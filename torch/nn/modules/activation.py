@@ -977,13 +977,14 @@ def _is_make_fx_tracing():
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information from different representation subspaces.
 
-    .. note::
-        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
-        for an in depth discussion of the performant building blocks PyTorch offers for building your own
-        transformer layers.
-
-    Method described in the paper:
-    `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+    This MultiheadAttention layer implements the original architecture described
+    in the `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_ paper. The
+    intent of this layer is as a reference implementation for foundational understanding
+    and thus it contains only limited features relative to newer architectures.
+    Given the fast pace of innovation in transformer-like architectures, we recommend
+    exploring this `tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+    to build efficient layers from building blocks in core or using higher
+    level libraries from the `PyTorch Ecosystem <https://landscape.pytorch.org/>`_.
 
     Multi-Head Attention is defined as:
 
