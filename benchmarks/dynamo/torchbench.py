@@ -8,7 +8,6 @@ import re
 import sys
 import warnings
 from collections import namedtuple
-from os.path import abspath, exists
 
 import torch
 
@@ -20,6 +19,16 @@ except ImportError:
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
+try:
+    from .torchbench_output_processors import PROCESS_TRAIN_MODEL_OUTPUT
+except ImportError:
+    from torchbench_output_processors import PROCESS_TRAIN_MODEL_OUTPUT
+
+try:
+    from .torchbench_utils import _reassign_parameters, setup_torchbench_cwd
+except ImportError:
+    from torchbench_utils import _reassign_parameters, setup_torchbench_cwd
 
 
 # We are primarily interested in tf32 datatype
@@ -34,70 +43,8 @@ if "TORCHINDUCTOR_AUTOGRAD_CACHE" not in os.environ:
     torch._functorch.config.enable_autograd_cache = True
 
 
-def _reassign_parameters(model):
-    # torch_geometric models register parameter as tensors due to
-    # https://github.com/pyg-team/pytorch_geometric/blob/master/torch_geometric/nn/dense/linear.py#L158-L168
-    # Since it is unusual thing to do, we just reassign them to parameters
-    def state_dict_hook(module, destination, prefix, local_metadata):
-        for name, param in module.named_parameters():
-            if isinstance(destination[name], torch.Tensor) and not isinstance(
-                destination[name], torch.nn.Parameter
-            ):
-                destination[name] = torch.nn.Parameter(destination[name])
-
-    model._register_state_dict_hook(state_dict_hook)
 
 
-def setup_torchbench_cwd():
-    original_dir = abspath(os.getcwd())
-
-    os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
-    for torchbench_dir in (
-        "./torchbenchmark",
-        "../torchbenchmark",
-        "../torchbench",
-        "../benchmark",
-        "../../torchbenchmark",
-        "../../torchbench",
-        "../../benchmark",
-        "../../../torchbenchmark",
-        "../../../torchbench",
-        "../../../benchmark",
-    ):
-        if exists(torchbench_dir):
-            break
-
-    if exists(torchbench_dir):
-        torchbench_dir = abspath(torchbench_dir)
-        os.chdir(torchbench_dir)
-        sys.path.append(torchbench_dir)
-
-    return original_dir
-
-
-def process_hf_reformer_output(out):
-    assert isinstance(out, list)
-    # second output is unstable
-    return [elem for i, elem in enumerate(out) if i != 1]
-
-
-def process_hf_whisper_output(out):
-    out_ret = []
-    for i, elem in enumerate(out):
-        if i == 0:
-            if elem is not None:
-                assert isinstance(elem, dict)
-                out_ret.append({k: v for k, v in elem.items() if k != "logits"})
-        elif i != 1:
-            out_ret.append(elem)
-
-    return out_ret
-
-
-process_train_model_output = {
-    "hf_Reformer": process_hf_reformer_output,
-    "hf_Whisper": process_hf_whisper_output,
-}
 
 
 class TorchBenchmarkRunner(BenchmarkRunner):
@@ -168,7 +115,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
     @property
     def get_output_amp_train_process_func(self):
-        return process_train_model_output
+        return PROCESS_TRAIN_MODEL_OUTPUT
 
     @property
     def skip_not_suitable_for_training_models(self):
