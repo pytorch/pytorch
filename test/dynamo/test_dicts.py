@@ -1354,6 +1354,13 @@ class OrderedDictMethodsTests(DictMethodsTests):
         self.thetype.move_to_end(d, "a")
         self.assertEqual("".join(d), "cdeba")
 
+        # Test last=False
+        self.thetype.move_to_end(d, "a", last=False)
+        self.assertEqual("".join(d), "acdeb")
+
+        # Test KeyError
+        self.assertRaises(KeyError, d.move_to_end, "f")
+
     @make_dynamo_test
     def test_binop_or_return_type(self):
         d1 = self.thetype({"a": 1, "b": 2})
