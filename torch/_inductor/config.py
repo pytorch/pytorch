@@ -891,6 +891,8 @@ profile_bandwidth_with_do_bench_using_profiling = (
 disable_cpp_codegen = False
 
 
+new_configs: bool = True
+
 # Freezing will attempt to inline weights as constants in optimization
 # and run constant folding and other optimizations on them. After freezing, weights
 # can no longer be updated.
