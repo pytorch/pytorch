@@ -10,15 +10,15 @@ except ImportError:
 
 class TorchBenchConfig:
     """Handles TorchBench configuration from YAML files."""
-    
+
     def __init__(self):
         self._config = load_yaml_file("torchbench.yaml")
         self.args = None  # Will be set by the runner
-    
+
     def set_args(self, args):
         """Set args for configuration properties that depend on command line arguments."""
         self.args = args
-    
+
     @property
     def _skip(self):
         return self._config["skip"]
@@ -174,7 +174,7 @@ class TorchBenchConfig:
         return tolerance, cosine
 
     def get_batch_size_for_model(self, model_name, is_training, batch_size=None):
-        """Get appropriate batch size for a model."""        
+        """Get appropriate batch size for a model."""
         if (
             batch_size is None
             and is_training
@@ -187,11 +187,15 @@ class TorchBenchConfig:
             and model_name in self._batch_size["inference"]
         ):
             return self._batch_size["inference"][model_name]
-        
+
         return batch_size
 
     def limit_batch_size_for_accuracy(self, model_name, batch_size):
         """Limit batch size for accuracy testing."""
-        if self.args and self.args.accuracy and model_name in self._accuracy["max_batch_size"]:
+        if (
+            self.args
+            and self.args.accuracy
+            and model_name in self._accuracy["max_batch_size"]
+        ):
             return min(batch_size, self._accuracy["max_batch_size"][model_name])
         return batch_size
