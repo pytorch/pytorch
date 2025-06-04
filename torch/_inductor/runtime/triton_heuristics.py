@@ -1008,7 +1008,9 @@ class CachingAutotuner(KernelInterface):
         bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
         binary = launcher.bin.asm[bin_type]
         # Also store asm code which can be used for debugging and generating cpp package
-        asm_type = {"hip": "amdgcn", "cuda": "ptx"}.get(self.device_props.type, None)
+        asm_type = {"hip": "amdgcn", "cuda": "ptx", "xpu": "spv"}.get(
+            self.device_props.type, None
+        )
         asm = launcher.bin.asm.get(asm_type, None)
 
         CudaKernelParamCache.set(key, params, binary, bin_type, asm, asm_type)
