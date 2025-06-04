@@ -52,6 +52,7 @@ Streams and events
     Event
     Stream
 
+.. currentmodule:: torch.xpu.memory
 
 Memory management
 -----------------
@@ -73,6 +74,5 @@ Memory management
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
-.. py:module:: torch.xpu.memory
 .. py:module:: torch.xpu.random
 .. py:module:: torch.xpu.streams

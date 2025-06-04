@@ -96,6 +96,8 @@ Graphs (beta)
     graph
     make_graphed_callables
 
+.. currentmodule:: torch.cuda.memory
+
 .. _cuda-memory-management-api:
 
 Memory management
@@ -109,7 +111,11 @@ Memory management
      list_gpu_processes
      mem_get_info
      memory_stats
+     memory_stats_as_nested_dict
+     reset_accumulated_memory_stats
      host_memory_stats
+     host_memory_stats_as_nested_dict
+     reset_accumulated_host_memory_stats
      memory_summary
      memory_snapshot
      memory_allocated
@@ -129,8 +135,6 @@ Memory management
      CUDAPluggableAllocator
      change_current_allocator
      MemPool
-
-.. currentmodule:: torch.cuda.memory
 
 .. autosummary::
     :toctree: generated
