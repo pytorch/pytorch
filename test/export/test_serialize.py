@@ -34,9 +34,12 @@ from torch._export.serde.serialize import (
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export_for_training, load, save, unflatten
+from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_MACOS,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -1491,6 +1494,7 @@ class TestSaveLoad(TestCase):
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
+    @unittest.skipIf(IS_WINDOWS, "Cannot modify file in windows")
     def test_save_file(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1501,10 +1505,10 @@ class TestSaveLoad(TestCase):
         inp = (torch.randn(2, 2),)
         ep = export_for_training(f, inp, strict=True)
 
-        with tempfile.NamedTemporaryFile() as f:
-            save(ep, f)
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            save(ep, f.name)
             f.seek(0)
-            loaded_ep = load(f)
+            loaded_ep = load(f.name)
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
@@ -1518,7 +1522,7 @@ class TestSaveLoad(TestCase):
         inp = (torch.tensor([6]), torch.tensor([7]))
         ep = export_for_training(f, inp, strict=True)
 
-        with TemporaryFileName() as fname:
+        with TemporaryFileName(suffix=".pt2") as fname:
             path = Path(fname)
             save(ep, path)
             loaded_ep = load(path)
@@ -1545,6 +1549,9 @@ class TestSaveLoad(TestCase):
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
         self.assertEqual(extra_files["extra.txt"], "moo")
 
+    @unittest.skipIf(
+        IS_FBCODE or IS_MACOS or IS_WINDOWS, "The file path is different in fbcode CI"
+    )
     def test_version_error(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1555,18 +1562,19 @@ class TestSaveLoad(TestCase):
         ep = export_for_training(f, (torch.randn(1, 3),), strict=True)
 
         with self.assertRaisesRegex(
-            RuntimeError, r"Serialized version .* does not match our current"
+            ValueError, r"Saved archive version -1 does not match our current"
         ):
-            with tempfile.NamedTemporaryFile() as f:
-                save(ep, f)
+            with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+                save(ep, f.name)
                 f.seek(0)
+                file_prefix = f.name.split("/")[2].split(".")[0]
 
                 # Modify the version
                 with zipfile.ZipFile(f, "a") as zipf:
-                    zipf.writestr("version", "-1.1")
+                    zipf.writestr(f"{file_prefix}/{ARCHIVE_VERSION_PATH}", "-1")
 
                 f.seek(0)
-                load(f)
+                load(f.name)
 
     def test_save_constants(self):
         class Foo(torch.nn.Module):
