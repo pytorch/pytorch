@@ -6473,7 +6473,7 @@ Tensor rms_norm_jvp(
     const Tensor& input_t,
     const Tensor& weight_p,
     const Tensor& weight_t,
-    const Tensor& saved_rrms,
+    const Tensor& saved_rstd,
     IntArrayRef normalized_shape) {
 
   auto dims = std::vector<int64_t>{};
@@ -6491,7 +6491,7 @@ Tensor rms_norm_jvp(
     }
   }
 
-  auto rstd_p = saved_rrms.view(view_size);
+  auto rstd_p = saved_rstd.view(view_size);
 
   Tensor rstd_t;
   if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
@@ -6527,10 +6527,10 @@ Tensor rms_norm_jvp(
       Tensor());
 }
 
-Tensor rms_norm_rrms_jvp(
+Tensor rms_norm_rstd_jvp(
     const Tensor& input_p,
     const Tensor& input_t,
-    const Tensor& saved_rrms,
+    const Tensor& saved_rstd,
     IntArrayRef normalized_shape) {
   auto dims = std::vector<int64_t>{};
   auto view_size = input_t.sizes().vec();
@@ -6547,7 +6547,7 @@ Tensor rms_norm_rrms_jvp(
     }
   }
 
-  auto rstd_p = saved_rrms.view(view_size);
+  auto rstd_p = saved_rstd.view(view_size);
   Tensor rstd_t;
   if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
       input_t._is_zerotensor()) {
