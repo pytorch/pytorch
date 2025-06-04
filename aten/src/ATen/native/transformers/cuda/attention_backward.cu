@@ -648,8 +648,8 @@ _efficient_attention_backward(
     p.custom_mask_type = custom_mask_type;
     p.scale = sdp::calculate_scale(query, scale).expect_float();
     if (cu_seqlens_q.has_value()) {
-      p.cu_seqlens_q_ptr = (const int32_t*)cu_seqlens_q->const_data_ptr();
-      p.cu_seqlens_k_ptr = (const int32_t*)cu_seqlens_k->const_data_ptr();
+      p.cu_seqlens_q_ptr = (const int64_t*)cu_seqlens_q->const_data_ptr();
+      p.cu_seqlens_k_ptr = (const int64_t*)cu_seqlens_k->const_data_ptr();
     }
     if (window_size.has_value()) {
       p.window_size = *window_size;

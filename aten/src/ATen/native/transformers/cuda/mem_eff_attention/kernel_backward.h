@@ -636,8 +636,8 @@ struct AttentionBackwardKernel {
     const scalar_t* output_ptr = nullptr; // [Mq, nH, Kv]
     const scalar_t* grad_output_ptr = nullptr; // [Mq, nH, Kv]
     accum_t* delta_ptr = nullptr; // [nH, Mq]
-    const int32_t* cu_seqlens_q_ptr = nullptr;
-    const int32_t* cu_seqlens_k_ptr = nullptr;
+    const int64_t* cu_seqlens_q_ptr = nullptr;
+    const int64_t* cu_seqlens_k_ptr = nullptr;
 
     // Output tensors
     output_t* grad_query_ptr = nullptr; //  [Mq, nH, K]
@@ -659,11 +659,11 @@ struct AttentionBackwardKernel {
     accum_t scale = 1.0f;
 
     // Dimensions/strides
-    int32_t head_dim = -1;
-    int32_t head_dim_value = -1;
-    int32_t num_queries = -1;
-    int32_t num_keys = -1;
-    int32_t num_heads = -1;
+    int64_t head_dim = -1;
+    int64_t head_dim_value = -1;
+    int64_t num_queries = -1;
+    int64_t num_keys = -1;
+    int64_t num_heads = -1;
     uint8_t custom_mask_type = NoCustomMask;
 
     int64_t q_strideM = -1;
@@ -772,8 +772,8 @@ struct AttentionBackwardKernel {
         assert(cu_seqlens_k_ptr != nullptr);
         cu_seqlens_q_ptr += batch_id;
         cu_seqlens_k_ptr += batch_id;
-        int32_t q_start = cu_seqlens_q_ptr[0];
-        int32_t k_start = cu_seqlens_k_ptr[0];
+        int64_t q_start = cu_seqlens_q_ptr[0];
+        int64_t k_start = cu_seqlens_k_ptr[0];
         int64_t q_next_start = cu_seqlens_q_ptr[1];
         int64_t k_next_start = cu_seqlens_k_ptr[1];
         assert(q_next_start - q_start <= num_queries);
@@ -858,21 +858,21 @@ struct AttentionBackwardKernel {
         return 0;
       }
       return num_splits_key * kBlockSizeJ *
-          align_up(head_dim, kBlockSizeI);
+          align_up(head_dim, (int64_t)kBlockSizeI);
     }
     CUTLASS_HOST_DEVICE int64_t workspace_elements_gv() const {
       if (!kNeedsAccumGradV) {
         return 0;
       }
       return num_splits_key * kBlockSizeJ *
-          align_up(head_dim_value, kBlockSizeI);
+          align_up(head_dim_value, (int64_t)kBlockSizeI);
     }
     CUTLASS_HOST_DEVICE int64_t workspace_elements_gq() const {
       if (!kNeedsAccumGradQ) {
         return 0;
       }
-      int num_blocks = ceil_div(num_queries, kBlockSizeI);
-      int num_cols = ceil_div(head_dim, MatmulGradQ::ThreadblockShape::kN);
+      int num_blocks = ceil_div(num_queries, (int64_t)kBlockSizeI);
+      int num_cols = ceil_div(head_dim, (int64_t)MatmulGradQ::ThreadblockShape::kN);
       return num_blocks * num_cols * sizeof(GradQTempStorage) /
           sizeof(output_accum_t);
     }
@@ -1286,7 +1286,7 @@ struct AttentionBackwardKernel {
     TORCH_CHECK(
         p.num_splits_key > 0, "Invalid `num_splits_key` (expected >0)");
     TORCH_CHECK(
-        p.num_splits_key <= cutlass::ceil_div(p.num_keys, kBlockSizeJ),
+        p.num_splits_key <= cutlass::ceil_div(p.num_keys, (int64_t)kBlockSizeJ),
         "Invalid `num_splits_key` (",
         p.num_splits_key,
         ") - too large for `num_keys` = ",
@@ -1475,14 +1475,14 @@ struct AttentionBackwardKernel {
       shared_storage.di()[thread_id] = di_rf;
     }
 
-    int32_t num_queries_in_block = skipBoundsChecks
+    int64_t num_queries_in_block = skipBoundsChecks
         ? MatmulQK::Mma::Shape::kN
         : warp_uniform(cutlass::fast_min(
-              MatmulQK::Mma::Shape::kN, (int32_t)(p.num_queries - query_start)));
-    int32_t num_keys_in_block = skipBoundsChecks
+              (int64_t)MatmulQK::Mma::Shape::kN, p.num_queries - query_start));
+    int64_t num_keys_in_block = skipBoundsChecks
         ? MatmulQK::Mma::Shape::kM
         : warp_uniform(cutlass::fast_min(
-              MatmulQK::Mma::Shape::kM, (int32_t)(p.num_keys - key_start)));
+              (int64_t)MatmulQK::Mma::Shape::kM, p.num_keys - key_start));
 
     auto prologueGradV = [&](int64_t col) {
       typename MatmulGradV::Mma::IteratorB iterator_dO(
@@ -1709,7 +1709,7 @@ struct AttentionBackwardKernel {
         // on the K-dimension) otherwise we can get NaNs during the GEMM
         const int kQueriesPerBlock = kBlockSizeI;
         const int threads_per_row = cutlass::fast_min(
-            kNumThreads / kQueriesPerBlock, (int64_t)num_keys_in_block);
+            int64_t(kNumThreads / kQueriesPerBlock), num_keys_in_block);
         const int elts_per_thread = cutlass::round_nearest(
             cutlass::ceil_div(num_keys_in_block, threads_per_row), 4);
 
@@ -1779,7 +1779,7 @@ struct AttentionBackwardKernel {
     /////////////////////////////////////////////////////////////////////////////////////////////////
     constexpr bool kSingleIterationGradV =
         kMaxK <= MatmulGradV::ThreadblockShape::kN;
-    for (int32_t col = 0; col < (kSingleIterationGradV ? 1 : p.head_dim_value);
+    for (int64_t col = 0; col < (kSingleIterationGradV ? 1 : p.head_dim_value);
          col += MatmulGradV::ThreadblockShape::kN) {
       using Mma = typename MatmulGradV::Mma;
       using AccumTileGmem = typename MatmulGradQ::AccumTileGmem;
@@ -2057,7 +2057,7 @@ struct AttentionBackwardKernel {
       int col_id = col / MatmulGradQ::ThreadblockShape::kN;
       int num_cols = kSingleIterationGradQ
           ? 1
-          : ceil_div(p.head_dim, MatmulGradQ::ThreadblockShape::kN);
+          : ceil_div(p.head_dim, static_cast<int64_t>(MatmulGradQ::ThreadblockShape::kN));
       int storage_id = (col_id + query_start / kBlockSizeI * num_cols);
 
       if (p.num_splits_key_device() > 1) {
@@ -2273,7 +2273,7 @@ struct AttentionBackwardKernel {
     return getSmallestQueryForKey(p, key_start) + getQueryStartShift(p);
   };
   static CUTLASS_HOST_DEVICE int64_t getQueryEnd(Params const& p) {
-    return align_up(p.num_queries, kBlockSizeI);
+    return align_up(p.num_queries, (int64_t)kBlockSizeI);
   };
 
   static CUTLASS_HOST_DEVICE int64_t
@@ -2288,7 +2288,7 @@ struct AttentionBackwardKernel {
         p.window_size == 0 ? p.num_queries + p.num_keys : p.window_size;
 
     auto last_key_for_block =
-        cutlass::fast_min(key_start + kBlockSizeJ, (int64_t)p.num_keys) - 1;
+        cutlass::fast_min(key_start + (int64_t)kBlockSizeJ, p.num_keys) - 1;
     int first_query = key_start - shift;
     int last_query = last_key_for_block - shift + window_size - 1;
     if (last_query < 0 || first_query >= p.num_queries) {
@@ -2303,15 +2303,15 @@ struct AttentionBackwardKernel {
   // for instance in the causal case, or varying seqlen
   static CUTLASS_HOST_DEVICE int32_t
   getNumParallelBlocksForQuery(Params const& p, int32_t query_start) {
-    int16_t num_key_blocks = ceil_div(p.num_keys, kBlockSizeJ);
+    int16_t num_key_blocks = ceil_div(p.num_keys, static_cast<int64_t>(kBlockSizeJ));
     if (p.custom_mask_type != NoCustomMask) {
       int32_t shift = p.custom_mask_type == CausalFromBottomRight
           ? p.num_keys - p.num_queries
           : 0;
       int32_t last_query_for_block =
-          cutlass::fast_min(query_start + kBlockSizeI, p.num_queries) - 1;
+          cutlass::fast_min(static_cast<int64_t>(query_start + kBlockSizeI), p.num_queries) - 1;
       int32_t last_key_for_block =
-          cutlass::fast_min(last_query_for_block + shift, p.num_keys - 1);
+          cutlass::fast_min(static_cast<int64_t>(last_query_for_block + shift), p.num_keys - 1);
       int32_t first_key_for_block = p.window_size == 0
           ? 0
           : cutlass::fast_max(query_start - p.window_size + 1 + shift, 0);
@@ -2357,7 +2357,7 @@ struct AttentionBackwardKernel {
             : 0;
         // last key that is not masked out
         int last_key_for_block =
-            cutlass::fast_min(key_start + kBlockSizeJ, (int64_t)p.num_keys) - 1;
+            cutlass::fast_min(key_start + (int64_t)kBlockSizeJ, p.num_keys) - 1;
         int last_query = last_key_for_block - shift + p.window_size - 1;
         if (next_query <= last_query && next_query < p.num_queries) {
           return;
@@ -2422,11 +2422,11 @@ struct AttentionBackwardKernel {
     int32_t num_keys_in_block = skipBoundsChecks
         ? MatmulQK::Mma::Shape::kM
         : cutlass::fast_min(
-              MatmulQK::Mma::Shape::kM, p.num_keys - key_start);
+              (int64_t)MatmulQK::Mma::Shape::kM, p.num_keys - key_start);
     typename MatmulGradV::OutputTileIterator outputV_it(
         typename MatmulGradV::OutputTileIterator::Params{p.gV_strideM()},
         p.grad_value_ptr + key_start * p.gV_strideM(),
-        {num_keys_in_block, p.head_dim_value},
+        {(int64_t)num_keys_in_block, p.head_dim_value},
         thread_id);
     accumulateInGmem<MatmulGradV>(
         shared_storage.gradV_epilogue_final(),
@@ -2439,7 +2439,7 @@ struct AttentionBackwardKernel {
     typename MatmulGradK::OutputTileIterator outputK_it(
         typename MatmulGradK::OutputTileIterator::Params{p.gK_strideM()},
         p.grad_key_ptr + key_start * p.gK_strideM(),
-        {num_keys_in_block,
+        {(int64_t)num_keys_in_block,
          false ? MatmulGradK::ThreadblockShape::kN : p.head_dim},
         thread_id);
     accumulateInGmem<MatmulGradK>(
@@ -2574,7 +2574,7 @@ struct AttentionBackwardKernel {
       }
     } else {
       int num_iters =
-          ceil_div(p.head_dim_value, kElementsPerAccess * kNumThreadsPerLine) *
+          ceil_div(p.head_dim_value, (int64_t)(kElementsPerAccess * kNumThreadsPerLine)) *
           (kElementsPerAccess * kNumThreadsPerLine);
       for (int iter = 0; iter < num_iters; ++iter) {
         columnIteration(iter);
