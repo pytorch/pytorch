@@ -957,9 +957,9 @@ exclusions = {
     "cudagraph_static_inputs",
     "benchmarking",
     "loop_ordering",
+    "loop_tiling",
     "autotuning",
     "graph_region_expansion",
-    "codecache",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

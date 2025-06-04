@@ -346,7 +346,6 @@ class AsyncCompile:
             else:
                 return future.result()
 
-        # Cache miss
         if is_parallel:
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
