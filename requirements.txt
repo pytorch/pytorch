@@ -9,7 +9,6 @@ jinja2
 lintrunner ; platform_machine != "s390x"
 networkx
 ninja
-numpy
 optree>=0.13.0
 packaging
 psutil
@@ -20,3 +19,4 @@ setuptools>=62.3.0,<80.0
 sympy>=1.13.3
 types-dataclasses
 typing-extensions>=4.10.0
+numpy
