@@ -991,6 +991,18 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
 
+    def test_newly_constructed_default_dict(self):
+        def f(x):
+            d = defaultdict(list)
+            d[0] = 42
+            return x + 1, d
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+
 
 class DictMethodsTests(torch._dynamo.test_case.TestCase):
     thetype = dict
