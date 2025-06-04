@@ -1323,10 +1323,6 @@ coverage_ignore_functions = [
     "scatter_kwargs",
     # torch.nn.parameter
     "is_lazy",
-    # torch.nn.utils.clip_grad
-    "clip_grad_norm",
-    "clip_grad_norm_",
-    "clip_grad_value_",
     # torch.nn.utils.convert_parameters
     "parameters_to_vector",
     "vector_to_parameters",
