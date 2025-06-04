@@ -1127,13 +1127,19 @@ class MemPool(_MemPool):
         self,
         allocator: Optional[_cuda_CUDAAllocator] = None,
         use_on_oom: bool = False,
+        symm_mem: bool = False,
     ):
-        super().__init__(allocator, True, use_on_oom)
+        super().__init__(allocator, True, use_on_oom, symm_mem)
 
     @property
     def id(self) -> tuple[int, int]:
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
+    
+    @property
+    def symm_mem(self) -> bool:
+        r"""Returns whether this pool is used for NCCL's symmetric memory."""
+        return super().symm_mem
 
     @property
     def allocator(self) -> Optional[_cuda_CUDAAllocator]:

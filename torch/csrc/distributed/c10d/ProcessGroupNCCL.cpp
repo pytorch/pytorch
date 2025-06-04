@@ -1168,7 +1168,14 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
   // We must ensure we're listening for allocator trace events in order to
   // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
-  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  // TODO:
+  // if(pool->symm_mem()) {
+  //   Allgather to verify len(mempool.snapshot.segments) matches across GPUs
+  //   Allgather to verify mempool.alloc_request_counter matches across GPUs
+  //   add alloc_request_counter per mempool (How many allocations a mempool has served during its lifetime)
+  //   this should guarantee pool is used in a symmetric/SPMD manner
+  // }
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
@@ -1177,7 +1184,8 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<void*>(segmentInfo.address),
         segmentInfo.total_size,
-        /*errorOnRereg=*/false); // ignores reregistration error
+        /*errorOnRereg=*/false, // ignores reregistration error
+        /*window=*/pool->symm_mem()); // whether to use NCCL symmetric memory
   }
 }
 
@@ -1208,7 +1216,9 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
+    ncclComm->deregisterSegment(
+      reinterpret_cast<void*>(segmentInfo.address),
+      pool->symm_mem());
   }
 }
 
