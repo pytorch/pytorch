@@ -16,11 +16,10 @@ from typing import (
     Literal,
     NamedTuple,
     overload,
-    Protocol,
     SupportsIndex,
     TypeVar,
 )
-from typing_extensions import ParamSpec, runtime_checkable, Self, TypeAlias
+from typing_extensions import ParamSpec, Protocol, runtime_checkable, Self, TypeAlias
 
 import numpy
 
