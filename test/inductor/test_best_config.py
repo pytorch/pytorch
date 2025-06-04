@@ -27,6 +27,7 @@ def trivial_kernel(x):
     return torch.sin(x) + torch.cos(x)
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 class TestKernelBestConfig(TestCase):
     device_type = GPU_TYPE
 

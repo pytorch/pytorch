@@ -190,8 +190,6 @@ S390X_BLOCKLIST = [
     # these tests run long and fail in addition to that
     "dynamo/test_dynamic_shapes",
     "inductor/test_torchinductor_opinfo",
-    # these tests fail when cuda is not available
-    "inductor/test_best_config",
     # sysctl -n hw.memsize is not available
     "test_mps",
     # https://github.com/pytorch/pytorch/issues/102078
