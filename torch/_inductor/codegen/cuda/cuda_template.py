@@ -116,7 +116,7 @@ class CUDATemplate(KernelTemplate):
             expected_args,
         )
         V.graph.sizevars.size_hints(map(sympy.expand, call_args[len(expected_args) :]))
-        size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
+        size_args = V.graph.sizevars.size_hints(kernel.get_dynamic_shape_args())
         extra_args = tuple(list(size_args) + self.get_runtime_arg_values(**kwargs))
 
         kernel_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:8]
@@ -284,6 +284,7 @@ class CUTLASSTemplate(CUDATemplate):
         torch.uint8: "uint8_t",
         torch.bool: "bool",
         torch.bfloat16: "cutlass::bfloat16_t",
+        torch.float8_e4m3fn: "cutlass::float_e4m3_t",
     }
 
     _DTYPE_TO_CUTLASS_SPARSE_META = {
