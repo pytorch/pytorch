@@ -2067,7 +2067,7 @@ def create_precompile_key(
             inputs_key,
             torch.get_float32_matmul_precision(),
         ]
-        + [choice.hash_key() for choice in choices]
+        + [choice.kernel_hash_key() for choice in choices]
     )
 
 
@@ -2434,11 +2434,11 @@ class AlgorithmSelectorCache(PersistentCache):
         seen_choices: OrderedSet[str] = OrderedSet()
         for c in choices:
             # Skip choices which we have already issued a precompile
-            if c.hash_key() in seen_choices:
+            if c.kernel_hash_key() in seen_choices:
                 log.debug("Skipping already seen choice: %s", c)
                 continue
             else:
-                seen_choices.add(c.hash_key())
+                seen_choices.add(c.kernel_hash_key())
 
             if hasattr(c, "precompile"):
                 triton_cuda_choice = isinstance(c, TritonTemplateCaller) and isinstance(
@@ -2754,11 +2754,11 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # prune choices based on prescreening timings
         candidates_to_prune = OrderedSet(
-            candidate.hash_key() for candidate in sorted_candidates[num_to_keep:]
+            candidate.kernel_hash_key() for candidate in sorted_candidates[num_to_keep:]
         )
         for candidate in sorted_candidates[:num_to_keep]:
             if candidate_timings[candidate] == float("inf"):
-                candidates_to_prune.add(candidate.hash_key())
+                candidates_to_prune.add(candidate.kernel_hash_key())
             else:
                 if isinstance(candidate, CUDATemplateCaller):
                     candidate.bmreq.ensure_dll_loaded()
@@ -2766,7 +2766,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices = [
             choice
             for choice in choices
-            if choice.hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
+            if choice.kernel_hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
         ]
 
         log.debug("After pruning using prescreening timings, %d choices", len(choices))

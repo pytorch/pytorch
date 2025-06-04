@@ -98,9 +98,13 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             n.meta["val"] if "val" in n.meta else n.meta["example_value"]
             for n in gm.graph.find_nodes(op="placeholder")
         ]
-        _, _, _, mutated_inputs, outputs = check_input_alias_and_mutation_return_outputs(
-            gm, example_inputs
-        )
+        (
+            _,
+            _,
+            _,
+            mutated_inputs,
+            outputs,
+        ) = check_input_alias_and_mutation_return_outputs(gm, example_inputs)
         for idx, arg in enumerate(operands):
             schema_gen.add_arg(f"arg{idx}", arg, is_mutated=idx in mutated_inputs)
         for out in outputs:
