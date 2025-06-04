@@ -1488,7 +1488,6 @@ def sym_or(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
     """
     or, but for symbolic expressions, without bool casting.
     """
-    print(x, type(x))
     if len(others) == 0:
         return x
     for y in others:
