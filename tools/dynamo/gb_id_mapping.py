@@ -248,9 +248,7 @@ def main():
     args = parser.parse_args()
 
     if args.command == "create":
-        success = create_registry(args.dynamo_dir, args.registry_path)
-        if not success:
-            sys.exit(1)
+        create_registry(args.dynamo_dir, args.registry_path)
     elif args.command == "add":
         success = cmd_add_new_gb_type(args.gb_type, args.file_path, args.registry_path)
         if not success:
