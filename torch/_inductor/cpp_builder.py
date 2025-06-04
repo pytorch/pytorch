@@ -601,7 +601,7 @@ def _get_optimization_cflags(
     cpp_compiler: str, min_optimize: bool = False
 ) -> list[str]:
     if _IS_WINDOWS:
-        return ["O1" if min_optimize else "O2"]
+        return ["O2"]
     else:
         wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level
         cflags = (

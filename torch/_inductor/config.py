@@ -103,7 +103,7 @@ bundle_triton_into_fx_graph_cache: Optional[bool] = (
 )
 
 non_blocking_remote_cache_write: bool = Config(
-    justknob="pytorch/remote_cache:enable_non_blocking_remote_cache_write",
+    justknob="pytorch/remote_cache:enable_non_blocking_remote_cache_write_v2",
     env_name_force="TORCHINDUCTOR_NON_BLOCKING_REMOTE_CACHE_WRITE",
     default=True,
 )
@@ -265,6 +265,16 @@ pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
 _pre_fusion_custom_pass: Optional[
+    Callable[
+        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
+        list["torch._inductor.scheduler.BaseSchedulerNode"],
+    ]
+] = None
+
+# Registers a custom pass to be run right after fusion in Inductor scheduler.
+# WARNING: Inductor scheduler IR is at prototype stage and subject to change,
+# hence custom IR passes built on top of it might break in the future.
+_post_fusion_custom_pass: Optional[
     Callable[
         [list["torch._inductor.scheduler.BaseSchedulerNode"]],
         list["torch._inductor.scheduler.BaseSchedulerNode"],
@@ -1247,9 +1257,9 @@ class aot_inductor:
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
-    # to use which cpp compiler optimization level, default to O1
+    # to use which cpp compiler optimization level, default to O2.
     compile_wrapper_opt_level = os.environ.get(
-        "AOT_INDUCTOR_COMPILE_WRAPPER_OPT_LEVEL", "O1"
+        "AOT_INDUCTOR_COMPILE_WRAPPER_OPT_LEVEL", "O2"
     )
 
     # option for debug printing/saving for intermediate tensor values for aot inductor
@@ -1670,6 +1680,9 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
+
+    # TODO - temporary config before enabled by default
+    global_tiling_analysis: bool = False
 
 
 if TYPE_CHECKING:
