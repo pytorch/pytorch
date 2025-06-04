@@ -23,18 +23,12 @@ def clean_string(s):
         s = re.sub(r'["\'] f["\']', " ", s)
         # Remove surrounding quotes, keeping only the content (e.g., "hello" -> hello)
         s = re.sub(r'^["\'](.*)["\']$', r"\1", s)
-        # Replace any whitespace around newlines with a single space for consistent formatting
-        s = re.sub(r"\s*\n\s*", " ", s)
-        # Replace escaped quotes with their unescaped versions (e.g., \" -> ", \' -> ')
-        s = s.replace('\\"', '"').replace("\\'", "'")
-        # Remove any remaining backslashes used for escaping
-        s = s.replace("\\", "")
+        # Replace any whitespace
+        s = " ".join(s.splitlines())
+        # Replace escaped quotes with their unescaped versions
+        s = s.encode().decode("unicode_escape")
         # Replace adjacent quoted strings with a space (e.g., " "" -> " ")
         s = re.sub(r'" "', " ", s)
-        # Remove any curly brace expressions used in f-strings (e.g., {variable})
-        s = re.sub(r"\{[^}]*\}", "", s)
-        # Remove backticks used in docstrings or code examples
-        s = re.sub(r"``", "", s)
     return s
 
 
@@ -83,16 +77,11 @@ def extract_info_from_keyword(source, kw):
         return clean_string(param_source)
 
 
-def find_unimplemented_v2_calls(path):
+def find_unimplemented_v2_calls(dynamo_dir):
     results = []
-    path = Path(path)
+    dynamo_dir = Path(dynamo_dir)
 
-    if path.is_dir():
-        file_paths = path.glob("**/*.py")
-    else:
-        file_paths = [path]
-
-    for file_path in file_paths:
+    for file_path in dynamo_dir.glob("**/*.py"):
         with open(file_path) as f:
             source = f.read()
             try:
@@ -150,7 +139,7 @@ def create_registry(dynamo_dir, registry_path):
 
     GB_ID_INDEX = 0000
     for i, (gb_type, info) in enumerate(sorted(gb_types.items()), GB_ID_INDEX):
-        gb_id = f"GB{i}"
+        gb_id = f"GB{i:04d}"
         hints = info["hints"]
 
         registry[gb_id] = {
@@ -165,43 +154,36 @@ def create_registry(dynamo_dir, registry_path):
 
 
 def main():
-    script_dir = Path(__file__).resolve().parent
+    try:
+        import torch._dynamo
 
-    repo_root = script_dir.parent.parent
-    dynamo_dir = repo_root / "torch" / "_dynamo"
-    registry_path = script_dir / "graph_break_registry.json"
+        default_dynamo_dir = str(Path(torch._dynamo.__file__).parent)
+    except ImportError:
+        default_dynamo_dir = str(
+            Path(__file__).parent.parent.parent / "torch" / "_dynamo"
+        )
 
     parser = argparse.ArgumentParser(description="Manage graph break registry.")
-    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
-
-    create_parser = subparsers.add_parser("create", help="Create registry from scratch")
-    create_parser.add_argument(
+    parser.add_argument(
         "--dynamo_dir",
         type=str,
-        default=None,
+        default=default_dynamo_dir,
         help="Directory to search for unimplemented_v2 calls.",
-    )
-
-    parser.add_argument(
-        "--registry-path",
-        type=str,
-        default=str(registry_path),
-        help="Path to save the registry JSON file.",
     )
 
     args = parser.parse_args()
 
-    if args.command == "create":
-        if getattr(args, "dynamo_dir", None) is None:
-            try:
-                import torch._dynamo
+    if args.dynamo_dir is None:
+        try:
+            import torch._dynamo
 
-                args.dynamo_dir = str(Path(torch._dynamo.__file__).parent)
-            except ImportError:
-                args.dynamo_dir = str(dynamo_dir)
-        create_registry(args.dynamo_dir, args.registry_path)
-    else:
-        parser.print_help()
+            args.dynamo_dir = str(Path(torch._dynamo.__file__).parent)
+        except ImportError:
+            args.dynamo_dir = str(
+                Path(__file__).parent.parent.parent / "torch" / "_dynamo"
+            )
+
+    create_registry(args.dynamo_dir, args.registry_path)
 
 
 if __name__ == "__main__":
