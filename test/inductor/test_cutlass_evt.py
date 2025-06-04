@@ -347,7 +347,9 @@ return tmp_1, D""",
         )
         buffer_renames = {"buf0": "buf0", "buf1": "buf1", "acc": "buf0"}
         name_to_buffer = {"buf0": row_major_buf0, "buf1": col_major_buf1}
-        result = create_example_tensors(buffer_renames, name_to_buffer)
+        result = create_example_tensors(
+            buffer_renames, name_to_buffer, lambda x: int(x)
+        )
         self.assertEqual(result["acc"].shape, (3, 4, 1))
         self.assertEqual(result["acc"].stride, (4, 1, 0))
         self.assertEqual(
