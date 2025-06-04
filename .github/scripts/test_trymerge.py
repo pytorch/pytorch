@@ -19,6 +19,7 @@ from urllib.error import HTTPError
 from github_utils import gh_graphql
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import (
+    _revlist_to_prs,
     categorize_checks,
     DRCI_CHECKRUN_NAME,
     find_matching_merge_rule,
@@ -1086,6 +1087,62 @@ class TestGitHubPRGhstackDependencies(TestCase):
             "Approved by: \n"
             "ghstack dependencies: #106032, #106033, #106034\n"
         )
+
+
+@mock.patch.object(DummyGitRepo, "commit_message")
+class TestRevListToPR(TestCase):
+    # Tests for _revlist_to_prs function
+
+    # https://github.com/pytorch/pytorch/commit/343c56e7650f55fd030aca0b9275d6d73501d3f4
+    commit_message = """add sticky cache pgo
+
+ghstack-source-id: 9bc6dee0b427819f978bfabccb72727ba8be2f81
+Pull-Request-resolved: https://github.com/pytorch/pytorch/pull/154098
+
+ghstack-source-id: 9bc6dee0b427819f978bfabccb72727ba8be2f81
+Pull Request resolved: https://github.com/pytorch/pytorch/pull/154394"""
+
+    def test__revlist_to_prs_prioritize_input_pr_first(
+        self, mock_commit_message: mock.MagicMock, *args: Any
+    ) -> None:
+        # If multiple prs are mentioned in the commit, if the input PR is in the
+        # commit message, it should be prioritized
+        pr_num = 154098
+        pr = GitHubPR("pytorch", "pytorch", pr_num)
+        repo = DummyGitRepo()
+        mock_commit_message.return_value = self.commit_message
+        prs = _revlist_to_prs(repo, pr, ["dummy"])
+
+        self.assertEqual(len(prs), 1)
+        self.assertEqual(prs[0][0].pr_num, pr_num)
+
+    def test__revlist_to_prs_prioritize_input_pr_second(
+        self, mock_commit_message: mock.MagicMock, *args: Any
+    ) -> None:
+        # For ghstack commit with multiple prs mentioned, if the input PR is in
+        # the commit message, it should be prioritized
+        pr_num = 154394
+        pr = GitHubPR("pytorch", "pytorch", pr_num)
+        repo = DummyGitRepo()
+        mock_commit_message.return_value = self.commit_message
+        prs = _revlist_to_prs(repo, pr, ["dummy"])
+
+        self.assertEqual(len(prs), 1)
+        self.assertEqual(prs[0][0].pr_num, 154394)
+
+    def test__revlist_to_prs_prioritize_last_pr(
+        self, mock_commit_message: mock.MagicMock, *args: Any
+    ) -> None:
+        # For ghstack commit with multiple prs mentioned, if the input PR is NOT
+        # in the commit message, the last PR in the commit message should be
+        # prioritized
+        pr = GitHubPR("pytorch", "pytorch", 106034)
+        repo = DummyGitRepo()
+        mock_commit_message.return_value = self.commit_message
+        prs = _revlist_to_prs(repo, pr, ["dummy"])
+
+        self.assertEqual(len(prs), 1)
+        self.assertEqual(prs[0][0].pr_num, 154394)
 
 
 if __name__ == "__main__":
