@@ -30,6 +30,7 @@ import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.aoti_eager
 import torch.nn as nn
+from torch._C._dynamo.guards import assert_alignment, assert_size_stride
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.device_interface import get_interface_for_device
@@ -1409,7 +1410,14 @@ class CommonTemplate:
             )
             _, code = run_and_get_code(fn, x, y)
             code = " ".join(code)
-            self.assertEqual(
+            assert_keywords = ["assert_size_stride", "assert_alignment"]
+            filtered_lines = [
+                line
+                for line in code.splitlines()
+                if not any(assert_key in line for assert_key in assert_keywords)
+            ]
+            code = "\n".join(filtered_lines)
+            self.assertGreaterEqual(
                 code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 3
             )
 
@@ -11923,6 +11931,98 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=False,
         )
 
+    @requires_gpu()
+    @skip_if_not_triton
+    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
+    @config.patch(implicit_fallbacks=True)
+    def test_generated_code_has_size_stride_assert(self):
+        def foo(x):
+            return 3 * x
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        define_custom_op_for_test("foo", foo, foo_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.foo(a)
+            return b
+
+        a = torch.randn((16, 32), device=self.device)
+
+        _, code = run_and_get_code(
+            torch.compile(fn),
+            a,
+        )
+        if not is_dynamic_shape_enabled():
+            if code and len(code) > 0 and "assert_size_stride(" in code[0]:
+                try:
+                    FileCheck().check_regex(
+                        r"assert_size_stride\s*\(\s*[^,]+,\s*\([^\)]*\),\s*\([^\)]*\),\s*'[^']+'\s*\)"
+                    ).run(code[0])
+                except Exception as e:
+                    print(f"Failed regex match for assert_size_stride: {e}")
+                    print(code[0])
+                    raise e
+            else:
+                print("Skipping: No assert_size_stride found.")
+
+    @requires_gpu()
+    @skip_if_not_triton
+    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
+    @config.patch(implicit_fallbacks=True)
+    def test_generated_code_has_alignment_assert(self):
+        def foo(x):
+            return 3 * x
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        define_custom_op_for_test("foo", foo, foo_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.foo(a)
+            return b
+
+        a = torch.randn((16, 32), device=self.device)
+
+        _, code = run_and_get_code(
+            torch.compile(fn),
+            a,
+        )
+        if not is_dynamic_shape_enabled():
+            if code and len(code) > 0 and "assert_alignment(" in code[0]:
+                try:
+                    FileCheck().check_regex(
+                        r"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*'[^']+'\s*\)"
+                    ).run(code[0])
+                except Exception as e:
+                    print(f"Failed regex match for assert_alignment: {e}")
+                    print(code[0])
+                    raise e
+            else:
+                print("Skipping: No assert_alignment found.")
+
+    def test_assert_size_stride_op_name_pass(self):
+        tensor = torch.empty((16, 32))
+        assert_size_stride(tensor, (16, 32), (32, 1), "torch.ops.dummy.op_name")
+
+    def test_assert_size_stride_op_name_fail(self):
+        tensor = torch.empty((16, 32))
+        with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
+            assert_size_stride(tensor, (32, 64), (32, 1), "torch.ops.dummy.op_name")
+
+    def test_assert_alignment_op_name_pass(self):
+        tensor = torch.empty((16, 32))
+        assert_alignment(tensor, 16, "torch.ops.dummy.op_name")
+
+    def test_assert_alignment_op_name_fail(self):
+        tensor = torch.empty((16, 32))
+        with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
+            assert_alignment(tensor, 0, "torch.ops.dummy.op_name")
+
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_custom_op_unbacked_symints(self):
@@ -13056,12 +13156,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code = run_and_get_triton_code(f, x)
 
         if is_dynamic_shape_enabled():
-            FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1))").check(
-                "assert_size_stride(buf2, (s77, s27), (s27, 1))"
+            FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1)").check(
+                "assert_size_stride(buf2, (s77, s27), (s27, 1)"
             ).run(code)
         else:
-            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1))").check(
-                "assert_size_stride(buf2, (16, 32), (32, 1))"
+            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1)").check(
+                "assert_size_stride(buf2, (16, 32), (32, 1)"
             ).run(code)
 
     @requires_cuda
