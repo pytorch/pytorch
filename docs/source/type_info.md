@@ -32,14 +32,11 @@ smallest_normal        float   The smallest positive normal number. See notes.
 resolution             float   The approximate decimal resolution of this type, i.e., ``10**-precision``.
 ===============        =====   ==========================================================================
 
-```{eval-rst}
-.. note::
+```{note}
   The constructor of {class}`torch.finfo` can be called without argument, in which case the class is created for the pytorch default dtype (as returned by {func}`torch.get_default_dtype`).
 ```
 
-
-```{eval-rst}
-.. note::
+```{note}
   `smallest_normal` returns the smallest *normal* number, but there are smaller
   subnormal numbers. See https://en.wikipedia.org/wiki/Denormal_number
   for more information.
