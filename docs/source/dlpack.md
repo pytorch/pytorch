@@ -1,6 +1,7 @@
+(dlpack)=
 # torch.utils.dlpack
 
-```{rst-eval}
+```{eval-rst}
 .. currentmodule:: torch.utils.dlpack
 
 .. autofunction:: from_dlpack
