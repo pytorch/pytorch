@@ -7,7 +7,7 @@ on:
 jobs:
   do_merge:
     name: try_merge_pr_${{ github.event.client_payload.pr_num }}
-    runs-on: linux.20_04.4x
+    runs-on: linux.24_04.4x
     environment: mergebot
     permissions:
       id-token: write

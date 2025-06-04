@@ -226,7 +226,6 @@ class TestProfilerITT(TestCase):
             q.backward()
 
 
-@unittest.skipIf(sys.version_info >= (3, 13), "segfaults")
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
     @unittest.skipIf(
@@ -2308,7 +2307,6 @@ class MockNode:
         self.children = [MockNode(name, i) for name, i in children.items()]
 
 
-@unittest.skipIf(sys.version_info >= (3, 13), "segfaults")
 class TestExperimentalUtils(TestCase):
     def make_tree(self) -> list[MockNode]:
         tree = {

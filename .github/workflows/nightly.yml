@@ -5,7 +5,8 @@ on:
     - cron: 0 0 * * *
   push:
     tags:
-      # NOTE: Doc build pipelines should only get triggered on release candidate builds
+      # Final Release tags look like: v1.11.0
+      - v[0-9]+.[0-9]+.[0-9]+
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
       - ciflow/nightly/*
@@ -47,7 +48,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11
       docker-image: ${{ needs.docs-build.outputs.docker-image }}
-      push: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.event.ref, 'refs/tags/v') }}
+      push: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (startsWith(github.event.ref, 'refs/tags/v') && !contains(github.event.ref, 'rc')) }}
       run-doxygen: true
     secrets:
       GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}

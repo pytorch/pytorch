@@ -19,6 +19,7 @@ std::vector<int64_t> pool_output_sizes(
   output_size[1] = input_size[1];
 
   for (const auto i : c10::irange(2, input_size.size())) {
+    TORCH_CHECK_VALUE(stride[i -2] > 0, "Strides must be positive!");
     output_size[i] = pooling_output_shape_pad_lr<int64_t>(
       input_size[i],
       kernel_size[i - 2],
