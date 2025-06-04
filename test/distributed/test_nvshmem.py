@@ -142,19 +142,20 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         nsplits = ne * self.world_size
         # Number of elements for an expert is random between [0, k)
         k = 3
+        # Align
+        align = 16
         inp_splits = torch.randint(k, (nsplits,), device=self.device)
         inp_numel = inp_splits.sum().item()
         # Exchange input splits to get output splits
         out_splits = torch.zeros_like(inp_splits)
         dist.all_to_all_single(out_splits, inp_splits)
         # We do a .t() here because there is a rank-major to expert-major shuffle
-        out_splits_t = out_splits.reshape(self.world_size, ne).t().reshape(-1)
+        out_splits_t = out_splits.reshape(self.world_size, ne).t()
 
         # Total number of output elements
         out_numel = out_splits.sum().item()
-        # Align up to make it bigger
-        align = 16
-        out_numel_max = (out_numel + align - 1) // align * align
+        # Align-up makes it bigger
+        out_numel_max = (out_numel + align * ne) // align * align
 
         inp = symm_mem.empty(inp_numel, dtype=dtype, device=self.device).fill_(
             self.rank
@@ -167,20 +168,34 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         in_out_splits[0].copy_(inp_splits)
 
         torch.ops.symm_mem.nvshmem_all_to_all_vdev_2d(
-            inp, out, in_out_splits, group_name
+            inp, out, in_out_splits, group_name, align
         )
+        received_out_splits = in_out_splits[1]
+        received_out_offsets = in_out_splits[2]
 
         # Check input splits (row 0) -- should not change
         torch.testing.assert_close(in_out_splits[0], inp_splits)
 
         # Check output splits (row 1)
-        torch.testing.assert_close(in_out_splits[1], out_splits_t)
+        torch.testing.assert_close(received_out_splits, out_splits_t.reshape(-1))
 
         # Check output offsets (row 2)
-        out_offsets = torch.cumsum(out_splits_t, dim=0)  # inclusive scan
-        # output offsets from `nvshmem_all_to_all_vdev` is exclusive scan
-        self.assertEqual(in_out_splits[2][0], 0)
-        torch.testing.assert_close(in_out_splits[2][1:], out_offsets[:-1])
+        out_split_list = out_splits_t.tolist()
+        for i in range(ne):
+            expert_sum = 0
+            for j in range(self.world_size):
+                expert_sum += out_split_list[i][j]
+            align_pad = align - (expert_sum % align)
+            # last element absorbs the padding
+            out_split_list[i][-1] += align_pad
+
+        out_splits_padded = torch.tensor(out_split_list, device=self.device).reshape(-1)
+        out_offsets = torch.cumsum(out_splits_padded, dim=0)  # inclusive scan
+        # Make it exclusive scan because that's what `nvshmem_all_to_all_vdev_2d` returns
+        out_offsets = torch.cat(
+            [torch.zeros(1, device=self.device), out_offsets[:-1]]
+        ).to(torch.int64)
+        torch.testing.assert_close(received_out_offsets, out_offsets)
 
         # Check data
         expected = torch.empty(out_numel, dtype=dtype, device=self.device)
@@ -199,8 +214,12 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
                 chunk = expected[offset - out_splits[chunk_id] : offset]
                 result_list.append(chunk)
 
-        final = torch.cat(result_list)
-        torch.testing.assert_close(out[:out_numel], final)
+        # Do a chunk-wise comparison
+        for c, chunk in enumerate(result_list):
+            start = received_out_offsets[c].item()
+            split = received_out_splits[c].item()
+            received_chunk = out[start : start + split]
+            torch.testing.assert_close(received_chunk, chunk)
 
 
 if __name__ == "__main__":
