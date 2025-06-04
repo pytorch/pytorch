@@ -564,6 +564,8 @@ class ProcessGroupGloo(Backend):
     class Options(Backend.Options):
         devices: list[ProcessGroupGloo.Device]
         threads: int
+        global_ranks_in_group: list[int]
+        group_name: str
 
         def __init__(self): ...
 
@@ -579,6 +581,8 @@ class ProcessGroupGloo(Backend):
     @staticmethod
     def create_default_device(lazy_init=None) -> Device: ...
     def _set_default_timeout(self, timeout) -> None: ...
+    @property
+    def options(self) -> Options: ...  # type: ignore[override]
 
 class _ProcessGroupWrapper(Backend):
     def __init__(self, pg: Backend, gloo_pg: ProcessGroupGloo) -> None: ...

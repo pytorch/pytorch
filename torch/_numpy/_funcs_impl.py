@@ -941,7 +941,7 @@ def choose(
     ]
 
     idx_list[0] = a
-    return choices[idx_list].squeeze(0)
+    return choices[tuple(idx_list)].squeeze(0)
 
 
 # ### unique et al. ###
