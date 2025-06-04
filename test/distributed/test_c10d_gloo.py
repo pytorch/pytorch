@@ -1,13 +1,16 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import json
 import logging
 import math
 import operator
 import os
+import pickle
 import random
 import sys
 import tempfile
+import time
 from datetime import timedelta
 from functools import reduce
 from itertools import groupby
@@ -242,11 +245,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         super().setUp()
         self._spawn_processes()
 
-    def opts(self, threads=2):
+    def opts(self, threads=2, group_name="0"):
         opts = c10d.ProcessGroupGloo._Options()
         opts._timeout = 50.0
         opts._devices = [create_device(interface=LOOPBACK, lazy_init=self.lazy_init)]
         opts._threads = threads
+        opts.group_name = group_name
         return opts
 
     @requires_gloo()
@@ -2359,6 +2363,122 @@ class ProcessGroupGlooLazyInitTest(ProcessGroupGlooTest):
     def tearDown(self) -> None:
         del os.environ["TORCH_GLOO_LAZY_INIT"]
         return super().tearDown()
+
+
+class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
+    def setUp(self):
+        os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
+        super().setUp()
+
+    def tearDown(self) -> None:
+        del os.environ["TORCH_FR_BUFFER_SIZE"]
+        return super().tearDown()
+
+    def _verify_trace(self, t, is_json):
+        ver = t["version"]
+        self.assertEqual(ver, "2.7")
+        pg_config = t["pg_config"]
+        self.assertEqual(len(pg_config), 1)
+        default_pg_info = pg_config["0"]
+        self.assertIn("name", default_pg_info)
+        self.assertIn("desc", default_pg_info)
+        self.assertIn("ranks", default_pg_info)
+        pg_status = t["pg_status"]
+        self.assertEqual(len(pg_status), 1)
+        self.assertEqual(str(pg_status["0"]["last_enqueued_collective"]), "3")
+        self.assertEqual(str(pg_status["0"]["last_completed_collective"]), "3")
+        self.assertEqual(
+            str(pg_status["0"]["last_started_collective"]),
+            "-1",
+        )
+        global_ranks = pg_config["0"]["ranks"]
+        self.assertEqual(len(json.loads(global_ranks)), self.world_size)
+        self.assertEqual(len(t["entries"]), 3)
+        t = t["entries"]
+        last = t[-1]
+        self.assertEqual(last["process_group"], ("0", ""))
+        # No event recorded for Gloo.
+        self.assertEqual(last["state"], "scheduled")
+        # we don't collect stack traces in JSON at the moment
+        if not is_json:
+            self.assertIn("test_c10d_gloo.py", str(last["frames"]))
+        self.assertEqual(last["input_sizes"], ((3, 4),))
+        self.assertEqual(last["input_dtypes"], ["Float"])
+        self.assertEqual(last["output_sizes"], ((3, 4),))
+        self.assertEqual(last["output_dtypes"], ["Float"])
+        self.assertEqual(last["collective_seq_id"], 3)
+        # TODO: Needs verification
+        self.assertEqual(last["timeout_ms"], 50000)
+        self.assertTrue("duration_ms" not in last)
+
+    @requires_gloo()
+    def test_short_json(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts(group_name="0")
+        )
+        a = torch.full((3, 4), float(self.rank))
+        for _ in range(2):
+            f = pg.allreduce(a)
+            f.wait()
+        time.sleep(1)
+        t = json.loads(
+            torch._C._distributed_c10d._dump_fr_trace_json(includeCollectives=True)
+        )
+        self._verify_trace(t, True)
+
+    @requires_gloo()
+    def test_short_pickle(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts(group_name="0")
+        )
+        a = torch.full((3, 4), float(self.rank))
+        for _ in range(2):
+            f = pg.allreduce(a)
+            f.wait()
+        time.sleep(1)
+        t = pickle.loads(
+            torch._C._distributed_c10d._dump_fr_trace(includeCollectives=True)
+        )
+        self._verify_trace(
+            t,
+            is_json=False,
+        )
+
+    @requires_gloo()
+    def test_long(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts(group_name="0")
+        )
+        a = torch.full((3, 4), float(self.rank))
+        for _ in range(2):
+            # test some other primitives to make sure
+            # their strings are valid
+            xs = [torch.ones(3, 4)]
+            pg.broadcast(xs).wait()
+            pg.allreduce(xs).wait()
+            pg.reduce(xs).wait()
+            ys = [[torch.empty(3, 4) for _ in range(self.world_size)]]
+            pg.allgather(ys, xs).wait()
+            pg.reduce_scatter(xs, ys).wait()
+            f = pg.allreduce(a)
+            f.wait()
+        t = pickle.loads(torch._C._distributed_c10d._dump_fr_trace())
+        t = t["entries"]
+        self.assertEqual(len(t), 10)
+        first = t[0]
+        last = t[-1]
+        self.assertEqual(last["profiling_name"], "gloo:all_reduce")
+        self.assertEqual(last["state"], "scheduled")
+        self.assertIn("test_c10d_gloo.py", str(last["frames"]))
+        self.assertEqual(last["input_sizes"], ((3, 4),))
+        self.assertEqual(last["input_dtypes"], ["Float"])
+        self.assertEqual(last["output_sizes"], ((3, 4),))
+        self.assertEqual(last["output_dtypes"], ["Float"])
+        self.assertEqual(last["timeout_ms"], 50000)
+        self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
