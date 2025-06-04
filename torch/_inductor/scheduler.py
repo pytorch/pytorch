@@ -4259,7 +4259,7 @@ class Scheduler:
             # use free_symbols only when s is simplified to an Integer or expr
             res.update(symplified_s.free_symbols)
 
-        return res
+        return OrderedSet(sorted(res))
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
