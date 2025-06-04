@@ -231,7 +231,7 @@ def _package_aoti_files(
                     )
             if file.endswith(".cpp"):
                 num_cpp_files += 1
-                if num_cpp_files > 1:
+                if num_so_files > 1:
                     raise RuntimeError(
                         f"Multiple .cpp files found in {files}. "
                         "You might need to clear your cache "
@@ -548,28 +548,29 @@ def load_pt2(
                 ]  # split "model_name/...cpp" into "model_name"
                 aoti_model_names.add(model_name)
 
-    if isinstance(f, (io.IOBase, IO)) and len(aoti_model_names) > 0:
-        # Workaround for AOTIModelPackageLoader not reading buffers
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as tf:
-            f.seek(0)
-            tf.write(f.read())
-            f.seek(0)
-            logger.debug("Writing buffer to tmp file located at %s.", tf.name)
+    if isinstance(f, (io.IOBase, IO)):
+        if len(aoti_model_names) > 0:
+            # Workaround for AOTIModelPackageLoader not reading buffers
+            with tempfile.NamedTemporaryFile(suffix=".pt2") as tf:
+                f.seek(0)
+                tf.write(f.read())
+                f.seek(0)
+                logger.debug("Writing buffer to tmp file located at %s.", tf.name)
 
-            aoti_runners = {
-                model_name: AOTICompiledModel(
-                    torch._C._aoti.AOTIModelPackageLoader(
-                        tf.name,
-                        model_name,
-                        run_single_threaded,
-                        num_runners,
-                        device_index,
+                aoti_runners = {
+                    model_name: AOTICompiledModel(
+                        torch._C._aoti.AOTIModelPackageLoader(
+                            tf.name,
+                            model_name,
+                            run_single_threaded,
+                            num_runners,
+                            device_index,
+                        )
                     )
-                )
-                for model_name in aoti_model_names
-            }
+                    for model_name in aoti_model_names
+                }
+
     else:
-        assert isinstance(f, str), type(f)
         aoti_runners = {
             model_name: AOTICompiledModel(
                 torch._C._aoti.AOTIModelPackageLoader(
