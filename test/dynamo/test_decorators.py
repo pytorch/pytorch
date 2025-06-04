@@ -1903,6 +1903,34 @@ If the above doesn't work, please subtmit an issue to GitHub.
         with self.assertRaises(Unsupported):
             f2(inp)
 
+    def test_nested_compile_fullgraph(self):
+        inp = torch.ones(3)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def inner_f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def f1(x):
+            return inner_f1(x)
+
+        with self.assertRaises(Unsupported):
+            f1(inp)
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def inner_f2(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f2(x):
+            return inner_f2(x)
+
+        self.assertEqual(f2(inp), inp + 3)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
