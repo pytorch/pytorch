@@ -1,23 +1,24 @@
+```{eval-rst}
 .. currentmodule:: torch
+```
 
-.. _type-info-doc:
+(type-info-doc)=
+# Type Info
 
-Type Info
-=========
+The numerical properties of a {class}`torch.dtype` can be accessed through either the {class}`torch.finfo` or the {class}`torch.iinfo`.
 
-The numerical properties of a :class:`torch.dtype` can be accessed through either the :class:`torch.finfo` or the :class:`torch.iinfo`.
+(finfo-doc)=
 
-.. _finfo-doc:
+## torch.finfo
 
-torch.finfo
------------
-
+```{eval-rst}
 .. class:: torch.finfo
+```
 
-A :class:`torch.finfo` is an object that represents the numerical properties of a floating point
-:class:`torch.dtype`, (i.e. ``torch.float32``, ``torch.float64``, ``torch.float16``, and ``torch.bfloat16``). This is similar to `numpy.finfo <https://numpy.org/doc/stable/reference/generated/numpy.finfo.html>`_.
+A {class}`torch.finfo` is an object that represents the numerical properties of a floating point
+{class}`torch.dtype`, (i.e. ``torch.float32``, ``torch.float64``, ``torch.float16``, and ``torch.bfloat16``). This is similar to `numpy.finfo <https://numpy.org/doc/stable/reference/generated/numpy.finfo.html>`_.
 
-A :class:`torch.finfo` provides the following attributes:
+A {class}`torch.finfo` provides the following attributes:
 
 ===============        =====   ==========================================================================
 Name                   Type    Description
@@ -31,27 +32,31 @@ smallest_normal        float   The smallest positive normal number. See notes.
 resolution             float   The approximate decimal resolution of this type, i.e., ``10**-precision``.
 ===============        =====   ==========================================================================
 
+```{eval-rst}
 .. note::
-  The constructor of :class:`torch.finfo` can be called without argument, in which case the class is created for the pytorch default dtype (as returned by :func:`torch.get_default_dtype`).
+  The constructor of {class}`torch.finfo` can be called without argument, in which case the class is created for the pytorch default dtype (as returned by {func}`torch.get_default_dtype`).
+```
 
+
+```{eval-rst}
 .. note::
   `smallest_normal` returns the smallest *normal* number, but there are smaller
   subnormal numbers. See https://en.wikipedia.org/wiki/Denormal_number
   for more information.
+```
 
+(iinfo-doc)=
 
-.. _iinfo-doc:
+## torch.iinfo
 
-torch.iinfo
-------------
-
+```{eval-rst}
 .. class:: torch.iinfo
+```
 
+A {class}`torch.iinfo` is an object that represents the numerical properties of a integer
+{class}`torch.dtype` (i.e. ``torch.uint8``, ``torch.int8``, ``torch.int16``, ``torch.int32``, and ``torch.int64``). This is similar to `numpy.iinfo <https://numpy.org/doc/stable/reference/generated/numpy.iinfo.html>`_.
 
-A :class:`torch.iinfo` is an object that represents the numerical properties of a integer
-:class:`torch.dtype` (i.e. ``torch.uint8``, ``torch.int8``, ``torch.int16``, ``torch.int32``, and ``torch.int64``). This is similar to `numpy.iinfo <https://numpy.org/doc/stable/reference/generated/numpy.iinfo.html>`_.
-
-A :class:`torch.iinfo` provides the following attributes:
+A {class}`torch.iinfo` provides the following attributes:
 
 =========   =====   ========================================
 Name        Type    Description
