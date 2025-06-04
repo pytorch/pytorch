@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSProfiler.h>
-// #include <ATen/native/Activation.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
@@ -35,7 +34,6 @@ REGISTER_UNARY_TI_DISPATCH(sqrt);
 REGISTER_UNARY_TI_DISPATCH(rsqrt);
 REGISTER_UNARY_TI_DISPATCH(neg);
 REGISTER_UNARY_TI_DISPATCH(exp2);
-REGISTER_UNARY_TI_DISPATCH(sigmoid);
 REGISTER_UNARY_TI_DISPATCH(log10);
 REGISTER_UNARY_TI_DISPATCH(log2);
 REGISTER_UNARY_TI_DISPATCH(log);
