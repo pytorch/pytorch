@@ -40,6 +40,7 @@
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/rsqrt_native.h>
 #include <ATen/ops/sgn_native.h>
+#include <ATen/ops/sigmoid_native.h>
 #include <ATen/ops/sign_mps_dispatch.h>
 #include <ATen/ops/sign_native.h>
 #include <ATen/ops/signbit_native.h>
@@ -276,6 +277,12 @@ Tensor angle_mps(const Tensor& self) {
       : c10::toRealValueType(self.scalar_type());
   Tensor result = at::empty({0}, self.options().dtype(float_type));
   return angle_out_mps(self, result);
+}
+
+TORCH_IMPL_FUNC(sigmoid_out_mps)(const Tensor& self, const Tensor& output) {
+  mps::unary_op(self, output, "sigmoid_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+    return [mpsGraph sigmoidWithTensor:inputTensor name:nil];
+  });
 }
 
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
