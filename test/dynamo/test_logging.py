@@ -957,6 +957,7 @@ exclusions = {
     "cudagraph_static_inputs",
     "benchmarking",
     "loop_ordering",
+    "loop_tiling",
     "autotuning",
     "graph_region_expansion",
 }

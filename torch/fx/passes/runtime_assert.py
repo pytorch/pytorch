@@ -95,6 +95,7 @@ def insert_deferred_runtime_asserts(
 
     from torch._export.passes._node_metadata_hook import _set_node_metadata_hook
     from torch.fx.experimental.symbolic_shapes import (
+        _get_placeholder_expr,
         _has_uninterpretable_sympy_function,
         CallMethodKey,
         cast_symbool_to_symint_guardless,
@@ -258,6 +259,7 @@ def insert_deferred_runtime_asserts(
                 # nodes
                 with _set_node_metadata_hook(gm, _node_metadata_hook):
                     res = _sympy_interp(expr_to_proxy, ra.expr).node
+
                     graph.call_function(
                         torch.ops.aten._assert_scalar.default,
                         # TODO: use ra.msg here, but it's pretty
@@ -290,7 +292,9 @@ def insert_deferred_runtime_asserts(
                     if (
                         isinstance(symint, torch.SymInt)
                         and isinstance(symint.node, SymNode)
-                        and isinstance(s := symint.node.expr, sympy.Symbol)
+                        and isinstance(
+                            s := _get_placeholder_expr(symint.node), sympy.Symbol
+                        )
                         and s not in expr_to_proxy
                     ):
                         with _set_node_metadata_hook(gm, _node_metadata_hook):

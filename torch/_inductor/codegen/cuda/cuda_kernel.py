@@ -8,10 +8,11 @@ from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 from sympy import Expr, symbols
 
+import torch._inductor.config as config
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.scheduler import BaseSchedulerNode
-from torch._inductor.utils import Placeholder
+from torch._inductor.utils import do_bench_using_profiling, Placeholder
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
@@ -241,7 +242,6 @@ class CUDATemplateKernel(CUDAKernel):
         self,
         inputs: list[IRNode],
         outputs: list[IRNode],
-        epilogue_inputs: list[IRNode],
         names_str: str = "",
         input_reorder: Optional[list[int]] = None,
     ) -> str:
@@ -259,7 +259,7 @@ class CUDATemplateKernel(CUDAKernel):
                            In this case, the `input_reorder` would be [2, 0, 1].
         """
         names = [x.strip() for x in names_str.strip().split(",")]
-        if len(inputs) + len(epilogue_inputs) + len(outputs) != len(names):
+        if len(inputs) + len(outputs) != len(names):
             raise RuntimeError(
                 f"{len(inputs) + len(outputs)=} != {len(names)=}, {inputs=}, {outputs=}, {names=}"
             )
@@ -275,13 +275,6 @@ class CUDATemplateKernel(CUDAKernel):
             if node is not None:
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
-
-        for epilogue_input in epilogue_inputs:
-            if epilogue_input is not None:
-                self.named_nodes[epilogue_input.get_name()] = epilogue_input
-                self.args.input_buffers[epilogue_input.get_name()] = (
-                    epilogue_input.get_name()
-                )
 
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
@@ -593,9 +586,10 @@ class CUDATemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(
-            *args, out=out
-        )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
+        return self.bmreq.benchmark(*args, out=out)
 
     def __str__(self) -> str:
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"
@@ -603,11 +597,26 @@ class CUDATemplateCaller(ChoiceCaller):
     def call_name(self) -> str:
         return f"cuda_template_kernels.{self.name}"
 
-    def hash_key(self) -> str:
+    def kernel_hash_key(self) -> str:
+        """
+        Return kernel hash key that does not depend on swizzle.
+        """
         return "-".join(
             [
                 self.category,
                 self.bmreq.hash_key,
+            ]
+        )
+
+    def hash_key(self) -> str:
+        """
+        Return kernel hash key that does not depend on swizzle.
+        """
+        return "-".join(
+            [
+                self.category,
+                self.bmreq.hash_key,
+                str(self.info_dict().get("swizzle")),
             ]
         )
 
@@ -628,6 +637,7 @@ class CUDATemplateCaller(ChoiceCaller):
                 "instruction_shape": str(
                     op.tile_description.math_instruction.instruction_shape
                 ),
+                "swizzle": str(self.info_kwargs["swizzle"]),
             }
         else:
             return {"backend": "CUDA", "op_type": "unknown"}
