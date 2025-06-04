@@ -8,7 +8,7 @@ from textwrap import dedent
 from typing import Dict, List
 
 import torch
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, raise_on_run_directly
 from torch.testing._internal.jit_utils import execWrapper, JitTestCase
 
 
@@ -617,3 +617,7 @@ class TestComplex(JitTestCase):
                 scripted = torch.jit.script(op)
                 jit_result = scripted(x, y)
                 self.assertEqual(eager_result, jit_result)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")
