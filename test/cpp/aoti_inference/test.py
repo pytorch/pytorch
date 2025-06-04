@@ -1,4 +1,5 @@
 import torch
+import torch._inductor.config
 from torch._export import aot_compile
 from torch.export import Dim
 
@@ -47,7 +48,8 @@ def generate_basic_tests():
                 ref_output = model(x)
 
             torch._dynamo.reset()
-            with torch.no_grad():
+            # patch freezing off to make constant names more predictable
+            with torch.no_grad(), torch._inductor.config.patch(freezing=False):
                 dim0_x = Dim("dim0_x", min=1, max=1024)
                 dynamic_shapes = {"x": {0: dim0_x}}
                 model_so_path = aot_compile(
@@ -94,7 +96,8 @@ def generate_large_tests():
 
     torch._dynamo.reset()
     for use_runtime_constant_folding in [True, False]:
-        with torch.no_grad():
+        # patch freezing off to make constant names more predictable
+        with torch.no_grad(), torch._inductor.config.patch(freezing=False):
             model_so_path = aot_compile(
                 model,
                 (x,),
@@ -138,7 +141,8 @@ def generate_test_with_additional_tensors():
         ref_output = model(x, y)
 
     torch._dynamo.reset()
-    with torch.no_grad():
+    # patch freezing off to make constant names more predictable
+    with torch.no_grad(), torch._inductor.config.patch(freezing=False):
         model_so_path = aot_compile(model, (x, y))
         # Also store a .pt2 file using the aoti_compile_and_package API
         pt2_package_path = torch._inductor.aoti_compile_and_package(
