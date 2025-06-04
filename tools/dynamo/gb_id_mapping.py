@@ -4,6 +4,7 @@ import argparse
 import ast
 import json
 import re
+import sys
 from pathlib import Path
 
 
@@ -40,18 +41,12 @@ def clean_string(s):
         s = re.sub(r'["\'] f["\']', " ", s)
         # Remove surrounding quotes, keeping only the content (e.g., "hello" -> hello)
         s = re.sub(r'^["\'](.*)["\']$', r"\1", s)
-        # Replace any whitespace around newlines with a single space for consistent formatting
-        s = re.sub(r"\s*\n\s*", " ", s)
-        # Replace escaped quotes with their unescaped versions (e.g., \" -> ", \' -> ')
-        s = s.replace('\\"', '"').replace("\\'", "'")
-        # Remove any remaining backslashes used for escaping
-        s = s.replace("\\", "")
+        # Replace any whitespace
+        s = " ".join(s.splitlines())
+        # Replace escaped quotes with their unescaped versions
+        s = s.encode().decode("unicode_escape")
         # Replace adjacent quoted strings with a space (e.g., " "" -> " ")
         s = re.sub(r'" "', " ", s)
-        # Remove any curly brace expressions used in f-strings (e.g., {variable})
-        s = re.sub(r"\{[^}]*\}", "", s)
-        # Remove backticks used in docstrings or code examples
-        s = re.sub(r"``", "", s)
     return s
 
 
@@ -187,6 +182,7 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path):
 
     save_registry(reg, registry_path)
     print(f"Added {gb_type} to registry with ID {gb_id}")
+    return True
 
 
 def create_registry(dynamo_dir, registry_path):
@@ -199,7 +195,7 @@ def create_registry(dynamo_dir, registry_path):
 
     GB_ID_INDEX = 0000
     for i, (gb_type, info) in enumerate(sorted(gb_types.items()), GB_ID_INDEX):
-        gb_id = f"GB{i}"
+        gb_id = f"GB{i:04d}"
         hints = info["hints"]
 
         registry[gb_id] = {
@@ -211,14 +207,20 @@ def create_registry(dynamo_dir, registry_path):
 
     with open(registry_path, "w") as f:
         json.dump(registry, f, indent=2)
+    return True
 
 
 def main():
     script_dir = Path(__file__).resolve().parent
-
     repo_root = script_dir.parent.parent
-    dynamo_dir = repo_root / "torch" / "_dynamo"
     registry_path = script_dir / "graph_break_registry.json"
+
+    try:
+        import torch._dynamo
+
+        default_dynamo_dir = str(Path(torch._dynamo.__file__).parent)
+    except ImportError:
+        default_dynamo_dir = str(repo_root / "torch" / "_dynamo")
 
     parser = argparse.ArgumentParser(description="Manage graph break registry.")
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
@@ -227,7 +229,7 @@ def main():
     create_parser.add_argument(
         "--dynamo_dir",
         type=str,
-        default=None,
+        default=default_dynamo_dir,
         help="Directory to search for unimplemented_v2 calls.",
     )
 
@@ -247,16 +249,13 @@ def main():
     args = parser.parse_args()
 
     if args.command == "create":
-        if getattr(args, "dynamo_dir", None) is None:
-            try:
-                import torch._dynamo
-
-                args.dynamo_dir = str(Path(torch._dynamo.__file__).parent)
-            except ImportError:
-                args.dynamo_dir = str(dynamo_dir)
-        create_registry(args.dynamo_dir, args.registry_path)
+        success = create_registry(args.dynamo_dir, args.registry_path)
+        if not success:
+            sys.exit(1)
     elif args.command == "add":
-        cmd_add_new_gb_type(args.gb_type, args.file_path, args.registry_path)
+        success = cmd_add_new_gb_type(args.gb_type, args.file_path, args.registry_path)
+        if not success:
+            sys.exit(1)
     else:
         parser.print_help()
 
