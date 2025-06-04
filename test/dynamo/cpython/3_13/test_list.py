@@ -27,6 +27,9 @@ redirect_imports = (
     "test.typinganndata.ann_module",
 )
 
+def xfailIfBelow3133(func):
+    return unittest.expectedFailure(func) if sys.version_info < (3, 13, 3) else func
+
 class RedirectImportFinder(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path, target=None):
         # Check if the import is the problematic one
@@ -373,7 +376,7 @@ class ListTest(list_tests.CommonTest):
             a.append(4)
             self.assertEqual(list(it), [])
 
-    @unittest.expectedFailure
+    @xfailIfBelow3133
     def test_deopt_from_append_list(self):
         # gh-132011: it used to crash, because
         # of `CALL_LIST_APPEND` specialization failure.
