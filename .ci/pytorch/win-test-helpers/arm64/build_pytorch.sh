@@ -54,20 +54,16 @@ echo "*" > .venv/.gitignore
 source ./.venv/Scripts/activate
 which python
 
+# Add link.exe to PATH
+where link.exe
+export PATH=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.43.34808\bin\Hostarm64\arm64;%PATH%
+
 # Install Python dependencies
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 
 # Set DISTUTILS_USE_SDK after psutil install
 export DISTUTILS_USE_SDK=1
-
-# Add link.exe to PATH
-where link.exe
-# Remove Git's usr/bin directory from PATH to avoid GNU link.exe
-PATH=$(echo "$PATH" | tr ';' '\n' | grep -v "Git\\\\usr\\\\bin" | paste -sd ';' -)
-echo %PATH%
-set PATH="C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.43.34808\bin\Hostarm64\arm64;%PATH%"
-export PATH
 
 # Print environment variables (debugging)
 env
