@@ -546,6 +546,7 @@ BatchNormBackend _select_batch_norm_backend(
       && (input.suggest_memory_format() == MemoryFormat::Contiguous
 #if (defined(USE_ROCM) && ROCM_VERSION >= 60500)
         || (input.suggest_memory_format() == MemoryFormat::ChannelsLast && PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM)
+        || (input.suggest_memory_format() == MemoryFormat::ChannelsLast3d && PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM)
 #endif
         )
   ) {
