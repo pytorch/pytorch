@@ -207,7 +207,6 @@ def create_registry(dynamo_dir, registry_path):
 
     with open(registry_path, "w") as f:
         json.dump(registry, f, indent=2)
-    return True
 
 
 def main():
