@@ -1801,17 +1801,18 @@ namespace {
 
 using SigHandler = void (*)(int);
 
-
 SigHandler* _getOldHandler(int signum) {
-  // Use a "dumb" structure that won't be cleaned up by the exit handlers.
-  static SigHandler _sigsegv = nullptr;
-  static SigHandler _sigint = nullptr;
-
-  switch (signum) {
-  case SIGSEGV: return &_sigsegv;
-  case SIGINT: return &_sigint;
-  default: assert(false); return nullptr;
+#define SIG_CHECK(n)                     \
+  if (signum == (n)) {                   \
+    static SigHandler handler = nullptr; \
+    return &handler;                     \
   }
+
+  SIG_CHECK(SIGSEGV);
+  SIG_CHECK(SIGILL);
+
+  throw std::runtime_error("unexpected signal number");
+#undef SIG_CHECK
 }
 
 extern "C" void _signalHandler(int signum) {
