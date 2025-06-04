@@ -190,8 +190,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   const int64_t seq_len_q = query.size(2);
   const int64_t seq_len_kv = key.size(2);
 
-  auto opts = query.options();
-  auto output = at::empty({batch_size, num_head, seq_len_q, head_dim}, opts);
+  at::Tensor output;
   at::Tensor logsumexp, debug_attn_mask; // not supported
 
   at::native::onednn::gpu_float_sdpa(
