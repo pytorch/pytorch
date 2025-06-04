@@ -6,10 +6,10 @@ import sys
 import tempfile
 import warnings
 from typing import Any, Callable, Optional, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
-from typing_extensions import ParamSpec
 
 
 _T = TypeVar("_T")
@@ -285,7 +285,7 @@ def profiler_allow_cudagraph_cupti_lazy_reinit_cuda12():
     return True
 
 
-def deprecate():
+def deprecated():
     """Decorator that deprecates functions.
 
     Effects:
