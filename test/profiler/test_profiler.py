@@ -2041,6 +2041,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             gpu_activity = ProfilerActivity.CUDA
             device = "cuda"
         elif torch.xpu.is_available():
+            gpu_activity = ProfilerActivity.XPU
             device = "xpu"
         activities = [ProfilerActivity.CPU, gpu_activity]
         with profile(activities=activities) as p:
@@ -2052,7 +2053,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
         self.assertTrue(any(device in e.name for e in p.events()))
 
-        self.assertTrue(any("kernel" in e.name for e in p.events()))
+        self.assertTrue(any("kernel" in e.name.lower() for e in p.events()))
 
         with profile(activities=activities) as p1:
             p1.toggle_collection_dynamic(False, [gpu_activity])
@@ -2064,7 +2065,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
         self.assertTrue(all(device not in e.name for e in p1.events()))
 
-        self.assertTrue(all("kernel" not in e.name for e in p1.events()))
+        self.assertTrue(all("kernel" not in e.name.lower() for e in p1.events()))
 
         with profile(activities=activities) as p2:
             p2.toggle_collection_dynamic(False, activities)
