@@ -417,6 +417,43 @@ class TestLazyCloneDeviceType(TestCase):
 
         fn(torch.randn([2, 2, 10], pin_memory=pin_memory))
 
+    # See Note [CPU pinned to MPS failures]
+    # TODO: Once this issue is fixed, remove this test
+    def test_isclose_issue(self, device):
+        a_device = torch.device(device).type
+        b_device = "mps" if a_device == "cpu" else "cpu"
+
+        a_args = [
+            torch.randint(
+                -9,
+                10,
+                (5, 10, 5),
+                dtype=torch.int32,
+                device=a_device,
+                pin_memory=a_device == "cpu",
+            ),
+            torch.randint(
+                -9,
+                10,
+                (5, 10, 5),
+                dtype=torch.int32,
+                device=a_device,
+                pin_memory=a_device == "cpu",
+            ),
+        ]
+
+        b_args = [arg.to(b_device) for arg in a_args]
+
+        # This op call mutates the first arg's data
+        if a_device == "mps":
+            torch.isclose(*a_args)
+        else:
+            torch.isclose(*b_args)
+
+        self.assertEqual(a_args[1], b_args[1])
+        # THIS one fails
+        self.assertEqual(a_args[0], b_args[0])
+
 
 instantiate_device_type_tests(TestLazyCloneDeviceType, globals(), allow_mps=True)
 
