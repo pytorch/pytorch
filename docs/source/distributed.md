@@ -56,6 +56,10 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 ```
 
 ### Backends that come with PyTorch
+<<<<<<< HEAD
+=======
+
+>>>>>>> b0ad1baf86a0f0fba5d8fddaf34f128fb26b2cd8
 
 PyTorch distributed package supports Linux (stable), MacOS (stable), and Windows (prototype).
 By default for Linux, the Gloo and NCCL backends are built and included in PyTorch
@@ -65,7 +69,11 @@ installed.)
 
 :::{note}
 As of PyTorch v1.8, Windows supports all collective communications backend but NCCL,
+<<<<<<< HEAD
 If the `init_method` argument of {func}`init_process_group` points to a file it must adhere
+=======
+If  the `init_method` argument of :func:`init_process_group` points to a file it must adhere
+>>>>>>> b0ad1baf86a0f0fba5d8fddaf34f128fb26b2cd8
 to the following schema:
 
 - Local file system, `init_method="file:///d:/tmp/some_file"`
@@ -106,17 +114,27 @@ In the past, we were often asked: "which backend should I use?".
 - CPU hosts with Ethernet interconnect
 
   - Use Gloo, unless you have specific reasons to use MPI.
-
+  
 ### Common environment variables
 
+<<<<<<< HEAD
+### Common environment variables
+
+=======
+>>>>>>> b0ad1baf86a0f0fba5d8fddaf34f128fb26b2cd8
 #### Choosing the network interface to use
 
 By default, both the NCCL and Gloo backends will try to find the right network interface to use.
 If the automatically detected interface is not correct, you can override it using the following
 environment variables (applicable to the respective backend):
 
+<<<<<<< HEAD
 - **NCCL_SOCKET_IFNAME**, for example `export NCCL_SOCKET_IFNAME=eth0`
 - **GLOO_SOCKET_IFNAME**, for example `export GLOO_SOCKET_IFNAME=eth0`
+=======
+* **NCCL_SOCKET_IFNAME**, for example `export NCCL_SOCKET_IFNAME=eth0`
+* **GLOO_SOCKET_IFNAME**, for example `export GLOO_SOCKET_IFNAME=eth0`
+>>>>>>> b0ad1baf86a0f0fba5d8fddaf34f128fb26b2cd8
 
 If you're using the Gloo backend, you can specify multiple interfaces by separating
 them by a comma, like this: `export GLOO_SOCKET_IFNAME=eth0,eth1,eth2,eth3`.
@@ -184,8 +202,13 @@ or {func}`torch.distributed.device_mesh.init_device_mesh` function before callin
 Both block until all processes have joined.
 
 :::{warning}
+<<<<<<< HEAD
 Initialization is not thread-safe. Process group creation should be performed from a single thread, to prevent
 inconsistent 'UUID' assignment across ranks, and to prevent races during initialization that can lead to hangs.
+=======
+    Initialization is not thread-safe.  Process group creation should be performed from a single thread, to prevent
+    inconsistent 'UUID' assignment across ranks, and to prevent races during initialization that can lead to hangs.
+>>>>>>> b0ad1baf86a0f0fba5d8fddaf34f128fb26b2cd8
 :::
 
 ```{eval-rst}
