@@ -161,7 +161,6 @@ class AOTInductorTestsTemplate:
         "toolchain doesn't support ptx to fatbin",
     )
     @skipIfRocm
-    @skipIfXpu
     @common_utils.parametrize("embed_kernel_binary", [True, False])
     @common_utils.parametrize("emit_current_arch_binary", [True, False])
     def test_simple_multi_arch(self, embed_kernel_binary, emit_current_arch_binary):
@@ -193,7 +192,8 @@ class AOTInductorTestsTemplate:
                 _, code = run_and_get_cpp_code(
                     AOTIRunnerUtil.compile, model, example_inputs
                 )
-                FileCheck().check(".fatbin").run(code)
+                file_extension = ".spv" if self.device == "xpu" else ".fatbin"
+                FileCheck().check(file_extension).run(code)
 
     def test_small_constant(self):
         class Model(torch.nn.Module):
