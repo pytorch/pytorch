@@ -677,6 +677,7 @@ class TestFlattenParams(FSDPTest):
             out = fsdp_model(x)
         self.assertEqual(out.shape, torch.Size([]))
 
+
 instantiate_parametrized_tests(TestFlattenParams)
 
 if __name__ == "__main__":
