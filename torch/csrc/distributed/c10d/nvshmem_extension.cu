@@ -11,8 +11,6 @@
 #include <ATen/cuda/cub.cuh>
 #include <nvshmem.h>
 
-#include <cooperative_groups.h>
-
 namespace c10d::nvshmem_extension {
 
 using c10d::symmetric_memory::StoreExchange;
