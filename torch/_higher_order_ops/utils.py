@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import functools
 from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
@@ -7,9 +8,11 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     disable_proxy_modes_tracing,
@@ -970,6 +973,36 @@ def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
         else:
             bound_kwargs[arg.name] = val
     return op(*bound_args, **bound_kwargs)
+
+
+def materialize_as_graph(
+    fn: Callable,
+    args: tuple[Any],
+    include_key_set: Optional[torch._C.DispatchKeySet] = None,
+    exclude_key_set: Optional[torch._C.DispatchKeySet] = None,
+    force_enable_grad=False,
+) -> torch.fx.GraphModule:
+    if include_key_set is None:
+        include_key_set = torch._C._dispatch_tls_local_include_set()
+    if exclude_key_set is None:
+        exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+
+    @torch._dynamo.disable(recursive=True, reason=None)
+    def _materialize_as_graph_inner():
+        with suspend_functionalization(), disable_functional_mode():
+            with disable_proxy_modes_tracing():
+                unfunc_t = [_from_fun(arg) for arg in args]
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
+            )
+            if force_enable_grad:
+                stack.enter_context(torch.enable_grad())
+            return _maybe_reenter_make_fx(fn)(*unfunc_t)
+
+    gm = _materialize_as_graph_inner()
+    assert gm is not None
+    return gm
 
 
 def materialize_callable_in_args(op: HopInstance, args, kwargs):

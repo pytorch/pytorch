@@ -360,8 +360,7 @@ Suppose we want to define a sparse tensor with the entry 3 at location
 Unspecified elements are assumed to have the same value, fill value,
 which is zero by default. We would then write:
 
-    >>> i = [[0, 1, 1],
-             [2, 0, 2]]
+    >>> i = [[0, 1, 1], [2, 0, 2]]
     >>> v =  [3, 4, 5]
     >>> s = torch.sparse_coo_tensor(i, v, (2, 3))
     >>> s
