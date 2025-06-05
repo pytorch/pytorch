@@ -2282,7 +2282,6 @@ coverage_ignore_classes = [
     "UnsynchronizedAccessError",
     # torch.cuda.memory
     "MemPool",
-    "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",

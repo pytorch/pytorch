@@ -569,7 +569,7 @@ def dispatch_torch_function(tx: "InstructionTranslator", fn, args, kwargs):
             return res
 
     unimplemented_v2(
-        gb_type="TypeError from user code",
+        gb_type="All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
         context=f"{fn=}, {args=}, {kwargs=}",
         explanation=f"All __torch_function__ overrides for for function {fn} returned NotImplemented",
         hints=[

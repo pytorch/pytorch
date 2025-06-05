@@ -26,8 +26,8 @@ As shown in the CPU example section of :class:`torch.autocast`, "automatic mixed
 datatype of ``torch.bfloat16`` only uses :class:`torch.autocast`.
 
 .. warning::
-    ``torch.cuda.amp.autocast(args...)`` and ``torch.cpu.amp.autocast(args...)`` will be deprecated. Please use ``torch.autocast("cuda", args...)`` or ``torch.autocast("cpu", args...)`` instead.
-    ``torch.cuda.amp.GradScaler(args...)`` and ``torch.cpu.amp.GradScaler(args...)`` will be deprecated. Please use ``torch.GradScaler("cuda", args...)`` or ``torch.GradScaler("cpu", args...)`` instead.
+    ``torch.cuda.amp.autocast(args...)`` and ``torch.cpu.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cuda", args...)`` or ``torch.amp.autocast("cpu", args...)`` instead.
+    ``torch.cuda.amp.GradScaler(args...)`` and ``torch.cpu.amp.GradScaler(args...)`` is deprecated. Please use ``torch.amp.GradScaler("cuda", args...)`` or ``torch.amp.GradScaler("cpu", args...)`` instead.
 
 :class:`torch.autocast` and :class:`torch.cpu.amp.autocast` are new in version `1.10`.
 

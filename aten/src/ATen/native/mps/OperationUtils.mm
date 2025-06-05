@@ -974,6 +974,7 @@ class BundledShaderLibary : public MetalShaderLibrary {
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<int64_t> extra) {
+  TORCH_CHECK(iter.can_use_32bit_indexing(), name, " can't be indexed using 32-bit iterator for shape ", iter.shape());
   auto inputTensor = iter.input(0);
   auto outputTensor = iter.output(0);
   bool is_storage_dense = is_dense_in_storage(inputTensor) && inputTensor.strides().equals(outputTensor.strides());
@@ -1028,7 +1029,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
   // double as common dtype (because Python floating point are always 64-bit values)
   TORCH_CHECK(iter.output().scalar_type() != at::kDouble, "float64 is not supported on MPS");
-  TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
+  TORCH_CHECK(iter.can_use_32bit_indexing(), name, " can't be indexed using 32-bit iterator for shape ", iter.shape());
 
   // Skip for empty iterators
   if (iter.numel() == 0) {

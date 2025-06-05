@@ -7,6 +7,7 @@ import sympy
 from sympy.parsing.sympy_parser import parse_expr
 
 import torch
+from torch._inductor.utils import do_bench_using_profiling
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import SymT
 
@@ -566,6 +567,9 @@ class CppTemplateCaller(ir.ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
         return self.bmreq.benchmark(*args, out=out)
 
     def hash_key(self) -> str:

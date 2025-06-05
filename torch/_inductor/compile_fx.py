@@ -1713,7 +1713,7 @@ def cudagraphify_impl(
             graph.replay()
             return static_outputs
 
-    return align_inputs_from_check_idxs(run, check_input_idxs)
+    return align_inputs_from_check_idxs(run, check_input_idxs, OrderedSet())
 
 
 def compile_fx_aot(

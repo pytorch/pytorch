@@ -65,12 +65,12 @@ class DistTensorRandomInitTest(DTensorTestBase):
             # compare with local tensors from other ranks
             for other_rank in range(self.world_size):
                 if self.rank != other_rank:
-                    slice_idx = [
+                    slice_idx = (
                         slice(input_size[0]),
                         slice(
                             other_rank * input_size[1], (other_rank + 1) * input_size[1]
                         ),
-                    ]
+                    )
                     # other rank should have a different local tensor
                     self.assertNotEqual(dtensor.full_tensor()[slice_idx], local_tensor)
 
@@ -537,9 +537,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     slice(offset, offset + size) for offset, size in other_local_shard
                 ]
                 if local_shard_offset == other_local_shard_offset:
-                    self.assertEqual(full_tensor[slice_idx], local_tensor)
+                    self.assertEqual(full_tensor[tuple(slice_idx)], local_tensor)
                 else:
-                    self.assertNotEqual(full_tensor[slice_idx], local_tensor)
+                    self.assertNotEqual(full_tensor[tuple(slice_idx)], local_tensor)
 
 
 class DistTensorRandomOpsTest3D(DTensorTestBase):
