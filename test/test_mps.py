@@ -22,7 +22,7 @@ from torch import inf
 from torch.nn import Buffer, Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
+    (gradcheck, gradgradcheck, largeTensorTest, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier, mps_ops_error_inputs_modifier
 from torch.testing import make_tensor
@@ -7957,14 +7957,15 @@ class TestMPS(TestCaseMPS):
 
 
 class TestLargeTensors(TestCaseMPS):
-    def test_4gb_binops(self):
-       a = torch.rand(1, 1024, 1024, dtype=torch.float16, device='mps')
-       b = torch.rand(5000, 1, 1, dtype=torch.float16, device='mps')
-       rc = (a + b).sin()
-       slice_idx = -2
-       rc_slice = rc[slice_idx:]
-       rc_slice_cpu = (a.cpu() + b.cpu()[slice_idx:]).sin()
-       self.assertEqual(rc_slice, rc_slice_cpu)
+    @largeTensorTest('32Gb')
+    def test_64bit_binops(self):
+        a = torch.rand(1, 1024, 1024, dtype=torch.float16, device='mps')
+        b = torch.rand(5000, 1, 1, dtype=torch.float16, device='mps')
+        rc = (a + b).sin()
+        slice_idx = -2
+        rc_slice = rc[slice_idx:]
+        rc_slice_cpu = (a.cpu() + b.cpu()[slice_idx:]).sin()
+        self.assertEqual(rc_slice, rc_slice_cpu)
 
 
 class TestLogical(TestCaseMPS):
