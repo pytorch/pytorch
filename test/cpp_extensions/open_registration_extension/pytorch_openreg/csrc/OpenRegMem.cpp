@@ -6,6 +6,7 @@
 #include <ATen/ops/as_strided_cpu_dispatch.h>
 #include <ATen/ops/quantize_per_tensor_native.h>
 #include <ATen/ops/set_cpu_dispatch.h>
+#include <ATen/ops/set_native.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
@@ -107,7 +108,7 @@ at::Tensor as_strided_openreg(
   return at::cpu::as_strided(self, size, stride, storage_offset_);
 }
 
-at::Tensor& set_openreg(
+at::Tensor& set_source_Storage_storage_offsetset_openreg(
     at::Tensor& result,
     at::Storage storage,
     int64_t storage_offset,
@@ -269,7 +270,8 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("empty.memory_format", empty_openreg);
   m.impl("empty_strided", empty_strided_openreg);
   m.impl("as_strided", as_strided_openreg);
-  m.impl("set_.source_Storage_storage_offset", set_openreg);
+  m.impl("set_.source_Storage", at::native::set_);
+  m.impl("set_.source_Storage_storage_offset", set_source_Storage_storage_offsetset_openreg);
   m.impl("quantize_per_tensor", at::native::quantize_per_tensor);
   m.impl("_fused_sdp_choice", &_fused_sdp_choice_privateuse1);
   m.impl("_scaled_dot_product_fused_attention_overrideable", &custom_scaled_dot_product_fused_attention_overrideable);
