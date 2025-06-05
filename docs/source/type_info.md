@@ -52,7 +52,6 @@ A {class}`torch.iinfo` is an object that represents the numerical properties of 
 
 A {class}`torch.iinfo` provides the following attributes:
 
-
 | Name | Type | Description                              |
 | :--- | :--- | :--------------------------------------- |
 | bits | int  | The number of bits occupied by the type. |
