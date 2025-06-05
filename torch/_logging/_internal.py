@@ -217,6 +217,7 @@ def set_logs(
     ddp_graphs: bool = False,
     graph: bool = False,
     graph_code: bool = False,
+    graph_code_verbose: bool = False,
     graph_breaks: bool = False,
     graph_sizes: bool = False,
     guards: bool = False,
@@ -246,6 +247,7 @@ def set_logs(
     benchmarking: bool = False,
     autotuning: bool = False,
     graph_region_expansion: bool = False,
+    inductor_metrics: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -345,6 +347,9 @@ def set_logs(
             Whether to emit the python source of the graph captured by TorchDynamo.
             Default: ``False``
 
+        graph_code_verbose (:class:`bool`):
+            Whether to emit verbose/intermediate FX pass logs for graph code. Default: ``False``
+
         graph_breaks (:class:`bool`):
             Whether to emit the graph breaks encountered by TorchDynamo.
             Default: ``False``
@@ -437,6 +442,8 @@ def set_logs(
         graph_region_expansion (:class:`bool`):
             Whether to emit the detailed steps of the duplicate graph region tracker expansion algorithm. Default: ``False``
 
+        inductor_metrics (:class:`bool`):
+            Whether to estimate the runtimes of the nodes in a graph and log them to the metrics table. Default: ``False``
 
     Example::
 
@@ -519,6 +526,7 @@ def set_logs(
         dtensor=dtensor,
         graph=graph,
         graph_code=graph_code,
+        graph_code_verbose=graph_code_verbose,
         graph_breaks=graph_breaks,
         graph_sizes=graph_sizes,
         guards=guards,
@@ -548,6 +556,7 @@ def set_logs(
         benchmarking=benchmarking,
         autotuning=autotuning,
         graph_region_expansion=graph_region_expansion,
+        inductor_metrics=inductor_metrics,
     )
 
 
@@ -639,7 +648,6 @@ def help_message(verbose=False):
         printed_artifacts = log_registry.artifact_names
     else:
         printed_artifacts = log_registry.visible_artifacts
-
     if verbose:
         heading = "All registered names"
     else:

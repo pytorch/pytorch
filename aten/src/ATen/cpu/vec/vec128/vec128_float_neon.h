@@ -97,14 +97,14 @@ class Vectorized<float> {
       const Vectorized<float>& a,
       const Vectorized<float>& b) {
     Vectorized<float> vec;
-    vec.values =
-        BlendRegs<0, (mask & 0x01) != 0>::impl(a.values, b.values, vec.values);
-    vec.values =
-        BlendRegs<1, (mask & 0x02) != 0>::impl(a.values, b.values, vec.values);
-    vec.values =
-        BlendRegs<2, (mask & 0x04) != 0>::impl(a.values, b.values, vec.values);
-    vec.values =
-        BlendRegs<3, (mask & 0x08) != 0>::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 0,
+    (mask & 0x01) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 1,
+    (mask & 0x02) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 2,
+    (mask & 0x04) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 3,
+    (mask & 0x08) != 0 > ::impl(a.values, b.values, vec.values);
     return vec;
   }
   static Vectorized<float> blendv(
