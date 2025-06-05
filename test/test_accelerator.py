@@ -1,5 +1,6 @@
 # Owner(s): ["module: tests"]
 
+import gc
 import sys
 import unittest
 
@@ -155,6 +156,18 @@ class TestAccelerator(TestCase):
             "Both events must be created with argument 'enable_timing=True'",
         ):
             event1.elapsed_time(event2)
+
+    def test_memory_stats(self):
+        # Ensure that device allocator is initialized
+        tmp = torch.randn(100).to(torch.accelerator.current_accelerator())
+        del tmp
+        gc.collect()
+        self.assertTrue(torch._C._accelerator_isAllocatorInitialized())
+        torch.accelerator.empty_cache()
+
+        pool_type = ["all", "small_pool", "large_pool"]
+        status_type = ["peak", "current", "allocated", "freed"]
+        stats_type = ["allocated_bytes", "reserved_bytes"]
 
 
 if __name__ == "__main__":
