@@ -159,7 +159,7 @@ class ConstantFolder(torch.fx.Interpreter):
             # int8_weight and leave dq in graph to be fused
             return True
 
-        if _dont_constant_fold and node.target in _dont_constant_fold:
+        if node.target in _dont_constant_fold:
             return True
         return False
 
