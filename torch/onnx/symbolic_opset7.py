@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 Note [ONNX operators that are added/updated from opset 7 to opset 8]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -13,6 +12,7 @@ Updated operators:
 
 import functools
 import warnings
+from typing import Any, Optional
 
 from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._internal import jit_utils, registration
@@ -38,7 +38,12 @@ block_listed_operators = (
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
 @_onnx_symbolic("aten::max")
-def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
+def max(
+    g: jit_utils.GraphContext,
+    self: Any,
+    dim_or_y: Optional[Any] = None,
+    keepdim: Optional[bool] = None,
+) -> Any:
     # torch.max(input, other)
     if keepdim is None and dim_or_y is not None:
         warnings.warn(
@@ -50,7 +55,12 @@ def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
 
 
 @_onnx_symbolic("aten::min")
-def min(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
+def min(
+    g: jit_utils.GraphContext,
+    self: Any,
+    dim_or_y: Optional[Any] = None,
+    keepdim: Optional[bool] = None,
+) -> Any:
     # torch.min(input, other)
     if keepdim is None and dim_or_y is not None:
         warnings.warn(
