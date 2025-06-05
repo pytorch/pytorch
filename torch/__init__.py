@@ -979,9 +979,20 @@ __all__.append("sym_sqrt")
 
 def sym_ite(b, t, f):
     """SymInt-aware utility for ternary operator (``t if b else f``.)"""
+    from .types import BoolLikeType, FloatLikeType, IntLikeType
+
+    def _same_type(x, y):
+        if isinstance(x, BoolLikeType) and isinstance(y, BoolLikeType):
+            return True
+        elif isinstance(x, FloatLikeType) and isinstance(y, FloatLikeType):
+            return True
+        elif isinstance(x, IntLikeType) and isinstance(y, IntLikeType):
+            return True
+        return type(t) == type(f)
+
     if overrides.has_torch_function((b, t, f)):
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
-    assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
+    assert isinstance(b, (SymBool, builtins.bool)) and _same_type(t, f)
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
