@@ -244,7 +244,7 @@ fake_tensor_propagate_real_tensors = False
 #
 # When `assume_standard_autocast` is True, AOTAutograd disables autocast
 # in the backward graph. When it is False, AOTAutograd will not do anything.
-assume_standard_autocast = False
+assume_standard_autocast = True
 
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
