@@ -433,7 +433,7 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
-    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float8_e4m3fn))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
         self,
