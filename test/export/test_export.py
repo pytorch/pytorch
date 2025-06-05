@@ -15122,6 +15122,36 @@ class TestExportCustomClass(TorchTestCase):
             ep.graph_module.code
         )
 
+    def test_export_script_module(self):
+        class Add(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.add_mod = torch.jit.script(Add())._c
+
+            def forward(self, x, y):
+                return self.add_mod.forward(x, y)
+
+        x, y = torch.randn(3, 2), torch.randn(3, 2)
+        mod = Mod()
+        if is_non_strict_test(self._testMethodName):
+            ep = export(mod, (x, y))
+            self.assertEqual(ep.module()(x, y), mod(x, y))
+            FileCheck().check_count("torch.ops.aten.add.Tensor", 1, exactly=True).run(
+                ep.graph_module.code
+            )
+            return
+
+        # TODO: strict mode doesn't work because dynamo add_mod is treated as a
+        # user defined variable. We might need to add a CustomModule variable to support it.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "UserDefined with non-function"
+        ):
+            ep = export(mod, (x, y))
+
     def test_preserve_cia_op(self):
         class StaticResizeTrilinear2dModule(torch.nn.Module):
             def forward(self, x):
