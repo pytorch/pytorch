@@ -1702,6 +1702,9 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
+    def has_shape_env(l):
+        return not isinstance(l, torch.SymInt) or hasattr(l.node, "shape_env")
+
     from torch.fx.experimental.symbolic_shapes import is_nested_int
 
     multiplier: Union[_IntLikeT, int] = 1
@@ -1709,7 +1712,7 @@ def make_contiguous_strides_for(
     for l in reversed(shape):
         strides.append(multiplier)
         multiplier *= (
-            l if is_nested_int(l) else sym_max(l, 1)
+            l if (is_nested_int(l) and not has_shape_env(l)) else sym_max(l, 1)
         )  # type:ignore[assignment]
 
     result = tuple(reversed(strides))
