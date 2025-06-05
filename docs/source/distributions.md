@@ -1,4 +1,10 @@
+```{eval-rst}
+.. role:: hidden
+    :class: hidden-section
+```
+
 (torch.distributions)=
+
 # Probability distributions - torch.distributions
 
 ```{eval-rst}

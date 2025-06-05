@@ -1,3 +1,8 @@
+```{eval-rst}
+.. role:: hidden
+    :class: hidden-section
+```
+
 (torch.distributed.tensor.parallel)=
 # Tensor Parallelism - torch.distributed.tensor.parallel
 

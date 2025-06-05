@@ -1,3 +1,7 @@
+```{eval-rst}
+.. currentmodule:: torch.distributed.tensor
+```
+
 (torch.distributed.tensor)=
 # torch.distributed.tensor
 
