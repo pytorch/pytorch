@@ -518,11 +518,9 @@ inline void enablePeerAccess(
 
 namespace c10::cuda {
 
-using CaptureId_t = unsigned long long;
-
-// first is set if the instance is created by CUDAGraph::capture_begin.
-// second is set if the instance is created by at::cuda::graph_pool_handle.
-using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
+// Keep BC only
+using c10::CaptureId_t;
+using c10::MempoolId_t;
 
 // MemPool represents a pool of memory in a caching allocator. Currently,
 // it's just the ID of the pool object maintained in the CUDACachingAllocator.
