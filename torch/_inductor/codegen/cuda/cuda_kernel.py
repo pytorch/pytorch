@@ -293,7 +293,7 @@ class CUDATemplateKernel(CUDAKernel):
                     "Bias",
                     "Y",
                 ):  # we handle these symbolic shapes explicitly
-                    for expr in [*node.get_size(), *node.get_stride()]:
+                    for expr in itertools.chain(node.get_size(), node.get_stride()):
                         if isinstance(expr, Expr):
                             for s in expr.free_symbols:
                                 free_symbols.add(s)  # type: ignore[arg-type]
