@@ -593,6 +593,7 @@ class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoa
         self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
     ) -> CompiledFxGraph:
         compiled_bw = super().post_compile(result, fx_config)
+        # See note [Wrapping bw_compiler in disable]
         # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
         # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
         return torch._dynamo.disable(compiled_bw, reason="do not trace generated backwards pass")  # type: ignore[return-value]
@@ -611,6 +612,7 @@ class BundledCompiledBackward(
         self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
     ) -> CompiledFxGraph:
         compiled_bw = super().post_compile(result, fx_config)
+        # See note [Wrapping bw_compiler in disable]
         # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
         # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
         return torch._dynamo.disable(compiled_bw, reason="do not trace generated backwards pass")  # type: ignore[return-value]
