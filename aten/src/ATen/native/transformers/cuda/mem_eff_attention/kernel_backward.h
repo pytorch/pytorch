@@ -636,8 +636,8 @@ struct AttentionBackwardKernel {
     const scalar_t* output_ptr = nullptr; // [Mq, nH, Kv]
     const scalar_t* grad_output_ptr = nullptr; // [Mq, nH, Kv]
     accum_t* delta_ptr = nullptr; // [nH, Mq]
-    const int64_t* cu_seqlens_q_ptr = nullptr;
-    const int64_t* cu_seqlens_k_ptr = nullptr;
+    const int32_t* cu_seqlens_q_ptr = nullptr;
+    const int32_t* cu_seqlens_k_ptr = nullptr;
 
     // Output tensors
     output_t* grad_query_ptr = nullptr; //  [Mq, nH, K]
@@ -772,8 +772,8 @@ struct AttentionBackwardKernel {
         assert(cu_seqlens_k_ptr != nullptr);
         cu_seqlens_q_ptr += batch_id;
         cu_seqlens_k_ptr += batch_id;
-        int64_t q_start = cu_seqlens_q_ptr[0];
-        int64_t k_start = cu_seqlens_k_ptr[0];
+        int32_t q_start = cu_seqlens_q_ptr[0];
+        int32_t k_start = cu_seqlens_k_ptr[0];
         int64_t q_next_start = cu_seqlens_q_ptr[1];
         int64_t k_next_start = cu_seqlens_k_ptr[1];
         assert(q_next_start - q_start <= num_queries);
