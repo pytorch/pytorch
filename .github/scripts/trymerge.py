@@ -630,33 +630,24 @@ def _revlist_to_prs(
         msg = repo.commit_message(rev)
         # findall doesn't return named captures, so we need to use finditer
         all_matches = list(RE_PULL_REQUEST_RESOLVED.finditer(msg))
-        if len(all_matches) == 0:
+        if len(all_matches) != 1:
             raise RuntimeError(
-                f"Could not find PR-resolved string in {msg} on commit {rev} of ghstacked PR {pr.pr_num}"
+                f"Found an unexpected number of PRs mentioned in commit {rev}: "
+                f"{len(all_matches)}.  This is probably because you are using an "
+                "old verion of ghstack.  Please update ghstack and resubmit "
+                "your PRs"
             )
 
-        candidate = None
-        for m in all_matches:
-            if pr.org != m.group("owner") or pr.project != m.group("repo"):
-                raise RuntimeError(
-                    f"PR {m.group('number')} resolved to wrong owner/repo pair"
-                )
-            if candidate is not None and candidate.pr_num == pr.pr_num:
-                # Prioritize the PR that matches the current PR number
-                continue
-            pr_num = int(m.group("number"))
-            candidate = (
-                GitHubPR(pr.org, pr.project, pr_num) if pr_num != pr.pr_num else pr
+        m = all_matches[0]
+        if pr.org != m.group("owner") or pr.project != m.group("repo"):
+            raise RuntimeError(
+                f"PR {m.group('number')} resolved to wrong owner/repo pair"
             )
-            if should_skip is not None and should_skip(idx, candidate):
-                # Not sure what the correct behavior is if one PR is skipped but
-                # the other isn't.  This behavior is to choose one that isn't
-                # skipped if possible
-                continue
-
-        if candidate is not None:
-            rc.append((candidate, rev))
-
+        pr_num = int(m.group("number"))
+        candidate = GitHubPR(pr.org, pr.project, pr_num) if pr_num != pr.pr_num else pr
+        if should_skip is not None and should_skip(idx, candidate):
+            continue
+        rc.append((candidate, rev))
     return rc
 
 

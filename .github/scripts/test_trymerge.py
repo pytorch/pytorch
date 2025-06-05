@@ -1097,57 +1097,42 @@ class TestGitHubPRGhstackDependencies(TestCase):
 @mock.patch.object(DummyGitRepo, "commit_message")
 class TestRevListToPR(TestCase):
     # Tests for _revlist_to_prs function
+    def test__revlist_to_prs_zero_matches(
+        self, mock_commit_message: mock.MagicMock, *args: Any
+    ) -> None:
+        # If zero PRs are mentioned in the commit message, it should raise an error
+        pr_num = 154098
+        pr = GitHubPR("pytorch", "pytorch", pr_num)
+        repo = DummyGitRepo()
+        mock_commit_message.return_value = "no PRs"
+        self.assertRaisesRegex(
+            RuntimeError,
+            "PRs mentioned in commit dummy: 0.",
+            lambda: _revlist_to_prs(repo, pr, ["dummy"]),
+        )
 
-    # https://github.com/pytorch/pytorch/commit/343c56e7650f55fd030aca0b9275d6d73501d3f4
-    commit_message = """add sticky cache pgo
+    def test__revlist_to_prs_two_prs(
+        self, mock_commit_message: mock.MagicMock, *args: Any
+    ) -> None:
+        # If two PRs are mentioned in the commit message, it should raise an error
+        pr_num = 154394
+        pr = GitHubPR("pytorch", "pytorch", pr_num)
+        repo = DummyGitRepo()
+        # https://github.com/pytorch/pytorch/commit/343c56e7650f55fd030aca0b9275d6d73501d3f4
+
+        commit_message = """add sticky cache pgo
 
 ghstack-source-id: 9bc6dee0b427819f978bfabccb72727ba8be2f81
 Pull-Request-resolved: https://github.com/pytorch/pytorch/pull/154098
 
 ghstack-source-id: 9bc6dee0b427819f978bfabccb72727ba8be2f81
 Pull Request resolved: https://github.com/pytorch/pytorch/pull/154394"""
-
-    def test__revlist_to_prs_prioritize_input_pr_first(
-        self, mock_commit_message: mock.MagicMock, *args: Any
-    ) -> None:
-        # If multiple prs are mentioned in the commit, if the input PR is in the
-        # commit message, it should be prioritized
-        pr_num = 154098
-        pr = GitHubPR("pytorch", "pytorch", pr_num)
-        repo = DummyGitRepo()
-        mock_commit_message.return_value = self.commit_message
-        prs = _revlist_to_prs(repo, pr, ["dummy"])
-
-        self.assertEqual(len(prs), 1)
-        self.assertEqual(prs[0][0].pr_num, pr_num)
-
-    def test__revlist_to_prs_prioritize_input_pr_second(
-        self, mock_commit_message: mock.MagicMock, *args: Any
-    ) -> None:
-        # For ghstack commit with multiple prs mentioned, if the input PR is in
-        # the commit message, it should be prioritized
-        pr_num = 154394
-        pr = GitHubPR("pytorch", "pytorch", pr_num)
-        repo = DummyGitRepo()
-        mock_commit_message.return_value = self.commit_message
-        prs = _revlist_to_prs(repo, pr, ["dummy"])
-
-        self.assertEqual(len(prs), 1)
-        self.assertEqual(prs[0][0].pr_num, 154394)
-
-    def test__revlist_to_prs_prioritize_last_pr(
-        self, mock_commit_message: mock.MagicMock, *args: Any
-    ) -> None:
-        # For ghstack commit with multiple prs mentioned, if the input PR is NOT
-        # in the commit message, the last PR in the commit message should be
-        # prioritized
-        pr = GitHubPR("pytorch", "pytorch", 106034)
-        repo = DummyGitRepo()
-        mock_commit_message.return_value = self.commit_message
-        prs = _revlist_to_prs(repo, pr, ["dummy"])
-
-        self.assertEqual(len(prs), 1)
-        self.assertEqual(prs[0][0].pr_num, 154394)
+        mock_commit_message.return_value = commit_message
+        self.assertRaisesRegex(
+            RuntimeError,
+            "PRs mentioned in commit dummy: 2.",
+            lambda: _revlist_to_prs(repo, pr, ["dummy"]),
+        )
 
 
 if __name__ == "__main__":
