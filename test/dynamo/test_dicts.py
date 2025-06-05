@@ -1137,7 +1137,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d1.__eq__(d3), False)
 
         # Test Dict.__eq__
-        self.assertEqual(self.thetype.__eq__(d1, d2), True)
+        self.assertEqual(dict.__eq__(d1, d2), True)
         self.assertEqual(self.thetype.__eq__(d1, d3), False)
 
     @make_dynamo_test
@@ -1157,7 +1157,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d1.__ne__(d2), False)
 
         # Test Dict.__ne__
-        self.assertEqual(self.thetype.__ne__(d1, d3), True)
+        self.assertEqual(dict.__ne__(d1, d3), True)
         self.assertEqual(self.thetype.__ne__(d1, d2), False)
 
     @make_dynamo_test
@@ -1174,7 +1174,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d2.__or__(d1), {"a": 1, "b": 2, "c": 4})
 
         # Test Dict.__or__
-        self.assertEqual(self.thetype.__or__(d1, d2), {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(dict.__or__(d1, d2), {"a": 1, "b": 3, "c": 4})
         self.assertEqual(self.thetype.__or__(d2, d1), {"a": 1, "b": 2, "c": 4})
 
         # Test with non-dict types
@@ -1192,6 +1192,10 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.clear
         d = self.thetype({"a": 1, "b": 2})
+        dict.clear(d)
+        self.assertEqual(d, {})
+
+        d = self.thetype({"a": 1, "b": 2})
         self.thetype.clear(d)
         self.assertEqual(d, {})
 
@@ -1208,6 +1212,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertIsNot(d, d2)
 
         # Test Dict.copy
+        self.assertEqual(dict.copy(d), d2)
         self.assertEqual(self.thetype.copy(d), d2)
 
         # Test invalid usage
@@ -1237,6 +1242,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(d.get("c"))
 
         # Test Dict.get
+        self.assertEqual(dict.get(d, "b"), 2)
         self.assertEqual(self.thetype.get(d, "b"), 2)
 
         # Test invalid usage
@@ -1249,6 +1255,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(set(items), {("a", 1), ("b", 2)})
 
         # Test Dict.items
+        self.assertEqual(set(dict.items(d)), {("a", 1), ("b", 2)})
         self.assertEqual(set(self.thetype.items(d)), {("a", 1), ("b", 2)})
 
         # Test invalid usage
@@ -1261,6 +1268,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(set(keys), {"a", "b"})
 
         # Test Dict.keys
+        self.assertEqual(set(dict.keys(d)), {"a", "b"})
         self.assertEqual(set(self.thetype.keys(d)), {"a", "b"})
 
         # Test invalid usage
@@ -1274,7 +1282,9 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(d.pop("c", None))
 
         # Test Dict.pop
-        self.assertEqual(self.thetype.pop(d, "b"), 2)
+        d = self.thetype({"a": 1, "b": 2})
+        self.assertEqual(dict.pop(d, "b"), 2)
+        self.assertEqual(self.thetype.pop(d, "a"), 1)
 
         # Test invalid usage
         self.assertRaises(KeyError, d.pop, "c")
@@ -1294,12 +1304,20 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d.popitem(), ("b", 2))
 
         # Test Dict.popitem
+        d = self.thetype({"a": 1})
+        key, value = dict.popitem(d)
+        self.assertEqual(key, "a")
+        self.assertEqual(value, 1)
+
+        d = self.thetype({"a": 1})
         key, value = self.thetype.popitem(d)
         self.assertEqual(key, "a")
         self.assertEqual(value, 1)
 
         # Test invalid usage
-        self.assertRaises(TypeError, d.popitem, 1)
+        if self.thetype != OrderedDict:
+            # OrderedDict accepts a keyword arg
+            self.assertRaises(TypeError, d.popitem, 1)
 
     @make_dynamo_test
     def test_setdefault(self):
@@ -1310,6 +1328,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d, {"a": 1, "b": 2, "c": 3, "d": None})
 
         # Test Dict.setdefault
+        self.assertEqual(dict.setdefault(d, "f", 5), 5)
         self.assertEqual(self.thetype.setdefault(d, "e", 5), 5)
 
         # Test invalid usage
@@ -1329,8 +1348,11 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.update
         d3 = self.thetype({"e": 6})
-        self.thetype.update(d, d3)
+        dict.update(d, d3)
         self.assertEqual(d, {"a": 1, "b": 3, "c": 4, "d": 5, "e": 6})
+        d4 = self.thetype({"f": 7})
+        self.thetype.update(d, d4)
+        self.assertEqual(d, {"a": 1, "b": 3, "c": 4, "d": 5, "e": 6, "f": 7})
 
         # Test with keyword arguments
         d.update(f=7, g=8)
@@ -1352,6 +1374,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(set(values), {1, 2})
 
         # Test Dict.values
+        self.assertEqual(set(dict.values(d)), {1, 2})
         self.assertEqual(set(self.thetype.values(d)), {1, 2})
 
         # Test invalid usage
@@ -1360,6 +1383,20 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
+
+
+class OrderedDictMethodsTests(DictMethodsTests):
+    thetype = OrderedDict
+
+    # Methods:
+    # - popitem - Inherited from DictMethodsTest
+    # + move_to_end
+
+    @make_dynamo_test
+    def test_cmp_eq_order(self):
+        a = self.thetype.fromkeys("abc")
+        b = self.thetype.fromkeys("bca")
+        self.assertFalse(a == b)
 
 
 if __name__ == "__main__":
