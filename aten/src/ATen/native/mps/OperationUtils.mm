@@ -974,10 +974,15 @@ class BundledShaderLibary : public MetalShaderLibrary {
 void MetalShaderLibrary::bind_tensors(id<MTLComputeCommandEncoder> encoder, TensorIteratorBase& iter) {
   for (auto idx : c10::irange(iter.ntensors())) {
     auto& t = iter.tensor_base(idx);
+    // Handle CPU scalars
     if (C10_UNLIKELY(t.device().type() == kCPU)) {
       mtl_setBuffer(encoder, t, idx);
       continue;
     }
+    // At the moment, MPS storage data is not the real GPU pointer, but rather a pointer to id<MTLBuffer> object
+    // But TensorIterator constructs data_ptr as if base was just a raw pointer
+    // Workaround this problem by computing an offset from the start of the tensor, which works for both
+    // tensor vies and sliced 64-bit iterators
     auto offs = reinterpret_cast<size_t>(iter.data_ptr(idx)) - reinterpret_cast<size_t>(t.storage().data());
     [encoder setBuffer:getMTLBufferStorage(t) offset:offs atIndex:idx];
   }

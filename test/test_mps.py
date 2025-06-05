@@ -7955,6 +7955,18 @@ class TestMPS(TestCaseMPS):
             x[::2].bitwise_not_()
         self.assertEqual(x_mps.cpu(), x_cpu)
 
+
+class TestLargeTensors(TestCaseMPS):
+    def test_4gb_binops(self):
+       a = torch.rand(1, 1024, 1024, dtype=torch.float16, device='mps')
+       b = torch.rand(5000, 1, 1, dtype=torch.float16, device='mps')
+       rc = (a + b).sin()
+       slice_idx = -2
+       rc_slice = rc[slice_idx:]
+       rc_slice_cpu = (a.cpu() + b.cpu()[slice_idx:]).sin()
+       self.assertEqual(rc_slice, rc_slice_cpu)
+
+
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
         return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
