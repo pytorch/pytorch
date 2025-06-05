@@ -578,7 +578,6 @@ def extract_normalized_read_writes(
         writes,
         ranges,
     )
-    loop_tiling_log.info("Normalized Fused reads: %s", fused_out)
     return fused_out
 
 
@@ -630,8 +629,28 @@ class CoalesceVarAnalysis:
 
     suggested_split: Optional[VarTiling] = None
 
-
 def analyze_memory_coalescing(
+    fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
+) -> Optional[CoalesceVarAnalysis]:
+    """
+    Find variables that coalesce the reads and writes and score the total size.
+
+    If uncoalesced memory expressions are found, look for additionally tiling of variables
+    which will coalesce memory accesses.
+
+    For instance - for the following expression:
+
+    (32*p0) // 2048
+
+    Tiling p0 by 64 will make this expression coalesced.
+    """
+
+    out = _analyze_memory_coalescing_impl(fused_node)
+    loop_tiling_log.info("Coalesced Var Analysis for %s\n: \t%s\n", fused_node.get_buffer_names(), out)
+    return out
+
+
+def _analyze_memory_coalescing_impl(
     fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
 ) -> Optional[CoalesceVarAnalysis]:
     """

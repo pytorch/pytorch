@@ -2148,6 +2148,9 @@ class Scheduler:
             }
         )
 
+        # only enabled with +loop_tiling
+        self.debug_diff_tilings: dict[SchedulerNode, tuple[Any, Any]] = {}
+
     def get_donated_buffers(self) -> dict[str, SchedulerDonatedBuffer]:
         name_to_donated_buf = {}
         for name in V.graph.graph_inputs_original:

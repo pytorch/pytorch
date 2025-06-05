@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.runtime_utils import green_text, yellow_text
-from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
+from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse, SchedulerNode
 from ..utils import (
     cache_on_self,
     expr_fits_within_32bit,
@@ -2301,9 +2301,19 @@ class SIMDScheduling(BaseScheduling):
             and coalesce_analysis
             and not config.triton.prefer_nd_tiling
         ):
-            return cls.compute_tiling_strategy(
+            coalesce_tiling = cls.compute_tiling_strategy(
                 node_schedule, numel, reduction_numel, coalesce_analysis
             )
+            loop_tiling_log = torch._logging.getArtifactLogger(__name__, "loop_tiling")
+            if loop_tiling_log.isEnabledFor(logging.DEBUG):
+                non_coalesce_tiling = cls.get_tiling_and_scores(node_schedule, numel, reduction_numel, None)
+                if coalesce_tiling[0] != non_coalesce_tiling[0]:
+                    for n in node_schedule:
+                        if isinstance(n, SchedulerNode):
+                            V.graph.scheduler.debug_diff_tilings[n] = (coalesce_tiling[0], non_coalesce_tiling[0])
+                            break
+
+            return coalesce_tiling
 
         if (not is_pointwise and not config.triton.tile_reductions) or get_max_tiles(
             default=2

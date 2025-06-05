@@ -4177,6 +4177,13 @@ class TritonScheduling(SIMDScheduling):
             if metrics.is_metric_table_enabled("kernel_metadata"):
                 metrics.log_kernel_metadata(kernel_name, kernel_path, src_code)
 
+            loop_tiling_log = torch._logging.getArtifactLogger(__name__, "loop_tiling")
+            if loop_tiling_log.isEnabledFor(logging.DEBUG):
+                for n in node_schedule:
+                    if diff_tiling := V.graph.scheduler.debug_diff_tilings.get(n):
+                        loop_tiling_log.debug("Different coalesce tiling for %s, new: %s, old: %s", kernel_name, diff_tiling[0], diff_tiling[1])
+                        break
+
         return kernel_name
 
     def benchmark_fused_nodes(self, nodes, n_spills_threshold=8) -> tuple[float, str]:
