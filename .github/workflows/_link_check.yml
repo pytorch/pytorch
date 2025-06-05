@@ -7,29 +7,25 @@ on:
       ref:
         type: string
         required: true
-      run-url-lint:
-        type: boolean
-        required: false
-        default: false
 
 jobs:
   lint-urls:
-    if: ${{ inputs.run-url-lint }}
+    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-url-lint') }}
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
       timeout: 120
       runner: ${{ inputs.runner }}linux.2xlarge
-      docker-image: pytorch-linux-focal-linter
+      docker-image: ci-image:pytorch-linux-focal-linter
       fetch-depth: 0
       submodules: false
       ref: ${{ inputs.ref }}
       script: |
         ./scripts/lint_urls.sh $(
-          { [ "${{ github.event_name }}" = "pull_request" ] \
-              && git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"; } \
-          || \
-          { [ "${{ github.event_name }}" = "push" ] \
-              && git diff --name-only "${{ github.event.before }}...${{ github.sha }}"; }
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+          else
+            echo "${{ github.event.before }}" "${{ github.sha }}"
+          fi
         ) || {
           echo
           echo "URL lint failed."
@@ -44,17 +40,17 @@ jobs:
     with:
       timeout: 60
       runner: ${{ inputs.runner }}linux.2xlarge
-      docker-image: pytorch-linux-focal-linter
+      docker-image: ci-image:pytorch-linux-focal-linter
       fetch-depth: 0
       submodules: false
       ref: ${{ inputs.ref }}
       script: |
         ./scripts/lint_xrefs.sh $(
-          { [ "${{ github.event_name }}" = "pull_request" ] \
-              && git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"; } \
-          || \
-          { [ "${{ github.event_name }}" = "push" ] \
-              && git diff --name-only "${{ github.event.before }}...${{ github.sha }}"; }
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+          else
+            echo "${{ github.event.before }}" "${{ github.sha }}"
+          fi
         ) || {
           echo
           echo "Xref lint failed."

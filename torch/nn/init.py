@@ -572,8 +572,8 @@ def kaiming_normal_(
 
 
 def orthogonal_(
-    tensor,
-    gain=1,
+    tensor: Tensor,
+    gain: float = 1,
     generator: _Optional[torch.Generator] = None,
 ):
     r"""Fill the input `Tensor` with a (semi) orthogonal matrix.
