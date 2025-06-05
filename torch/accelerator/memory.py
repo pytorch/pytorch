@@ -13,6 +13,7 @@ __all__ = [
     "memory_allocated",
     "memory_reserved",
     "memory_stats",
+    "memory_stats_as_nested_dict"
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
 ]
@@ -44,15 +45,54 @@ def memory_stats_as_nested_dict(device: _device_t = None, /) -> dict[str, Any]:
     return torch._C._accelerator_getDeviceStats(device)
 
 
-def memory_stats(device: _device_t = None) -> dict[str, Any]:
+def memory_stats(device: _device_t = None, /) -> dict[str, Any]:
     r"""Return a dictionary of accelerator device memory allocator statistics for a given device.
+
+    The return value of this function is a dictionary of statistics, each of
+    which is a non-negative integer.
+
+    Core statistics:
+
+    - ``"allocated.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      number of allocation requests received by the memory allocator.
+    - ``"allocated_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      amount of allocated memory.
+    - ``"segment.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      number of reserved segments from device memory allocation.
+    - ``"reserved_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      amount of reserved memory.
+    - ``"active.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      number of active memory blocks.
+    - ``"active_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      amount of active memory.
+    - ``"inactive_split.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      number of inactive, non-releasable memory blocks.
+    - ``"inactive_split_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      amount of inactive, non-releasable memory.
+
+    For these core statistics, values are broken down as follows.
+
+    Pool type:
+
+    - ``all``: combined statistics across all memory pools.
+    - ``large_pool``: statistics for the large allocation pool
+      (as of June 2025, for size >= 1MB allocations).
+    - ``small_pool``: statistics for the small allocation pool
+      (as of June 2025, for size < 1MB allocations).
+
+    Metric type:
+
+    - ``current``: current value of this metric.
+    - ``peak``: maximum value of this metric.
+    - ``allocated``: historical total increase in this metric.
+    - ``freed``: historical total decrease in this metric.
 
     Args:
         device (:class:`torch.device`, str, int, optional): a given device that must match the current
             :ref:`accelerator<accelerators>` device type. If not given,
             use :func:`torch.accelerator.current_device_index` by default.
     """
-    stats = memory_stats_as_nested_dict(device=device)
+    stats = memory_stats_as_nested_dict(device)
     flat_stats = []
 
     def flatten(prefix: str, value: Any) -> None:
@@ -68,7 +108,7 @@ def memory_stats(device: _device_t = None) -> dict[str, Any]:
     return collections.OrderedDict(flat_stats)
 
 
-def memory_allocated(device: _device_t = None) -> int:
+def memory_allocated(device: _device_t = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` device memory occupied by tensors
     in bytes for a given device.
 
@@ -80,7 +120,7 @@ def memory_allocated(device: _device_t = None) -> int:
     return memory_stats(device=device).get("allocated_bytes.all.current", 0)
 
 
-def max_memory_allocated(device: _device_t = None) -> int:
+def max_memory_allocated(device: _device_t = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` maximum device memory occupied by tensors
     in bytes for a given device.
 
@@ -96,7 +136,7 @@ def max_memory_allocated(device: _device_t = None) -> int:
     return memory_stats(device=device).get("allocated_bytes.all.peak", 0)
 
 
-def memory_reserved(device: _device_t = None) -> int:
+def memory_reserved(device: _device_t = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` device memory managed by the caching allocator
     in bytes for a given device.
 
@@ -108,7 +148,7 @@ def memory_reserved(device: _device_t = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.current", 0)
 
 
-def max_memory_reserved(device: _device_t = None) -> int:
+def max_memory_reserved(device: _device_t = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` maximum device memory managed by the caching allocator
     in bytes for a given device.
 
@@ -124,7 +164,7 @@ def max_memory_reserved(device: _device_t = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
 
-def reset_accumulated_memory_stats(device: _device_t = None) -> None:
+def reset_accumulated_memory_stats(device: _device_t = None, /) -> None:
     r"""Reset the "accumulated" (historical) stats tracked by the current :ref:`accelerator<accelerators>` memory allocator.
 
     Args:
@@ -139,7 +179,7 @@ def reset_accumulated_memory_stats(device: _device_t = None) -> None:
     return torch._C._accelerator_resetAccumulatedStats(device)
 
 
-def reset_peak_memory_stats(device: _device_t = None) -> None:
+def reset_peak_memory_stats(device: _device_t = None, /) -> None:
     r"""Reset the "peak" stats tracked by the current :ref:`accelerator<accelerators>` memory allocator.
 
     Args:
