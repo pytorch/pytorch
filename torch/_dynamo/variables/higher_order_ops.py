@@ -941,6 +941,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     ) -> VariableTracker:
         unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
+    def as_python_constant(self):
+        return self.value
+
 
 class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     """
