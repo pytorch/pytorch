@@ -2680,7 +2680,10 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
                 self.epilogue = torch.nn.ReLU()
 
             def forward(self, x, other, noise):
-                result = x.reshape(-1, Mdim, Kdim) @ other.reshape(-1, Kdim, Ndim)
+                # we do not want to to have Mdim, Kdim and Ndim dynamic so we force specialize them.
+                result = x.reshape(-1, int(Mdim), int(Kdim)) @ other.reshape(
+                    -1, int(Kdim), int(Ndim)
+                )
                 return self.epilogue(result) + noise
 
         counters.clear()
