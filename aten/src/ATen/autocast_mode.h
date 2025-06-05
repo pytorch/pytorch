@@ -10,6 +10,16 @@
 
 namespace at::autocast {
 
+constexpr std::array<at::DeviceType, 7> kAllAutocastDeviceTypes = {
+    at::kCPU,
+    at::kCUDA,
+    at::kXPU,
+    at::kIPU,
+    at::kXLA,
+    at::kHPU,
+    at::kPrivateUse1,
+};
+
 TORCH_API bool is_autocast_enabled(at::DeviceType device_type);
 TORCH_API void set_autocast_enabled(at::DeviceType device_type, bool enabled);
 TORCH_API at::ScalarType get_autocast_dtype(at::DeviceType device_type);

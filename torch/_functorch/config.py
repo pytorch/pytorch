@@ -229,6 +229,23 @@ fake_tensor_crossref = False
 # of tensors in question.
 fake_tensor_propagate_real_tensors = False
 
+# If we assume that the user is using autocast in a standard way;
+# that is, the model's forward pass runs under autocast and the
+# backwards pass is not run with autocast.
+#
+# >>> with autocast():
+# >>>     loss = torch.compile(model)(x)
+# >>> loss.backward()
+#
+# The reason why we need this flag is because AOTAutograd will trace
+# the backward graph at the time of the forward pass. Since autocast is
+# active then, AOTAutograd will naively include the autocast in the
+# backward graph unless otherwise told.
+#
+# When `assume_standard_autocast` is True, AOTAutograd disables autocast
+# in the backward graph. When it is False, AOTAutograd will not do anything.
+assume_standard_autocast = False
+
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
 donated_buffer = False if is_fbcode() else True

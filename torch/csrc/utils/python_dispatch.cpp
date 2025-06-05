@@ -5,6 +5,7 @@
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/autocast_mode.h>
 #include <ATen/core/NestedIntSymNodeImpl.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -699,6 +700,15 @@ void initDispatchBindings(PyObject* module) {
     return keys;
   });
   m.def("_dispatch_num_backends", []() { return c10::num_backends; });
+  m.def("_autocast_enabled_devices", []() {
+    std::vector<std::string> result;
+    for (auto device_type : at::autocast::kAllAutocastDeviceTypes) {
+      if (at::autocast::is_autocast_enabled(device_type)) {
+        result.push_back(c10::DeviceTypeName(device_type, /*lowercase*/ true));
+      }
+    }
+    return result;
+  });
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
 

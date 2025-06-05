@@ -677,17 +677,12 @@ static PyObject* set_autocast_dtype(
 
 static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_autocast_enabled(at::kCPU) ||
-      at::autocast::is_autocast_enabled(at::kCUDA) ||
-      at::autocast::is_autocast_enabled(at::kXPU) ||
-      at::autocast::is_autocast_enabled(at::kIPU) ||
-      at::autocast::is_autocast_enabled(at::kXLA) ||
-      at::autocast::is_autocast_enabled(at::kHPU) ||
-      at::autocast::is_autocast_enabled(at::kPrivateUse1)) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
+  for (auto device_type : at::autocast::kAllAutocastDeviceTypes) {
+    if (at::autocast::is_autocast_enabled(device_type)) {
+      Py_RETURN_TRUE;
+    }
   }
+  Py_RETURN_FALSE;
   END_HANDLE_TH_ERRORS
 }
 
