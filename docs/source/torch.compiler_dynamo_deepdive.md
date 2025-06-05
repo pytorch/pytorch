@@ -2,6 +2,8 @@
 
 (#torch.compiler_dynamo_deepdive)=
 
+
+(#torch.compiler_dynamo_deepdive)=
 TorchDynamo (or simply Dynamo) is the tracer within `torch.compile`,
 and it is, more often than not, the one to blame for those insane
 backtraces. However, we cannot blindly blame Dynamo for these errors. In
