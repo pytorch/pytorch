@@ -185,8 +185,20 @@ class PGTransport:
         self._state_dict = state_dict
 
     def send_checkpoint(
-        self, dst_ranks: list[int], state_dict: T
+        self, dst_ranks: list[int], state_dict: object
     ) -> None:
+        """
+        Send a checkpoint to multiple destination ranks.
+        
+        The process:
+        1. Prepares the state dict by converting tensors to a serializable format
+        2. Sends metadata as pickled data
+        3. Sends each tensor sequentially to all destination ranks
+        
+        Args:
+            dst_ranks: List of destination ranks to send the checkpoint to
+            state_dict: The state dictionary containing model parameters
+        """
         with _timeit("preparing state_dict"):
             meta, tensors = _prepare_state_dict(
                 state_dict, device=self._device
@@ -219,7 +231,22 @@ class PGTransport:
             for w in work:
                 w.wait()
 
-    def recv_checkpoint(self, src_rank: int) -> T:
+    def recv_checkpoint(self, src_rank: int) -> object:
+        """
+        Receive a checkpoint from a source rank.
+        
+        The process:
+        1. Receives metadata about the checkpoint structure
+        2. Receives each tensor, potentially reusing existing tensors for in-place updates
+        3. Reconstructs the original state dict structure
+        
+        Args:
+            src_rank: The source rank to receive the checkpoint from
+            
+        Returns:
+            The reconstructed state dictionary with model parameters
+        """
+
         state_dict = self._state_dict() if self._state_dict else {}
         state_dict_leaves, _ = tree_flatten_with_path(state_dict)
 
