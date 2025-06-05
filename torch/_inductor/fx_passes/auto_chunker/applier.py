@@ -52,6 +52,11 @@ def is_chunking_subgraph_input(node):
 
 
 class ChunkingApplier:
+    """
+    A class that chunks the graph assuming chunking metadata has already
+    been attached to the nodes in the chunking subgraph.
+    """
+
     def __init__(self, parent_gm, num_chunk):
         self.gm = parent_gm
         self.parent_graph = reorder_nodes(self.gm.graph)
@@ -204,6 +209,11 @@ class ChunkingApplier:
             self.accumulators[node] = accum
 
     def build_subgraph(self, chunk_size):
+        """
+        Build a subgraph for the given chunk size.
+        The last chunk can be smaller and a new subgraph will be created
+        to avoid involving dynamic shapes.
+        """
         new_graph = Graph()
         env = {}
 
@@ -313,7 +323,8 @@ class ChunkingApplier:
         for chunk_id in range(self.num_chunk):
             assert self.chunk_sizes is not None
             chunk_size = self.chunk_sizes[chunk_id]
-            sub_gm = self.parent_graph.get_attr(self.chunk_size_to_gm_attr[chunk_size])
+            subgraph_id = self.chunk_size_to_gm_attr[chunk_size]
+            sub_gm = self.parent_graph.get_attr(subgraph_id)
 
             args = []
             chunks_iter = iter(self.chunked_subgraph_input)
@@ -331,7 +342,7 @@ class ChunkingApplier:
                 args.append(accum)
 
             output_node = self.parent_graph.call_function(
-                torch.ops.higher_order.invoke_subgraph, (sub_gm, None, args), {}
+                torch.ops.higher_order.invoke_subgraph, (sub_gm, subgraph_id, *args), {}
             )
 
             output_node_dict = {}

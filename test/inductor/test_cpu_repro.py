@@ -987,6 +987,33 @@ class CPUReproTests(TestCase):
         # aten parallel.
         self.common(fn, (v,), atol=5e-1, rtol=5e-1)
 
+    def test_parallel_reduction_vectorization(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/151523
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3,
+                    out_channels=16,
+                    kernel_size=(1, 7),
+                    stride=(2, 1),
+                    padding=0,
+                )
+
+            def forward(self, x, weight):
+                x = self.conv(x)
+                x = F.hardshrink(x, lambd=0)
+                x = x.view(x.size(0), -1)
+                x = torch.mv(weight, x[0])
+                return x
+
+        mod = Model().eval()
+        x = torch.randn(2, 3, 127, 255)
+        weight = torch.randn(10, 254976)
+        # Use same criterion as test_inplace_squeeze_needed
+        # for parallel reduction.
+        self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
+
     def test_cat_mul(self):
         # https://github.com/pytorch/pytorch/issues/93365
         def fn(p0, p1):
@@ -1042,6 +1069,27 @@ class CPUReproTests(TestCase):
 
         x = torch.randn(1, 3, 64, 64)
         self.common(Model(), (x,))
+
+    @unittest.skipIf(
+        os.getenv("ATEN_CPU_CAPABILITY") == "default",
+        "Failing in periodic nogpu_NO_AVX2 after added in #152542",
+    )
+    @config.patch("cpp.use_decompose_tanh", "1")
+    def test_tanh_atan2_use_decompose_tanh(self):
+        # https://github.com/pytorch/pytorch/issues/148241
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shrink = nn.Tanhshrink()
+
+            def forward(self, x):
+                x = self.shrink(x)
+                x = torch.atan2(x, x)
+                return x
+
+        x = torch.randn(1, 3, 64, 64)
+        with self.assertRaises(AssertionError):
+            self.common(Model(), (x,))
 
     def test_index_propagation_issue_102065(self):
         def fn(x):
@@ -1370,9 +1418,20 @@ class CPUReproTests(TestCase):
         use_quant_list = [False, True]
         use_tensor_overload_list = [False, True]
 
-        assert dtype in [torch.uint8, torch.int8]
+        assert dtype in [
+            torch.uint8,
+            torch.int8,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+        ]
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
+        if dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
+            quant_min = int(torch.finfo(dtype).min)
+            quant_max = int(torch.finfo(dtype).max)
+            use_tensor_overload_list = [
+                False,
+            ]
 
         for (
             use_dequant,
@@ -1427,6 +1486,14 @@ class CPUReproTests(TestCase):
         self._test_dequant_quant_lowering_helper(
             torch.int8, dequant_out_dtype=torch.bfloat16
         )
+
+    @requires_vectorization
+    def test_dequant_quant_lowering_fp8_e4m3(self):
+        self._test_dequant_quant_lowering_helper(torch.float8_e4m3fn)
+
+    @requires_vectorization
+    def test_dequant_quant_lowering_fp8_e5m2(self):
+        self._test_dequant_quant_lowering_helper(torch.float8_e5m2)
 
     def _test_dequant_maxpool2d_lowering_helper(self, dtype):
         def fn(x, scale, zero_point, quant_min, quant_max, dtype):
@@ -5269,6 +5336,15 @@ class CPUReproTests(TestCase):
             return torch.max(x, 1, False)
 
         self.common(fn, (x,))
+
+    def test_vector_norm_compile(self):
+        x = torch.randn([16, 32], dtype=torch.float)
+        ref = torch.linalg.vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
+        compiled_vector_norm = torch.compile(
+            torch.linalg.vector_norm, backend="inductor"
+        )
+        res = compiled_vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":

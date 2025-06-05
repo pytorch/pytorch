@@ -3,19 +3,16 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
+
+#include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <c10/util/CallOnce.h>
-
-#include <iostream>
 
 namespace openreg {
-
 namespace {
+
 // Python factory function where real implementations can be found
 PyObject* py_factory;
-
-using host_ptr_t = uint64_t;
 
 struct HostAllocator final : at::Allocator {
   HostAllocator() = default;
@@ -25,35 +22,25 @@ struct HostAllocator final : at::Allocator {
     void* data = nullptr;
     if (nbytes > 0) {
       data = reinterpret_cast<void*>(
-          get_method("hostMalloc")(nbytes).cast<host_ptr_t>());
+          get_method("hostMalloc")(nbytes).cast<openreg_ptr_t>());
       TORCH_CHECK(data, "Failed to allocator ", nbytes, " bytes on host.");
     }
-    return {data, data, &ReportAndDelete, at::Device(at::kCPU)};
-  }
-
-  static void ReportAndDelete(void* ptr) {
-    if (!ptr) {
-      return;
-    }
-    py::gil_scoped_acquire acquire;
-    TORCH_CHECK(
-        get_method("hostFree")(reinterpret_cast<host_ptr_t>(ptr)).cast<bool>(),
-        "Failed to free memory pointer at ",
-        ptr);
+    return {data, data, &ReportAndDelete<kHostFreeMethod>, at::Device(at::kCPU)};
   }
 
   at::DeleterFnPtr raw_deleter() const override {
-    return &ReportAndDelete;
+    return &ReportAndDelete<kHostFreeMethod>;
   }
 
   void copy_data(void* dest, const void* src, std::size_t count) const final {
     py::gil_scoped_acquire acquire;
     get_method("hostCopyData")(
-        reinterpret_cast<host_ptr_t>(dest),
-        reinterpret_cast<host_ptr_t>(src),
+        reinterpret_cast<openreg_ptr_t>(dest),
+        reinterpret_cast<openreg_ptr_t>(src),
         count);
   }
 };
+
 static HostAllocator global_host_alloc;
 
 static c10::DeviceIndex device_count() {
@@ -82,20 +69,8 @@ static at::Generator make_openreg_generator(c10::DeviceIndex device_index) {
 // Default, global generators, one per device.
 static std::vector<at::Generator> default_generators;
 
-static void initGenerators() {
-  auto deivce_nums = device_count();
-  default_generators.resize(deivce_nums);
-  for (auto i = 0; i < deivce_nums; i++) {
-    default_generators[i] = make_openreg_generator(i);
-    default_generators[i].seed();
-  }
-}
-
-// C++ hooks implementation
-struct OpenRegHooksArgs : public at::PrivateUse1HooksArgs {};
-
 struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
-  OpenRegHooksInterface(OpenRegHooksArgs) {};
+  OpenRegHooksInterface() {};
   ~OpenRegHooksInterface() override = default;
 
   bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
@@ -109,14 +84,22 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
 
   bool isPinnedPtr(const void* data) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("isPinnedPtr")(reinterpret_cast<host_ptr_t>(data))
+    return get_method("isPinnedPtr")(reinterpret_cast<openreg_ptr_t>(data))
         .cast<bool>();
   }
 
   const at::Generator& getDefaultGenerator(
       c10::DeviceIndex device_index) const override {
-    static c10::once_flag generator_init_flag;
-    c10::call_once(generator_init_flag, initGenerators);
+    static bool flag [[maybe_unused]] = []() {
+      auto deivce_nums = device_count();
+      default_generators.resize(deivce_nums);
+      for (auto i = 0; i < deivce_nums; i++) {
+        default_generators[i] = make_openreg_generator(i);
+        default_generators[i].seed();
+      }
+      return true;
+    }();
+
     c10::DeviceIndex idx = device_index;
     if (idx == -1) {
       idx = current_device_idx();
@@ -131,27 +114,11 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   }
 };
 
-int register_hook() {
-  at::RegisterPrivateUse1HooksInterface(
-      new OpenRegHooksInterface(OpenRegHooksArgs{}));
-  return 0;
-}
-int temp_register_hook = register_hook();
+static bool register_hook_flag [[maybe_unused]] = []() {
+  at::RegisterPrivateUse1HooksInterface(new OpenRegHooksInterface());
 
-TORCH_DECLARE_REGISTRY(
-    PrivateUse1HooksRegistry,
-    OpenRegHooksInterface,
-    OpenRegHooksArgs);
-C10_DEFINE_REGISTRY(
-    PrivateUse1HooksRegistry,
-    OpenRegHooksInterface,
-    OpenRegHooksArgs);
-// Using Create function to get PrivateUse1HooksInterface point from
-// PrivateUse1HooksRegistry class.
-C10_REGISTER_TYPED_CLASS(
-    PrivateUse1HooksRegistry,
-    "OpenRegHooks",
-    OpenRegHooksInterface);
+  return true;
+}();
 
 // Device guard registration
 struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
@@ -379,4 +346,5 @@ py::function get_method(const char* name) {
   auto factory = py::cast<py::function>(py_factory);
   return factory(name);
 }
+
 } // namespace openreg

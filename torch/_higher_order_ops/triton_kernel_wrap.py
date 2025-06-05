@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import inspect
 import logging
+import operator
 import threading
 from collections import defaultdict
 from collections.abc import Sequence
@@ -25,6 +26,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import guard_scalar
+from torch.types import IntLikeType
 
 
 if TYPE_CHECKING:
@@ -71,9 +73,9 @@ log = logging.getLogger("torch._dynamo")
 TMADescriptorMetadata = dict[
     str,  # kernel parameter name
     tuple[
-        list[Union[int, SymInt]],  # dims
-        list[Union[int, SymInt]],  # block_dims
-        Union[int, SymInt],  # element_size
+        list[IntLikeType],  # dims
+        list[IntLikeType],  # block_dims
+        IntLikeType,  # element_size
     ],
 ]
 
@@ -1245,7 +1247,7 @@ class TritonHOPifier:
                 ]
                 configs = [
                     config[0]
-                    for config in sorted(est_timing, key=lambda x: x[1])[:top_k]
+                    for config in sorted(est_timing, key=operator.itemgetter(1))[:top_k]
                 ]
         return configs
 
@@ -1749,6 +1751,27 @@ class TracingTritonHOPifier(TritonHOPifier):
         # normalize to tuple
         return tuple(grid)
 
+    def store_non_graphable_args(
+        self,
+        combined_args: dict[str, Any],
+    ) -> tuple[dict, int]:
+        """
+        Some args cannot be stored in the FX graph.
+        Put them in the side table.
+        """
+
+        def is_graphable(val: Any) -> bool:
+            return isinstance(val, (fx.node.base_types, fx.Node))
+
+        non_graphable_args = {
+            k: v for k, v in combined_args.items() if not is_graphable(v)
+        }
+        graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
+
+        constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
+
+        return graphable_args, constant_args_idx
+
     def call_HOP(
         self,
         variable: "TraceableTritonKernelWrapper",
@@ -1759,15 +1782,8 @@ class TracingTritonHOPifier(TritonHOPifier):
         assert tx is None
         assert isinstance(variable, TraceableTritonKernelWrapper)
 
-        def is_graphable(val: Any) -> bool:
-            return isinstance(val, fx.node.base_types)
+        graphable_args, constant_args_idx = self.store_non_graphable_args(combined_args)
 
-        non_graphable_args = {
-            k: v for k, v in combined_args.items() if not is_graphable(v)
-        }
-        graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
-
-        constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
         assert isinstance(variable.kernel_idx, int)
         return triton_kernel_wrapper_mutation(
             kernel_idx=variable.kernel_idx,

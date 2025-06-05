@@ -171,6 +171,12 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/ccl/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  # Enable XCCL build
+  export USE_XCCL=1
   # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
   export USE_KINETO=0
   export TORCH_XPU_ARCH_LIST=pvc

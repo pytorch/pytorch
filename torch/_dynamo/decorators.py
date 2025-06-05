@@ -10,7 +10,7 @@ import inspect
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -30,7 +30,11 @@ from .eval_frame import (
     skip_code,
 )
 from .exc import IncorrectUsage
-from .external_utils import get_nonrecursive_disable_wrapper, is_compiling
+from .external_utils import (
+    _dynamo_config_patch_proxy_dunder_call,
+    get_nonrecursive_disable_wrapper,
+    is_compiling,
+)
 from .utils import is_function
 
 
@@ -282,6 +286,12 @@ def graph_break(msg=""):
     """Force a graph break"""
 
 
+# NOTE: primarily used for internal debugging purposes!
+@_disallow_in_graph_helper(throw_if_not_allowed=False)
+def skip_frame(msg=""):
+    """Force a skipped frame"""
+
+
 def forbid_in_graph(fn):
     """
     Customize which functions TorchDynamo will assert are not present while tracing.
@@ -514,7 +524,7 @@ class _DimRange:
 
 
 @forbid_in_graph
-def mark_unbacked(t, index, strict=False):
+def mark_unbacked(t, index, strict=False, specialize_on=None):
     """
     Mark a tensor as having an unbacked dim.  This changes the semantics of operations,
     we will always report the size does not equal zero/one, we will turn asserts
@@ -537,8 +547,13 @@ def mark_unbacked(t, index, strict=False):
             t._dynamo_strict_unbacked_indices.add(index)
             return
 
+        if not hasattr(t, "_specialized_on"):
+            t._specialize_on = {}
+
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
+
+        t._specialize_on[index] = specialize_on if specialize_on is not None else []
         t._dynamo_unbacked_indices.add(index)
         return
 
@@ -548,7 +563,7 @@ def mark_unbacked(t, index, strict=False):
 
 
 @forbid_in_graph
-def mark_dynamic(t, index, *, min=None, max=None):
+def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None):
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
@@ -571,6 +586,20 @@ def mark_dynamic(t, index, *, min=None, max=None):
     4) Attempts to trace this function will explicitly raise. As such, all calls to mark_dynamic must be made
     before torch.compile.
 
+    5) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
+    multiple specialized compilations in addition to a single generic compilation. NB: For now we only support
+    per dimension specialization, or in other words we do not generate a cross product of specializations.
+    At runtime, we will dispatch to a specialized compiled region if the input matches the specialization criteria.
+
+    For example:
+        mark_dynamic(..., specialize_on=[
+            lambda x: x == 8,
+            lambda x: x == 16
+        ])
+
+    This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
+    at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
+    2-8x speedups depending on the specific specialization and model architecture.
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
@@ -583,14 +612,20 @@ def mark_dynamic(t, index, *, min=None, max=None):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
             t._dynamo_dynamic_range = set()
+
+        if not hasattr(t, "_specialize_on"):
+            t._specialize_on = {}
+
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
+        t._specialize_on[index] = specialize_on if specialize_on is not None else []
         return
 
     assert isinstance(index, (list, tuple))
     for i in index:
         mark_dynamic(t, i, min=min, max=max)
+        mark_dynamic(t, i, min=min, max=max, specialize_on=specialize_on)
 
 
 @forbid_in_graph
@@ -704,10 +739,10 @@ def _allow_in_graph_einops():
     if mod is None:
         return
     else:
-        # version > 0.7.0 does allow_in_graph out of tree
+        # version > 0.8.1 does allow_in_graph out of tree
         # for BC we need to keep this in fbcode
         # internal xref https://fb.workplace.com/groups/1026248852325474/permalink/1107135774236781/
-        if Version(mod.__version__) < Version("0.7.0") or is_fbcode():
+        if Version(mod.__version__) <= Version("0.8.1") or is_fbcode():
             import einops
 
             try:
@@ -732,3 +767,109 @@ def _allow_in_graph_einops():
 
 
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
+
+
+# Proxy class for torch._dynamo.config patching - so dynamo can identify context managers/decorators
+# created by patch_dynamo_config, compared to ones created by a raw torch._dynamo.config.patch.
+class DynamoConfigPatchProxy:
+    def __init__(self, config_patch):
+        self.config_patch = config_patch
+
+    @property
+    def changes(self):
+        return self.config_patch.changes
+
+    # Decorator implementation that simply sets up `self` as a context manager.
+    # Placed in external_utils so that we can trace through it.
+    __call__ = _dynamo_config_patch_proxy_dunder_call
+
+    def __enter__(self):
+        return self.config_patch.__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self.config_patch.__exit__(exc_type, exc_val, exc_tb)
+
+
+# Criteria for patchable config:
+# - Config values must be constants (i.e. int, float, str, bool, None).
+#     - in particular, NO list, set, dict.
+# - Traceable config patches are only useful for configs that change dynamo behavior
+#   from symbolic_convert and below.
+#     - e.g. patching recompile_limit won't really do anything.
+# - For patching configs that affect Dynamo behavior above symbolic_convert,
+#   ensure that Dynamo behaves soundly even if tracing is done with different config.
+#     - e.g. be careful if patching guard-related configs as configs may have changed
+#       between guard creation and evaluation.
+_allowed_config_patches = (
+    "verbose",
+    "verify_correctness",
+    "rewrite_assert_with_torch_assert",
+    "capture_scalar_outputs",
+    "allow_unspec_int_on_nn_module",
+    "skip_torchrec",
+    "dont_skip_tracing",
+)
+
+from . import config
+
+
+for name in _allowed_config_patches:
+    assert hasattr(config, name), "nonexistent config"
+del config
+
+
+def _patch_dynamo_config_check(changes: dict[str, Any]):
+    for k, v in changes.items():
+        if k not in _allowed_config_patches:
+            raise ValueError(
+                f"patch_dynamo_config does not support patching config {k}"
+            )
+        if not torch._dynamo.utils.is_safe_constant(v):
+            raise ValueError(
+                f"patch_dynamo_config does not support patching config {k} "
+                f"with non-safe-constant value {v}"
+            )
+
+
+# TODO: also implement nonrecursive patch_dynamo_config/dont_skip_tracing.
+# Unlike config.patch, we also need to accept tuple as input in order to
+# deal with context manager reconstruction.
+def patch_dynamo_config(
+    arg1: Optional[Union[str, dict[str, Any], tuple[tuple[str, Any], ...]]] = None,
+    arg2: Any = None,
+    **kwargs: Any,
+) -> DynamoConfigPatchProxy:
+    """
+    A wrapper around torch._dynamo.config.patch that can be traced by Dynamo to
+    temporarily change config values DURING tracing.
+
+    See _allowed_config_patches for the list of allowed config patches.
+
+    Arguments are the same as with torch._dynamo.confing.patch.
+
+    Can be used as a decorator or a context manager.
+
+    User code SHOULD NOT MODIFY the return value of this function.
+
+    WARNING: changing Dynamo config during tracing can lead to unpredictable tracing behavior!
+        Proceed only as advised!
+    """
+    if isinstance(arg1, tuple):
+        arg1 = dict(arg1)
+    config_patch = torch._dynamo.config.patch(arg1, arg2, **kwargs)
+    _patch_dynamo_config_check(config_patch.changes)
+    # check for valid patching using config_patch.changes
+    return DynamoConfigPatchProxy(config_patch)
+
+
+def dont_skip_tracing(fn=None):
+    """
+    Context manager/decorator to trace into functions intentionally marked by developers to be skipped
+    when tracing.
+
+    This decorator will also apply to recursively invoked functions.
+    """
+    ctx = patch_dynamo_config(dont_skip_tracing=True)
+    if fn:
+        return ctx(fn)
+    return ctx

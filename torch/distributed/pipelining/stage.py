@@ -433,10 +433,7 @@ class _PipelineStageBase(ABC):
         """
         Get the activation send ops for current stage's forward.
         """
-        output = self.output_chunks[fwd_chunk_id]
-        # Unify output form to tuple for easy correspondance with
-        # `act_send_info`
-        output_tuple = output if type(output) is tuple else (output,)
+        output_tuple, _ = self.fwd_cache[fwd_chunk_id]
 
         ops: list[dist.P2POp] = []
 
@@ -719,7 +716,9 @@ class _PipelineStageBase(ABC):
         output_tuple = _normalize_model_output_as_tuple(output)
 
         # Prepare for final output merge or reduction
-        self.output_chunks.append(output)
+        # Output chunks is only used for the last stage since we only merge the output of the last stage
+        if self.is_last:
+            self.output_chunks.append(output)
 
         # Save activations and inputs for backward
         flat_args = flatten_args(composite_args)

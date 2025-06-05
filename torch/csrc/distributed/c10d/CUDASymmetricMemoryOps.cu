@@ -8,8 +8,6 @@
 #include <c10/cuda/driver_api.h>
 #endif
 
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -17,9 +15,12 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
+
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
+
+#if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
 #define INT_SWITCH_CASE(name, val, ...) \
   case val: {                           \
@@ -72,7 +73,7 @@ size_t get_and_verify_alignment(const at::Tensor& input, const char* op_name) {
   const size_t min_alignment = std::max(4l, input.element_size());
   // Only check the offset since the multicast address is always at least
   // 128-bit aligned
-  const size_t ptr_alignment = get_alignment(
+  const size_t ptr_alignment = at::native::memory::get_alignment(
       static_cast<size_t>(input.storage_offset() * input.element_size()));
   TORCH_CHECK(
       ptr_alignment >= min_alignment,
@@ -84,7 +85,7 @@ size_t get_and_verify_alignment(const at::Tensor& input, const char* op_name) {
       "-byte aligned.");
 
   const size_t size_alignment =
-      get_alignment(static_cast<size_t>(input.numel() * input.element_size()));
+      at::native::memory::get_alignment(static_cast<size_t>(input.numel() * input.element_size()));
   TORCH_CHECK(
       size_alignment >= min_alignment,
       op_name,
@@ -123,6 +124,7 @@ void init_elementwise_launch_config(
   }
 }
 
+#if !defined(USE_ROCM) //No multi-cast support on ROCm yet
 template <typename T, int alignment>
 static __global__ void multimem_all_reduce_kernel(
     T* input_mc_ptr,
@@ -225,7 +227,7 @@ static __global__ void multimem_one_shot_all_reduce_kernel(
   auto stride = blockDim.x * gridDim.x * numel_per_thread;
   for (size_t i = offset; i < numel; i += stride) {
     auto vec = multimem_ld_reduce_add<alignment>(input_mc_ptr + i);
-    st_vec<alignment>(output_ptr + i, vec);
+    at::native::memory::st_vec<alignment>(output_ptr + i, vec);
   }
 
   __syncthreads();
@@ -318,7 +320,7 @@ static __global__ void multimem_all_gather_kernel(
   auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * alignment;
   auto stride = blockDim.x * gridDim.x * alignment;
   for (size_t i = offset; i < bytes_per_rank; i += stride) {
-    auto vec = ld_vec<alignment>(input_ptr + i);
+    auto vec = at::native::memory::ld_vec<alignment>(input_ptr + i);
     multimem_st<alignment>(output_mc_ptr + start + i, vec);
   }
 
@@ -394,6 +396,8 @@ at::Tensor multimem_all_gather_out(
   return out;
 }
 
+#endif //no multi-cast support on ROCm
+
 // One-shot all-reduce is register-intensive because it stages values loaded
 // from peers in registers before performing reduction. Setting the thread
 // count to 512 to prevent/alleviate register spill.
@@ -418,8 +422,8 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
   auto stride = blockDim.x * gridDim.x * numel_per_thread;
   if (input_ptr) {
     for (size_t i = offset; i < numel; i += stride) {
-      Vec<alignment> vec_st = ld_vec<alignment>(input_ptr + i);
-      st_vec<alignment>(input_ptrs[rank] + input_offset + i, vec_st);
+      Vec<alignment> vec_st = at::native::memory::ld_vec<alignment>(input_ptr + i);
+      at::native::memory::st_vec<alignment>(input_ptrs[rank] + input_offset + i, vec_st);
     }
   }
   // TODO make it sync with one block for no-copy case
@@ -429,7 +433,7 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
   for (size_t i = offset; i < numel; i += stride) {
     auto vec = load_and_reduce<T, alignment, k_world_size>(
         input_ptrs, rank, world_size, input_offset + i);
-    st_vec<alignment>(output_ptr + i, vec);
+    at::native::memory::st_vec<alignment>(output_ptr + i, vec);
   }
 
   __syncthreads();
@@ -606,9 +610,9 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
         input_ptrs, rank, world_size, input_offset + start + idx);
     // store to local buffer or to output
     if constexpr (reduce_scatter) {
-      st_vec<alignment>(output_ptr + i, vec);
+      at::native::memory::st_vec<alignment>(output_ptr + i, vec);
     } else {
-      st_vec<alignment>(input_ptrs[rank] + input_offset + start + i, vec);
+      at::native::memory::st_vec<alignment>(input_ptrs[rank] + input_offset + start + i, vec);
     }
   }
 
@@ -627,7 +631,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
       if (remote_start + i >= numel) {
         continue;
       }
-      tmp[step] = ld_vec<alignment>(
+      tmp[step] = at::native::memory::ld_vec<alignment>(
           input_ptrs[remote_rank] + input_offset + remote_start + i);
     }
 #pragma unroll k_world_size
@@ -637,7 +641,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
       if (remote_start + i >= numel) {
         continue;
       }
-      st_vec<alignment>(output_ptr + remote_start + i, tmp[step]);
+      at::native::memory::st_vec<alignment>(output_ptr + remote_start + i, tmp[step]);
     }
   }
   // need to make sure all blocks exit simultaneously so that the data
@@ -675,7 +679,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
         input_ptrs, rank, world_size, input_offset + start + i);
     for (size_t step = 0; step < world_size; ++step) {
       size_t remote_rank = (rank + step) % world_size;
-      st_vec<alignment>(
+      at::native::memory::st_vec<alignment>(
           input_ptrs[remote_rank] + input_offset + start + i, vec);
     }
   }
@@ -947,7 +951,104 @@ at::Tensor reduce_scatter_out(
   return output;
 }
 } // namespace
-#endif // #if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
+#elif defined(CUDART_VERSION) && CUDART_VERSION < 12030
+namespace {
+at::Tensor multimem_all_reduce_(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "multimem_all_reduce_: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor multimem_one_shot_all_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "multimem_one_shot_all_reduce_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor multimem_one_shot_all_reduce(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "multimem_one_shot_all_reduce: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor multimem_all_gather_out(
+    const at::Tensor& input,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "multimem_all_gather_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor one_shot_all_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "one_shot_all_reduce_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor one_shot_all_reduce_copy_out(
+    const at::Tensor& input,
+    const at::Tensor& local_input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "one_shot_all_reduce_copy_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor one_shot_all_reduce(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "one_shot_all_reduce: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor one_shot_all_reduce_copy(
+    const at::Tensor& input,
+    const at::Tensor& local_input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "one_shot_all_reduce_copy: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor two_shot_all_reduce_(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "two_shot_all_reduce_: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor two_shot_all_reduce_out(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor output) {
+  TORCH_CHECK(false, "two_shot_all_reduce_out: requires CUDA 12.3+.");
+  return output;
+}
+
+at::Tensor reduce_scatter_out(
+    at::Tensor input,
+    std::string group_name,
+    bool split_last_dim,
+    at::Tensor output) {
+  TORCH_CHECK(false, "reduce_scatter_out: requires CUDA 12.3+.");
+  return output;
+}
+} // namespace
+#endif // #if defined(CUDART_VERSION) && CUDART_VERSION < 12030
 
 namespace {
 
@@ -956,7 +1057,6 @@ at::Tensor memset32_(
     int64_t offset,
     int64_t val,
     int64_t count) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   TORCH_CHECK(
       input.dim() == 1 && input.is_contiguous() &&
           input.scalar_type() == c10::ScalarType::UInt32,
@@ -980,7 +1080,6 @@ at::Tensor memset32_(
       "symm_mem::memset32_: val must be in the range of "
       "[0, 4294967295] (uint32_t).")
 
-  auto element_size = c10::elementSize(input.scalar_type());
   TORCH_CHECK(
       offset + count <= input.numel(),
       "symm_mem::memset32_: offset + count (",
@@ -990,14 +1089,20 @@ at::Tensor memset32_(
       ")");
 
   auto addr = reinterpret_cast<uint32_t*>(input.data_ptr()) + offset;
-
   c10::cuda::CUDAGuard guard(input.device());
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemsetD32Async_(
       reinterpret_cast<CUdeviceptr>(addr),
       val,
       count,
       at::cuda::getCurrentCUDAStream()));
+#elif defined(USE_ROCM)
+  C10_HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(addr),
+                                   val,
+                                   count,
+                                   at::cuda::getCurrentCUDAStream()));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -1009,7 +1114,6 @@ at::Tensor stream_write_value32_(
     at::Tensor& input,
     int64_t offset,
     int64_t val) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   TORCH_CHECK(
       input.dim() == 1 && input.is_contiguous() &&
           input.scalar_type() == c10::ScalarType::UInt32,
@@ -1029,7 +1133,6 @@ at::Tensor stream_write_value32_(
       "symm_mem::stream_write_value32_: "
       "val must be in the range of [0, 4294967295] (uint32_t).")
 
-  auto element_size = c10::elementSize(input.scalar_type());
   TORCH_CHECK(
       offset < input.numel(),
       "symm_mem::stream_write_value32_: offset (",
@@ -1039,8 +1142,9 @@ at::Tensor stream_write_value32_(
       ")");
 
   auto addr = reinterpret_cast<uint32_t*>(input.data_ptr()) + offset;
-
   c10::cuda::CUDAGuard guard(input.device());
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   // According to the documentation of CUstreamWriteValue_flags,
   // cuStreamWriteValue32 will provide a memory fence before the write, which
@@ -1051,6 +1155,12 @@ at::Tensor stream_write_value32_(
       reinterpret_cast<CUdeviceptr>(addr),
       val,
       0));
+#elif defined(USE_ROCM)
+  C10_HIP_CHECK(hipStreamWriteValue32(
+                                      at::cuda::getCurrentCUDAStream(),
+                                      reinterpret_cast<void*>(addr),
+                                      val,
+                                      0));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -1061,7 +1171,18 @@ at::Tensor stream_write_value32_(
 } // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
+#if defined(USE_ROCM) || defined(CUDART_VERSION)
+  m.impl("one_shot_all_reduce", ::one_shot_all_reduce);
+  m.impl("one_shot_all_reduce_out", ::one_shot_all_reduce_out);
+  m.impl("one_shot_all_reduce_copy", ::one_shot_all_reduce_copy);
+  m.impl("one_shot_all_reduce_copy_out", ::one_shot_all_reduce_copy_out);
+  m.impl("two_shot_all_reduce_", ::two_shot_all_reduce_);
+  m.impl("two_shot_all_reduce_out", ::two_shot_all_reduce_out);
+  m.impl("reduce_scatter_out", ::reduce_scatter_out);
+
+  m.impl("_async_input_mm", c10d::cuda::detail::async_input_mm);
+#endif
+#if defined(CUDART_VERSION)
   m.impl("multimem_all_reduce_", ::multimem_all_reduce_);
 
   // NOTE: [multimem_one_shot_all_reduce]
@@ -1075,15 +1196,6 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl(
       "multimem_one_shot_all_reduce_out", ::multimem_one_shot_all_reduce_out);
   m.impl("multimem_all_gather_out", ::multimem_all_gather_out);
-  m.impl("one_shot_all_reduce", ::one_shot_all_reduce);
-  m.impl("one_shot_all_reduce_out", ::one_shot_all_reduce_out);
-  m.impl("one_shot_all_reduce_copy", ::one_shot_all_reduce_copy);
-  m.impl("one_shot_all_reduce_copy_out", ::one_shot_all_reduce_copy_out);
-  m.impl("two_shot_all_reduce_", ::two_shot_all_reduce_);
-  m.impl("two_shot_all_reduce_out", ::two_shot_all_reduce_out);
-  m.impl("reduce_scatter_out", ::reduce_scatter_out);
-
-  m.impl("_async_input_mm", c10d::cuda::detail::async_input_mm);
 #endif
   m.impl("stream_write_value32_", ::stream_write_value32_);
   m.impl("memset32_", ::memset32_);

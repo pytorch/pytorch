@@ -354,6 +354,10 @@ def propagate_mm(mm_node):
     ]
 )
 def propagate_general_copy_metadata(out_node, ignore_broadcast=False):
+    """
+    A general propagation rules that basically copy around the chunking
+    metadata.
+    """
     node_args = get_args_of_node_type(out_node)
     node_is_scalar = get_node_is_scalar(node_args)
     node_ndim = get_node_ndim(node_args)

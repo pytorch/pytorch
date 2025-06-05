@@ -13,10 +13,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   echo 'Skipping tests'
   exit 0
 fi
-if [[ "${BUILD_ENVIRONMENT}" == *-rocm* ]]; then
-  # temporary to locate some kernel issues on the CI nodes
-  export HSAKMT_DEBUG_LEVEL=4
-fi
 # These additional packages are needed for circleci ROCm builds.
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
     # Need networkx 2.0 because bellmand_ford was moved in 2.1 . Scikit-image by
