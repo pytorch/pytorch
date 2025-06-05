@@ -836,6 +836,7 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         @torch.compile
         def fn(x):
+            # Calls x.sum().backward() during forward execution of fn
             (x_grad,) = torch.autograd.grad(x.sum(), x)
             return x_grad
 
@@ -843,7 +844,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         result = fn(a)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-        # Backward will run due to graph break
+        # Backward of `sum` will run during execution of graph break
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
         traced_frame_infos = copy.deepcopy(
             torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos
