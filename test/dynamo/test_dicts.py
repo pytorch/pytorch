@@ -1034,6 +1034,56 @@ class DictGuardTests(LoggingTestCase):
         record = self.getRecord(records, "d")
         self.assertIn(
             """d[3] == 4""",
+            munge_exc(record),
+        )
+
+    @make_logging_test(recompiles=True)
+    def test_cmp_eq(self, records):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d1, d2):
+            if d1 == d2:
+                return x.sin()
+            return x.cos()
+
+        x = torch.tensor(1.0)
+        d1 = self.thetype({1: 2, 3: 4})
+        d2 = self.thetype({1: 2, 5: 6})
+        y = fn(x, d1, d2)
+        # sanity check
+        self.assertEqual(len(records), 0)
+        self.assertEqual(y, x.cos())
+
+        y = fn(x, d1, d1)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(y, x.sin())
+        record = self.getRecord(records, "d2")
+        self.assertIn(
+            """list(dict.keys(d2))""",
+            munge_exc(record.getMessage()),
+        )
+
+    @make_logging_test(recompiles=True)
+    def test_cmp_ne(self, records):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d1, d2):
+            if d1 == d2:
+                return x.sin()
+            return x.cos()
+
+        x = torch.tensor(1.0)
+        d1 = self.thetype({1: 2, 3: 4})
+        d2 = self.thetype({1: 2, 5: 6})
+        y = fn(x, d1, d2)
+        # sanity check
+        self.assertEqual(len(records), 0)
+        self.assertEqual(y, x.cos())
+
+        y = fn(x, d1, d1)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(y, x.sin())
+        record = self.getRecord(records, "d2")
+        self.assertIn(
+            """list(dict.keys(d2))""",
             munge_exc(record.getMessage()),
         )
 
@@ -1310,14 +1360,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
-
-    @unittest.expectedFailure
-    def test_cmp_eq(self):
-        return super().test_cmp_eq()
-
-    @unittest.expectedFailure
-    def test_cmp_ne(self):
-        return super().test_cmp_ne()
 
 
 if __name__ == "__main__":

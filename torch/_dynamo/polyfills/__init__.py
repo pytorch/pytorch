@@ -9,6 +9,7 @@ Python polyfills for common builtins.
 # mypy: allow-untyped-defs
 
 import types
+from collections import OrderedDict
 from collections.abc import Iterable, MutableMapping, Sequence
 from itertools import repeat as _repeat
 from typing import Any, Callable, TYPE_CHECKING
@@ -99,6 +100,20 @@ def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequenc
 
     # No more pairs to compare, so compare sizes.
     return op(len(left), len(right))
+
+
+def dict___eq__(d, other):
+    if (len(d) != len(other)) or (d.keys() != other.keys()):
+        return False
+
+    if all(isinstance(a, OrderedDict) for a in (d, other)):
+        return list(d.items()) == list(other.items())
+
+    for k, v in d.items():
+        if v != other[k]:
+            return False
+
+    return True
 
 
 def set_symmetric_difference(set1, set2):
