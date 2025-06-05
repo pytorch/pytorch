@@ -2,7 +2,7 @@
 orphan: true
 ---
 
-(torch-compiler-troubleshooting-old)=
+(torch.compiler_troubleshooting_old)=
 
 # PyTorch 2.0 Troubleshooting (old)
 
@@ -18,7 +18,7 @@ available.
 We are actively developing debug tools, profilers, and improving our
 error and warning messages. Below is a table of the available
 tools and their typical usage. For additional help see
-[Diagnosing Runtime Errors](#diagnosing-runtime-errors).
+{ref}`diagnosing-runtime-errors`.
 
 ```{eval-rst}
 .. list-table:: Title
@@ -78,6 +78,7 @@ In addition to info and debug logging,
 you can use [torch.\_logging](https://pytorch.org/docs/main/logging.html)
 for more fine-grained logging.
 
+(diagnosing-runtime-errors)=
 ## Diagnosing Runtime Errors
 
 At a high level, the TorchDynamo stack consists of a graph capture from
@@ -116,16 +117,15 @@ The general procedure to narrow down an issue is the following:
 
 1. Run your program with the `"eager"` backend. If the error no longer
    occurs, the issue is in the backend compiler that is being used (if
-   using TorchInductor, proceed to step 2. If not, see [this
-   section](#minifying-backend-compiler-errors)). If the error still
-   occurs with the `"eager"` backend, it is an [error while running
-   torchdynamo](#torchdynamo-errors).
+   using TorchInductor, proceed to step 2. If not, see
+   {ref}`minifying-backend-compiler-errors`). If the error still
+   occurs with the `"eager"` backend, it is due to
+   {ref}`torchdynamo-errors`.
 2. This step is only necessary if `TorchInductor` is used as the backend
    compiler. Run the model with the `"aot_eager"` backend. If this
    backend raises an error then the error is occurring during
    AOTAutograd tracing. If the error no longer occurs with this backend,
-   then [the error is in
-   TorchInductor\*](#minifying-torchinductor-errors).
+   then {ref}`minifying-torchinductor-errors`.
 
 Each of these cases are analyzed in the following sections.
 
@@ -136,6 +136,8 @@ disambiguate by referring to `TorchInductor` as the backend, and
 TorchInductor lowering as the phase which lowers the graph traced by
 AOTAutograd.
 :::
+
+(torchdynamo-errors)=
 
 ### Torchdynamo Errors
 
@@ -278,6 +280,8 @@ If you then change `torch.compile(backend="inductor")` to
 issue](https://github.com/pytorch/torchdynamo/blob/d09e50fbee388d466b5252a63045643166006f77/torchinductor/lowering.py#:~:text=%23%20This%20shouldn%27t%20be,assert%20False)
 is in the TorchInductor lowering process, not in AOTAutograd.
 
+(minifying-torchinductor-errors)=
+
 ### Minifying TorchInductor Errors
 
 From here, let’s run the minifier to get a minimal repro. Setting the
@@ -344,11 +348,13 @@ The `forward` method of the `Repro` module contains the exact op
 which causes the issue. When filing an issue, please include any
 minified repros to aid in debugging.
 
+(minifying-backend-compiler-errors)=
+
 ### Minifying Backend Compiler Errors
 
 With backend compilers other than TorchInductor the process for finding
 the subgraph causing the error is nearly identical to the procedure in
-[errors in TorchInductor](#torchinductor-errors) with one important
+{ref}`minifying-torchinductor-errors` with one important
 caveat. Namely, that the minifier will now be run on the graph that is
 traced by TorchDynamo, not the output graph of AOTAutograd. Let’s walk
 through an example.
@@ -427,7 +433,7 @@ with torch.cuda.amp.autocast(enabled=False):
 
 The minifier successfully reduced the graph to the op that raises the
 error in `toy_compiler`. The other difference from the procedure in
-[TorchInductor Errors](#torchinductor-errors) is that the minifier is
+{ref}`minifying-torchinductor-errors` is that the minifier is
 automatically run after encountering a backend compiler error. After a
 successful run, the minifier writes `repro.py` to
 `torch._dynamo.config.base_dir`.

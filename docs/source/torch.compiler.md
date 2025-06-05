@@ -1,4 +1,4 @@
-(torch-compiler-overview)=
+(torch.compiler_overview)=
 
 # torch.compiler
 

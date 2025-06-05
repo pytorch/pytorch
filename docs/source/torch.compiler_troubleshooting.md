@@ -1,4 +1,4 @@
-(torch-compiler-troubleshooting)=
+(torch.compiler_troubleshooting)=
 
 # torch.compile Troubleshooting
 
@@ -274,7 +274,7 @@ torch._logging.set_logs(graph_breaks=True)
 ...
 ```
 
-More `TORCH_LOGS` options are {ref}`detailed below <troubleshooting_torch_logs_options>`.
+More `TORCH_LOGS` options are {ref}`troubleshooting-torch-logs-options`.
 For the full list of options, see [torch.\_logging](https://pytorch.org/docs/stable/logging.html)
 and [torch.\_logging.set_logs](https://pytorch.org/docs/stable/generated/torch._logging.set_logs.html#torch._logging.set_logs).
 
