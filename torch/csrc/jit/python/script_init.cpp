@@ -1492,9 +1492,10 @@ void initJitScriptBindings(PyObject* module) {
                     .cast<bool>()) {
               TORCH_CHECK(
                   py::hasattr(args[0], py::str("_torchdynamo_inline")),
-                  "When export scripted function ",
+                  "During PT2 exporting, we encountered TorchScripted function",
                   strongPtr.function_->name(),
-                  "we cannot find its _torchdynamo_inline attribute, which stores non scripted kcallable. ",
+                  "When tracing through it, we cannot find its _torchdynamo_inline attribute, ",
+                  "which stores non scripted kcallable. ",
                   "Please file an issue to PyTorch if you see this error.");
 
               // remove the function itself with args[1:]
@@ -1607,12 +1608,31 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "__call__",
           [](py::args args, const py::kwargs& kwargs) {
-            // see: [pybind11 varargs]
             HANDLE_TH_ERRORS
-            Method& method = py::cast<Method&>(args[0]);
-
-            return invokeScriptMethodFromPython(
-                method, tuple_slice(std::move(args), 1), kwargs);
+            if (py::module::import("torch")
+                    .attr("compiler")
+                    .attr("is_exporting")()
+                    .cast<bool>() &&
+                // TODO: fix all cases where ScriptMethod doesn't have
+                // __wrapped__, which is the non-scripted original method. E.g.
+                // it seems the top-level script module's scriptMethod doesn't
+                // have __wrapped__ attributes. For example:
+                //  class M(torch.nn.Module):
+                //    def forward(self, x):
+                //        return x.cos() + x.sin()
+                //  traced_module = torch.jit.trace(M(), example_inputs=inps)
+                // ,where traced_module.forward is a ScriptMethod but doesn't
+                // have __wrapped__
+                py::hasattr(args[0], "__wrapped__")) {
+              // remove the function itself with args[1:]
+              py::slice slice0(1, args.size(), 1);
+              return args[0].attr("__wrapped__")(*args, **kwargs);
+            } else {
+              // see: [pybind11 varargs]
+              Method& method = py::cast<Method&>(args[0]);
+              return invokeScriptMethodFromPython(
+                  method, tuple_slice(std::move(args), 1), kwargs);
+            }
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def_property_readonly("graph", &Method::graph)

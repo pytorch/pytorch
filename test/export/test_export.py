@@ -629,6 +629,12 @@ graph():
 
         x = torch.randn(3, 4)
         ep = torch.export.export(M(), (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
         res = ep.module()(x)
         # We're inlining the original _forward function
         # instead of the scripted function, so we get x.sin()
@@ -648,10 +654,49 @@ graph():
 
         x = torch.randn(3, 4)
         ep = torch.export.export(M(), (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
         res = ep.module()(x)
         # We're inlining the original _forward function
         # instead of the scripted function, so we get x.sin()
         self.assertEqual(res, x.sin())
+
+    def test_inline_script_class_method_recursive(self):
+        f = 0.4
+        i = 2
+        s = "foo"
+
+        @torch.jit.script
+        def _inner(x: torch.Tensor, y: torch.Tensor, f: float, i: int, s_len: int):
+            return x * y * f * i * s_len
+
+        class M(torch.nn.Module):
+            @staticmethod
+            @torch.jit.script
+            def _forward(x: torch.Tensor, y: torch.Tensor, f: float, i: int, s: str):
+                if torch.jit.is_scripting():
+                    return _inner(x.cos(), y.cos(), f, i, len(s))
+                return _inner(x.sin(), y.sin(), f, i, len(s))
+
+            def forward(self, x: torch.Tensor):
+                return M._forward(x, y=x, f=f, i=i, s=s)
+
+        x = torch.randn(3, 4)
+        ep = torch.export.export(M(), (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 2, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
+        res = ep.module()(x)
+        # We're inlining the original _forward function
+        # instead of the scripted function, so we get x.sin()
+        self.assertEqual(res, _inner(x.sin(), x.sin(), f, i, len(s)))
 
     def test_inline_script_method(self):
         class M(torch.jit.ScriptModule):
@@ -674,6 +719,12 @@ graph():
 
         x = torch.randn(3, 4)
         ep = torch.export.export(Wrapped(M()), (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
         res = ep.module()(x)
         # We're inlining the original _forward function
         # instead of the scripted function, so we get x.sin()
@@ -15051,36 +15102,6 @@ class TestExportCustomClass(TorchTestCase):
             ):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
-
-    def test_export_script_module(self):
-        class Add(torch.nn.Module):
-            def forward(self, x, y):
-                return x + y
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.add_mod = torch.jit.script(Add())._c
-
-            def forward(self, x, y):
-                return self.add_mod.forward(x, y)
-
-        x, y = torch.randn(3, 2), torch.randn(3, 2)
-        mod = Mod()
-        if is_non_strict_test(self._testMethodName):
-            ep = export(mod, (x, y))
-            self.assertEqual(ep.module()(x, y), mod(x, y))
-            FileCheck().check_count("torch.ops.aten.add.Tensor", 1, exactly=True).run(
-                ep.graph_module.code
-            )
-            return
-
-        # TODO: strict mode doesn't work because dynamo add_mod is treated as a
-        # user defined variable. We might need to add a CustomModule variable to support it.
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "UserDefined with non-function"
-        ):
-            ep = export(mod, (x, y))
 
     def test_preserve_non_cia_op(self):
         class M(torch.nn.Module):
