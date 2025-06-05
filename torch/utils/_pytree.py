@@ -384,7 +384,9 @@ def register_dataclass(
 CONSTANT_NODES: set[type] = set()
 
 
-def register_constant(cls: type[Any]) -> None:
+def register_constant(
+    cls: type[Any], *, serialized_type_name: Optional[str] = None
+) -> None:
     """Registers a type as a pytree node with no leaves.
 
     In a :func:`torch.compile` region, if instances of these types get passed to
@@ -414,6 +416,8 @@ def register_constant(cls: type[Any]) -> None:
 
     Args:
         cls: the type to register as a constant. This type must be hashable.
+        serialized_type_name: A keyword argument used to specify the fully qualified
+        name used when serializing the constant
 
     Example:
 
@@ -452,12 +456,41 @@ def register_constant(cls: type[Any]) -> None:
     def _flatten_with_keys(x):  # type: ignore[no-untyped-def]
         return [], ConstantNode(x)
 
+    to_dumpable_context = None
+    from_dumpable_context = None
+
+    if serialized_type_name is not None:
+
+        def _to_dumpable_context(x: Any) -> bytes:
+            assert isinstance(x, ConstantNode)
+
+            ser_val = {
+                "__type__": x.value.__class__.__qualname__,
+                "__module__": x.value.__class__.__module__,
+                "state": x.value.__dict__,
+            }
+            return json.dumps(ser_val)
+
+        def _from_dumpable_context(x: bytes) -> Any:
+            data = json.loads(x)
+            mod = importlib.import_module(data["__module__"])
+            cls = getattr(mod, data["__type__"])
+            obj = cls.__new__(cls)
+            obj.__dict__.update(data["state"])
+            return ConstantNode(obj)
+
+        to_dumpable_context = _to_dumpable_context
+        from_dumpable_context = _from_dumpable_context
+
     with _NODE_REGISTRY_LOCK:
         _private_register_pytree_node(
             cls,
             _flatten,
             _unflatten,
             flatten_with_keys_fn=_flatten_with_keys,
+            serialized_type_name=serialized_type_name,
+            to_dumpable_context=to_dumpable_context,
+            from_dumpable_context=from_dumpable_context,
         )
         CONSTANT_NODES.add(cls)
 
