@@ -1595,6 +1595,7 @@ void scaled_gemm(
 #else
     TORCH_CHECK(false, "scaled_gemm with `torch.float` outer vector scaling is only supported for CUDA 12.9 and above");
 #endif // if CUDA_VERSION >= 12090
+  }
 
   size_t workspaceSize = _getWorkspaceSize();
   auto workspace = at::empty(static_cast<int64_t>(workspaceSize), at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
