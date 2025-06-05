@@ -9,7 +9,8 @@ Python polyfills for common builtins.
 # mypy: allow-untyped-defs
 
 import types
-from collections.abc import Iterable, Mapping, MutableMapping, Sequence
+from collections import OrderedDict
+from collections.abc import Iterable, MutableMapping, Sequence
 from itertools import repeat as _repeat
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -105,24 +106,14 @@ def dict___eq__(d, other):
     if (len(d) != len(other)) or (d.keys() != other.keys()):
         return False
 
+    if all(isinstance(a, OrderedDict) for a in (d, other)):
+        return list(d.items()) == list(other.items())
+
     for k, v in d.items():
         if v != other[k]:
             return False
 
     return True
-
-
-def dict___ior__(d, other):
-    if not isinstance(other, (Iterable, Mapping)):
-        raise TypeError(f"unsupported operand type(s) for |: 'dict' and {type(other)}")
-
-    if isinstance(other, Mapping):
-        for k in other:
-            d[k] = other.__getitem__(k)
-    else:
-        for k, v in other:
-            d[k] = v
-    return d
 
 
 def set_symmetric_difference(set1, set2):
