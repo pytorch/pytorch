@@ -1,5 +1,4 @@
-# mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from torch import Tensor
 from torch.distributions import constraints
@@ -45,7 +44,7 @@ class LogNormal(TransformedDistribution):
         base_dist = Normal(loc, scale, validate_args=validate_args)
         super().__init__(base_dist, ExpTransform(), validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: Any, _instance: Optional[Any] = None) -> "LogNormal":
         new = self._get_checked_instance(LogNormal, _instance)
         return super().expand(batch_shape, _instance=new)
 
@@ -70,5 +69,5 @@ class LogNormal(TransformedDistribution):
         scale_sq = self.scale.pow(2)
         return scale_sq.expm1() * (2 * self.loc + scale_sq).exp()
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return self.base_dist.entropy() + self.loc
