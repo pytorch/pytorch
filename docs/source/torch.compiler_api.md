@@ -1,27 +1,21 @@
-.. currentmodule:: torch.compiler
+# torch.compiler API reference
 
-.. automodule:: torch.compiler
+For a quick overview of `torch.compiler`, see [torch.compiler overview](torch.compiler_overview).
 
-.. _torch.compiler_api:
+## API
 
-torch.compiler API reference
-============================
+- [`compile`](#compile)
+- [`reset`](#reset)
+- [`allow_in_graph`](#allow_in_graph)
+- [`substitute_in_graph`](#substitute_in_graph)
+- [`assume_constant_result`](#assume_constant_result)
+- [`list_backends`](#list_backends)
+- [`disable`](#disable)
+- [`set_stance`](#set_stance)
+- [`cudagraph_mark_step_begin`](#cudagraph_mark_step_begin)
+- [`is_compiling`](#is_compiling)
+- [`is_dynamo_compiling`](#is_dynamo_compiling)
+- [`is_exporting`](#is_exporting)
 
-For a quick overview of ``torch.compiler``, see :ref:`torch.compiler_overview`.
+> **Note:** For detailed documentation on each function, refer to the generated API docs or the source code.
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-     compile
-     reset
-     allow_in_graph
-     substitute_in_graph
-     assume_constant_result
-     list_backends
-     disable
-     set_stance
-     cudagraph_mark_step_begin
-     is_compiling
-     is_dynamo_compiling
-     is_exporting
