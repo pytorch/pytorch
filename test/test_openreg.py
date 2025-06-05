@@ -77,6 +77,11 @@ class TestOpenReg(TestCase):
         self.assertEqual(generator.device.type, "openreg")
         self.assertEqual(generator.device.index, 1)
 
+    # TODO(FFFrog): Add more check for rng_state
+    def test_rng_state(self):
+        state = torch.openreg.get_rng_state(0)
+        torch.openreg.set_rng_state(state, 0)
+
     @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_pin_memory(self):
         cpu_a = torch.randn(10)
@@ -86,6 +91,7 @@ class TestOpenReg(TestCase):
         slice_a = pinned_a[2:5]
         self.assertTrue(slice_a.is_pinned())
 
+    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_rewrapped_storage(self):
         pinned_a = torch.randn(10).pin_memory()
         rewrapped_a = torch.tensor((), dtype=torch.float32).set_(
@@ -108,6 +114,7 @@ class TestOpenReg(TestCase):
         # Does not crash!
         stream_2.wait_stream(stream_1)
 
+    @skipIfTorchDynamo()
     def test_record_event(self):
         stream = torch.Stream(device="openreg:1")
         event1 = stream.record_event()
@@ -130,12 +137,14 @@ class TestOpenReg(TestCase):
         ms = e1.elapsed_time(e2)
         self.assertTrue(ms > 0)
 
+    @skipIfTorchDynamo()
     def test_stream_wait_event(self):
         s1 = torch.Stream(device="openreg")
         s2 = torch.Stream(device="openreg")
         e = s1.record_event()
         s2.wait_event(e)
 
+    @skipIfTorchDynamo()
     def test_event_wait_stream(self):
         s1 = torch.Stream(device="openreg")
         s2 = torch.Stream(device="openreg")

@@ -4,12 +4,22 @@ This module provides a set of functions to create ONNX operators in the FX graph
 which are exportable to ONNX.
 """
 
+# flake8: noqa: B950
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+
+__all__ = [
+    "aten_decompositions",
+    "symbolic",
+    "symbolic_multi_out",
+    "rotary_embedding",
+]
+
+
+from typing import Callable, TYPE_CHECKING
 
 import torch
-from torch.onnx.ops import _symbolic_impl
+from torch.onnx.ops import _impl, _symbolic_impl
 
 
 if TYPE_CHECKING:
@@ -38,7 +48,15 @@ _TORCH_DTYPE_TO_ONNX_DTYPE = {
     torch.float8_e4m3fnuz: 18,  # FLOAT8E4M3FNUZ
     torch.float8_e5m2: 19,  # FLOAT8E5M2
     torch.float8_e5m2fnuz: 20,  # FLOAT8E5M2FNUZ
+    # 21 = UINT4
+    # 22 = INT4
+    torch.float4_e2m1fn_x2: 23,  # FLOAT4E2M1
 }
+
+
+def aten_decompositions() -> dict[torch._ops.OpOverload, Callable]:
+    """Return the ONNX to ATen decomp table."""
+    return _impl.ONNX_ATEN_DECOMP_TABLE
 
 
 def _parse_domain_op_type(domain_op: str) -> tuple[str, str]:
@@ -78,6 +96,9 @@ def symbolic(
 
     This function is used to create a symbolic operator with a single output.
     To create an operator with multiple outputs, use :func:`symbolic_multi_out`.
+
+    You may use ``if torch.onnx.is_in_onnx_export()`` to conditionally enable the
+    symbolic logic only during ``torch.onnx.export()``.
 
     Example::
 
@@ -174,6 +195,9 @@ def symbolic_multi_out(
 ) -> Sequence[torch.Tensor]:
     """Create a symbolic FX operator to represent an arbitrary ONNX operator with multiple outputs.
 
+    You may use ``if torch.onnx.is_in_onnx_export()`` to conditionally enable the
+    symbolic logic only during ``torch.onnx.export()``.
+
     Example::
 
         class CustomOp(torch.nn.Module):
@@ -252,4 +276,70 @@ def symbolic_multi_out(
         metadata_props_values=metadata_props.values() if metadata_props else [],
         domain=domain,
         version=version,
+    )
+
+
+def rotary_embedding(
+    X: torch.Tensor,
+    cos_cache: torch.Tensor,
+    sin_cache: torch.Tensor,
+    position_ids: torch.Tensor | None = None,
+    *,
+    interleaved: bool = False,
+    num_heads: int = 0,
+    rotary_embedding_dim: int = 0,
+) -> torch.Tensor:
+    """RotaryEmbedding op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__RotaryEmbedding.html
+
+    RotaryEmbedding is the implementation of rotary positional embeddings (RoPE) based on the paper https://arxiv.org/pdf/2104.09864.
+    The key advantage of RoPE is that it allows the model to understand both the absolute position of a token and the relative distances
+    between tokens. This is achieved through a rotational mechanism where the extent of rotation is computed based on the token's absolute position (position_ids).
+
+    The rotational mechanism is defined by sine and cosine functions that are used to represent the rotation angles.
+    For each token in the sequence, its positional embedding is computed by rotating its embedding vector. This is done by splitting the
+    embedding vector either into two halves or interleaving every alternate token and applying the rotation matrix to each half of the embedding vector.
+    The rotation matrix is parameterized by the token's position in the sequence. The rotated halves of the embedding vector are concatenated
+    to form the final positional embedding for each token. The rotated positional embeddings are used in the self-attention mechanism.
+    The rotation ensures that the model captures both absolute and relative positional information.
+
+    Args:
+        X: The input tensor representing the token embeddings. 4D tensor with
+            shape `(batch_size, num_heads, sequence_length, head_size)` or 3D tensor
+            with shape `(batch_size, sequence_length, hidden_size)`. For cases with
+            a 4D input tensor, `head_size` has to be even. For cases with a 3D input
+            tensor, `num_heads` attribute must be provided and `hidden_size` must
+            be an even multiple of `num_heads` where `hidden_size = num_heads * head_size`
+        cos_cache: The cosine values for the rotation. 2D tensor with shape `(max_position_id_plus_1, head_size / 2)`
+            for full rotation or `(max_position_id_plus_1, rotary_embedding_dim / 2)`
+            for partial rotation when `position_ids` are provided. 3D tensor with shape
+            `(batch_size, sequence_length, head_size / 2)` for full rotation or
+            `(batch_size, sequence_length, rotary_embedding_dim / 2)` for partial
+            rotation when `position_ids` are not provided. `max_position_id_plus_1`
+            is a parameter to the model.
+        sin_cache: The sine values for the rotation. 2D tensor with shape `(max_position_id_plus_1, head_size / 2)`
+            for full rotation or `(max_position_id_plus_1, rotary_embedding_dim / 2)`
+            for partial rotation when `position_ids` are provided. 3D tensor with shape
+            `(batch_size, sequence_length, head_size / 2)` for full rotation or
+            `(batch_size, sequence_length, rotary_embedding_dim / 2)` for partial rotation
+            when `position_ids` are not provided. `max_position_id_plus_1` is a parameter
+            to the model.
+        position_ids: The position indices for the tokens. 2D tensor with shape
+            `(batch_size, sequence_length)`.
+        interleaved: Rotate using interleaved pattern. Default value is 0 (False).
+        num_heads: Number of attention heads. Must be provided when input is a 3D tensor.
+        rotary_embedding_dim: Rotary embedding dimension used to apply partial rotary embeddings.
+
+    Returns:
+        Tensor with same shape as input.
+    """
+    return _impl.rotary_embedding(
+        X,
+        cos_cache,
+        sin_cache,
+        position_ids=position_ids,
+        interleaved=interleaved,
+        num_heads=num_heads,
+        rotary_embedding_dim=rotary_embedding_dim,
     )

@@ -542,6 +542,46 @@ def _sfdp_replacement_19(query, key, value, causal_mask, attn_mask, dropout_p):
     )
 
 
+def _sfdp_pattern_20(query, key, value, attn_mask, dropout_p):
+    # for DistilBert with dropout transformers==4.44.2
+    q = query.permute([0, 2, 1, 3])
+    k = key.permute([0, 2, 1, 3])
+    v = value.permute([0, 2, 1, 3])
+    bs = q.size(0)
+    k_len = k.size(-2)
+    q = q.div(math.sqrt(q.size(-1)))
+    scores = q @ k.transpose(-2, -1)
+    fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
+    attn_mask = (attn_mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
+    return (
+        torch.nn.functional.dropout(
+            torch.softmax(scores.masked_fill(attn_mask, fill_value), dim=-1), dropout_p
+        )
+        @ v
+    )
+
+
+def _sfdp_replacement_20(query, key, value, attn_mask, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    bs = query.size(0)
+    n_head = query.size(2)
+    q_len = query.size(1)
+    k_len = key.size(1)
+    # do attn_mask->logical_not() in _scaled_dot_product_attention
+    attn_mask = (
+        (attn_mask == 1).view((bs, 1, 1, k_len)).expand((bs, n_head, q_len, k_len))
+    )
+    return _scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask.to(dtype=torch.bool),
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=1.0 / math.sqrt(query.size(-1)),
+    )
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -641,6 +681,8 @@ def _get_sfdp_patterns():
     # attn_mask
     b_inp = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
     m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
+    # need 2d attn_mask to generate patterns with view op
+    m_inp_2d = functools.partial(torch.empty, (2, 4), device=device)
     # inv_scale
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
     # workaround https://github.com/pytorch/pytorch/issues/97894
@@ -670,6 +712,7 @@ def _get_sfdp_patterns():
         m = functools.partial(m_inp, dtype=dtype)
         m_float = functools.partial(m_inp, dtype=torch.float)
         m_bool = functools.partial(m_inp, dtype=torch.bool)
+        m_2d = functools.partial(m_inp_2d, dtype=dtype)
         c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
         g_bs1 = functools.partial(g_bs1_inp, dtype=dtype)
@@ -779,7 +822,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_15,
                 _sfdp_replacement_15,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), m_2d(), c()],
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
             ),
@@ -801,7 +844,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_17,
                 _sfdp_replacement_17,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), m_2d(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
             ),
@@ -825,6 +868,13 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), b_bool(), b_float()],
                 d,
                 _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_20,
+                _sfdp_replacement_20,
+                [g(), g(), g(), m_2d()],
+                d,
+                _sfdp_extra_check(aten.div.Tensor),
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]

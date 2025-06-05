@@ -71,6 +71,10 @@ register_artifact(
 )
 register_artifact("graph_code", "Like `graph`, but gives you the Python code instead.")
 register_artifact(
+    "graph_code_verbose",
+    "Verbose FX pass logs, e.g. from tensorify_python_scalars and runtime_assert.",
+)
+register_artifact(
     "graph_sizes", "Prints the sizes of all FX nodes in the dynamo graph."
 )
 register_artifact(
@@ -183,6 +187,12 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "loop_tiling",
+    "Logs related to loop ordering",
+    off_by_default=True,
+)
+
+register_artifact(
     "overlap",
     "Detailed Inductor compute/comm overlap decisions",
     off_by_default=True,
@@ -215,6 +225,12 @@ register_artifact(
 register_artifact(
     "graph_region_expansion",
     "Logs detailed steps of the duplicate graph region tracker expansion algorithm",
+    off_by_default=True,
+)
+
+register_artifact(
+    "inductor_metrics",
+    "Logs Inductor metrics, such as num_bytes, nodes_num_elem, node_runtimes",
     off_by_default=True,
 )
 
