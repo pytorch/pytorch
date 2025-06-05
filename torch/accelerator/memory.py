@@ -25,6 +25,8 @@ def empty_cache() -> None:
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
     """
+    if not torch._C._accelerator_isAllocatorInitialized():
+        return
     torch._C._accelerator_emptyCache()
 
 
@@ -36,7 +38,7 @@ def memory_stats_as_nested_dict(device: _device_t = None, /) -> dict[str, Any]:
             :ref:`accelerator<accelerators>` device type. If not given,
             use :func:`torch.accelerator.current_device_index` by default.
     """
-    if not torch._C._accelerator_allocatorInitialized():
+    if not torch._C._accelerator_isAllocatorInitialized():
         return {}
     device = _get_device_index(device, optional=True)
     return torch._C._accelerator_getDeviceStats(device)
