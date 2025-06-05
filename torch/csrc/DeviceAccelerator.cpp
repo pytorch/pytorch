@@ -73,12 +73,12 @@ void initModule(PyObject* module) {
     return at::accelerator::maybeExchangeDevice(device_index);
   });
 
-  m.def("_accelerator_allocatorInitialized", []() {
+  m.def("_accelerator_isAllocatorInitialized", []() {
     const auto device_type = at::accelerator::getAccelerator(true).value();
     return at::GetDeviceAllocator(device_type)->initialized();
   });
 
-  m.def("_accelerator_emptyCache", []() {at::accelerator::emptyCache();});
+  m.def("_accelerator_emptyCache", []() { at::accelerator::emptyCache(); });
 
   m.def("_accelerator_getDeviceStats", [](c10::DeviceIndex device_index) {
     using c10::CachingAllocator::Stat;

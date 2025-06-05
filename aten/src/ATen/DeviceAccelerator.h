@@ -75,25 +75,23 @@ TORCH_API c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index);
 
 TORCH_API inline void emptyCache() {
   const auto device_type = getAccelerator(true).value();
-  if (at::GetDeviceAllocator(device_type)->initialized()) {
-    at::GetDeviceAllocator(device_type)->emptyCache();
-  }
+  at::GetDeviceAllocator(device_type)->emptyCache();
 }
 
-TORCH_API inline at::CachingDeviceAllocator::DeviceStats
-getDeviceStats(c10::DeviceIndex device_index) {
+TORCH_API inline at::CachingDeviceAllocator::DeviceStats getDeviceStats(
+    c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
   return at::GetDeviceAllocator(device_type)->getDeviceStats(device_index);
 }
 
 TORCH_API inline void resetAccumulatedStats(c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
-    at::GetDeviceAllocator(device_type)->resetAccumulatedStats(device_index);
+  at::GetDeviceAllocator(device_type)->resetAccumulatedStats(device_index);
 }
 
 TORCH_API inline void resetPeakStats(c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
-    at::GetDeviceAllocator(device_type)->resetPeakStats(device_index);
+  at::GetDeviceAllocator(device_type)->resetPeakStats(device_index);
 }
 
 } // namespace at::accelerator
