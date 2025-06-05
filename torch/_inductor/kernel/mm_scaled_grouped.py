@@ -179,7 +179,7 @@ triton_scaled_grouped_mm_source = r"""
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
-    triton_helpers.make_tensor_descriptor(
+    a_desc = triton_helpers.make_tensor_descriptor(
         base_ptr=a_ptr,
         global_shape=[M, K],
         strides=[K, 1],
@@ -187,7 +187,7 @@ triton_scaled_grouped_mm_source = r"""
         desc_ptr=a_desc_ptr,
         element_ty=a_ptr.dtype.element_ty,
     )
-    triton_helpers.make_tensor_descriptor(
+    b_desc = triton_helpers.make_tensor_descriptor(
         base_ptr=b_ptr,
         global_shape=[N * G, K],
         strides=[K, 1],
@@ -227,13 +227,13 @@ triton_scaled_grouped_mm_source = r"""
                     n_offset = (N_start_offset + tile_n_idx * BLOCK_N).to(tl.int32)
                     for k_offset in range(0, K, BLOCK_K):
                         a = triton_helpers.load_tensor_descriptor(
-                            a_desc_ptr,
+                            a_desc,
                             [m_offset, k_offset],
                             [BLOCK_M, BLOCK_K],
                             dtype,
                         )
                         b = triton_helpers.load_tensor_descriptor(
-                            b_desc_ptr,
+                            b_desc,
                             [n_offset, k_offset],
                             [BLOCK_N, BLOCK_K],
                             dtype,

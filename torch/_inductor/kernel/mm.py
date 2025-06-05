@@ -264,18 +264,18 @@ persistent_tma_mm_template = TritonTemplate(
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
-    triton_helpers.make_tensor_descriptor(
+    a_desc = triton_helpers.make_tensor_descriptor(
         base_ptr=A,
         global_shape=[M, K] if A_ROW_MAJOR else [K, M],
-        strides=[K if A_ROW_MAJOR else M, 1],
+        strides=[K, 1] if A_ROW_MAJOR else [M, 1],
         block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
         desc_ptr=a_desc_ptr,
         element_ty=A.dtype.element_ty,
     )
-    triton_helpers.make_tensor_descriptor(
+    b_desc = triton_helpers.make_tensor_descriptor(
         base_ptr=B,
         global_shape=[K, N] if B_ROW_MAJOR else [N, K],
-        strides=[N if B_ROW_MAJOR else K, 1],
+        strides=[N, 1] if B_ROW_MAJOR else [K, 1],
         block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
         desc_ptr=b_desc_ptr,
         element_ty=B.dtype.element_ty,
@@ -305,13 +305,13 @@ persistent_tma_mm_template = TritonTemplate(
         rk = ki * BLOCK_K
 
         a = triton_helpers.load_tensor_descriptor(
-            a_desc_ptr,
+            a_desc,
             [rm, rk] if A_ROW_MAJOR else [rk, rm],
             [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
             A.dtype.element_ty,
         )
         b = triton_helpers.load_tensor_descriptor(
-            b_desc_ptr,
+            b_desc,
             [rk, rn] if B_ROW_MAJOR else [rn, rk],
             [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
             B.dtype.element_ty,
@@ -417,7 +417,7 @@ device_tma = r"""
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
-    triton_helpers.make_tensor_descriptor(
+    a_desc = triton_helpers.make_tensor_descriptor(
         base_ptr=A,
         global_shape=[M, K],
         strides=[K, 1],
@@ -425,7 +425,7 @@ device_tma = r"""
         desc_ptr=a_desc_ptr,
         element_ty=A.dtype.element_ty,
     )
-    triton_helpers.make_tensor_descriptor(
+    b_desc = triton_helpers.make_tensor_descriptor(
         base_ptr=B,
         global_shape=[N, K],
         strides=[K, 1],
@@ -434,8 +434,8 @@ device_tma = r"""
         element_ty=B.dtype.element_ty,
     )
 
-    triton_helpers.tensormap_fenceproxy_acquire(a_desc_ptr)
-    triton_helpers.tensormap_fenceproxy_acquire(b_desc_ptr)
+    triton_helpers.tensormap_fenceproxy_acquire(a_desc)
+    triton_helpers.tensormap_fenceproxy_acquire(b_desc)
 
     tiles_per_SM = num_tiles // NUM_SMS
     if start_pid < num_tiles % NUM_SMS:
@@ -469,10 +469,10 @@ device_tma = r"""
         offs_k = ki * BLOCK_K
 
         a = triton_helpers.load_tensor_descriptor(
-            a_desc_ptr, [offs_am, offs_k], [BLOCK_M, BLOCK_K],  A.dtype.element_ty
+            a_desc, [offs_am, offs_k], [BLOCK_M, BLOCK_K],  A.dtype.element_ty
         )
         b = triton_helpers.load_tensor_descriptor(
-            b_desc_ptr, [offs_bn, offs_k], [BLOCK_N, BLOCK_K],  B.dtype.element_ty
+            b_desc, [offs_bn, offs_k], [BLOCK_N, BLOCK_K],  B.dtype.element_ty
         )
         if USE_FAST_ACCUM:
             accumulator = tl.dot(a, b.T, accumulator)
