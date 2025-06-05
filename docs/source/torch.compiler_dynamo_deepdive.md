@@ -1,8 +1,6 @@
+(torch.compiler_dynamo_deepdive)=
 # Dynamo Deep-Dive
 
-
-
-(#torch.compiler_dynamo_deepdive)=
 TorchDynamo (or simply Dynamo) is the tracer within `torch.compile`,
 and it is, more often than not, the one to blame for those insane
 backtraces. However, we cannot blindly blame Dynamo for these errors. In
@@ -834,6 +832,8 @@ Many of them require very minor changes in the code, once you find where
 you need to make those changes.
 
 ## Footnotes
+
+Below are additional details and references for concepts mentioned in this document.
 
 [^footnote-1]: In the literature, this is called a Directed Acyclical Graph (DAG).
 
