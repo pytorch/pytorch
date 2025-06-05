@@ -270,7 +270,6 @@ sycl::event scaled_matmul(
     const std::optional<at::Tensor>& bias,
     const at::Tensor& scale_a,
     const at::Tensor& scale_b,
-    Attr& attr,
     const std::vector<sycl::event>& deps = {}) {
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();

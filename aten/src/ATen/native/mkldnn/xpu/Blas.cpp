@@ -443,7 +443,7 @@ if (bias) {
 }
 at::native::resize_output(out, {mat1.size(0), mat2.size(1)});
 onednn::scaled_matmul(
-    out, mat1, mat2, bias, scale_a, scale_b, onednn::Attr());
+    out, mat1, mat2, bias, scale_a, scale_b);
 return out;
 }
 
