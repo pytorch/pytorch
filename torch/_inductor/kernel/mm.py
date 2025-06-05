@@ -42,6 +42,7 @@ from ..utils import (
     get_tma_workspace_arg,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
+    use_ck_tile_gemm_template,
     use_cpp_gemm_template,
     use_cutlass_template,
     use_decompose_k_choice,
@@ -724,6 +725,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
+    if is_nonzero and use_ck_tile_gemm_template(layout, m, n, k):
         CKTileGemmTemplate.add_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_gemm_template(layout, mat1, mat2):
