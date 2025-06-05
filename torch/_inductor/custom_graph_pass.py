@@ -52,6 +52,7 @@ class CustomGraphPass(ABC):
         to skip inductor code caching entirely.
         """
 
+
 class CustomGraphModulePass(ABC):
     """
     Implement this interface for custom Graph passes:

@@ -28,8 +28,8 @@ from torch._inductor.codecache import (
     TensorMetadataAndValues,
 )
 from torch._inductor.custom_graph_pass import (
-    CustomGraphPass,
     CustomGraphModulePass,
+    CustomGraphPass,
     get_hash_for_files,
 )
 from torch._inductor.graph import GraphLowering
