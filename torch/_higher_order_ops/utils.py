@@ -1046,3 +1046,10 @@ def materialize_callable_in_args(op: HopInstance, args, kwargs):
             materialized_args.append(flat_args[i])
 
     return pytree.tree_unflatten(materialized_args, flat_spec)
+
+
+def _has_gen_schema(op: HigherOrderOperator):
+    method = "gen_schema"
+    return hasattr(type(op), method) and getattr(type(op), method) is not getattr(
+        HigherOrderOperator, method
+    )
