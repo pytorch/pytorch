@@ -71,9 +71,6 @@ Tensor cross(const Tensor & input, const Tensor & other, const std::optional<int
 }
 
 Tensor & cross_out(const Tensor & input, const Tensor & other, const std::optional<int64_t> dimension, Tensor & out) {
-  at::assert_no_internal_overlap(out);
-  at::assert_no_overlap(out, input);
-  at::assert_no_overlap(out, other);
   auto dim = _default_cross_dim(dimension, input.sym_sizes());
   return at::linalg_cross_out(out, input, other, dim);
 }
@@ -81,6 +78,9 @@ Tensor & cross_out(const Tensor & input, const Tensor & other, const std::option
 
 TORCH_IMPL_FUNC(linalg_cross_out)
 (const Tensor & input, const Tensor & other, int64_t dim, const Tensor & out) {
+  at::assert_no_internal_overlap(out);
+  at::assert_no_overlap(out, input);
+  at::assert_no_overlap(out, other);
   dim = maybe_wrap_dim(dim, input.dim());
   auto out_size = out.sizes();
   Tensor input_broadcasted = input.expand(out_size);
