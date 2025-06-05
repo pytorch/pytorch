@@ -1485,12 +1485,29 @@ void initJitScriptBindings(PyObject* module) {
           "__call__",
           [](py::args args, const py::kwargs& kwargs) {
             HANDLE_TH_ERRORS
-            // see: [pybind11 varargs]
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
-            Function& callee = *strongPtr.function_;
-            py::object result = invokeScriptFunctionFromPython(
-                callee, tuple_slice(std::move(args), 1), kwargs);
-            return result;
+            if (py::module::import("torch")
+                    .attr("compiler")
+                    .attr("is_exporting")()
+                    .cast<bool>()) {
+              TORCH_CHECK(
+                  py::hasattr(args[0], py::str("_torchdynamo_inline")),
+                  "When export scripted function ",
+                  strongPtr.function_->name(),
+                  "we cannot find its _torchdynamo_inline attribute, which stores non scripted kcallable. ",
+                  "Please file an issue to PyTorch if you see this error.");
+
+              // remove the function itself with args[1:]
+              py::slice slice0(1, args.size(), 1);
+              return args[0].attr("_torchdynamo_inline")(
+                  *args[slice0], **kwargs);
+            } else {
+              // see: [pybind11 varargs]
+              Function& callee = *strongPtr.function_;
+              py::object result = invokeScriptFunctionFromPython(
+                  callee, tuple_slice(std::move(args), 1), kwargs);
+              return result;
+            }
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def(

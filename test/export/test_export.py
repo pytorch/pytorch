@@ -616,6 +616,24 @@ graph():
     return (1,)""",
         )
 
+    def test_inline_script_function(self):
+        @torch.jit.script
+        def _forward(x: torch.Tensor):
+            if torch.jit.is_scripting():
+                return x.cos()
+            return x.sin()
+
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return _forward(x)
+
+        x = torch.randn(3, 4)
+        ep = torch.export.export(M(), (x,))
+        res = ep.module()(x)
+        # We're inlining the original _forward function
+        # instead of the scripted function, so we get x.sin()
+        self.assertEqual(res, x.sin())
+
     def test_no_tensor_computation_2(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
