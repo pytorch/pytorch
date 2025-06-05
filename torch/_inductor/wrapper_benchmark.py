@@ -407,7 +407,7 @@ def collect_memory_snapshot(
 
 # With AOTAutograd cache, we directly call the compiled module. So prevent
 # Dynamo from reentering
-@torch.compiler.disable
+@torch.compiler.disable  # type: ignore[misc]
 def compiled_module_main(
     benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
 ) -> None:
