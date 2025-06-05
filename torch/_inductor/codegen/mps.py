@@ -6,12 +6,14 @@ import functools
 import itertools
 import logging
 import math
+from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
+from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -786,6 +788,11 @@ class MetalKernel(SIMDKernel):
             if not V.graph.cpp_wrapper:
                 for header in self.headers:
                     code.writeline(f"#include <c10/metal/{header}.h>")
+            else:
+                headers = [f"#include <c10/metal/{header}.h>" for header in self.headers]
+                header_contents = _embed_headers(headers, [Path(__file__).parent.parent.parent / "include"], set())
+                code.writeline(header_contents)
+
             if self.inside_reduction:
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
