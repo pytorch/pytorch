@@ -3301,9 +3301,9 @@ def native_layer_norm(
 
     input = contiguous(input)
     if weight is not None:
-        weight = weight.contiguous()
+        weight = contiguous(weight)
     if bias is not None:
-        bias = bias.contiguous()
+        bias = contiguous(bias)
 
     axis = input.ndim - normalized_ndim
     reduction_dims = list(range(axis, input.ndim))
