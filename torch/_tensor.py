@@ -219,7 +219,13 @@ class Tensor(torch._C.TensorBase):
                             "please open an issue on PyTorch's GitHub."
                         )
                 else:
-                    new_tensor = self.new_empty([])
+                    def create_new_tensor():
+                        if torch._utils.staging_copy_context.stager is not None:
+                            return self.new_empty([], device = "cpu")
+                        else:
+                            return self.new_empty([])
+
+                    new_tensor = create_new_tensor()
                     if type(new_tensor) is not type(self):
                         raise RuntimeError(
                             "The default implementation of __deepcopy__() for non-wrapper subclasses "
