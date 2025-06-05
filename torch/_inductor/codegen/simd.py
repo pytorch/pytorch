@@ -1259,8 +1259,8 @@ class SIMDScheduling(BaseScheduling):
         done = OrderedSet[scheduler.BaseSchedulerNode]()
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
-        not_ready_yet_nodes = OrderedSet[str]()
-        current_loop_buffer_usage = OrderedSet[str]()
+        not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
+        current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
         maybe_split_index: Optional[int] = None
 
         def fits_in_main_body(n):
@@ -2327,7 +2327,7 @@ class SIMDScheduling(BaseScheduling):
 
             return default_tiling, None
 
-        seen_names = OrderedSet[str]()
+        seen_names: OrderedSet[str] = OrderedSet()
         candidate_tiles: Counter[CandidateTiling] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
             for candidate_tiling in cls.candidate_tilings(node, numel, reduction_numel):
