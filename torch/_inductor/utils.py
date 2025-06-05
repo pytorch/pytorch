@@ -67,7 +67,6 @@ from torch.utils._pytree import tree_map_only
 OPTIMUS_EXCLUDE_POST_GRAD = [
     "activation_quantization_aten_pass",
 ]
-
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
 
@@ -2338,6 +2337,10 @@ def contains_wait(snode: BaseSchedulerNode) -> bool:
         return any(contains_wait(x) for x in snode.snodes)
     else:
         return is_wait(snode.node)
+
+
+def contains_collective_or_wait(snodes: list[BaseSchedulerNode]) -> bool:
+    return any(contains_collective(snode) or contains_wait(snode) for snode in snodes)
 
 
 def is_fallback_op(

@@ -9,8 +9,10 @@ from typing import Callable, TYPE_CHECKING, TypedDict, Union
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
+from . import config
+
 from .ir import MultiOutputLayout, NoneLayout
-from .utils import get_dtype_size, is_wait
+from .utils import contains_collective_or_wait, get_dtype_size, is_wait
 from .virtualized import V
 
 
@@ -647,6 +649,9 @@ def reorder_for_peak_memory(
     """
 
     torch_log.info("Reordering for peak memory -- %d nodes", len(nodes))
+
+    if config.disable_peak_mem_reorder_with_collectives and contains_collective_or_wait(nodes):
+        return nodes
 
     estimated_peak_memory, name_to_freeable_input_buf = prepare_planning_info(
         nodes,
