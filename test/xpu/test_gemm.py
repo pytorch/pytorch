@@ -1344,6 +1344,26 @@ class TestBasicGEMM(TestCase):
             mean_err = ((res - ref).abs() / ref).mean()
             self.assertTrue(mean_err < 0.05)
 
+    def test_mm_with_offset(self, device):
+        from torch._dynamo.testing import rand_strided
+
+        offset = 997
+        a = rand_strided(
+            (2, 4, 128, 64),
+            (65536, 16384, 64, 1),
+            dtype=torch.float16,
+            device=device,
+            extra_size=offset,
+        )
+        a = a.as_strided((2, 4, 128, 64), (65536, 16384, 64, 1), storage_offset=offset)
+        b = rand_strided(
+            (2, 4, 64, 256), (65536, 16384, 1, 64), dtype=torch.float16, device=device
+        )
+
+        gpu_out = torch.matmul(a, b)
+        cpu_out = torch.matmul(a.cpu(), b.cpu())
+        self.assertEqual(gpu_out.cpu(), cpu_out)
+
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
 

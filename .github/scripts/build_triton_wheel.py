@@ -65,6 +65,7 @@ def build_triton(
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
+
         triton_repo = "https://github.com/openai/triton"
         if device == "rocm":
             triton_pkg_name = "pytorch-triton-rocm"
@@ -101,11 +102,19 @@ def build_triton(
             )
             print("ROCm libraries setup for triton installation...")
 
-        check_call(
-            [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
+        # old triton versions have setup.py in the python/ dir,
+        # new versions have it in the root dir.
+        triton_setupdir = (
+            triton_basedir
+            if (triton_basedir / "setup.py").exists()
+            else triton_pythondir
         )
 
-        whl_path = next(iter((triton_pythondir / "dist").glob("*.whl")))
+        check_call(
+            [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_setupdir, env=env
+        )
+
+        whl_path = next(iter((triton_setupdir / "dist").glob("*.whl")))
         shutil.copy(whl_path, Path.cwd())
 
         if device == "rocm":

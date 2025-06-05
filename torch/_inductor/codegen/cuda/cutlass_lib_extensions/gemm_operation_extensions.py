@@ -133,16 +133,6 @@ ${compile_guard_end}
 
         def emit(self, operation):
             """Given a gem operation, emits a template definition of the operation"""
-            _LOGGER.debug("*** EmitGemmConfigurationLibrary::emit(operation)")
-            _LOGGER.debug(
-                "***   operation.procedural_name(): %s", operation.procedural_name()
-            )
-            _LOGGER.debug(
-                "***   tile_shape: %s", str(operation.tile_description.tile_shape)
-            )
-            _LOGGER.debug(
-                "***   warp_count: %s", str(operation.tile_description.warp_count)
-            )
 
             opcode_class_main = operation.tile_description.math_instruction.opcode_class
             opcode_class_epi = opcode_class_main

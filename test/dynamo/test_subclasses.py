@@ -1113,9 +1113,11 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 elif isinstance(result, (tuple, list)):
                     # Preserve the original type (tuple or list)
                     wrapped = [
-                        cls(x, quant_type=quant_type)
-                        if isinstance(x, torch.Tensor)
-                        else x
+                        (
+                            cls(x, quant_type=quant_type)
+                            if isinstance(x, torch.Tensor)
+                            else x
+                        )
                         for x in result
                     ]
                     return type(result)(wrapped)
@@ -2535,9 +2537,9 @@ class GraphModule(torch.nn.Module):
         clone_1: "f32[3, s16]" = torch.ops.aten.clone.default(primals_3);  primals_3 = None
 
         view: "f32[3*s16]" = torch.ops.aten.view.default(clone, [-1])
-        sym_numel_default: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone)
+        sym_size_int_2: "Sym(3*s16)" = torch.ops.aten.sym_size.int(view, 0)
         view_1: "f32[3*s16]" = torch.ops.aten.view.default(clone_1, [-1])
-        return (clone, view, view_1, sym_numel_default, clone_1, primals_5)
+        return (clone, view, view_1, sym_size_int_2, clone_1, primals_5)
 """,  # noqa: B950
         )
 
@@ -2591,9 +2593,9 @@ class GraphModule(torch.nn.Module):
         clone_1: "f32[3, s16]" = torch.ops.aten.clone.default(primals_3);  primals_3 = None
 
         view: "f32[3*s16]" = torch.ops.aten.view.default(clone, [-1])
-        sym_numel_default: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone)
+        sym_size_int_2: "Sym(3*s16)" = torch.ops.aten.sym_size.int(view, 0)
         view_1: "f32[3*s16]" = torch.ops.aten.view.default(clone_1, [-1])
-        return (clone, view, view_1, sym_numel_default, clone_1, primals_5)
+        return (clone, view, view_1, sym_size_int_2, clone_1, primals_5)
 """,  # noqa: B950
         )
 

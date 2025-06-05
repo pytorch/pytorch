@@ -133,6 +133,10 @@ class TuningProcess:
             "TORCH_WARM_POOL": "0",
             # Some internal usages need a modified LD_LIBRARY_PATH.
             "LD_LIBRARY_PATH": get_ld_library_path(),
+            # This will cause the subprocs to profile using the profiler.
+            "TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING": "1"
+            if config.profile_bandwidth_with_do_bench_using_profiling
+            else "0",
         }
         if self.device is not None:
             extra_env[CUDA_VISIBLE_DEVICES] = str(self.device)

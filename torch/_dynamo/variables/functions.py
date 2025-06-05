@@ -1390,6 +1390,13 @@ class SkipFunctionVariable(VariableTracker):
                     "Remove the `torch._dynamo.graph_break()` call.",
                 ],
             )
+        elif self.value is torch._dynamo.skip_frame:
+            skip_frame_msg = kwargs.get("msg", None)
+            if skip_frame_msg:
+                skip_frame_msg = skip_frame_msg.as_python_constant()
+            raise SkipFrame(
+                f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}"
+            )
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
