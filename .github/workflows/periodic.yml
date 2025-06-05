@@ -193,15 +193,15 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda12_6-py3-gcc11-slow-gradcheck-test:
-    name: linux-jammy-cuda12.6-py3-gcc11-slow-gradcheck
+  linux-jammy-cuda12_8-py3-gcc11-slow-gradcheck-test:
+    name: linux-jammy-cuda12.8-py3-gcc11-slow-gradcheck
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-cuda12_6-py3-gcc11-slow-gradcheck-build
+      - linux-jammy-cuda12_8-py3-gcc11-slow-gradcheck-build
       - target-determination
     with:
-      build-environment: linux-jammy-cuda12.6-py3-gcc11-slow-gradcheck
-      docker-image: ${{ needs.linux-jammy-cuda12_6-py3-gcc11-slow-gradcheck-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_6-py3-gcc11-slow-gradcheck-build.outputs.test-matrix }}
+      build-environment: linux-jammy-cuda12.8-py3-gcc11-slow-gradcheck
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3-gcc11-slow-gradcheck-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3-gcc11-slow-gradcheck-build.outputs.test-matrix }}
       timeout-minutes: 300
     secrets: inherit
