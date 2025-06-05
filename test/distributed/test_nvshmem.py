@@ -185,9 +185,12 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
             expert_sum = 0
             for j in range(self.world_size):
                 expert_sum += out_split_list[i][j]
-            align_pad = align - (expert_sum % align)
+            # Align up expert_sum
+            expert_sum_aligned = (expert_sum + align - 1) // align * align
+            # If 0, make it at least `align` (bc cutlass currently does not support empty bins)
+            expert_sum_aligned = max(expert_sum_aligned, align)
             # last element absorbs the padding
-            out_split_list[i][-1] += align_pad
+            out_split_list[i][-1] += expert_sum_aligned - expert_sum
 
         out_splits_padded = torch.tensor(out_split_list, device=self.device).reshape(-1)
         out_offsets = torch.cumsum(out_splits_padded, dim=0)  # inclusive scan
