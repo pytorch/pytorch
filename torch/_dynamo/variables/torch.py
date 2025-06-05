@@ -950,7 +950,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if all(isinstance(x, SymNodeVariable) for x in terms):
                 return SymNodeVariable.create(
                     tx,
-                    torch.fx.experimental.symbolic_shapes.sym_and(*(x.as_proxy() for x in terms)),
+                    torch.fx.experimental.symbolic_shapes.sym_and(
+                        *(x.as_proxy() for x in terms)
+                    ),
                     sym_num=None,
                 )
 
@@ -959,7 +961,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if all(isinstance(x, SymNodeVariable) for x in terms):
                 return SymNodeVariable.create(
                     tx,
-                    torch.fx.experimental.symbolic_shapes.sym_or(*(x.as_proxy() for x in terms)),
+                    torch.fx.experimental.symbolic_shapes.sym_or(
+                        *(x.as_proxy() for x in terms)
+                    ),
                     sym_num=None,
                 )
 
