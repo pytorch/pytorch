@@ -62,6 +62,9 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
     // attn_bias: (batch_size, nheads, seqlen_q, seqlen_k)
     // lse: (batch_size, nheads, seqlen_q)
     // randval: (batch_size, nheads, seqlen_q, seqlen_k)
+    std::cout << "MHA_FWD_CK GET ARGS DROPOUT STRIDES, SHAPE, ETC" << std::endl;
+    std::cout << dropout_randval.strides() << std::endl;
+    std::cout << "GET_ARGS: HAS_DROPOUT_RANDVAL: " << has_dropout_randval << std::endl;
 
     ck_tile::index_t stride_q = q.stride(1);
     ck_tile::index_t stride_k = k.stride(1);
@@ -278,10 +281,11 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         std::cout << "CHECKPOINT 1.A" << std::endl;
         TORCH_CHECK(has_dropout, "return_dropout_randval require p_dropout > 0");
         p = at::empty({batch_size, num_heads, seqlen_q, seqlen_k}, opts.dtype(at::kByte));
+        //p = at::empty({batch_size, num_heads, seqlen_q, seqlen_k}, opts);
     }
     else {
         std::cout << "CHECKPOINT 1.B" << std::endl;
-        p = at::empty({ 0 }, opts);
+        p = at::empty({ 0 }, opts.dtype(at::kByte));
     }
 
 
@@ -321,8 +325,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         auto philox_args = gen->philox_cuda_state(counter_offset);
 
         std::tie(drop_seed, drop_offset) = at::cuda::philox::unpack(philox_args);
-        std::cout << "DROP_SEED: " << drop_seed << std::endl;
-        std::cout << "DROP_OFST: " << drop_offset << std::endl;
+        std::cout << "MHA_FWD_CK::DROP_SEED: " << drop_seed << std::endl;
+        std::cout << "MHA_FWD_CK::DROP_OFST: " << drop_offset << std::endl;
 
         std::cout << "CHECKPOINT 2.A.B" << std::endl;
     }
@@ -376,7 +380,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         auto args =
             get_ck_fmha_fwd_args(
                 has_lse,
-                return_dropout_randval,
+                has_dropout,
                 mask,
                 batch_size,
                 seqlen_q,
@@ -397,7 +401,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         std::cout << "CHECKPOINT 5" << std::endl;
         float t = fmha_fwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
-        std::cout << "CHECKPOINT 6" << std::endl;
+        std::cout << "CHECKPOINT 5a" << std::endl;
     }
     else {
         std::cout << "CHECKPOINT BAD" << std::endl;
@@ -407,11 +411,16 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     }
     std::cout << "CHECKPOINT 6" << std::endl;
     if (seqlenq_ngroups_swapped) {
+        std::cout << "SWAPPING" << std::endl;
         out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
         q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
     std::cout << "CHECKPOINT OUT" << std::endl;
+    std::cout << "CK INTERNALS RETURNED RANDVAL" << std::endl;
+    std::cout << p << std::endl;
+    std::cout << "CK INTERNAL OUT" << std::endl;
+    std::cout << out << std::endl;
     return {out, q_padded, k_padded, v_padded, softmax_lse, rng_state, _unused, p};
 }
 } //namespace pytorch_flash

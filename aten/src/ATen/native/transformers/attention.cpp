@@ -751,7 +751,7 @@ Tensor scaled_dot_product_attention(
         // We need to calculate the scale based off the OG head dim size
         auto og_scale = sdp::calculate_scale(query_, scale);
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
-            query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.guard_float("attention.cpp", 735));
+            query_padded, key_padded, value_padded, dropout_p, is_causal, true /*return_debug_mask*/, og_scale.guard_float("attention.cpp", 735));
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       }
       // For the CPU case we do not need to pad the last dim
@@ -912,7 +912,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     if (dropout_p > 0.0) {
       if (dropout_mask.has_value()) {
         std::cout << "dtype: " << dropout_mask->dtype() << std::endl;
-        std::cout << "DROPOUT_MASK: " << dropout_mask.value() << std::endl;
+        std::cout << "attention.cpp MATH: DROPOUT_MASK: " << dropout_mask.value() << std::endl;
         // In order to validate the correctness of the fused kernels, we need to
         // use the same dropout mask in order to compare the results.
         TORCH_WARN_ONCE("Dropout mask should only be used for testing purposes.");

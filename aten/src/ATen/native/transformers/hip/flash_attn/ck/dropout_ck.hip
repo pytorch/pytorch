@@ -29,6 +29,7 @@ at::Tensor rand_uniform_int(
     const at::Tensor& out_pattern) // [Batches, num_head, query_len, key_len]
 {
     std::cout << "ANDY LUGO" << std::endl;
+    std::cout << "dropout probability: " << dropout_prob << std::endl;
   int B = out_pattern.size(0);
   int num_heads = out_pattern.size(1);
   int M = out_pattern.size(2);
@@ -51,7 +52,8 @@ at::Tensor rand_uniform_int(
 
   int64_t philox_seed = std::get<0>(seeds);
   int64_t philox_offset = std::get<1>(seeds);
-
+  std::cout << "CUSTOM SEED: " << philox_seed << std::endl;
+  std::cout << "CUSTOM OFST: " << philox_offset << std::endl;
   at::Tensor randvals;
 
   randvals = at::empty(
@@ -72,7 +74,6 @@ at::Tensor rand_uniform_int(
         static_cast<int>(randvals.stride(1)),
         static_cast<int>(randvals.stride(0)),
         {philox_seed, philox_offset});
-
     dim3 kGridSize = FmhaRandUniformKernel_::GridSize(B, num_heads, M, N);
     constexpr dim3 kBlockSize = FmhaRandUniformKernel_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu =
@@ -85,7 +86,8 @@ at::Tensor rand_uniform_int(
   }
 
   (void)hipStreamSynchronize(stream);
-
+  std::cout << "CUSTOM RETURNED RANDVALS" << std::endl;
+  std::cout << randvals << std::endl;
   return randvals;
 }
 

@@ -423,10 +423,10 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     std::cout << "drop_ofst address  : " << static_cast<const void*>(drop_seed_offset.second) << std::endl;
     std::cout << "philox_seed address: " << static_cast<const void*>(philox_seed.data_ptr()) << std::endl;
     std::cout << "philox_ofst address: " << static_cast<const void*>(philox_offset.data_ptr()) << std::endl;
-    std::cout << "bad PHILOX_SEED device: " << philox_seed.device() << std::endl;
-    std::cout << "bad PHILOX_OFST device: " << philox_offset.device() << std::endl;
-    std::cout << "bad PHILOX_SEED dtype : " << philox_seed.dtype() << std::endl;
-    std::cout << "bad PHILOX_OFST dtype : " << philox_offset.dtype() << std::endl;
+    std::cout << "PT_MHA_BWD_CK PHILOX_SEED device: " << philox_seed.device() << std::endl;
+    std::cout << "PT_MHA_BWD_CK PHILOX_OFST device: " << philox_offset.device() << std::endl;
+    std::cout << "PT_MHA_BWD_CK PHILOX_SEED dtype : " << philox_seed.dtype() << std::endl;
+    std::cout << "PT_MHA_BWD_CK PHILOX_OFST dtype : " << philox_offset.dtype() << std::endl;
 // ===========================================================================
 
     if (seqlen_q > 0) {
