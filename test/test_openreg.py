@@ -88,6 +88,75 @@ class TestPrivateUse1(TestCase):
         torch.abs(x_openreg, out=o_openreg[:, :, 0:6:3])
         self.assertEqual(o_cpu, o_openreg.cpu())
 
+    def test_backend_tensor_type(self):
+        dtypes_map = {
+            torch.bool: "torch.openreg.BoolTensor",
+            torch.double: "torch.openreg.DoubleTensor",
+            torch.float32: "torch.openreg.FloatTensor",
+            torch.half: "torch.openreg.HalfTensor",
+            torch.int32: "torch.openreg.IntTensor",
+            torch.int64: "torch.openreg.LongTensor",
+            torch.int8: "torch.openreg.CharTensor",
+            torch.short: "torch.openreg.ShortTensor",
+            torch.uint8: "torch.openreg.ByteTensor",
+        }
+
+        for dtype, str in dtypes_map.items():
+            x = torch.empty(4, 4, dtype=dtype, device="openreg")
+            self.assertTrue(x.type() == str)
+
+    def test_backend_tensor_methods(self):
+        x = torch.empty(4, 4)
+        self.assertFalse(x.is_openreg)  # type: ignore[misc]
+
+        y = x.openreg(torch.device("openreg"))  # type: ignore[misc]
+        self.assertTrue(y.is_openreg)  # type: ignore[misc]
+        z = x.openreg(torch.device("openreg:0"))  # type: ignore[misc]
+        self.assertTrue(z.is_openreg)  # type: ignore[misc]
+        n = x.openreg(0)  # type: ignore[misc]
+        self.assertTrue(n.is_openreg)  # type: ignore[misc]
+
+    @unittest.skip("Need to support Parameter in openreg")
+    def test_backend_module_methods(self):
+        class FakeModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.nn.Parameter(torch.randn(3, 3))
+
+            def forward(self):
+                pass
+
+        module = FakeModule()
+        self.assertEqual(module.x.device.type, "cpu")
+        module.openreg()  # type: ignore[misc]
+        self.assertEqual(module.x.device.type, "openreg")
+
+    @unittest.skip("Need to support untyped_storage in openreg")
+    def test_backend_storage_methods(self):
+        x = torch.empty(4, 4)
+
+        x_cpu = x.storage()
+        self.assertFalse(x_cpu.is_openreg)  # type: ignore[misc]
+        x_openreg = x_cpu.openreg()  # type: ignore[misc]
+        self.assertTrue(x_openreg.is_openreg)  # type: ignore[misc]
+
+        y = torch.empty(4, 4)
+
+        y_cpu = y.untyped_storage()
+        self.assertFalse(y_cpu.is_openreg)  # type: ignore[misc]
+        y_openreg = y_cpu.openreg()  # type: ignore[misc]
+        self.assertTrue(y_openreg.is_openreg)  # type: ignore[misc]
+
+    def test_backend_packed_sequence_methods(self):
+        x = torch.rand(5, 3)
+        y = torch.tensor([1, 1, 1, 1, 1])
+
+        z_cpu = torch.nn.utils.rnn.PackedSequence(x, y)
+        self.assertFalse(z_cpu.is_openreg)  # type: ignore[misc]
+
+        z_openreg = z_cpu.openreg()  # type: ignore[misc]
+        self.assertTrue(z_openreg.is_openreg)  # type: ignore[misc]
+
     def test_backend_fallback(self):
         pass
 
@@ -246,6 +315,12 @@ class TestOpenReg(TestCase):
         y = x.expand(3, 2)
         self.assertEqual(y.to(device="cpu"), torch.tensor([[1, 1], [2, 2], [3, 3]]))
         self.assertEqual(x.data_ptr(), y.data_ptr())
+
+    def test_quantize(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32, device="openreg")
+        quantized_tensor = torch.quantize_per_tensor(x, 0.1, 10, torch.qint8)
+        self.assertEqual(quantized_tensor.device, torch.device("openreg:0"))
+        self.assertEqual(quantized_tensor.dtype, torch.qint8)
 
 
 if __name__ == "__main__":
