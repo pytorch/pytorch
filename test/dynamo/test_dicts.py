@@ -18,6 +18,7 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class SimpleDict(dict):
@@ -956,12 +957,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
             a = {"one": torch.ones(1)}
             return a | b
 
-        from torch._dynamo.exc import InternalTorchDynamoError
+        from torch._dynamo.exc import Unsupported
 
         for arg in args:
-            with self.assertRaisesRegex(
-                InternalTorchDynamoError, "unsupported operand type"
-            ):
+            with self.assertRaisesRegex(Unsupported, "Observed exception"):
                 _ = fn(arg)
 
     def test_builtin_or_with_diff_keys(self):
@@ -1003,6 +1002,277 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = torch.compile(f, backend="eager", fullgraph=True)(x)
 
         self.assertEqual(ref, res)
+
+
+class DictMethodsTests(torch._dynamo.test_case.TestCase):
+    thetype = dict
+
+    # Methods:
+    # + clear
+    # + copy
+    # + fromkeys
+    # + get
+    # + items
+    # + keys
+    # + pop
+    # + popitem
+    # + setdefault
+    # + update
+    # + values
+    # BinOps:
+    # ==, !=, |
+
+    def setUp(self):
+        torch._dynamo.config.enable_trace_unittest = True
+        super().setUp()
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = False
+        return super().tearDown()
+
+    def assertEqual(self, x, y):
+        self.assertTrue(x == y, f"Expected {x} to be equal to {y}")
+
+    def assertNotEqual(self, x, y):
+        self.assertFalse(x == y, f"Expected {x} to not be equal to {y}")
+
+    @make_dynamo_test
+    def test_cmp_eq(self):
+        d1 = self.thetype({"a": 1, "b": 2})
+        d2 = self.thetype({"a": 1, "b": 2})
+        d3 = self.thetype({"a": 1, "b": 3})
+        self.assertEqual(d1, d2)
+        self.assertNotEqual(d1, d3)
+
+        # Test the == operator
+        self.assertEqual(d1 == d2, True)
+        self.assertEqual(d1 == d3, False)
+
+        # Test the __eq__ method
+        self.assertEqual(d1.__eq__(d2), True)
+        self.assertEqual(d1.__eq__(d3), False)
+
+        # Test Dict.__eq__
+        self.assertEqual(self.thetype.__eq__(d1, d2), True)
+        self.assertEqual(self.thetype.__eq__(d1, d3), False)
+
+    @make_dynamo_test
+    def test_cmp_ne(self):
+        d1 = self.thetype({"a": 1, "b": 2})
+        d2 = self.thetype({"a": 1, "b": 2})
+        d3 = self.thetype({"a": 1, "b": 3})
+        self.assertNotEqual(d1, d3)
+        self.assertEqual(d1, d2)
+
+        # Test the != operator
+        self.assertEqual(d1 != d3, True)
+        self.assertEqual(d1 != d2, False)
+
+        # Test the __ne__ method
+        self.assertEqual(d1.__ne__(d3), True)
+        self.assertEqual(d1.__ne__(d2), False)
+
+        # Test Dict.__ne__
+        self.assertEqual(self.thetype.__ne__(d1, d3), True)
+        self.assertEqual(self.thetype.__ne__(d1, d2), False)
+
+    @make_dynamo_test
+    def test_binop_or(self):
+        d1 = self.thetype({"a": 1, "b": 2})
+        d2 = self.thetype({"b": 3, "c": 4})
+
+        # Test the | operator
+        self.assertEqual(d1 | d2, {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(d2 | d1, {"a": 1, "b": 2, "c": 4})
+
+        # Test the __or__ method
+        self.assertEqual(d1.__or__(d2), {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(d2.__or__(d1), {"a": 1, "b": 2, "c": 4})
+
+        # Test Dict.__or__
+        self.assertEqual(self.thetype.__or__(d1, d2), {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(self.thetype.__or__(d2, d1), {"a": 1, "b": 2, "c": 4})
+
+        # Test with non-dict types
+        self.assertRaises(TypeError, lambda: d1 | 1)
+
+    @make_dynamo_test
+    def test_clear(self):
+        d = self.thetype({"a": 1, "b": 2})
+        d.clear()
+        self.assertEqual(d, {})
+
+        # Test that clear returns None
+        d = self.thetype({"a": 1, "b": 2})
+        self.assertIsNone(d.clear())
+
+        # Test Dict.clear
+        d = self.thetype({"a": 1, "b": 2})
+        self.thetype.clear(d)
+        self.assertEqual(d, {})
+
+        # Test invalid usage
+        self.assertRaises(TypeError, d.clear, 1)
+
+    @make_dynamo_test
+    def test_copy(self):
+        d = self.thetype({"a": 1, "b": 2})
+        d2 = d.copy()
+        self.assertEqual(d, d2)
+
+        # Test that copy returns a new instance
+        self.assertIsNot(d, d2)
+
+        # Test Dict.copy
+        self.assertEqual(self.thetype.copy(d), d2)
+
+        # Test invalid usage
+        self.assertRaises(TypeError, d.copy, 1)
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_fromkeys(self):
+        d = self.thetype.fromkeys(["a", "b"], 1)
+        self.assertEqual(d, {"a": 1, "b": 1})
+        p = self.thetype.fromkeys(["a", "b"], None)
+        self.assertEqual(p, {"a": None, "b": None})
+
+        # Test Dict.fromkeys
+        d2 = self.thetype.fromkeys(["c", "d"], 2)
+        self.assertEqual(d2, {"c": 2, "d": 2})
+
+        # Test invalid usage
+        self.assertRaises(TypeError, self.thetype.fromkeys)
+        self.assertRaises(TypeError, self.thetype.fromkeys, 1, 2)
+
+    @make_dynamo_test
+    def test_get(self):
+        d = self.thetype({"a": 1, "b": 2})
+        self.assertEqual(d.get("a"), 1)
+        self.assertEqual(d.get("c", 3), 3)
+        self.assertIsNone(d.get("c"))
+
+        # Test Dict.get
+        self.assertEqual(self.thetype.get(d, "b"), 2)
+
+        # Test invalid usage
+        self.assertRaises(TypeError, d.get)
+
+    @make_dynamo_test
+    def test_items(self):
+        d = self.thetype({"a": 1, "b": 2})
+        items = d.items()
+        self.assertEqual(set(items), {("a", 1), ("b", 2)})
+
+        # Test Dict.items
+        self.assertEqual(set(self.thetype.items(d)), {("a", 1), ("b", 2)})
+
+        # Test invalid usage
+        self.assertRaises(TypeError, d.items, 1)
+
+    @make_dynamo_test
+    def test_keys(self):
+        d = self.thetype({"a": 1, "b": 2})
+        keys = d.keys()
+        self.assertEqual(set(keys), {"a", "b"})
+
+        # Test Dict.keys
+        self.assertEqual(set(self.thetype.keys(d)), {"a", "b"})
+
+        # Test invalid usage
+        self.assertRaises(TypeError, d.keys, 1)
+
+    @make_dynamo_test
+    def test_pop(self):
+        d = self.thetype({"a": 1, "b": 2})
+        self.assertEqual(d.pop("a"), 1)
+        self.assertEqual(d, {"b": 2})
+        self.assertIsNone(d.pop("c", None))
+
+        # Test Dict.pop
+        self.assertEqual(self.thetype.pop(d, "b"), 2)
+
+        # Test invalid usage
+        self.assertRaises(KeyError, d.pop, "c")
+        self.assertRaises(TypeError, d.pop)
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_popitem(self):
+        d = self.thetype({"a": 1})
+        key, value = d.popitem()
+        self.assertEqual(key, "a")
+        self.assertEqual(value, 1)
+        self.assertEqual(len(d), 0)
+        # check LIFO
+        d = self.thetype()
+        d["a"] = 1
+        d["b"] = 2
+        self.assertEqual(d.popitem(), ("b", 2))
+
+        # Test Dict.popitem
+        key, value = self.thetype.popitem(d)
+        self.assertEqual(key, "a")
+        self.assertEqual(value, 1)
+
+        # Test invalid usage
+        self.assertRaises(TypeError, d.popitem, 1)
+
+    @make_dynamo_test
+    def test_setdefault(self):
+        d = self.thetype({"a": 1, "b": 2})
+        self.assertEqual(d.setdefault("a", 3), 1)
+        self.assertEqual(d.setdefault("c", 3), 3)
+        self.assertIsNone(d.setdefault("d"), None)
+        self.assertEqual(d, {"a": 1, "b": 2, "c": 3, "d": None})
+
+        # Test Dict.setdefault
+        self.assertEqual(self.thetype.setdefault(d, "e", 5), 5)
+
+        # Test invalid usage
+        self.assertRaises(TypeError, d.setdefault)
+        self.assertRaises(TypeError, d.setdefault, [[]])
+
+    @make_dynamo_test
+    def test_update(self):
+        d = self.thetype({"a": 1, "b": 2})
+        d.update({"b": 3, "c": 4})
+        self.assertEqual(d, {"a": 1, "b": 3, "c": 4})
+
+        # Test with another dict
+        d2 = self.thetype({"d": 5})
+        d.update(d2)
+        self.assertEqual(d, {"a": 1, "b": 3, "c": 4, "d": 5})
+
+        # Test Dict.update
+        d3 = self.thetype({"e": 6})
+        self.thetype.update(d, d3)
+        self.assertEqual(d, {"a": 1, "b": 3, "c": 4, "d": 5, "e": 6})
+
+        # Test with keyword arguments
+        d.update(f=7, g=8)
+        self.assertEqual(d, {"a": 1, "b": 3, "c": 4, "d": 5, "e": 6, "f": 7, "g": 8})
+
+        # Test Dict.update with keyword arguments
+        self.thetype.update(d, h=9, i=10)
+        self.assertEqual(
+            d, {"a": 1, "b": 3, "c": 4, "d": 5, "e": 6, "f": 7, "g": 8, "h": 9, "i": 10}
+        )
+
+        # Test invalid usage
+        self.assertRaises(TypeError, d.update, 1)
+
+    @make_dynamo_test
+    def test_values(self):
+        d = self.thetype({"a": 1, "b": 2})
+        values = d.values()
+        self.assertEqual(set(values), {1, 2})
+
+        # Test Dict.values
+        self.assertEqual(set(self.thetype.values(d)), {1, 2})
+
+        # Test invalid usage
+        self.assertRaises(TypeError, d.values, 1)
 
 
 if __name__ == "__main__":
