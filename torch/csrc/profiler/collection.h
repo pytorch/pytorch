@@ -421,7 +421,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   std::weak_ptr<Result> parent_;
   std::vector<std::shared_ptr<Result>> children_;
   bool finished_{false};
-
+  bool hidden_{false};
   const torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
 
  private:
