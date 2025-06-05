@@ -167,10 +167,10 @@ void quantized_matmul(
 void gpu_float_sdpa(
     int batch_size,
     int seq_len_q,
-    int seq_len_k,
-    int num_head,
+    int seq_len_kv,
+    int num_head_q,
     int num_head_kv,
-    int head_dim,
+    int head_dim_qk,
     int head_dim_v,
     const Tensor& query,
     const Tensor& key,
