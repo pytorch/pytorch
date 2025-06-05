@@ -50,8 +50,25 @@ class CUDAGraph(torch._C._CUDAGraph):
         This API is in beta and may change in future releases.
     """
 
-    def __new__(cls):
-        return super().__new__(cls)
+    def __new__(cls, *args, **kwargs):
+        r"""TODO(galv): Wait, why isn't this an __init__ method? Does
+        putting the docstring here work as intended?
+
+        Previously, the graph would always and immediately be
+        instantiated at the end of capture_end(). Then, the
+        cudaGraph_t would be destroyed. However, that prevents users
+        from modifying the cudaGraph_t before the cudaGraphExec_t is
+        made.  Since replay() is expected to be run on
+        performance-critical paths, we want to retain the prior
+        behavior of instantiating at the end of graph capture to
+        prevent performance degredation of the first call of replay()
+        in existing performance-sensitive code. If a user knows that
+        they will be modifying the cudaGraph_t after graph capture is
+        done, they can set instantiate_eagerly_ to true to avoid the
+        overhead of instantiating twice.
+
+        """
+        return super().__new__(cls, *args, **kwargs)
 
     def capture_begin(self, pool=None, capture_error_mode="global"):
         r"""Begin capturing CUDA work on the current stream.
@@ -82,6 +99,12 @@ class CUDAGraph(torch._C._CUDAGraph):
         which call ``capture_end`` internally.
         """
         super().capture_end()
+
+    def instantiate(self):
+        r"""
+        TODO
+        """
+        super().instantiate()
 
     def replay(self):
         r"""Replay the CUDA work captured by this graph."""

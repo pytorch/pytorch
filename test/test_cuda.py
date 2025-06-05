@@ -51,6 +51,7 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
+    cuda_python_error_check,
     EXPANDABLE_SEGMENTS,
     freeze_rng_state,
     gcIfJetson,
@@ -77,6 +78,7 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
+    TEST_CUDA_PYTHON,
     TEST_NUMPY,
     TEST_WITH_ROCM,
     TestCase,
@@ -3505,6 +3507,62 @@ exit(2)
         # self.assertTrue(throws_on_cuda_event("global"))
 
     @unittest.skipIf(
+        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-python must be installed",
+    )
+    @parametrize("eagerly_instantiate", [False, True])
+    def test_cuda_graph_raw_graph(self, eagerly_instantiate):
+        import cuda.bindings.runtime as cudart
+
+        graph = torch.cuda.CUDAGraph(eagerly_instantiate=eagerly_instantiate)
+        x = torch.zeros([2000], device="cuda")
+        y = torch.ones([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            z = x + y
+
+        cudart_cuda_graph = cudart.cudaGraph_t(init_value=graph.raw_cuda_graph())
+        _, num_nodes = cuda_python_error_check(
+            cudart.cudaGraphGetNodes(cudart_cuda_graph)
+        )
+        nodes, _ = cuda_python_error_check(
+            cudart.cudaGraphGetNodes(cudart_cuda_graph, num_nodes)
+        )
+        for node in nodes:
+            cuda_python_error_check(cudart.cudaGraphNodeGetType(node))
+
+        graph.replay()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @parametrize("eagerly_instantiate", [False, True])
+    def test_cuda_graph_raw_graph_reset_and_recapture(self, eagerly_instantiate):
+        graph = torch.cuda.CUDAGraph(eagerly_instantiate=eagerly_instantiate)
+        x = torch.zeros([2000], device="cuda")
+        y = torch.ones([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            z = x + y
+
+        graph.instantiate()
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(z == 1.0))
+        graph.reset()
+
+        # Don't do y += 1.0 because we want to capture a new address
+        # in the next cuda graph, to make sure we are running a new
+        # cuda graph.
+        y = y + 1.0
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            z = x + y
+
+        graph.instantiate()
+        graph.instantiate()
+        graph.replay()
+
+        self.assertTrue(torch.all(z == 2.0))
+
+    @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_cuda_graph_allocator_propagates_stream(self):
@@ -5733,6 +5791,27 @@ class TestCudaOptims(TestCase):
             scaler.update()
             self.assertEqual(scaler._scale, scale)
             self.assertEqual(scaler._growth_tracker, growth_tracker)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_simple(self):
+        s = torch.cuda.Stream()
+
+        with torch.cuda.stream(s):
+            a = torch.full((1000,), 1, device="cuda")
+            g = torch.cuda.CUDAGraph()
+            torch.cuda.empty_cache()
+            g.capture_begin()
+            b = a
+            for _ in range(10):
+                b = b + 1
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        g.replay()
+
+        self.assertEqual(b.sum().item(), 11000.0)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")

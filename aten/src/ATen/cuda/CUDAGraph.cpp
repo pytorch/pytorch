@@ -36,9 +36,10 @@ MempoolId_t graph_pool_handle() {
  * describes memory management for captures.
  */
 
-CUDAGraph::CUDAGraph()
+CUDAGraph::CUDAGraph(bool eagerly_instantiate)
   // CUDAStreams may not be default-constructed.
-  : capture_stream_(at::cuda::getCurrentCUDAStream()) {
+  : capture_stream_(at::cuda::getCurrentCUDAStream()),
+    eagerly_instantiate_(eagerly_instantiate) {
 }
 
 void CUDAGraph::register_generator_state(
@@ -138,16 +139,30 @@ void CUDAGraph::capture_end() {
                  "attempted to be captured on wrong device or stream.");
   }
 
-  // previously, the graph would immediately be instantiated at the
-  // end of capture_end() here. However, that prevents users from
-  // modifying the cudaGraph_t before the cudaGraphExec_t is made.
+  capture_ended_ = true;
 
-  // Now, the cuda graph will be lazily instantiated on the first call
-  // to replay(), unless the user explicitly calls instantiate()
-  // before hand.
+  // Previously, the graph would always and immediately be
+  // instantiated at the end of capture_end(). Then, the cudaGraph_t
+  // would be destroyed. However, that prevents users from modifying
+  // the cudaGraph_t before the cudaGraphExec_t is made.  Since
+  // replay() is expected to be run on performance-critical paths, we
+  // want to retain the prior behavior of instantiating at the end of
+  // graph capture to prevent performance degredation of the first
+  // call of replay() in existing performance-sensitive code. If a
+  // user knows that they will be modifying the cudaGraph_t after
+  // graph capture is done, they can set eagerly_instantiate_ to true
+  // to avoid the overhead of instantiating twice.
+  if (eagerly_instantiate_) {
+    instantiate();
+  }
 }
 
 void CUDAGraph::instantiate() {
+  TORCH_CHECK(capture_ended_, "capture_end() must have been called before calling instantiate");
+
+  if (has_graph_exec_) {
+    AT_CUDA_CHECK(cudaGraphExecDestroy(graph_exec_));
+  }
   // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not freed
   // between replays.
   // If Pytorch compiles and runs with a CUDA 11.4+ toolkit, there's a chance the allocator backend
@@ -250,9 +265,10 @@ void CUDAGraph::reset() {
   // and the allocator could end up in all kinds of weird states depending where failure occurred.
   // If the user catches the failure exception in a script, or is running in REPL or (god forbid)
   // a Jupyter notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
-  if (has_graph_ || has_graph_exec_) {
+  if (capture_ended_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+    capture_ended_ = false;
   }
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
@@ -266,7 +282,7 @@ void CUDAGraph::reset() {
 
 // Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
 MempoolId_t CUDAGraph::pool() {
-TORCH_CHECK(has_graph_exec_,
+TORCH_CHECK(capture_ended_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
   return mempool_id_;
 }

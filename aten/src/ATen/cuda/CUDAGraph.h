@@ -19,7 +19,7 @@ namespace cuda {
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
-  CUDAGraph();
+  CUDAGraph(bool eagerly_instantiate=false);
   ~CUDAGraph();
 
   // See Note [Explicit Registration of Generators to the CUDA Graph]
@@ -43,10 +43,10 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaGraphExec_t graph_exec_ = nullptr;
 
   // internal states so reset() can do its best cleaning up
-  // Set to true in capture_end if cudaStreamEndCapture succeeded
-  // Set back to false soon after, when graph_ is consumed by cudaGraphInstantiate
-  // to create graph_exec_, then graph_ is deleted
+  // Set to true in capture_begin if cudaStreamBeginCapture succeeded
   bool has_graph_ = false;
+  // Set to true in capture_end if cudaStreamEndCapture succeeded
+  bool capture_ended_ = false;
   // Set to true in capture_end if cudaGraphInstantiate succeeded
   bool has_graph_exec_ = false;
 
@@ -83,6 +83,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // init capture_dev_ as UNDEFINED_DEVICE to check that it stores the real device id in the destructor
   static constexpr c10::DeviceIndex UNDEFINED_DEVICE = -1;
   c10::DeviceIndex capture_dev_{UNDEFINED_DEVICE};
+
+  bool eagerly_instantiate_;
 };
 
 } // namespace cuda
