@@ -269,7 +269,7 @@ def get_nvidia_smi():
     return smi
 
 
-def _detect_linux_pkg_manager():
+def detect_linux_pkg_manager():
     if get_platform() != "linux":
         return "N/A"
     for mgr_name in ["dpkg", "dnf", "yum", "zypper"]:
@@ -279,29 +279,10 @@ def _detect_linux_pkg_manager():
     return "N/A"
 
 
-def get_linux_pkg_version(run_lambda, pkg):
-    pkg_mgr = _detect_linux_pkg_manager()
+def get_linux_pkg_version(run_lambda, pkg_name):
+    pkg_mgr = detect_linux_pkg_manager()
     if pkg_mgr == "N/A":
         return "N/A"
-
-    pkgs = {
-        "dpkg": {
-            "intel_opencl": "intel-opencl-icd",
-            "level_zero": "libze1",
-        },
-        "dnf": {
-            "intel_opencl": "intel-opencl",
-            "level_zero": "level-zero",
-        },
-        "yum": {
-            "intel_opencl": "intel-opencl",
-            "level_zero": "level-zero",
-        },
-        "zypper": {
-            "intel_opencl": "intel-opencl",
-            "level_zero": "level-zero",
-        },
-    }
 
     grep_version = {
         "dpkg": {
@@ -322,9 +303,7 @@ def get_linux_pkg_version(run_lambda, pkg):
         },
     }
 
-    assert pkg in pkgs[pkg_mgr].keys(), f"Unexpected package {pkg} found."
     field_index: int = int(_cast(int, grep_version[pkg_mgr]["field_index"]))
-    pkg_name: str = str(pkgs[pkg_mgr][pkg])
     cmd: str = str(grep_version[pkg_mgr]["command"])
     cmd = cmd.format(pkg_name)
     ret = run_and_read_all(run_lambda, cmd)
@@ -340,7 +319,25 @@ def get_intel_gpu_driver_version(run_lambda):
     lst = []
     platform = get_platform()
     if platform == "linux":
-        for pkg in ["intel_opencl", "level_zero"]:
+            pkgs = {
+            "dpkg": {
+                "intel-opencl-icd",
+                "libze1",
+            },
+            "dnf": {
+                "intel-opencl",
+                "level-zero",
+            },
+            "yum": {
+                "intel-opencl",
+                "level-zero",
+            },
+            "zypper": {
+             "intel-opencl",
+             "level-zero",
+            },
+        }.get(detect_linux_pkg_manager(), {})
+        for pkg in pkgs:
             lst.append(f"* {pkg}:\t{get_linux_pkg_version(run_lambda, pkg)}")
     if platform in ["win32", "cygwin"]:
         txt = run_and_read_all(
