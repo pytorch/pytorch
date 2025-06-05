@@ -40,7 +40,7 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
 
 
 def static_cuda_launcher_default() -> bool:
-    STATIC_CUDA_LAUNCHER_VERSION = 0
+    STATIC_CUDA_LAUNCHER_VERSION = 1
 
     if "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
         return os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1"
@@ -1115,12 +1115,23 @@ class triton:
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
+    # TODO - enable by default
+    coalesce_tiling_analysis: bool = (
+        os.environ.get(
+            "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS", "1" if not is_fbcode() else "0"
+        )
+        == "1"
+    )
+
     # limit tiling dimensions
     #   - max_tiles=1 disables tiling
-    #   - max_tiles=2 is the default
+    #   - max_tiles=2
     #   - max_tiles=3 is experimental and may have bugs
     # higher values are unsupported
-    max_tiles = 2
+
+    #  We use a max of 3 if coalesce_tiling_analysis is True, and 2 otherwise.
+    #  Note - coalesce_tiling_analysis does not yet apply to dynamic shapes.
+    max_tiles: Optional[int] = None
 
     # Prefer higher dimensional tilings. This simplifies indexing expressions, making
     # it easier to identify block pointers.
