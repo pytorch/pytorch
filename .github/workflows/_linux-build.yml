@@ -288,6 +288,7 @@ jobs:
           TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
 
           if [[ ${BUILD_ENVIRONMENT} == *"riscv64"* ]]; then
+            docker run --rm --privileged tonistiigi/binfmt:latest
             docker run --rm --privileged tonistiigi/binfmt:latest --install riscv64
           fi
 
