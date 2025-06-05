@@ -264,12 +264,24 @@ class TestOpenReg(TestCase):
     # Storage & Pin Memory
     @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_pin_memory(self):
-        cpu_a = torch.randn(10)
-        self.assertFalse(cpu_a.is_pinned())
-        pinned_a = cpu_a.pin_memory()
-        self.assertTrue(pinned_a.is_pinned())
-        slice_a = pinned_a[2:5]
-        self.assertTrue(slice_a.is_pinned())
+        tensor = torch.randn(10)
+        self.assertFalse(tensor.is_pinned())
+        pinned_tensor = tensor.pin_memory()
+        self.assertTrue(pinned_tensor.is_pinned())
+        slice_tensor = pinned_tensor[2:5]
+        self.assertTrue(slice_tensor.is_pinned())
+
+        tensor = torch.randn(10)
+        storage = tensor.storage()
+        self.assertFalse(storage.is_pinned("openreg"))
+        pinned_storage = storage.pin_memory("openreg")
+        self.assertTrue(pinned_storage.is_pinned("openreg"))
+
+        tensor = torch.randn(10)
+        untyped_storage = tensor.untyped_storage()
+        self.assertFalse(untyped_storage.is_pinned("openreg"))
+        pinned_untyped_storage = untyped_storage.pin_memory("openreg")
+        self.assertTrue(pinned_untyped_storage.is_pinned("openreg"))
 
     @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_rewrapped_storage(self):
@@ -282,6 +294,44 @@ class TestOpenReg(TestCase):
         )
         self.assertTrue(rewrapped_a.is_pinned())
         self.assertNotEqual(pinned_a.data_ptr(), rewrapped_a.data_ptr())
+
+    # Serialization
+    @unittest.skip(
+        "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function,"
+        "this pr can fix this, https://github.com/pytorch/pytorch/pull/147095"
+    )
+    def test_serialization(self):
+        storage = torch.UntypedStorage(4, device=torch.device("openreg"))
+        self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
+
+        storage = torch.UntypedStorage(4, device=torch.device("openreg:0"))
+        self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
+
+        # Need to support torch.storage.UntypedStorage first in prepare_for_sending.convert
+        # storage_cpu = torch.empty(4, 4).storage()
+        # storage_openreg = torch.serialization.default_restore_location(
+        #     storage_cpu, "openreg:0"
+        # )
+        # self.assertTrue(storage_openreg.is_openreg)  # type: ignore[misc]
+
+        tensor = torch.empty(3, 3, device="openreg")
+        self.assertEqual(torch._utils.get_tensor_metadata(tensor), {})  # type: ignore[misc]
+        metadata = {"version_number": True, "format_number": True}
+        torch._utils.set_tensor_metadata(tensor, metadata)  # type: ignore[misc]
+        self.assertEqual(torch._utils.get_tensor_metadata(tensor), metadata)  # type: ignore[misc]
+
+        # Need to support torch.storage.UntypedStorage first in prepare_for_sending.convert
+        # with tempfile.TemporaryDirectory() as tmpdir:
+        #     path = os.path.join(tmpdir, "data.pt")
+        #     torch.save(tensor, path)
+
+        #     tensor_openreg = torch.load(path)
+        #     self.assertTrue(tensor_openreg.is_openreg)
+        #     self.assertEqual(torch._utils.get_tensor_metadata(tensor_openreg), metadata)  # type: ignore[misc]
+
+        #     tensor_cpu = torch.load(path, map_location="cpu")
+        #     self.assertFalse(tensor_cpu.is_openreg)
+        #     self.assertEqual(torch._utils.get_tensor_metadata(tensor), {})  # type: ignore[misc]
 
     # Opeartors
     def test_factory(self):
