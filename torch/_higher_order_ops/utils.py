@@ -755,11 +755,11 @@ def check_input_alias_and_mutation(
         inp_out_alias_map,
         out_out_alias_map,
         mutated_inputs,
-    ) = check_input_alias_and_mutation_return_ouputs(gm, fake_args)[:-1]
+    ) = check_input_alias_and_mutation_return_outputs(gm, fake_args)[:-1]
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 
-def check_input_alias_and_mutation_return_ouputs(
+def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
     fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
 ) -> tuple[
@@ -769,6 +769,8 @@ def check_input_alias_and_mutation_return_ouputs(
     list[int],
     Union[tuple[Any, ...], list[Any]],
 ]:
+    with disable_functional_mode(), suspend_functionalization():
+        fake_args = pytree.tree_map_only(torch.Tensor, _from_fun, fake_args)
     # We want to disable active functional, proxy and fake modes if any.
     # to create a encapsulated environment for fake tensor prop
     with torch.utils._python_dispatch._disable_current_modes():
@@ -799,13 +801,10 @@ def check_input_alias_and_mutation_return_ouputs(
             if len(fake_args) == 0:
                 return torch.fx.experimental.symbolic_shapes.ShapeEnv()
 
-            prev_fake_mode = None
             for arg in fake_args:
-                if isinstance(arg, torch.Tensor):
-                    assert isinstance(arg, FakeTensor)
-                    prev_fake_mode = arg.fake_mode
-            assert prev_fake_mode is not None
-            return prev_fake_mode.shape_env
+                if isinstance(arg, FakeTensor):
+                    return arg.fake_mode.shape_env
+            return None
 
         # Clone the fake args to avoid mutating the original fake args
         with ExitStack() as ctx_stack:
@@ -1040,6 +1039,9 @@ def materialize_callable_in_args(op: HopInstance, args, kwargs):
 
 
 def _has_gen_schema(op: HigherOrderOperator):
+    # There is an InvokeQuant argument we cannot gen_schema.
+    if op is torch.ops.higher_order.invoke_quant_packed:
+        return False
     method = "gen_schema"
     return hasattr(type(op), method) and getattr(type(op), method) is not getattr(
         HigherOrderOperator, method
