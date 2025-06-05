@@ -58,8 +58,8 @@ jobs:
           else
             COMMIT_SHA="${{ github.sha }}"
           fi
-          echo "sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
-          echo "tag_name=trunk/${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "sha=${COMMIT_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "tag_name=trunk/${COMMIT_SHA}" >> "${GITHUB_OUTPUT}"
 
       - name: Validate commit SHA
         run: |
@@ -88,6 +88,7 @@ jobs:
           fi
 
       - name: Create and push tag with retry
+        id: check_tag
         env:
           TAG_NAME: ${{ steps.commit.outputs.tag_name }}
           COMMIT_SHA: ${{ steps.commit.outputs.sha }}
@@ -114,6 +115,7 @@ jobs:
           # Exit early if tag already exists
           if check_tag_exists; then
             echo "✅ Tag already exists - no action needed"
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
@@ -127,11 +129,11 @@ jobs:
 
           # Common retry function with exponential backoff
           retry_with_backoff() {
-            local command="$1"
-            local description="$2"
+            local command="${1}"
+            local description="${2}"
             local retry_count=0
 
-            while [ $retry_count -le $MAX_RETRIES ]; do
+            while [ "${retry_count}" -le "${MAX_RETRIES}" ]; do
               echo "Attempt $((retry_count + 1))/$((MAX_RETRIES + 1)): ${description}"
 
               if eval "${command}"; then
@@ -141,15 +143,15 @@ jobs:
 
               retry_count=$((retry_count + 1))
 
-              if [ $retry_count -le $MAX_RETRIES ]; then
+              if [ "${retry_count}" -le "${MAX_RETRIES}" ]; then
                 # Calculate delay with exponential backoff
                 local delay=$((BASE_DELAY * (BACKOFF_MULTIPLIER ** retry_count)))
-                if [ $delay -gt $MAX_DELAY ]; then
-                  delay=$MAX_DELAY
+                if [ "${delay}" -gt "${MAX_DELAY}" ]; then
+                  delay="${MAX_DELAY}"
                 fi
 
                 echo "Failed. Retrying in ${delay} seconds..."
-                sleep $delay
+                sleep "${delay}"
               fi
             done
 
@@ -194,6 +196,7 @@ jobs:
 
           # Execute with retry
           if retry_with_backoff "tag_with_retry" "Creating tag ${TAG_NAME} for commit ${COMMIT_SHA}"; then
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
             exit 0
           else
             echo "Tag creation failed after all retry attempts"
@@ -203,21 +206,18 @@ jobs:
       - name: Tag creation summary
         if: always()
         run: |
-          TAG_NAME="${{ steps.commit.outputs.tag_name }}"
-          COMMIT_SHA="${{ steps.commit.outputs.sha }}"
-
           if [ "${{ steps.check_tag.outputs.exists }}" = "true" ]; then
-            echo "✅ Tag ${TAG_NAME} already existed - no action needed"
+            echo "✅ Tag ${{ steps.commit.outputs.tag_name }} already existed - no action needed"
           elif [ "${{ job.status }}" = "success" ]; then
-            echo "✅ Successfully created tag ${TAG_NAME} for commit ${COMMIT_SHA}"
+            echo "✅ Successfully created tag ${{ steps.commit.outputs.tag_name }} for commit ${{ steps.commit.outputs.sha }}"
           else
-            echo "❌ Failed to create tag ${TAG_NAME} for commit ${COMMIT_SHA}"
+            echo "❌ Failed to create tag ${{ steps.commit.outputs.tag_name }} for commit ${{ steps.commit.outputs.sha }}"
           fi
 
           echo ""
           echo "Tag details:"
-          echo "  Name: ${TAG_NAME}"
-          echo "  Commit: ${COMMIT_SHA}"
+          echo "  Name: ${{ steps.commit.outputs.tag_name }}"
+          echo "  Commit: ${{ steps.commit.outputs.sha }}"
           echo "  Trigger: ${{ github.event_name }}"
           if [ -n "${{ github.event.inputs.commit_sha }}" ]; then
             echo "  Manual commit: ${{ github.event.inputs.commit_sha }}"
