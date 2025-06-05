@@ -194,6 +194,23 @@ class FxConverter:
         node.name = name
         node.meta["val"] = buffer.get_example()
 
+    def _create_as_strided(
+        self,
+        input_node: torch.fx.Node,
+        size: tuple[Any, ...],
+        stride: tuple[Any, ...],
+        offset: Union[int, sympy.Expr],
+    ) -> torch.fx.Node:
+        return self.gm.graph.call_function(
+            torch.as_strided,
+            args=(
+                input_node,
+                convert_shape_to_symint(size),
+                convert_shape_to_symint(stride),
+                convert_to_symint(offset),
+            ),
+        )
+
     def _record_allocation(self, buffer: CodegenBuffer, node: torch.fx.Node) -> None:
         """
         Updates the symbol table to record that an Inductor buffer maps to the result of
@@ -239,8 +256,13 @@ class FxConverter:
         """
         Converts graph inputs to FX placeholders.
         """
-        for ir_node in V.graph.graph_inputs.values():
-            buffer = self._get_buffer(ir_node)
+        for name, ir_node in V.graph.graph_inputs.items():
+            # Introduce a new symbol for constant inputs.
+            buffer = (
+                SymbolBuffer(sympy.Symbol(name, is_integer=True))
+                if isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
+                else self._get_buffer(ir_node)
+            )
             node = self.gm.graph.placeholder(buffer.get_name())
             self._create_meta_from_buffer(node, buffer)
             self._record_allocation(buffer, node)
@@ -406,12 +428,17 @@ class FxConverter:
         assert name
         size = tuple(layout.size)
         stride = tuple(layout.stride)
+        if isinstance(layout, ir.NonOwningLayout):
+            # Look up the view's layout.
+            view = layout.view
+            assert isinstance(view, ir.ReinterpretView), (
+                f"unexpected type: {type(view)}"
+            )
+            layout = view.layout
         offset = input_buffer.get_offset() + layout.offset
 
         # Map ReinterpretView to as_strided.
-        result_node = self.gm.graph.call_function(
-            torch.as_strided, args=(input_node, size, stride, offset)
-        )
+        result_node = self._create_as_strided(input_node, size, stride, offset)
         result_node.name = name
         result_node.meta["val"] = layout.get_example()
         self._record_allocation(result_buffer, result_node)
@@ -427,17 +454,15 @@ class FxConverter:
         result_node = old_node
 
         # Change shape and stride.
-        size = new.get_size()
-        stride = new.get_stride()
+        size = tuple(new.get_size())
+        stride = tuple(new.get_stride())
         offset = new.get_offset()
         if (
-            old.get_size() != size
-            or old.get_stride() != stride
+            tuple(old.get_size()) != size
+            or tuple(old.get_stride()) != stride
             or old.get_offset() != offset
         ):
-            result_node = self.gm.graph.call_function(
-                torch.as_strided, args=(old_node, size, stride, offset)
-            )
+            result_node = self._create_as_strided(old_node, size, stride, offset)
             self._create_meta_from_buffer(result_node, new)
 
         self._record_allocation(new, result_node)

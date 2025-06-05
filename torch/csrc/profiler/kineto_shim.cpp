@@ -50,7 +50,6 @@ const std::set<libkineto::ActivityType> kXpuTypes = {
 const std::set<libkineto::ActivityType> kMtiaTypes = {
     libkineto::ActivityType::MTIA_CCP_EVENTS,
     libkineto::ActivityType::MTIA_RUNTIME,
-    libkineto::ActivityType::MTIA_WORKLOADD,
 };
 const std::set<libkineto::ActivityType> hpuTypes = {
     libkineto::ActivityType::HPU_OP,
@@ -393,7 +392,6 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     }
     // TODO: T151322015
     case libkineto::ActivityType::MTIA_CCP_EVENTS:
-    case libkineto::ActivityType::MTIA_WORKLOADD:
     case libkineto::ActivityType::MTIA_INSIGHT: {
       // PrivateUse1 kineto backend reuse above ActivityTypes,
       // If PrivateUse1 backend enabled, this should return
