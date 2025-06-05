@@ -878,7 +878,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         op.element_epilogue = op.accumulator_type()
 
         if self.fast_accum is not None:
-            is_op_fast_accum = "fast_accum" in op.configuration_name()
+            is_op_fast_accum = "fastaccum" in op.configuration_name()
             if (self.fast_accum and not is_op_fast_accum) or (
                 not self.fast_accum and is_op_fast_accum
             ):
