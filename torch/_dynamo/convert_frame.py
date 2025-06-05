@@ -960,6 +960,7 @@ def _compile(
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
         compile_context(CompileContext(compile_id)),
+        torch._inductor.async_compile.warm_async_compile_pool(),
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),

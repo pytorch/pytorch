@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import functools
 import json
 import logging
@@ -50,6 +51,8 @@ from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from torch._inductor.runtime.hints import HalideMeta
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -214,6 +217,15 @@ class CompiledTritonKernels:
         # Delete the LambdaFuture if there is one
         if key in CompiledTritonKernels._cache:
             del CompiledTritonKernels._cache[key]
+
+
+@contextlib.contextmanager
+def warm_async_compile_pool() -> Generator[None, None, None]:
+    try:
+        torch._inductor.async_compile.AsyncCompile.warm_pool()
+        yield
+    finally:
+        torch._inductor.async_compile.AsyncCompile.quiesce()
 
 
 class AsyncCompile:

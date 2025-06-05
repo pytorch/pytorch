@@ -52,7 +52,7 @@ def _unpack_msg(data: bytes) -> tuple[MsgType, int, int]:
     return MsgType(msg_type), job_id, length
 
 
-msg_bytes = len(_pack_msg(0, 0, 0))
+msg_bytes = len(_pack_msg(MsgType.JOB, 0, 0))
 
 
 def _send_msg(
@@ -193,7 +193,7 @@ class SubprocPool:
         self._send(MsgType.JOB, job_id, job_data)
         return future
 
-    def _send(self, msg_type: MsgType, job_id: int = -1, data: bytes = b""):
+    def _send(self, msg_type: MsgType, job_id: int = -1, data: bytes = b"") -> None:
         with self.write_lock:
             if not self.running:
                 raise RuntimeError("Attempting to use a closed pool")
@@ -202,6 +202,7 @@ class SubprocPool:
     def _read_thread(self) -> None:
         while True:
             data = b""
+            job_id = -1
             try:
                 msg_type, job_id, data = _recv_msg(self.read_pipe)
             except Exception:
@@ -285,7 +286,7 @@ class SubprocMain:
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
         self.nprocs = nprocs
-        self.pool = None
+        self.pool: Optional[ProcessPoolExecutor] = None
         self.running = True
 
     def main(self) -> None:
@@ -294,7 +295,7 @@ class SubprocMain:
             if msg_type == MsgType.JOB:
                 self.submit(job_id, data)
             elif msg_type == MsgType.WARMUP:
-                self._init_pool()
+                self._start_pool()
             elif msg_type == MsgType.QUIESCE:
                 self._quiesce()
             else:
@@ -342,13 +343,15 @@ class SubprocMain:
                     _send_msg(self.write_pipe, MsgType.JOB, job_id, result)
             return
 
-        self._init_pool()
+        self._start_pool()
+        assert self.pool is not None
+
         future = self.pool.submit(
             functools.partial(SubprocMain.do_job, self.pickler, data)
         )
         future.add_done_callback(callback)
 
-    def _init_pool(self) -> ProcessPoolExecutor:
+    def _start_pool(self) -> None:
         if self.pool is not None:
             return
         self.pool = ProcessPoolExecutor(
@@ -356,7 +359,9 @@ class SubprocMain:
             mp_context=multiprocessing.get_context(self.kind.value),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
         )
-        multiprocessing.util.Finalize(None, self.pool.shutdown, exitpriority=sys.maxsize)
+        multiprocessing.util.Finalize(
+            None, self.pool.shutdown, exitpriority=sys.maxsize
+        )
         _warm_process_pool(self.pool, self.nprocs)
 
     @staticmethod
