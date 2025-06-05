@@ -490,14 +490,15 @@ class FxConverter:
 
         # Optionally autotune the kernels.
         # The FX backend currently only supports compile-time tuning.
+        kernel_name = tuner.fn.__name__
         if config.triton.autotune_at_compile_time:
             from triton.runtime import driver
 
-            log.info("Autotuning Triton kernels at compile time.")
+            log.info("Autotuning Triton kernel %s at compile time.", kernel_name)
             device = driver.active.get_current_device()
             stream = driver.active.get_current_stream(device)
 
-            def node_to_tensor(arg: Any) -> Any:
+            def node_to_tuning_arg(arg: Any) -> Any:
                 """
                 Create real tensors for autotuning arguments, substituting size hints
                 for dynamic shapes.
@@ -515,11 +516,12 @@ class FxConverter:
                     device=device,
                 ).zero_()
 
-            arg_values = [node_to_tensor(arg) for arg in call_args]
+            arg_values = [node_to_tuning_arg(arg) for arg in call_args]
             tuner.run(*arg_values, stream=stream)
         else:
             log.info(
-                "Skipping autotuning. Set config.triton.autotune_at_compile_time = True to enable."
+                "Skipping autotuning for kernel %s. Set config.triton.autotune_at_compile_time = True to enable.",
+                kernel_name,
             )
 
         kernel_config = tuner.compile_results[0].config
