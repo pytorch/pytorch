@@ -4,6 +4,7 @@ import contextlib
 import os
 import subprocess
 import sys
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -15,7 +16,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 
 
 class TestKernelBenchmark(TestCase):
@@ -147,6 +148,9 @@ class TestKernelBenchmark(TestCase):
     # Need to refine the template and config for XPU.
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
     @fresh_inductor_cache()
     def test_matmul_triton_kernel_benchmark(self):
@@ -463,6 +467,9 @@ class TestKernelBenchmark(TestCase):
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch("triton.unique_kernel_names", True)
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)

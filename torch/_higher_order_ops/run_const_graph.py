@@ -42,7 +42,7 @@ def run_const_graph_functional(ctx, graph, args):
         return ctx.wrap_tensors(out)
 
 
-run_const_graph.py_impl(DispatchKey.Autograd)(
+run_const_graph.py_autograd_impl(
     autograd_not_implemented(run_const_graph, deferred_error=True)
 )
 

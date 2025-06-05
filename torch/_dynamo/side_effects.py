@@ -256,6 +256,7 @@ class SideEffects:
             int.__getattribute__,
             str.__getattribute__,
             list.__getattribute__,
+            tuple.__getattribute__,
             BaseException.__getattribute__,
         )
 
@@ -997,6 +998,23 @@ class SideEffects:
                             suffixes.append(
                                 [create_instruction("DELETE_ATTR", argval=name)]
                             )
+                    elif isinstance(
+                        var, variables.UserDefinedObjectVariable
+                    ) and var.should_skip_descriptor_setter(name):
+                        cg.add_push_null(
+                            lambda: cg.load_import_from(
+                                utils.__name__, "object_setattr_ignore_descriptor"
+                            )
+                        )
+                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(variables.ConstantVariable(name))
+                        cg(value)
+                        suffixes.append(
+                            [
+                                *create_call_function(3, False),
+                                create_instruction("POP_TOP"),
+                            ]
+                        )
                     elif (
                         isinstance(var, variables.UserDefinedObjectVariable)
                         and var.needs_slow_setattr()

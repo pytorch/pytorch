@@ -18,7 +18,6 @@ These classes work together to track tensor operations and properties during Dyn
 """
 
 import functools
-import inspect
 import logging
 import operator
 import textwrap
@@ -124,6 +123,13 @@ def is_bound_tensor_method(value):
         and isinstance(value.__self__, torch.Tensor)
         and getattr(value.__self__, value.__name__, None)
     )
+
+
+# instead of using inspect.getattr_static, we directly lookup the appropriate
+# dicts. It is necessary to keep the torch._C.TensorBase first in the or
+# operation, because the second arg takes priority in or operation when there
+# are common keys.
+all_tensor_attrs = torch._C.TensorBase.__dict__ | torch.Tensor.__dict__
 
 
 class TensorVariable(VariableTracker):
@@ -394,6 +400,13 @@ class TensorVariable(VariableTracker):
         from . import GetAttrVariable
         from .builtin import BuiltinVariable
 
+        # TODO - This is not a good solution but solves an accuracy issue.
+        # Today, var_getattr returns GetAttrVariable for both non-existent
+        # attributes and existing attributes. This is a bug and requires more
+        # deep dive.
+        if name in ("size", "stride"):
+            return ConstantVariable(True)
+
         try:
             var = BuiltinVariable(getattr).call_function(
                 tx, [self, ConstantVariable(name)], {}
@@ -466,9 +479,8 @@ class TensorVariable(VariableTracker):
                 from .builder import wrap_fx_proxy
                 from .misc import GetAttrVariable
 
-                try:
-                    static_attr = inspect.getattr_static(torch.Tensor, name)
-                except AttributeError:
+                static_attr = all_tensor_attrs.get(name, None)
+                if static_attr is None:
                     return None
 
                 # Make sure this is an attribute, not a method.
@@ -585,12 +597,8 @@ class TensorVariable(VariableTracker):
         # Only override builtin tensor methods
         # The user can manually add override handling
         # with a decorator for other methods (e.g. a dispatch subclass with other methods)
-        is_base_tensor_method = False
-        try:
-            inspect.getattr_static(torch.Tensor, name)
-            is_base_tensor_method = True
-        except AttributeError:
-            is_base_tensor_method = False
+        static_attr = all_tensor_attrs.get(name, None)
+        is_base_tensor_method = static_attr is not None
 
         if (
             can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
@@ -599,7 +607,7 @@ class TensorVariable(VariableTracker):
             if self.source:
                 func_var = VariableBuilder(
                     tx, AttrSource(AttrSource(self.source, "__class__"), name)
-                )(inspect.getattr_static(torch.Tensor, name))
+                )(static_attr)
             else:
                 func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
 
@@ -616,6 +624,31 @@ class TensorVariable(VariableTracker):
         # This is seen in inspect signature where we check if the value is a default value
         if name == "__eq__" and isinstance(args[0], UserDefinedClassVariable):
             return variables.ConstantVariable(False)
+
+        # For historical reasons, these ops decompose down to syntactically
+        # invalid aten ops because they contain the python keyword `from`, see
+        # discussions in #151432 for more details.
+        # We graph break for now since this use case is uncommon.
+        if name == "random_":
+            unimplemented_v2(
+                gb_type="Tensor.random_ op",
+                context=f"Tensor.{name}({args=}, {kwargs=})",
+                explanation="This is currently not supported.",
+                hints=[
+                    "Use the out-of-place version of this op",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        elif name == "uniform_" and "from" in kwargs:
+            unimplemented_v2(
+                gb_type="Tensor.uniform_ op called with `from` keyword",
+                context=f"Tensor.{name}({args=}, {kwargs=})",
+                explanation="This is currently not supported.",
+                hints=[
+                    "Avoid using the `from` keyword.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         try:
             handler_method = getattr(self, f"method_{name}")
@@ -822,7 +855,7 @@ class TensorVariable(VariableTracker):
             unimplemented("Tensor.numpy(). NumPy is not available")
         if self.layout != torch.strided:
             raise TypeError(
-                f"can't convert {self.layout} layout tensor to numpy. Use Tensor.dense() first"
+                f"can't convert {self.layout} layout tensor to numpy. Use Tensor.to_dense() first"
             )
         from ..symbolic_convert import InstructionTranslator
 
@@ -1386,7 +1419,7 @@ class NumpyNdarrayVariable(TensorVariable):
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
-        if name in ("tostring", "tobytes"):
+        if name in ("tostring", "tobytes", "__delattr__"):
             unimplemented(f"{name} is not modelled in torch._numpy")
         proxy = tx.output.create_proxy(
             "call_function",

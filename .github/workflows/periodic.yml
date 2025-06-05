@@ -49,14 +49,14 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  linux-focal-cuda12_6-py3_10-gcc11-build:
-    name: linux-focal-cuda12.6-py3.10-gcc11
+  linux-jammy-cuda12_6-py3_10-gcc11-build:
+    name: linux-jammy-cuda12.6-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.6-py3.10-gcc11
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda12.6-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc11
       test-matrix: |
         { include: [
           { config: "nogpu_AVX512", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
@@ -68,26 +68,26 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-cuda12_6-py3_10-gcc11-test:
-    name: linux-focal-cuda12.6-py3.10-gcc11
+  linux-jammy-cuda12_6-py3_10-gcc11-test:
+    name: linux-jammy-cuda12.6-py3.10-gcc11
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-focal-cuda12_6-py3_10-gcc11-build
+      - linux-jammy-cuda12_6-py3_10-gcc11-build
       - target-determination
     with:
-      build-environment: linux-focal-cuda12.6-py3.10-gcc11
-      docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-build.outputs.test-matrix }}
+      build-environment: linux-jammy-cuda12.6-py3.10-gcc11
+      docker-image: ${{ needs.linux-jammy-cuda12_6-py3_10-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_6-py3_10-gcc11-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-focal-cuda11_8-py3_9-gcc9-build:
-    name: linux-focal-cuda11.8-py3.9-gcc9
+  linux-jammy-cuda12_8-py3_9-gcc9-build:
+    name: linux-jammy-cuda12.8-py3.9-gcc9
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda11.8-py3.9-gcc9
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
+      build-environment: linux-jammy-cuda12.8-py3.9-gcc9
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -97,24 +97,24 @@ jobs:
       build-with-debug: false
     secrets: inherit
 
-  linux-focal-cuda11_8-py3_9-gcc9-test:
-    name: linux-focal-cuda11.8-py3.9-gcc9
+  linux-jammy-cuda12_8-py3_9-gcc9-test:
+    name: linux-jammy-cuda12.8-py3.9-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda11_8-py3_9-gcc9-build
+    needs: linux-jammy-cuda12_8-py3_9-gcc9-build
     with:
-      build-environment: linux-focal-cuda11.8-py3.9-gcc9
-      docker-image: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-build.outputs.test-matrix }}
+      build-environment: linux-jammy-cuda12.8-py3.9-gcc9
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_9-gcc9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_9-gcc9-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-focal-cuda11_8-py3_10-gcc9-debug-build:
-    name: linux-focal-cuda11.8-py3.10-gcc9-debug
+  linux-jammy-cuda12_8-py3_10-gcc9-debug-build:
+    name: linux-jammy-cuda12.8-py3.10-gcc9-debug
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-debug
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9
       build-with-debug: true
       test-matrix: |
         { include: [
@@ -128,26 +128,26 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-cuda11_8-py3_10-gcc9-debug-test:
-    name: linux-focal-cuda11.8-py3.10-gcc9-debug
+  linux-jammy-cuda12_8-py3_10-gcc9-debug-test:
+    name: linux-jammy-cuda12.8-py3.10-gcc9-debug
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-focal-cuda11_8-py3_10-gcc9-debug-build
+      - linux-jammy-cuda12_8-py3_10-gcc9-debug-build
       - target-determination
     with:
-      build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
-      docker-image: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-debug-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-debug-build.outputs.test-matrix }}
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-debug
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc9-debug-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc9-debug-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-focal-rocm-py3_10-build:
-    name: linux-focal-rocm-py3.10
+  linux-jammy-rocm-py3_10-build:
+    name: linux-jammy-rocm-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-rocm-py3.10
-      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      build-environment: linux-jammy-rocm-py3.10
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
           { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.4", owners: ["module:rocm", "oncall:distributed"] },
@@ -156,52 +156,52 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-rocm-py3_10-test:
+  linux-jammy-rocm-py3_10-test:
     permissions:
       id-token: write
       contents: read
-    name: linux-focal-rocm-py3.10
+    name: linux-jammy-rocm-py3.10
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-focal-rocm-py3_10-build
+      - linux-jammy-rocm-py3_10-build
       - target-determination
     with:
-      build-environment: linux-focal-rocm-py3.10
-      docker-image: ${{ needs.linux-focal-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm-py3_10-build.outputs.test-matrix }}
+      build-environment: linux-jammy-rocm-py3.10
+      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-focal-cuda12_6-py3-gcc11-slow-gradcheck-build:
-    name: linux-focal-cuda12.6-py3-gcc11-slow-gradcheck
+  linux-jammy-cuda12_6-py3-gcc11-slow-gradcheck-build:
+    name: linux-jammy-cuda12.6-py3-gcc11-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.6-py3-gcc11-slow-gradcheck
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda12.6-py3-gcc11-slow-gradcheck
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc11
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 2, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 3, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 4, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 5, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 6, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 7, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 8, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
         ]}
     secrets: inherit
 
-  linux-focal-cuda12_6-py3-gcc11-slow-gradcheck-test:
-    name: linux-focal-cuda12.6-py3-gcc11-slow-gradcheck
+  linux-jammy-cuda12_6-py3-gcc11-slow-gradcheck-test:
+    name: linux-jammy-cuda12.6-py3-gcc11-slow-gradcheck
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-focal-cuda12_6-py3-gcc11-slow-gradcheck-build
+      - linux-jammy-cuda12_6-py3-gcc11-slow-gradcheck-build
       - target-determination
     with:
-      build-environment: linux-focal-cuda12.6-py3-gcc11-slow-gradcheck
-      docker-image: ${{ needs.linux-focal-cuda12_6-py3-gcc11-slow-gradcheck-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_6-py3-gcc11-slow-gradcheck-build.outputs.test-matrix }}
+      build-environment: linux-jammy-cuda12.6-py3-gcc11-slow-gradcheck
+      docker-image: ${{ needs.linux-jammy-cuda12_6-py3-gcc11-slow-gradcheck-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_6-py3-gcc11-slow-gradcheck-build.outputs.test-matrix }}
       timeout-minutes: 300
     secrets: inherit

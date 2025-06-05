@@ -1,16 +1,11 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <torch/csrc/distributed/c10d/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
 
 namespace c10d::symmetric_memory {
-
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-using HandleType = CUmemGenericAllocationHandle;
-#else
-using HandleType = void*;
-#endif
 
 // Resource wrapper that owns a (vaddr, allocation handle) pair. Upon
 // destruction, it unmaps the vaddr and releases the allocation handle.
@@ -42,7 +37,7 @@ class CUDASymmetricMemory : public SymmetricMemory {
       int rank,
       int world_size);
 
-  ~CUDASymmetricMemory() override{};
+  ~CUDASymmetricMemory() override {};
 
   std::vector<void*> get_buffer_ptrs() override;
   std::vector<void*> get_signal_pad_ptrs() override;

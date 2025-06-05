@@ -547,7 +547,7 @@ void ScriptModuleSerializer::writeArchive(
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
 
   for (const auto& td : data_pickle.tensorData()) {
-    std::string tensor_name = tensor_names[i++];
+    const std::string& tensor_name = tensor_names[i++];
     if (td.is_meta() || skip_tensor_data) {
       writer_.writeRecord(tensor_dir + tensor_name, nullptr, 0);
       continue;

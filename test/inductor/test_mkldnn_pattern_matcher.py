@@ -231,6 +231,14 @@ class TestPatternMatcherBase(TestCase):
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
                 *clone_inputs,
             )
+            assert_keywords = ["assert_size_stride", "assert_alignment"]
+            filtered_lines = [
+                line
+                for line in source_code.splitlines()
+                if not any(assert_key in line for assert_key in assert_keywords)
+            ]
+            source_code = "\n".join(filtered_lines)
+
             for op in include_ops:
                 self.assertIn(op, source_code)
             if num_include_ops is not None:
@@ -3788,6 +3796,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
             om(*example_inputs)
 
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @xfailIfACL
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_reproduce_121253_issue_addmm_fusion_check(self):
