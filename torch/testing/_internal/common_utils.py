@@ -1125,8 +1125,8 @@ def lint_test_case_extension(suite):
             test_case = first_test
 
         if test_case is not None:
-            test_class = test_case.id().split('.', 1)[1].split('.')[0]
             if not isinstance(test_case, TestCase):
+                test_class = test_case.id().split('.', 1)[1].split('.')[0]
                 err = "This test class should extend from torch.testing._internal.common_utils.TestCase but it doesn't."
                 print(f"{test_class} - failed. {err}")
                 succeed = False
@@ -2383,7 +2383,7 @@ class CudaNonDefaultStream:
                                      device_type=deviceStream.device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
-    def __exit__(self, exec_type, exec_value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         # After completing CUDA test load previously active streams on all
         # CUDA devices.
         beforeDevice = torch.cuda.current_device()
@@ -2431,9 +2431,9 @@ class CudaMemoryLeakCheck:
             driver_mem_allocated = bytes_total - bytes_free
             self.driver_befores.append(driver_mem_allocated)
 
-    def __exit__(self, exec_type, exec_value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         # Don't check for leaks if an exception was thrown
-        if exec_type is not None:
+        if exc_type is not None:
             return
 
         # Compares caching allocator before/after statistics
@@ -3747,14 +3747,14 @@ class TestCase(expecttest.TestCase):
                         if target is None:
                             target = batch_data[layout] = (ext_coo_indices1, d[1])
                         else:
-                            target[0].set_(torch.cat((target[0], ext_coo_indices1), 1))
+                            target[0].set_(torch.cat((target[0], ext_coo_indices1), 1))  # type: ignore[call-overload]
                             target[1].set_(torch.cat((target[1], d[1])))
                     else:
                         if target is None:
                             target = batch_data[layout] = tuple(d[j].unsqueeze(0) for j in range(len(d)))
                         else:
                             for j in range(len(d)):
-                                target[j].set_(torch.cat((target[j], d[j].unsqueeze(0))))
+                                target[j].set_(torch.cat((target[j], d[j].unsqueeze(0))))  # type: ignore[call-overload]
             return batch_data
 
         def generate_values(base, densesize):

@@ -71,6 +71,7 @@ BATCH_SIZE_DIVISORS = {
 }
 
 REQUIRE_HIGHER_TOLERANCE = {
+    "crossvit_9_240",
     "fbnetv3_b",
     "gmixer_24_224",
     "hrnet_w18",

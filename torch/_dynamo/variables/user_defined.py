@@ -21,6 +21,7 @@ These classes help Dynamo track and handle arbitrary Python objects during traci
 maintaining proper semantics while enabling optimizations where possible.
 """
 
+import _collections
 import builtins
 import collections
 import contextlib
@@ -735,7 +736,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
 
-    _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
+    _nonvar_fields = {
+        "value",
+        "value_type",
+        "attrs_directly_modifed_on_dict",
+        *UserDefinedVariable._nonvar_fields,
+    }
 
     def __init__(
         self,
@@ -762,6 +768,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         #   obj = base_cls.__new__(user_cls, *args)
         self.base_cls_vt = base_cls_vt
         self.init_args = init_args
+
+        # This records names of the attributes that were modifed via instance
+        # `__dict__` directly, rather than the normal setattr path.
+        #
+        # TODO consider emulating `obj.__dict__` as a `ConstDictVariable` to get
+        # rid of these workarounds here and in `GetAttrVariable`.
+        self.attrs_directly_modifed_on_dict = set()
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -897,7 +910,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def method_setattr_standard(self, tx: "InstructionTranslator", name, value):
+    def method_setattr_standard(
+        self, tx: "InstructionTranslator", name, value, directly_update_dict=False
+    ):
         try:
             name = name.as_python_constant()
         except NotImplementedError:
@@ -905,6 +920,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if not tx.output.side_effects.is_attribute_mutation(self):
             unimplemented(f"setattr({self}, {name}, ...)")
 
+        if directly_update_dict:
+            self.attrs_directly_modifed_on_dict.add(name)
+        else:
+            tmp = self.try_get_descritor_and_setter_py_func(name)
+            if tmp:
+                descriptor, setter = tmp
+                # Emulate
+                # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1371-L1452
+                desc_source = None
+                func_source = None
+                if self.cls_source:
+                    desc_source = self.get_source_by_walking_mro(name)
+                    # use `type(...)` to ignore instance attrs.
+                    func_source = AttrSource(TypeSource(desc_source), "__set__")
+                desc_var = VariableTracker.build(tx, descriptor, desc_source)
+                func_var = VariableTracker.build(tx, setter, func_source)
+                args = [desc_var, self, value]
+                return func_var.call_function(tx, args, {})
+            # NOTE: else we assume the descriptor (if any) has a
+            # side-effect-free `__set__` as far as Dynamo tracing is concerned.
+
+        # Emulate the standard setattr on instance dict.
         tx.output.side_effects.store_attr(self, name, value)
         return variables.ConstantVariable(None)
 
@@ -1010,26 +1047,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
-        import _collections
 
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
+        # NOTE we assume the following descriptors are side-effect-free as far
+        # as Dynamo tracing is concerned.
         if not object_has_getattribute(self.value) and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
-            or isinstance(
-                subobj, _collections._tuplegetter
-            )  # namedtuple fields are represented by _tuplegetter
-            or (
-                inspect.ismemberdescriptor(subobj) and name in self.value.__slots__
-            )  # handle memberdecriptor and slots
+            or inspect.ismemberdescriptor(subobj)  # e.g., __slots__
+            or inspect.isgetsetdescriptor(subobj)  # e.g., __dict__
             or self._is_c_defined_property(subobj)
-            or inspect.isgetsetdescriptor(
-                subobj
-            )  # handle getsetdescriptor like __dict__
         ):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
             # want to call getattr because it can be user-overridden.
-            subobj = self.value.__getattribute__(name)
+            subobj = type(self.value).__getattribute__(self.value, name)
         elif object_has_getattribute(self.value) and subobj is NO_SUCH_SUBOBJ:
             # If the object has an overridden getattribute method, Dynamo has
             # already tried tracing it, and encountered an AttributeError. We
@@ -1039,6 +1070,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             raise AttributeError
 
         return subobj
+
+    def should_skip_descriptor_setter(self, attr_name):
+        # Check if `attr_name` corresponds to a descriptor.
+        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
+        setter = inspect.getattr_static(type(descriptor), "__set__", None)
+        if setter:
+            # Skip if `__set__` was traceable (no need to redo the side effect).
+            if inspect.isfunction(setter):
+                return True
+            # For untraceable `__set__` we should still skip if the attribute
+            # was mutated via instance `__dict__`.
+            elif attr_name in self.attrs_directly_modifed_on_dict:
+                return True
+        return False
+
+    def try_get_descritor_and_setter_py_func(self, attr_name):
+        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
+        setter = inspect.getattr_static(type(descriptor), "__set__", None)
+        if inspect.isfunction(setter):
+            return (descriptor, setter)
+        return None
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
@@ -1160,6 +1212,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
             ).call_function(tx, [], {})
+        elif isinstance(subobj, _collections._tuplegetter):
+            # namedtuple fields are represented by _tuplegetter, and here we
+            # emulate its `__get__`, which is implemented in C.
+            _, (idx, _) = subobj.__reduce__()
+            # Don't go through the `__getitem__` method anymore, see
+            # https://github.com/python/cpython/blob/470941782f74288823b445120f6383914b659f23/Modules/_collectionsmodule.c#L2690
+            assert isinstance(self, UserDefinedTupleVariable)
+            return self._tuple_vt.items[idx]
         elif isinstance(subobj, staticmethod):
             # Safe because `staticmethod.__get__` basically won't trigger user
             # code and just returns the underlying `__func__`:
@@ -1174,9 +1234,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # e.g.: inspect.getattr_static({}, "fromkeys")
             func = subobj.__get__(self.value, None)
             return VariableTracker.build(tx, func, source)
-        elif inspect.ismethoddescriptor(subobj) and not is_wrapper_or_member_descriptor(
-            subobj.__get__
+        elif inspect.getattr_static(
+            type(subobj), "__get__", NO_SUCH_SUBOBJ
+        ) is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(
+            type(subobj).__get__
         ):
+            # Emulate https://github.com/python/cpython/blob/3.11/Objects/object.c#L1271-L1285
+            #
             # Attribute has a __get__ method. Create a user defined object vt
             # for the subobj, and then trace the __get__ method.
             descriptor_source = None
@@ -1185,7 +1249,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # To access the method descriptor from the udf object w/o using
                 # inspect.getattr_static, we can look into the class mro
                 descriptor_source = self.get_source_by_walking_mro(name)
-                descriptor_get_source = AttrSource(descriptor_source, "__get__")
+                descriptor_get_source = AttrSource(
+                    TypeSource(descriptor_source), "__get__"
+                )
                 descriptor_var = VariableTracker.build(tx, subobj, descriptor_source)
             else:
                 # Sourceless Builder does not support user defined objects
@@ -1637,18 +1703,24 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
-    def __init__(self, value, **kwargs):
-        super().__init__(value, **kwargs)
-        self._tuple_vt = None
-
-    def set_underlying_tuple_vt(self, tuple_vt):
+    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
+        super().__init__(value, init_args=init_args, **kwargs)
         self._tuple_vt = tuple_vt
+        if self._tuple_vt is None:
+            assert self.source is None, (
+                "tuple_vt must be constructed by builder.py when source is present"
+            )
+            # Emulate `tuple.__new__`
+            # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
+            #
+            # TODO this duplicates the logic in `BuiltinVariable(tuple)`
+            from torch._dynamo.symbolic_convert import InstructionTranslator
 
-    @staticmethod
-    def create(value, tuple_vt, **kwargs):
-        result = UserDefinedTupleVariable(value, **kwargs)
-        result.set_underlying_tuple_vt(tuple_vt)
-        return result
+            tx = InstructionTranslator.current_tx()
+            elems = init_args[0].unpack_var_sequence(tx)
+            self._tuple_vt = variables.TupleVariable(
+                elems, mutation_type=ValueMutationNew()
+            )
 
     def call_method(
         self,

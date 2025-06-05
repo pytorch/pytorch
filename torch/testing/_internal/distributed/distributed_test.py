@@ -7,6 +7,7 @@ import math
 import operator
 import os
 import random
+import re
 import sys
 import tempfile
 import time
@@ -966,7 +967,8 @@ class DistributedTest:
         @skip_if_lt_x_gpu(4)
         def test_new_subgroups_world_size_not_divisible_by_group_size(self):
             with self.assertRaisesRegex(
-                ValueError, "The world size must be divisible by 'group_size'"
+                ValueError,
+                re.escape("The world size (4) must be divisible by 'group_size=3'"),
             ):
                 dist.new_subgroups(3)
 

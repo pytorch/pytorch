@@ -362,6 +362,10 @@ function(torch_compile_options libname)
       # 2. For MSVC VERSION: https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html
       target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
     endif()
+    # This option enables a token-based preprocessor that conforms to C99 and C++11 and later standards.
+    # This option is available since VS 2017.
+    # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor" PARENT_SCOPE)
 
     if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 143)
       # Add /d2implyavx512upperregs- to disable compiler over-aggressive optimization, which caused involeved AVX512 register on AVX2 machine.

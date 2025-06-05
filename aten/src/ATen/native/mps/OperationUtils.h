@@ -109,7 +109,6 @@ MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = Mem
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
-  std::cout << "getMTLBufferStorage " << tensor.storage().data() << std::endl;
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
 }
 
@@ -479,6 +478,15 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
       TORCH_CHECK(false, "Passed CPU tensor to MPS op");
     }
     return;
+  }
+  if (t.storage_offset() == 64 && t.element_size() == 4) {
+    auto buffer_pointer = static_cast<uint8_t*>([getMTLBufferStorage(t) contents]);
+    std::cout << "mtl_setBuffer:: " << static_cast<void*>(buffer_pointer) << " " << t.storage_offset() << " " << t.element_size() << " " << idx << " Buffer contents: ";
+    const int32_t* int_ptr = reinterpret_cast<const int32_t*>(buffer_pointer + t.storage_offset());
+    for (size_t i = 0; i < 16; i++) {  // 64 bytes = 16 integers
+        std::cout << int_ptr[i] << " ";
+    }
+    std::cout << std::endl;
   }
   [encoder setBuffer:getMTLBufferStorage(t) offset:t.storage_offset() * t.element_size() atIndex:idx];
 }

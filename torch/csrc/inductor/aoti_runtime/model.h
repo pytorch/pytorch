@@ -15,9 +15,9 @@
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
-#ifdef __APPLE__
+#ifdef USE_MPS
 #include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
-#endif // __APPLE__
+#endif // USE_MPS
 #ifdef USE_XPU
 #include <torch/csrc/inductor/aoti_runtime/utils_xpu.h>
 #else
@@ -77,7 +77,7 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   return RAIIDataPtr(data_ptr, deleter);
 }
 
-#elif defined(__APPLE__)
+#elif defined(USE_MPS)
 
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   void* data_ptr = nullptr;
@@ -125,7 +125,7 @@ inline void parse_device_str(
   } else if (sm[1].str() == "xpu") {
     device_type = aoti_torch_device_type_xpu();
 #endif
-#ifdef __APPLE__
+#ifdef USE_MPS
   } else if (sm[1].str() == "mps") {
     device_type = aoti_torch_device_type_mps();
 #endif
@@ -177,11 +177,11 @@ class AOTInductorModelBase {
       aoti_torch_set_current_xpu_device(device_idx_);
     }
 #endif // USE_XPU
-#ifdef __APPLE__
+#ifdef USE_MPS
     if (device_idx_ == -1) {
       device_idx_ = 0;
     }
-#endif // __APPLE__
+#endif // USE_MPS
   }
 
   // NOLINTNEXTLINE(modernize-use-equals-default)
@@ -316,7 +316,7 @@ class AOTInductorModelBase {
     if (!include_weights) {
       return;
     }
-#if defined(USE_CUDA) || defined(USE_XPU) || defined(__APPLE__)
+#if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
     constant_blob_ = RAII_gpuMalloc(blob_size);
 #else
     constant_blob_ = RAII_cpuMalloc(blob_size);
@@ -344,10 +344,16 @@ class AOTInductorModelBase {
       auto ndim = this->constant_ndim(i);
       auto size = this->constant_shape(i);
       auto stride = this->constant_stride(i);
+#ifdef USE_MPS
+      auto offset = this->constant_offset(i) + constants_internal_offset[i];
+#else
       auto offset = this->constant_offset(i);
+#endif
       auto layout = this->constant_layout(i);
       auto opaque_metadata_ptr = this->opaque_metadata(i);
       auto opaque_metadata_size = this->opaque_metadata_size(i);
+
+      std::cout << "load_constants:: " << static_cast<void*>(internal_ptr) << " " << offset << std::endl;
 
       AtenTensorHandle tensor_handle = nullptr;
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
@@ -407,6 +413,14 @@ class AOTInductorModelBase {
           _get_constants_start() + bytes_read,
           data_size,
           cudaMemcpyHostToDevice));
+#elif USE_MPS
+      aoti_torch_mps_memcpy(
+          constants_ptr,
+          constant_offset,
+          bytes_read,
+          data_size,
+          _get_constants_start());
+      return constants_ptr;
 #else
       memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
 #endif
@@ -720,8 +734,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       std::shared_ptr<ConstantMap> constants_map,
       std::shared_ptr<std::vector<ConstantHandle>> constants_array,
       const std::string& device_str,
-      std::optional<std::string> cubin_dir,
-      bool include_weights = true);
+      std::optional<std::string> cubin_dir);
 
   std::unordered_map<std::string, AtenTensorHandle> const_run_impl(
       DeviceStreamType stream,
