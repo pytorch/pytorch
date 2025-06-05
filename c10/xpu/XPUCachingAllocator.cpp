@@ -610,7 +610,7 @@ class XPUAllocator : public DeviceAllocator {
     }
   }
 
-  void emptyCache(MempoolId_t mempool_id [[maybe_unused]]) override {
+  void emptyCache(MempoolId_t mempool_id = { 0, 0 } [[maybe_unused]]) override {
     for (auto& da : device_allocators) {
       da->emptyCache();
     }

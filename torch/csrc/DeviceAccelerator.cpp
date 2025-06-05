@@ -108,11 +108,12 @@ void initModule(PyObject* module) {
       return dict;
     };
 
-    return py::dict{
-        {"allocated_bytes", stat_array_to_dict(stats.allocated_bytes)},
-        {"reserved_bytes", stat_array_to_dict(stats.reserved_bytes)},
-        {"active_bytes", stat_array_to_dict(stats.active_bytes)},
-        {"requested_bytes", stat_array_to_dict(stats.requested_bytes)}};
+    py::dict result;
+    result["allocated_bytes"] = stat_array_to_dict(stats.allocated_bytes);
+    result["reserved_bytes"] = stat_array_to_dict(stats.reserved_bytes);
+    result["active_bytes"] = stat_array_to_dict(stats.active_bytes);
+    result["requested_bytes"] = stat_array_to_dict(stats.requested_bytes);
+    return result;
   });
 
   m.def(
