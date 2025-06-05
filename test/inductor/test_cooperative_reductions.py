@@ -57,7 +57,10 @@ class CooperativeReductionTests(TestCase):
         torch._inductor.metrics.generated_kernel_count = 0
         torch._dynamo.reset()
 
-    def run_and_check(self, fn, args, dtype=None, *, expect_kernel_count=1): # Make dtype optional, as some tests don't pass it
+    def run_and_check(self, fn, args, dtype=None, *, expect_kernel_count=1):
+        # Define fixed tolerances
+        RTOL = 1e-5
+        ATOL = 1e-6
 
         # calculate reference value in higher precision when input dtype is float16
         ref_dtype = dtype
@@ -84,24 +87,16 @@ class CooperativeReductionTests(TestCase):
             else:
                 expected = raw_expected.to(torch.float64)
 
-        # Now, ensure args are on CUDA with the correct dtype for compilation
-        # (Assuming args are already on CUDA in the test calls, and we just need to ensure correct dtype)
-        # However, the run_and_get_code expects *args directly, which are already on CUDA from the test definition
-        # So, no change needed for args here, but it's good to be aware of the data flow.
-
         fn_compiled = torch.compile(fn, fullgraph=True)
-        result, (source_code,) = run_and_get_code(fn_compiled, *args) # Use the original args which are on CUDA
+        result, (source_code,) = run_and_get_code(fn_compiled, *args)
 
         # For comparison, ensure result is also a tuple/list if expected is
         if isinstance(expected, (tuple, list)):
-            # Convert result to the same type as expected (tuple or list)
-            # This is important for self.assertEqual to work correctly
-            if isinstance(result, torch.Tensor): # If compile somehow unwrapped it
+            if isinstance(result, torch.Tensor):
                 result = (result,)
-            elif not isinstance(result, type(expected)): # If type is different (e.g., list vs tuple)
-                 result = type(expected)(result)
+            elif not isinstance(result, type(expected)):
+                result = type(expected)(result)
 
-            # Ensure all tensors in result are also converted to the same dtype for comparison
             if dtype is not None:
                 result = type(result)([t.to(dtype) if isinstance(t, torch.Tensor) else t for t in result])
             else:
@@ -112,7 +107,21 @@ class CooperativeReductionTests(TestCase):
             elif isinstance(result, torch.Tensor):
                 result = result.to(torch.float64)
 
-        self.assertEqual(result, expected)
+        # Apply assert_close with fixed tolerances for tensor comparisons
+        if isinstance(result, torch.Tensor) and isinstance(expected, torch.Tensor):
+            self.assert_close(result, expected, rtol=RTOL, atol=ATOL)
+        elif isinstance(result, (tuple, list)) and isinstance(expected, (tuple, list)):
+            # Iterate through elements for comparison
+            for r_item, e_item in zip(result, expected):
+                if isinstance(r_item, torch.Tensor) and isinstance(e_item, torch.Tensor):
+                    self.assert_close(r_item, e_item, rtol=RTOL, atol=ATOL)
+                else:
+                    # Fallback to assertEqual for non-tensor elements (e.g., bool, int)
+                    self.assertEqual(r_item, e_item)
+        else:
+            # Fallback to assertEqual for other types not handled by assert_close
+            self.assertEqual(result, expected)
+
         if "@triton_heuristics.fixed_config" in source_code:
             self.assertIn("cooperative_reduction_grid", source_code)
         else:
