@@ -5764,3 +5764,18 @@ def recover_orig_fp32_precision(fn):
             torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
 
     return recover()(fn)
+
+# Skips a test if the Python version is not in the specified range.
+def skipIfPythonVersionNotIn(version_from, version_to):
+    from torch._vendor.packaging import version
+    vi = sys.version_info
+    v = version.parse(f"{vi.major}.{vi.minor}.{vi.micro}")
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if v >= version.parse(version_from) and v < version.parse(version_to):
+                return fn(self, *args, **kwargs)
+            else:
+                raise unittest.SkipTest(f"Python version {v} not in range [{version_from} - {version_to})")
+        return wrap_fn
+    return dec_fn
