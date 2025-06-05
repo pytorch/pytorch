@@ -1781,10 +1781,13 @@ def use_cpp_gemm_template(
     is_woq_int4: bool = False,
     q_group_size: Optional[int] = None,
 ) -> bool:
+    from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
     from .kernel.mm_common import mm_args
+    from .virtualized import V
 
     if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
         return False
@@ -1802,9 +1805,13 @@ def use_cpp_gemm_template(
         use_4x2_dim=is_woq_int4,
     )
 
-    # TODO(jgong5): support dynamic shapes for n or k
+    if not has_free_unbacked_symbols(n) and not has_free_unbacked_symbols(k):
+        V.graph.sizevars.evaluate_static_shape(n)
+        V.graph.sizevars.evaluate_static_shape(k)
+
     if has_free_symbols((n, k)):
         return False
+
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
 
