@@ -5,6 +5,7 @@
 // Do not include this file directly. Instead, include c10/macros/Macros.h.
 
 #cmakedefine C10_BUILD_SHARED_LIBS
+#cmakedefine C10_BUILD_MAIN_LIB
 #cmakedefine C10_USE_GLOG
 #cmakedefine C10_USE_GFLAGS
 #cmakedefine C10_USE_NUMA
