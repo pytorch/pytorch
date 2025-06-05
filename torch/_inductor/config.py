@@ -375,6 +375,10 @@ reorder_prefetch_limit: Optional[int] = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
+# reorder_for_peak_memory has performance regression for models with collectives
+# so we by default disable it for models with collectives
+disable_peak_mem_reorder_with_collectives = True
+
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
