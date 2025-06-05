@@ -29,46 +29,6 @@
 #include <library_types.h>
 #endif
 
-#if !defined(CUSPARSE_VERSION) || (CUSPARSE_VERSION < 10100)
-const char* cusparseGetErrorString(cusparseStatus_t status) {
-  switch(status)
-  {
-    case CUSPARSE_STATUS_SUCCESS:
-      return "success";
-
-    case CUSPARSE_STATUS_NOT_INITIALIZED:
-      return "library not initialized";
-
-    case CUSPARSE_STATUS_ALLOC_FAILED:
-      return "resource allocation failed";
-
-    case CUSPARSE_STATUS_INVALID_VALUE:
-      return "an invalid numeric value was used as an argument";
-
-    case CUSPARSE_STATUS_ARCH_MISMATCH:
-      return "an absent device architectural feature is required";
-
-    case CUSPARSE_STATUS_MAPPING_ERROR:
-      return "an access to GPU memory space failed";
-
-    case CUSPARSE_STATUS_EXECUTION_FAILED:
-      return "the GPU program failed to execute";
-
-    case CUSPARSE_STATUS_INTERNAL_ERROR:
-      return "an internal operation failed";
-
-    case CUSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
-      return "the matrix type is not supported by this function";
-
-    case CUSPARSE_STATUS_ZERO_PIVOT:
-      return "an entry of the matrix is either structural zero or numerical zero (singular block)";
-
-    default:
-      return "unknown error";
-  }
-}
-#endif
-
 namespace at::native::sparse::cuda {
 
 void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {

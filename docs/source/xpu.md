@@ -59,8 +59,14 @@
     Stream
 ```
 
-## Memory management
 ```{eval-rst}
+.. automodule:: torch.xpu.memory
+```
+```{eval-rst}
+.. currentmodule:: torch.xpu.memory
+```
+
+## Memory management
 .. autosummary::
     :toctree: generated
     :nosignatures:
