@@ -70,12 +70,28 @@ using CaptureId_t = unsigned long long;
 using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
 
 struct C10_API DeviceAllocator : public c10::Allocator {
+  // Returns true if the allocator has been properly initialized and is ready
+  // for use
   virtual bool initialized() = 0;
+
+  // Releases all cached device memory from the specified memory pool back to
+  // the system
   virtual void emptyCache(MempoolId_t mempool_id = {0, 0}) = 0;
+
+  // Associates a memory allocation with a stream to establish dependency
+  // tracking. Prevents memory reuse until all operations on the specified
+  // stream complete
   virtual void recordStream(const DataPtr&, c10::Stream stream) = 0;
+
+  // Retrieves comprehensive memory statistics for the specified device,
+  // including allocation patterns, usage metrics
   virtual CachingDeviceAllocator::DeviceStats getDeviceStats(
       c10::DeviceIndex device) = 0;
+
+  // Resets cumulative allocation statistics for the specified device to zero
   virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
+
+  // Resets peak memory usage statistics for the specified device
   virtual void resetPeakStats(c10::DeviceIndex device) = 0;
 };
 
