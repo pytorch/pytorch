@@ -479,6 +479,7 @@ class JsonProfile:
             if "cat" not in event or "args" not in event or event["cat"] != "kernel":
                 continue
             dev = self._devices[event["args"]["device"]]
+
             dur = event["dur"]  # us
             if "kernel_flop" in event["args"]:
                 assert dur != 0
