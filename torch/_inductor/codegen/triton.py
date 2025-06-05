@@ -4181,7 +4181,12 @@ class TritonScheduling(SIMDScheduling):
             if loop_tiling_log.isEnabledFor(logging.DEBUG):
                 for n in node_schedule:
                     if diff_tiling := V.graph.scheduler.debug_diff_tilings.get(n):
-                        loop_tiling_log.debug("Different coalesce tiling for %s, new: %s, old: %s", kernel_name, diff_tiling[0], diff_tiling[1])
+                        loop_tiling_log.debug(
+                            "Different coalesce tiling for %s, new: %s, old: %s",
+                            kernel_name,
+                            diff_tiling[0],
+                            diff_tiling[1],
+                        )
                         break
 
         return kernel_name

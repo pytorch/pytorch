@@ -2148,8 +2148,10 @@ class Scheduler:
             }
         )
 
-        # only enabled with +loop_tiling
-        self.debug_diff_tilings: dict[SchedulerNode, tuple[Any, Any]] = {}
+        # only enabled with +loop_tiling, node -> (new_tiling, old_tiling)
+        self.debug_diff_tilings: dict[
+            SchedulerNode, tuple[dict[str, sympy.Expr], dict[str, sympy.Expr]]
+        ] = {}
 
     def get_donated_buffers(self) -> dict[str, SchedulerDonatedBuffer]:
         name_to_donated_buf = {}

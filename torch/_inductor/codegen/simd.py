@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.runtime_utils import green_text, yellow_text
-from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse, SchedulerNode
+from ..scheduler import BaseSchedulerNode, BaseScheduling, SchedulerNode, WhyNoFuse
 from ..utils import (
     cache_on_self,
     expr_fits_within_32bit,
@@ -2306,11 +2306,16 @@ class SIMDScheduling(BaseScheduling):
             )
             loop_tiling_log = torch._logging.getArtifactLogger(__name__, "loop_tiling")
             if loop_tiling_log.isEnabledFor(logging.DEBUG):
-                non_coalesce_tiling = cls.get_tiling_and_scores(node_schedule, numel, reduction_numel, None)
+                non_coalesce_tiling = cls.get_tiling_and_scores(
+                    node_schedule, numel, reduction_numel, None
+                )
                 if coalesce_tiling[0] != non_coalesce_tiling[0]:
                     for n in node_schedule:
                         if isinstance(n, SchedulerNode):
-                            V.graph.scheduler.debug_diff_tilings[n] = (coalesce_tiling[0], non_coalesce_tiling[0])
+                            V.graph.scheduler.debug_diff_tilings[n] = (
+                                coalesce_tiling[0],
+                                non_coalesce_tiling[0],
+                            )
                             break
 
             return coalesce_tiling

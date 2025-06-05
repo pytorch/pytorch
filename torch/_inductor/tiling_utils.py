@@ -629,6 +629,7 @@ class CoalesceVarAnalysis:
 
     suggested_split: Optional[VarTiling] = None
 
+
 def analyze_memory_coalescing(
     fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
 ) -> Optional[CoalesceVarAnalysis]:
@@ -646,7 +647,9 @@ def analyze_memory_coalescing(
     """
 
     out = _analyze_memory_coalescing_impl(fused_node)
-    loop_tiling_log.info("Coalesced Var Analysis for %s\n: \t%s\n", fused_node.get_buffer_names(), out)
+    loop_tiling_log.info(
+        "Coalesced Var Analysis for %s\n: \t%s\n", fused_node.get_buffer_names(), out
+    )
     return out
 
 
