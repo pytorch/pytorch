@@ -11,10 +11,10 @@ config.aot_inductor.dump_aoti_minifier = True
 
 There are two main steps to use the minifier:
 
-1. **Enable Minifier Dumping**  
+1. **Enable Minifier Dumping**
     Set `from torch._inductor import config; config.aot_inductor.dump_aoti_minifier = True` or set the environment variable `DUMP_AOTI_MINIFIER=1`. Running the script that triggers the error will produce a `minifier_launcher.py` script. The output directory can be configured by setting `torch._dynamo.config.debug_dir_root` to a valid directory.
 
-2. **Run the Minifier Script**  
+2. **Run the Minifier Script**
     Execute the generated `minifier_launcher.py` script. If the minifier runs successfully, it generates runnable Python code in `repro.py` that reproduces the exact error.
 
 ## Example Code
