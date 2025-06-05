@@ -1088,7 +1088,11 @@ class TestGitHubPRGhstackDependencies(TestCase):
             "ghstack dependencies: #106032, #106033, #106034\n"
         )
 
-
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+@mock.patch("trymerge.gh_fetch_merge_base", return_value="")
+@mock.patch(
+    "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
+)
 @mock.patch.object(DummyGitRepo, "commit_message")
 class TestRevListToPR(TestCase):
     # Tests for _revlist_to_prs function
