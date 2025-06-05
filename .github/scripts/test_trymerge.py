@@ -1088,6 +1088,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
             "ghstack dependencies: #106032, #106033, #106034\n"
         )
 
+
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch("trymerge.gh_fetch_merge_base", return_value="")
 @mock.patch(
