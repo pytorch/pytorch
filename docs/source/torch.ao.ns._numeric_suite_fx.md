@@ -1,26 +1,28 @@
-.. _torch_ao_ns_numeric_suite_fx:
+# torch.ao.ns._numeric_suite_fx
 
-torch.ao.ns._numeric_suite_fx
------------------------------
+> **Warning**  
+> This module is an early prototype and is subject to change.
 
-.. warning ::
-     This module is an early prototype and is subject to change.
+## Module: `torch.ao.ns._numeric_suite_fx`
 
-.. currentmodule:: torch.ao.ns._numeric_suite_fx
+Documentation for the `torch.ao.ns._numeric_suite_fx` module.
 
-.. automodule:: torch.ao.ns._numeric_suite_fx
-    :members:
-    :member-order: bysource
+---
 
+# torch.ao.ns.fx.utils
 
-torch.ao.ns.fx.utils
---------------------------------------
+> **Warning**  
+> This module is an early prototype and is subject to change.
 
-.. warning ::
-     This module is an early prototype and is subject to change.
+## Module: `torch.ao.ns.fx.utils`
 
-.. currentmodule:: torch.ao.ns.fx.utils
+### Functions
 
-.. autofunction:: torch.ao.ns.fx.utils.compute_sqnr(x, y)
-.. autofunction:: torch.ao.ns.fx.utils.compute_normalized_l2_error(x, y)
-.. autofunction:: torch.ao.ns.fx.utils.compute_cosine_similarity(x, y)
+- [`compute_sqnr(x, y)`](#)  
+     Compute the Signal-to-Quantization-Noise Ratio (SQNR) between `x` and `y`.
+
+- [`compute_normalized_l2_error(x, y)`](#)  
+     Compute the normalized L2 error between `x` and `y`.
+
+- [`compute_cosine_similarity(x, y)`](#)  
+     Compute the cosine similarity between `x` and `y`.
