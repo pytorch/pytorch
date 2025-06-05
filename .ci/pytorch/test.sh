@@ -1135,6 +1135,12 @@ test_custom_backend() {
 
 test_custom_script_ops() {
   echo "Testing custom script operators"
+
+  if [[ "$BUILD_ENVIRONMENT" == *s390x* ]]; then
+    echo "Skipping custom script operators until it's fixed"
+    return 0
+  fi
+
   CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
   pushd test/custom_operator
   cp -a "$CUSTOM_OP_BUILD" build

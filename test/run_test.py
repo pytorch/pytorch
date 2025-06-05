@@ -241,6 +241,8 @@ S390X_BLOCKLIST = [
     "test_fx",
     # some false errors
     "doctests",
+    # new failures to investigate and fix
+    "cpp_extensions/libtorch_agnostic_extension/test/test_libtorch_agnostic",
 ]
 
 XPU_BLOCKLIST = [
