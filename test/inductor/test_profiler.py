@@ -12,7 +12,7 @@ from torch import _dynamo as torchdynamo
 from torch._inductor import config
 from torch.profiler import ProfilerActivity
 from torch.testing._internal.common_utils import TemporaryFileName
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA, IS_BIG_GPU
 from torch.torch_version import TorchVersion
 from torch.utils._triton import has_triton
 
@@ -108,7 +108,9 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
                 self.assertEqual(event.input_shapes[:4], [[4, 4], [4, 4], [4, 4], []])
         self.assertTrue(event_found)
 
-    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     def test_inductor_profiling_kernel_names_template(self):
         with config.patch(
             {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
@@ -177,8 +179,13 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    @config.patch(
+        "compile_threads", 1
+    )  # This test monkey patches global variables, which workers don't see
     def test_inductor_profiling_triton_hooks(self):
         from triton.compiler import CompiledKernel  # @manual
+
+        from torch._inductor.runtime.triton_compat import knobs
 
         hooks_called = {"enter": False, "exit": False}
 
@@ -188,8 +195,12 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         def launch_exit_hook(lazy_dict):
             hooks_called["exit"] = True
 
-        CompiledKernel.launch_enter_hook = launch_enter_hook
-        CompiledKernel.launch_exit_hook = launch_exit_hook
+        if knobs:
+            knobs.runtime.launch_enter_hook = launch_enter_hook
+            knobs.runtime.launch_exit_hook = launch_exit_hook
+        else:
+            CompiledKernel.launch_enter_hook = launch_enter_hook
+            CompiledKernel.launch_exit_hook = launch_exit_hook
 
         def fn(x, y):
             return torch._foreach_add(x, y)

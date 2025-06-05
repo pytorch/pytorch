@@ -52,6 +52,7 @@ __all__ = [
     "FlatArgsAdapter",
     "UnflattenedModule",
     "AdditionalInputs",
+    "draft_export",
 ]
 
 # To make sure export specific custom ops are loaded
@@ -131,6 +132,10 @@ def export_for_training(
          to be different and the model will be serialized in the same way regardless of what value
          is passed here.
          WARNING: This option is experimental and use this at your own risk.
+
+        preserve_module_call_signature: A list of submodule paths for which the original
+         calling conventions are preserved as metadata. The metadata will be used when calling
+         torch.export.unflatten to preserve the original calling conventions of modules.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
@@ -246,6 +251,10 @@ def export(
          errors. Note that toggling this argument does not affect the resulting IR spec to be
          different and the model will be serialized in the same way regardless of what value
          is passed here.
+
+        preserve_module_call_signature: A list of submodule paths for which the original
+         calling conventions are preserved as metadata. The metadata will be used when calling
+         torch.export.unflatten to preserve the original calling conventions of modules.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
@@ -372,29 +381,15 @@ def save(
             f"The 'ep' parameter must be an instance of 'ExportedProgram', got '{type(ep).__name__}' instead."
         )
 
-    from torch._export.serde.schema import SCHEMA_VERSION
-    from torch._export.serde.serialize import serialize, SerializedArtifact
+    from torch.export.pt2_archive._package import package_pt2
 
-    artifact: SerializedArtifact = serialize(ep, opset_version, pickle_protocol)
-
-    if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
-
-    with zipfile.ZipFile(f, "w") as zipf:
-        # Save every field in the SerializedArtifact to a file.
-        assert isinstance(artifact.exported_program, bytes)
-        zipf.writestr("serialized_exported_program.json", artifact.exported_program)
-        zipf.writestr("serialized_state_dict.pt", artifact.state_dict)
-        zipf.writestr("serialized_constants.pt", artifact.constants)
-        zipf.writestr("serialized_example_inputs.pt", artifact.example_inputs)
-
-        zipf.writestr("version", ".".join(map(str, SCHEMA_VERSION)))
-
-        # Add extra files if provided
-        if extra_files:
-            for extra_file_name, content in extra_files.items():
-                encoded_content = content.encode("utf-8")
-                zipf.writestr(f"extra_files/{extra_file_name}", encoded_content)
+    package_pt2(
+        f,
+        exported_programs={"model": ep},
+        extra_files=extra_files,
+        pickle_protocol=pickle_protocol,
+        opset_version=opset_version,
+    )
 
 
 def load(
@@ -451,10 +446,32 @@ def load(
 
     extra_files = extra_files or {}
 
+    from torch.export.pt2_archive._package import load_pt2, PT2ArchiveContents
+
+    try:
+        pt2_contents = load_pt2(
+            f,
+            expected_opset_version=expected_opset_version,
+        )
+    except RuntimeError:
+        pt2_contents = PT2ArchiveContents({}, {}, {})
+
+    if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:
+        for k, v in pt2_contents.extra_files.items():
+            extra_files[k] = v
+
+        return pt2_contents.exported_programs["model"]
+
+    # TODO: For backward compatibility, we support loading a zip file from 2.7. Delete this path in 2.9(?)
+    warnings.warn(
+        "This version of file is deprecated. Please generate a new pt2 saved file."
+    )
     with zipfile.ZipFile(f, "r") as zipf:
         # Check the version
         version = zipf.read("version").decode().split(".")
-        from torch._export.serde.schema import SCHEMA_VERSION
+        from torch._export.serde.schema import (
+            SCHEMA_VERSION,  # todo change archive version to schema version
+        )
 
         assert len(version) == len(SCHEMA_VERSION)
         if version[0] != str(SCHEMA_VERSION[0]):
@@ -508,6 +525,32 @@ def load(
         ep = deserialize(artifact, expected_opset_version)
 
         return ep
+
+
+def draft_export(
+    mod: torch.nn.Module,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
+    *,
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    preserve_module_call_signature: tuple[str, ...] = (),
+    strict: bool = False,
+) -> ExportedProgram:
+    """
+    A version of torch.export.export which is designed to consistently produce
+    an ExportedProgram, even if there are potential soundness issues, and to
+    generate a report listing the issues found.
+    """
+    from ._draft_export import draft_export
+
+    return draft_export(
+        mod=mod,
+        args=args,
+        kwargs=kwargs,
+        dynamic_shapes=dynamic_shapes,
+        preserve_module_call_signature=preserve_module_call_signature,
+        strict=strict,
+    )
 
 
 def register_dataclass(

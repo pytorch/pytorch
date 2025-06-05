@@ -4,6 +4,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/util/Array.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
@@ -26,22 +27,26 @@ static inline bool cpu_has_vxe()
 #endif
 
 static CPUCapability compute_cpu_capability() {
-  auto envar = std::getenv("ATEN_CPU_CAPABILITY");
-  if (envar) {
+  const auto envar = c10::utils::get_env("ATEN_CPU_CAPABILITY");
+  if (envar.has_value()) {
 #if defined(HAVE_VSX_CPU_DEFINITION)
-    if (strcmp(envar, "vsx") == 0) {
+    if (envar == "vsx") {
       return CPUCapability::VSX;
     }
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
-    if (strcmp(envar, "zvector") == 0) {
+    if (envar == "zvector") {
       return CPUCapability::ZVECTOR;
     }
 #elif defined(HAVE_SVE_CPU_DEFINITION)
     int sve_vl = cpuinfo_get_max_arm_sve_length(); //Returns maximum SVE VL supported by your HW.
 #ifdef HAVE_SVE256_CPU_DEFINITION
-    if (strcmp(envar, "sve256") == 0) {
+    if (envar == "sve256") {
       if (sve_vl == 256) {
-        return CPUCapability::SVE256;
+#ifdef HAVE_ARM_BF16_CPU_DEFINITION
+        if (cpuinfo_has_arm_bf16()) {
+          return CPUCapability::SVE256;
+        }
+#endif
       }
       TORCH_WARN("SVE256 capability not available on hardware. Falling back to DEFAULT");
       return CPUCapability::DEFAULT;
@@ -49,20 +54,20 @@ static CPUCapability compute_cpu_capability() {
 #endif
 #else
 #ifdef HAVE_AVX512_CPU_DEFINITION
-    if (strcmp(envar, "avx512") == 0) {
+    if (envar == "avx512") {
       return CPUCapability::AVX512;
     }
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
-    if (strcmp(envar, "avx2") == 0) {
+    if (envar == "avx2") {
       return CPUCapability::AVX2;
     }
 #endif
 #endif
-    if (strcmp(envar, "default") == 0) {
+    if (envar == "default") {
       return CPUCapability::DEFAULT;
     }
-    TORCH_WARN("ignoring invalid value for ATEN_CPU_CAPABILITY: ", envar);
+    TORCH_WARN("ignoring invalid value for ATEN_CPU_CAPABILITY: ", envar.value());
   }
 
 #if !defined(__powerpc__) && !defined(__s390x__) && !defined(HAVE_SVE_CPU_DEFINITION)
@@ -102,7 +107,10 @@ static CPUCapability compute_cpu_capability() {
     }
     #ifdef HAVE_SVE256_CPU_DEFINITION
         if (sve_vl == 256) { // Check for SVE256
+        #ifdef HAVE_ARM_BF16_CPU_DEFINITION
+          if (cpuinfo_has_arm_bf16())
             return CPUCapability::SVE256;
+        #endif
         }
     #endif
     // Return the default CPU capability.

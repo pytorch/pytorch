@@ -212,6 +212,19 @@ class InPlaceCompilationTests(TestCase):
         out = torch.compile(fn)(a)
         self.assertEqual(out, a)
 
+    def test_to_sparse_to_dense_with_graph_break(self):
+        def fn(x):
+            x = x.to_sparse()
+            x = x.to_dense()
+            return x
+
+        x = torch.tensor([[1.0]])
+        c_fn = torch.compile(fn)
+
+        output = fn(x)
+        c_output = c_fn(x)
+        self.assertEqual(output, c_output)
+
 
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good

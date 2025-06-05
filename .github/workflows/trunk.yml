@@ -45,13 +45,13 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  libtorch-linux-focal-cuda12_6-py3_10-gcc11-debug-build:
-    name: libtorch-linux-focal-cuda12.6-py3.10-gcc11-debug
+  libtorch-linux-jammy-cuda12_6-py3_10-gcc11-debug-build:
+    name: libtorch-linux-jammy-cuda12.6-py3.10-gcc11-debug
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: libtorch-linux-focal-cuda12.6-py3.10-gcc11
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
+      build-environment: libtorch-linux-jammy-cuda12.6-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc11
       build-generates-artifacts: false
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "linux.4xlarge"
@@ -62,14 +62,14 @@ jobs:
     secrets: inherit
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  linux-focal-cuda12_6-py3_10-gcc11-no-ops-build:
-    name: linux-focal-cuda12.6-py3.10-gcc11-no-ops
+  linux-jammy-cuda12_6-py3_10-gcc11-no-ops-build:
+    name: linux-jammy-cuda12.6-py3.10-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.6-py3.10-gcc11-no-ops
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda12.6-py3.10-gcc11-no-ops
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -86,27 +86,12 @@ jobs:
       runner-type: macos-m1-stable
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
-      python-version: 3.9.12
+      python-version: 3.12.7
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-stable" },
           { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-stable" },
           { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-stable" },
-        ]}
-    secrets: inherit
-
-  macos-py3-arm64-mps-test:
-    name: macos-py3-arm64-mps
-    uses: ./.github/workflows/_mac-test-mps.yml
-    needs: macos-py3-arm64-build
-    if: needs.macos-py3-arm64-build.outputs.build-outcome == 'success'
-    with:
-      sync-tag: macos-py3-arm64-mps-test
-      build-environment: macos-py3-arm64
-      # Same as the build job
-      python-version: 3.9.12
-      test-matrix: |
-        { include: [
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
@@ -122,8 +107,9 @@ jobs:
     with:
       build-environment: macos-py3-arm64
       # Same as the build job
-      python-version: 3.9.12
+      python-version: 3.12.7
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
+      disable-monitor: false
     secrets: inherit
 
   win-vs2022-cpu-py3-build:
@@ -133,7 +119,6 @@ jobs:
     with:
       build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
-      sync-tag: win-cpu-build
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
       test-matrix: |
         { include: [
@@ -153,6 +138,7 @@ jobs:
       build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
       test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
+      disable-monitor: false
     secrets: inherit
 
   win-vs2022-cuda12_6-py3-build:
@@ -165,15 +151,15 @@ jobs:
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     secrets: inherit
 
-  linux-focal-rocm-py3_10-build:
+  linux-jammy-rocm-py3_10-build:
     if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}
-    name: linux-focal-rocm-py3.10
+    name: linux-jammy-rocm-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-rocm-py3.10
-      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      build-environment: linux-jammy-rocm-py3.10
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
         { include: [
@@ -183,31 +169,31 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-rocm-py3_10-test:
+  linux-jammy-rocm-py3_10-test:
     if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}
     permissions:
       id-token: write
       contents: read
-    name: linux-focal-rocm-py3.10
+    name: linux-jammy-rocm-py3.10
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-focal-rocm-py3_10-build
+      - linux-jammy-rocm-py3_10-build
       - target-determination
     with:
-      build-environment: linux-focal-rocm-py3.10
-      docker-image: ${{ needs.linux-focal-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm-py3_10-build.outputs.test-matrix }}
+      build-environment: linux-jammy-rocm-py3.10
+      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
       tests-to-include: "test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor distributed/test_c10d_common distributed/test_c10d_nccl"
     secrets: inherit
 
   # NB: Keep this in sync with inductor-perf-test-nightly.yml
-  linux-focal-cuda12_4-py3_10-gcc9-inductor-build:
-    name: cuda12.4-py3.10-gcc9-sm80
+  linux-jammy-cuda12_8-py3_10-gcc9-inductor-build:
+    name: cuda12.8-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm80
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
     secrets: inherit
 
@@ -218,7 +204,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11
-      docker-image-name: pytorch-linux-jammy-py3.9-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11
       test-matrix: |
         { include: [
           { config: "verify_cachebench", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },

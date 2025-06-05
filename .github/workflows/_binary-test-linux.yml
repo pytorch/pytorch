@@ -39,6 +39,10 @@ on:
         required: true
         type: string
         description: Docker image to use
+      DOCKER_IMAGE_TAG_PREFIX:
+        required: true
+        type: string
+        description: Docker image tag to use
       LIBTORCH_CONFIG:
         required: false
         type: string
@@ -71,6 +75,9 @@ on:
       github-token:
         required: true
         description: Github Token
+
+permissions:
+  id-token: write
 
 jobs:
   test:
@@ -155,7 +162,7 @@ jobs:
           mkdir "${GITHUB_WORKSPACE}"
 
       - name: Checkout PyTorch to pytorch dir
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -182,7 +189,7 @@ jobs:
 
       - name: Download Build Artifacts
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
-        uses: actions/download-artifact@v4.1.7
+        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"
@@ -191,15 +198,37 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && steps.filter.outputs.is-test-matrix-empty == 'False' }}
 
+      - name: configure aws credentials
+        id: aws_creds
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' && startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
+          docker-image-name: ${{ inputs.DOCKER_IMAGE }}
+          custom-tag-prefix: ${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
+          docker-build-dir: .ci/docker
+          working-directory: pytorch
+
       - name: Pull Docker image
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: ${{ inputs.DOCKER_IMAGE }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Test Pytorch binary
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         uses: ./pytorch/.github/actions/test-pytorch-binary
+        env:
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image || format('{0}:{1}', inputs.DOCKER_IMAGE, inputs.DOCKER_IMAGE_TAG_PREFIX) }}
 
       - name: Teardown Linux
         if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'

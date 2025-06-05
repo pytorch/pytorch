@@ -9,7 +9,7 @@ append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
 
 # Generate unboxing kernels
 set(GEN_COMMAND
-        "${Python_EXECUTABLE}" -m torchgen.gen_executorch
+        Python::Interpreter -m torchgen.gen_executorch
         --source-path=${TEST_ROOT}
         --install-dir=${OUTPUT_DIRECTORY}
         --tags-path=${TORCH_ROOT}/aten/src/ATen/native/tags.yaml
@@ -58,11 +58,7 @@ add_executable(test_edge_op_registration
 
 target_compile_definitions(test_edge_op_registration PRIVATE USE_GTEST)
 
-set(TEST_DEPENDENCIES gtest unbox_lib)
-
-target_link_libraries(test_edge_op_registration PRIVATE
-  ${TEST_DEPENDENCIES}
-)
+target_link_libraries(test_edge_op_registration PRIVATE gtest_main unbox_lib)
 if((CMAKE_CXX_COMPILER_ID MATCHES "AppleClang") OR (APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
   target_link_options(test_edge_op_registration PRIVATE
           "-Wl,-force_load,$<TARGET_FILE:unbox_lib>"
