@@ -20,6 +20,7 @@ from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
     definitely_contiguous,
+    definitely_contiguous_for_memory_format,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -2975,7 +2976,7 @@ def contiguous(
         lambda: "preserve memory format is unsupported by the contiguous operator",
     )
 
-    if utils.is_contiguous_for_memory_format(a, memory_format=memory_format):
+    if definitely_contiguous_for_memory_format(a, memory_format=memory_format):
         return a
 
     return torch.clone(a, memory_format=memory_format)
@@ -3298,11 +3299,11 @@ def native_layer_norm(
         + str(input.shape),
     )
 
-    input = input.contiguous()
+    input = contiguous(input)
     if weight is not None:
-        weight = weight.contiguous()
+        weight = contiguous(weight)
     if bias is not None:
-        bias = bias.contiguous()
+        bias = contiguous(bias)
 
     axis = input.ndim - normalized_ndim
     reduction_dims = list(range(axis, input.ndim))
