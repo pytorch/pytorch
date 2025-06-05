@@ -87,20 +87,18 @@ void initModule(PyObject* module) {
     using c10::CachingDeviceAllocator::DeviceStats;
 
     const auto stats = at::accelerator::getDeviceStats(device_index);
-
-    static constexpr std::
-        array<const char*, static_cast<size_t>(StatType::NUM_TYPES)>
-            kStatTypeNames = {"all", "small_pool", "large_pool"};
-
     const auto stat_to_dict = [](const Stat& stat) -> py::dict {
-      return py::dict(
-          {"current", stat.current},
-          {"peak", stat.peak},
-          {"allocated", stat.allocated},
-          {"freed", stat.freed});
+      py::dict dict;
+      dict["current"] = stat.current;
+      dict["peak"] = stat.peak;
+      dict["allocated"] = stat.allocated;
+      dict["freed"] = stat.freed;
+      return dict;
     };
 
-    const auto stat_array_to_dict = [&](const StatArray& stats) -> py::dict {
+    const auto stat_array_to_dict = [=](const StatArray& stats) -> py::dict {
+      const std::array<const char*, static_cast<size_t>(StatType::NUM_TYPES)>
+          kStatTypeNames = {"all", "small_pool", "large_pool"};
       py::dict dict;
       for (const auto i : c10::irange(kStatTypeNames.size())) {
         dict[kStatTypeNames[i]] = stat_to_dict(stats[i]);
