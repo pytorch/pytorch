@@ -829,7 +829,8 @@ class AOTAutogradCacheTests(InductorTestCase):
     @functorch_config.patch({"strict_autograd_cache": True})
     def test_autograd_no_dynamo_trace_backward(self):
         """
-        Lazily compile the backward, and lazily save to cache
+        Test that dynamo does not trace into the backward compiled function,
+        even on cache hit.
         """
         torch._dynamo.eval_frame.clear_dynamo_tls()
 
