@@ -1,6 +1,4 @@
-.. role:: hidden
-    :class: hidden-section
-
+(torch.distributions)=
 # Probability distributions - torch.distributions
 
 ```{eval-rst}
@@ -8,7 +6,7 @@
 .. currentmodule:: torch.distributions
 ```
 
-## :hidden:`Distribution`
+## `Distribution`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.distribution
@@ -17,7 +15,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`ExponentialFamily`
+## `ExponentialFamily`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.exp_family
@@ -26,7 +24,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Bernoulli`
+## `Bernoulli`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.bernoulli
@@ -36,7 +34,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Beta`
+## `Beta`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.beta
@@ -46,7 +44,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Binomial`
+## `Binomial`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.binomial
@@ -56,7 +54,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Categorical`
+## `Categorical`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.categorical
@@ -66,7 +64,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Cauchy`
+## `Cauchy`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.cauchy
@@ -76,7 +74,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Chi2`
+## `Chi2`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.chi2
@@ -86,7 +84,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`ContinuousBernoulli`
+## `ContinuousBernoulli`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.continuous_bernoulli
@@ -96,7 +94,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Dirichlet`
+## `Dirichlet`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.dirichlet
@@ -106,7 +104,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Exponential`
+## `Exponential`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.exponential
@@ -116,7 +114,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`FisherSnedecor`
+## `FisherSnedecor`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.fishersnedecor
@@ -126,7 +124,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Gamma`
+## `Gamma`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.gamma
@@ -136,7 +134,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`GeneralizedPareto`
+## `GeneralizedPareto`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.generalized_pareto
@@ -146,7 +144,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Geometric`
+## `Geometric`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.geometric
@@ -156,7 +154,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Gumbel`
+## `Gumbel`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.gumbel
@@ -166,7 +164,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`HalfCauchy`
+## `HalfCauchy`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.half_cauchy
@@ -176,7 +174,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`HalfNormal`
+## `HalfNormal`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.half_normal
@@ -186,7 +184,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Independent`
+## `Independent`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.independent
@@ -196,7 +194,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`InverseGamma`
+## `InverseGamma`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.inverse_gamma
@@ -206,7 +204,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Kumaraswamy`
+## `Kumaraswamy`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.kumaraswamy
@@ -216,7 +214,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`LKJCholesky`
+## `LKJCholesky`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.lkj_cholesky
@@ -226,7 +224,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Laplace`
+## `Laplace`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.laplace
@@ -236,7 +234,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`LogNormal`
+## `LogNormal`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.log_normal
@@ -246,7 +244,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`LowRankMultivariateNormal`
+## `LowRankMultivariateNormal`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.lowrank_multivariate_normal
@@ -256,7 +254,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`MixtureSameFamily`
+## `MixtureSameFamily`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.mixture_same_family
@@ -266,7 +264,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Multinomial`
+## `Multinomial`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.multinomial
@@ -276,7 +274,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`MultivariateNormal`
+## `MultivariateNormal`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.multivariate_normal
@@ -286,7 +284,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`NegativeBinomial`
+## `NegativeBinomial`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.negative_binomial
@@ -296,7 +294,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Normal`
+## `Normal`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.normal
@@ -306,7 +304,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`OneHotCategorical`
+## `OneHotCategorical`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.one_hot_categorical
@@ -316,7 +314,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Pareto`
+## `Pareto`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.pareto
@@ -326,7 +324,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Poisson`
+## `Poisson`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.poisson
@@ -336,7 +334,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`RelaxedBernoulli`
+## `RelaxedBernoulli`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.relaxed_bernoulli
@@ -346,7 +344,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`LogitRelaxedBernoulli`
+## `LogitRelaxedBernoulli`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.relaxed_bernoulli
@@ -356,7 +354,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`RelaxedOneHotCategorical`
+## `RelaxedOneHotCategorical`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.relaxed_categorical
@@ -366,7 +364,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`StudentT`
+## `StudentT`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.studentT
@@ -376,7 +374,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`TransformedDistribution`
+## `TransformedDistribution`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.transformed_distribution
@@ -386,7 +384,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Uniform`
+## `Uniform`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.uniform
@@ -396,7 +394,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`VonMises`
+## `VonMises`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.von_mises
@@ -406,7 +404,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Weibull`
+## `Weibull`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.weibull
@@ -416,7 +414,7 @@
     :show-inheritance:
 ```
 
-## :hidden:`Wishart`
+## `Wishart`
 
 ```{eval-rst}
 .. currentmodule:: torch.distributions.wishart
