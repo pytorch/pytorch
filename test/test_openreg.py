@@ -82,6 +82,10 @@ class TestOpenReg(TestCase):
         state = torch.openreg.get_rng_state(0)
         torch.openreg.set_rng_state(state, 0)
 
+    def test_manual_seed(self):
+        torch.openreg.manual_seed_all(2024)
+        self.assertEqual(torch.openreg.initial_seed(), 2024)
+
     @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_pin_memory(self):
         cpu_a = torch.randn(10)
