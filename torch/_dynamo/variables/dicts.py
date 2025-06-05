@@ -238,7 +238,8 @@ class ConstDictVariable(VariableTracker):
         def make_hashable(key):
             return key if isinstance(key, Hashable) else Hashable(key)
 
-        self.items = user_cls({make_hashable(x): v for x, v in items.items()})
+        dict_cls = dict if user_cls is collections.defaultdict else user_cls
+        self.items = dict_cls({make_hashable(x): v for x, v in items.items()})
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = not is_from_local_source(self.source)
@@ -676,17 +677,9 @@ class ConstDictVariable(VariableTracker):
             new_dict_vt.items.update(args[0].items)
             return new_dict_vt
         elif name == "__ior__":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name)
-
-            self.install_dict_keys_match_guard()
-            if hasattr(args[0], "install_dict_keys_match_guard"):
-                # TODO: Guard with stuff that it is an iterable (e.g., generator)?
-                args[0].install_dict_keys_match_guard()
-
-            return variables.UserFunctionVariable(polyfills.dict___ior__).call_function(
-                tx, [self, args[0]], {}
-            )
+            r = self.call_method(tx, "__or__", args, kwargs)
+            self.call_method(tx, "update", [r], {})
+            return self
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -1150,9 +1143,6 @@ class DictViewVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
-
-    def install_dict_keys_match_guard(self):
-        return self.dv_dict.install_dict_keys_match_guard()
 
     def call_method(
         self,
