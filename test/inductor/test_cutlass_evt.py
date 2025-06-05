@@ -372,7 +372,9 @@ return tmp_1, D""",
 
         self.assertExpectedInline(
             _render_argument_type(
-                epilogue_functor, _create_mock_buffer_name_map(EXAMPLE_TENSORS)
+                epilogue_functor,
+                _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+                lambda x: int(x),
             ),
             """\
 { /* thread */
@@ -427,7 +429,9 @@ def fn(accum, bias):
 
         self.assertExpectedInline(
             _render_argument_type(
-                epilogue_functor, _create_mock_buffer_name_map(example_tensors)
+                epilogue_functor,
+                _create_mock_buffer_name_map(example_tensors),
+                lambda x: int(x),
             ),
             """\
 { /* thread */
@@ -452,6 +456,7 @@ def fn(accum, bias):
             MockTileDescription(),
             EpilogueScheduleType.ScheduleAuto,
             _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+            lambda x: x,  # static shapes
         )
         self.assertExpectedInline(
             code,
