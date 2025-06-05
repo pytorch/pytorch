@@ -2340,6 +2340,10 @@ def contains_wait(snode: BaseSchedulerNode) -> bool:
         return is_wait(snode.node)
 
 
+def contains_collective_or_wait(snodes: list[BaseSchedulerNode]) -> bool:
+    return any(contains_collective(snode) or contains_wait(snode) for snode in snodes)
+
+
 def is_fallback_op(
     node: Optional[Operation],
     op: Union[torch._ops.OpOverload, Collection[torch._ops.OpOverload]],
