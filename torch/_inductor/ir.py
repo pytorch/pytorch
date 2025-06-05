@@ -4709,6 +4709,13 @@ class ChoiceCaller:
     def to_callable(self):  # type: ignore[no-untyped-def]
         raise NotImplementedError
 
+    def kernel_hash_key(self) -> str:
+        """
+        Hash key for the underlying kernel. By default, we assume there are no
+        runtime params, so kernel hash key defaults to choice caller's hash key.
+        """
+        return self.hash_key()
+
     def hash_key(self) -> str:
         raise NotImplementedError
 
@@ -5811,6 +5818,17 @@ class ExternKernel(InputsKernel):
             ]
         return kwargs
 
+    def get_op_name(self) -> str:
+        if self.fx_node is not None:
+            target = self.fx_node.target
+            op_namespace = getattr(target, "__module__", "unknown_namespace")
+            op_namespace = op_namespace.replace("._ops.", ".ops.")
+            op_namespace = op_namespace.rsplit(".", 1)[0]
+            op_name = f"{op_namespace}.{target}"
+        else:
+            op_name = "unknown_op"
+        return op_name
+
     def codegen_size_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if config.size_asserts and not V.graph.cpp_wrapper:
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
@@ -5818,19 +5836,24 @@ class ExternKernel(InputsKernel):
                 return
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-
+            op_name = self.get_op_name()
             wrapper.writeline(
-                f"assert_size_stride({self.get_name()}, {size}, {stride})"
+                f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
             )
 
     def codegen_alignment_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if config.alignment_asserts and not V.graph.cpp_wrapper:
             name = self.get_name()
             aligned = name not in V.graph.unaligned_buffers
+            op_name = self.get_op_name()
             if aligned:
-                wrapper.writeline(f"assert_alignment({name}, {GPU_ALIGN_BYTES})")
+                wrapper.writeline(
+                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
+                )
             else:
-                wrapper.writeline(f"# buffer {name} is assumed to be not aligned")
+                wrapper.writeline(
+                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
+                )
 
     def get_group_stride(self):  # type: ignore[no-untyped-def]
         """
