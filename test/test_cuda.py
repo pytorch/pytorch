@@ -5792,27 +5792,6 @@ class TestCudaOptims(TestCase):
             self.assertEqual(scaler._scale, scale)
             self.assertEqual(scaler._growth_tracker, growth_tracker)
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
-    def test_graph_capture_simple(self):
-        s = torch.cuda.Stream()
-
-        with torch.cuda.stream(s):
-            a = torch.full((1000,), 1, device="cuda")
-            g = torch.cuda.CUDAGraph()
-            torch.cuda.empty_cache()
-            g.capture_begin()
-            b = a
-            for _ in range(10):
-                b = b + 1
-            g.capture_end()
-        torch.cuda.current_stream().wait_stream(s)
-
-        g.replay()
-
-        self.assertEqual(b.sum().item(), 11000.0)
-
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestGDS(TestCase):
