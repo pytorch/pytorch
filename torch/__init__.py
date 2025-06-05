@@ -155,6 +155,21 @@ assert __all__ == sorted(__all__)
 # Load the extension module
 ################################################################################
 
+# If PyTorch was built against the ROCm runtime wheels, then there will be
+# a _rocm_init module and it will define an initialize() function which can
+# prepare ROCm for use. See general documentation on ROCm runtime wheels:
+# https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md
+# Since this module is only ever added to the wheel if built for such a
+# deployment, it is always safe to attempt.
+try:
+    from . import _rocm_init
+except ImportError:
+    pass
+else:
+    _rocm_init.initialize()
+    del _rocm_init
+
+
 if sys.platform == "win32":
 
     def _load_dll_libraries() -> None:
@@ -2613,7 +2628,9 @@ def compile(
         disable=disable,
         guard_filter_fn=guard_filter_fn,
         frame_traced_fn=frame_traced_fn,
-    )(model)  # type: ignore[return-value]
+    )(
+        model
+    )  # type: ignore[return-value]
 
 
 def _register_device_module(device_type, module):
