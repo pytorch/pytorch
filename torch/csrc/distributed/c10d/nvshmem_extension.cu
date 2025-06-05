@@ -141,7 +141,7 @@ at::Tensor nvshmem_all_to_all(
 }
 
 // This is an exclusive prefix sum function that calculates read (or write) offsets for each peer.
-__device__ void prefixSum(int64_t *odata, int64_t *idata, int n) {
+__device__ int64_t prefixSum(int64_t *odata, int64_t *idata, int n) {
   // Specialize BlockScan for a 1D block of threads, of type int64_t.
   // - `BLOCK_SCAN_WARP_SCANS` is a low-latency scan algorithm (instead of high
   // throughput which we don't need here).
@@ -159,12 +159,12 @@ __device__ void prefixSum(int64_t *odata, int64_t *idata, int n) {
   int64_t thread_data = (tid < n) ? idata[tid] : 0;
 
   // Collectively compute the block-wide exclusive prefix sum
-  BlockScanT(temp_storage).ExclusiveSum(thread_data, thread_data);
+  int64_t block_aggregate;
+  BlockScanT(temp_storage).ExclusiveSum(thread_data, thread_data, block_aggregate);
 
   // Store the result
-  if (tid < n) {
-    odata[tid] = thread_data;
-  }
+  odata[tid] = thread_data;
+  return block_aggregate;
 }
 
 // This kernel is used to exchange output splits and source offsets between peers.
@@ -318,7 +318,7 @@ at::Tensor nvshmem_all_to_all_vdev(
 // - input splits (IN)
 // - output splits (OUT) and
 // - source offsets (OUT).
-__global__ void exchangeSplitAndOffset_2d(int64_t* in_out_splits, int mype, int npes, int ne) {
+__global__ void exchangeSplitAndOffset_2d(int64_t* in_out_splits, int mype, int npes, int ne, size_t input_dim0) {
   int nsplits = npes * ne;
   auto input_splits = in_out_splits;
   auto output_splits = in_out_splits + nsplits;
@@ -328,8 +328,9 @@ __global__ void exchangeSplitAndOffset_2d(int64_t* in_out_splits, int mype, int 
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
 
   // Scan input splits to get the source offsets
-  prefixSum(peer_offsets, input_splits, nsplits);
+  auto sum_of_splits = prefixSum(peer_offsets, input_splits, nsplits);
   __syncthreads();;
+  CUDA_KERNEL_ASSERT(sum_of_splits <= input_dim0);
 
   // Use 1 block to do the exchange
   if (tid < nsplits) {
@@ -421,13 +422,24 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
   void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
   int64_t* splits_ptr = (int64_t*)(splits_hdl->get_buffer_ptrs()[rank]);
 
+  // Shape checks
   auto split_shape = in_out_splits.sizes();
   TORCH_CHECK(in_out_splits.is_contiguous()
       && input.is_contiguous()
       && out.is_contiguous(),
       "input, out and in_out_splits must be contiguous");
-  TORCH_CHECK(split_shape.size() == 2 && split_shape[0] == 3, "in_out_splits must be 2D with 3 rows");
-  TORCH_CHECK(split_shape[1] % world_size == 0, "Each row of in_out_splits must be a multiple of world_size");
+  TORCH_CHECK(split_shape.size() == 2
+      && split_shape[0] == 3
+      && split_shape[1] % world_size == 0,
+      "in_out_splits must be 2D with 3 rows, "
+      "each row must be a multiple of world_size");
+
+  // Consistency checks
+  TORCH_CHECK(input.dtype() == out.dtype()
+      && input.stride(0) == out.stride(0),
+      "input and out must have the same dtype and same stride at dim 0");
+  TORCH_CHECK(in_out_splits.scalar_type() == at::kLong, "in_out_splits must be int64");
+
   // Number of experts per rank
   int ne = split_shape[1] / world_size;
 
@@ -436,12 +448,14 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
   auto stream = at::cuda::getCurrentCUDAStream();
 
   // Exchange output splits and source offsets
+  auto input_dim0 = input.size(0);
   // Use collective launch because kernel involves nvshmem barrier
   void* args0[] = {
       &splits_ptr,
       &rank,
       &world_size,
-      &ne};
+      &ne,
+      &input_dim0};
   nvshmemx_collective_launch(
       (const void*)exchangeSplitAndOffset_2d,
       dim3(1),
@@ -455,7 +469,7 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
   // Total number of blocks is limited to 64 (intra-node) or 8 (inter-node).
   int num_blocks = std::min(world_size * ne, world_size > 8 ? 8 : 64);
 
-  // Stride at dim 0 (assuming input is contiguous, TODO)
+  // Stride at dim 0
   size_t stride_bytes = input.stride(0) * input.element_size();
 
   // All to all data exchange
