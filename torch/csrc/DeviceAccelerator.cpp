@@ -107,10 +107,24 @@ void initModule(PyObject* module) {
     };
 
     py::dict result;
+    result["num_alloc_retries"] = stats.num_alloc_retries;
+    result["num_ooms"] = stats.num_ooms;
+    result["max_split_size"] = stats.max_split_size;
+    result["num_sync_all_streams"] = stats.num_sync_all_streams;
+    result["num_device_alloc"] = stats.num_device_alloc;
+    result["num_device_free"] = stats.num_device_free;
     result["allocated_bytes"] = stat_array_to_dict(stats.allocated_bytes);
     result["reserved_bytes"] = stat_array_to_dict(stats.reserved_bytes);
     result["active_bytes"] = stat_array_to_dict(stats.active_bytes);
     result["requested_bytes"] = stat_array_to_dict(stats.requested_bytes);
+    result["allocation"] = stat_array_to_dict(stats.allocation);
+    result["segment"] = stat_array_to_dict(stats.segment);
+    result["active"] = stat_array_to_dict(stats.active);
+    result["inactive_split"] = stat_array_to_dict(stats.inactive_split);
+    result["inactive_split_bytes"] =
+        stat_array_to_dict(stats.inactive_split_bytes);
+    result["oversize_allocations"] = stat_to_dict(stats.oversize_allocations);
+    result["oversize_segments"] = stat_to_dict(stats.oversize_segments);
     return result;
   });
 
