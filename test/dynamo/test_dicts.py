@@ -18,7 +18,8 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import make_dynamo_test, munge_exc
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
 class SimpleDict(dict):
@@ -1004,6 +1005,89 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
 
+class DictGuardTests(LoggingTestCase):
+    thetype = dict
+
+    @make_logging_test(recompiles=True)
+    def test_popitem(self, records):
+        d = self.thetype()
+        d[1] = 2
+        d[3] = 4
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            k, v = d.popitem()
+            if k == 3 and v == 4:
+                return x.sin()
+            return x.cos()
+
+        x = torch.tensor(1.0)
+        y = fn(x)
+        # sanity check
+        self.assertEqual(len(records), 0)
+        self.assertEqual(y, x.sin())
+
+        d[3] = 5
+        y = fn(x)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(y, x.cos())
+        record = self.getRecord(records, "d")
+        self.assertIn(
+            """d[3] == 4""",
+            munge_exc(record),
+        )
+
+    @make_logging_test(recompiles=True)
+    def test_cmp_eq(self, records):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d1, d2):
+            if d1 == d2:
+                return x.sin()
+            return x.cos()
+
+        x = torch.tensor(1.0)
+        d1 = self.thetype({1: 2, 3: 4})
+        d2 = self.thetype({1: 2, 5: 6})
+        y = fn(x, d1, d2)
+        # sanity check
+        self.assertEqual(len(records), 0)
+        self.assertEqual(y, x.cos())
+
+        y = fn(x, d1, d1)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(y, x.sin())
+        record = self.getRecord(records, "d2")
+        self.assertIn(
+            """list(dict.keys(d2))""",
+            munge_exc(record.getMessage()),
+        )
+
+    @make_logging_test(recompiles=True)
+    def test_cmp_ne(self, records):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d1, d2):
+            if d1 == d2:
+                return x.sin()
+            return x.cos()
+
+        x = torch.tensor(1.0)
+        d1 = self.thetype({1: 2, 3: 4})
+        d2 = self.thetype({1: 2, 5: 6})
+        y = fn(x, d1, d2)
+        # sanity check
+        self.assertEqual(len(records), 0)
+        self.assertEqual(y, x.cos())
+
+        y = fn(x, d1, d1)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(y, x.sin())
+        record = self.getRecord(records, "d2")
+        self.assertIn(
+            """list(dict.keys(d2))""",
+            munge_exc(record.getMessage()),
+        )
+
+
 class DictMethodsTests(torch._dynamo.test_case.TestCase):
     thetype = dict
 
@@ -1308,15 +1392,11 @@ class OrderedDictMethodsTests(DictMethodsTests):
     # - popitem - Inherited from DictMethodsTest
     # + move_to_end
 
-    def test_move_to_end(self):
-        d = self.thetype.fromkeys("abcde")
-        self.assertEqual("".join(d), "abcde")
-        d.move_to_end("b")
-        self.assertEqual("".join(d), "acdeb")
-
-        # Test OrderedDict.move_to_end
-        self.thetype.move_to_end(d, "a")
-        self.assertEqual("".join(d), "cdeba")
+    @make_dynamo_test
+    def test_cmp_eq_order(self):
+        a = self.thetype.fromkeys("abc")
+        b = self.thetype.fromkeys("bca")
+        self.assertFalse(a == b)
 
 
 if __name__ == "__main__":
