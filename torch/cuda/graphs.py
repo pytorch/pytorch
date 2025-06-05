@@ -74,7 +74,6 @@ class CUDAGraph(torch._C._CUDAGraph):
 
     .. warning::
         This API is in beta and may change in future releases.
-
     """
 
     def __new__(cls, instantiate_eagerly=True):
@@ -111,8 +110,10 @@ class CUDAGraph(torch._C._CUDAGraph):
         super().capture_end()
 
     def instantiate(self):
-        r"""
-        TODO
+        r"""Instantiate the CUDA graph. Will be called by
+        capture_end() if eagerly_instantiate=True, or by replay() if
+        eagerly_instantiate=False and instantiate() has not already
+        been explicitly called.
         """
         super().instantiate()
 
