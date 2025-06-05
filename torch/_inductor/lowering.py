@@ -486,11 +486,11 @@ def broadcast_symbolic_shapes(a, b):
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
         if V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(y, 1), size_oblivious=True
+            sympy.Eq(y, 1), size_oblivious=True, fallback_value=False
         ):
             output.append(x)
         elif V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(x, 1), size_oblivious=True
+            sympy.Eq(x, 1), size_oblivious=True, fallback_value=False
         ):
             output.append(y)
         else:
@@ -938,18 +938,18 @@ def broadcast_tensors(*inputs):
             (
                 (
                     V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(a, 1), size_oblivious=True
+                        sympy.Eq(a, 1), size_oblivious=True, fallback_value=False
                     )
                     and not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(b, 1), size_oblivious=True
+                        sympy.Eq(b, 1), size_oblivious=True, fallback_value=False
                     )
                 )
                 or (
                     not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(a, 1), size_oblivious=True
+                        sympy.Eq(a, 1), size_oblivious=True, fallback_value=False
                     )
                     and V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(b, 1), size_oblivious=True
+                        sympy.Eq(b, 1), size_oblivious=True, fallback_value=False
                     )
                 )
             )

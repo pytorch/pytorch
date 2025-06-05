@@ -1667,9 +1667,9 @@ def native_layer_norm_backward(
 
     N = prod(inner_dims)  # type: ignore[arg-type]
     M = prod(outer_dims)  # type: ignore[arg-type]
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-    if guard_size_oblivious(M <= 0) or guard_size_oblivious(N <= 0):
+    if statically_known_true(M == 0) or statically_known_true(N == 0):
         return (
             input.new_zeros(input_shape) if output_mask[0] else None,
             input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
