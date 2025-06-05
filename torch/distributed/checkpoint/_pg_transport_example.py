@@ -44,8 +44,6 @@ def main(argv: list[str]) -> None:
     parser.add_argument("--total-size", type=int, default=12_000_000_000)  # 12GB
     args = parser.parse_args(argv)
 
-    log.info(f"args: {args}")
-
     CHUNK_SIZE: int = args.chunk_size
     TOTAL_SIZE: int = args.total_size
     INPLACE: bool = args.inplace
@@ -85,14 +83,14 @@ def main(argv: list[str]) -> None:
         with Timer("send_checkpoint"):
             transport.send_checkpoint(
                 dst_ranks=[1],
-                step=1,
                 state_dict=state_dict,
             )
     elif rank == 1:
         with Timer("recv_checkpoint"):
-            transport.recv_checkpoint(src_rank=0, step=1)
+            transport.recv_checkpoint(src_rank=0)
 
     # Clean up
+    logger.info(f"[Rank {dist.get_rank()}] Finished")
     dist.destroy_process_group()
 
 
