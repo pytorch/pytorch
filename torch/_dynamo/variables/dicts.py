@@ -609,7 +609,9 @@ class ConstDictVariable(VariableTracker):
             self.items.pop(key)
             self.items[key] = val
             return ConstantVariable.create(None)
-        elif name == "__eq__":
+        elif name == "__eq__" and istype(
+            self, ConstDictVariable
+        ):  # don't let Set use this function
             if len(args) != 1:
                 raise_args_mismatch(tx, name)
 
