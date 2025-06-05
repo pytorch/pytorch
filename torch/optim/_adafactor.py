@@ -315,6 +315,11 @@ Adafactor.__doc__ = (
                 &\hspace{5mm}U_t \leftarrow \frac{G_t}{\sqrt{\widehat{V}_t}}                                            \\
             \end{aligned}
 
+        In addition, there is an additional deviation in our implementaion when compared to the standard procedure.
+        Noam Shazeer and Mitchell Stern use the sum of the square of the gradient. In our implementation,
+        we use the mean of the square of the gradient and are careful to account for
+        the normalization factor. This allows for greater numerical stability for largs sums where we have limited
+        numerical ranges.
 
     .. _Adafactor\: Adaptive Learning Rates with Sublinear Memory Cost:
         https://arxiv.org/pdf/1804.04235
