@@ -26,7 +26,7 @@ void THCPGraph_init(PyObject* module) {
   torch_C_m.def("_graph_pool_handle", &::at::cuda::graph_pool_handle);
 
   shared_ptr_class_<::at::cuda::CUDAGraph>(torch_C_m, "_CUDAGraph")
-      .def(py::init<bool>(), py::arg("eagerly_instantiate") = true)
+      .def(py::init<bool>(), py::arg("instantiate_eagerly") = true)
       .def(
           "capture_begin",
           [](::at::cuda::CUDAGraph& self,
