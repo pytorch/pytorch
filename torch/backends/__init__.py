@@ -1,6 +1,7 @@
-# mypy: allow-untyped-defs
 import types
+from collections.abc import Generator
 from contextlib import contextmanager
+from typing import Any, Callable
 
 
 # The idea for this parameter is that we forbid bare assignment
@@ -10,17 +11,17 @@ from contextlib import contextmanager
 __allow_nonbracketed_mutation_flag = True
 
 
-def disable_global_flags():
+def disable_global_flags() -> None:
     global __allow_nonbracketed_mutation_flag
     __allow_nonbracketed_mutation_flag = False
 
 
-def flags_frozen():
+def flags_frozen() -> bool:
     return not __allow_nonbracketed_mutation_flag
 
 
 @contextmanager
-def __allow_nonbracketed_mutation():
+def __allow_nonbracketed_mutation() -> Generator[None, None, None]:
     global __allow_nonbracketed_mutation_flag
     old = __allow_nonbracketed_mutation_flag
     __allow_nonbracketed_mutation_flag = True
@@ -31,14 +32,16 @@ def __allow_nonbracketed_mutation():
 
 
 class ContextProp:
-    def __init__(self, getter, setter):
+    def __init__(
+        self, getter: Callable[[], Any], setter: Callable[[Any], None]
+    ) -> None:
         self.getter = getter
         self.setter = setter
 
-    def __get__(self, obj, objtype):
+    def __get__(self, obj: Any, objtype: Any) -> Any:
         return self.getter()
 
-    def __set__(self, obj, val):
+    def __set__(self, obj: Any, val: Any) -> None:
         if not flags_frozen():
             self.setter(val)
         else:
@@ -49,11 +52,11 @@ class ContextProp:
 
 
 class PropModule(types.ModuleType):
-    def __init__(self, m, name):
+    def __init__(self, m: types.ModuleType, name: str) -> None:
         super().__init__(name)
         self.m = m
 
-    def __getattr__(self, attr):
+    def __getattr__(self, attr: str) -> Any:
         return self.m.__getattribute__(attr)
 
 
