@@ -110,7 +110,7 @@ To make a hook serializable, ``__setstate__`` and ``__getstate__`` should be def
 `__getstate__` should exclude non-serializable attributes from a returned dictionary.
 ```
 ```{warning}
-    `__setstate__` should properly initialize non-serializable attributes, excluded from a provided `state`.
+`__setstate__` should properly initialize non-serializable attributes, excluded from a provided `state`.
 ```
 {class}`PowerSGDState` has `__setstate__` and `__getstate__` implemented and can be used as a reference.
 
@@ -125,88 +125,88 @@ Here is a simple, end-to-end example of saving and reloading PowerSGD state and 
 
 ```{code-block} python
 
-    import os
-    import sys
-    import tempfile
-    import torch
-    import torch.distributed as dist
-    import torch.nn as nn
-    import torch.optim as optim
-    import torch.multiprocessing as mp
+import os
+import sys
+import tempfile
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+import torch.optim as optim
+import torch.multiprocessing as mp
 
-    from torch.nn.parallel import DistributedDataParallel
-    from torch.distributed.algorithms.ddp_comm_hooks import powerSGD_hook as powerSGD
+from torch.nn.parallel import DistributedDataParallel
+from torch.distributed.algorithms.ddp_comm_hooks import powerSGD_hook as powerSGD
 
-    class SimpleModel(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.fc1 = nn.Linear(24,24)
-            self.relu = nn.ReLU()
-            self.fc2 = nn.Linear(24,12)
+class SimpleModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(24,24)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(24,12)
 
-        def forward(self, x):
-            return self.fc2(self.relu(self.fc1(x)))
+    def forward(self, x):
+        return self.fc2(self.relu(self.fc1(x)))
 
-    def setup(rank, world_size):
-        os.environ['MASTER_ADDR'] = 'localhost'
-        os.environ['MASTER_PORT'] = '12355'
+def setup(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
 
-        # initialize the process group
-        dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    # initialize the process group
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
-    def cleanup():
-        dist.destroy_process_group()
+def cleanup():
+    dist.destroy_process_group()
 
-    def run_demo(demo_fn, world_size):
-        mp.spawn(
-            demo_fn,
-            args=(world_size,),
-            nprocs=world_size,
-            join=True)
+def run_demo(demo_fn, world_size):
+    mp.spawn(
+        demo_fn,
+        args=(world_size,),
+        nprocs=world_size,
+        join=True)
 
-    def demo_serialization(rank, world_size):
-        setup(rank, world_size)
+def demo_serialization(rank, world_size):
+    setup(rank, world_size)
 
-        CHECKPOINT = tempfile.gettempdir() + "/checkpoint.pt"
+    CHECKPOINT = tempfile.gettempdir() + "/checkpoint.pt"
 
-        model = SimpleModel().to(rank)
-        ddp_model = DistributedDataParallel(model, device_ids=[rank])
+    model = SimpleModel().to(rank)
+    ddp_model = DistributedDataParallel(model, device_ids=[rank])
 
-        powersgd_hook = powerSGD.powerSGD_hook
-        powersgd_state = powerSGD.PowerSGDState(process_group=None)
+    powersgd_hook = powerSGD.powerSGD_hook
+    powersgd_state = powerSGD.PowerSGDState(process_group=None)
 
-        optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
-        ddp_model.register_comm_hook(powersgd_state, powersgd_hook)
+    optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
+    ddp_model.register_comm_hook(powersgd_state, powersgd_hook)
 
-        state = {
-            'state_dict': ddp_model.state_dict(),
-            'comm_hook': powersgd_hook,
-            'comm_hook_state': powersgd_state}
+    state = {
+        'state_dict': ddp_model.state_dict(),
+        'comm_hook': powersgd_hook,
+        'comm_hook_state': powersgd_state}
 
-        if rank == 0:
-            torch.save(state, CHECKPOINT)
+    if rank == 0:
+        torch.save(state, CHECKPOINT)
 
-        dist.barrier()
-        map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
-        checkpoint = torch.load(CHECKPOINT, map_location=map_location)
+    dist.barrier()
+    map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
+    checkpoint = torch.load(CHECKPOINT, map_location=map_location)
 
-        new_ddp_model = DistributedDataParallel(SimpleModel().to(rank), device_ids=[rank])
-        new_ddp_model.load_state_dict(checkpoint['state_dict'])
-        powersgd_hook = checkpoint['comm_hook']
-        powersgd_state = checkpoint['comm_hook_state']
+    new_ddp_model = DistributedDataParallel(SimpleModel().to(rank), device_ids=[rank])
+    new_ddp_model.load_state_dict(checkpoint['state_dict'])
+    powersgd_hook = checkpoint['comm_hook']
+    powersgd_state = checkpoint['comm_hook_state']
 
-        new_ddp_model.register_comm_hook(powersgd_state, powersgd_hook)
+    new_ddp_model.register_comm_hook(powersgd_state, powersgd_hook)
 
-        if rank == 0:
-            os.remove(CHECKPOINT)
+    if rank == 0:
+        os.remove(CHECKPOINT)
 
-        cleanup()
+    cleanup()
 
-    if __name__ == "__main__":
-        n_gpus = torch.cuda.device_count()
-        assert n_gpus >= 2, f"Requires at least 2 GPUs to run, but got {n_gpus}"
-        world_size = n_gpus
-        run_demo(demo_serialization, world_size)
+if __name__ == "__main__":
+    n_gpus = torch.cuda.device_count()
+    assert n_gpus >= 2, f"Requires at least 2 GPUs to run, but got {n_gpus}"
+    world_size = n_gpus
+    run_demo(demo_serialization, world_size)
 ```
 
 ## Acknowledgements
