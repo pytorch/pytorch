@@ -36,10 +36,10 @@ MempoolId_t graph_pool_handle() {
  * describes memory management for captures.
  */
 
-CUDAGraph::CUDAGraph(bool eagerly_instantiate)
+CUDAGraph::CUDAGraph(bool instantiate_eagerly)
   // CUDAStreams may not be default-constructed.
   : capture_stream_(at::cuda::getCurrentCUDAStream()),
-    eagerly_instantiate_(eagerly_instantiate) {
+    instantiate_eagerly_(instantiate_eagerly) {
 }
 
 void CUDAGraph::register_generator_state(
@@ -141,7 +141,7 @@ void CUDAGraph::capture_end() {
 
   capture_ended_ = true;
 
-  if (eagerly_instantiate_) {
+  if (instantiate_eagerly_) {
     instantiate();
   }
 }

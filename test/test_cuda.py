@@ -3510,11 +3510,11 @@ exit(2)
         not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON,
         "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-python must be installed",
     )
-    @parametrize("eagerly_instantiate", [False, True])
-    def test_cuda_graph_raw_graph(self, eagerly_instantiate):
+    @parametrize("instantiate_eagerly", [False, True])
+    def test_cuda_graph_raw_graph(self, instantiate_eagerly):
         import cuda.bindings.runtime as cudart
 
-        graph = torch.cuda.CUDAGraph(eagerly_instantiate=eagerly_instantiate)
+        graph = torch.cuda.CUDAGraph(instantiate_eagerly=instantiate_eagerly)
         x = torch.zeros([2000], device="cuda")
         y = torch.ones([2000], device="cuda")
         with torch.cuda.graph(graph, capture_error_mode="relaxed"):
@@ -3535,9 +3535,9 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
-    @parametrize("eagerly_instantiate", [False, True])
-    def test_cuda_graph_raw_graph_reset_and_recapture(self, eagerly_instantiate):
-        graph = torch.cuda.CUDAGraph(eagerly_instantiate=eagerly_instantiate)
+    @parametrize("instantiate_eagerly", [False, True])
+    def test_cuda_graph_raw_graph_reset_and_recapture(self, instantiate_eagerly):
+        graph = torch.cuda.CUDAGraph(instantiate_eagerly=instantiate_eagerly)
         x = torch.zeros([2000], device="cuda")
         y = torch.ones([2000], device="cuda")
         with torch.cuda.graph(graph, capture_error_mode="relaxed"):
