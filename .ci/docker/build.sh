@@ -90,7 +90,7 @@ tag=$(echo $image | awk -F':' '{print $2}')
 # from scratch
 case "$tag" in
   pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc11)
-    CUDA_VERSION=12.6
+    CUDA_VERSION=12.6.3
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
@@ -113,7 +113,7 @@ case "$tag" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.6
+    CUDA_VERSION=12.6.3
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
