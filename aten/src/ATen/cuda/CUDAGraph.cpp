@@ -109,7 +109,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
 
   cudaStreamCaptureStatus status{};
-  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_, &graph_));
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(stream, &status, &capture_id_, &graph_, nullptr, nullptr));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
 
   has_graph_ = true;
@@ -141,17 +141,6 @@ void CUDAGraph::capture_end() {
 
   capture_ended_ = true;
 
-  // Previously, the graph would always and immediately be
-  // instantiated at the end of capture_end(). Then, the cudaGraph_t
-  // would be destroyed. However, that prevents users from modifying
-  // the cudaGraph_t before the cudaGraphExec_t is made.  Since
-  // replay() is expected to be run on performance-critical paths, we
-  // want to retain the prior behavior of instantiating at the end of
-  // graph capture to prevent performance degredation of the first
-  // call of replay() in existing performance-sensitive code. If a
-  // user knows that they will be modifying the cudaGraph_t after
-  // graph capture is done, they can set eagerly_instantiate_ to true
-  // to avoid the overhead of instantiating twice.
   if (eagerly_instantiate_) {
     instantiate();
   }
