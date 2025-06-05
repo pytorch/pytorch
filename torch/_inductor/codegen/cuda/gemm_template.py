@@ -879,9 +879,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         if self.fast_accum is not None:
             is_op_fast_accum = "fastaccum" in op.configuration_name()
-            if (self.fast_accum and not is_op_fast_accum) or (
-                not self.fast_accum and is_op_fast_accum
-            ):
+            if self.fast_accum ^ is_op_fast_accum:
                 return None
 
         # Set bias layout and alignment.
