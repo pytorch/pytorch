@@ -337,8 +337,10 @@ __global__ void exchangeSplitAndOffset_2d(int64_t* in_out_splits, int mype, int 
     int e = tid % ne;
     // This does a transpose from rank-major order to expert-major order
     int dst_offset = e * npes + mype;
+    auto split_val = input_splits[tid];
+    CUDA_KERNEL_ASSERT(split_val >= 0);
     nvshmem_int64_p(source_offsets + dst_offset, peer_offsets[tid], peer);
-    nvshmem_int64_p(output_splits + dst_offset, input_splits[tid], peer);
+    nvshmem_int64_p(output_splits + dst_offset, split_val, peer);
   }
   // This barrier ensures that all remote PEs see the updated values
   nvshmemx_barrier_all_block();
@@ -420,6 +422,10 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
   int64_t* splits_ptr = (int64_t*)(splits_hdl->get_buffer_ptrs()[rank]);
 
   auto split_shape = in_out_splits.sizes();
+  TORCH_CHECK(in_out_splits.is_contiguous()
+      && input.is_contiguous()
+      && out.is_contiguous(),
+      "input, out and in_out_splits must be contiguous");
   TORCH_CHECK(split_shape.size() == 2 && split_shape[0] == 3, "in_out_splits must be 2D with 3 rows");
   TORCH_CHECK(split_shape[1] % world_size == 0, "Each row of in_out_splits must be a multiple of world_size");
   // Number of experts per rank
