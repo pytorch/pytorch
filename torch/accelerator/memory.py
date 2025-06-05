@@ -87,6 +87,16 @@ def memory_stats(device: _device_t = None, /) -> dict[str, Any]:
     - ``allocated``: historical total increase in this metric.
     - ``freed``: historical total decrease in this metric.
 
+    In addition to the core statistics, we also provide some simple event
+    counters:
+
+    - ``"num_alloc_retries"``: number of failed device memory allocation calls that
+      result in a cache flush and retry.
+    - ``"num_ooms"``: number of out-of-memory errors thrown.
+    - ``"num_sync_all_streams"``: number of ``synchronize_and_free_events`` calls.
+    - ``"num_device_alloc"``: number of device memory allocation calls.
+    - ``"num_device_free"``: number of device memory free calls.
+
     Args:
         device (:class:`torch.device`, str, int, optional): a given device that must match the current
             :ref:`accelerator<accelerators>` device type. If not given,
