@@ -272,6 +272,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(obj)
         elif isinstance(obj, enum.Enum):
             return EnumVariable(obj)
+        elif self.value is collections.OrderedDict:
+            return variables.GetAttrVariable(self, name)
         elif name in getattr(self.value, "__dict__", {}) or (
             self.value.__module__.startswith("torch.")
             or self.value.__module__ == "torch"
