@@ -1,11 +1,12 @@
-# mypy: allow-untyped-defs
+from typing import Any, Callable, Optional
+
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as distributed_c10d
 from torch.distributed._shard.sharded_tensor import _sharded_op_impl, ShardedTensor
 
 
-def _communicate_result(result, pg):
+def _communicate_result(result: bool, pg: dist.ProcessGroup) -> bool:
     # Gather results from all ranks.
     if result:
         result_tensor = torch.ones(1, device=torch.device(torch.cuda.current_device()))
@@ -21,7 +22,13 @@ def _communicate_result(result, pg):
     return torch.equal(result_tensor, expected_result)
 
 
-def binary_cmp(cmp_fun, types, args, kwargs=None, process_group=None):
+def binary_cmp(
+    cmp_fun: Callable[..., Any],
+    types: Any,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
+    process_group: Optional[dist.ProcessGroup] = None,
+) -> bool:
     if len(args) != 2:
         raise ValueError(f"Expected two arguments for torch.{cmp_fun.__name__}")
 
@@ -68,11 +75,21 @@ def binary_cmp(cmp_fun, types, args, kwargs=None, process_group=None):
     return _communicate_result(True, st1._process_group)
 
 
-@_sharded_op_impl(torch.equal)
-def equal(types, args, kwargs, process_group):
+@_sharded_op_impl(torch.equal)  # type: ignore[misc]
+def equal(
+    types: Any,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]],
+    process_group: Optional[dist.ProcessGroup],
+) -> bool:
     return binary_cmp(torch.equal, types, args, kwargs, process_group)
 
 
-@_sharded_op_impl(torch.allclose)
-def allclose(types, args, kwargs, process_group):
+@_sharded_op_impl(torch.allclose)  # type: ignore[misc]
+def allclose(
+    types: Any,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]],
+    process_group: Optional[dist.ProcessGroup],
+) -> bool:
     return binary_cmp(torch.allclose, types, args, kwargs, process_group)
