@@ -9093,6 +9093,36 @@ class TestLinalgMPS(TestCaseMPS):
             mean_err = ((res - ref).abs() / ref).mean()
             self.assertLess(mean_err, 0.05)
 
+    def test_solve_triangular_mixed_devices(self):
+        """Regression test for #142048: solve_triangular should not crash with mixed CPU/MPS tensors"""
+        if not torch.backends.mps.is_available():
+            self.skipTest("MPS not available")
+
+        # Create test matrices
+        # Upper triangular matrix on MPS
+        mps_matrix = torch.randn(5, 5, device='mps')
+        mps_matrix = torch.triu(mps_matrix)  # Make it upper triangular
+
+        # Right-hand side on CPU
+        cpu_rhs = torch.randn(5, 3)
+
+        # This should not crash with the device guard fix
+        # The operation should handle mixed devices gracefully
+        result = torch.linalg.solve_triangular(mps_matrix, cpu_rhs, upper=True)
+
+        # Result should be on MPS device (same as first argument)
+        self.assertEqual(result.device.type, 'mps')
+
+        # Also test the reverse: CPU matrix, MPS rhs
+        cpu_matrix = torch.randn(5, 5)
+        cpu_matrix = torch.triu(cpu_matrix)
+        mps_rhs = torch.randn(5, 3, device='mps')
+
+        result2 = torch.linalg.solve_triangular(cpu_matrix, mps_rhs, upper=True)
+
+        # Result should be on CPU device (same as first argument)
+        self.assertEqual(result2.device.type, 'cpu')
+
 
 class TestSDPA(TestCaseMPS):
     def _compare_tensors(self, y, ref):
