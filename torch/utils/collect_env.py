@@ -319,7 +319,7 @@ def get_intel_gpu_driver_version(run_lambda):
     lst = []
     platform = get_platform()
     if platform == "linux":
-            pkgs = {
+        pkgs = {
             "dpkg": {
                 "intel-opencl-icd",
                 "libze1",
@@ -333,8 +333,8 @@ def get_intel_gpu_driver_version(run_lambda):
                 "level-zero",
             },
             "zypper": {
-             "intel-opencl",
-             "level-zero",
+                "intel-opencl",
+                "level-zero",
             },
         }.get(detect_linux_pkg_manager(), {})
         for pkg in pkgs:
