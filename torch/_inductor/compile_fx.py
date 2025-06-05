@@ -675,6 +675,14 @@ class _CompileFxCallable(Protocol):
     ) -> OutputCode: ...
 
 
+@contextlib.contextmanager
+def quiesce_async_compile_pool():
+    try:
+        yield
+    finally:
+        torch._inductor.async_compile.AsyncCompile.quiesce()
+
+
 def compile_fx_inner(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -710,6 +718,7 @@ def compile_fx_inner(
         stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
+        stack.enter_context(quiesce_async_compile_pool())
         CompileEventLogger.pt2_compile(
             "inductor_compile",
             is_backward=kwargs["is_backward"],

@@ -272,9 +272,18 @@ class AsyncCompile:
         if get_compile_threads() <= 1:
             return
         _compile_start()
-        # Pool is initialized on first access
-        cls.process_pool()
+        pool = cls.process_pool()
+        if isinstance(pool, SubprocPool):
+            pool.warmup()
         _compile_end()
+
+    @classmethod
+    def quiesce(cls) -> None:
+        # Don't inadvertently create a process pool if it doesn't already exist:
+        if cls.process_pool.cache_info().currsize:
+            pool = cls.process_pool()
+            if isinstance(pool, SubprocPool):
+                pool.quiesce()
 
     @classmethod
     def submit(cls, task: Callable[..., Any]) -> Any:
