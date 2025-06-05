@@ -1277,14 +1277,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
 
-    @unittest.expectedFailure
-    def test_cmp_eq(self):
-        return super().test_cmp_eq()
-
-    @unittest.expectedFailure
-    def test_cmp_ne(self):
-        return super().test_cmp_ne()
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
