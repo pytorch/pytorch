@@ -117,11 +117,14 @@ class TestLazyModules(TestCase):
         self.assertIsInstance(module.weight, UninitializedParameter)
         self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(5, 5)
-        module(input)
+        output = module(input)
         self.assertIsInstance(module, nn.Linear)
         self.assertNotIsInstance(module, nn.LazyLinear)
         self.assertTrue(module.weight.shape == (10, 5))
         self.assertTrue(module.bias.shape == (10,))
+        self.assertTrue((module.weight != 0).any())
+        self.assertTrue((module.bias != 0).any())
+        self.assertTrue((output != 0).any())
         y = module(input)
         self.assertTrue(
             torch.equal(

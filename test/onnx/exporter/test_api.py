@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 
 import numpy as np
@@ -124,17 +125,6 @@ class TestExportAPIDynamo(common_utils.TestCase):
             )
             self.assertTrue(os.path.exists(path))
 
-    def test_export_supports_script_module(self):
-        class ScriptModule(torch.nn.Module):
-            def forward(self, x):
-                return x
-
-        self.assert_export(
-            torch.jit.script(ScriptModule()),
-            (torch.randn(1, 1, 2),),
-            strategy="JitTraceConvertStrategy",
-        )
-
     def test_dynamic_shapes_with_fully_specified_axes(self):
         ep = torch.export.export(
             SampleModelForDynamicShapes(),
@@ -245,6 +235,31 @@ class TestExportAPIDynamo(common_utils.TestCase):
                 ][:-1]
             )
         )
+
+    def test_upgraded_torchlib_impl(self):
+        class GeluModel(torch.nn.Module):
+            def forward(self, input):
+                # Use GELU activation function
+                return torch.nn.functional.gelu(input, approximate="tanh")
+
+        input = torch.randn(1, 3, 4, 4)
+        onnx_program_op18 = torch.onnx.export(
+            GeluModel(),
+            input,
+            dynamo=True,
+        )
+        all_nodes_op18 = [n.op_type for n in onnx_program_op18.model.graph]
+        self.assertIn("Tanh", all_nodes_op18)
+        self.assertNotIn("Gelu", all_nodes_op18)
+
+        onnx_program_op20 = torch.onnx.export(
+            GeluModel(),
+            input,
+            opset_version=20,
+            dynamo=True,
+        )
+        all_nodes_op20 = [n.op_type for n in onnx_program_op20.model.graph]
+        self.assertIn("Gelu", all_nodes_op20)
 
     def test_refine_dynamic_shapes_with_onnx_export(self):
         # NOTE: From test/export/test_export.py
@@ -359,6 +374,51 @@ class TestCustomTranslationTable(common_utils.TestCase):
         self.assertIn("Sub", all_nodes)
         self.assertNotIn("Add", all_nodes)
 
+    def test_custom_translation_table_supports_custom_op_with_its_decomp(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            @torch.library.register_fake("mylib::foo")
+            def foo_impl(a, b):
+                return a + b
+
+            class M(torch.nn.Module):
+                def forward(self, x, y):
+                    return torch.ops.mylib.foo(x, y)
+
+            def onnx_add(self: FLOAT, other: FLOAT) -> FLOAT:
+                # Replace add with Sub
+                return op.Sub(self, other)
+
+            # With the custom op defined, we can use it in the model
+            # and replace it with a custom translation table
+            custom_translation_table = {
+                torch.ops.mylib.foo.default: onnx_add,
+            }
+            onnx_program = torch.onnx.export(
+                M(),
+                (torch.ones(3, 3), torch.ones(3, 3)),
+                custom_translation_table=custom_translation_table,
+                dynamo=True,
+            )
+            all_nodes = [n.op_type for n in onnx_program.model.graph]
+            self.assertIn("Sub", all_nodes)
+            self.assertNotIn("Add", all_nodes)
+
+            # Without the custom op defined, it's going to be decomposed
+            onnx_program_decomp = torch.onnx.export(
+                M(), (torch.ones(3, 3), torch.ones(3, 3)), dynamo=True
+            )
+            all_nodes_decomp = [n.op_type for n in onnx_program_decomp.model.graph]
+            self.assertIn("Add", all_nodes_decomp)
+            self.assertNotIn("Sub", all_nodes_decomp)
+
 
 class TestFakeTensorExport(common_utils.TestCase):
     """Test exporting in fake mode."""
@@ -459,6 +519,35 @@ class TestFakeTensorExport(common_utils.TestCase):
         np.testing.assert_allclose(
             onnx_model.graph.initializers["weight"].const_value.numpy(), 42.0
         )
+
+    def test_is_in_onnx_export(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                def f(x):
+                    return x.sin() if torch.onnx.is_in_onnx_export() else x.cos()
+
+                return f(x)
+
+        self.assertFalse(torch.onnx.is_in_onnx_export())
+        onnx_program = torch.onnx.export(
+            Mod(),
+            (torch.randn(3, 4),),
+            dynamo=True,
+            fallback=False,
+        )
+        self.assertFalse(torch.onnx.is_in_onnx_export())
+
+        node_names = [n.op_type for n in onnx_program.model.graph]
+        self.assertIn("Sin", node_names)
+
+    def test_torchscript_exporter_raises_deprecation_warning(self):
+        # Test that the deprecation warning is raised when using torchscript exporter
+        with self.assertWarnsRegex(
+            DeprecationWarning, "You are using the legacy TorchScript-based ONNX export"
+        ):
+            torch.onnx.export(
+                SampleModel(), (torch.randn(1, 1, 2),), io.BytesIO(), dynamo=False
+            )
 
 
 if __name__ == "__main__":

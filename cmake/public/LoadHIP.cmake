@@ -26,12 +26,6 @@ else()
   endif()
 endif()
 
-if(NOT DEFINED ENV{ROCM_INCLUDE_DIRS})
-  set(ROCM_INCLUDE_DIRS ${ROCM_PATH}/include)
-else()
-  set(ROCM_INCLUDE_DIRS $ENV{ROCM_INCLUDE_DIRS})
-endif()
-
 # MAGMA_HOME
 if(NOT DEFINED ENV{MAGMA_HOME})
   set(MAGMA_HOME ${ROCM_PATH}/magma)
@@ -72,6 +66,7 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
   message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
+  list(APPEND ROCM_INCLUDE_DIRS ${${PACKAGE_NAME}_INCLUDE_DIR})
 endmacro()
 
 # Find the HIP Package
@@ -82,11 +77,15 @@ find_package_and_print_version(HIP 1.0 MODULE)
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
 
-  # Find ROCM version for checks
+  find_package_and_print_version(hip REQUIRED CONFIG)
+  # Find ROCM version for checks. UNIX filename is rocm_version.h, Windows is hip_version.h
   if(UNIX)
-    set(ROCM_VERSION_HEADER_PATH ${ROCM_INCLUDE_DIRS}/rocm-core/rocm_version.h)
-  else()
-    set(ROCM_VERSION_HEADER_PATH ${ROCM_INCLUDE_DIRS}/hip/hip_version.h)
+    find_package_and_print_version(rocm-core REQUIRED CONFIG)
+    find_file(ROCM_VERSION_HEADER_PATH NAMES rocm_version.h
+      HINTS ${rocm_core_INCLUDE_DIR}/rocm-core /usr/include)
+  else() # Win32
+    find_file(ROCM_VERSION_HEADER_PATH NAMES hip_version.h
+      HINTS ${hip_INCLUDE_DIR}/hip)
   endif()
   get_filename_component(ROCM_HEADER_NAME ${ROCM_VERSION_HEADER_PATH} NAME)
 
@@ -144,7 +143,6 @@ if(HIP_FOUND)
   # Find ROCM components using Config mode
   # These components will be searced for recursively in ${ROCM_PATH}
   message("\n***** Library versions from cmake find_package *****\n")
-  find_package_and_print_version(hip REQUIRED CONFIG)
   find_package_and_print_version(amd_comgr REQUIRED)
   find_package_and_print_version(rocrand REQUIRED)
   find_package_and_print_version(hiprand REQUIRED)
@@ -153,17 +151,30 @@ if(HIP_FOUND)
   find_package_and_print_version(miopen REQUIRED)
   find_package_and_print_version(hipfft REQUIRED)
   find_package_and_print_version(hipsparse REQUIRED)
+  find_package_and_print_version(hipsparselt REQUIRED)
   find_package_and_print_version(rocprim REQUIRED)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
-  find_package_and_print_version(hiprtc REQUIRED)
+  # workaround cmake 4 build issue
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+    message(WARNING "Work around hiprtc cmake failure for cmake >= 4")
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    find_package_and_print_version(hiprtc REQUIRED)
+    unset(CMAKE_POLICY_VERSION_MINIMUM)
+  else()
+    find_package_and_print_version(hiprtc REQUIRED)
+  endif()
   find_package_and_print_version(hipblaslt REQUIRED)
 
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
+  endif()
 
+  list(REMOVE_DUPLICATES ROCM_INCLUDE_DIRS)
+
+  if(UNIX)
     # roctx is part of roctracer
     find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
 

@@ -93,29 +93,37 @@ def generate_large_tests():
         ref_output = model(x)
 
     torch._dynamo.reset()
-    with torch.no_grad():
-        model_so_path = aot_compile(
-            model,
-            (x,),
-        )
-        # Also store a .pt2 file using the aoti_compile_and_package API
-        pt2_package_path = torch._inductor.aoti_compile_and_package(
-            torch.export.export(
+    for use_runtime_constant_folding in [True, False]:
+        with torch.no_grad():
+            model_so_path = aot_compile(
                 model,
                 (x,),
-            ),
-        )
+                options={
+                    "aot_inductor.use_runtime_constant_folding": use_runtime_constant_folding
+                },
+            )
+            # Also store a .pt2 file using the aoti_compile_and_package API
+            pt2_package_path = torch._inductor.aoti_compile_and_package(
+                torch.export.export(
+                    model,
+                    (x,),
+                ),
+                inductor_configs={
+                    "aot_inductor.use_runtime_constant_folding": use_runtime_constant_folding
+                },
+            )
 
-    large_data.update(
-        {  # noqa: F541
-            "model_so_path": model_so_path,
-            "pt2_package_path": pt2_package_path,
-            "inputs": [x],
-            "outputs": [ref_output],
-            "w_pre": model.w_pre,
-            "w_add": model.w_add,
-        }
-    )
+        suffix = "_use_runtime_constant_folding" if use_runtime_constant_folding else ""
+        large_data.update(
+            {  # noqa: F541
+                f"model_so_path{suffix}": model_so_path,
+                f"pt2_package_path{suffix}": pt2_package_path,
+                "inputs": [x],
+                "outputs": [ref_output],
+                "w_pre": model.w_pre,
+                "w_add": model.w_add,
+            }
+        )
 
 
 # AOTI model which will create additional tensors during autograd.

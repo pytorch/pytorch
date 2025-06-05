@@ -21,7 +21,7 @@ CUDA_STABLE = "12.6"
 CUDA_ARCHES_FULL_VERSION = {
     "11.8": "11.8.0",
     "12.6": "12.6.3",
-    "12.8": "12.8.0",
+    "12.8": "12.8.1",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "11.8": "9",
@@ -30,7 +30,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
 }
 
 # NOTE: Also update the ROCm sources in tools/nightly.py when changing this list
-ROCM_ARCHES = ["6.2.4", "6.3"]
+ROCM_ARCHES = ["6.3", "6.4"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -66,39 +66,50 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nccl-cu12==2.26.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvshmem-cu12==3.2.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "12.8": (
-        "nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-nvrtc-cu12==12.8.93; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-runtime-cu12==12.8.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-cupti-cu12==12.8.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cudnn-cu12==9.8.0.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cublas-cu12==12.8.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufft-cu12==11.3.3.83; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-curand-cu12==10.3.9.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusolver-cu12==11.7.3.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparse-cu12==12.5.8.93; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'"
+        "nvidia-nccl-cu12==2.26.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvshmem-cu12==3.2.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvtx-cu12==12.8.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvjitlink-cu12==12.8.93; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufile-cu12==1.13.1.3; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "xpu": (
-        "intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | "
-        "intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | "
-        "intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | "
-        "intel-sycl-rt==2025.0.4; platform_system == 'Linux' | "
-        "intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | "
-        "intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | "
-        "intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | "
-        "intel-sycl-rt==2025.0.5; platform_system == 'Windows' | "
-        "tcmlib==1.2.0 | "
-        "umf==0.9.1 | "
-        "intel-pti==0.10.1"
+        "intel-cmplr-lib-rt==2025.1.1 | "
+        "intel-cmplr-lib-ur==2025.1.1 | "
+        "intel-cmplr-lic-rt==2025.1.1 | "
+        "intel-sycl-rt==2025.1.1 | "
+        "oneccl-devel==2021.15.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2021.15.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "impi-rt==2021.15.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "onemkl-sycl-blas==2025.1.0 | "
+        "onemkl-sycl-dft==2025.1.0 | "
+        "onemkl-sycl-lapack==2025.1.0 | "
+        "onemkl-sycl-rng==2025.1.0 | "
+        "onemkl-sycl-sparse==2025.1.0 | "
+        "dpcpp-cpp-rt==2025.1.1 | "
+        "intel-opencl-rt==2025.1.1 | "
+        "mkl==2025.1.0 | "
+        "intel-openmp==2025.1.1 | "
+        "tbb==2022.1.0 | "
+        "tcmlib==1.3.0 | "
+        "umf==0.10.0 | "
+        "intel-pti==0.12.0"
     ),
 }
 
@@ -154,41 +165,28 @@ def arch_type(arch_version: str) -> str:
         return "cpu"
 
 
-# This can be updated to the release version when cutting release branch, i.e. 2.1
 DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
 
 WHEEL_CONTAINER_IMAGES = {
+    **{gpu_arch: f"manylinux2_28-builder:cuda{gpu_arch}" for gpu_arch in CUDA_ARCHES},
     **{
-        gpu_arch: f"pytorch/manylinux2_28-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in CUDA_ARCHES
-    },
-    **{
-        gpu_arch: f"pytorch/manylinuxaarch64-builder:cuda{gpu_arch.replace('-aarch64', '')}-{DEFAULT_TAG}"
+        gpu_arch: f"manylinuxaarch64-builder:cuda{gpu_arch.replace('-aarch64', '')}"
         for gpu_arch in CUDA_AARCH64_ARCHES
     },
-    **{
-        gpu_arch: f"pytorch/manylinux2_28-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in ROCM_ARCHES
-    },
-    "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
-    "cpu": f"pytorch/manylinux2_28-builder:cpu-{DEFAULT_TAG}",
-    "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
-    "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
+    **{gpu_arch: f"manylinux2_28-builder:rocm{gpu_arch}" for gpu_arch in ROCM_ARCHES},
+    "xpu": "manylinux2_28-builder:xpu",
+    "cpu": "manylinux2_28-builder:cpu",
+    "cpu-aarch64": "manylinux2_28_aarch64-builder:cpu-aarch64",
+    "cpu-s390x": "pytorch/manylinuxs390x-builder:cpu-s390x",
 }
 
 RELEASE = "release"
 DEBUG = "debug"
 
 LIBTORCH_CONTAINER_IMAGES: dict[str, str] = {
-    **{
-        gpu_arch: f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in CUDA_ARCHES
-    },
-    **{
-        gpu_arch: f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in ROCM_ARCHES
-    },
-    "cpu": f"pytorch/libtorch-cxx11-builder:cpu-{DEFAULT_TAG}",
+    **{gpu_arch: f"libtorch-cxx11-builder:cuda{gpu_arch}" for gpu_arch in CUDA_ARCHES},
+    **{gpu_arch: f"libtorch-cxx11-builder:rocm{gpu_arch}" for gpu_arch in ROCM_ARCHES},
+    "cpu": "libtorch-cxx11-builder:cpu",
 }
 
 FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t"]
@@ -249,7 +247,12 @@ def generate_libtorch_matrix(
                     "libtorch_config": release_type,
                     "libtorch_variant": libtorch_variant,
                     "container_image": (
-                        LIBTORCH_CONTAINER_IMAGES[arch_version]
+                        LIBTORCH_CONTAINER_IMAGES[arch_version].split(":")[0]
+                        if os not in ("windows", "windows-arm64")
+                        else ""
+                    ),
+                    "container_image_tag_prefix": (
+                        LIBTORCH_CONTAINER_IMAGES[arch_version].split(":")[1]
                         if os not in ("windows", "windows-arm64")
                         else ""
                     ),
@@ -333,7 +336,12 @@ def generate_wheels_matrix(
                         "gpu_arch_version": gpu_arch_version,
                         "desired_cuda": desired_cuda,
                         "use_split_build": "True" if use_split_build else "False",
-                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
+                            ":"
+                        )[0],
+                        "container_image_tag_prefix": WHEEL_CONTAINER_IMAGES[
+                            arch_version
+                        ].split(":")[1],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS[
@@ -361,7 +369,12 @@ def generate_wheels_matrix(
                                 gpu_arch_type, gpu_arch_version
                             ),
                             "use_split_build": "True" if use_split_build else "False",
-                            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                            "container_image": WHEEL_CONTAINER_IMAGES[
+                                arch_version
+                            ].split(":")[0],
+                            "container_image_tag_prefix": WHEEL_CONTAINER_IMAGES[
+                                arch_version
+                            ].split(":")[1],
                             "package_type": package_type,
                             "pytorch_extra_install_requirements": "",
                             "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-full".replace(  # noqa: B950
@@ -379,7 +392,12 @@ def generate_wheels_matrix(
                             gpu_arch_type, gpu_arch_version
                         ),
                         "use_split_build": "True" if use_split_build else "False",
-                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
+                            ":"
+                        )[0],
+                        "container_image_tag_prefix": WHEEL_CONTAINER_IMAGES[
+                            arch_version
+                        ].split(":")[1],
                         "package_type": package_type,
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                             ".", "_"
@@ -387,8 +405,6 @@ def generate_wheels_matrix(
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"]
                             if gpu_arch_type == "xpu"
-                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[CUDA_STABLE]
-                            if os != "linux"
                             else ""
                         ),
                     }

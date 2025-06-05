@@ -6,7 +6,6 @@ import os
 import sys
 import tempfile
 import unittest
-from typing import Union
 from unittest.mock import patch
 
 import numpy as np
@@ -35,36 +34,6 @@ def generate_faked_module():
         pass
 
     return _OpenRegMod()
-
-
-def generate_faked_module_methods():
-    def device_count() -> int:
-        return 1
-
-    def get_rng_state(
-        device: Union[int, str, torch.device] = "openreg",
-    ) -> torch.Tensor:
-        # create a tensor using our custom device object.
-        return torch.empty(4, 4, device="openreg")
-
-    def set_rng_state(
-        new_state: torch.Tensor, device: Union[int, str, torch.device] = "openreg"
-    ) -> None:
-        pass
-
-    def is_available():
-        return True
-
-    def current_device():
-        return 0
-
-    torch.openreg.device_count = device_count
-    torch.openreg.get_rng_state = get_rng_state
-    torch.openreg.set_rng_state = set_rng_state
-    torch.openreg.is_available = is_available
-    torch.openreg.current_device = current_device
-    torch.openreg._lazy_init = lambda: None
-    torch.openreg.is_initialized = lambda: True
 
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
@@ -106,7 +75,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         )
 
         torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
-        generate_faked_module_methods()
 
     def test_base_device_registration(self):
         self.assertFalse(self.module.custom_add_called())
@@ -151,7 +119,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         # check whether torch.openreg have been registered correctly
         self.assertTrue(
-            torch.utils.backend_registration._get_custom_mod_func("device_count")() == 1
+            torch.utils.backend_registration._get_custom_mod_func("device_count")() == 2
         )
         with self.assertRaisesRegex(RuntimeError, "Try to call torch.openreg"):
             torch.utils.backend_registration._get_custom_mod_func("func_name_")

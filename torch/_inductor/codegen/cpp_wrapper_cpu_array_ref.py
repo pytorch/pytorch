@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Optional
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, Union
 
 import sympy
 
@@ -87,7 +88,22 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             numel = buf.get_numel()
             self.prefix.writeline(f"assert_numel({name}, {numel});")
 
-    def generate_kernel_call(
+    def generate_extern_kernel_alloc(self, *args, **kwargs):
+        # Disable stack allocation for extern kernels.
+        self.allow_stack_allocation = False
+        super().generate_extern_kernel_alloc(*args, **kwargs)
+
+    def generate_extern_kernel_out(self, *args, **kwargs):
+        # Disable stack allocation for extern kernels.
+        self.allow_stack_allocation = False
+        super().generate_extern_kernel_out(*args, **kwargs)
+
+    def generate_fallback_kernel(self, *args, **kwargs):
+        # Disable stack allocation for extern kernels.
+        self.allow_stack_allocation = False
+        super().generate_fallback_kernel(*args, **kwargs)
+
+    def _generate_kernel_call_helper(
         self,
         kernel_name: str,
         call_args,
@@ -95,8 +111,11 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         device=None,
         triton=True,
         arg_types=None,
+        raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        graph_name="",
+        original_fxnode_name=None,
     ):
         """
         Generates kernel call code.
@@ -338,7 +357,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     else:
                         self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
-                    "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
+                    "[[maybe_unused]] auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
     def generate_return(self, output_refs: list[str]):
@@ -731,57 +750,16 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self,
         buf_name: str,
         python_kernel_name: str,
-        cpp_kernel_name: str,
-        codegen_args: list[str],
-        op_overload: Optional[torch._ops.OpOverload] = None,
-        raw_args=None,
-        outputs=None,
-    ):
+        codegen_args: Sequence[str],
+        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        raw_args: Sequence[Any],
+        outputs: Sequence[ir.Buffer],
+    ) -> None:
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
-
-        def extract_output_name(out):
-            if out is None:
-                return None
-            elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
-                return out.get_name()
-            elif isinstance(out, (list, tuple)):
-                return type(out)(extract_output_name(o) for o in out)
-            else:
-                raise AssertionError(f"Unexpected output: {type(out)}")
-
-        # output_args has the same pytree structure as outputs
-        output_args = None
-        if outputs is None:
-            # outputs is not specified, the default is to write to buf_name
-            output_args = [buf_name]
-        else:
-            output_args = extract_output_name(outputs)
-            if isinstance(output_args, str):
-                output_args = [output_args]
-
-        if V.graph.aot_mode:
-            assert op_overload is not None
-            assert raw_args is not None
-            assert outputs is not None
-
-            return self.generate_fallback_kernel_with_runtime_lookup_aot(
-                op_overload,
-                raw_args,
-                output_args,
-                outputs,
-            )
-        else:
-            return self.generate_fallback_kernel_with_runtime_lookup_jit(
-                buf_name,
-                python_kernel_name,
-                cpp_kernel_name,
-                codegen_args,
-                op_overload,
-                raw_args,
-                output_args,
-                outputs,
-            )
+        super().generate_fallback_kernel_with_runtime_lookup(
+            buf_name, python_kernel_name, codegen_args, op_overload, raw_args, outputs
+        )
 
     def codegen_device_copy(self, src, dst, non_blocking: bool):
         # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
@@ -833,16 +811,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if (name := data.get_name()) in self.stack_allocated_buffers:
                 return name, []
 
-            # TODO (benjaminglass1): uncomment this and remove  create_reinterpret_view
-            # after the AOTI forwards compatibility window has passed.
-            #
-            # tmp_AtenTensorHandle = f"tmp_{name}_{next(self.tmp_tensor_id)}"
-            # tmp_call_strs = [
-            #     f"AtenTensorHandle {tmp_AtenTensorHandle};",
-            #     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
-            # ]
-            # return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
-            return create_reinterpret_call(), []
+            tmp_AtenTensorHandle = f"tmp_{name}_{next(self.tmp_tensor_id)}"
+            tmp_call_strs = [
+                f"AtenTensorHandle {tmp_AtenTensorHandle};",
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
+            ]
+            return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
         if (
             size == data.layout.size
