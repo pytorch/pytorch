@@ -372,10 +372,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     if (!disable_addmm_cuda_lt_final) {
       useLtInterface = ((self.dim() == 1 && // row broadcast case
           result.dim() == 2 && self.size(0) == mat2_sizes[1]) ||
-	  (self.dim() == 2 && self.size(0) == mat1_sizes[0] &&  // 2d case
+          (self.dim() == 2 && self.size(0) == mat1_sizes[0] &&  // 2d case
            self.size(1) == mat2_sizes[1])) &&
           self.is_contiguous() && result.is_contiguous() &&
-	  self.scalar_type() == result.scalar_type() &&
+          self.scalar_type() == result.scalar_type() &&
 #ifdef USE_ROCM
           (scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
@@ -480,7 +480,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
             args.n,
             args.k,
             alpha.to<at::opmath_type<scalar_t>>(),
-	    beta.to<at::opmath_type<scalar_t>>(),
+            beta.to<at::opmath_type<scalar_t>>(),
             args.mata->const_data_ptr<scalar_t>(),
             args.lda,
             args.matb->const_data_ptr<scalar_t>(),
@@ -491,7 +491,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
             args.result->data_ptr<scalar_t>(),
             args.result_ld,
             activation_to_gemm_and_blas_arg(activation),
-	    bias2d
+            bias2d
           );
         }
       });
@@ -529,7 +529,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.result->data_ptr<float>(),
               args.result_ld,
               activation_epilogue,
-	      bias2d
+              bias2d
           );
         }});
     } else {
@@ -544,10 +544,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           launchTunableGemmAndBias<scalar_t>(
               args,
               alpha,
-	      beta,
+              beta,
               self.const_data_ptr<scalar_t>(),
               activation_epilogue,
-	      bias2d);
+              bias2d);
         }
         else {
           okay = at::cuda::blas::gemm_and_bias<scalar_t>(
@@ -557,7 +557,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.n,
               args.k,
               alpha.to<at::opmath_type<scalar_t>>(),
-	      beta.to<at::opmath_type<scalar_t>>(),
+              beta.to<at::opmath_type<scalar_t>>(),
               args.mata->const_data_ptr<scalar_t>(),
               args.lda,
               args.matb->const_data_ptr<scalar_t>(),
@@ -566,7 +566,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.result->data_ptr<scalar_t>(),
               args.result_ld,
               activation_epilogue,
-	      bias2d
+              bias2d
           );
       }});
     }

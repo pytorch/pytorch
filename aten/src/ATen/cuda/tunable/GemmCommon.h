@@ -457,9 +457,7 @@ struct GemmAndBiasParams : OpParams {
   int64_t n{};
   int64_t k{};
   at::opmath_type<T> alpha{};
-#if !defined(USE_ROCM)
   at::opmath_type<T> beta{};
-#endif
   const T* a{};
   int64_t lda{};
   const T* b{};
