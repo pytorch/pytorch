@@ -1500,6 +1500,23 @@ class OrderedDictMethodsTests(DictMethodsTests):
     # + move_to_end
 
     @make_dynamo_test
+    def test_move_to_end(self):
+        d = self.thetype.fromkeys("abcde")
+        self.assertEqual("".join(d), "abcde")
+        d.move_to_end("b")
+        self.assertEqual("".join(d), "acdeb")
+
+        # Test OrderedDict.move_to_end
+        self.thetype.move_to_end(d, "a")
+        self.assertEqual("".join(d), "cdeba")
+
+        # Test last=False
+        self.thetype.move_to_end(d, "a", last=False)
+        self.assertEqual("".join(d), "acdeb")
+
+        # Test KeyError
+        self.assertRaises(KeyError, d.move_to_end, "f")
+
     def test_cmp_eq_order(self):
         a = self.thetype.fromkeys("abc")
         b = self.thetype.fromkeys("bca")
