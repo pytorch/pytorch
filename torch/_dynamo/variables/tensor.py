@@ -1419,7 +1419,7 @@ class NumpyNdarrayVariable(TensorVariable):
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
-        if name in ("tostring", "tobytes"):
+        if name in ("tostring", "tobytes", "__delattr__"):
             unimplemented(f"{name} is not modelled in torch._numpy")
         proxy = tx.output.create_proxy(
             "call_function",

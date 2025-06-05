@@ -117,18 +117,19 @@ gemm_notrans_(
   scale_(m, n, beta, c, ldc);
 
   // c += alpha * (a @ b)
-  for (const auto l : c10::irange(k)) {
-    for (const auto j : c10::irange(n)) {
+  const uint64_t unsigned_m = static_cast<int64_t>(m);
+  const uint64_t i_m = unsigned_m / 4;
+  for (const uint64_t l : c10::irange(k)) {
+    for (const uint64_t j : c10::irange(n)) {
       opmath_t val = b[l + j * ldb] * alpha;
-      int64_t i_m = m / 4;
       for (const auto i_i : c10::irange(i_m)) {
         c[j * ldc + i_i * 4 + 0] += a[i_i * 4 + 0 + l * lda] * val;
         c[j * ldc + i_i * 4 + 1] += a[i_i * 4 + 1 + l * lda] * val;
         c[j * ldc + i_i * 4 + 2] += a[i_i * 4 + 2 + l * lda] * val;
         c[j * ldc + i_i * 4 + 3] += a[i_i * 4 + 3 + l * lda] * val;
       }
-      int64_t i = i_m * 4;
-      for (; i < m; i++)
+      uint64_t i = i_m * 4;
+      for (; i < unsigned_m; i++)
         c[j * ldc + i] += a[i + l * lda] * val;
     }
   }

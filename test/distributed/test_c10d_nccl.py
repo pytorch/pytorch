@@ -285,10 +285,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
 
-        # These tests are expected to throw SIGABRT(6); adding the negative sign
-        # bc the test return code is actually -6
+        # These tests are expected to throw SIGABRT(6);
         # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
-        TEST_NAN_ASSERT_RETURN = 0 if IS_SANDCASTLE else -signal.SIGABRT
+        TEST_NAN_ASSERT_RETURN = 0 if IS_SANDCASTLE else signal.SIGABRT
         self.special_return_code_checks = {
             self.test_nan_assert_float16.__wrapped__: TEST_NAN_ASSERT_RETURN,
             self.test_nan_assert_float32.__wrapped__: TEST_NAN_ASSERT_RETURN,
@@ -455,7 +454,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # This unit test is to test the case when the collective is launched in
         # a side thread and the thread dies before the cache has been fully recycled.
         # More details can be found in this issue: https://github.com/pytorch/pytorch/issues/143470.
-        import threading
 
         # initiate collectives here
         def init_collective_task(t):
@@ -478,6 +476,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         side_thread.join()
         torch.cuda.synchronize()
 
+        # reset ENV
+        os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "0"
+
     CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
         torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
     )
@@ -485,7 +486,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
         # skip for cu126 as well due to https://github.com/pytorch/pytorch/issues/153479
-        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE and False),
+        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
         "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
     )
     @parametrize(
@@ -539,10 +540,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         backend._set_enable_nan_check(False)
         # Note: using all-gather here bc some NCCL/SM version does not support
         # FP8 reduction
-        pg._allgather_base(output, nan_tensor)
+        # temporarily skip due to https://github.com/pytorch/pytorch/issues/153479
+        # pg._allgather_base(output, nan_tensor)
 
         backend._set_enable_nan_check(True)
-        pg._allgather_base(output, nan_tensor)
+        try:
+            pg._allgather_base(output, nan_tensor)
+        except Exception:
+            sys.exit(signal.SIGABRT)
+
         dist.destroy_process_group()
 
         # reset env
@@ -4276,6 +4282,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(len(t["entries"]), 2)
             t = t["entries"]
             last = t[-1]
+            self.assertEqual(last["thread_id"], str(threading.current_thread().ident))
+            self.assertEqual(last["thread_name"], "fr_test_thread")
             self.assertEqual(last["process_group"], ("0", "default_pg"))
             self.assertEqual(last["state"], "completed")
             s = last["time_discovered_started_ns"]
@@ -4308,6 +4316,35 @@ class NCCLTraceTest(NCCLTraceTestBase):
         else:
             self.assertTrue("entries" not in t)
 
+    def load_libpthread_or_libc(self):
+        import ctypes.util
+
+        for base in ("pthread", "c"):
+            path = ctypes.util.find_library(base)
+            if path:
+                try:
+                    return ctypes.CDLL(path)
+                except OSError:
+                    continue
+        raise RuntimeError("Could not load pthread or libc")
+
+    # Directly set thread name using threading.current_thread().name does not work
+    # because we use pthread_getname_np to get the thread’s OS-level name in C++
+    def set_thread_name(self, name):
+        import ctypes
+
+        lib = self.load_libpthread_or_libc()
+        pthread_self = lib.pthread_self
+        pthread_self.restype = ctypes.c_void_p
+        pthread_setname_np = lib.pthread_setname_np
+        pthread_setname_np.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+
+        # Get current pthread handle
+        tid = pthread_self()
+
+        # Set name
+        pthread_setname_np(tid, name.encode())
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
@@ -4319,6 +4356,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         if timing_enabled:
             pg._enable_collectives_timing()
         device = self.local_device
+        self.set_thread_name("fr_test_thread")
         a = torch.full((3, 4), float(self.rank), device=device)
         for _ in range(2):
             f = pg.allreduce(a)
@@ -4345,6 +4383,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         if timing_enabled:
             pg._enable_collectives_timing()
         device = self.local_device
+        self.set_thread_name("fr_test_thread")
         a = torch.full((3, 4), float(self.rank), device=device)
         for _ in range(2):
             f = pg.allreduce(a)

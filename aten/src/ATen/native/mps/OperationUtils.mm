@@ -974,21 +974,21 @@ class BundledShaderLibary : public MetalShaderLibrary {
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<int64_t> extra) {
+  TORCH_CHECK(iter.can_use_32bit_indexing(), name, " can't be indexed using 32-bit iterator for shape ", iter.shape());
   auto inputTensor = iter.input(0);
   auto outputTensor = iter.output(0);
-  bool is_storage_dense = is_dense_in_storage(inputTensor) && inputTensor.strides().equals(outputTensor.strides());
   uint32_t length = iter.numel();
   if (length == 0) {
     return;
   }
   using namespace mps;
+  auto kernel_name = fmt::format("{}_{}_{}_{}",
+                                 name,
+                                 iter.is_contiguous() ? "dense" : "strided",
+                                 scalarToMetalTypeString(outputTensor),
+                                 scalarToMetalTypeString(inputTensor));
   @autoreleasepool {
-    id<MTLComputePipelineState> cplState = nil;
-    cplState = getPipelineStateForFunc(fmt::format("{}_{}_{}_{}",
-                                                   name,
-                                                   is_storage_dense ? "dense" : "strided",
-                                                   scalarToMetalTypeString(outputTensor),
-                                                   scalarToMetalTypeString(inputTensor)));
+    auto cplState = getPipelineStateForFunc(kernel_name);
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
@@ -997,22 +997,16 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
       getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor});
 
       [computeEncoder setComputePipelineState:cplState];
-      if (is_storage_dense) {
-        mtl_setArgs(computeEncoder, outputTensor, inputTensor);
-        if (extra) {
-          mtl_setBytes(computeEncoder, *extra, 2);
-        }
-      } else {
-        mtl_setArgs(computeEncoder,
-                    outputTensor,
-                    inputTensor,
-                    outputTensor.sizes(),
-                    inputTensor.strides(),
-                    outputTensor.strides(),
-                    inputTensor.ndimension());
-        if (extra) {
-          mtl_setBytes(computeEncoder, *extra, 6);
-        }
+      mtl_setArgs(computeEncoder, outputTensor, inputTensor);
+      if (!iter.is_contiguous()) {
+        mtl_setArgs<2>(computeEncoder,
+                       outputTensor.sizes(),
+                       inputTensor.strides(),
+                       outputTensor.strides(),
+                       inputTensor.ndimension());
+      }
+      if (extra) {
+        mtl_setBytes(computeEncoder, *extra, iter.is_contiguous() ? 2 : 6);
       }
       mtl_dispatch1DJob(computeEncoder, cplState, length);
 
@@ -1028,7 +1022,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
   // double as common dtype (because Python floating point are always 64-bit values)
   TORCH_CHECK(iter.output().scalar_type() != at::kDouble, "float64 is not supported on MPS");
-  TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
+  TORCH_CHECK(iter.can_use_32bit_indexing(), name, " can't be indexed using 32-bit iterator for shape ", iter.shape());
 
   // Skip for empty iterators
   if (iter.numel() == 0) {
@@ -1053,11 +1047,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   convert_double_scalar(input);
   convert_double_scalar(other);
 
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-  const uint32_t nDim = iter.ndim();
-  constexpr uint32_t nOffsets = 3;
-  const uint32_t numThreads = iter.numel();
   const auto cast_needed = input.scalar_type() != other.scalar_type();
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   // TODO: Implicitly pass both input and output types to non-cast kernels
@@ -1071,10 +1061,11 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
       [computeEncoder setComputePipelineState:binaryPSO];
+      // Set input and output tensors
+      mtl_setArgs(computeEncoder, out, input, other);
       // Iterator is contiguous if all of its elements are dense in storage,
       // i.e. it's true for both row-first and column-first tensors
       if (iter.is_contiguous()) {
-        mtl_setArgs(computeEncoder, out, input, other);
         if (alpha) {
           mtl_setBytes(computeEncoder, getMPSScalar(*alpha, iter.common_dtype()), 3);
         }
@@ -1092,29 +1083,19 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
         std::array<int, 3> ndim_and_types = {
             iter.ndim(), static_cast<int>(input.scalar_type()), static_cast<int>(other.scalar_type())};
         if (alpha) {
-          mtl_setArgs(computeEncoder,
-                      out,
-                      input,
-                      other,
-                      getMPSScalar(*alpha, iter.common_dtype()),
-                      iter.shape(),
-                      iter.strides(0),
-                      iter.strides(1),
-                      iter.strides(2),
-                      ndim_and_types);
+          mtl_setArgs<3>(computeEncoder,
+                         getMPSScalar(*alpha, iter.common_dtype()),
+                         iter.shape(),
+                         iter.strides(0),
+                         iter.strides(1),
+                         iter.strides(2),
+                         ndim_and_types);
         } else {
-          mtl_setArgs(computeEncoder,
-                      out,
-                      input,
-                      other,
-                      iter.shape(),
-                      iter.strides(0),
-                      iter.strides(1),
-                      iter.strides(2),
-                      ndim_and_types);
+          mtl_setArgs<3>(
+              computeEncoder, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
         }
       }
-      mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
+      mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
       getMPSProfiler().endProfileKernel(binaryPSO);
     }
   });

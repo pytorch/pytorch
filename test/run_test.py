@@ -423,6 +423,7 @@ TESTS_NOT_USING_GRADCHECK = [
     "test_decomp",
     "test_cpp_extensions_jit",
     "test_jit",
+    "test_matmul_cuda",
     "test_ops",
     "test_ops_jit",
     "dynamo/test_recompile_ux",

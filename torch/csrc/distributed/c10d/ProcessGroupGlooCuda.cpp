@@ -15,12 +15,12 @@ class AsyncAllreduceCUDADeviceWork : public ProcessGroupGloo::AsyncWork {
       uint32_t tag,
       uint64_t seq)
       : ProcessGroupGloo::AsyncWork(
+            std::move(context),
             {inputs},
             OpType::ALLREDUCE,
             seq,
             "gloo:all_reduce",
             inputs),
-        context_(context),
         inputs_(inputs),
         reduceOp_(reduceOp) {}
 
@@ -52,12 +52,19 @@ class AsyncAllreduceCUDADeviceWork : public ProcessGroupGloo::AsyncWork {
     }
   }
 
+  const std::vector<at::Tensor> getInputTensors() override {
+    return inputs_;
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return inputs_;
+  }
+
   void synchronize() override {
     // TODO: is synchronization needed?
   }
 
  private:
-  std::shared_ptr<gloo::Context> context_;
   std::vector<at::Tensor> inputs_;
   const ReduceOp reduceOp_;
 };

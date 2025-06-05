@@ -601,6 +601,7 @@ test_perf_for_dashboard() {
     elif [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
       device=cpu_aarch64
     fi
+    test_inductor_set_cpu_affinity
   elif [[ "${TEST_CONFIG}" == *cuda_a10g* ]]; then
     device=cuda_a10g
   elif [[ "${TEST_CONFIG}" == *h100* ]]; then
@@ -608,9 +609,6 @@ test_perf_for_dashboard() {
   elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
     device=rocm
   fi
-
-  # Always set CPU affinity because metrics like compilation time requires CPU
-  test_inductor_set_cpu_affinity
 
   for mode in "${modes[@]}"; do
     if [[ "$mode" == "inference" ]]; then
@@ -1562,7 +1560,8 @@ test_operator_benchmark() {
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
-      --output-dir "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv"
+      --output-csv "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.json" \
 
   pip_install pandas
   python check_perf_csv.py \

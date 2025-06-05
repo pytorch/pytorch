@@ -849,7 +849,7 @@ void OSSProxyExecutor::call_function(
           TORCH_CHECK(false, "Expected tensor, got None");
         }
       } else {
-        continue;
+        index++;
       }
     } else {
       TORCH_CHECK(

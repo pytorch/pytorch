@@ -2234,7 +2234,7 @@ class BuiltinVariable(VariableTracker):
         obj: VariableTracker,
         name_var: VariableTracker,
     ):
-        return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
+        return obj.call_method(tx, "__delattr__", [name_var], {})
 
     def call_type(self, tx: "InstructionTranslator", obj: VariableTracker):
         try:

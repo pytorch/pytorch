@@ -117,6 +117,7 @@ bmm_template = TritonTemplate(
     # inductor generates a suffix
     {{store_output(("idx_q", "idx_m", "idx_n"), "acc", "mask")}}
 """,
+    cache_codegen_enabled_for_template=True,
 )
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
@@ -273,6 +274,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 **mm_options(config, m, n, k, layout),
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
+                epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
             )
 
     return autotune_select_algorithm("baddbmm", choices, [inp, mat1, mat2], layout)

@@ -5994,17 +5994,25 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
-    def test_log1p(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
+    @parametrize("dtype", {torch.float, torch.half} if MACOS_VERSION < 14 else {torch.float, torch.half, torch.bfloat16})
+    def test_log1p(self, dtype):
+        eps = torch.finfo(dtype).eps
+        # Small values
+        cpu_x = torch.arange(-10.0 * eps, 10.0 * eps, 1e-2 * eps, dtype=dtype, requires_grad=False)
+        x = cpu_x.detach().clone().to('mps')
 
-            log_result = torch.log1p(x)
-            log_result_cpu = torch.log1p(cpu_x)
+        log_result = torch.log1p(x)
+        log_result_cpu = torch.log1p(cpu_x)
+        self.assertEqual(log_result, log_result_cpu, atol=0, rtol=2e-7)
 
-            self.assertEqual(log_result, log_result_cpu)
+        # Fallback to log
+        cpu_x = torch.arange(-1.0, 2.0, 1e-4, dtype=dtype, requires_grad=False)
+        x = cpu_x.detach().clone().to('mps')
 
-        helper((2, 8, 4, 5))
+        log_result = torch.log1p(x)
+        log_result_cpu = torch.log1p(cpu_x)
+
+        self.assertEqual(log_result, log_result_cpu, atol=0, rtol=2e-7)
 
     def test_logaddexp(self):
         def helper(shape):
