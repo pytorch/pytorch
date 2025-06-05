@@ -620,7 +620,9 @@ class ConstDictVariable(VariableTracker):
             key = Hashable(args[0])
             self.items.move_to_end(key, last=last)
             return ConstantVariable.create(None)
-        elif name == "__eq__":
+        elif name == "__eq__" and istype(
+            self, ConstDictVariable
+        ):  # don't let Set use this function
             if len(args) != 1:
                 raise_args_mismatch(tx, name)
 
@@ -664,8 +666,9 @@ class ConstDictVariable(VariableTracker):
                 raise_args_mismatch(tx, name)
 
             self.install_dict_keys_match_guard()
-            # TODO: install guard if args is DictItemsVariable
-            args[0].install_dict_keys_match_guard()
+            if hasattr(args[0], "install_dict_keys_match_guard"):
+                # TODO: Guard with stuff that it is an iterable (e.g., generator)?
+                args[0].install_dict_keys_match_guard()
 
             return variables.UserFunctionVariable(polyfills.dict___ior__).call_function(
                 tx, [self, args[0]], {}
@@ -1133,6 +1136,9 @@ class DictViewVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
+
+    def install_dict_keys_match_guard(self):
+        return self.dv_dict.install_dict_keys_match_guard()
 
     def call_method(
         self,

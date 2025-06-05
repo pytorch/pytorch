@@ -1112,8 +1112,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         d3, d4 = d1.copy(), d2.copy()
 
         def fn(d):
-            for k, v in d.items():
-                yield (k, v)
+            yield from d.items()
 
         self.assertEqual(d3.__ior__(d2.items()), {"a": 1, "b": 3, "c": 4})
         self.assertEqual(d4.__ior__(fn(d1)), {"a": 1, "b": 2, "c": 4})
