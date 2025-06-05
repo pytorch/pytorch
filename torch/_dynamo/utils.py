@@ -50,7 +50,7 @@ from collections import Counter, OrderedDict
 from contextlib import contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
-from types import MethodWrapperType
+from types import CodeType, MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -4670,3 +4670,11 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
     return node is None or "example_value" in node.meta or "val" in node.meta
+
+
+# Returns a set of code objects present traced in the current TracingContext, or None
+# if there is no current TracingContext.
+def get_traced_code() -> list[CodeType]:
+    from torch._guards import TracingContext
+
+    return TracingContext.get_traced_code()
