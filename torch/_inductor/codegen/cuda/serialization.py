@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import enum
+import functools
 import json
 from enum import Enum
 from typing import Optional
@@ -458,6 +459,7 @@ class CUTLASSOperationSerializer:
         return enum_class[json_dict["name"]]
 
 
+@functools.lru_cache(1)
 def get_cutlass_operation_serializer() -> Optional[CUTLASSOperationSerializer]:
     if not try_import_cutlass():
         return None
