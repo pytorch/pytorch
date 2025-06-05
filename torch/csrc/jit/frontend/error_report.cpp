@@ -6,7 +6,7 @@ namespace torch::jit {
 
 // Avoid storing objects with destructor in thread_local for mobile build.
 #ifndef C10_MOBILE
-thread_local std::vector<Call> calls;
+static thread_local std::vector<Call> calls;
 #endif // C10_MOBILE
 
 ErrorReport::ErrorReport(const ErrorReport& e)

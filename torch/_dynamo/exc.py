@@ -271,13 +271,17 @@ class FailOnRecompileLimitHit(Exception):
     pass
 
 
+class PackageError(TorchDynamoException):
+    pass
+
+
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
     pass
 
 
 class ObservedUserStopIteration(ObservedException):
-    # An UserStopIteraion exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
+    # An UserStopIteration exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
     value: Optional[Any]
 
     # Reference `StopIteration_init` in CPython

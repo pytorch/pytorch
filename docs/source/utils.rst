@@ -16,7 +16,6 @@ torch.utils
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.utils.backend_registration
-.. py:module:: torch.utils.benchmark.examples.blas_compare_setup
 .. py:module:: torch.utils.benchmark.examples.compare
 .. py:module:: torch.utils.benchmark.examples.fuzzer
 .. py:module:: torch.utils.benchmark.examples.op_benchmark

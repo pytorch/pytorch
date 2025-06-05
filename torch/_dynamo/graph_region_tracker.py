@@ -17,6 +17,7 @@ import copyreg
 import io
 import logging
 import math
+import operator
 import pickle
 from collections import defaultdict, deque
 from dataclasses import fields
@@ -25,7 +26,10 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 import torch._logging
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten
+
+from .graph_utils import _get_flat_args_unique
 
 
 T = TypeVar("T")
@@ -110,7 +114,7 @@ def _normalize_args(
     node: Node,
 ) -> tuple[tuple[str, ...], tuple[Optional[Any], ...]]:
     flat_args, _ = tree_flatten(node.args)
-    sorted_kwargs = sorted(node.kwargs.items(), key=lambda x: x[0])
+    sorted_kwargs = sorted(node.kwargs.items(), key=operator.itemgetter(0))
     sorted_keys = tuple(sorted(node.kwargs.keys()))
     flat_kwargs, _ = tree_flatten(sorted_kwargs)
     all_args = flat_args + flat_kwargs
@@ -148,6 +152,9 @@ class BackwardBfsArgIter:
     def create(origin: Node) -> "BackwardBfsArgIter":
         it = BackwardBfsArgIter(origin)
         it.add_children(origin)
+        # pop the origin node, since it is the origin of
+        # the region and does not need to be considered for addition
+        assert it.next()
         return it
 
     def next(self) -> Optional[Node]:
@@ -162,22 +169,19 @@ class BackwardBfsArgIter:
         return self._cur
 
     def add_children(self, node: Node) -> None:
-        arg: Any
-        flat_args, _ = tree_flatten(node.args)
+        flat_args = _get_flat_args_unique(node, {})
         for arg in flat_args:
             if isinstance(arg, Node):
                 self._append(arg)
-
-        flat_kwargs, _ = tree_flatten(node.kwargs)
-        for kwarg in flat_kwargs:
-            if isinstance(kwarg, Node):
-                self._append(kwarg)
 
     def _append(self, arg: Node) -> None:
         if self._cur is None:
             self._cur = arg
         else:
             self._queue.append(arg)
+
+    def __str__(self) -> str:
+        return f"BackwardBfsArgIter(cur={self._cur}, queue={self._queue})"
 
 
 class GraphRegionTracker:
@@ -194,6 +198,8 @@ class GraphRegionTracker:
     def __init__(self) -> None:
         self.hash_to_duplicates: dict[str, IdenticalNodes] = defaultdict(list)
         self.node_to_duplicates: dict[Node, IdenticalNodes] = {}
+        # Note: position is in flattened args/kwargs list
+        self.node_to_mutated_arg_positions: dict[Node, OrderedSet[int]] = {}
         self.input_pickler = InputPickler()
 
     def _hash_node(
@@ -235,6 +241,28 @@ class GraphRegionTracker:
         except NodeHashException as e:
             log.debug("Unable to hash node %s with exception %s", node, e)
 
+    def track_node_mutations(
+        self,
+        node: Node,
+        flat_args_kwargs: list[Any],
+        id_to_initial_version: dict[int, int],
+    ) -> None:
+        """
+        This function tracks which argument positions are mutated by the given node. Subgraph HOP does not support
+        input mutations today so we will skip regions which have inputs that are mutated.
+        """
+        mutated_arg_positions = OrderedSet[int]()
+        for i, arg in enumerate(flat_args_kwargs):
+            val_id = id(arg)
+            if (
+                val_id in id_to_initial_version
+                and id_to_initial_version[val_id] != arg._version
+            ):
+                mutated_arg_positions.add(i)
+
+        if mutated_arg_positions:
+            self.node_to_mutated_arg_positions[node] = mutated_arg_positions
+
     def get_identical_regions(self, graph: torch.fx.Graph) -> list[list[Region]]:
         """
         This function is responsible for extracting the largest regions of identical nodes from the given graph.
@@ -250,6 +278,8 @@ class GraphRegionTracker:
         """
         topological_ranking = {node: i for i, node in enumerate(graph.nodes)}
         region_groups_with_rank = []
+        # needed to detect if replacing a region will create cycles
+        node_to_recursive_ancestors = _populate_recursive_ancestor_map(graph)
 
         # Create region groups; a region group is a group
         # of regions that are all identical. In this initial state
@@ -278,7 +308,12 @@ class GraphRegionTracker:
         # overlap.
         seen_nodes: set[Node] = set()
         for region_group in region_groups:
-            fully_expand_region_group(region_group, seen_nodes, self._is_identical)
+            fully_expand_region_group(
+                region_group,
+                seen_nodes,
+                node_to_recursive_ancestors,
+                self._is_identical,
+            )
             # sort topologically
             for region in region_group:
                 region.sort(key=lambda n: topological_ranking[n])
@@ -291,9 +326,42 @@ class GraphRegionTracker:
         return f"GraphRegionTracker(hash_to_duplicates={self.hash_to_duplicates}, node_to_duplicates={self.node_to_duplicates})"
 
 
+class RegionWrapper:
+    """Holds state for regions e.g. ancestors and new candidate nodes for consideration"""
+
+    def __init__(
+        self, region: Region, node_to_recursive_ancestors: dict[Node, set[Node]]
+    ) -> None:
+        assert len(region) == 1, "all regions should start with one node"
+        node = region[0]
+        self.node_to_recursive_ancestors = node_to_recursive_ancestors
+        self.iter = BackwardBfsArgIter.create(node)
+        self.nodes_unique = OrderedSet([node])
+        self.ancestors = set(node_to_recursive_ancestors[node])
+        self.region = region
+
+    def next_candidate(self) -> Optional[Node]:
+        return self.iter.next()
+
+    def will_inclusion_create_cycle(self, node: Node) -> bool:
+        external_users = [user for user in node.users if user not in self.nodes_unique]
+        for user in external_users:
+            if user in self.ancestors:
+                return True
+
+        return False
+
+    def add(self, node: Node) -> None:
+        self.nodes_unique.add(node)
+        self.region.append(node)
+        self.iter.add_children(node)
+        self.ancestors.update(self.node_to_recursive_ancestors[node])
+
+
 def fully_expand_region_group(
     regions: list[Region],
     seen_nodes: set[Node],
+    node_to_recursive_ancestors: dict[Node, set[Node]],
     is_identical_fn: Callable[[Node, Node], bool],
 ) -> None:
     debug_log("--------------------------------------------------")
@@ -301,60 +369,66 @@ def fully_expand_region_group(
 
     # All regions should start with 1 node
     assert all(len(region) == 1 for region in regions)
-    region_iters = []
-    for region in regions:
-        (origin,) = region  # Only works for 1 element sets
-        region_iters.append(BackwardBfsArgIter.create(origin))
+    region_wrappers = [
+        RegionWrapper(region, node_to_recursive_ancestors) for region in regions
+    ]
 
-    nodes_to_add: list[Node] = []
+    nodes_to_add = OrderedSet[Node]()
+    current_node = region_wrappers[0].next_candidate()
 
-    # we already have the origin node in each region
-    for region_it in region_iters:
-        node = region_it.next()
-        assert node
-        region_it.add_children(node)
+    # No children
+    if current_node is None:
+        return
 
-    current_node = region_iters[0].next()
-    assert current_node is not None
     # Loop incrementally adding new nodes to each region
     # regions are only expanded if the node to add is valid
     # for ALL regions
     while current_node:
-        add_node = True
+        add_to_all_regions = not region_wrappers[0].will_inclusion_create_cycle(
+            current_node
+        )
         nodes_to_add.clear()
-        nodes_to_add.append(current_node)
-        nodes_to_add_set = set(nodes_to_add)
-        for region_it in region_iters[1:]:
-            node = region_it.next()
+        nodes_to_add.add(current_node)
+        for region_wrapper in region_wrappers[1:]:
+            candidate = region_wrapper.next_candidate()
 
             debug_log("--------------------")
-            debug_log("considering adding: %s, cur_node: %s", node, current_node)
-            debug_log("previously claimed nodes: %s", node in seen_nodes)
-            debug_log("%s", seen_nodes)
-            if node:
-                debug_log("is_identical: %s", is_identical_fn(node, current_node))
-                add_node &= (
-                    node not in seen_nodes
-                    and node not in nodes_to_add_set
-                    and node.op != "placeholder"
-                    and is_identical_fn(node, current_node)
-                )
-                nodes_to_add.append(node)
-                nodes_to_add_set.add(node)
-            else:
-                add_node = False
+            debug_log(
+                "considering candidate: %s, cur_node: %s", candidate, current_node
+            )
 
+            if not candidate or not add_to_all_regions:
+                add_to_all_regions = False
+                continue
+
+            debug_log(
+                "candidate in previously claimed nodes?: %s", candidate in seen_nodes
+            )
+            debug_log("is_identical: %s", is_identical_fn(candidate, current_node))
+
+            add_to_all_regions &= (
+                candidate not in seen_nodes
+                and candidate not in nodes_to_add
+                and candidate.op != "placeholder"
+                and is_identical_fn(candidate, current_node)
+                and not region_wrapper.will_inclusion_create_cycle(candidate)
+            )
+            nodes_to_add.add(candidate)
+
+            debug_log(f"add_to_all_regions: {add_to_all_regions}")
             debug_log("--------------------")
 
-        if add_node:
-            for region, region_it, node in zip(regions, region_iters, nodes_to_add):
-                region.append(node)
+        if add_to_all_regions:
+            assert len(region_wrappers) == len(nodes_to_add), (
+                "Numer of nodes to add must equal the number of regions"
+            )
+            for region_wrapper, node in zip(region_wrappers, nodes_to_add):
+                region_wrapper.add(node)
                 debug_log("adding %s's children", node)
                 debug_log("%s %s", node.args, list(node.kwargs.items()))
-                region_it.add_children(node)
                 seen_nodes.add(node)
 
-        current_node = region_iters[0].next()
+        current_node = region_wrappers[0].next_candidate()
 
     # Ensure regions are sorted in topological order
     for region in regions:
@@ -362,3 +436,18 @@ def fully_expand_region_group(
 
     debug_log("end expand new region group: %s", regions)
     debug_log("--------------------------------------------------")
+
+
+def _populate_recursive_ancestor_map(graph: torch.fx.Graph) -> dict[Node, set[Node]]:
+    node_to_recursive_ancestors: dict[Node, set[Node]] = {}
+    for node in graph.nodes:
+        node_to_recursive_ancestors[node] = set()
+    for node in graph.nodes:
+        all_args = _get_flat_args_unique(node, {})
+        for arg in all_args:
+            if isinstance(arg, Node):
+                node_to_recursive_ancestors[node].update(
+                    node_to_recursive_ancestors[arg]
+                )
+                node_to_recursive_ancestors[node].add(arg)
+    return node_to_recursive_ancestors

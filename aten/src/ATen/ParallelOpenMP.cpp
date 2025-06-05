@@ -10,15 +10,13 @@
 #include <mkl.h>
 #endif
 
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/IDeepRegistration.h>
+#endif
+
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 namespace at {
-#if AT_MKLDNN_ENABLED()
-namespace native::mkldnn {
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-void clear_computation_cache();
-} // namespace native::mkldnn
-#endif
 
 namespace {
 // Number of threads set by the user

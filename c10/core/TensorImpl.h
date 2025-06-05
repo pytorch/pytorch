@@ -193,11 +193,11 @@ struct C10_API AutogradMetaFactory {
 C10_API void SetAutogradMetaFactory(AutogradMetaFactory* factory);
 C10_API AutogradMetaFactory* GetAutogradMetaFactory();
 
-struct C10_API AutogradMetaFactoryRegisterer {
-  explicit AutogradMetaFactoryRegisterer(AutogradMetaFactory* factory) {
-    SetAutogradMetaFactory(factory);
-  }
-};
+struct C10_API AutogradMetaFactoryRegisterer{
+    explicit AutogradMetaFactoryRegisterer(AutogradMetaFactory * factory){
+        SetAutogradMetaFactory(factory);
+} // namespace impl
+}; // namespace c10
 
 } // namespace impl
 
@@ -1832,6 +1832,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_numel();
     empty_tensor_restride(
         MemoryFormat::Contiguous); // calls refresh_contiguous()
+  }
+
+  C10_ALWAYS_INLINE const impl::SizesAndStrides& sizes_and_strides() {
+    return sizes_and_strides_;
   }
 
   /**

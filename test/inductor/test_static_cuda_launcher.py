@@ -1,9 +1,12 @@
 # Owner(s): ["module: inductor"]
 import os
+import random
 import tempfile
+from unittest import mock
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
 from torch._inductor.runtime.static_cuda_launcher import StaticallyLaunchedCudaKernel
 from torch._inductor.runtime.triton_compat import CompiledKernel, tl, triton
@@ -52,7 +55,13 @@ class TestStaticCudaLauncher(TestCase):
         cubin_file = self.write_cubin_to_tmp(compiled_kernel)
         compiled_kernel._cubin_path = cubin_file
         result = StaticallyLaunchedCudaKernel(compiled_kernel)
-        result.load_kernel()
+        # Test reload cubin from raw here
+        old_cubin_path = result.cubin_path
+        assert old_cubin_path is not None
+        result.cubin_path = None
+        result.reload_cubin_from_raw(old_cubin_path)
+        device_interface = get_interface_for_device("cuda")
+        result.load_kernel(device_interface.current_device())
         return result
 
     @skipIfRocm
@@ -265,16 +274,59 @@ class TestStaticCudaLauncher(TestCase):
         self.assertEqual(arg1, arg2)
 
     @skipIfRocm
-    def test_incompatible_args(self):
+    def test_kernel_no_args(self):
         # Just an easy way to test incompatible number of arguments
         @triton.jit
         def kernel_no_op():
             pass
 
         compiled_kernel = kernel_no_op[(1,)]()
+        launcher = self._make_launcher(compiled_kernel)
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream)
+
+    @skipIfRocm
+    def test_high_shared_mem(self):
+        @triton.jit
+        def simple_kernel(arg0, arg1):
+            x = tl.load(arg0)
+            y = arg1
+            tl.store(arg0, x + y)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
+        arg1 = 5
+        args = (arg0, arg1)
+        compiled_kernel = simple_kernel[(1,)](*args)
+        # Allocate 50 KB of memory
+        compiled_kernel.shared = 50000
+        launcher = self._make_launcher(compiled_kernel)
+        self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device="cuda"))
+        self.assertEqual(launcher.arg_tys, "Oi")
+        new_arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.slow_launch_kernel = True
+        launcher.run(1, 1, 1, stream, new_arg0, arg1)
+        self.assertEqual(new_arg0, arg0)
+
+    @skipIfRocm
+    def test_too_high_shared_mem(self):
+        @triton.jit
+        def simple_kernel(arg0, arg1):
+            x = tl.load(arg0)
+            y = arg1
+            tl.store(arg0, x + y)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
+        arg1 = 5
+        args = (arg0, arg1)
+        compiled_kernel = simple_kernel[(1,)](*args)
+        # Allocate too much shared memory
+        compiled_kernel.shared = 99999999
         self.assertRaisesRegex(
-            NotImplementedError,
-            "No static cuda launcher available",
+            RuntimeError,
+            "out of resource: simple_kernel",
             lambda: self._make_launcher(compiled_kernel),
         )
 
@@ -339,6 +391,37 @@ class TestStaticCudaLauncher(TestCase):
         launcher.run(1, 1, 1, stream, arg1, arg2, buf1, arg0, xnumel)
         self.assertEqual(buf0, buf1)
 
+    @skipIfRocm
+    def test_kernel_many_args(self):
+        N = 200
+        # Make 200 arguments
+        args = [f"arg_{i}" for i in range(N)]
+        decl = ", ".join(args)
+        sums = [f"    total += arg_{i}" for i in range(N)]
+        sums_str = "\n".join(sums)
+
+        template = f"""
+from torch._inductor.runtime.triton_compat import tl, triton
+@triton.jit
+def kernel_many_args(out_tensor, {decl}):
+    out = tl.load(out_tensor)
+    total = out
+{sums_str}
+    tl.store(out_tensor, total)
+        """
+
+        result = PyCodeCache.load(template.lstrip())
+
+        kernel_args = tuple(random.random() for _ in range(N))
+        buf0 = torch.zeros(1, device="cuda")
+        compiled_kernel = result.kernel_many_args[1,](buf0, *kernel_args)
+        launcher = self._make_launcher(compiled_kernel)
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        buf1 = torch.zeros(1, device="cuda")
+        launcher.run(1, 1, 1, stream, buf1, *kernel_args)
+        self.assertEqual(buf0, buf1)
+
 
 @requires_cuda
 @torch._inductor.config.patch(
@@ -383,6 +466,28 @@ class TestStaticTritonCompileResult(TestCase):
         )
 
     @skipIfRocm
+    # The error gets raised on a worker, so we want to not use a separate process
+    @torch._inductor.config.patch(
+        {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
+    )
+    def test_static_launch_user_defined_triton_kernels(self):
+        # User defined triton kernel
+        @triton.jit
+        def custom_kernel(arg_0, arg_1):
+            x = tl.load(arg_0)
+            y = arg_1
+            tl.store(arg_0, x + y)
+
+        @torch.compile
+        def foo(x):
+            custom_kernel[1,](x, 5)
+            return x
+
+        x = torch.randn(1, device="cuda")
+        x2 = x.clone().detach_()
+        self.assertEqual(foo(x), x2 + 5)
+
+    @skipIfRocm
     def test_empty_tensor(self):
         @torch.compile()
         def foo(x, y):
@@ -413,6 +518,24 @@ class TestStaticTritonCompileResult(TestCase):
         eager_result = fn(arg)
         compiled_result = compiled_fn(arg)
         self.assertEqual(eager_result, compiled_result)
+
+    @skipIfRocm
+    def test_disable_static_cuda_launcher(self):
+        @torch.compile
+        def fn(x, y):
+            return torch.cat(((x * 4), y + 10))
+
+        # Test that static cuda launcher is in fact disabled
+        with torch._inductor.config.patch("use_static_cuda_launcher", False):
+            x = torch.rand(20, device="cuda")
+            y = torch.rand(20, device="cuda")
+            with mock.patch(
+                "torch._inductor.runtime.triton_heuristics.StaticTritonCompileResult.make_launcher"
+            ) as mocked:
+                result = fn(x, y)
+                mocked.assert_not_called()
+
+            self.assertEqual(result, torch.cat(((x * 4), y + 10)))
 
 
 if __name__ == "__main__":

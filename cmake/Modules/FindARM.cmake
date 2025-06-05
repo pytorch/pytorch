@@ -106,12 +106,12 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
       }
     ")
 
-    SET(SVE_BF16_CODE "
-      #include <arm_sve.h>
+    SET(ARM_BF16_CODE "
+      #include <arm_neon.h>
       int main()
       {
-        svfloat32_t a = svdup_n_f32(0);
-        svbfloat16_t b = svreinterpret_bf16_f32(a);
+        float32x4_t a = vdupq_n_f32(0);
+        bfloat16x8_t b = vreinterpretq_bf16_f32(a);
         return 0;
       }
     ")
@@ -126,9 +126,9 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
 
       # Check if the source code compiles with the given flags for the specified language (C or C++)
       IF(lang STREQUAL "CXX")
-        CHECK_CXX_SOURCE_COMPILES("${SVE_CODE}" ${lang}_HAS_${type})
+        CHECK_CXX_SOURCE_COMPILES("${code}" ${lang}_HAS_${type})
       ELSE()
-        CHECK_C_SOURCE_COMPILES("${SVE_CODE}" ${lang}_HAS_${type})
+        CHECK_C_SOURCE_COMPILES("${code}" ${lang}_HAS_${type})
       ENDIF()
 
       # If the compilation test is successful, set appropriate variables indicating support
@@ -152,8 +152,8 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
     ENDMACRO()
 
     # Check for SVE256 vector length
-    CHECK_COMPILES(CXX "SVE256" "-march=armv8.2-a+sve -msve-vector-bits=256" SVE_CODE)
-    CHECK_COMPILES(CXX "SVE256_BF16" "-march=armv8.2-a+sve+bf16 -msve-vector-bits=256" SVE_BF16_CODE)
+    CHECK_COMPILES(CXX "SVE256" "-march=armv8.2-a+sve -msve-vector-bits=256" "${SVE_CODE}")
+    CHECK_COMPILES(CXX "ARM_BF16" "-march=armv8.2-a+sve+bf16 -msve-vector-bits=256" "${ARM_BF16_CODE}")
 
     # If SVE256 support is not found, set CXX_SVE_FOUND to FALSE and notify the user
     if(NOT CXX_SVE256_FOUND)
