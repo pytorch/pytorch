@@ -117,7 +117,7 @@ def memory_allocated(device: _device_t = None, /) -> int:
             :ref:`accelerator<accelerators>` device type. If not given,
             use :func:`torch.accelerator.current_device_index` by default.
     """
-    return memory_stats(device=device).get("allocated_bytes.all.current", 0)
+    return memory_stats(device).get("allocated_bytes.all.current", 0)
 
 
 def max_memory_allocated(device: _device_t = None, /) -> int:
@@ -133,7 +133,7 @@ def max_memory_allocated(device: _device_t = None, /) -> int:
             :ref:`accelerator<accelerators>` device type. If not given,
             use :func:`torch.accelerator.current_device_index` by default.
     """
-    return memory_stats(device=device).get("allocated_bytes.all.peak", 0)
+    return memory_stats(device).get("allocated_bytes.all.peak", 0)
 
 
 def memory_reserved(device: _device_t = None, /) -> int:
@@ -145,7 +145,7 @@ def memory_reserved(device: _device_t = None, /) -> int:
             :ref:`accelerator<accelerators>` device type. If not given,
             use :func:`torch.accelerator.current_device_index` by default.
     """
-    return memory_stats(device=device).get("reserved_bytes.all.current", 0)
+    return memory_stats(device).get("reserved_bytes.all.current", 0)
 
 
 def max_memory_reserved(device: _device_t = None, /) -> int:
@@ -161,7 +161,7 @@ def max_memory_reserved(device: _device_t = None, /) -> int:
             :ref:`accelerator<accelerators>` device type. If not given,
             use :func:`torch.accelerator.current_device_index` by default.
     """
-    return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
+    return memory_stats(device).get("reserved_bytes.all.peak", 0)
 
 
 def reset_accumulated_memory_stats(device: _device_t = None, /) -> None:
