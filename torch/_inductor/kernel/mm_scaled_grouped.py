@@ -179,22 +179,24 @@ triton_scaled_grouped_mm_source = r"""
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
-    triton.language.extra.cuda.experimental_device_tensormap_create2d(
+    a_desc = triton_helpers.make_tensor_descriptor(
+        base_ptr=a_ptr,
+        global_shape=[M, K],
+        strides=[K, 1],
+        block_shape=[BLOCK_M, BLOCK_K],
         desc_ptr=a_desc_ptr,
-        global_address=a_ptr,
-        load_size=[BLOCK_M, BLOCK_K],
-        global_size=[M, K],
         element_ty=a_ptr.dtype.element_ty,
     )
-    triton.language.extra.cuda.experimental_device_tensormap_create2d(
+    b_desc = triton_helpers.make_tensor_descriptor(
+        base_ptr=b_ptr,
+        global_shape=[N * G, K],
+        strides=[K, 1],
+        block_shape=[BLOCK_N, BLOCK_K],
         desc_ptr=b_desc_ptr,
-        global_address=b_ptr,
-        load_size=[BLOCK_N, BLOCK_K],
-        global_size=[N * G, K],
         element_ty=b_ptr.dtype.element_ty,
     )
-    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
-    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
+    triton_helpers.tensormap_fenceproxy_acquire(a_desc_ptr)
+    triton_helpers.tensormap_fenceproxy_acquire(b_desc_ptr)
 
     M_end_offset = 0
     iterated_tiles = 0
@@ -224,14 +226,14 @@ triton_scaled_grouped_mm_source = r"""
                     m_offset = (M_start_offset + tile_m_idx * BLOCK_M).to(tl.int32)
                     n_offset = (N_start_offset + tile_n_idx * BLOCK_N).to(tl.int32)
                     for k_offset in range(0, K, BLOCK_K):
-                        a = tl._experimental_descriptor_load(
-                            a_desc_ptr,
+                        a = triton_helpers.load_tensor_descriptor(
+                            a_desc,
                             [m_offset, k_offset],
                             [BLOCK_M, BLOCK_K],
                             dtype,
                         )
-                        b = tl._experimental_descriptor_load(
-                            b_desc_ptr,
+                        b = triton_helpers.load_tensor_descriptor(
+                            b_desc,
                             [n_offset, k_offset],
                             [BLOCK_N, BLOCK_K],
                             dtype,
