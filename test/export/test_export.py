@@ -15103,25 +15103,6 @@ class TestExportCustomClass(TorchTestCase):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
 
-    def test_preserve_non_cia_op(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return torch.nn.functional.elu(x)
-
-        ep = export(M(), (torch.randn(2, 3, 4, 5),))
-        FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
-            ep.graph_module.code
-        )
-
-        decomp_table = default_decompositions()
-
-        ep = ep.run_decompositions(
-            decomp_table=decomp_table,
-        )
-        FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
-            ep.graph_module.code
-        )
-
     def test_export_script_module(self):
         class Add(torch.nn.Module):
             def forward(self, x, y):
@@ -15151,6 +15132,25 @@ class TestExportCustomClass(TorchTestCase):
             torch._dynamo.exc.Unsupported, "UserDefined with non-function"
         ):
             ep = export(mod, (x, y))
+
+    def test_preserve_non_cia_op(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.elu(x)
+
+        ep = export(M(), (torch.randn(2, 3, 4, 5),))
+        FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+
+        decomp_table = default_decompositions()
+
+        ep = ep.run_decompositions(
+            decomp_table=decomp_table,
+        )
+        FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
+            ep.graph_module.code
+        )
 
     def test_preserve_cia_op(self):
         class StaticResizeTrilinear2dModule(torch.nn.Module):
