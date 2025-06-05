@@ -1616,16 +1616,14 @@ void initJitScriptBindings(PyObject* module) {
                 // TODO: fix all cases where ScriptMethod doesn't have
                 // __wrapped__, which is the non-scripted original method. E.g.
                 // it seems the top-level script module's scriptMethod doesn't
-                // have __wrapped__ attributes. For example:
+                // have __wrapped__ attributes:
                 //  class M(torch.nn.Module):
                 //    def forward(self, x):
                 //        return x.cos() + x.sin()
                 //  traced_module = torch.jit.trace(M(), example_inputs=inps)
-                // ,where traced_module.forward is a ScriptMethod but doesn't
-                // have __wrapped__
+                // , where traced_module.forward is a ScriptMethod but doesn't
+                // have __wrapped__.
                 py::hasattr(args[0], "__wrapped__")) {
-              // remove the function itself with args[1:]
-              py::slice slice0(1, args.size(), 1);
               return args[0].attr("__wrapped__")(*args, **kwargs);
             } else {
               // see: [pybind11 varargs]
