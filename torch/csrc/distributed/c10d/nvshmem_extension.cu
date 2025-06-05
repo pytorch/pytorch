@@ -518,8 +518,11 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
   auto split_shape = in_out_splits.sizes();
   TORCH_CHECK(split_shape.size() == 2 && split_shape[0] == 3, "in_out_splits must be 2D with 3 rows");
   TORCH_CHECK(split_shape[1] % world_size == 0, "Each row of in_out_splits must be a multiple of world_size");
+
   // Number of experts per rank
   int ne = split_shape[1] / world_size;
+  constexpr int NUM_TILES = THREADS_PER_BLOCK / A2AV_TILE_SIZE;
+  TORCH_CHECK(ne <= NUM_TILES, "Number of experts must be smaller than NUM_TILES", NUM_TILES);
 
   // Set device context for getting the stream and launching kernels below
   c10::cuda::CUDAGuard guard(input.device());
