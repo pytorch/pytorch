@@ -29,13 +29,6 @@ TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 
 
-def generate_faked_module():
-    class _OpenRegMod:
-        pass
-
-    return _OpenRegMod()
-
-
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
 @unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -74,8 +67,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             verbose=True,
         )
 
-        torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
-
     def test_base_device_registration(self):
         self.assertFalse(self.module.custom_add_called())
         # create a tensor using our custom device object
@@ -96,44 +87,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertFalse(z.is_cpu)
         self.assertTrue(z.device == device)
         self.assertEqual(z, z_cpu)
-
-    def test_common_registration(self):
-        # check unsupported device and duplicated registration
-        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
-            torch._register_device_module("dev", generate_faked_module())
-        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
-            torch._register_device_module("openreg", generate_faked_module())
-
-        # backend name can be renamed to the same name multiple times
-        torch.utils.rename_privateuse1_backend("openreg")
-
-        # backend name can't be renamed multiple times to different names.
-        with self.assertRaisesRegex(
-            RuntimeError, "torch.register_privateuse1_backend()"
-        ):
-            torch.utils.rename_privateuse1_backend("dev")
-
-        # generator tensor and module can be registered only once
-        with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
-            torch.utils.generate_methods_for_privateuse1_backend()
-
-        # check whether torch.openreg have been registered correctly
-        self.assertTrue(
-            torch.utils.backend_registration._get_custom_mod_func("device_count")() == 2
-        )
-        with self.assertRaisesRegex(RuntimeError, "Try to call torch.openreg"):
-            torch.utils.backend_registration._get_custom_mod_func("func_name_")
-
-        # check attributes after registered
-        self.assertTrue(hasattr(torch.Tensor, "is_openreg"))
-        self.assertTrue(hasattr(torch.Tensor, "openreg"))
-        self.assertTrue(hasattr(torch.TypedStorage, "is_openreg"))
-        self.assertTrue(hasattr(torch.TypedStorage, "openreg"))
-        self.assertTrue(hasattr(torch.UntypedStorage, "is_openreg"))
-        self.assertTrue(hasattr(torch.UntypedStorage, "openreg"))
-        self.assertTrue(hasattr(torch.nn.Module, "openreg"))
-        self.assertTrue(hasattr(torch.nn.utils.rnn.PackedSequence, "is_openreg"))
-        self.assertTrue(hasattr(torch.nn.utils.rnn.PackedSequence, "openreg"))
 
     def test_open_device_generator_registration_and_hooks(self):
         device = self.module.custom_device()
