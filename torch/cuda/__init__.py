@@ -333,6 +333,7 @@ class DeferredCudaCallError(Exception):
     pass
 
 
+AcceleratorError = torch._C.AcceleratorError
 OutOfMemoryError = torch._C.OutOfMemoryError
 
 
