@@ -990,12 +990,11 @@ void MetalShaderLibrary::bind_tensors(id<MTLComputeCommandEncoder> encoder, Tens
 
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
-                                           std::optional<c10::Scalar> extra,
-                                           std::optional<c10::ScalarType> extra_type) {
+                                           const std::optional<std::pair<c10::Scalar, c10::ScalarType>> extra) {
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_unary_kernel(sub_iter, name, extra, extra_type);
+      exec_unary_kernel(sub_iter, name, extra);
     }
     return;
   }
@@ -1030,9 +1029,9 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                        outputTensor.strides(),
                        inputTensor.ndimension());
       }
-      if (extra) {
-        TORCH_CHECK(extra_type.has_value(), "Extra type must be specified");
-        mtl_setBytes(computeEncoder, getMPSScalar(*extra, extra_type.value()), iter.is_contiguous() ? 2 : 6);
+      if (extra.has_value()) {
+        mtl_setBytes(
+            computeEncoder, getMPSScalar(extra.value().first, extra.value().second), iter.is_contiguous() ? 2 : 6);
       }
       mtl_dispatch1DJob(computeEncoder, cplState, length);
 
