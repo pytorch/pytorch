@@ -182,7 +182,7 @@ def is_sym_node(node: _HasMeta) -> bool:
     return "val" in node.meta and isinstance(node.meta["val"], py_sym_types)
 
 
-@overload
+@overload  # type: ignore[no-overload-impl]
 def set_proxy_slot(obj: Tensor, tracer: _ProxyTracer, proxy: _ProxyTensor) -> None:
     ...
 
@@ -201,25 +201,38 @@ def set_proxy_slot(
     ...
 
 
-_TLS = threading.local()
-_TLS._proxy_tensor_disable_update_tensor_tracker = False
+class DisableUpdateTensorTracker(threading.local):
+    value: bool = False
+
+
+disable_update_tensor_tracker_tls = DisableUpdateTensorTracker()
 
 
 def is_proxy_tensor_update_tensor_tracker_disabled() -> bool:
-    return _TLS._proxy_tensor_disable_update_tensor_tracker
+    """
+    Returns current state of disabling update tensor tracker.
+    """
+    return disable_update_tensor_tracker_tls.value
 
 
 @contextmanager
 def proxy_tensor_disable_update_tensor_tracker() -> Generator[None, None, None]:
-    orig_value = _TLS._proxy_tensor_disable_update_tensor_tracker
-    _TLS._proxy_tensor_disable_update_tensor_tracker = True
+    """
+    By default tensor_tracker is updated every time.
+    This leads to chaining every operation on the FakeTensor.
+    For some cases of non-functional code, e.g. mutations in aotdispatch,
+    we want emitted nodes to be disconnected that partitioner will be able
+    to separate them into different subgraphs.
+    """
+    orig_value = disable_update_tensor_tracker_tls.value
+    disable_update_tensor_tracker_tls.value = True
     try:
         yield
     finally:
-        _TLS._proxy_tensor_disable_update_tensor_tracker = orig_value
+        disable_update_tensor_tracker_tls.value = orig_value
 
 
-def set_proxy_slot(
+def set_proxy_slot(  # type: ignore[no-redef]
     obj: Union[PySymType, _AnyScriptObjectType, Tensor],
     tracer: _ProxyTracer,
     proxy: object,
