@@ -199,7 +199,7 @@ See the synthetic example below for a demonstration:
 ```
 
 ```{figure} _static/img/profiling_torch_compile/graph_breaks_with_torch_compiled_region.png
-    [Alt text] Visualization in the chrome://trace viewer, showing nested Torch-Compiled Region events and multiple CompiledFunction events - indicating graph breaks.
+:alt: Visualization in the chrome://trace viewer, showing nested Torch-Compiled Region events and multiple CompiledFunction events - indicating graph breaks.
 ```
 
 ## Operator Kernels
