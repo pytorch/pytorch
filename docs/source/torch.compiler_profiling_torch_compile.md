@@ -211,7 +211,7 @@ When an operator is launched, we expect to see a few events:
 3. GPU-side event
 
 ```{figure} _static/img/profiling_torch_compile/kernel_launch_labeled.png
-:alt: Visualization in the chrome://trace viewer, showing the three types of events: CPU-side event, kernel launch, and GPU-side event
+:alt: Visualization in the chrome://trace viewer, showing the three types of events - CPU-side event, kernel launch, and GPU-side event
 ```
 
 **Inductor-generated Triton kernels:**
