@@ -250,7 +250,6 @@ The named tensor API is experimental and subject to change.
 ```
 
 (keeps_input_names-doc)=
-``
 
 ## Keeps input names
 
