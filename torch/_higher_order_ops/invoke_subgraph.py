@@ -207,7 +207,7 @@ def trace_joint_graph(fn, fw_inputs, fw_outputs):
 # TODO (@anijain2305) - Delete this function when base_hop uses invoke_subgraph infra
 def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
     with suspend_functionalization(), disable_functional_mode():
-        with disable_proxy_modes_tracing():
+        with disable_proxy_modes_tracing(), torch._dynamo.compiled_autograd._disable():
             # args are functional tensors, generate some example tensors
             fw_inputs = pytree.tree_map(_from_fun, operands)
 

@@ -4825,6 +4825,7 @@ def wrap_test_class(orig_cls):
                         fullgraph=name not in known_graph_breaks_tests,
                     )
                 ),
+                config.patch(compiled_autograd=True),
                 test_contexts.get(name, contextlib.nullcontext()),
             ]
             dct[name] = make_wrapped(fn, ctxs)
@@ -4933,6 +4934,7 @@ known_graph_breaks_tests = {
     "test_dropout_inductor",  # dynamo disable
     "test_function_with_kwargs",  # dynamo disable
     "test_module",  # dynamo disable
+    "test_autograd_simple_views_python",  # data-dependent control flow
 }
 
 test_contexts = {
@@ -4979,18 +4981,10 @@ xfail_by_backend = {
         "test_default_saved_tensors_hooks_double_backward",  # wrong when pack hook returns non-leaf
         "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # wrong when pack hook returns non-leaf
         "test_nested_anomaly_detect_nan",  # nested anomaly
-        "test_select_sum",  # batched gradients
-        "test_custom_autograd_no_early_free",  # batched gradients
-        "test_grad_batched_grad",  # batched gradients
         # Uncategorized
-        "test_lobpcg",  # NaNs
-        "test_autograd_simple_views_python",  # gradient is None
-        "test_function_returns_undefined_tensor",  # gradient is None
+        "test_grad_batched_grad",  # batched gradients
         "test_input_buffer_accum",  # add(sparse, dense)
-        "test_return_duplicate",  # batched gradients
-        "test_return_duplicate_inplace",  # batched gradients
         "test_naughty_autograd_function_stashing_ctx",  # error not raised
-        "test_unrelated_inputs",  # batched gradients
         "test_nested_checkpoint_early_stop_False",  # unpack hook grad_fn semantics
         "test_nested_checkpoint_early_stop_True",  # unpack hook grad_fn semantics
         "test_nested_checkpoint_two_children_early_stop_False",  # unpack hook grad_fn semantics
