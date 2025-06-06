@@ -48,19 +48,16 @@ from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
 from .ir import (
-    BaseView,
     DtypeView,
     ExpandView,
     IndexingConstant,
     IRNode,
     is_triton,
-    MutableBox,
     OnlineSoftmaxReduction,
     ops_wrapper,
     PermuteView,
     Pointwise,
     Reduction,
-    ShapeAsConstantBuffer,
     SqueezeView,
     TensorBox,
     validate_ir,
@@ -167,7 +164,7 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
 def tag_to_layout_constraint(tag):
     if tag == torch._C.Tag.needs_exact_strides:
         return constrain_to_fake_tensors
-    if tag == torch._C.Tag.needs_contiguous_strides:  # type: ignore[attr-defined]
+    if tag == torch._C.Tag.needs_contiguous_strides:
         return require_contiguous_strides
     if tag == torch._C.Tag.needs_fixed_stride_order:
         return constrain_to_fx_strides
@@ -700,9 +697,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
     return inner
 
 
-def to_dtype(
-    x: Union[TensorBox, ShapeAsConstantBuffer], dtype: torch.dtype, copy: bool = False
-):
+def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
     src_dtype = x.get_dtype()
     if src_dtype == dtype:
         return clone(x) if copy else x
@@ -1161,7 +1156,9 @@ def repeat(x, repeats):
 @register_lowering(aten._unsafe_view, type_promotion_kind=None)
 @register_lowering(aten.view, type_promotion_kind=None)
 @register_lowering(aten.reshape, type_promotion_kind=None)
-def view(x: TensorBox, sizes: Sequence[sympy.Expr]) -> TensorBox:
+def view(x, sizes):
+    assert isinstance(x, TensorBox)
+    assert isinstance(sizes, (list, tuple))
     return TensorBox(View.create(x.data, sizes))
 
 
@@ -1289,7 +1286,7 @@ def quantized_decomposed_quantize_per_channel(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
 
@@ -1344,7 +1341,7 @@ def quantized_decomposed_dequantize_per_channel(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
     assert input.get_dtype() == dtype, (
@@ -1394,7 +1391,7 @@ def quantized_decomposed_quantize_per_tensor_default(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
     assert input.get_dtype() == torch.float32, (
@@ -1435,7 +1432,7 @@ def quantized_decomposed_dequantize_per_tensor_default(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     assert input.get_dtype() == dtype, (
         f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
     )
@@ -1472,7 +1469,7 @@ def quantized_decomposed_quantize_per_tensor_tensor(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
     assert input.get_dtype() == torch.float32, (
@@ -1522,7 +1519,7 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     assert len(scale.get_size()) == 0 or (
         len(scale.get_size()) == 1 and scale.get_size()[0] == 1
     ), "expect scale as scalar tensor"
@@ -2262,7 +2259,7 @@ def searchsorted(
     right: bool = False,
     side: Optional[str] = None,
     sorter: Optional[TensorBox] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
         tb, BackendFeature.BUCKETIZE
     )
@@ -3614,7 +3611,6 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    assert isinstance(V.graph.current_node.target, torch._ops.OpOverload)
     ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
     return self
 
@@ -3738,10 +3734,8 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     values = expand(values, expected_vals_size)
     # all guards are set above during broadcast_tensors and expand
 
-    device = self.get_device()
-    assert device is not None
     scatter = ir.Scatter(
-        device=device,
+        device=self.get_device(),
         dtype=self.get_dtype(),
         inner_fn=values.make_loader(),
         ranges=expected_vals_size,  # iter_ranges,
@@ -3961,13 +3955,10 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             assert reduce is None
             return None
 
-    device = self.get_device()
-    assert device is not None
-
     if not include_self:
         # zero out the corresponding elements first
         zero_out = ir.Scatter(
-            device=device,
+            device=self.get_device(),
             dtype=self.get_dtype(),
             inner_fn=lambda index: ops.constant(0, self.get_dtype()),
             ranges=index.get_size(),
@@ -3986,7 +3977,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
     # self[i][j][index[i][j][k]] += src[i][j][k]  # if dim == 2
     scatter = ir.Scatter(
-        device=device,
+        device=self.get_device(),
         dtype=self.get_dtype(),
         inner_fn=fn,
         ranges=index.get_size(),
@@ -4459,10 +4450,10 @@ def _max_pool_with_offsets(
         ranges=new_size,
         reduction_ranges=kernel_size,
     )
-    if isinstance(result.data.data, Reduction):  # type: ignore[attr-defined, union-attr]
+    if isinstance(result.data.data, Reduction):  # type: ignore[attr-defined]
         # Only realize if reduction isn't unrolled
         result.realize()
-    if isinstance(offsets.data.data, Reduction):  # type: ignore[attr-defined, union-attr]
+    if isinstance(offsets.data.data, Reduction):  # type: ignore[attr-defined]
         # Only realize if reduction isn't unrolled
         offsets.realize()
 
@@ -4512,7 +4503,7 @@ def _pool_offsets_to_indices(
         [Sequence[Union[int, torch.SymInt]], Sequence[Union[int, torch.SymInt]]],
         torch._inductor.virtualized.OpsValue,
     ],
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     n_dim = len(kernel_size)
     offsets_loader = offsets.make_loader()
     window_size = sympy.sympify(functools.reduce(operator.mul, kernel_size))
@@ -4645,12 +4636,10 @@ def max_pool2d_with_indices_backward(
     x_stride: Optional[Sequence[Any]]
     if isinstance(x, TensorBox) and isinstance(x.data.data, Pointwise):  # type: ignore[attr-defined]
         data = x.data.data  # type: ignore[attr-defined]
-        device = data.get_device()
-        assert device is not None
         x_buffer = ir.ComputedBuffer(
             name=None,
             layout=ir.FlexibleLayout(
-                device=device,
+                device=data.get_device(),
                 dtype=data.get_dtype(),
                 size=data.get_size(),
             ),
@@ -5147,11 +5136,9 @@ def _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim):
             ranges=new_size,
             reduction_ranges=kernel_size,
         )
-        assert isinstance(result, TensorBox), result
         if isinstance(result.data.data, Reduction):  # type: ignore[attr-defined]
             # Only realize if reduction isn't unrolled
             result.realize()
-        assert isinstance(offsets, TensorBox), offsets
         if isinstance(offsets.data.data, Reduction):  # type: ignore[attr-defined]
             # Only realize if reduction isn't unrolled
             offsets.realize()
@@ -5836,7 +5823,7 @@ def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
         )
         result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
-            result.data.data,  # type: ignore[attr-defined, attr-type, union-attr]
+            result.data.data,  # type: ignore[attr-defined]
             Reduction,
         ):  # Only realize if reduction isn't unrolled
             result.realize()
@@ -6082,14 +6069,12 @@ def mutate_to(changed, val, unsafe_alias=False):
 
     if not isinstance(val, ir.StorageBox):
         # introduce a copy to handle views
-        node = Pointwise.create(
+        val = Pointwise.create(
             device=changed.get_device(),
             dtype=changed.get_dtype(),
             inner_fn=val.make_loader(),
             ranges=changed.get_size(),
-        )
-        assert isinstance(node, (BaseView, MutableBox))
-        val = node.data
+        ).data
         assert isinstance(val, ir.StorageBox)
 
     if isinstance(changed_data, ir.StorageBox) and not (
@@ -6953,14 +6938,13 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             raise RuntimeError(f"NYI unsupported output type: {type(out)}")
 
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
-    assert isinstance(result, Sequence)
     return list(map(_map_output, result))
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
 def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
     result = ir.InvokeSubgraph.create(subgraph_fn, *operands)
-    return list(map(TensorBox.create, result))  # type: ignore[call-overload]
+    return list(map(TensorBox.create, result))
 
 
 @register_lowering(torch._higher_order_ops.invoke_quant, type_promotion_kind=None)

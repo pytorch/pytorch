@@ -15,7 +15,6 @@ import traceback
 import typing
 from collections import Counter, defaultdict
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec, TypeAlias
 
 
 if TYPE_CHECKING:
@@ -76,9 +75,7 @@ log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
-PartitionType: TypeAlias = list["BaseSchedulerNode"]
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
+PartitionType = list["BaseSchedulerNode"]
 
 
 @dataclasses.dataclass
@@ -1019,14 +1016,13 @@ class SchedulerNode(BaseSchedulerNode):
     def _compute_attrs(
         self,
         extra_indexing_constraints: Optional[tuple[dict[Any, Any], list[Any]]] = None,
-        recompute_sizes_body_func: Optional[Callable[_P, _T]] = None,
+        recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
-        self._sizes, body = self.node.simplify_and_reorder(
+        self._sizes, self._body = self.node.simplify_and_reorder(
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
-        self._body = body  # type: ignore[assignment]
 
         device = self.node.get_device_or_error()
         group_fn = self.scheduler.get_backend(device).group_fn
@@ -1938,7 +1934,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 def pick_loop_order(
     stride_lengths: list[list[int]],
     sizes: Sequence[sympy.Expr],
-    priority_idx: Sequence[int] = (),
+    priority_idx: tuple[int, ...] = (),
 ) -> list[int]:
     """
     A heuristic to decide loop iteration orders.  This has not been well
@@ -2239,7 +2235,9 @@ class Scheduler:
         mutation properly.
         """
 
-        class DedupList(Generic[_T]):
+        T = TypeVar("T")
+
+        class DedupList(Generic[T]):
             """
             This data structure behaves like a list except it makes sure the
             elements remain unique.
@@ -2251,19 +2249,19 @@ class Scheduler:
 
             def __init__(
                 self,
-                items: Optional[list[_T]] = None,
-                membership: Optional[OrderedSet[_T]] = None,
+                items: Optional[list[T]] = None,
+                membership: Optional[OrderedSet[T]] = None,
             ) -> None:
                 self.items = items or []
                 self.membership = membership or OrderedSet()
 
-            def append(self, node_user: _T) -> None:
+            def append(self, node_user: T) -> None:
                 if node_user in self.membership:
                     return
                 self.items.append(node_user)
                 self.membership.add(node_user)
 
-            def __add__(self, other: DedupList[_T]) -> DedupList[_T]:
+            def __add__(self, other: DedupList[T]) -> DedupList[T]:
                 new_membership = OrderedSet.union(self.membership, other.membership)
                 new_items = self.items + [
                     x for x in other.items if x not in self.membership
@@ -2756,7 +2754,7 @@ class Scheduler:
                     continue
 
                 out_tensorbox = min_node_unfused.output_node()
-                out_storage = out_tensorbox.data  # type: ignore[union-attr]
+                out_storage = out_tensorbox.data
                 assert isinstance(out_storage, ir.StorageBox)
                 out_buffer = out_storage.data
                 assert isinstance(out_buffer, ir.OperationBuffer)
@@ -3661,7 +3659,7 @@ class Scheduler:
             allowed_prologue_inps = template.get_allowed_prologue_inps()
 
             unsupported_prologue_args = (
-                OrderedSet(inp.get_name() for inp in template.inputs)  # type: ignore[union-attr]
+                OrderedSet(inp.get_name() for inp in template.inputs)
                 - allowed_prologue_inps
             )
 
