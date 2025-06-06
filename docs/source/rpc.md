@@ -80,7 +80,6 @@ across RPC boundaries. These features can be categorized into four sets of APIs.
    optimizers into one, and provides a concise constructor and ``step()`` API.
 
 (rpc)=
-
 ## RPC
 
 Before using RPC and distributed autograd primitives, initialization must take
@@ -290,7 +289,7 @@ The distributed autograd design note covers the design of the RPC-based distribu
 
 -  {ref}`distributed-autograd-design`
 
-The RRef design note covers the design of the :ref:`rref` (Remote REFerence) protocol used to refer to values on remote workers by the framework.
+The RRef design note covers the design of the {ref}`rref` (Remote REFerence) protocol used to refer to values on remote workers by the framework.
 
 -  {ref}`remote-reference-protocol`
 
