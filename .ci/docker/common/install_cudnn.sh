@@ -4,7 +4,9 @@ if [[ -n "${CUDNN_VERSION}" ]]; then
     # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
     mkdir tmp_cudnn
     pushd tmp_cudnn
-    if [[ ${CUDA_VERSION:0:4} == "12.8" ]]; then
+    if [[ ${CUDA_VERSION:0:4} == "12.9" ]]; then
+        CUDNN_NAME="cudnn-linux-x86_64-9.10.1.4_cuda12-archive"
+    elif [[ ${CUDA_VERSION:0:4} == "12.8" ]]; then
         CUDNN_NAME="cudnn-linux-x86_64-9.10.1.4_cuda12-archive"
     elif [[ ${CUDA_VERSION:0:4} == "12.6" ]]; then
         CUDNN_NAME="cudnn-linux-x86_64-9.10.1.4_cuda12-archive"
