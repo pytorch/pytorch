@@ -58,11 +58,17 @@ def type_casts(
     f: Callable,
     type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND,
     compute_dtype_only: bool = False,
+    include_non_tensor_args: bool = False,
 ):
     @functools.wraps(f)
     def inner(*args, **kwargs):
+        allowed_types = (
+            (Tensor, torch.types._Number) if include_non_tensor_args else (Tensor,)
+        )  # type: ignore[arg-type]
         flat_args = [
-            x for x in pytree.arg_tree_leaves(*args, **kwargs) if isinstance(x, Tensor)
+            x
+            for x in pytree.arg_tree_leaves(*args, **kwargs)
+            if isinstance(x, allowed_types)
         ]
         computation_dtype, result_dtype = utils.elementwise_dtypes(
             *flat_args, type_promotion_kind=type_promotion
@@ -97,6 +103,11 @@ compute_only_pw_cast_for_opmath = partial(
 )
 pw_cast_for_opmath = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+pw_cast_for_opmath_non_tensor_args = partial(
+    type_casts,
+    type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    include_non_tensor_args=True,
 )
 pw_cast_for_int_to_real = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
