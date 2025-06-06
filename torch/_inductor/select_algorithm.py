@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import builtins
 import contextlib
 import dataclasses
 import functools
@@ -1174,7 +1173,7 @@ class GeneratedCodeCache:
         input_nodes: tuple[ir.IRNode],
         num_stages: int,
         num_warps: int,
-        call_sizes: list[sympy.core.symbol.Symbol],
+        call_sizes: Sequence[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
@@ -1327,7 +1326,7 @@ class TritonTemplate(KernelTemplate):
         input_nodes: tuple[ir.IRNode],
         num_stages: int,
         num_warps: int,
-        call_sizes: list[sympy.core.symbol.Symbol],
+        call_sizes: Sequence[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
@@ -1527,7 +1526,7 @@ class TritonTemplate(KernelTemplate):
         epilogue_fn_hash: Optional[str] = None,
         subgraphs: Optional[list[ir.Buffer]] = None,
         mutated_inputs: Optional[list[ir.IRNode]] = None,
-        call_sizes: Optional[list[sympy.core.symbol.Symbol]] = None,
+        call_sizes: Optional[Sequence[sympy.core.symbol.Symbol]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
         generate_with_caching=False,
         **kwargs,
@@ -1901,7 +1900,7 @@ class ExternKernelCaller(ChoiceCaller):
             assert self.choice.op_overload is not None, (
                 "Please provide an op_overload to use ir.FallbackKernel"
             )
-            inner = ir.FallbackKernel.create(
+            inner: ir.IRNode = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
         elif self.choice.kernel_creator is not None:
@@ -2334,13 +2333,34 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
         timings = do_autotuning(choices, precompile_fn)
-        if timings == {} or choices[0] not in timings:
-            return choices[0].output_node()
 
-        selected_key = builtins.min(timings, key=timings.__getitem__)
-        selected_choice = selected_key.output_node()
-        log.debug("selected choice: %s", str(selected_choice))
-        return selected_choice
+        # if timings is empty, we really have no choice but to return a semi-random
+        # choice. returning the first `ExternKernelCaller` is probably the safest bet
+        # in this case, since it will generally be the ATen kernel. if there are no
+        # `ExternKernelCaller`s to return, then returning the 0th kernel is our next
+        # best option (ideally we'd fail whenever there is no ATen kernel to fallback
+        # to, but that's not trivial to figure out)
+        if timings == {}:
+            for choice in choices:
+                if isinstance(choice, ExternKernelCaller):
+                    node = choice.output_node()
+                    log.debug(
+                        "Autotuning returned empty timings, falling back to first `ExternKernelCaller`: %s",
+                        node,
+                    )
+                    return node
+            node = choices[0].output_node()
+            log.debug(
+                "Autotuning returned empty timings, falling back to first choice: %s",
+                node,
+            )
+            return node
+
+        # if we got any timings at all, pick the best of those
+        choice = min(timings, key=timings.__getitem__)
+        node = choice.output_node()
+        log.debug("Autotuning selected choice: %s", node)
+        return node
 
     def make_precompile_fn(
         self,
