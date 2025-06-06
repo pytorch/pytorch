@@ -8,6 +8,8 @@ from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import config, metrics
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT", "1") == "1"
@@ -101,6 +103,7 @@ class AutoChunkerTest(TestCase):
         self.common_matmul_test(has_softmax=True, use_bias=True)
 
     @config.patch("AutoChunker.num_chunk", config.AutoChunker.num_chunk or 16)
+    @largeTensorTest("6GB", device=GPU_TYPE, inductor=True)
     def test_fused_linear_cel(self):
         B = 32
         T = 1024
@@ -160,4 +163,5 @@ class AutoChunkerTest(TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    run_tests()
+    if HAS_GPU:
+        run_tests()
