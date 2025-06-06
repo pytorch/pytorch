@@ -319,6 +319,18 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 with torch._C._AutoDispatchBelowAutograd():
                     return self(*args, **kwargs)
 
+            from torch._higher_order_ops.utils import _has_gen_schema
+
+            if _has_gen_schema(self):
+                schema = self.gen_schema(*args, **kwargs)
+                if any(arg.is_write for arg in schema.arguments):
+                    raise RuntimeError(
+                        f"The {self.name()} HigherOrderOperator does not currently support training "
+                        "with in-place input or buffer mutations "
+                        "If you require this feature, please submit an issue to PyTorch. "
+                        "Alternatively, consider creating your own custom autograd.Function. "
+                    )
+
             return fn(*args, **kwargs)
 
         self.py_impl(DispatchKey.Autograd)(maybe_run_autograd)

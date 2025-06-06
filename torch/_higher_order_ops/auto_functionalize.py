@@ -11,6 +11,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
+    _has_gen_schema,
     call_op,
     HopInstance,
     materialize_callable_in_args,
@@ -411,12 +412,6 @@ def can_auto_functionalize(
 ) -> bool:
     if isinstance(op, HopInstance):
         # HOPs that implement gen_schema and schema is not functional are auto_functionalizable.
-        def _has_gen_schema(op: HigherOrderOperator):
-            method = "gen_schema"
-            return hasattr(type(op), method) and getattr(
-                type(op), method
-            ) is not getattr(HigherOrderOperator, method)
-
         if not _has_gen_schema(op._op):
             return False
 
