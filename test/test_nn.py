@@ -11589,7 +11589,7 @@ class TestNNDeviceType(NNTestCase):
             F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
 
     @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypes(torch.float)
     @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
@@ -11660,7 +11660,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x_leaf.grad, grad_x, atol=dtype2prec_DONTUSE[dtype], rtol=0)
             for p1, p2 in zip(lstm.parameters(), lstm2.parameters()):
                 prec = dtype2prec_DONTUSE[dtype]
-                if dtype == torch.float16:
+                if dtype == torch.float16 or dtype == torch.bfloat16:
                     prec = 4e-2
                 self.assertEqual(p1.grad, p2.grad, atol=prec, rtol=0)
 
