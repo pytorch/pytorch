@@ -2,7 +2,6 @@
 import gc
 import math
 import pickle
-import re
 import unittest
 import warnings
 import weakref
@@ -1448,10 +1447,9 @@ class TestModuleHookNN(NNTestCase):
         # This should run and trigger the hook properly
         with self.assertWarnsRegex(
             UserWarning,
-            re.escape(
-                "Full backward hook for Linear(in_features=2, out_features=3, "
-                "bias=True) is firing when gradients are computed with respect "
-                "to module outputs since no inputs require gradients"
+            (
+                "Full backward hook is firing when gradients are computed with "
+                "respect to module outputs since no inputs require gradients"
             ),
         ):
             mod(inp).sum().backward()
