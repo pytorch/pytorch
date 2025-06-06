@@ -7796,20 +7796,25 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         def fn(dummy, inplace_tensor):
             return AF.apply(dummy, inplace_tensor)
 
-        def inps():
-            dummy = torch.randn((2,), requires_grad=True)
+        def _inps():
+            dummy = torch.zeros((2,), requires_grad=True)
             inplace_tensor = torch.zeros((2,), requires_grad=False)
             return dummy, inplace_tensor
 
-        dummy, inplace = inps()
-        fn(dummy, inplace).sum().backward()
-        ref = inplace.clone().detach()
+        inps = _inps()
+        out = fn(*inps)
+        ref_inps_after_fw = [x.clone().detach() for x in inps]
+        out.sum().backward()
+        ref_inps_after_bw = [x.clone().detach() for x in inps]
 
-        dummy, inplace = inps()
-        torch.compile(fn, backend="aot_eager", fullgraph=True)(
-            dummy, inplace
-        ).sum().backward()
-        self.assertEqual(ref, inplace)
+        inps = _inps()
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(*inps)
+        inps_after_fw = [x.clone().detach() for x in inps]
+        out.sum().backward()
+        inps_after_bw = [x.clone().detach() for x in inps]
+
+        self.assertEqual(ref_inps_after_fw, inps_after_fw)
+        self.assertEqual(ref_inps_after_bw, inps_after_bw)
 
     def test_mutation_of_input_in_fw_and_bw(self):
         class AF(torch.autograd.Function):
