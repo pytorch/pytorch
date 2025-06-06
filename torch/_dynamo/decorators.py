@@ -766,7 +766,7 @@ def _allow_in_graph_einops():
                     allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 
-trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
+# trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 
 
 # Proxy class for torch._dynamo.config patching - so dynamo can identify context managers/decorators

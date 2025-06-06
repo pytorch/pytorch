@@ -13,6 +13,14 @@ from torch.testing._internal.common_utils import make_dynamo_test, munge_exc
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
+try:
+    import einops
+
+    has_einops = True
+except ImportError:
+    has_einops = False
+
+
 class SetSubclass(set):
     pass
 
@@ -85,6 +93,67 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(1)
         y = fn(x)
         self.assertEqual(y, x.sin())
+
+    @unittest.skipIf(not has_einops, reason="Needs einops")
+    def test_trace_einops_rearrange(self):
+        def fn(x):
+            return einops.rearrange(x, "b c -> c b")
+
+        x = torch.randn(2, 2)
+        exp = fn(x)
+        got = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(exp, got)
+
+    @unittest.skipIf(not has_einops, reason="Needs einops")
+    def test_trace_einops_reduce(self):
+        def fn(x):
+            return einops.reduce(x, "a b c d -> a b c", "max")
+
+        x = torch.randn(4, 3, 2, 2)
+        exp = fn(x)
+        got = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(exp, got)
+
+    @unittest.skipIf(not has_einops, reason="Needs einops")
+    def test_trace_einops(self):
+        # Test copied from arogozhnikov/einops at
+        # https://github.com/arogozhnikov/einops/blob/5dac4043970e0a74c81fcc5a73d7386ca696113e/einops/tests/test_other.py#L254-L301
+        from einops import reduce, repeat
+
+        from torch import nn
+
+        class TorchModuleWithOperations(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x_abc, suffix=""):
+                a, b, c = x_abc.shape
+
+                def suf(pattern):
+                    parts = pattern.split()
+                    return " ".join(
+                        [p if p[-1] not in "acd" else p + suffix for p in parts]
+                    )
+
+                # patterns look a bit strange because names a, c, d will be modified on every run
+                # by suf function
+                x_abcd = repeat(x_abc, suf("a b c -> a b c 4"))
+                x_abc = reduce(x_abcd, suf("a b c d -> a b c"), "min")
+                # x_abdc, ps = pack([x_abc] * (2 + len(suffix)), suf("a b * c"))
+                # x_array = unpack(rearrange(x_abdc, suf("a b d c -> (a b ) 1 c d")), ps, "ab one1 c *")
+                # x1 = x_array[0] + len(x_array)
+                # x1 = rearrange(x1, suf("(a b ) 1 c -> a b c"), b=b)
+                # addition = einsum(x_abc, x_abcd, suf("a b c , a b c d -> d"))[0]
+                # return x1 + addition
+
+        original = TorchModuleWithOperations()
+        compiled = torch.compile(original, fullgraph=True, backend="aot_eager")
+        for size in [10, 20, 40]:
+            x = torch.rand([size, size + 1, size + 2])
+            for suffix in ["", "suf1", "other_suffix"]:
+                result1 = compiled(x, suffix)
+                result2 = original(x, suffix)
+                assert torch.allclose(result1, result2)
 
 
 class TestSetGuards(LoggingTestCase):
