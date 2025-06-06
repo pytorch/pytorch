@@ -859,18 +859,11 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(8, requires_grad=False)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
-        ) as cm:
+            torch._dynamo.exc.Unsupported,
+            "Encountered input mutation during higher order op tracing",
+        ):
             opt_fn(x, y)
-
-        cause = cm.exception.__cause__
-        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
-        self.assertTrue(
-            "Encountered input mutation during higher order op tracing" in str(cause)
-        )
 
     def test_input_mutation_inference_mode(self):
         @mark_compile_region
@@ -888,16 +881,10 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(8, requires_grad=False)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
-        ) as cm:
+            torch._dynamo.exc.Unsupported,
+            "Encountered input mutation during higher order op tracing",
+        ):
             opt_fn(x, y)
-
-        cause = cm.exception.__cause__
-        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
-        self.assertTrue(
-            "Encountered input mutation during higher order op tracing" in str(cause)
-        )
 
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
@@ -955,18 +942,11 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(8, requires_grad=False)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
-        ) as cm:
+            torch._dynamo.exc.Unsupported,
+            "Encountered aliasing during higher order op tracing",
+        ):
             opt_fn(x, y)
-
-        cause = cm.exception.__cause__
-        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
-        self.assertTrue(
-            "Encountered aliasing during higher order op tracing" in str(cause)
-        )
 
     def test_input_input_aliasing(self):
         @mark_compile_region
@@ -979,18 +959,11 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8, requires_grad=False)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
-        ) as cm:
+            torch._dynamo.exc.Unsupported,
+            "Encountered aliasing during higher order op tracing",
+        ):
             opt_fn(x)
-
-        cause = cm.exception.__cause__
-        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
-        self.assertTrue(
-            "Encountered aliasing during higher order op tracing" in str(cause)
-        )
 
     def test_output_output_aliasing(self):
         @mark_compile_region
@@ -1004,18 +977,11 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8, requires_grad=False)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
-        ) as cm:
+            torch._dynamo.exc.Unsupported,
+            "Encountered aliasing during higher order op tracing",
+        ):
             opt_fn(x)
-
-        cause = cm.exception.__cause__
-        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
-        self.assertTrue(
-            "Encountered aliasing during higher order op tracing" in str(cause)
-        )
 
     def test_mod_attr_aliasing(self):
         class MutateParam(torch.nn.Module):
@@ -1041,18 +1007,11 @@ class GraphModule(torch.nn.Module):
         fn(x, y)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
-        ) as cm:
+            torch._dynamo.exc.Unsupported,
+            "Encountered input mutation during higher order op tracing",
+        ):
             opt_fn(x, y)
-
-        cause = cm.exception.__cause__
-        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
-        self.assertTrue(
-            "Encountered input mutation during higher order op tracing" in str(cause)
-        )
 
     def test_kwargs_only(self):
         @mark_compile_region
@@ -2133,25 +2092,6 @@ class GraphModule(torch.nn.Module):
         ep = torch.export.export(M(), (x, y), strict=self.strict)
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
-
-
-class NegativeTesting(TestCase):
-    def test_graph_break(self):
-        @mark_compile_region
-        def gn(x):
-            torch._dynamo.graph_break()
-            return torch.cos(x)
-
-        def fn(x):
-            return gn(x)
-
-        x = torch.randn(8, 8, requires_grad=True)
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
-        ):
-            torch.compile(fn, backend="eager")(x)
 
 
 if __name__ == "__main__":
