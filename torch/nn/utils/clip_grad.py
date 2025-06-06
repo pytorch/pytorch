@@ -16,11 +16,7 @@ from torch.utils._foreach_utils import (
 )
 
 
-__all__ = [
-    "clip_grad_norm_",
-    "clip_grad_norm",
-    "clip_grad_value_",
-]
+__all__: list[str] = []
 
 
 _tensor_or_tensors = Union[
@@ -292,3 +288,8 @@ def clip_grad_value_(
         else:
             for grad in grads:
                 cast(Tensor, grad).clamp_(min=-clip_value, max=clip_value)
+
+
+clip_grad_norm.__module__ = "torch.nn.utils"
+clip_grad_norm_.__module__ = "torch.nn.utils"
+clip_grad_value_.__module__ = "torch.nn.utils"

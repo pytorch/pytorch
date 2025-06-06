@@ -473,7 +473,7 @@ In addition to the standard Google Style docstring formatting rules, the followi
 
 ### Building documentation
 
-To build the documentation:
+Note that the docs will only build with Python versions <3.13. To build the documentation:
 
 1. Build and install PyTorch
 
@@ -583,9 +583,8 @@ rsync -az me@my_machine:/path/to/pytorch/docs/cpp/build/html cpp/build
 
 ### Previewing documentation on PRs
 
-PyTorch will host documentation previews at `https://docs-preview.pytorch.org/pytorch/pytorch/<pr number>/index.html` once the
-`pytorch_python_doc_build` GitHub Actions job has completed on your PR. You can visit that page directly
-or find its link in the automated Dr. CI comment on your PR.
+PyTorch will host documentation previews at `https://docs-preview.pytorch.org/pytorch/pytorch/<pr number>/index.html` once the docs GitHub Actions job has completed on your PR. You can find its link in the automated pytorchbot comment on your PR or go to the URL
+directly.
 
 ### Adding documentation tests
 

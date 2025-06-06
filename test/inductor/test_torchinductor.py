@@ -14133,6 +14133,8 @@ if RUN_GPU:
             # it does not move the tensor constructor to cuda and keeps it on CPU.
             self.assertFalse("empty_strided_cuda(()" in code)
 
+        # only uncoalesced without this :)
+        @config.patch("triton.coalesce_tiling_analysis", False)
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
             @torch.compile
@@ -14183,6 +14185,7 @@ if RUN_GPU:
             )
 
         @config.patch("triton.use_block_ptr", True)
+        @config.patch("triton.coalesce_tiling_analysis", False)
         def test_evict_last_non_coalesced_loads_block_ptr(self):
             @torch.compile
             def f(a, b):

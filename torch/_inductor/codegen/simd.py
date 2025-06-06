@@ -86,6 +86,11 @@ pexpr = PythonPrinter().doprint
 all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
 
 
+def get_max_tiles(default: int = 2) -> int:
+    max_tiles = torch._inductor.config.triton.max_tiles
+    return max_tiles if max_tiles is not None else default
+
+
 @dataclasses.dataclass
 class IterationRanges:
     """
@@ -1254,8 +1259,8 @@ class SIMDScheduling(BaseScheduling):
         done = OrderedSet[scheduler.BaseSchedulerNode]()
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
-        not_ready_yet_nodes = OrderedSet[str]()
-        current_loop_buffer_usage = OrderedSet[str]()
+        not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
+        current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
         maybe_split_index: Optional[int] = None
 
         def fits_in_main_body(n):
@@ -1354,7 +1359,7 @@ class SIMDScheduling(BaseScheduling):
 
         nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
 
-        if torch._inductor.config.test_configs.global_tiling_analysis:
+        if torch._inductor.config.triton.coalesce_tiling_analysis:
             coalesce_analysis = analyze_memory_coalescing(node)
         else:
             coalesce_analysis = None
@@ -1993,7 +1998,7 @@ class SIMDScheduling(BaseScheduling):
 
             # Flatten leading dimensions, assigning labels to each dim.
             for node_tiling in node_tilings:
-                num_leading_dims = max(0, len(node_tiling) - config.triton.max_tiles)
+                num_leading_dims = max(0, len(node_tiling) - get_max_tiles(2))
                 first_trailing_dim = num_leading_dims + 1
                 collapsed_leading_dim = sympy_product(node_tiling[:first_trailing_dim])
                 collapsed_splits = (collapsed_leading_dim,) + tuple(
@@ -2165,7 +2170,7 @@ class SIMDScheduling(BaseScheduling):
                 )
             )
 
-        if torch._inductor.config.triton.max_tiles == 3 and reduction_numel == 1:
+        if get_max_tiles(default=3) == 3 and reduction_numel == 1:
             for vars_to_use in itertools.combinations(overlapping_iter_vars, 2):
                 score_split.append(
                     (
@@ -2187,13 +2192,16 @@ class SIMDScheduling(BaseScheduling):
 
         # add a slight penalty for longer tilings that dont increase score much,
         # and are poor sizes
-        additional_tiling_penalty = 1.025
+        bad_size_additional_tiling_penalty = 1.025
+        good_size_tiling_penalty = 1.005
 
         def score_mod(t):
             score_factor = 1.0
             for tile_size in t[0].tiling.values():
                 if not CandidateTiling.is_good_size(tile_size):
-                    score_factor = score_factor / additional_tiling_penalty
+                    score_factor = score_factor / bad_size_additional_tiling_penalty
+                else:
+                    score_factor = score_factor / good_size_tiling_penalty
 
             return -t[0].score * score_factor
 
@@ -2204,7 +2212,7 @@ class SIMDScheduling(BaseScheduling):
             ):
                 # we always include default reduction numel == 1, dont include
                 tiling_len = len(cand.tiling) - (1 if reduction_numel == 1 else 0)
-                if tiling_len > torch._inductor.config.triton.max_tiles:
+                if tiling_len > get_max_tiles(default=3):
                     perf_hint_log.info(
                         "Found optimal tiling with %s tiles but torch._inductor.config.triton.max_tiles "
                         "set to %s. Consider increasing",
@@ -2289,16 +2297,17 @@ class SIMDScheduling(BaseScheduling):
 
         # # TODO: enable by default
         if (
-            torch._inductor.config.test_configs.global_tiling_analysis
+            torch._inductor.config.triton.coalesce_tiling_analysis
             and coalesce_analysis
+            and not config.triton.prefer_nd_tiling
         ):
             return cls.compute_tiling_strategy(
                 node_schedule, numel, reduction_numel, coalesce_analysis
             )
 
-        if (
-            not is_pointwise and not config.triton.tile_reductions
-        ) or config.triton.max_tiles <= 1:
+        if (not is_pointwise and not config.triton.tile_reductions) or get_max_tiles(
+            default=2
+        ) <= 1:
             # Emit a perf hint in case we miss an opportunity to tile a reduction.
             if perf_hint_log.level <= logging.WARNING:
                 for node in EnableReduction.filter(node_schedule):
@@ -2318,7 +2327,7 @@ class SIMDScheduling(BaseScheduling):
 
             return default_tiling, None
 
-        seen_names = OrderedSet[str]()
+        seen_names: OrderedSet[str] = OrderedSet()
         candidate_tiles: Counter[CandidateTiling] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
             for candidate_tiling in cls.candidate_tilings(node, numel, reduction_numel):
@@ -2333,7 +2342,7 @@ class SIMDScheduling(BaseScheduling):
             for candidate_tiling, score in candidate_tiles.most_common()
         ]
 
-        if config.triton.max_tiles >= 3 and is_pointwise:
+        if get_max_tiles(default=2) >= 3 and is_pointwise:
             # Consider adding a third dimension of tiling, but only
             # when a1 is a multiple of b1; otherwise, you have a lot
             # of stragglers which is annoying to generate code for.

@@ -621,6 +621,9 @@ class VarTiling:
 
 @dataclasses.dataclass(frozen=True)
 class CoalesceVarAnalysis:
+    # Var -> Memory Score - not strictly the amount of memory
+    # because we multiply writes x2
+    # TODO: separate into dataclass that olds mem, dtype, is_write
     coalesced_by_var: dict[sympy.Expr, int]
 
     norm_read_writes: FusedNormalizedReadsWrites
@@ -656,7 +659,10 @@ def analyze_memory_coalescing(
     coalesced_by_var: dict[sympy.Symbol, int] = Counter()
     uncoalesced_addrs: dict[sympy.Expr, int] = Counter()
 
-    for memory_expr, buf_names in itertools.chain(reads.items(), writes.items()):
+    for is_read, (memory_expr, buf_names) in itertools.chain(
+        ((True, item) for item in reads.items()),
+        ((False, item) for item in writes.items()),
+    ):
         # skip memory deps with indirect vars - todo: better handling
         indirect_expr = bool(
             memory_expr.free_symbols - norm_read_writes.var_ranges.keys()
@@ -675,6 +681,9 @@ def analyze_memory_coalescing(
         for buf_name in buf_names:
             if buf := V.graph.try_get_buffer(buf_name):
                 byte_multipler += buf.dtype.itemsize
+
+        # coalesced writes more important
+        byte_multipler *= 1 if is_read else 2
 
         if maybe_coalesced_var:
             coalesced_by_var[maybe_coalesced_var] += size * byte_multipler

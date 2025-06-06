@@ -1967,7 +1967,7 @@ class _MakefxTracer:
 
         # All context managers and their states should be initialized before tracing based on the inputs
         # and configurations. After tracing, their states should be cleaned except for shape_env.
-        # Remember to specify how to intialize it from user inputs and from parent tracer whenever
+        # Remember to specify how to initialize it from user inputs and from parent tracer whenever
         # adding new modes in _MakefxTracer.
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self.proxy_mode: Union[nullcontext, ProxyTorchDispatchMode] = nullcontext()

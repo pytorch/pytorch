@@ -1115,12 +1115,23 @@ class triton:
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
+    # TODO - enable by default
+    coalesce_tiling_analysis: bool = (
+        os.environ.get(
+            "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS", "1" if not is_fbcode() else "0"
+        )
+        == "1"
+    )
+
     # limit tiling dimensions
     #   - max_tiles=1 disables tiling
-    #   - max_tiles=2 is the default
+    #   - max_tiles=2
     #   - max_tiles=3 is experimental and may have bugs
     # higher values are unsupported
-    max_tiles = 2
+
+    #  We use a max of 3 if coalesce_tiling_analysis is True, and 2 otherwise.
+    #  Note - coalesce_tiling_analysis does not yet apply to dynamic shapes.
+    max_tiles: Optional[int] = None
 
     # Prefer higher dimensional tilings. This simplifies indexing expressions, making
     # it easier to identify block pointers.
@@ -1246,6 +1257,10 @@ class triton:
 
 
 class aot_inductor:
+    """
+    Settings for Ahead-Of-Time Inductor Compilation
+    """
+
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
@@ -1345,6 +1360,10 @@ class aot_inductor:
     emit_multi_arch_kernel: bool = False
     # In addition to emit asm files, also emit binary files for current arch
     emit_current_arch_binary: bool = False
+
+    # If not None, the generated files with use this name in file stem.
+    # If None, we will use a hash to name files.
+    model_name_for_generated_files: Optional[str] = None
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
@@ -1680,9 +1699,6 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
-
-    # TODO - temporary config before enabled by default
-    global_tiling_analysis: bool = False
 
 
 if TYPE_CHECKING:

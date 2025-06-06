@@ -29,13 +29,13 @@ runs:
       if: always()
       shell: bash
       run: |
-        xpu-smi discovery
+        timeout 30 xpu-smi discovery || true
 
     - name: Runner health check GPU count
       if: always()
       shell: bash
       run: |
-        ngpu=$(xpu-smi discovery | grep -c -E 'Device Name')
+        ngpu=$(timeout 30 xpu-smi discovery | grep -c -E 'Device Name')
         msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
         if [[ $ngpu -eq 0 ]]; then
           echo "Error: Failed to detect any GPUs on the runner"
