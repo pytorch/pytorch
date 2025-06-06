@@ -127,9 +127,7 @@ TEST_F(ModulesTest, Conv2dSameStrided) {
       [&] { Conv2d model_invalid(options.stride(2)); }(),
       "padding='same' is not supported for strided convolutions");
   ASSERT_THROWS_WITH(
-      [&] {
-        Conv2d model_invalid(options.stride({1, 2}));
-      }(),
+      [&] { Conv2d model_invalid(options.stride({1, 2})); }(),
       "padding='same' is not supported for strided convolutions");
 }
 
@@ -181,9 +179,7 @@ TEST_F(ModulesTest, Conv3dSameStrided) {
       [&] { Conv3d model_invalid(options.stride(2)); }(),
       "padding='same' is not supported for strided convolutions");
   ASSERT_THROWS_WITH(
-      [&] {
-        Conv3d model_invalid(options.stride({1, 2, 1}));
-      }(),
+      [&] { Conv3d model_invalid(options.stride({1, 2, 1})); }(),
       "padding='same' is not supported for strided convolutions");
 }
 

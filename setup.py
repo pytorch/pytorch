@@ -443,7 +443,7 @@ def check_submodules():
             ],
         )
     check_for_files(
-        os.path.join(third_party_path, "fbgemm", "third_party", "asmjit"),
+        os.path.join(third_party_path, "fbgemm", "external", "asmjit"),
         ["CMakeLists.txt"],
     )
 
@@ -747,6 +747,25 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 os.makedirs(target_dir)
 
             self.copy_file(export_lib, target_lib)
+
+            # In ROCm on Windows case copy rocblas and hipblaslt files into
+            # torch/lib/rocblas/library and torch/lib/hipblaslt/library
+            use_rocm = os.environ.get("USE_ROCM")
+            if use_rocm:
+                rocm_dir_path = os.environ.get("ROCM_DIR")
+                rocm_bin_path = os.path.join(rocm_dir_path, "bin")
+
+                rocblas_dir = os.path.join(rocm_bin_path, "rocblas")
+                target_rocblas_dir = os.path.join(target_dir, "rocblas")
+                os.makedirs(target_rocblas_dir, exist_ok=True)
+                self.copy_tree(rocblas_dir, target_rocblas_dir)
+
+                hipblaslt_dir = os.path.join(rocm_bin_path, "hipblaslt")
+                target_hipblaslt_dir = os.path.join(target_dir, "hipblaslt")
+                os.makedirs(target_hipblaslt_dir, exist_ok=True)
+                self.copy_tree(hipblaslt_dir, target_hipblaslt_dir)
+            else:
+                report("The specified environment variable does not exist.")
 
     def build_extensions(self):
         self.create_compile_commands()

@@ -59,13 +59,9 @@ if try_import_cutlass():
     _CUTLASS_C_DTYPES = OrderedSet(dtype2ctype.values())  # type: ignore[var-annotated]
 
     def create_example_tensors(
-        read_names: list[str],
-        write_names: list[str],
-        buffer_renames: dict[str, str],
+        var_name_to_buffer_name: dict[str, str],
         name_to_buffer: dict[str, Buffer],
     ) -> dict[str, CutlassTensor]:
-        example_tensors = {}
-
         def cutlass_tensor_from_buffer(buffer: Buffer) -> CutlassTensor:
             shape = buffer.get_layout().size
             stride = buffer.get_layout().stride
@@ -95,17 +91,10 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
                 element=torch_dtype_to_cutlass_type(buffer.get_layout().dtype),
             )
 
-        for name in read_names + write_names:
-            key = name
-
-            if name in buffer_renames:
-                key = buffer_renames[
-                    name
-                ]  # Need to rewrite some special args (e.g. acc is a required arg name)
-
-            example_tensors[key] = cutlass_tensor_from_buffer(name_to_buffer[name])
-
-        return example_tensors
+        return {
+            key: cutlass_tensor_from_buffer(name_to_buffer[name])
+            for key, name in var_name_to_buffer_name.items()
+        }
 
     def trace(
         fn_src: str,
@@ -119,7 +108,7 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
     ) -> tuple[str, str, str]:
         cuda_arch = int(cuda_env.get_cuda_arch())  # type: ignore[arg-type]
         assert cuda_arch >= 90, "Only SM90+ is supported for EVT"
-        epilogue_functor = _trace(fn_src, example_tensors, **kwargs)
+        epilogue_functor = _trace(fn_src, example_tensors, cuda_arch, **kwargs)
         visitor = EpilogueFunctorVisitor(cuda_arch, epilogue_functor)
         fusion_callbacks = FusionCallbacks(visitor.graph, cuda_arch, emit_CD=False)
         collective_epilogue = CollectiveEpilogue(
@@ -138,7 +127,7 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
     # This is modified to enable directly passing the source code of the epilogue vs getting it from a bona-fide python function
     # The reason for this is that inspect.getsource does not work with functions defined at runtime via exec/eval
     def _trace(
-        fn_src: str, example_tensors: dict[str, CutlassTensor], **kwargs: Any
+        fn_src: str, example_tensors: dict[str, CutlassTensor], cc: int, **kwargs: Any
     ) -> EpilogueFunctor:
         class EpilogueFunctor(PythonASTFrontend):
             def __init__(self, cc: int, **kwargs: Any):

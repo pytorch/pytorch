@@ -323,7 +323,7 @@ class TestDraftExport(TestCase):
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
-        self.assertEqual(report.failures[0].data["expr"], "Eq(9380*u1, 0)")
+        self.assertEqual(report.failures[0].data["expr"], "Eq(Mod(10, 2*u1), 0)")
 
     def test_dedup_data_dependent_failure(self):
         class M(torch.nn.Module):

@@ -23,7 +23,7 @@ from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
-from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
+from .. import config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..loop_body import LoopBody
 from ..scheduler import (
     BaseSchedulerNode,
@@ -154,6 +154,8 @@ VECTORIZABLE_DTYPES: list[torch.dtype] = [
     torch.int8,
     torch.int32,
     torch.int64,
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
 ]
 
 MASKED_VECTORIZABLE_DTYPES: list[torch.dtype] = [
@@ -1607,6 +1609,8 @@ class CppVecOverrides(CppOverrides):
             torch.int8,
             torch.int32,
             torch.int64,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
         ], f"{__name__} does not support {dtype}"
         assert isinstance(x, CppCSEVariable)
         src_dtype = x.dtype
@@ -2840,7 +2844,7 @@ class CppVecKernel(CppKernel):
             # use welford_helper for vec kernel
             assert self.reduction_depth is not None
             reduction_size = functools.reduce(
-                lambda x, y: x * y, self.ranges[self.reduction_depth :]
+                operator.mul, self.ranges[self.reduction_depth :]
             )
             welford_helper_val = self.welford_helper_cse.generate(
                 self.compute, f"reduction {reduction_key}", write=False
@@ -5256,7 +5260,7 @@ class KernelGroup:
         ]
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        code.writeline(codecache.cpp_prefix())
+        code.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
 
         # 2. Function definition
         kernel_decl_name = str(Placeholder.KERNEL_NAME) if name is None else name

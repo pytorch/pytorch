@@ -1,7 +1,9 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
+import types
 import typing
+import warnings
 from typing import cast, Optional, Union
 from typing_extensions import deprecated
 
@@ -213,8 +215,14 @@ def clip_grad_norm_(
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     else:
+        is_generator = isinstance(parameters, types.GeneratorType)
         # prevent generators from being exhausted
         parameters = list(parameters)
+        if is_generator and len(parameters) == 0:
+            warnings.warn(
+                "`parameters` is an empty generator, no gradient clipping will occur.",
+                stacklevel=3,
+            )
     grads = [p.grad for p in parameters if p.grad is not None]
     total_norm = _get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
     _clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
