@@ -19,6 +19,7 @@ import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
+    definitely_contiguous,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -3824,7 +3825,7 @@ def _view_simple(a: TensorLikeType, shape, data_dependent_error) -> TensorLikeTy
     if new_strides is not None:
         return a.as_strided(shape, new_strides)
 
-    if a.is_contiguous():
+    if definitely_contiguous(a):
         return a.as_strided(shape, utils.make_contiguous_strides_for(shape))
 
     raise data_dependent_error

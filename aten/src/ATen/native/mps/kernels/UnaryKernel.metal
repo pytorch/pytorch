@@ -145,6 +145,28 @@ struct log10_functor {
   }
 };
 
+struct log1p_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(::c10::metal::log1p(float(x)));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return ::precise::log(1.0f + static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // TODO: Implement proper log1p algoirthm
+    auto magnitude = ::precise::sqrt((1.0f + x.x) * (1.0f + x.x) + x.y * x.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (x.x == -1 && x.y == 0) ? 0 : ::precise::atan2(x.y, 1.0 + x.x);
+    return T(real, imag);
+  }
+  inline float operator()(const bool x) {
+    return x ? ::precise::log(2.0) : 0;
+  }
+};
+
 struct log2_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -276,6 +298,7 @@ REGISTER_UNARY_OP(bitwise_not, bool, bool);
   REGISTER_UNARY_OP(exp2, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(log, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(log10, DTYPE1, DTYPE0);        \
+  REGISTER_UNARY_OP(log1p, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(log2, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
@@ -304,6 +327,7 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(log, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2); \
+  REGISTER_UNARY_OP(log1p, DTYPE##2, DTYPE##2); \
   REGISTER_UNARY_OP(log2, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);  \
