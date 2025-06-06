@@ -7572,6 +7572,10 @@ def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
 
 @ir_dataclass(frozen=False)
 class InvokeSubgraph(ExternKernel):
+    """
+    Ir node for the invoke_subgraph HOP.
+    """
+
     subgraph: Optional[Subgraph] = None
     operands: Optional[list[TensorBox]] = None
     outputs: Optional[list[MultiOutput]] = None
@@ -7591,24 +7595,32 @@ class InvokeSubgraph(ExternKernel):
     @classmethod
     def create(cls, subgraph: Subgraph, *operands):  # type: ignore[no-untyped-def]
         # TODO(anijain2305) - Support sym expr as operands in future.
-        fx_operands = V.graph.current_node.args[2:]
-        fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
+        current_node = V.graph.current_node
+
+        fake_operands = None
+        if eager_input_vals := current_node.meta.get("eager_input_vals"):
+            # eager_input_vals is (args_values, kwargs_values). We need args for invoke_subgraph
+            fake_operands = eager_input_vals[0][2:]
+        else:
+            # For the partitioned backward graph, we do not have
+            # eager_input_vals. Here, we rely on the recorded example values.
+            fx_operands = current_node.args[2:]
+            fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
 
         # Realize the inputs. Also intermediates can have different strides than
         # the inputs of the subgraph. So, force the intermediates to have same
         # strides as that of subgraph inputs.
         operands = [cls.realize_input(x) for x in operands]
 
-        def handle_sym_expr(stride):  # type: ignore[no-untyped-def]
-            return [s.node.expr if isinstance(s, torch.SymInt) else s for s in stride]
-
         new_operands = []
         for idx, operand in enumerate(operands):
             if isinstance(operand, ShapeAsConstantBuffer):
                 new_operands.append(operand)
             else:
-                example_stride = handle_sym_expr(fake_operands[idx].stride())
-                new_operands.append(cls.require_exact_strides(operand, example_stride))
+                stride_order = get_stride_order(
+                    fake_operands[idx].stride(), V.graph.sizevars.shape_env
+                )
+                new_operands.append(cls.require_stride_order(operand, stride_order))
 
         operands = new_operands
 
