@@ -33,7 +33,7 @@
 #include <ATen/cuda/tunable/GemmRocblas.h>
 #define PYTORCH_ROCSOLVER_VERSION \
   (ROCSOLVER_VERSION_MAJOR * 10000 + ROCSOLVER_VERSION_MINOR * 100 + ROCSOLVER_VERSION_PATCH)
-#if (PYTORCH_ROCSOLVER_VERSION >= 33000)
+#if (PYTORCH_ROCSOLVER_VERSION >= 32600)
 #define ROCSOLVER_SYEVD_BATCHED_ENABLED 1
 #else
 #define ROCSOLVER_SYEVD_BATCHED_ENABLED 0
@@ -1301,8 +1301,16 @@ static void apply_syevd_batched_rocsolver(const Tensor& values, const Tensor& ve
   auto& allocator = *at::cuda::getCUDADeviceAllocator();
   auto work_data = allocator.allocate(sizeof(scalar_t) * work_size);
 
+  rocblas_handle handle = static_cast<rocblas_handle>(at::cuda::getCurrentCUDASolverDnHandle());
+
+  // rocsolver will manage the workspace size automatically
+   if(!rocblas_is_managing_device_memory(handle))
+        TORCH_ROCBLAS_CHECK(rocblas_set_workspace(handle, nullptr, 0));
+  
   TORCH_ROCBLAS_CHECK(_rocsolver_syevd_strided_batched<scalar_t>(
-    static_cast<rocblas_handle>(at::cuda::getCurrentCUDABlasHandle()), // getCurrentCUDASolverDnHandle() can't be used
+    // static_cast<rocblas_handle>(at::cuda::getCurrentCUDABlasHandle()), // getCurrentCUDASolverDnHandle() can't be used
+    // static_cast<rocblas_handle>(getCurrentCUDASolverDnHandle()),
+    handle,
     evect,
     uplo,
     n,
