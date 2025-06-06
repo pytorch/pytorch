@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import warnings
 from collections import defaultdict
@@ -2252,6 +2253,128 @@ torch.cuda.synchronize()
         torch.cuda.synchronize()
         with tempfile.TemporaryDirectory() as tempdir:
             g.debug_dump(os.path.join(tempdir, "out_multi_stream.dot"))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for external events in cuda graphs",
+    )
+    def test_graph_timing(self):
+        torch.cuda.empty_cache()
+        x = torch.randn(10240000, device="cuda")
+        y = torch.rand_like(x)
+        g = torch.cuda.CUDAGraph()
+        start_event = torch.cuda.Event(enable_timing=True, external=True)
+        end_event = torch.cuda.Event(enable_timing=True, external=True)
+        with torch.cuda.graph(g):
+            start_event.record()
+            z = x + y
+            end_event.record()
+        torch.cuda.synchronize()
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertTrue(start_event.elapsed_time(end_event) > 0)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH or TEST_WITH_ROCM,
+        "CUDA >= 11.0 required for external events in cuda graphs",
+    )
+    def test_graph_external_wait_and_record(self):
+        torch.cuda.empty_cache()
+
+        kernel_source = r"""
+        // #include <cuda/atomic>
+        __global__ void wait_for_cpu(int *pinned_cpu_flag) {
+            int flag = 0;
+            do {
+                    asm volatile("ld.relaxed.sys.global.s32 %0, [%1];" : "=r"(flag) : "l"(pinned_cpu_flag) : "memory");
+            } while (flag == 0);
+        }
+        """
+        from torch.cuda import _compile_kernel
+
+        spin_wait_kernel = _compile_kernel(kernel_source, "wait_for_cpu")
+
+        x = torch.ones(4, device="cuda")
+        x_cpu = torch.zeros(x.shape, device="cpu").pin_memory()
+        flag_cpu = torch.zeros(1, dtype=torch.int32, device="cpu").pin_memory()
+        start_event = torch.cuda.Event(external=True)
+        end_event = torch.cuda.Event(external=True)
+
+        signalling_graph = torch.cuda.CUDAGraph()
+        # print("signalling_graph capture")
+        with torch.cuda.graph(signalling_graph, capture_error_mode="relaxed"):
+            spin_wait_kernel(grid=(1, 1, 1), block=(1, 1, 1), args=[flag_cpu])
+            start_event.record()
+
+        # This is counter-intuitive, but a cudaEventRecord() during
+        # stream capture does not count as the first call to
+        # cudaEventRecord(). Rather, cudaGraphLaunch() counts as the
+        # first call to cudaEventRecord(). Therefore, all calls to
+        # cudaEventQuery() will succeed before that happens.
+
+        # See:
+        # "Before the first call to cudaEventRecord(), an event represents an empty set of work, so for example cudaEventQuery() would return cudaSuccess."  # noqa: B950
+        # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
+        self.assertTrue(start_event.query())
+        self.assertTrue(
+            torch.all(x_cpu == 0.0), "Copy cannot occur until start_event is recorded"
+        )
+
+        work_graph = torch.cuda.CUDAGraph()
+        # print("work_graph capture")
+        with torch.cuda.graph(work_graph, capture_error_mode="relaxed"):
+            start_event.wait()
+            x_cpu.copy_(x, non_blocking=True)
+            end_event.record()
+
+        self.assertTrue(
+            torch.all(x_cpu == 0.0), "Copy cannot occur until start_event is recorded"
+        )
+
+        try:
+            signalling_stream = torch.cuda.Stream()
+            with torch.cuda.stream(signalling_stream):
+                signalling_graph.replay()
+
+            work_stream = torch.cuda.Stream()
+            with torch.cuda.stream(work_stream):
+                work_graph.replay()
+
+            # Because work_graph has been launched, end_event is no longer considered empty
+            # Okay, this assertion fails and therefore the test never ends. lol.
+            self.assertFalse(end_event.query())
+
+            # Sleep for a little to make sure that work doesn't proceed until we set flag_cpu[0]=1
+            time.sleep(1)
+            self.assertTrue(
+                torch.all(x_cpu == 0.0),
+                "Copy cannot occur until start_event is recorded",
+            )
+        finally:
+            # In case an assertion fails, we still need to empty out
+            # the GPU queue of work. Therefore, we do this write
+            # unconditionally, even if an exception is thrown.
+
+            # This writes allows wait_for_cpu to proceed
+            # This is an atomic store at system scope according to this rule:
+            # "the scope is thread_scope_system and and it is a load or store that affects a naturally-aligned object of sizes 1, 2, 4, 8, or 16 bytes on mapped memory"  # noqa: B950
+            # https://nvidia.github.io/cccl/libcudacxx/extended_api/memory_model.html#atomicity
+
+            # Note that every CPU store is implicitly system scope,
+            # even if we don't use C++ atomics like this:
+            # std::atomic_ref<int32_t>::store(1);
+            flag_cpu[0] = 1
+
+        end_event.synchronize()
+        self.assertTrue(
+            torch.all(x_cpu == 1.0),
+            "Copy should be done once end_event is synchronized",
+        )
+        self.assertTrue(
+            work_stream.query(),
+            "end_event.synchronize() completing should imply that work_stream is done",
+        )
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
