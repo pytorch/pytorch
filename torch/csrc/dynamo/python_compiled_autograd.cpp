@@ -1,6 +1,5 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
-#include <ATen/LegacyVmapMode.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -1192,9 +1191,6 @@ static variable_list compiled_autograd(
   TORCH_CHECK(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
-  TORCH_CHECK(
-      at::impl::VmapMode::current_vmap_level() == 0,
-      "torch.vmap not yet implemented for compiled autograd")
   static std::mutex mtx;
   LockGuardWithErrorLogs lock_guard(mtx);
   pybind11::gil_scoped_acquire gil;

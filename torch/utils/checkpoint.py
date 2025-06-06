@@ -316,8 +316,7 @@ class CheckpointFunction(torch.autograd.Function):
                 "none of output has requires_grad=True,"
                 " this checkpoint() is not necessary"
             )
-        with torch._dynamo.compiled_autograd._disable():
-            torch.autograd.backward(outputs_with_grad, args_with_grad)
+        torch.autograd.backward(outputs_with_grad, args_with_grad)
         grads = tuple(
             inp.grad if isinstance(inp, torch.Tensor) else None
             for inp in detached_inputs
