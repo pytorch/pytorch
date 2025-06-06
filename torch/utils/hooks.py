@@ -224,7 +224,7 @@ class BackwardHook:
                 # hook directly
                 if self.input_tensors_index is None:
                     warnings.warn(f"Full backward hook for {self.module} is firing when gradients are computed "
-                                  "with respect to module outputs since no inputs require gradients")
+                                  "with respect to module outputs since no inputs require gradients", stacklevel=5)
                     grad_inputs = self._pack_with_none([], [], self.n_inputs)
                     for user_hook in self.user_hooks:
                         res = user_hook(self.module, grad_inputs, self.grad_outputs)
