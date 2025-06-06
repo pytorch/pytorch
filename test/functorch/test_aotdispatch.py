@@ -7779,6 +7779,38 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
 
         self.assertEqual(out, optout)
 
+    def test_mutations_in_bw_detached_from_tangent(self):
+        class AF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, dummy, inplace_tensor):
+                ctx.inplace_tensor = inplace_tensor
+                return dummy.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                inplace_tensor = ctx.inplace_tensor
+                gradient_attachment = grad_output * 0 + 1
+                inplace_tensor.add_(1 * gradient_attachment)
+                return grad_output, None, None
+
+        def fn(dummy, inplace_tensor):
+            return AF.apply(dummy, inplace_tensor)
+
+        def inps():
+            dummy = torch.randn((2,), requires_grad=True)
+            inplace_tensor = torch.zeros((2,), requires_grad=False)
+            return dummy, inplace_tensor
+
+        dummy, inplace = inps()
+        fn(dummy, inplace).sum().backward()
+        ref = inplace.clone().detach()
+
+        dummy, inplace = inps()
+        torch.compile(fn, backend="aot_eager", fullgraph=True)(
+            dummy, inplace
+        ).sum().backward()
+        self.assertEqual(ref, inplace)
+
 
 class MockFXGraphCache:
     """
