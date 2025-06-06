@@ -25,10 +25,6 @@ ShapeArg = Union[ShapeVar, torch.types.Number, str, OpsValue]
 
 @functools.lru_cache(None)
 def get_broadcasted_shape(a: ShapeType, b: ShapeType) -> ShapeType:
-    if a is None:
-        return b
-    if b is None:
-        return a
     assert isinstance(a, Sequence)
     assert isinstance(b, Sequence)
     if len(a) > len(b):
@@ -48,17 +44,28 @@ def get_broadcasted_shape(a: ShapeType, b: ShapeType) -> ShapeType:
             assert str(d1) == str(d2)
             return d1
 
-        return [_get_broadcasted_dim(d1, d2) for d1, d2 in zip(a, b)]
+        return tuple(_get_broadcasted_dim(d1, d2) for d1, d2 in zip(a, b))
 
 
 def broadcast_shapes_for_args(
-    args: Sequence[ShapeArg],
+    args: Sequence[ShapeArg], assume_equal_shapes: bool = False
 ) -> ShapeType:
-    result_shape = None
+    result_shape: ShapeType = None
 
     for arg in args:
-        if shape := getattr(arg, "shape", None):
-            result_shape = get_broadcasted_shape(result_shape, shape)
+        if hasattr(arg, "shape"):
+            shape = arg.shape
+            if shape is None:
+                if assume_equal_shapes:
+                    continue
+                else:
+                    return None
+            elif result_shape is None:
+                result_shape = tuple(shape)
+            else:
+                result_shape = get_broadcasted_shape(result_shape, tuple(shape))
+        else:
+            return None
 
     return result_shape
 
@@ -70,7 +77,7 @@ class ShapePropagationOpsHandler:
 
     @staticmethod
     def constant(value: torch.types.Number, dtype: torch.dtype) -> ShapeType:
-        return []
+        return ()
 
     @staticmethod
     def store_reduction(name: str, index: int, value: ShapeArg) -> None:
@@ -93,7 +100,8 @@ class ShapePropagationOpsHandler:
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> ShapeType:
-        return []
+        # TODO: fix me
+        return ()
 
     @staticmethod
     def indirect_indexing(

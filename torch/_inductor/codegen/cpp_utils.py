@@ -145,7 +145,7 @@ class CppCSEVariable(CSEVariable):
         name,
         bounds: ValueRanges[Any],
         dtype: Optional[torch.dtype] = None,
-        shape: Optional[ShapeType] = None,
+        shape: ShapeType = None,
     ) -> None:
         super().__init__(name, bounds, dtype, shape=shape)
         self.is_vec = False

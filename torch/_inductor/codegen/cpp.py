@@ -5090,10 +5090,10 @@ class CppScheduling(BaseScheduling):
         assert self.is_cpp_template(template_node), (
             "Template node passed to CppScheduler.codegen_template must be a SchedulerNode that wraps a CppTemplateBuffer"
         )
-        template_node = cast(SchedulerNode, template_node)
+        template_node = cast("SchedulerNode", template_node)
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
-        ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
+        ctb: ir.CppTemplateBuffer = cast("ir.CppTemplateBuffer", template_node.node)
         epilogue_ir_nodes: list[Optional[ir.Operation]] = [
             n.node for n in epilogue_nodes
         ]

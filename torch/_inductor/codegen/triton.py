@@ -2031,7 +2031,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return options
 
         expand_str = None
-        expand_shape = None
+        expand_shape: ShapeType = None
         index_str = self.index_to_str(index)
         if isinstance(index, sympy.Integer):
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
@@ -2060,6 +2060,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         elif not have_loop_vars and copy_shape:
             index_str = f"tl.broadcast_to({index_str}, {copy_shape}.shape)"
             mask_vars = dense_mask_vars
+
+        if expand_shape is None:
+            if need_dense:
+                expand_shape = None if copy_shape else self.dense_size_list()
+            else:
+                expand_shape = ()
 
         if override_mask:
             mask_vars = OrderedSet([override_mask])
@@ -2261,7 +2267,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             cachemod = ", cache_modifier='.cg'"
 
         append_broadcast = None
-        shape = None
+        shape: ShapeType = None
         dtype = V.graph.get_dtype(name)
 
         if should_unwrap_unspec_arg(name):
@@ -2270,6 +2276,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # see triton_utils.py:signature_of
             if dtype in (torch.float16, torch.bfloat16):
                 dtype = torch.float32
+            shape = ()
 
         else:
             if isinstance(indexing, BlockPtrOptions):
@@ -2282,7 +2289,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif isinstance(original_index, sympy.Integer):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
-                shape = None
+                shape = ()
             else:
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
                 shape = indexing.expand_shape
@@ -2616,7 +2623,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.compute,
                     where_cond(value, default),
                     dtype=value.dtype,
-                    shape=value.shape,
+                    shape=value.shape if value.shape is not None else default.shape,
                 )
 
             masked_value: Union[CSEVariable, Sequence[CSEVariable]]
@@ -3674,7 +3681,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if isinstance(arg, SizeArg):
                 # mypy is unhappy about the sympy.Expr
                 # type for the key of the dict below
-                symbol = cast(sympy.Symbol, arg.expr)
+                symbol = cast("sympy.Symbol", arg.expr)
                 if symbol in V.graph.sizevars.inv_precomputed_replacements:
                     signature[i] = SizeArg(
                         arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
@@ -3690,7 +3697,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 and mutation not in self.removed_buffers
             ):
                 mutated_args.add(
-                    cast(InplacedBuffer, self.args.inplace_buffers[mutation]).inner_name
+                    cast(
+                        "InplacedBuffer", self.args.inplace_buffers[mutation]
+                    ).inner_name
                 )
             if mutation in self.args.output_buffers:
                 mutation_arg = self.args.output_buffers[mutation]

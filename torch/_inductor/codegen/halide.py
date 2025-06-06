@@ -578,7 +578,7 @@ class HalideCSEVariable(CSEVariable):
         name,
         bounds: ValueRanges[Any],
         dtype: Optional[torch.dtype] = None,
-        shape: Optional[ShapeType] = None,
+        shape: ShapeType = None,
     ) -> None:
         super().__init__(name, bounds, dtype, shape=shape)
         self.used_dims: Optional[list[sympy.Symbol]] = None
@@ -942,7 +942,7 @@ class HalideKernel(SIMDKernel):
 
         # group the expression by variables used
         offset = sympy.S.Zero
-        split_expr = {s: sympy.S.Zero for s in symbols}
+        split_expr = dict.fromkeys(symbols, sympy.S.Zero)
         split_failed: list[tuple[list[sympy.Symbol], sympy.Expr]] = []
         index = sympy.expand(self.rename_indexing(index))
         for part in index.args if isinstance(index, sympy.Add) else [index]:
@@ -1366,16 +1366,14 @@ class HalideKernel(SIMDKernel):
         used_dims,
         *,
         bounds=ValueRanges.unknown(),
-        shape: Optional[ShapeType] = None,
+        shape: ShapeType = None,
     ) -> HalideCSEVariable:
         var = self.cse.generate(self.body, line, bounds=bounds, shape=shape)
         assert isinstance(var, HalideCSEVariable)
         var.used_dims = used_dims
         return var
 
-    def newfunc(
-        self, used_dims, *, shape: Optional[ShapeType] = None
-    ) -> HalideCSEVariable:
+    def newfunc(self, used_dims, *, shape: ShapeType = None) -> HalideCSEVariable:
         var = self.cse.newvar(shape=shape)
         assert isinstance(var, HalideCSEVariable)
         var.used_dims = used_dims
@@ -1548,7 +1546,7 @@ class HalideKernel(SIMDKernel):
         code.splice(self.indexing_code)
 
         def update_index(m):
-            var = cast(HalideCSEVariable, self.cse.varname_map[m.group(1)])
+            var = cast("HalideCSEVariable", self.cse.varname_map[m.group(1)])
             assert var.used_dims is not None, var
             return str(var)
 

@@ -40,6 +40,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .. import config, metrics
 from ..dtype_propagation import DtypePropagationOpsHandler
 from ..ops_handler import BasicMathOpsMixin, DefaultHandler
+from ..shape_propagation import ShapePropagationOpsHandler
 from ..utils import (
     boolean_ops,
     DeferredLineBase,
@@ -1354,9 +1355,9 @@ class KernelArgs:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
-            return cast(str, self.output_buffers[name])
+            return cast("str", self.output_buffers[name])
         if name in self.inplace_buffers:
-            return cast(InplacedBuffer, self.inplace_buffers[name]).inner_name
+            return cast("InplacedBuffer", self.inplace_buffers[name]).inner_name
         if name.startswith("seed"):
             return self._lookup("seed", self.input_buffers, name)
         return self._lookup("in_ptr", self.input_buffers, name)
@@ -1366,7 +1367,7 @@ class KernelArgs:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.inplace_buffers:
-            return cast(InplacedBuffer, self.inplace_buffers[name]).inner_name
+            return cast("InplacedBuffer", self.inplace_buffers[name]).inner_name
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def make_inplace(self, input_name: str, output_name: str) -> None:
@@ -1612,7 +1613,7 @@ class KernelArgs:
                 if other in self.input_buffers:
                     yield self.input_buffers[other], inplaced.inner_name
                 if other in self.output_buffers:
-                    yield cast(str, self.output_buffers[other]), inplaced.inner_name
+                    yield cast("str", self.output_buffers[other]), inplaced.inner_name
 
     def is_removed(self, name: str) -> bool:
         return isinstance(
@@ -1647,7 +1648,7 @@ class CSEVariable:
         name: str,
         bounds: ValueRanges[Any],
         dtype: Optional[torch.dtype] = None,
-        shape: Optional[ShapeType] = None,
+        shape: ShapeType = None,
     ):
         super().__init__()
         assert isinstance(bounds, ValueRanges)
@@ -1742,7 +1743,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
 
     def augment_key(self, cache_key: str) -> AugmentedKeyT:
         "Override this method to augment cache key with backend specifics"
-        return cast(AugmentedKeyT, cache_key)
+        return cast("AugmentedKeyT", cache_key)
 
     def put(self, cache_key: str, val: CSEVariableType) -> None:
         self._cache[self.augment_key(cache_key)] = val
@@ -1765,7 +1766,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         write: bool = True,
         assignment: bool = True,
         dtype: Optional[torch.dtype] = None,
-        shape: Optional[ShapeType] = None,
+        shape: ShapeType = None,
     ) -> CSEVariableType:
         if isinstance(expr, OpsValue):
             expr = expr.value
@@ -1777,7 +1778,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
             # with the loose ValueRanges.unknown(), so we need to tighten the bounds
             expr.bounds = expr.bounds.tighten(bounds)
             expr.use_count += 1
-            return cast(CSEVariableType, expr)
+            return cast("CSEVariableType", expr)
         elif isinstance(expr, IndentedBuffer):
             cache_key = expr.getvalue()
         elif isinstance(expr, DeferredLineBase):
@@ -1833,7 +1834,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         self,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         dtype: Optional[torch.dtype] = None,
-        shape: Optional[ShapeType] = None,
+        shape: ShapeType = None,
     ) -> CSEVariableType:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype, shape)
@@ -1845,7 +1846,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         name: str,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         dtype: Optional[torch.dtype] = None,
-        shape: Optional[ShapeType] = None,
+        shape: ShapeType = None,
     ) -> CSEVariableType:
         torch._check_value(
             name not in self.varname_map, lambda: f"duplicate name: {name}"
@@ -2306,10 +2307,12 @@ class CSEProxy(DefaultHandler):
 
         value = getattr(self.parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
         dtype_handler = DtypePropagationOpsHandler()
+        shape_handler = ShapePropagationOpsHandler()
 
         backend = get_current_backend()
 
         output_dtype = None
+
         if name == "masked" and backend == "triton":
             output_dtype = value.dtype
         elif name == "masked" and backend == "cpp":
@@ -2319,6 +2322,12 @@ class CSEProxy(DefaultHandler):
         elif backend in ("triton", "cpp"):
             dtype_op = getattr(dtype_handler, name)
             output_dtype = dtype_op(*args, **kwargs)
+
+        shape_op = getattr(shape_handler, name)
+        if name == "masked":
+            output_shape = value.shape
+        else:
+            output_shape = shape_op(*args, **kwargs)
 
         if backend in ("triton", "cpp"):
             # maybe there are some exceptions on mps?
@@ -2334,18 +2343,28 @@ class CSEProxy(DefaultHandler):
                 if isinstance(output_dtype, (list, tuple))
                 else output_dtype
             )
+            var_shape: ShapeType = (
+                output_shape[output_idx]  # type: ignore[assignment]
+                if isinstance(output_shape, (list, tuple))
+                and len(output_shape) > 0
+                and isinstance(output_shape[0], (list, tuple))
+                else output_shape
+            )
             output_idx += 1
 
             # some cpp op implementations don't set the dtype
-            if backend == "cpp" and isinstance(v, CSEVariable) and v.dtype is None:
-                v.dtype = var_dtype
+            if isinstance(v, CSEVariable):
+                if backend == "cpp" and v.dtype is None:
+                    v.dtype = var_dtype
+                if v.shape is None:
+                    v.shape = var_shape
 
             csevar = V.kernel.cse.generate(
                 V.kernel.compute,
                 v,
                 bounds=bounds,
                 dtype=output_dtype,
-                shape=getattr(v, "shape", None),
+                shape=output_shape,
             )
 
             csevar.update_on_args(name, args, kwargs)
