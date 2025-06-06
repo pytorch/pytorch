@@ -589,6 +589,15 @@ class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoa
     def _is_backward(self) -> bool:
         return True
 
+    def post_compile(
+        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
+    ) -> CompiledFxGraph:
+        compiled_bw = super().post_compile(result, fx_config)
+        # See note [Wrapping bw_compiler in disable]
+        # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
+        # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
+        return torch._dynamo.disable(compiled_bw, reason="do not trace generated backwards pass")  # type: ignore[return-value]
+
 
 # Forward types don't have any extra parameters, so this is just a TypeAlias, in essence
 class BundledCompiledForward(CompiledFxGraphLoadable):
@@ -599,7 +608,14 @@ class BundledCompiledForward(CompiledFxGraphLoadable):
 class BundledCompiledBackward(
     GenericCompiledBackward[CompiledFxGraph], CompiledFxGraphLoadable
 ):
-    pass
+    def post_compile(
+        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
+    ) -> CompiledFxGraph:
+        compiled_bw = super().post_compile(result, fx_config)
+        # See note [Wrapping bw_compiler in disable]
+        # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
+        # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
+        return torch._dynamo.disable(compiled_bw, reason="do not trace generated backwards pass")  # type: ignore[return-value]
 
 
 TForward = TypeVar("TForward", bound=InductorOutput)
