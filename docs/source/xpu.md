@@ -67,6 +67,7 @@
 ```
 
 ## Memory management
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
