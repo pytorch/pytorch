@@ -216,7 +216,9 @@ def ops():
         for epilogue in ["Default", "CShuffle"]
     ]
 
-    return list(itertools.chain(compute_v3_instances, compute_v4_instances, mem_instances))
+    return list(
+        itertools.chain(compute_v3_instances, compute_v4_instances, mem_instances)
+    )
 
 
 class CKTileGemmTemplate(CKTileTemplate):
@@ -849,8 +851,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             rendered_dispatch=render_dispatch(op.pipeline, op.name()),
             k_batch=self.k_batch,
         )
-    
-    @functools.lru_cache(None)
+
     def gen_ops(self):
         """
         Creates a list of `CKTileGemmOperation` instances that match the GEMM operation this template represents.
