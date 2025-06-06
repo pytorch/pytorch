@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 
+import pytest
 import transformers
 from onnxscript import ir
 
@@ -224,7 +225,7 @@ class DynamoExporterTest(common_utils.TestCase):
             def forward(self):
                 return torch.empty([1], dtype=torch.float4_e2m1fn_x2)
 
-        onnx_program = self.export(Float4Module())
+        onnx_program = self.export(Float4Module(), optimize=False)
         output = onnx_program.model.graph.outputs[0]
         self.assertEqual(output.dtype, ir.DataType.FLOAT4E2M1)
         # The shape is [*shape, 2] because ONNX stores the shape of the unpacked tensor
@@ -628,6 +629,35 @@ class DynamoExporterTest(common_utils.TestCase):
             "GroupNormalization",
             [node.op_type for node in onnx_program.model.graph],
         )
+
+    def test_graph_attention_opset_23(self):
+        class Model(torch.nn.Module):
+            def forward(self, query, key, value):
+                return torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value
+                )
+
+        query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+
+        onnx_program = self.export(Model(), (query, key, value), opset_version=23)
+        self.assertIn("Attention", [node.op_type for node in onnx_program.model.graph])
+
+    @pytest.mark.xfail(reason="Expected to fail until opset 23 is supported by ORT.")
+    def test_graph_accuracy_attention_opset_23(self):
+        class Model(torch.nn.Module):
+            def forward(self, query, key, value):
+                return torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value
+                )
+
+        query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+
+        onnx_program = self.export(Model(), (query, key, value), opset_version=23)
+        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
 
 if __name__ == "__main__":
