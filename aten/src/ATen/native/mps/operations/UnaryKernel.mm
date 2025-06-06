@@ -21,7 +21,8 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
   REGISTER_DISPATCH(NAME##_stub, NAME##_kernel_mps)
 
 static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
-  lib.exec_unary_kernel(iter, "round_decimals", Scalar(decimals), ScalarType::Long);
+  std::pair<c10::Scalar, c10::ScalarType> extra = {Scalar(decimals), ScalarType::Long};
+  lib.exec_unary_kernel(iter, "round_decimals", extra);
 }
 
 REGISTER_UNARY_TI_DISPATCH(exp);

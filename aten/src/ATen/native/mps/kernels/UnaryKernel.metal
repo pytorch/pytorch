@@ -300,7 +300,7 @@ struct round_decimals_functor {
   template <typename T>
   inline T operator()(const T x, const long ndigits) {
     return static_cast<T>(
-      rint(exp10(float(ndigits)) * x) * exp10(float(-ndigits)));
+        rint(exp10(float(ndigits)) * x) * exp10(float(-ndigits)));
   }
 };
 
