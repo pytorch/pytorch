@@ -116,7 +116,7 @@ class AutoChunkerTest(TestCase):
                 self.ce = nn.CrossEntropyLoss()
 
             def forward(self, x, y):
-                return self.ce(self.linear(x).view(B * T, V), y.view(-1))
+                return self.ce(self.linear(x).view(B * T, -1), y.view(-1))
 
         mod = LinearAndCEL().cuda().to(dtype)
 
