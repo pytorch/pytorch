@@ -12286,6 +12286,111 @@ fn
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(fn(*inputs), inputs[0])
 
+    def test_guard_filter_inbuilt_nn_modules(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.norm = torch.nn.LayerNorm(8)
+
+            def forward(self, x):
+                return self.norm(x)
+
+        mod = Mod()
+        opt_mod = torch.compile(
+            mod,
+            options={
+                "guard_filter_fn": torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe
+            },
+        )
+
+        x = torch.rand(4, 8)
+        opt_mod(x)
+
+        mod.norm.eps = 1e-02
+        # Since the guards are skipped on inbuilt nn modules, we should not recompile
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            opt_mod(x)
+
+    def test_guard_filter_nn_modules(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 2
+                self.norm = torch.nn.LayerNorm(8)
+
+            def forward(self, x):
+                return self.norm(x) + self.c
+
+        mod = Mod()
+        opt_mod = torch.compile(
+            mod,
+            options={
+                "guard_filter_fn": torch.compiler.skip_guard_on_all_nn_modules_unsafe
+            },
+        )
+
+        x = torch.rand(4, 8)
+        opt_mod(x)
+
+        mod.c = 3
+        # Since the guards are skipped on all nn modules, we should not recompile
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            opt_mod(x)
+
+    def test_guard_filter_tensors(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 2.0
+                self.norm = torch.nn.LayerNorm(8)
+
+            def forward(self, x):
+                return self.norm(x) + self.c
+
+        mod = Mod()
+        opt_mod = torch.compile(
+            mod,
+            options={
+                "guard_filter_fn": torch.compiler.keep_tensor_guards,
+            },
+        )
+
+        x = torch.rand(4, 8)
+        opt_mod(x)
+
+        mod.c = 3.0
+        # Since the guards are skipped on all tensors
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            opt_mod(x)
+
+    def test_guard_filter_globals(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 2
+                self.norm = torch.nn.LayerNorm(8)
+
+            def forward(self, x):
+                return self.norm(x) + self.c + GLOBAL_INT
+
+        mod = Mod()
+        opt_mod = torch.compile(
+            mod,
+            options={
+                "guard_filter_fn": torch.compiler.skip_guard_on_globals,
+            },
+        )
+
+        global GLOBAL_INT
+        GLOBAL_INT = 1
+        x = torch.rand(4, 8)
+        opt_mod(x)
+
+        GLOBAL_INT = 2
+        # Since the guards are skipped on globals, we should not recompile
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            opt_mod(x)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
