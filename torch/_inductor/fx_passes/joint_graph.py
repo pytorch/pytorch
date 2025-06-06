@@ -240,6 +240,40 @@ class UniformValueConstantFolder(ConstantFolder):
             ]
         )
 
+        self._add_peephole_patterns()
+
+    def _add_peephole_patterns(self) -> None:
+        """
+        Add peephole patterns for nodes where we can infer constant value even if some inputs
+        of the node are unknown.
+        """
+        for op in itertools.chain(
+            self.module.graph.find_nodes(  # type: ignore[operator, union-attr]
+                op="call_function", target=torch.ops.aten.mul.Tensor
+            ),
+            self.module.graph.find_nodes(  # type: ignore[operator, union-attr]
+                op="call_function", target=torch.ops.aten.mul.Scalar
+            ),
+        ):
+            tensor_val = op.meta.get("val", None)
+            if not isinstance(tensor_val, torch.Tensor):
+                continue
+
+            def is_zero_int(arg: Any) -> bool:
+                return isinstance(arg, int) and arg == 0
+
+            if not any(is_zero_int(a) for a in op.args):
+                continue
+
+            t = torch.full(
+                [1],  # shape
+                0,  # value
+                dtype=tensor_val.dtype,
+                device=tensor_val.device,
+                pin_memory=False,
+            )
+            self.add_node_replacement(op, t)
+
     def _support_dynamic_shape(self):
         return True
 
