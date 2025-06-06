@@ -223,7 +223,7 @@ kernel void binary_strided_cast(
     constant long* output_strides [[buffer(4)]],
     constant long* input_strides [[buffer(5)]],
     constant long* other_strides [[buffer(6)]],
-    constant uint3& ndim_types [[buffer(7)]],
+    constant uint4& ndim_types [[buffer(7)]],
     uint index [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
@@ -249,7 +249,7 @@ kernel void alpha_binary_strided_cast(
     constant long* output_strides [[buffer(5)]],
     constant long* input_strides [[buffer(6)]],
     constant long* other_strides [[buffer(7)]],
-    constant uint3& ndim_types [[buffer(8)]],
+    constant uint4& ndim_types [[buffer(8)]],
     uint index [[thread_position_in_grid]]) {
   F f;
   int pos[max_ndim];
@@ -344,7 +344,7 @@ kernel void alpha_binary_dense_cast(
           constant long* output_strides,                                       \
           constant long* input_strides,                                        \
           constant long* other_strides,                                        \
-          constant uint3& ndim_types,                                          \
+          constant uint4& ndim_types,                                          \
           uint tid);                                                           \
   template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
       c10::metal::binary_dense<DTYPEI, NAME##_functor, OMT>(                   \
@@ -397,7 +397,7 @@ kernel void alpha_binary_dense_cast(
           constant long* output_strides,                                       \
           constant long* input_strides,                                        \
           constant long* other_strides,                                        \
-          constant uint3& ndim_types,                                          \
+          constant uint4& ndim_types,                                          \
           uint tid);                                                           \
   template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
       c10::metal::alpha_binary_dense<DTYPEI, NAME##_functor>(                  \
