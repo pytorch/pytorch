@@ -1954,7 +1954,7 @@ class MultiOutputReduction(Reduction):
         indexer: Callable[[Sequence[Expr]], Never],
         vars: Sequence[Expr],
         reduction_vars: Sequence[Symbol],
-    ) -> None:
+    ) -> Any:
         values = ops.reduction(
             self.dtype,
             self.src_dtype,
@@ -1963,7 +1963,7 @@ class MultiOutputReduction(Reduction):
         )
         assert isinstance(values, (tuple, list)), type(values)
         value = values[self.output_index]
-        ops.store_reduction(output_name or "unnamed", indexer(vars), value)
+        return ops.store_reduction(output_name or "unnamed", indexer(vars), value)
 
 
 class OnlineSoftmaxReduction(MultiOutputReduction):
@@ -2264,11 +2264,13 @@ class Scan(Loops):
         indexer: Callable[[Sequence[_IntLike]], Never],
         vars: Sequence[Expr],
         scan_vars: Sequence[Symbol],
-    ) -> None:
+    ) -> Any:
         idx = self.reindex(vars, scan_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
         result = ops.scan(self.dtypes, self.combine_fn, values)
-        ops.store(output_name or "unnamed", indexer(idx), result[self.output_index])
+        return ops.store(
+            output_name or "unnamed", indexer(idx), result[self.output_index]
+        )
 
     def get_reduction_type(self) -> Optional[str]:
         # return self.scan_op
@@ -2468,11 +2470,13 @@ class Sort(Loops):
         indexer: Callable[[Sequence[Expr]], Expr],
         vars: Sequence[Expr],
         reduction_vars: Sequence[Expr],
-    ) -> None:
+    ) -> Any:
         idx = self.reindex(vars, reduction_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
         result = ops.sort(self.dtypes, values, self.stable, self.descending)
-        ops.store(output_name or "unnamed", indexer(idx), result[self.output_index])
+        return ops.store(
+            output_name or "unnamed", indexer(idx), result[self.output_index]
+        )
 
     def get_reduction_type(self) -> Optional[str]:
         return "sort"
@@ -4650,9 +4654,9 @@ class TemplateBuffer(OperationBuffer):
         name = self.get_name()
         indexer = self.get_layout().make_indexer()
 
-        def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> None:
+        def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> Any:
             assert len(rindex) == 0
-            ops.store(name, indexer(index), "fake")
+            return ops.store(name, indexer(index), "fake")
 
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=normalize
@@ -4664,9 +4668,9 @@ class TemplateBuffer(OperationBuffer):
 
             indexer = inp.layout.make_indexer()
 
-            def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> None:
+            def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> Any:
                 assert len(rindex) == 0
-                ops.load(inp.get_name(), indexer(index))
+                return ops.load(inp.get_name(), indexer(index))
 
             deps.reads |= dependencies.extract_read_writes(
                 dummy, inp.get_size(), (), normalize=True
