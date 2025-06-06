@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest import skip
 from unittest.mock import patch
 
@@ -2588,6 +2589,29 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(8, 4, 4, device=self.device),)
         self.check_model(Model(), example_inputs)
+
+    @patch("torch._dynamo.utils.CompileEventLogger.log_instant_event")
+    def test_backward_no_op_logging(self, mock_log_instant_event):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+        model = Model()
+        dummy_input = torch.randn(1, 5)
+
+        from torch._dynamo.utils import CompileEventLogLevel
+        from torch._inductor import compile_fx
+
+        graph_module = torch.fx.symbolic_trace(model)
+        compile_fx._compile_fx_inner(graph_module, (dummy_input,))
+        mock_log_instant_event.assert_called_once_with(
+            "backward no-op",
+            metadata={"compile_id": None},
+            log_level=CompileEventLogLevel.PT2_COMPILE,
+        )
 
     @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
     def test_dup_unbacked_sym_decl(self):
@@ -5970,6 +5994,39 @@ class AOTInductorTestsTemplate:
         self.check_model(Model1(), (x,))
         # the output should have int type
         self.check_model(Model2(), (x,))
+
+    def test_using_model_name_for_files(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        model = Model().to(self.device)
+        with torch.no_grad():
+            package_path: str = AOTIRunnerUtil.compile(
+                model,
+                example_inputs,
+                inductor_configs={
+                    "aot_inductor.model_name_for_generated_files": "test_model"
+                },
+            )
+
+        with zipfile.ZipFile(package_path, "r") as zip_ref:
+            all_files = zip_ref.namelist()
+            base_dir = "test_model.wrapper/data/aotinductor/model/test_model"
+            self.assertTrue(f"{base_dir}.wrapper.cpp" in all_files)
+            self.assertTrue(f"{base_dir}.kernel.cpp" in all_files)
+            self.assertTrue(f"{base_dir}.wrapper.so" in all_files)
+
+        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
+        self.assertEqual(aot_inductor_module(*example_inputs), model(*example_inputs))
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
