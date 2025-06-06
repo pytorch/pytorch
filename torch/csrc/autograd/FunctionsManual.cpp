@@ -5049,7 +5049,7 @@ std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
 
   std::vector<int64_t> rstd_view_shape = rstd.sizes().vec();
   for (int i = 0;
-       i < std::max(static_cast<int>(normalized_ndim - rstd.sizes().size()), 0);
+       i < std::max(static_cast<int>(normalized_ndim - rstd.dim()), 0);
        ++i) {
     rstd_view_shape.push_back(1);
   }
