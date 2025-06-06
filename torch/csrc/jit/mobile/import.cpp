@@ -647,7 +647,7 @@ mobile::Module _load_for_mobile(
     std::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
-#ifdef TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
   torch::initialize_torch_libraries();
 #endif
   auto observer = torch::observerConfig().getModuleObserver();

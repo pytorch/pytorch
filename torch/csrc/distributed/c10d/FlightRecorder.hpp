@@ -1,8 +1,4 @@
 #pragma once
-
-// TODO: Make Fligth Recorder device agnostic
-#ifdef USE_C10D_NCCL
-
 #include <cstdio>
 #include <cstdlib>
 
@@ -10,9 +6,9 @@
 #include <mutex>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAEvent.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <optional>
 
 namespace c10d {
@@ -24,9 +20,10 @@ namespace c10d {
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.5")
+DEFINE_CONSTANT(version_val, "2.7")
 DEFINE_CONSTANT(entries_key, "entries")
 DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state")
+DEFINE_CONSTANT(nccl_version_key, "nccl_version")
 DEFINE_CONSTANT(version_key, "version")
 DEFINE_CONSTANT(pg_config_key, "pg_config")
 DEFINE_CONSTANT(pg_status_key, "pg_status")
@@ -56,6 +53,8 @@ DEFINE_CONSTANT(time_discovered_completed_key, "time_discovered_completed_ns")
 DEFINE_CONSTANT(completed_state, "completed")
 DEFINE_CONSTANT(scheduled_state, "scheduled")
 DEFINE_CONSTANT(started_state, "started")
+DEFINE_CONSTANT(thread_id_key, "thread_id")
+DEFINE_CONSTANT(thread_name_key, "thread_name")
 #undef DEFINE_CONSTANT
 
 // Write NCCL debug info to local disk or any storage users define.
@@ -87,24 +86,22 @@ class TORCH_API DebugInfoWriter {
   static std::atomic<bool> hasWriterRegistered_;
 };
 
-/* Helper used by work::getDuration() and nccl flight recorder */
-float getDurationFromEvent(
-    at::cuda::CUDAEvent& ncclStartEvent,
-    at::cuda::CUDAEvent& ncclEndEvent);
-
+template <typename EventType>
 struct FlightRecorder {
-  static FlightRecorder* get() {
+  static FlightRecorder<EventType>* get() {
     // intentionally leak on exit
     // because this will hold python state that may get destructed
-    static FlightRecorder* instance = new FlightRecorder();
+    static FlightRecorder<EventType>* instance =
+        new FlightRecorder<EventType>();
     return instance;
   }
   FlightRecorder() {
-    max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
-    capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
+    max_entries_ =
+        getCvarInt({"TORCH_FR_BUFFER_SIZE", "TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
+    capture_cpp_stack_ = getCvarBool(
+        {"TORCH_FR_CPP_STACK", "TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
   }
-  using Event = at::cuda::CUDAEvent;
   struct Entry {
     size_t id_; // incremented id in the trace buffer
                 // used to figure out where in the circular entries
@@ -128,7 +125,7 @@ struct FlightRecorder {
     // we borrow pointers to start_ and end_ so we can query the state
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
-    Event *start_, *end_;
+    EventType *start_, *end_;
 
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
@@ -159,11 +156,17 @@ struct FlightRecorder {
     c10::SmallVector<int64_t, 4> output_dims_;
     std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
+    std::thread::id thread_id_;
+    std::string thread_name_;
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
 
     // Returns the traceback of current entry, in string form.
-    std::string getTraceback();
+    // Note: `getTraceback` invokes `torch::symbolize`, which may need to
+    // acquire the GIL. If you don't want to block the current thread or take
+    // the risk of a GIL deadlock, you can use an asynchronous calling mechanism
+    // like std::async.
+    TORCH_API std::string getTraceback();
   };
 
   bool enabled_ = false;
@@ -176,6 +179,7 @@ struct FlightRecorder {
   std::map<size_t, std::shared_ptr<ProcessGroupStatus>> all_pg_status_ = {};
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
       pg_name_to_ranks_ = {};
+  std::string nccl_version_;
 
   std::optional<size_t> record(
       size_t pg_id,
@@ -186,15 +190,17 @@ struct FlightRecorder {
       std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
-      Event* start,
-      Event* end,
+      EventType* start,
+      EventType* end,
       std::chrono::milliseconds timeout_ms,
       std::shared_ptr<ProcessGroupStatus> pg_status,
       bool isP2P);
 
-  void record_pg_ranks(
+  TORCH_API void record_pg_ranks(
       const std::tuple<std::string, std::string>& pg_name,
       std::vector<uint64_t> ranks);
+
+  void record_accelerator_version(const std::string nccl_version);
 
   void update_state(Entry& r);
 
@@ -202,7 +208,7 @@ struct FlightRecorder {
 
   // Returns the entry with the given id, if it exists. Otherwise, returns
   // std::nullopt.
-  std::optional<Entry> getEntry(std::optional<size_t> id);
+  TORCH_API std::optional<Entry> getEntry(std::optional<size_t> id);
 
   /*
   Mark an Event as completed and free its events.
@@ -214,7 +220,9 @@ struct FlightRecorder {
   never hang. (timing must also be enabled for compute_duration - see
   TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(std::optional<size_t> id, bool compute_duration = true);
+  TORCH_API void retire_id(
+      std::optional<size_t> id,
+      bool compute_duration = true);
 
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
@@ -235,20 +243,30 @@ struct FlightRecorder {
   std::string dump_json(
       const std::optional<std::unordered_map<
           std::string,
-          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+          std::unordered_map<std::string, std::string>>>& extraDumpMap,
       bool includeCollectives,
       bool onlyActive);
 
-  // dump all collectives + ncclDumpMap
   std::string dump(
       const std::optional<std::unordered_map<
           std::string,
-          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+          std::unordered_map<std::string, std::string>>>& extraDumpMap,
       bool includeCollectives,
       bool includeStackTraces,
       bool onlyActive);
 };
 
-} // namespace c10d
+// Dumps the fr traces and additional information about the Process
+// Group.
+TORCH_API std::string dump_fr_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive);
 
-#endif // USE_C10D_NCCL
+// Dumps the fr traces and additional information about the Process
+// Group in JSON formatted string.
+// We don't include stack traces in JSON format as it is far too much data.
+TORCH_API std::string dump_fr_trace_json(
+    bool includeCollectives,
+    bool onlyActive);
+} // namespace c10d

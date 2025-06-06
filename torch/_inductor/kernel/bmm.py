@@ -23,10 +23,10 @@ from ..virtualized import V
 from .mm_common import (
     _is_static_problem,
     addmm_epilogue,
+    is_batch_stride_largest,
     mm_args,
     mm_config_kwargs,
     mm_options,
-    should_fallback_to_aten,
 )
 
 
@@ -117,16 +117,26 @@ bmm_template = TritonTemplate(
     # inductor generates a suffix
     {{store_output(("idx_q", "idx_m", "idx_n"), "acc", "mask")}}
 """,
+    cache_codegen_enabled_for_template=True,
 )
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
+aten_bmm_dtype = ExternKernelChoice(
+    torch.bmm,
+    "at::_bmm_out_dtype_cuda",
+    name="bmm_dtype",
+    op_overload=aten.bmm.dtype_out,
+)
 aten_baddbmm = ExternKernelChoice(
     torch.baddbmm, "at::baddbmm_out", op_overload=aten.baddbmm.out
 )
 
 
 @L.register_lowering(aten.bmm)
-def tuned_bmm(mat1, mat2, *, layout=None):
+def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
+    """
+    Lowering for autotuning aten.bmm with different backends (Aten, Triton, CUTLASS, etc.)
+    """
     if all(x.get_device().type == "cpu" for x in [mat1, mat2]):
         # decompose to small ops when memory bound
         if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
@@ -164,7 +174,9 @@ def tuned_bmm(mat1, mat2, *, layout=None):
             meta_mat2 = V.graph.current_node.args[1]
             mat2 = may_require_contiguous(mat2, meta_mat2)
 
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    m, n, k, layout, mat1, mat2 = mm_args(
+        mat1, mat2, layout=layout, out_dtype=out_dtype
+    )
 
     # below is for getting an overview logging info of inductor mms
     counters["aten_mm_info"][f"aten.bmm_{m}_{n}_{k}"] += 1
@@ -178,13 +190,21 @@ def tuned_bmm(mat1, mat2, *, layout=None):
         layout,
     )
 
+    if out_dtype:
+        assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
+        aten_func = aten_bmm_dtype.bind((mat1, mat2), layout, out_dtype=out_dtype)
+    else:
+        aten_func = aten_bmm.bind((mat1, mat2), layout)
+
     # options to tune from
-    choices = [aten_bmm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
+    choices = [aten_func] if use_aten_gemm_kernels() else []
 
     device_type = ir.get_device_type(mat1)
     bmm_configs = V.choices.get_base_mm_configs(device_type)
 
     if use_triton_template(layout):
+        # TODO: add out_dtype support for Triton Template
+        assert out_dtype is None, "out_dtype is not supported for Triton"
         for config in bmm_configs(
             m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
         ):
@@ -194,11 +214,12 @@ def tuned_bmm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-    static_shape, is_nonzero = _is_static_problem(layout)
-    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
+    _, is_nonzero = _is_static_problem(layout)
+    batch_stride_largest = is_batch_stride_largest(mat1, mat2, layout)
+    if batch_stride_largest and is_nonzero and use_cutlass_template(layout, m, n, k):
         from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
-        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])  # type: ignore[arg-type]
 
     if use_cpp_bmm_template(layout, mat1, mat2):
         from ..codegen.cpp_bmm_template import CppBmmTemplate
@@ -211,9 +232,6 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
-
-    if should_fallback_to_aten(choices):
-        choices.append(aten_bmm.bind((mat1, mat2), layout))
 
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
 
@@ -256,6 +274,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 **mm_options(config, m, n, k, layout),
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
+                epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
             )
 
     return autotune_select_algorithm("baddbmm", choices, [inp, mat1, mat2], layout)

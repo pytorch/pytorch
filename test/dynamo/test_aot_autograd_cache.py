@@ -40,6 +40,76 @@ from torch.testing._internal.triton_utils import requires_cuda
 from torch.testing._internal.two_tensor import TwoTensor
 
 
+def saved_tensors_hooks_to_gm(
+    pack_fn,
+    unpack_fn,
+    pack_cache_hash=None,
+    unpack_cache_hash=None,
+    symbolic_tracing=True,
+    inp_fn=None,
+):
+    if symbolic_tracing:
+        pack_gm = torch.fx.symbolic_trace(pack_fn)
+        unpack_gm = torch.fx.symbolic_trace(unpack_fn)
+    else:
+        from functorch import make_fx
+
+        if inp_fn:
+            inp = inp_fn()
+        else:
+            inp = torch.randn(2, 3)
+            torch._dynamo.mark_dynamic(inp, 0)
+            torch._dynamo.mark_dynamic(inp, 1)
+        pack_out = pack_fn(inp)
+        pack_gm = make_fx(pack_fn)(inp)
+        unpack_gm = make_fx(unpack_fn)(pack_out)
+
+    def set_manual_hash(g, manual_hash):
+        for node in g.nodes:
+            if node.meta and node.meta.get("is_wrapped", False):
+                node.meta["user_cache_hash"] = manual_hash
+
+    if pack_cache_hash:
+        set_manual_hash(pack_gm.graph, pack_cache_hash)
+    if unpack_cache_hash:
+        set_manual_hash(unpack_gm.graph, unpack_cache_hash)
+    return pack_gm, unpack_gm
+
+
+def amax_to_scale(
+    amax: torch.Tensor,
+    float8_dtype: torch.dtype,
+    round_scales_to_power_of_2: bool = False,
+):
+    amax = amax.to(torch.float64)
+    res = torch.finfo(float8_dtype).max / torch.clamp(amax, min=1e-12)
+    res = res.to(torch.float32)
+    return res
+
+
+# Must be at module level to use fx.wrap
+@torch.fx.wrap
+def _pack_fp8_with_scale_wrap(x):
+    if not x.dtype.is_floating_point:
+        return x
+
+    amax = torch.max(torch.abs(x))
+    scale = amax_to_scale(amax, torch.float8_e5m2)
+    x_scaled = x.to(torch.float32) * scale
+    x_fp8 = x_scaled.to(torch.float8_e5m2)
+    return x.dtype, scale, x_fp8
+
+
+@torch.fx.wrap
+def _unpack_fp8_with_scale_wrap(x):
+    if isinstance(x, torch.Tensor):
+        return x
+
+    dtype, scale, x_fp8 = x
+    y = x_fp8.to(torch.float32) / scale
+    return y.to(dtype)
+
+
 @instantiate_parametrized_tests
 class AOTAutogradCacheTests(InductorTestCase):
     def setUp(self):
@@ -101,6 +171,8 @@ class AOTAutogradCacheTests(InductorTestCase):
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             compiled_result.sum().backward()
+            if hasattr(a, "_dynamo_weak_dynamic_indices"):
+                del a._dynamo_weak_dynamic_indices
             self.assertEqual(eager_result, compiled_result)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -133,6 +205,8 @@ class AOTAutogradCacheTests(InductorTestCase):
             compiled_result = compiled_fn(a, b)
             self.assertEqual(eager_result, compiled_result)
             compiled_result.sum().backward()
+            if hasattr(a, "_dynamo_weak_dynamic_indices"):
+                del a._dynamo_weak_dynamic_indices
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 4)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
@@ -157,6 +231,8 @@ class AOTAutogradCacheTests(InductorTestCase):
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             compiled_result.sum().backward()
+            if hasattr(a, "_dynamo_weak_dynamic_indices"):
+                del a._dynamo_weak_dynamic_indices
             self.assertEqual(eager_result, compiled_result)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 4)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
@@ -195,6 +271,49 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_multi_graph_specialization(self):
+        """
+        Verify multi graph specializations all cache hit
+        """
+
+        def fn(x):
+            return x * 5
+
+        a = torch.randn(5)
+        a8 = torch.randn(8)
+        a16 = torch.randn(16)
+        torch._dynamo.mark_dynamic(
+            a,
+            0,
+            specialize_on=[
+                lambda x: x == 8,
+                lambda x: x == 16,
+            ],
+        )
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # A first call should miss in the cache.
+        compiled_fn(a)
+        compiled_fn(a8)
+        compiled_fn(a16)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
+
+        self._clear_dynamo_and_codecache()
+
+        # A second call should hit on all 3 graphs
+        compiled_fn(a)
+        compiled_fn(a8)
+        compiled_fn(a16)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -282,10 +401,18 @@ class AOTAutogradCacheTests(InductorTestCase):
         self._clear_dynamo_and_codecache()
         torch._inductor.codecache.FxGraphCache.clear()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-        # We save again into the cache
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+        if functorch_config.bundled_autograd_cache:
+            # Bundled AutogradCache doesn't care if FxGraphCache is cleared
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        else:
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            # We save again into the cache
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -308,6 +435,113 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    @parametrize("fn_select", ("tag_activation_checkpoint", "allow_in_graph"))
+    def test_unsafe_mark_cacheable(self, fn_select):
+        if fn_select == "tag_activation_checkpoint":
+            from torch.utils.checkpoint import checkpoint
+
+            def gn(x, y, z=None):
+                a = torch.matmul(x, y)
+                if z is not None:
+                    return torch.matmul(a, z)
+                return a
+
+            @torch.compile
+            def fn(x, y, z):
+                return torch.cos(checkpoint(gn, x, y, use_reentrant=False, z=z))
+
+            fn_name = "torch.ops.higher_order.tag_activation_checkpoint"
+        else:
+            assert fn_select == "allow_in_graph"
+
+            @torch._dynamo.allow_in_graph
+            class AllowInGraphFunc(torch.autograd.Function):
+                @staticmethod
+                def forward(_, x):
+                    torch._dynamo.graph_break()
+                    return x.sin()
+
+            @torch.compile
+            def fn(x, y, z):
+                return AllowInGraphFunc.apply(x)
+
+            fn_name = "torch._dynamo.variables.misc.trampoline_autograd_apply"
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        z = torch.randn(4, 4)
+        args = (x, y, z)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            r".*BypassAOTAutogradCache: Unsupported call_function target .*",
+        ):
+            fn(*args)
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+        self._clear_dynamo_and_codecache()
+
+        if fn_select == "allow_in_graph":
+            # TODO: Fix allow in graph
+            raise unittest.SkipTest(
+                "Allow in graph produces an unserializable cache artifact"
+            )
+
+        with inductor_config.patch(
+            "unsafe_marked_cacheable_functions", {fn_name: "key1"}
+        ):
+            fn(*args)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+            self._clear_dynamo_and_codecache()
+
+            fn(*args)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+        self._clear_dynamo_and_codecache()
+        with inductor_config.patch(
+            "unsafe_marked_cacheable_functions", {fn_name: "key2"}
+        ):
+            fn(*args)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+            self._clear_dynamo_and_codecache()
+
+            fn(*args)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+        # On second try with same key, it should hit once more
+        with inductor_config.patch(
+            "unsafe_marked_cacheable_functions", {fn_name: "key1"}
+        ):
+            self._clear_dynamo_and_codecache()
+
+            fn(*args)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 3)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", False)
@@ -540,6 +774,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch({"fx_graph_cache": True})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"strict_autograd_cache": True})
     def test_autograd_lazy_backward(self):
         """
         Lazily compile the backward, and lazily save to cache
@@ -946,6 +1181,223 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(len(CompiledTritonKernels._cache), 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"strict_autograd_cache": True})
+    def test_dynamic_shapes_different_sizes(self):
+        # The forward and backward function have different symint inputs,
+        # but the same underlying symbols
+        def fn(x, y):
+            z = x * y
+            return (torch.cat((x, x), dim=0), z)
+
+        (x1, y1) = torch.randn(5, requires_grad=True), torch.randn(5)
+        compiled_fn = torch.compile(fn, backend="inductor", dynamic=True)
+        x_compiled, _ = compiled_fn(x1, y1)
+        x_compiled.sum().backward()
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        self._clear_dynamo_and_codecache()
+
+        # Run a second time and see it cache hit instead of erroring
+        (x2, y2) = torch.randn(5, requires_grad=True), torch.randn(5)
+        x_compiled, _ = compiled_fn(x2, y2)
+        x_compiled.sum().backward()
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"activation_memory_budget": 1.0})
+    @functorch_config.patch({"activation_memory_budget_runtime_estimator": "testing"})
+    @functorch_config.patch({"saved_tensors_hooks_filtering_mode": "all"})
+    def test_saved_tensors_hooks_autograd_cache(self):
+        ctx = torch.autograd.graph.saved_tensors_hooks
+        device = torch.device("cuda:0")
+
+        def pack_cpu(x):
+            return x.to(device="cpu")
+
+        def unpack_cpu(x):
+            return x.to(device=device)
+
+        def pack_cpu2(x):
+            return x.to(device="cpu")
+
+        def unpack_cpu2(x):
+            return x.to(device=device)
+
+        def pack_mul2(x):
+            return x * 2
+
+        def unpack_mul2(x):
+            return x / 2
+
+        # Can not use custom AutogradFunction here,
+        # Cache bypasses AutogradFunction Ctx usage.
+        # Can not save in ctx non floating point dtypes.
+        # For non-symbolic tracing all dtypes and devices and burned in the graph.
+
+        def fn(x):
+            x = x + 1
+            x = x.sin().cos()
+            x = x.relu()
+            x = x.exp()
+            x = 2 * x
+            return x
+
+        backend = "inductor"
+
+        def inp_fn():
+            x = torch.ones(2, 3, device=device, requires_grad=True)
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(x, 1)
+            return x
+
+        x = inp_fn()
+        fn_compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        y = fn_compiled(x)
+        y.sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        with ctx(
+            *saved_tensors_hooks_to_gm(
+                pack_cpu,
+                unpack_cpu,
+                symbolic_tracing=False,
+                inp_fn=inp_fn,
+                pack_cache_hash="cpu_offload",
+                unpack_cache_hash="cpu_offload",
+            )
+        ):
+            x = inp_fn()
+            y = fn_compiled(x)
+            y.sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+        with ctx(
+            *saved_tensors_hooks_to_gm(
+                pack_cpu2,
+                unpack_cpu2,
+                symbolic_tracing=False,
+                inp_fn=inp_fn,
+                pack_cache_hash="cpu_offload",
+                unpack_cache_hash="cpu_offload",
+            )
+        ):
+            x = inp_fn()
+            y = fn_compiled(x)
+            y.sum().backward()
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+        with ctx(
+            *saved_tensors_hooks_to_gm(pack_mul2, unpack_mul2, symbolic_tracing=False)
+        ):
+            x = inp_fn()
+            y = fn_compiled(x)
+            y.sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_saved_tensors_hooks_autograd_cache_symbolic(self):
+        def pack_fp8_with_scale(x):
+            return _pack_fp8_with_scale_wrap(x)
+
+        def unpack_fp8_with_scale(packed):
+            return _unpack_fp8_with_scale_wrap(packed)
+
+        ctx = torch.autograd.graph.saved_tensors_hooks
+
+        def fn(x):
+            x = x + 1
+            # Relu saves bitmask in AutogradContext
+            x = x.relu()
+            x = x.relu()
+            return x
+
+        device = torch.device("cuda:0")
+        backend = "inductor"
+
+        def inp_fn():
+            x = torch.ones(2, 3, device=device, requires_grad=True)
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(x, 1)
+            return x
+
+        x = inp_fn()
+        fn_compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        y = fn_compiled(x)
+        y.sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        with ctx(
+            *saved_tensors_hooks_to_gm(
+                pack_fp8_with_scale,
+                unpack_fp8_with_scale,
+                "fp8_with_scale_dtype_floating_point",
+                "fp8_with_scale_dtype_floating_point",
+            )
+        ):
+            x = inp_fn()
+            y = fn_compiled(x)
+            y.sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+        with ctx(
+            *saved_tensors_hooks_to_gm(
+                pack_fp8_with_scale,
+                unpack_fp8_with_scale,
+                "fp8_with_scale_dtype_floating_point",
+                "fp8_with_scale_dtype_floating_point",
+            )
+        ):
+            x = inp_fn()
+            y = fn_compiled(x)
+            y.sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+        with ctx(
+            *saved_tensors_hooks_to_gm(
+                pack_fp8_with_scale,
+                unpack_fp8_with_scale,
+                "fp8_with_scale_dtype_floating_point_MISS",
+                "fp8_with_scale_dtype_floating_point_MISS",
+            )
+        ):
+            x = inp_fn()
+            y = fn_compiled(x)
+            y.sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
+
+
+@functorch_config.patch({"bundled_autograd_cache": True})
+class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
+    pass
 
 
 @inductor_config.patch("fx_graph_cache", True)

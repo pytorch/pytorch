@@ -17,6 +17,7 @@ from torch.utils._pytree import (
     SequenceKey,
     SUPPORTED_NODES,
     tree_flatten,
+    tree_map,
     tree_map_with_path,
 )
 
@@ -440,6 +441,21 @@ class _RelaxedConstraint(_ConstraintTarget):
 Constraint = Union[_Constraint, _DerivedConstraint, _RelaxedConstraint]
 
 
+@dataclasses.dataclass
+class _IntWrapper:
+    """
+    Dummy wrapper class to wrap around integer inputs so that when we parse the
+    dynamic_shapes structure, we can mark if any of the integers were marked as
+    dynamic.
+    """
+
+    val: int
+    # Disallow specifying dynamism
+    dynamism: Optional[Union[_DimHint, int]] = dataclasses.field(
+        init=False, default=None
+    )
+
+
 def _process_equalities(
     constraint: Constraint,
     get_sources: Callable[[int, int], list["Source"]],
@@ -660,6 +676,24 @@ class ShapesCollection:
         # dynamic_shapes = {"x": (dim, dim + 1, 8), "others": [{0: dim * 2}, None]}
 
         torch.export(..., args, dynamic_shapes=dynamic_shapes)
+
+    To specify dynamism for integers, we need to first wrap the integers using
+    _IntWrapper so that we have a "unique identification tag" for each integer.
+
+    Example::
+
+        args = ({"x": tensor_x, "others": [int_x, int_y]})
+        # Wrap all ints with _IntWrapper
+        mapped_args = pytree.tree_map_only(int, lambda a: _IntWrapper(a), args)
+
+        dynamic_shapes = torch.export.ShapesCollection()
+        dynamic_shapes[tensor_x] = (dim, dim + 1, 8)
+        dynamic_shapes[mapped_args["others"][0]] = Dim.DYNAMIC
+
+        # This is equivalent to the following (now auto-generated):
+        # dynamic_shapes = {"x": (dim, dim + 1, 8), "others": [Dim.DYNAMIC, None]}
+
+        torch.export(..., args, dynamic_shapes=dynamic_shapes)
     """
 
     def __init__(self):
@@ -667,15 +701,17 @@ class ShapesCollection:
 
     def __setitem__(self, t, shape):
         assert isinstance(
-            t, torch.Tensor
-        ), f"Cannot assign shape to non-tensor type {type(t)}"
+            t, (torch.Tensor, _IntWrapper)
+        ), f"Cannot assign shape to non-tensor or non-_IntWrapper type {type(t)}"
+
         # TODO(avik): check that shape is indeed a Shape
+
         t_id = id(t)
         if t_id in self._shapes:
             _shape = self._shapes[t_id]
             assert (
                 shape == _shape
-            ), f"Shapes assigned to tensor do not match: expected {_shape}, got {shape}"
+            ), f"Shapes assigned to input do not match: expected {_shape}, got {shape}"
         else:
             self._shapes[id(t)] = shape
 
@@ -764,17 +800,34 @@ class AdditionalInputs:
 
         dynamic_shapes, *other_dynamic_shapes = [
             _tree_map_with_path(
-                lambda path, t: tuple(t.shape), _combine_args(m, args, kwargs)
+                lambda path, t: tuple(t.shape) if isinstance(t, torch.Tensor) else t,
+                _combine_args(m, args, kwargs),
             )
             for args, kwargs in [(args, kwargs), *self._examples]
         ]
 
-        return tree_map_with_path(
-            lambda path, dim, *other_dims: (
-                dim
-                if all(other_dim == dim for other_dim in other_dims)
-                else Dim.DYNAMIC
-            ),
+        def _mark_dynamism(v, *other_vs):
+            if not all(type(v) == type(other) for other in other_vs):
+                raise ValueError(
+                    "The following inputs were found to have differing types, "
+                    f"so they cannot be marked as dynamic: {(v,) + other_vs}."
+                )
+
+            if isinstance(v, int) and not isinstance(v, bool):
+                if all(other_v == v for other_v in other_vs):
+                    return None
+                else:
+                    return Dim.DYNAMIC
+            else:
+                if not all(other_v == v for other_v in other_vs):
+                    raise ValueError(
+                        "The following inputs were found to have differing values, "
+                        f"but they cannot be marked as dynamic: {(v,) + other_vs}."
+                    )
+                return None
+
+        return tree_map(
+            _mark_dynamism,
             dynamic_shapes,
             *other_dynamic_shapes,
             is_leaf=lambda i: type(i) is int,
@@ -849,6 +902,14 @@ def _check_dynamic_shapes(
                         case_name="dynamic_shapes_validation",
                     )
         elif isinstance(shape, (tuple, list)):
+            if len(shape) != len(tensor.shape):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic shape spec {shape} specified at `dynamic_shapes{keystr(path)}` "
+                    f"to have the same length as the actual tensor shape {tensor.shape} "
+                    f"(expected {len(tensor.shape)}, but got {len(shape)} instead)",
+                    case_name="dynamic_shapes_validation",
+                )
             for i, dim in enumerate(shape):
                 if isinstance(dim, Dim):
                     check_same_bounds(dim)
@@ -903,6 +964,13 @@ def _check_dynamic_shapes(
     def check_shape(path, t, dynamic_shape):
         if isinstance(t, torch.Tensor):
             check_symbols(path, t, dynamic_shape)
+        elif isinstance(t, _IntWrapper):
+            if isinstance(dynamic_shape, _Dim):
+                raise ValueError(
+                    "Unable to specify input integers as dynamic through named "
+                    "Dims. Please use Dim.AUTO/DYNAMIC instead."
+                )
+            assert dynamic_shape is None or isinstance(dynamic_shape, (int, _DimHint))
         else:
             if dynamic_shape is not None:
                 rendered_path = keystr(path)
@@ -1022,10 +1090,27 @@ def _process_dynamic_shapes(
             )
         return constraint
 
-    def update_symbols(path, tensor, shape):
+    def _parse_tensor_dim(tensor, idx, dim) -> None:
         def _create_static_dim(tensor, i, value):
             return _StaticDim(value)
 
+        if isinstance(dim, (int, Dim)):
+            if isinstance(dim, int):
+                dim = _create_static_dim(tensor, idx, dim)
+            constraint = to_constraint(dim, tensor, idx)
+            symbols[dim.__name__].append(constraint)
+        elif isinstance(dim, _DimHint):
+            if dim.type == _DimHintType.AUTO:
+                torch._dynamo.maybe_mark_dynamic(tensor, idx)
+            elif dim.type == _DimHintType.STATIC:
+                torch._dynamo.mark_static(tensor, idx)
+            elif dim.type == _DimHintType.DYNAMIC:
+                torch._dynamo.mark_dynamic(tensor, idx)
+            constraints.append(_RelaxedConstraint(id(tensor), idx))
+        elif dim is None:
+            torch._dynamo.mark_static(tensor, idx)
+
+    def update_symbols(path, tensor, shape):
         # clean out decorators from user side, or previous export call
         # we also delete these attributes in non_strict_utils.py/make_constraints()
         tensor._dynamo_weak_dynamic_indices = set()
@@ -1036,45 +1121,24 @@ def _process_dynamic_shapes(
 
         if isinstance(shape, dict):
             for i, dim in shape.items():
-                if isinstance(dim, (int, Dim)):
-                    if isinstance(dim, int):
-                        dim = _create_static_dim(tensor, i, dim)
-                    constraint = to_constraint(dim, tensor, i)
-                    symbols[dim.__name__].append(constraint)
-                elif isinstance(dim, _DimHint):
-                    if dim.type == _DimHintType.AUTO:
-                        torch._dynamo.maybe_mark_dynamic(tensor, i)
-                    elif dim.type == _DimHintType.STATIC:
-                        torch._dynamo.mark_static(tensor, i)
-                    elif dim.type == _DimHintType.DYNAMIC:
-                        torch._dynamo.mark_dynamic(tensor, i)
-                    constraints.append(_RelaxedConstraint(id(tensor), i))
-                elif dim is None:
-                    torch._dynamo.mark_static(tensor, i)
+                _parse_tensor_dim(tensor, i, dim)
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
-                if isinstance(dim, (int, Dim)):
-                    if isinstance(dim, int):
-                        dim = _create_static_dim(tensor, i, dim)
-                    constraint = to_constraint(dim, tensor, i)
-                    symbols[dim.__name__].append(constraint)
-                elif isinstance(dim, _DimHint):
-                    if dim.type == _DimHintType.AUTO:
-                        torch._dynamo.maybe_mark_dynamic(tensor, i)
-                    elif dim.type == _DimHintType.STATIC:
-                        torch._dynamo.mark_static(tensor, i)
-                    elif dim.type == _DimHintType.DYNAMIC:
-                        torch._dynamo.mark_dynamic(tensor, i)
-                    constraints.append(_RelaxedConstraint(id(tensor), i))
-                elif dim is None:
-                    torch._dynamo.mark_static(tensor, i)
+                _parse_tensor_dim(tensor, i, dim)
         elif shape is None:
             for i in range(tensor.dim()):
-                torch._dynamo.mark_static(tensor, i)
+                _parse_tensor_dim(tensor, i, None)
 
     def assoc_shape(path, t, dynamic_shape):
         if isinstance(t, torch.Tensor):
             update_symbols(path, t, dynamic_shape)
+        elif isinstance(t, _IntWrapper):
+            # If tensor dimensions are marked as dynamic, the tensors themselves
+            # get marked using mark_dynamic. However since we can't mark
+            # integers as dynamic, we first wrap integers in this class, and
+            # then set the `dim` field of the class with the dynamic shapes dim
+            # to mark the integer as dynamic.
+            t.dynamism = dynamic_shape
 
     _tree_map_with_path(assoc_shape, combined_args, dynamic_shapes, tree_name="inputs")
 

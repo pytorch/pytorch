@@ -17,7 +17,14 @@ from torch.nn.modules.module import _addindent
 from torch.package import Importer, PackageExporter, PackageImporter, sys_importer
 
 from ._compatibility import compatibility
-from .graph import _custom_builtins, _is_from_torch, _PyTreeCodeGen, Graph, PythonCode
+from .graph import (
+    _custom_builtins,
+    _is_from_torch,
+    _override_sym_repr,
+    _PyTreeCodeGen,
+    Graph,
+    PythonCode,
+)
 
 
 __all__ = [
@@ -927,18 +934,33 @@ class {module_name}(torch.nn.Module):
         include_stride=False,
         include_device=False,
         colored=False,
+        *,
+        # If `fast_sympy_print` is True then we use a sympy printer which is faster
+        # but may result in less-readable output.
+        fast_sympy_print: bool = False,
     ):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
-        return _print_readable(
-            self,
-            self._get_name(),
-            print_output,
-            include_stride,
-            include_device,
-            colored,
-        )
+        ctx_mgr = contextlib.ExitStack()
+        with ctx_mgr:
+            if fast_sympy_print:
+                from torch._inductor.utils import sympy_str
+
+                def fast_repr(expr: torch.types.PySymType) -> str:
+                    return sympy_str(expr.node.expr)
+
+                ctx_mgr.enter_context(_override_sym_repr(fast_repr))
+
+            r = _print_readable(
+                self,
+                self._get_name(),
+                print_output,
+                include_stride,
+                include_device,
+                colored,
+            )
+            return r
 
     def __str__(self) -> str:
         orig_str = super().__str__()

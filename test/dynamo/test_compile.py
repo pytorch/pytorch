@@ -81,11 +81,11 @@ class InPlaceCompilationTests(TestCase):
         torch._dynamo.reset()
 
         @torch._dynamo.on_compile_start
-        def start_callback():
+        def start_callback(_):
             print("Compilation started.")
 
         @torch._dynamo.on_compile_end
-        def end_callback():
+        def end_callback(_):
             print("Compilation ended.")
 
         mod = ToyModel()
@@ -116,13 +116,13 @@ class InPlaceCompilationTests(TestCase):
         counter = 0
 
         @torch._dynamo.on_compile_start
-        def start_callback():
+        def start_callback(_):
             nonlocal counter
             counter += 1
             print(f"Counter = {counter}")
 
         @torch._dynamo.on_compile_end
-        def end_callback():
+        def end_callback(_):
             nonlocal counter
             counter += 1
             print(f"Counter = {counter}")
@@ -211,6 +211,19 @@ class InPlaceCompilationTests(TestCase):
         a = torch.randn(1, 1)
         out = torch.compile(fn)(a)
         self.assertEqual(out, a)
+
+    def test_to_sparse_to_dense_with_graph_break(self):
+        def fn(x):
+            x = x.to_sparse()
+            x = x.to_dense()
+            return x
+
+        x = torch.tensor([[1.0]])
+        c_fn = torch.compile(fn)
+
+        output = fn(x)
+        c_output = c_fn(x)
+        self.assertEqual(output, c_output)
 
 
 # The private variants of the below functions are extensively tested

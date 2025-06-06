@@ -171,6 +171,12 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/ccl/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  # Enable XCCL build
+  export USE_XCCL=1
   # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
   export USE_KINETO=0
   export TORCH_XPU_ARCH_LIST=pvc
@@ -300,6 +306,18 @@ else
       fi
     fi
     pip_install_whl "$(echo dist/*.whl)"
+
+    if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+      echo "Checking that xpu is compiled"
+      pushd dist/
+      if python -c 'import torch; exit(0 if torch.xpu._is_compiled() else 1)'; then
+        echo "XPU support is compiled in."
+      else
+        echo "XPU support is NOT compiled in."
+        exit 1
+      fi
+      popd
+    fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
