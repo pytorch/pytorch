@@ -2101,6 +2101,8 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
+        if config._post_fusion_custom_pass is not None:
+            self.nodes = config._post_fusion_custom_pass(self.nodes)
         self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.combo_kernels:
@@ -2909,7 +2911,7 @@ class Scheduler:
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
-                choice_timings.items(), key=lambda x: x[1]
+                choice_timings.items(), key=operator.itemgetter(1)
             ):
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
@@ -3505,7 +3507,7 @@ class Scheduler:
             return 0
 
         # Pick the largest buffer to guide the loop reordering
-        _numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
+        _numel, lhs_dep, rhs_dep = max(candidates, key=operator.itemgetter(0))
 
         if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
             return 0
@@ -4249,7 +4251,15 @@ class Scheduler:
             *(get_input_node_symbols(node) for _, node in input_nodes.items())
         )
 
-        return filter_symbols(candidate_symbols)
+        candidate_symbols = filter_symbols(candidate_symbols)
+
+        res: OrderedSet[sympy.Symbol] = OrderedSet()
+        for s in candidate_symbols:
+            symplified_s = V.graph.sizevars.simplify(s)
+            # use free_symbols only when s is simplified to an Integer or expr
+            res.update(symplified_s.free_symbols)
+
+        return OrderedSet(sorted(res, key=operator.attrgetter("name")))
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
