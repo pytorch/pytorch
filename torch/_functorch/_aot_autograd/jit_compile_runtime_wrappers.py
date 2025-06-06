@@ -1686,6 +1686,14 @@ def aot_dispatch_autograd(
                         # GraphModule. Deepcopying tensors under fake mode is not supported and will
                         # raise when attempting to set storage.
                         bw_module_copy = copy.deepcopy(bw_module)
+                        # Tensors stored on the bw_module are deepcopied and may increase memory use.
+                        # It is safe to point them to original tensors on the bw_module if they aren't mutated.
+                        for name, _ in bw_module_copy.named_parameters():
+                            if (param := getattr(bw_module, name, None)) is not None:
+                                setattr(bw_module_copy, name, param)
+                        for name, _ in bw_module_copy.named_buffers():
+                            if (buffer := getattr(bw_module, name, None)) is not None:
+                                setattr(bw_module_copy, name, buffer)
                     compiled_bw_func = aot_config.bw_compiler(
                         bw_module_copy, placeholder_list
                     )
