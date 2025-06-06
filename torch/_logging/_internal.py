@@ -14,7 +14,7 @@ import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Callable, cast, Generic, Optional, Protocol, Union
+from typing import Any, Callable, Generic, Optional, Union
 from typing_extensions import ParamSpec
 from weakref import WeakSet
 
@@ -606,7 +606,6 @@ def getArtifactLogger(module_qname, artifact_name) -> logging.Logger:
     qname = module_qname + f".__{artifact_name}"
     log = logging.getLogger(qname)
     log.artifact_name = artifact_name  # type: ignore[attr-defined]
-    log = cast(ArtifactLogger, log)
     log_registry.register_artifact_log(qname)
     configure_artifact_log(log)
     return log
