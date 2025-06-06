@@ -104,6 +104,56 @@ kernel void unary_strided(
     }                                                                           \
   }
 
+template <typename T, typename T2, typename F>
+kernel void unary_alpha_dense(
+    device result_of<F, T>* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T2& alpha [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  output[index] = f(input[index], alpha);
+}
+
+template <typename T, typename T2, typename F>
+kernel void unary_alpha_strided(
+    device result_of<F, T>* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant long* sizes [[buffer(2)]],
+    constant long* input_strides [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant uint& ndim [[buffer(5)]],
+    constant T2& alpha [[buffer(6)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
+  output[output_offs] = f(input[input_offs], alpha);
+}
+
+#define REGISTER_UNARY_ALPHA_OP(NAME, DTYPE_IN, DTYPE_A, DTYPE_OUT)                 \
+  static_assert(                                                                    \
+      ::metal::                                                                     \
+          is_same_v<DTYPE_OUT, ::c10::metal::result_of<NAME##_functor, DTYPE_IN>>,  \
+      "Output dtype mismatch for unary op " #NAME " and input " #DTYPE_IN);         \
+  template [[host_name(#NAME "_dense_" #DTYPE_OUT "_" #DTYPE_IN)]] kernel void ::   \
+      c10::metal::unary_alpha_dense<DTYPE_IN, DTYPE_A, NAME##_functor>(             \
+          device ::c10::metal::result_of<NAME##_functor, DTYPE_IN> * output,        \
+          constant DTYPE_IN * input,                                                \
+          constant DTYPE_A & alpha,                                                 \
+          uint index);                                                              \
+  template [[host_name(#NAME "_strided_" #DTYPE_OUT "_" #DTYPE_IN)]] kernel void :: \
+      c10::metal::unary_alpha_strided<DTYPE_IN, DTYPE_A, NAME##_functor>(           \
+          device ::c10::metal::result_of<NAME##_functor, DTYPE_IN> * output,        \
+          constant DTYPE_IN * input,                                                \
+          constant long* sizes,                                                     \
+          constant long* input_strides,                                             \
+          constant long* output_strides,                                            \
+          constant uint& ndim,                                                      \
+          constant DTYPE_A & alpha,                                                 \
+          uint index)
+
 template <typename T>
 inline T val_at_offs(constant void* ptr, long offs) {
   return *reinterpret_cast<constant T*>(
