@@ -3069,6 +3069,45 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["out_ptr"],
         )
 
+    @make_mutation_test
+    def test_on_device_tma_store_old_api():
+        @triton.jit
+        def on_device_tma_kernel(A, workspace_ptr, m, n, BLOCK_SIZE: tl.constexpr):
+            tl.extra.cuda.experimental_device_tensormap_create2d(
+                desc_ptr=workspace_ptr,
+                global_address=A,
+                load_size=[BLOCK_SIZE, BLOCK_SIZE],
+                global_size=[m, n],
+                element_ty=A.dtype.element_ty,
+            )
+
+            pid = tl.program_id(0)
+            n_blocks = tl.cdiv(n, BLOCK_SIZE)
+            m_block_id = pid // n_blocks
+            n_block_id = pid % n_blocks
+
+            ones = tl.full([BLOCK_SIZE, BLOCK_SIZE], 1, A.dtype.element_ty)
+
+            tl._experimental_descriptor_store(
+                workspace_ptr,
+                ones,
+                [m_block_id * BLOCK_SIZE, n_block_id * BLOCK_SIZE],
+            )
+
+        A = torch.zeros(1024, 1024)
+        workspace = torch.empty(128, dtype=torch.int8)
+        return (
+            on_device_tma_kernel,
+            {
+                "A": A,
+                "workspace_ptr": workspace,
+                "m": 1024,
+                "n": 1024,
+                "BLOCK_SIZE": 32,
+            },
+            ["A", "workspace_ptr"],
+        )
+
 
 if HAS_GPU:
     t = torch.randn(4)

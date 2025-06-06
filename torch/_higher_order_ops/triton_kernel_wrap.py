@@ -381,8 +381,8 @@ def ttir_to_functions(
     reindex_map: dict[int, int] = {}
     next_fake_intermediate = 0
 
-    def reindex(idx: int) -> int:
-        if idx not in reindex_map:
+    def reindex(idx: int, override: bool = False) -> int:
+        if idx not in reindex_map or override:
             reindex_map[idx] = len(reindex_map)
         return reindex_map[idx]
 
@@ -422,6 +422,27 @@ def ttir_to_functions(
                     region_id_to_block_ids[parent_region.id()].append(parent_block_id)
 
         nonlocal next_fake_intermediate
+
+        # [Note: modify experimental_tensormap_create]
+        # experimental_tensormap_create(desc_ptr, global_address, ...)
+        # will fill desc_ptr with a TMA descriptor that points to global_address.
+        #
+        # Later, experimental_descriptor_store(desc_ptr, ...) can cause a
+        # write to global_address.
+        #
+        # To simplify analysis of this: we rewrite the IR from
+        #   experimental_tensormap_create(desc_ptr, global_address, ...)
+        # to
+        #   desc_ptr = tt.experimental_tensormap_create(desc_ptr, global_address, ...)
+        # by re-assigning the ID associated with the desc_ptr object to a new
+        # reindexed ID.
+        if name == "tt.experimental_tensormap_create":
+            assert not result_ids
+            assert len(operand_ids) > 0
+            raw_operand_0 = op.get_operand(0).id()
+
+            artificial_return = reindex(raw_operand_0, override=True)
+            result_ids.append(artificial_return)
 
         if name == "tt.func":
             # for function ops: gather and inline
