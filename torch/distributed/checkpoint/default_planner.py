@@ -7,7 +7,7 @@ import logging
 import operator
 from collections import ChainMap
 from functools import reduce
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, Final, Literal, Optional, Union
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
@@ -63,6 +63,8 @@ __all__ = [
     "create_default_local_save_plan",
     "create_default_global_save_plan",
 ]
+
+CURRENT_DCP_VERSION: Final[Literal[float]] = 1.0
 
 
 # TODO: Update docstrings for default_planner.py
@@ -135,6 +137,7 @@ class DefaultSavePlanner(SavePlanner):
         deduped_plans = self._dedup_save_plans(all_plans)
 
         global_plan, metadata = create_default_global_save_plan(deduped_plans)
+        metadata = dataclasses.replace(metadata, version=CURRENT_DCP_VERSION)
 
         if self.flatten_state_dict:
             # | does not work for Python 3.8 or older version.
