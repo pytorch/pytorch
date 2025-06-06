@@ -305,21 +305,56 @@ def do_bench_using_profiling(
     log.debug("raw events")
     log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
 
-    filtered_events = EventList(
-        [
-            event
-            for event in p.events()
-            if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
-        ]
-    )
+    tmp = [
+        event
+        for event in p.events()
+        if event.device_type == DeviceType.CUDA
+        and event.name not in ["Context Sync", "Memset (Device)"]
+    ]
+    filtered_events = EventList(tmp)
+    num_event_per_group = len(filtered_events) / n_repeat
     if len(filtered_events) % n_repeat != 0:
-        raise RuntimeError(
+        log.debug(
             "Failed to divide all profiling events into #repeat groups. "
-            "#CUDA events: %d, #repeats: %s",
+            "#CUDA events: %d, #repeats: %s. There could have been extra "
+            "events added, check filtered_events.",
             len(filtered_events),
             n_repeat,
         )
-    num_event_per_group = len(filtered_events) / n_repeat
+        # There's a bug in recent cuda cupti where kernel events aren't being recorded.
+        # This has been reported to NV, but no workaround yet, so we'll adjust the final
+        # estimate using some heuristics to see if we can still salvage a number.
+
+        # histogram of the kernels
+        from collections import defaultdict
+
+        name_counts = defaultdict(int)
+        for event in tmp:
+            name_counts[event.name] += 1
+
+        largest, smallest = max(name_counts), min(name_counts)
+        largest_num, smallest_num = name_counts[largest], name_counts[smallest]
+        if largest_num > n_repeat:
+            # we're out of luck here, since kernels are being ran multiple times in fn()
+            raise RuntimeError(
+                "Failed to divide all profiling events into #repeat groups and unable to adjust because"
+                " kernels are being ran multiple times in the benchmarking function."
+            )
+        else:
+            # It could be the case here that kernels are being run multiple times, and the profiler is missing events.
+            # Not much we can do in that situation. It shouldn't appear in most of the usage of this function, which is for microbenchmarking
+            # but beware if using on larger models.
+
+            # we're going to assume that the benchmarking function is one of each kernel, which we can't do if the distribution is lopsided
+            if largest_num / smallest_num < 0.90:
+                raise RuntimeError(
+                    "Failed to divide all profiling events into #repeat groups and unable to adjust because"
+                    " either the benchmarking function is too complex, or too many kernels are being skipped."
+                )
+            # TODO just sum one of each kernel and adjust the other ratios by there prevalence in the histogram.
+            
+            breakpoint()
+
     actual_events = EventList(
         [
             event
@@ -327,10 +362,11 @@ def do_bench_using_profiling(
             if i % num_event_per_group != 0
         ]
     )
+
     actual_events._build_tree()
     actual_events = actual_events.key_averages()
 
-    log.debug("profiling time breakdown")
+    log.info("profiling time breakdown")
     log.debug(actual_events.table(row_limit=-1))
 
     res = sum(event.device_time_total for event in actual_events) / 1000.0 / n_repeat
