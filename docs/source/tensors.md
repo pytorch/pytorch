@@ -17,15 +17,15 @@ Torch defines tensor types with the following data types:
 | ------------------------------------------------ | ---------------------------------------------- |
 | 32-bit floating point                            | `torch.float32` or `torch.float`               |
 | 64-bit floating point                            | `torch.float64` or `torch.double`              |
-| 16-bit floating point [^footnote-1]              | `torch.float16` or `torch.half`                |
-| 16-bit floating point [^footnote-2]              | `torch.bfloat16`                               |
+| 16-bit floating point [^1]              | `torch.float16` or `torch.half`                |
+| 16-bit floating point [^2]              | `torch.bfloat16`                               |
 | 32-bit complex                                   | `torch.complex32` or `torch.chalf`             |
 | 64-bit complex                                   | `torch.complex64` or `torch.cfloat`            |
 | 128-bit complex                                  | `torch.complex128` or `torch.cdouble`          |
 | 8-bit integer (unsigned)                         | `torch.uint8`                                  |
-| 16-bit integer (unsigned)                        | `torch.uint16` (limited support) [^footnote-4] |
-| 32-bit integer (unsigned)                        | `torch.uint32` (limited support) [^footnote-4] |
-| 64-bit integer (unsigned)                        | `torch.uint64` (limited support) [^footnote-4] |
+| 16-bit integer (unsigned)                        | `torch.uint16` (limited support) [^4] |
+| 32-bit integer (unsigned)                        | `torch.uint32` (limited support) [^4] |
+| 64-bit integer (unsigned)                        | `torch.uint64` (limited support) [^4] |
 | 8-bit integer (signed)                           | `torch.int8`                                   |
 | 16-bit integer (signed)                          | `torch.int16` or `torch.short`                 |
 | 32-bit integer (signed)                          | `torch.int32` or `torch.int`                   |
@@ -34,26 +34,26 @@ Torch defines tensor types with the following data types:
 | quantized 8-bit integer (unsigned)               | `torch.quint8`                                 |
 | quantized 8-bit integer (signed)                 | `torch.qint8`                                  |
 | quantized 32-bit integer (signed)                | `torch.qint32`                                 |
-| quantized 4-bit integer (unsigned) [^footnote-3] | `torch.quint4x2`                               |
-| 8-bit floating point, e4m3 [^footnote-5]         | `torch.float8_e4m3fn` (limited support)        |
-| 8-bit floating point, e5m2 [^footnote-5]         | `torch.float8_e5m2` (limited support)          |
+| quantized 4-bit integer (unsigned) [^3] | `torch.quint4x2`                               |
+| 8-bit floating point, e4m3 [^5]         | `torch.float8_e4m3fn` (limited support)        |
+| 8-bit floating point, e5m2 [^5]         | `torch.float8_e5m2` (limited support)          |
 
-[^footnote-1]: Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
+[^1]: Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
     significand bits. Useful when precision is important at the expense of range.
 
-[^footnote-2]: Sometimes referred to as Brain Floating Point: uses 1 sign, 8 exponent, and 7
+[^2]: Sometimes referred to as Brain Floating Point: uses 1 sign, 8 exponent, and 7
     significand bits. Useful when range is important, since it has the same
     number of exponent bits as `float32`
 
-[^footnote-3]: quantized 4-bit integer is stored as a 8-bit signed integer. Currently it's only supported in EmbeddingBag operator.
+[^3]: quantized 4-bit integer is stored as a 8-bit signed integer. Currently it's only supported in EmbeddingBag operator.
 
-[^footnote-4]: Unsigned types asides from `uint8` are currently planned to only have
+[^4]: Unsigned types asides from `uint8` are currently planned to only have
     limited support in eager mode (they primarily exist to assist usage with
     torch.compile); if you need eager support and the extra range is not needed,
     we recommend using their signed variants instead. See
     <https://github.com/pytorch/pytorch/issues/58734> for more details.
 
-[^footnote-5]: `torch.float8_e4m3fn` and `torch.float8_e5m2` implement the spec for 8-bit
+[^5]: `torch.float8_e4m3fn` and `torch.float8_e5m2` implement the spec for 8-bit
     floating point types from <https://arxiv.org/abs/2209.05433>. The op support
     is very limited.
 

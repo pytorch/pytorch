@@ -39,7 +39,7 @@ Untyped storages are somewhat independent of the tensors that are built on them.
 with different dtypes or shape can point to the same storage.
 It also implies that a tensor storage can be changed, as the following example shows:
 
-> ```pycon
+> ```python
 > >>> t = torch.ones(3)
 > >>> s0 = t.untyped_storage()
 > >>> s0
@@ -87,7 +87,7 @@ Other than `data_ptr`, untyped storage also have other attributes such as {attr}
 (in case the storage points to a file on disk), {attr}`~torch.UntypedStorage.device` or
 {attr}`~torch.UntypedStorage.is_cuda` for device checks. A storage can also be manipulated in-place or
 out-of-place with methods like {attr}`~torch.UntypedStorage.copy_`, {attr}`~torch.UntypedStorage.fill_` or
-{attr}`~torch.UntypedStorage.pin_memory`. FOr more information, check the API
+{attr}`~torch.UntypedStorage.pin_memory`. For more information, check the API
 reference below. Keep in mind that modifying storages is a low-level API and comes with risks!
 Most of these APIs also exist on the tensor level: if present, they should be prioritized over their storage
 counterparts.
@@ -98,7 +98,7 @@ We mentioned that a tensor that has a non-None `grad` attribute has actually two
 In this case, {meth}`~torch.Tensor.untyped_storage` will return the storage of the {attr}`~torch.Tensor.data` attribute,
 whereas the storage of the gradient can be obtained through `tensor.grad.untyped_storage()`.
 
-> ```pycon
+> ```python
 > >>> t = torch.zeros(3, requires_grad=True)
 > >>> t.sum().backward()
 > >>> assert list(t.untyped_storage()) == [0] * 12  # the storage of the tensor is just 0s

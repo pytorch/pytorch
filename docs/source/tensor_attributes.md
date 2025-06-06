@@ -26,8 +26,8 @@ A {class}`torch.dtype` is an object that represents the data type of a
 | 32-bit complex                      | `torch.complex32` or `torch.chalf`    |                          |
 | 64-bit complex                      | `torch.complex64` or `torch.cfloat`   |                          |
 | 128-bit complex                     | `torch.complex128` or `torch.cdouble` |                          |
-| 16-bit floating point [^footnote-1] | `torch.float16` or `torch.half`       | `torch.*.HalfTensor`     |
-| 16-bit floating point [^footnote-2] | `torch.bfloat16`                      | `torch.*.BFloat16Tensor` |
+| 16-bit floating point [^1] | `torch.float16` or `torch.half`       | `torch.*.HalfTensor`     |
+| 16-bit floating point [^2] | `torch.bfloat16`                      | `torch.*.BFloat16Tensor` |
 | 8-bit integer (unsigned)            | `torch.uint8`                         | `torch.*.ByteTensor`     |
 | 8-bit integer (signed)              | `torch.int8`                          | `torch.*.CharTensor`     |
 | 16-bit integer (signed)             | `torch.int16` or `torch.short`        | `torch.*.ShortTensor`    |
@@ -35,10 +35,10 @@ A {class}`torch.dtype` is an object that represents the data type of a
 | 64-bit integer (signed)             | `torch.int64` or `torch.long`         | `torch.*.LongTensor`     |
 | Boolean                             | `torch.bool`                          | `torch.*.BoolTensor`     |
 
-[^footnote-1]: Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
+[^1]: Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
     significand bits. Useful when precision is important.
 
-[^footnote-2]: Sometimes referred to as Brain Floating Point: use 1 sign, 8 exponent and 7
+[^2]: Sometimes referred to as Brain Floating Point: use 1 sign, 8 exponent and 7
     significand bits. Useful when range is important, since it has the same
     number of exponent bits as `float32`
 
@@ -108,9 +108,9 @@ torch.float32
 ```
 
 When the output tensor of an arithmetic operation is specified, we allow casting to its `dtype` except that:
-: - An integral output tensor cannot accept a floating point tensor.
-  - A boolean output tensor cannot accept a non-boolean tensor.
-  - A non-complex output tensor cannot accept a complex tensor
+- An integral output tensor cannot accept a floating point tensor.
+- A boolean output tensor cannot accept a non-boolean tensor.
+- A non-complex output tensor cannot accept a complex tensor
 
 Casting Examples:
 
@@ -209,13 +209,13 @@ is causing problems for you, please comment on
 The {class}`torch.device` argument in functions can generally be substituted with a string.
 This allows for fast prototyping of code.
 
-```pycon
+```python
 >>> # Example of a function that takes in a torch.device
 >>> cuda1 = torch.device('cuda:1')
 >>> torch.randn((2,3), device=cuda1)
 ```
 
-```pycon
+```python
 >>> # You can substitute the torch.device with a string
 >>> torch.randn((2,3), device='cuda:1')
 ```
@@ -227,7 +227,7 @@ as the current {ref}`accelerator<accelerators>` type.
 This matches {meth}`Tensor.get_device`, which returns an ordinal for device
 tensors and is not supported for cpu tensors.
 
-```pycon
+```python
 >>> torch.device(1)
 device(type='cuda', index=1)
 ```
@@ -237,7 +237,7 @@ device(type='cuda', index=1)
 Methods which take a device will generally accept a (properly formatted) string
 or (legacy) integer device ordinal, i.e. the following are all equivalent:
 
-```pycon
+```python
 >>> torch.randn((2,3), device=torch.device('cuda:1'))
 >>> torch.randn((2,3), device='cuda:1')
 >>> torch.randn((2,3), device=1)  # legacy
@@ -248,19 +248,19 @@ or (legacy) integer device ordinal, i.e. the following are all equivalent:
 Tensors are never moved automatically between devices and require an explicit call from the user. Scalar Tensors (with tensor.dim()==0) are the only exception to this rule and they are automatically transferred from CPU to GPU when needed as this operation can be done "for free".
 Example:
 
-```pycon
+```python
 >>> # two scalars
 >>> torch.ones(()) + torch.ones(()).cuda()  # OK, scalar auto-transferred from CPU to GPU
 >>> torch.ones(()).cuda() + torch.ones(())  # OK, scalar auto-transferred from CPU to GPU
 ```
 
-```pycon
+```python
 >>> # one scalar (CPU), one vector (GPU)
 >>> torch.ones(()) + torch.ones(1).cuda()  # OK, scalar auto-transferred from CPU to GPU
 >>> torch.ones(1).cuda() + torch.ones(())  # OK, scalar auto-transferred from CPU to GPU
 ```
 
-```pycon
+```python
 >>> # one scalar (GPU), one vector (CPU)
 >>> torch.ones(()).cuda() + torch.ones(1)  # Fail, scalar not auto-transferred from GPU to CPU and non-scalar not auto-transferred from CPU to GPU
 >>> torch.ones(1) + torch.ones(()).cuda()  # Fail, scalar not auto-transferred from GPU to CPU and non-scalar not auto-transferred from CPU to GPU
