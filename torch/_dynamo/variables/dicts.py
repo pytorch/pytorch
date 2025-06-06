@@ -101,8 +101,9 @@ def is_hashable(x):
     elif (
         isinstance(x, variables.UserDefinedObjectVariable)
         and not was_instancecheck_override(x.value)
-        and inspect.getattr_static(x.value, "__hash__") is int.__hash__
-        and isinstance(x.value, int)
+        and inspect.getattr_static(x.value, "__hash__")
+        in (int.__hash__, object.__hash__)
+        and isinstance(x.value, (object, int))
     ):
         return isinstance(x.value, py_Hashable)
     else:
@@ -373,6 +374,7 @@ class ConstDictVariable(VariableTracker):
 
     def install_dict_keys_match_guard(self):
         if self.source:
+            print(self.as_python_constant())
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
 
     def install_dict_contains_guard(self, tx, args):
@@ -399,6 +401,9 @@ class ConstDictVariable(VariableTracker):
 
         contains = args[0] in self
         if args[0].source is None and isinstance(args[0], ConstantVariable):
+            # if args[0].value == 'torch':
+            #     breakpoint()
+            #     print(f"{args[0].value} - {contains=}")
             install_guard(
                 self.make_guard(
                     functools.partial(
