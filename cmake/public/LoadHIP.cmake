@@ -90,7 +90,7 @@ if(HIP_FOUND)
   # Some old consumer HIP SDKs do not distribute rocm_version.h, so we allow
   # falling back to the hip version, which everyone should have.
   # rocm_version.h lives in the rocm-core package and hip_version.h lives in the
-  # hip (lower-case) package. Both are probed above and will be in 
+  # hip (lower-case) package. Both are probed above and will be in
   # ROCM_INCLUDE_DIRS if available.
   find_file(ROCM_VERSION_HEADER_PATH
     NAMES rocm-core/rocm_version.h
