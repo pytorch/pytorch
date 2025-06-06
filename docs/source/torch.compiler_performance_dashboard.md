@@ -42,6 +42,6 @@ The exact command lines used during a complete dashboard run can be found in any
 The [workflow page](https://github.com/pytorch/pytorch/actions/workflows/inductor-perf-test-nightly.yml)
 is a good place to look for logs from some of the recent runs.
 In those logs, you can search for lines like
-``python benchmarks/dynamo/huggingface.py --performance --cold-start-latency --inference --amp --backend inductor --disable-cudagraphs --device cuda``
+`python benchmarks/dynamo/huggingface.py --performance --cold-start-latency --inference --amp --backend inductor --disable-cudagraphs --device cuda`
 and run them locally if you have a GPU working with PyTorch 2.0.
 ``python benchmarks/dynamo/huggingface.py -h`` will give you a detailed explanation on options of the benchmarking script.
