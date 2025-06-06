@@ -1490,7 +1490,7 @@ void initJitScriptBindings(PyObject* module) {
                     .attr("compiler")
                     .attr("is_exporting")()
                     .cast<bool>()) {
-              TORCH_CHECK(
+              TORCH_INTERNAL_ASSERT(
                   py::hasattr(args[0], py::str("_torchdynamo_inline")),
                   "During PT2 exporting, we encountered TorchScripted function",
                   strongPtr.function_->name(),
