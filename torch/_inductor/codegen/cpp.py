@@ -4650,7 +4650,7 @@ class CppScheduling(BaseScheduling):
                 isinstance(template_buf.layout, ir.MultiOutputLayout)
                 and isinstance(node2.node, ir.MultiOutput)
                 and len(node2.node.inputs) == 1
-                and node2.node.inputs[0].get_name() == template_buf.name
+                and node2.node.inputs[0].get_name() == template_buf.name  # type: ignore[union-attr]
             )
         return False
 
@@ -4897,7 +4897,7 @@ class CppScheduling(BaseScheduling):
                 # https://github.com/pytorch/pytorch/blob/1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159 # noqa: B950
                 # where the buffer is with size of last dim and contiguous.
                 # Only support this typical case at first.
-                visited_scheduler_nodes = OrderedSet[str]()
+                visited_scheduler_nodes: OrderedSet[str] = OrderedSet()
                 for scheduler_node in node.get_nodes():
                     # all users inside same OuterLoopFusedSchedulerNode
                     assert isinstance(scheduler_node, SchedulerNode)
@@ -5124,7 +5124,7 @@ class CppScheduling(BaseScheduling):
         flag_template_buffer_has_other_users = template_buffer_has_other_users(
             ctb, template_node.outputs_by_name, epilogue_ir_nodes
         )
-        kernel, render = ctb.make_kernel_render(
+        kernel, render = ctb.make_kernel_render(  # type: ignore[misc]
             ctb,
             flag_template_buffer_has_other_users=flag_template_buffer_has_other_users,
             epilogue_nodes=epilogue_ir_nodes,
