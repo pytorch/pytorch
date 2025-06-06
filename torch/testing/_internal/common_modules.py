@@ -4043,7 +4043,6 @@ module_db: list[ModuleInfo] = [
                skips=(
                    # not supported on MPS backend
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_if_train_and_eval_modes_differ', device_type='mps'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format', device_type='mps'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors', device_type='mps'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_save_load', device_type='mps'),),
