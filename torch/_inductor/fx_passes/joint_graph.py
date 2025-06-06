@@ -694,18 +694,34 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
 
 
 def definitely_equal(
-    lhs_sizes: Sequence[Union[torch.SymInt, bool]],
-    rhs_sizes: Sequence[Union[torch.SymInt, bool]],
+    old_sizes: Sequence[Union[torch.SymInt, bool]],
+    new_sizes: Sequence[Union[torch.SymInt, bool]],
 ) -> bool:
     """
     Leverage guard_or_false to compare if two lists of int/symint are equal.
     Useful to compare sizes, strides etc.
+
+    Can handle -1 in new_sizes which happens in the size arguments of a
+    view op.
     """
 
-    return len(lhs_sizes) == len(rhs_sizes) and all(
-        guard_or_false(lhs_item == rhs_item)
-        for lhs_item, rhs_item in zip(lhs_sizes, rhs_sizes)
-    )
+    num_neg1 = 0
+
+    if len(old_sizes) != len(new_sizes):
+        return False
+
+    for lhs_item, rhs_item in zip(old_sizes, new_sizes):
+        if guard_or_false(lhs_item == rhs_item):
+            continue
+
+        if not guard_or_false(rhs_item == -1):
+            return False
+
+        num_neg1 += 1
+
+        if num_neg1 > 1:
+            return False
+    return True
 
 
 @register_graph_pattern(
