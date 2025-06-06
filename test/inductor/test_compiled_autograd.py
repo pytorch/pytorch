@@ -2819,6 +2819,43 @@ main()
         """
         self.run_as_subprocess(script)
 
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    def test_free_buffer_memory_bw_module_deepcopy(self):
+        script = """
+import torch
+from torch._dynamo.device_interface import get_interface_for_device
+from torch.testing._internal.inductor_utils import GPU_TYPE
+
+def main():
+    device_interface = get_interface_for_device(GPU_TYPE)
+    assert device_interface.memory_allocated() == 0
+
+    class Fn(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, x):
+            return x + 1
+
+        @staticmethod
+        def backward(ctx, grad_out):
+            return grad_out * torch.tensor([10] * 200000, device="cuda").sum() * grad_out.shape[0]
+
+    def f(x):
+        return Fn.apply(x)
+
+    x = torch.randn(8, requires_grad=True, device="cuda")
+    c_out = torch.compile(f, backend="aot_eager", dynamic=True)(x)
+    torch.autograd.grad(c_out.sum(), inputs=(x,))
+
+    # just using a number in-between
+    # with swapping buffers: 3204096
+    # without swapping buffers: 4804096
+    print(torch.cuda.max_memory_allocated())
+    assert torch.cuda.max_memory_allocated() < 4000000
+
+main()
+"""
+        self.run_as_subprocess(script)
+
     def test_callback_graph_break_throws_error(self):
         called = [0]
 
