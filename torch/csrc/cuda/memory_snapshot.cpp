@@ -184,7 +184,7 @@ void setRecordFunctionCallbacks(bool enabled, bool compileContext) {
       at::removeCallback(callbackManager.getAnnotationHandle());
       callbackManager.setAnnotationHandle(0);
     }
-    if (compileContext && callbackManager.getCompileContextHandle() != 0) {
+    if (callbackManager.getCompileContextHandle() != 0) {
       at::removeCallback(callbackManager.getCompileContextHandle());
       callbackManager.setCompileContextHandle(0);
     }
