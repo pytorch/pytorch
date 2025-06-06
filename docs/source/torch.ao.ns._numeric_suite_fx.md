@@ -23,7 +23,7 @@ This module is an early prototype and is subject to change.
 ```{currentmodule} torch.ao.ns.fx.utils
 ```
 
-```{automodule} torch.ao.ns.fx.utils
-:members:
-:member-order: bysource
-```
+```{eval-rst}
+.. autofunction:: torch.ao.ns.fx.utils.compute_sqnr(x, y)
+.. autofunction:: torch.ao.ns.fx.utils.compute_normalized_l2_error(x, y)
+.. autofunction:: torch.ao.ns.fx.utils.compute_cosine_similarity(x, y)
