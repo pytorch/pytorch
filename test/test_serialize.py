@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 import io
 import torch
 from torch._export.serde.serialize import deserialize_torch_artifact
@@ -11,3 +12,7 @@ def test_deserialize_torch_artifact_dict():
     result = deserialize_torch_artifact(serialized)
     assert isinstance(result, dict)
     assert torch.equal(result["key"], torch.tensor([1, 2, 3]))
+
+if __name__ == "__main__":
+    from torch.testing._internal.common_utils import run_tests
+    run_tests()
