@@ -571,6 +571,70 @@ class TestExport(TestCase):
 
         self.assertEqual(counter, 1)
 
+    def test_from_node_metadata_export(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv1d = torch.nn.Conv1d(3, 3, 3)
+                self.conv2d = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                x = self.conv2d(x)
+                x = x.squeeze(0)
+                x = self.conv1d(x)
+                return x
+
+            def example_inputs(self):
+                return
+
+        f = Foo()
+        inputs = (torch.randn(1, 3, 5, 5),)
+        gm = export(f, inputs).module()
+        from torch.fx.traceback import NodeSourceAction
+
+        for node in gm.graph.nodes:
+            if node.op in ("placeholder", "output"):
+                continue
+            if "weight" in node.name or "bias" in node.name:
+                self.assertTrue(
+                    node.meta["from_node"][-1].pass_name
+                    == "ExportedProgram.module().unlift()"
+                )
+                self.assertTrue(
+                    node.meta["from_node"][-1].action
+                    == [NodeSourceAction.CREATE, NodeSourceAction.REPLACE]
+                )
+            else:
+                self.assertTrue(
+                    node.meta["from_node"][-1].pass_name == "ExportedProgram.module()"
+                )
+                self.assertTrue(
+                    node.meta["from_node"][-1].action == [NodeSourceAction.CREATE]
+                )
+
+        ## re-export
+        gm2 = export(gm, inputs).module()
+
+        for node in gm2.graph.nodes:
+            if node.op in ("placeholder", "output"):
+                continue
+            if "weight" in node.name or "bias" in node.name:
+                self.assertTrue(
+                    node.meta["from_node"][-1].pass_name
+                    == "ExportedProgram.module().unlift()"
+                )
+                self.assertTrue(
+                    node.meta["from_node"][-1].action
+                    == [NodeSourceAction.CREATE, NodeSourceAction.REPLACE]
+                )
+            else:
+                self.assertTrue(
+                    node.meta["from_node"][-1].pass_name == "ExportedProgram.module()"
+                )
+                self.assertTrue(
+                    node.meta["from_node"][-1].action == [NodeSourceAction.CREATE]
+                )
+
     def test_bincount(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -12916,6 +12980,7 @@ graph():
     @testing.expectedFailureCppSerDes  # TODO: When we deserialize we somehow hardcode sympy.lower to 2
     @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureSerDer
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
     def test_baddbmm(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -12934,7 +12999,6 @@ graph():
         x2 = torch.randn(64, 1, 64, dtype=torch.float16)
         m = M()
 
-        torch.fx.experimental._config.backed_size_oblivious = True
         ep = export(m, (x2,), dynamic_shapes=({1: Dim("batch")},))
 
         self.assertTrue(torch.allclose(m(x2), ep.module()(x2)))
@@ -13400,6 +13464,7 @@ def forward(self, x):
         self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
         self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
 
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
     def test_repeat_interleave(self):
         class M(torch.nn.Module):
             def forward(self, values, batch_sizes):
@@ -13411,7 +13476,6 @@ def forward(self, x):
                 )
 
         inp = (torch.randint(0, 10, (1, 3)), torch.randint(0, 10, (1,)))
-        torch.fx.experimental._config.backed_size_oblivious = True
         ep = torch.export.export(
             M(), inp, dynamic_shapes=({0: Dim("dim")}, {0: Dim("dim")})
         )

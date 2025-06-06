@@ -5338,8 +5338,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: sigmoid_out
-    MPS: sigmoid_out_mps
+    CPU, CUDA, MPS: sigmoid_out
   tags: pointwise
 
 - func: logit(Tensor self, float? eps=None) -> Tensor
