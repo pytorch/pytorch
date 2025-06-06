@@ -5589,25 +5589,27 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
     # https://github.com/pytorch/pytorch/issues/121621
     def test_tensor_random(self):
-        def random_op(tensor, params):
-            res = tensor.random_(**params)
+        def random_op(tensor, args, kwargs):
+            res = tensor.random_(*args, **kwargs)
             return res
 
         random_op = torch.compile(random_op)
-        params = {"from": -10, "to": 10}
         tensor = torch.randn([2, 3])
-        random_op(tensor, params)
+        random_op(tensor, [], {"from": -10, "to": 10})
+        random_op(tensor, [-10], {"to": 10})
+        random_op(tensor, [-10, 10], {})
 
     # https://github.com/pytorch/pytorch/issues/131019
     def test_tensor_uniform(self):
-        def uniform_op(tensor, params):
-            res = tensor.uniform_(**params)
+        def uniform_op(tensor, args, kwargs):
+            res = tensor.uniform_(*args, **kwargs)
             return res
 
         uniform_op = torch.compile(uniform_op)
-        params = {"from": -10, "to": 10}
         tensor = torch.randn([2, 3])
-        uniform_op(tensor, params)
+        uniform_op(tensor, [], {"from": -10, "to": 10})
+        uniform_op(tensor, [-10], {"to": 10})
+        uniform_op(tensor, [-10, 10], {})
 
     def test_data_attr_mutation_after_saved_for_bw(self):
         def f(x):
@@ -6793,6 +6795,21 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         x = torch.randn(3)
         c = "foobar"
         self.assertEqual(f(x, c), opt_f(x, c))
+
+    def test_amp_foreach_fake_impl(self):
+        inv_scale = torch.full((1,), 0.25)
+        found_inf = torch.full((1,), 0.0)
+        grads = [torch.ones(10), torch.ones(10)]
+
+        def f():
+            res = torch._amp_foreach_non_finite_check_and_unscale_(
+                grads, found_inf, inv_scale
+            )
+            return res
+
+        ref = f()
+        res = torch.compile(f, backend="aot_eager")()
+        self.assertEqual(ref, res)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
