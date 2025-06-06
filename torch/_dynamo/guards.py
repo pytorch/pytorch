@@ -1508,9 +1508,23 @@ class GuardBuilder(GuardBuilderBase):
         code = f"{maybe_not}___dict_contains({key!r}, {dict_ref})"
         self._set_guard_export_info(guard, [code])
 
-        self.get_guard_manager(guard).add_dict_contains_guard(
-            not invert, key, get_verbose_code_parts(code, guard)
+        contains = not invert
+        val = self.get(guard.name)
+        print(f"{key=} - {contains=}")
+
+        def fn(d):
+            print(f"{dict.__contains__(val, key)=} - {key=} - {contains=}")
+            # if key in ('torch', 'tinygrad'):
+            #     breakpoint()
+            return dict.__contains__(val, key) == contains
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard)
         )
+
+        # self.get_guard_manager(guard).add_dict_contains_guard(
+        #     not invert, key, get_verbose_code_parts(code, guard)
+        # )
 
     def SET_CONTAINS(self, guard: Guard, key: Any, invert: bool):
         set_ref = self.arg_ref(guard)
