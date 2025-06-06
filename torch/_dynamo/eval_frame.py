@@ -206,9 +206,7 @@ def _callback_from_stance(callback):
         if callback in (False, None):
             return callback
 
-        def fail_callback(frame, *args, **kwargs):
-            if trace_rules.check(frame.f_code):
-                return ConvertFrameReturn()
+        def fail_callback(*args, **kwargs):
             raise RuntimeError(
                 "Detected recompile when torch.compile stance is 'fail_on_recompile'"
             )
