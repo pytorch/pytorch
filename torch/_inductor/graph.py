@@ -307,6 +307,7 @@ class GraphLowering(torch.fx.Interpreter):
         const_wrapper_code: Optional[str] = None,
         const_kernel_code: Optional[str] = None,
         const_module: Optional[GraphLowering] = None,
+        extern_kernel_nodes: Optional[list[ir.ExternKernelNode]] = None,
         name: Optional[str] = None,
         inputs_to_check: Optional[Sequence[int]] = None,
     ) -> None:
@@ -389,7 +390,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
-        self.extern_kernel_nodes: list[ir.ExternKernelNode] = []
+        self.extern_kernel_nodes: list[ir.ExternKernelNode] = (
+            extern_kernel_nodes if extern_kernel_nodes else []
+        )
 
         from torch._inductor.extern_node_serializer import extern_node_json_serializer
 

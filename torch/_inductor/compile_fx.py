@@ -1258,6 +1258,7 @@ class _InProcessFxCompile(FxCompile):
                 const_graph = None
                 const_wrapper_code = None
                 const_kernel_code = None
+                extern_kernel_nodes = None
 
                 if aot_mode and config.aot_inductor.use_runtime_constant_folding:
                     # torchbind objects have name that starts with _torchbind_obj
@@ -1290,6 +1291,7 @@ class _InProcessFxCompile(FxCompile):
                         const_wrapper_code, const_kernel_code = (
                             const_graph.codegen_with_cpp_wrapper()
                         )
+                        extern_kernel_nodes = const_graph.extern_kernel_nodes
 
                 graph = GraphLowering(
                     gm,
@@ -1312,6 +1314,7 @@ class _InProcessFxCompile(FxCompile):
                         const_kernel_code.value if const_kernel_code else None
                     ),
                     const_module=const_graph,
+                    extern_kernel_nodes=extern_kernel_nodes,
                     inputs_to_check=inputs_to_check,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
