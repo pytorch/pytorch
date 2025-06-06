@@ -158,7 +158,7 @@ class MetalExprPrinter(ExprPrinter_):
 
 
 class MetalOverrides(OpOverrides):
-    """Implements Metal-specific overrids for ops. Base class emits Python-friendly overrides"""
+    """Implements Metal-specific overrides for ops. Base class emits Python-friendly overrides."""
 
     @staticmethod
     def to_dtype(
@@ -726,7 +726,7 @@ class MetalKernel(SIMDKernel):
             )
             return
         self.multistage_reduction_entry.append(entry)
-        # When reducing the thensor whose size exceeds max threadgroup size
+        # When reducing the tensor whose size exceeds max threadgroup size
         # loop over extra indices per reduction thread and perform part of the operation
         # using values in the shared memory
         loop_size = (
@@ -850,7 +850,7 @@ class MetalKernel(SIMDKernel):
     def call_kernel(self, name: str, node: Any = None) -> None:
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
-        # Make sure sizevarss has been computed
+        # Make sure sizevars has been computed
         for v in self.args.sizevars.keys():
             wrapper.ensure_size_computed(v)
 
@@ -870,9 +870,9 @@ class MetalKernel(SIMDKernel):
             ]
 
             if V.graph.cpp_wrapper:
-                args += [f"{', '.join(threads)}"]
+                args.append(f"{', '.join(threads)}")
             else:
-                args += [f"threads=[{', '.join(threads)}]"]
+                args.append(f"threads=[{', '.join(threads)}]")
         else:
             if V.graph.cpp_wrapper:
                 raise RuntimeError("We should always have threads?")
@@ -885,9 +885,9 @@ class MetalKernel(SIMDKernel):
                 for v in self.active_range_trees()
             ]
             if V.graph.cpp_wrapper:
-                args += [f"{{{', '.join(threads)}}}"]
+                args.append(f"{{{', '.join(threads)}}}")
             else:
-                args += [f"group_size=[{', '.join(threads)}]"]
+                args.append(f"group_size=[{', '.join(threads)}]")
         else:
             if V.graph.cpp_wrapper:
                 # Add a None so that we always have a group_size in the
