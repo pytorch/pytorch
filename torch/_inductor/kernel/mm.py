@@ -916,6 +916,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 **mm_options(config, m, n, k, layout),
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
+                epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
             )
 
         if use_triton_tma_template(mat1, mat2):
@@ -1135,12 +1136,13 @@ def tuned_scaled_mm(
                 )
 
         for config in scaled_mm_configs(m, n, k):
-            if k <= 16:
-                continue  # Triton crashes in this case
+            if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
+                # Triton crashes however uncommon for real workloads
+                continue
 
             # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
             # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
-            if using_b200() and k < 32:
+            if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
                 continue
 
             kwargs = scaled_mm_options(
@@ -1154,6 +1156,7 @@ def tuned_scaled_mm(
                 **kwargs,
                 suffix_args=suffix_args,
                 epilogue_fn=scale_mm_epilogue(),
+                epilogue_fn_hash="scale_mm_epilogue",
             )
 
     if is_nonzero and use_cutlass_template(layout, m, n, k):
