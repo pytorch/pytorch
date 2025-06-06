@@ -162,7 +162,7 @@ assert __all__ == sorted(__all__)
 # Since this module is only ever added to the wheel if built for such a
 # deployment, it is always safe to attempt.
 try:
-    from . import _rocm_init
+    from . import _rocm_init  # type: ignore[attr-defined]
 except ImportError:
     pass
 else:
@@ -2628,9 +2628,7 @@ def compile(
         disable=disable,
         guard_filter_fn=guard_filter_fn,
         frame_traced_fn=frame_traced_fn,
-    )(
-        model
-    )  # type: ignore[return-value]
+    )(model)  # type: ignore[return-value]
 
 
 def _register_device_module(device_type, module):
