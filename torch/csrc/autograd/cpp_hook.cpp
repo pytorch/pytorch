@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/variable.h>
 
+#include <c10/util/Exception.h>
 #include <utility>
 
 namespace {
@@ -46,6 +47,18 @@ variable_list CppFunctionTensorPreHook::operator()(
   variable_list results(values);
   results[value_idx_] = value;
   return results;
+}
+
+void CppFunctionTensorPreHook::compiled_args(
+    torch::dynamo::autograd::CompiledNodeArgs& args) const {
+  for (const auto i : c10::irange(hooks_->size())) {
+    auto& hook = hooks_->at(i);
+    if (!hook) {
+      // hook was removed
+      continue;
+    }
+    args.add_cpp_single_tensor_pre_hook(hook, value_idx_);
+  }
 }
 
 CppFunctionSingleTensorPreHook::CppFunctionSingleTensorPreHook(
