@@ -4,10 +4,12 @@ from __future__ import annotations
 import io
 import logging
 import os
-from typing import Any, IO, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch._inductor.config
 import torch.fx
+
+from .standalone_compile import CompiledArtifact  # noqa: TC001
 
 
 if TYPE_CHECKING:
@@ -20,6 +22,7 @@ __all__ = [
     "list_mode_options",
     "list_options",
     "cudagraph_mark_step_begin",
+    "standalone_compile",
 ]
 
 
@@ -232,7 +235,9 @@ def _aoti_compile_and_package_inner(
     return package_path
 
 
-def aoti_load_package(path: FileLike, run_single_threaded: bool = False) -> Any:  # type: ignore[type-arg]
+def aoti_load_package(
+    path: FileLike, run_single_threaded: bool = False, device_index: int = -1
+) -> Any:  # type: ignore[type-arg]
     """
     Loads the model from the PT2 package.
 
@@ -251,10 +256,16 @@ def aoti_load_package(path: FileLike, run_single_threaded: bool = False) -> Any:
         run_single_threaded (bool): Whether the model should be run without
             thread synchronization logic. This is useful to avoid conflicts with
             CUDAGraphs.
+        device_index (int): The index of the device to which the PT2 package is
+            to be loaded. By default, `device_index=-1` is used, which corresponds
+            to the device `cuda` when using CUDA. Passing `device_index=1` would
+            load the package to `cuda:1`, for example.
     """
     from torch._inductor.package import load_package
 
-    return load_package(path, run_single_threaded=run_single_threaded)
+    return load_package(
+        path, run_single_threaded=run_single_threaded, device_index=device_index
+    )
 
 
 def aot_compile(
@@ -358,3 +369,46 @@ def cudagraph_mark_step_begin():
     from .cudagraph_trees import mark_step_begin
 
     mark_step_begin()
+
+
+def standalone_compile(
+    gm: torch.fx.GraphModule,
+    example_inputs: list[InputType],
+    *,
+    dynamic_shapes: Literal[
+        "from_example_inputs", "from_tracing_context", "from_graph"
+    ] = "from_graph",
+    options: Optional[dict[str, Any]] = None,
+) -> CompiledArtifact:
+    """
+    Precompilation API for inductor.
+
+    .. code-block:: python
+
+        compiled_artifact = torch._inductor.standalone_compile(gm, args)
+        compiled_artifact.save(path=path, format="binary")
+
+        # Later on a new process
+        loaded = torch._inductor.CompiledArtifact.load(path=path, format="binary")
+        compiled_out = loaded(*args)
+
+    Args:
+        gm: Graph Module
+        example_inputs: Inputs for the graph module
+        dynamic_shapes: If "from_graph" (default), we will use the dynamic
+            shapes in the passed-in graph module.
+            If "from_tracing_context", we use the dynamic shape info in the
+            ambient tracing context.
+            If "from_example_inputs", we will specialize the graph on the
+            example_inputs.
+        options: Inductor compilation options
+
+    Returns:
+        CompiledArtifact that can be saved to disk or invoked directly.
+    """
+    from .standalone_compile import standalone_compile
+
+    options = options if options else {}
+    return standalone_compile(
+        gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options
+    )

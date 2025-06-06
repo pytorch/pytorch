@@ -34,7 +34,6 @@ from torch.distributed.elastic.multiprocessing.errors import ProcessFailure
 from torch.distributed.elastic.rendezvous import RendezvousHandler, RendezvousParameters
 from torch.distributed.elastic.rendezvous.api import RendezvousGracefulExitError
 from torch.distributed.elastic.utils.distributed import get_free_port
-from torch.testing._internal.common_utils import run_tests
 
 
 def do_nothing():
@@ -127,9 +126,7 @@ class TestAgent(SimpleElasticAgent):
         self.stop_workers_call_count = 0
         self.start_workers_call_count = 0
 
-    def _stop_workers(
-        self, worker_group: WorkerGroup, is_restart: bool = False
-    ) -> None:
+    def _stop_workers(self, worker_group: WorkerGroup) -> None:
         # workers are fake, nothing to stop; just clear the rdzv info
         worker_group.group_rank = None
         worker_group.group_world_size = None
@@ -350,7 +347,8 @@ class SimpleElasticAgentTest(unittest.TestCase):
         self.assertEqual(spec_local_addr, worker_group.master_addr)
         self.assertGreater(worker_group.master_port, 0)
 
-    def test_initialize_workers(self):
+    @patch.object(TestAgent, "_construct_event")
+    def test_initialize_workers(self, mock_construct_event):
         spec = self._get_worker_spec(max_restarts=1)
         agent = TestAgent(spec)
         worker_group = agent.get_worker_group()
@@ -360,6 +358,9 @@ class SimpleElasticAgentTest(unittest.TestCase):
         for i in range(spec.local_world_size):
             worker = worker_group.workers[i]
             self.assertEqual(worker.id, worker.global_rank)
+
+        mock_construct_event.assert_called()
+        self.assertEqual(mock_construct_event.call_count, 10)
 
     def test_restart_workers(self):
         spec = self._get_worker_spec()
@@ -648,4 +649,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

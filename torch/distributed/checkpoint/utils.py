@@ -307,6 +307,16 @@ class _DistWrapper:
             raise final_result
         return cast(T, final_result)
 
+    def barrier(self) -> None:
+        """
+        Add a synchronization point across all processes when using distributed.
+        If torch.distributed is initialized, this function will invoke a barrier across the global process group.
+        If torch.distributed is not initialized, this function is a no-op.
+        """
+        if not self.use_dist:
+            return
+        dist.barrier(group=self.group)
+
 
 def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
     if index.offset is None:

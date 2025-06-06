@@ -1153,12 +1153,15 @@ def _canonicalize_group_rank(
     if group_rank is not None:
         if global_rank is not None:
             raise ValueError("Can't specify both group_rank and global_rank")
-        global_rank = get_global_rank(group, group_rank)
+        if return_global:
+            return get_global_rank(group, group_rank)
     else:
         if global_rank is None:
             raise ValueError("Must specify global_rank or group_rank")
+        if return_global:
+            return global_rank
         group_rank = get_group_rank(group, global_rank)
-    return global_rank if return_global else group_rank
+    return group_rank
 
 
 def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str):
@@ -1946,9 +1949,13 @@ def _new_process_group_helper(
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
+            if not is_gloo_available():
+                raise RuntimeError("Distributed package doesn't have Gloo built in")
             backend_class = ProcessGroupGloo(
                 backend_prefix_store, group_rank, group_size, timeout=timeout
             )
+            backend_class.options.global_ranks_in_group = global_ranks_in_group
+            backend_class.options.group_name = group_name
             backend_type = ProcessGroup.BackendType.GLOO
         elif backend_str == Backend.NCCL:
             if not is_nccl_available():
@@ -3079,6 +3086,10 @@ def all_gather_object(object_list, obj, group=None):
         ``torch.cuda.set_device()``.
 
     .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
+
+    .. warning::
         :func:`all_gather_object` uses ``pickle`` module implicitly, which is
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
@@ -3177,6 +3188,10 @@ def gather_object(
         ``torch.cuda.current_device()`` and it is the user's responsiblity to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`gather_object` uses ``pickle`` module implicitly, which is
@@ -3300,6 +3315,10 @@ def send_object_list(
         ``torch.cuda.set_device()``.
 
     .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
+
+    .. warning::
         :func:`send_object_list` uses ``pickle`` module implicitly, which
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
@@ -3396,6 +3415,10 @@ def recv_object_list(
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`recv_object_list` uses ``pickle`` module implicitly, which
@@ -3506,6 +3529,10 @@ def broadcast_object_list(
     .. note:: Note that this API differs slightly from the :func:`broadcast`
         collective since it does not provide an ``async_op`` handle and thus
         will be a blocking call.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`broadcast_object_list` uses ``pickle`` module implicitly, which
@@ -3625,6 +3652,10 @@ def scatter_object_list(
     .. note:: Note that this API differs slightly from the scatter collective
         since it does not provide an ``async_op`` handle and thus will be a
         blocking call.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`scatter_object_list` uses ``pickle`` module implicitly, which
@@ -4703,7 +4734,7 @@ def barrier(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        device_ids ([int], optional): List of device/GPU ids.
+        device_ids ([int], optional): List of device/GPU ids. Only one id is expected.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4711,22 +4742,35 @@ def barrier(
 
     .. note:: `ProcessGroupNCCL` now blocks the cpu thread till the completion of the barrier collective.
     """
+    group = group or _get_default_group()
+
     if _rank_not_in_group(group):
         _warn_not_in_group("barrier")
         return
 
     opts = BarrierOptions()
-    opts.device = torch.device(_get_object_coll_device(group))
     opts.asyncOp = async_op
-    if device_ids is not None:
-        if isinstance(device_ids, list):
-            opts.device_ids = device_ids
-        else:
-            raise TypeError(
-                "Invalid function argument: device_ids type should be List[int]"
-            )
+    # Detect the accelerator on the machine. If no accelerator is available, it
+    # returns CPU.
+    device = torch._C._get_accelerator()
+    if isinstance(device_ids, list):
+        opts.device_ids = device_ids
+        # use only the first device id
+        opts.device = torch.device(device.type, device_ids[0])
+    elif getattr(group, "bound_device_id", None) is not None:
+        # Use device id from `init_process_group(device_id=...)`
+        opts.device = group.bound_device_id  # type: ignore[assignment]
+    elif device.type == "cpu" or _get_object_coll_device(group) == "cpu":
+        opts.device = torch.device("cpu")
+    else:
+        # Use the current device set by the user. If user did not set any, this
+        # may use default device 0, causing issues like hang or all processes
+        # creating context on device 0.
+        opts.device = device
+        warnings.warn(  # warn only once
+            "No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. "
+        )
 
-    group = group or _get_default_group()
     work = group.barrier(opts=opts)
 
     if async_op:
@@ -4902,8 +4946,8 @@ def split_group(
     """
     Create a new process group splitted from the given parent process group.
 
-    warning:: This is an experimental API and only the ``NCCL`` backend supports this API.
-    Other backends will raise an error.
+    warning:: This is an experimental API. Only the ``NCCL`` and custom plugin backends
+    are supported. Other backends will raise an error.
     Users of this API must gurantee that all ranks in the parent group enter this API call,
     and the split of the sub groups is the same across all ranks in the parent group.
 
@@ -4919,12 +4963,9 @@ def split_group(
             [[0, 1], [2, 3]]. Note [[0,1]] is also a valid split, in which case ranks 2, 3 would
             return a non-group member.
         timeout (timedelta, optional): see `init_process_group` for details and default value.
-        pg_options (ProcessGroupOptions, optional): only ProcessGroupNCCLOptions is supported now.
-            specifying what additional options need to be passed in during
+        pg_options (ProcessGroupOptions, optional): Additional options need to be passed in during
             the construction of specific process groups. i.e.``is_high_priority_stream``
             can be specified so that process group can pick up high priority cuda streams.
-            For other availble options to config nccl,
-            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
         group_desc (str, optional): a string to describe the process group.
 
     Returns:
@@ -4968,18 +5009,14 @@ def split_group(
 
     # if the parent backend does not support splitting, raise error
     # currently this API only support NCCL backend
-    if (
-        not parent_backend
-        or not parent_backend.supports_splitting
-        or not isinstance(parent_backend, ProcessGroupNCCL)
-    ):
+    if not parent_backend or not parent_backend.supports_splitting:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
 
     # set the group_desc before the color or no_cloor split
     group_desc = (
-        f"{parent_pg.group_desc}:split:{parent_backend.comm_split_count()}"
+        f"{parent_pg.group_desc}:split:{parent_backend.comm_split_count()}"  # type: ignore[attr-defined]
         if group_desc is None
         else group_desc
     )
@@ -4989,11 +5026,7 @@ def split_group(
     backend = Backend(parent_backend_str)
     backend_config = BackendConfig(backend)
 
-    if pg_options is not None:
-        assert isinstance(pg_options, ProcessGroupNCCL.Options), (
-            "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
-        )
-    else:
+    if pg_options is None:
         # default pg_options same as the parent process group
         pg_options = parent_backend.options
 
@@ -5024,7 +5057,7 @@ def split_group(
     # if my rank does not belong to any sub group,
     # no_color split should be called
     if my_group is None or group_rank == -1:
-        parent_backend.perform_nocolor_split(device_id)
+        parent_backend.perform_nocolor_split(device_id)  # type: ignore[attr-defined]
         return None
 
     group_name = _process_group_name(my_group, use_hashed_name=False)
@@ -5037,18 +5070,40 @@ def split_group(
         group_rank,
         len(my_group),
     )
-    backend_type = ProcessGroup.BackendType.NCCL
-    pg.bound_device_id = device_id
-    pg._set_default_backend(backend_type)
+    pg.bound_device_id = device_id  # type: ignore[union-attr]
+    pg_options._timeout = timeout  # type: ignore[union-attr]
+    pg_options.split_from = parent_backend  # type: ignore[union-attr]
+    pg_options.split_color = _process_group_color(my_group)  # type: ignore[union-attr]
+    pg_options.global_ranks_in_group = global_ranks_in_my_group  # type: ignore[union-attr]
+    pg_options.group_name = group_name  # type: ignore[union-attr]
 
-    pg_options._timeout = timeout
-    pg_options.split_from = parent_backend
-    pg_options.split_color = _process_group_color(my_group)
-    pg_options.global_ranks_in_group = global_ranks_in_my_group
-    pg_options.group_name = group_name
-    backend_class = ProcessGroupNCCL(
-        prefix_store, group_rank, len(my_group), pg_options
-    )
+    if parent_backend_str == Backend.NCCL:
+        backend_type = ProcessGroup.BackendType.NCCL
+        if not isinstance(pg_options, ProcessGroupNCCL.Options):
+            raise RuntimeError(
+                "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
+            )
+        backend_class = ProcessGroupNCCL(
+            prefix_store, group_rank, len(my_group), pg_options
+        )
+    else:
+        assert parent_backend_str.upper() in Backend._plugins, (
+            f"Unknown c10d backend type {parent_backend_str.upper()}"
+        )
+        backend_plugin = Backend._plugins[parent_backend_str.upper()]
+        creator_fn = backend_plugin.creator_fn
+        extended_api = backend_plugin.extended_api
+        backend_type = ProcessGroup.BackendType.CUSTOM
+        if not extended_api:
+            backend_class = creator_fn(prefix_store, group_rank, len(my_group), timeout)
+        else:
+            dist_backend_opts = _DistributedBackendOptions()
+            dist_backend_opts.store = prefix_store
+            dist_backend_opts.group_rank = group_rank
+            dist_backend_opts.group_size = len(my_group)
+            backend_class = creator_fn(dist_backend_opts, pg_options)
+
+    pg._set_default_backend(backend_type)
     backend_class._set_sequence_number_for_group()
 
     pg._register_backend(torch.device("cuda"), backend_type, backend_class)
@@ -5115,9 +5170,9 @@ def new_group(
         group, they must be synchronized with other cuda streams by calling `work.wait()`
         before using another process group.
 
-        See `Using multiple NCCL communicators concurrently <https://docs.nvid
-        ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
-        -multiple-nccl-communicators-concurrently>`_ for more details.
+        See `Using multiple NCCL communicators concurrently
+        <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using-multiple-nccl-communicators-concurrently>`
+        for more details.
 
     Args:
         ranks (list[int]): List of ranks of group members. If ``None``, will be
@@ -5136,10 +5191,9 @@ def new_group(
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams. For other availble options to config nccl,
-            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
-        use_local_synchronization (bool, optional): perform a group-local
-            barrier at the end of the process group creation. This is different
-            in that non-member ranks don't need to call into API and don't
+            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-tuse_local_synchronization
+            (bool, optional): perform a group-local barrier at the end of the process group creation.
+            This is different in that non-member ranks don't need to call into API and don't
             join the barrier.
         group_desc (str, optional): a string to describe the process group.
         device_id (torch.device, optional): a single, specific device
@@ -5335,6 +5389,8 @@ def new_subgroups(
             the default subgroup size is equal to the number of devices on each machine,
             based on the assumption that each machine has exactly the same
             number of devices. Default is ``None``.
+        group (ProcessGroup, optional): The process group to work on. If
+            ``None``, the default process group will be used. Default is ``None``.
         timeout (timedelta, optional): see `init_process_group` for details and default value.
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values are ``gloo`` and ``nccl``.
@@ -5380,36 +5436,28 @@ def new_subgroups(
     if group_size <= 0:
         raise ValueError(f"The arg 'group_size' ({group_size}) must be positive")
 
-    world_size = get_world_size()
+    world_size = get_world_size(group=group)
     if world_size < group_size:
         raise ValueError(
             f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})"
         )
     if world_size % group_size != 0:
-        raise ValueError("The world size must be divisible by 'group_size'")
-
-    subgroups = []
-    cur_subgroup = None
-
-    for subgroup_id in range(world_size // group_size):
-        start_rank = subgroup_id * group_size
-        end_rank = start_rank + group_size
-        ranks_in_subgroup = list(range(start_rank, end_rank))
-        subgroup = new_group(
-            ranks=ranks_in_subgroup,
-            timeout=timeout,
-            backend=backend,
-            pg_options=pg_options,
-            group_desc=group_desc,
+        raise ValueError(
+            f"The world size ({world_size}) must be divisible by '{group_size=}'"
         )
-        subgroups.append(subgroup)
 
-        rank = get_rank()
-        if rank in ranks_in_subgroup:
-            cur_subgroup = subgroup
-            logger.info("Rank %s is assigned to subgroup %s", rank, ranks_in_subgroup)
-
-    return cur_subgroup, subgroups
+    # TODO: Use itertools.batched(get_process_group_ranks(group=group), group_size) instead when Python 3.12 is supported.
+    ranks = get_process_group_ranks(group=group or _get_default_group())
+    ranks_per_subgroup_list = [
+        ranks[i : i + group_size] for i in range(0, len(ranks), group_size)
+    ]
+    return new_subgroups_by_enumeration(
+        ranks_per_subgroup_list,
+        timeout=timeout,
+        backend=backend,
+        pg_options=pg_options,
+        group_desc=group_desc,
+    )
 
 
 def new_subgroups_by_enumeration(

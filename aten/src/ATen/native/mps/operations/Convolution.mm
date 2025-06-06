@@ -190,7 +190,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
     if (bias_defined)
       bias_shape = bias_opt.value().sizes();
 
-    string mem_format_key;
+    std::string mem_format_key;
     switch (memory_format) {
       case at::MemoryFormat::Contiguous:
         mem_format_key = "Contiguous";
@@ -202,14 +202,14 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
         assert(0 && "Check should have been done earlier\n");
     }
 
-    string bias_shape_key;
+    std::string bias_shape_key;
     if (bias_defined) {
       bias_shape_key = std::to_string(bias_shape[0]);
     } else {
       bias_shape_key = "nobias";
     }
 
-    string key;
+    std::string key;
     if (is3DConv) {
       key = "mps_3d_convolution:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
           std::to_string(stride[2]) + ":" + std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" +
@@ -404,7 +404,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   @autoreleasepool {
     MPSStream* stream = getCurrentMPSStream();
 
-    string mem_format_key;
+    std::string mem_format_key;
     switch (memory_format) {
       case at::MemoryFormat::Contiguous:
         mem_format_key = "Contiguous";
@@ -417,7 +417,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
     }
 
     MPSShape* mps_input_shape = getMPSShape(input_size);
-    string key;
+    std::string key;
     if (is3DConv) {
       key = "mps_3d_convolution_backward_input:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
           ":" + std::to_string(stride[2]) + std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" +
@@ -555,7 +555,7 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
     MPSStream* stream = getCurrentMPSStream();
 
     MPSShape* mps_weight_shape = getMPSShape(weight_size);
-    string key;
+    std::string key;
     if (is3DConv) {
       key = "mps_3d_convolution_backward_weights:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
           std::to_string(stride[2]) + ":" + std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" +
@@ -700,7 +700,9 @@ Tensor _mps_convolution_transpose(const Tensor& input_t,
                                   IntArrayRef stride,
                                   IntArrayRef dilation,
                                   int64_t groups) {
-  TORCH_CHECK(input_t.dim() < 5, "ConvTranspose 3D is not supported on MPS");
+  bool is_unsupported_3d_dtype =
+      (input_t.dim() == 5 && (input_t.scalar_type() == kHalf || input_t.scalar_type() == kBFloat16));
+  TORCH_CHECK(!is_unsupported_3d_dtype, "ConvTranspose 3D with BF16 or FP16 types is not supported on MPS");
 
   auto output_t =
       mps_convolution_transpose_forward(input_t, weight_t, padding, output_padding, stride, dilation, groups);

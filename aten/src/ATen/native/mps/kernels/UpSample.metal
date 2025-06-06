@@ -1,58 +1,8 @@
+#include <c10/metal/atomic.h>
 #include <metal_stdlib>
+
 using namespace metal;
-
-// Atomic operations helper
-template <typename T>
-struct AtomicType {};
-template <typename T>
-using AtomicType_t = typename AtomicType<T>::type;
-
-template <>
-struct AtomicType<float> {
-  using type = atomic<float>;
-  static inline void atomic_add(device type* data, long offset, float value) {
-    atomic_fetch_add_explicit(data + offset, value, memory_order_relaxed);
-  }
-};
-
-// As of Metal3.2 atomic operations are not supported on half-precision floats,
-// so they must be simulated Using atomic compare and exchange over 32-bit
-// atomic type
-template <typename T>
-static inline void atomic_add_helper(
-    device atomic<int>* data,
-    long offset,
-    float value) {
-  auto ptr = data + (offset >> 1);
-  auto old = atomic_load_explicit(ptr, memory_order_relaxed);
-  union {
-    int i;
-    T t[2];
-  } val;
-  do {
-    val.i = old;
-    val.t[offset & 1] += static_cast<T>(value);
-  } while (!atomic_compare_exchange_weak_explicit(
-      ptr, &old, val.i, memory_order_relaxed, memory_order_relaxed));
-}
-
-template <>
-struct AtomicType<half> {
-  using type = atomic<int>;
-  static inline void atomic_add(device type* data, long offset, float value) {
-    atomic_add_helper<half>(data, offset, value);
-  }
-};
-
-#if __METAL_VERSION__ >= 310
-template <>
-struct AtomicType<bfloat> {
-  using type = atomic<int>;
-  static inline void atomic_add(device type* data, long offset, float value) {
-    atomic_add_helper<bfloat>(data, offset, value);
-  }
-};
-#endif
+using namespace c10::metal;
 
 // Based on
 // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
@@ -155,7 +105,7 @@ void upsample_increment_value_bounded(
       data,
       n * strides.x + c * strides.y + access_y * strides.z +
           access_x * strides.w,
-      value);
+      static_cast<scalar_t>(value));
 }
 
 template <typename T>

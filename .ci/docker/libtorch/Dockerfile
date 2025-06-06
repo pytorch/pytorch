@@ -51,6 +51,7 @@ ADD ./common/install_cuda.sh install_cuda.sh
 ADD ./common/install_magma.sh install_magma.sh
 COPY ./common/install_nccl.sh install_nccl.sh
 COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+COPY ./common/install_cusparselt.sh install_cusparselt.sh
 ENV CUDA_HOME /usr/local/cuda
 
 FROM cuda as cuda11.8
@@ -89,7 +90,7 @@ ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
 # gfortran and python needed for building magma from source for ROCm
 RUN apt-get update -y && \
     apt-get install gfortran -y && \
-    apt-get install python -y && \
+    apt-get install python3 python-is-python3 -y && \
     apt-get clean
 
 RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh

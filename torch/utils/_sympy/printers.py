@@ -419,7 +419,7 @@ class CppPrinter(ExprPrinter):
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"
-            return f"std::min({il})"
+            return f"std::min<{INDEX_TYPE}>({il})"
 
     def _print_Max(self, expr: sympy.Expr) -> str:
         args = [self._print(a) for a in expr.args]
@@ -428,7 +428,7 @@ class CppPrinter(ExprPrinter):
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"
-            return f"std::max({il})"
+            return f"std::max<{INDEX_TYPE}>({il})"
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1

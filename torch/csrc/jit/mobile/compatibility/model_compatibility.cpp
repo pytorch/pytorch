@@ -137,7 +137,7 @@ uint64_t _get_model_bytecode_version(
 
 /********************** Operator Version **********************/
 
-uint64_t _get_model_operator_version(
+static uint64_t _get_model_operator_version(
     PyTorchStreamReader& reader); // Forward Declare
 
 uint64_t _get_model_operator_version(std::istream& in) {
@@ -168,7 +168,7 @@ uint64_t _get_model_operator_version(PyTorchStreamReader& reader) {
 /********************** Operators and Info **********************/
 
 // Forward declare
-std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+static std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     std::vector<IValue> bytecode_ivalues);
 
 std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
