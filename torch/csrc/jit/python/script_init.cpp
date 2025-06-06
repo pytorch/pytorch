@@ -1623,8 +1623,17 @@ void initJitScriptBindings(PyObject* module) {
                 //  traced_module = torch.jit.trace(M(), example_inputs=inps)
                 // , where traced_module.forward is a ScriptMethod but doesn't
                 // have __wrapped__.
-                py::hasattr(args[0], "__wrapped__")) {
-              return args[0].attr("__wrapped__")(*args, **kwargs);
+                (py::hasattr(args[0], "__wrapped__") ||
+                 py::hasattr(args[0], "_original_forward"))) {
+              if (py::hasattr(args[0], "__wrapped__")) {
+                py::slice slice0(1, args.size(), 1);
+                return args[0].attr("__wrapped__")(*args[slice0], **kwargs);
+              } else {
+                py::slice slice0(1, args.size(), 1);
+                return args[0].attr("_original_forward")(
+                    *args[slice0], **kwargs);
+              }
+
             } else {
               // see: [pybind11 varargs]
               Method& method = py::cast<Method&>(args[0]);

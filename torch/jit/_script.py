@@ -1149,9 +1149,16 @@ def _script_impl(
 
     if isinstance(obj, torch.nn.Module):
         obj = call_prepare_scriptable_func(obj)
-        return torch.jit._recursive.create_script_module(
+        script_module = torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
+
+        class Wrapped:
+            def __init__(self, mod):
+                self.mod = mod
+
+        script_module._orig_module = Wrapped(obj)
+        return script_module
     else:
         obj = (
             obj.__prepare_scriptable__()

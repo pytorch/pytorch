@@ -1318,6 +1318,7 @@ def trace_module(
     finally:
         torch.jit._trace._trace_module_map = old_module_map
 
+    module.forward._original_forward = mod.forward
     return module
 
 

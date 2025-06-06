@@ -1935,7 +1935,6 @@ def _non_strict_export(
         args,
         kwargs,
         dynamic_shapes,
-        _is_torch_jit_trace=_is_torch_jit_trace,
         allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,  # for shape env initialization
     )
 

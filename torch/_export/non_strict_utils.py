@@ -260,7 +260,6 @@ def make_fake_inputs(
     args,
     kwargs,
     dynamic_shapes,
-    _is_torch_jit_trace=False,
     allow_complex_guards_as_runtime_asserts=False,
 ):
     """
@@ -296,29 +295,6 @@ def make_fake_inputs(
         # a toplevel TracingContext with a fake mode, so we do not want to
         # create another fake mode.
         fake_mode = context.fake_mode
-    elif not _is_torch_jit_trace:
-        if isinstance(nn_module.forward, functools.partial):
-            # functools handles nesting by itself, no need to recurse
-            code = nn_module.forward.func.__code__
-        else:
-            code = nn_module.forward.__code__
-        co_fields = {
-            "co_name": code.co_name,
-            "co_filename": code.co_filename,
-            "co_firstlineno": code.co_firstlineno,
-        }
-        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            fake_mode = FakeTensorMode(
-                shape_env=ShapeEnv(
-                    tracked_fakes=[],
-                    co_fields=co_fields,
-                    prefer_deferred_runtime_asserts_over_guards=True,
-                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-                    trace_asserts=True,
-                ),
-                allow_non_fake_inputs=True,
-                export=True,
-            )
     else:
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
             fake_mode = FakeTensorMode(
@@ -338,11 +314,10 @@ def make_fake_inputs(
         )
 
     with fake_mode:
-        # FIXME(ycao) ScriptMethod doesn't have signature, I am using an empty one to unblock
-        if not _is_torch_jit_trace:
-            original_signature = inspect.signature(nn_module.forward)
+        if isinstance(nn_module, torch.ScriptModule):
+            original_signature = inspect.signature(nn_module.forward._orig_module.mod)  # type: ignore[attr-defined]
         else:
-            original_signature = None
+            original_signature = inspect.signature(nn_module.forward)
         sources: dict[tuple[int, int], list[Source]] = defaultdict(list)
         fake_args, fake_kwargs = tree_map_with_path(
             lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),

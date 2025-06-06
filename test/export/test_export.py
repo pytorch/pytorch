@@ -640,6 +640,27 @@ graph():
         # instead of the scripted function, so we get x.sin()
         self.assertEqual(res, x.sin())
 
+    def test_inline_jit_traced_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                if torch.jit.is_tracing():
+                    return x.cos()
+                return x.sin()
+
+        x = torch.randn(3, 4)
+        traced_m = torch.jit.trace(M(), x)
+        ep = torch.export.export(traced_m, (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
+        res = ep.module()(x)
+        # We're inlining the original function
+        # instead of the scripted function, so we get x.sin()
+        self.assertEqual(res, x.sin())
+
     def test_inline_script_class_method(self):
         class M(torch.nn.Module):
             @staticmethod
@@ -700,7 +721,6 @@ graph():
 
     def test_inline_script_method(self):
         class M(torch.jit.ScriptModule):
-            @torch.jit.script_method
             def _forward(self, x: torch.Tensor):
                 if torch.jit.is_scripting():
                     return x.cos()
@@ -2603,8 +2623,6 @@ graph():
                     self.assertEqual(ep.module()(sample_input), nz)
                     print(ep)
 
-    @testing.expectedFailureLegacyExportNonStrict  # Trivial error, just need to move the error check earlier, for real users it wont matter
-    @testing.expectedFailureLegacyExportStrict  # Trivial error, just need to move the error check earlier, for real users it wont matter
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
             def forward(self, rv: torch.Tensor, t: torch.Tensor):
@@ -2614,15 +2632,10 @@ graph():
         foo = Foo()
         foo_script = torch.jit.script(foo)
         inp = (torch.zeros(3, 4), torch.tensor(7))
+        foo_trace = torch.jit.trace(foo, inp)
 
-        with self.assertRaisesRegex(
-            ValueError, "Exporting a ScriptModule is not supported"
-        ):
-            export(foo_script, inp)
-
-        from torch._export.converter import TS2EPConverter
-
-        TS2EPConverter(foo_script, inp).convert()
+        export(foo_script, inp)
+        export(foo_trace, inp)
 
     def test_dim_auto_and_dim(self):
         # test basic Dims

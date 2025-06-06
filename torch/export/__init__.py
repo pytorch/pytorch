@@ -156,12 +156,6 @@ def export_for_training(
         raise ValueError(
             f"Expected `mod` to be an instance of `torch.nn.Module`, got {type(mod)}."
         )
-    if isinstance(mod, torch.jit.ScriptModule):
-        raise ValueError(
-            "Exporting a ScriptModule is not supported. "
-            "Maybe try converting your ScriptModule to an ExportedProgram "
-            "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
-        )
     return _export_for_training(
         mod,
         args,
@@ -274,12 +268,6 @@ def export(
     if not isinstance(mod, torch.nn.Module):
         raise ValueError(
             f"Expected `mod` to be an instance of `torch.nn.Module`, got {type(mod)}."
-        )
-    if isinstance(mod, torch.jit.ScriptModule):
-        raise ValueError(
-            "Exporting a ScriptModule is not supported. "
-            "Maybe try converting your ScriptModule to an ExportedProgram "
-            "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
         )
 
     try:
