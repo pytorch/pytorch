@@ -1503,7 +1503,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             self.exc_vt.args = args
             self.value.args = args
             return variables.ConstantVariable(None)
-        if (
+        elif (
             name == "__setattr__"
             and len(args) == 2
             and isinstance(args[0], variables.ConstantVariable)
@@ -1511,6 +1511,8 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             in ("__cause__", "__context__", "__suppress_context__", "__traceback__")
         ):
             self.exc_vt.call_setattr(tx, args[0], args[1])
+        elif name == "with_traceback":
+            return self.exc_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     @property
