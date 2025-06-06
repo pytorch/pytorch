@@ -2,8 +2,8 @@
 
 namespace c10 {
 
-DeviceAllocator::DeviceAllocator() = default;
-DeviceAllocator::~DeviceAllocator() = default;
+// DeviceAllocator::DeviceAllocator() = default;
+// DeviceAllocator::~DeviceAllocator() = default;
 
 DeviceAllocator* GetDeviceAllocator(const DeviceType& t) {
   auto* allocator = c10::GetAllocator(t);
