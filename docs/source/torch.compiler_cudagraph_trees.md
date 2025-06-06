@@ -163,10 +163,9 @@ the function to avoid input mutation.
 
 
 
-**Note**\
-Enable input mutation support by setting
-[torch.\_inductor.config.cudagraph_support_input_mutation = True](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/config.py#L662)
-for "reduce-overhead" mode.
+> **Note**\
+> Enable input mutation support by setting
+[torch.\_inductor.config.cudagraph_support_input_mutation = True](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/config.py#L662) for "reduce-overhead" mode.
 
 
 ### Dynamic Shape Support
