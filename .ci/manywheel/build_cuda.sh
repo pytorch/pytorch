@@ -15,6 +15,9 @@ export INSTALL_TEST=0 # dont install test binaries into site-packages
 export USE_CUPTI_SO=0
 export USE_CUSPARSELT=${USE_CUSPARSELT:-1} # Enable if not disabled by libtorch build
 export USE_CUFILE=${USE_CUFILE:-1}
+export USE_SYSTEM_NCCL=1
+export NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
+export NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 
 # Keep an array of cmake variables to add to
 if [[ -z "$CMAKE_ARGS" ]]; then
@@ -36,10 +39,8 @@ if [[ -n "$DESIRED_CUDA" ]]; then
     if [[ ${DESIRED_CUDA} =~ ^[0-9]+\.[0-9]+$ ]]; then
         CUDA_VERSION=${DESIRED_CUDA}
     else
-        # cu90, cu92, cu100, cu101
-        if [[ ${#DESIRED_CUDA} -eq 4 ]]; then
-            CUDA_VERSION="${DESIRED_CUDA:2:1}.${DESIRED_CUDA:3:1}"
-        elif [[ ${#DESIRED_CUDA} -eq 5 ]]; then
+        # cu126, cu128 etc...
+        if [[ ${#DESIRED_CUDA} -eq 5 ]]; then
             CUDA_VERSION="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4:1}"
         fi
     fi
@@ -58,10 +59,6 @@ case ${CUDA_VERSION} in
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
     12.6)
-        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
-        EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
-        ;;
-    12.4)
         TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
@@ -91,14 +88,15 @@ fi
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
 
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
-if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
-    LIBGOMP_PATH="/usr/lib64/libgomp.so.1"
-elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
+if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     LIBGOMP_PATH="/usr/lib64/libgomp.so.1"
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
     LIBGOMP_PATH="/usr/lib64/libgomp.so.1"
 elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     LIBGOMP_PATH="/usr/lib/x86_64-linux-gnu/libgomp.so.1"
+else
+    echo "Unknown OS: '$OS_NAME'"
+    exit 1
 fi
 
 DEPS_LIST=(
@@ -108,26 +106,8 @@ DEPS_SONAME=(
     "libgomp.so.1"
 )
 
-# CUDA 11.8 have to ship the libcusparseLt.so.0 with the binary
-# since nvidia-cusparselt-cu11 is not available in PYPI
-if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
-        DEPS_SONAME+=(
-            "libcusparseLt.so.0"
-        )
-        DEPS_LIST+=(
-            "/usr/local/cuda/lib64/libcusparseLt.so.0"
-        )
-fi
 
-
-# Turn USE_CUFILE off for CUDA 11.8, 12.4 since nvidia-cufile-cu11 and 1.9.0.20 are
-# not available in PYPI
-if [[ $CUDA_VERSION == "11.8" || $CUDA_VERSION == "12.4" ]]; then
-    export USE_CUFILE=0
-fi
-
-
-# CUDA_VERSION 12.4, 12.6, 12.8
+# CUDA_VERSION 12.6, 12.8
 if [[ $CUDA_VERSION == 12* ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
@@ -151,6 +131,8 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "/usr/local/cuda/lib64/libnvToolsExt.so.1"
             "/usr/local/cuda/lib64/libnvrtc.so.12"
             "/usr/local/cuda/lib64/libnvrtc-builtins.so"
+            "/usr/local/cuda/lib64/libcufile.so.0"
+            "/usr/local/cuda/lib64/libcufile_rdma.so.1"
         )
         DEPS_SONAME+=(
             "libcudnn_adv.so.9"
@@ -168,17 +150,9 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "libnvToolsExt.so.1"
             "libnvrtc.so.12"
             "libnvrtc-builtins.so"
+            "libcufile.so.0"
+            "libcufile_rdma.so.1"
         )
-        if [[ $USE_CUFILE == 1 ]]; then
-            DEPS_LIST+=(
-                "/usr/local/cuda/lib64/libcufile.so.0"
-                "/usr/local/cuda/lib64/libcufile_rdma.so.1"
-            )
-            DEPS_SONAME+=(
-                "libcufile.so.0"
-                "libcufile_rdma.so.1"
-            )
-        fi
     else
         echo "Using nvidia libs from pypi."
         CUDA_RPATHS=(
@@ -193,31 +167,39 @@ if [[ $CUDA_VERSION == 12* ]]; then
             '$ORIGIN/../../nvidia/cusparse/lib'
             '$ORIGIN/../../cusparselt/lib'
             '$ORIGIN/../../nvidia/nccl/lib'
+            '$ORIGIN/../../nvidia/nvshmem/lib'
             '$ORIGIN/../../nvidia/nvtx/lib'
+            '$ORIGIN/../../nvidia/cufile/lib'
         )
-        if [[ $USE_CUFILE == 1 ]]; then
-            CUDA_RPATHS+=(
-                '$ORIGIN/../../nvidia/cufile/lib'
-            )
-        fi
         CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
         export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
         export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
         export FORCE_RPATH="--force-rpath"
         export USE_STATIC_NCCL=0
-        export USE_SYSTEM_NCCL=1
         export ATEN_STATIC_CUDA=0
         export USE_CUDA_STATIC_LINK=0
         export USE_CUPTI_SO=1
-        export NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
-        export NCCL_LIB_DIR="/usr/local/cuda/lib64/"
     fi
 elif [[ $CUDA_VERSION == "11.8" ]]; then
     export USE_STATIC_CUDNN=0
+    # Turn USE_CUFILE off for CUDA 11.8 since nvidia-cufile-cu11 and 1.9.0.20 are
+    # not available in PYPI
+    export USE_CUFILE=0
     # Try parallelizing nvcc as well
     export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
     # Bundle ptxas into the wheel, see https://github.com/pytorch/pytorch/pull/119750
     export BUILD_BUNDLE_PTXAS=1
+
+    # CUDA 11.8 have to ship the libcusparseLt.so.0 with the binary
+    # since nvidia-cusparselt-cu11 is not available in PYPI
+    if [[ $USE_CUSPARSELT == "1" ]]; then
+        DEPS_SONAME+=(
+            "libcusparseLt.so.0"
+        )
+        DEPS_LIST+=(
+            "/usr/local/cuda/lib64/libcusparseLt.so.0"
+        )
+    fi
 
     if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
         echo "Bundling with cudnn and cublas."
@@ -273,12 +255,9 @@ elif [[ $CUDA_VERSION == "11.8" ]]; then
         export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
         export FORCE_RPATH="--force-rpath"
         export USE_STATIC_NCCL=0
-        export USE_SYSTEM_NCCL=1
         export ATEN_STATIC_CUDA=0
         export USE_CUDA_STATIC_LINK=0
         export USE_CUPTI_SO=1
-        export NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
-        export NCCL_LIB_DIR="/usr/local/cuda/lib64/"
     fi
 else
     echo "Unknown cuda version $CUDA_VERSION"

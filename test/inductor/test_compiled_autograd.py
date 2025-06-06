@@ -4373,6 +4373,10 @@ known_graph_breaks_tests = {
     "test_nested_checkpoint_set_early_stop",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
+    "test_dropout",  # dynamo disable
+    "test_dropout_inductor",  # dynamo disable
+    "test_function_with_kwargs",  # dynamo disable
+    "test_module",  # dynamo disable
 }
 
 test_contexts = {
@@ -4435,6 +4439,10 @@ xfail_by_backend = {
         "test_nested_checkpoint_early_stop_True",  # unpack hook grad_fn semantics
         "test_nested_checkpoint_two_children_early_stop_False",  # unpack hook grad_fn semantics
         "test_nested_checkpoint_two_children_early_stop_True",  # unpack hook grad_fn semantics
+        "test_dropout",  # functionalize_rng_ops not yet supported
+        "test_dropout_inductor",  # functionalize_rng_ops not yet supported
+        "test_function_with_kwargs",  # functionalize_rng_ops not yet supported
+        "test_module",  # functionalize_rng_ops not yet supported
     },
     "eager": {  # will be run without torch.compiling the CA graph
         "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
@@ -4482,6 +4490,9 @@ xfail_divergence_from_eager = {
     "test_inplace_on_view_backward",  # different node name: CompiledFunctionBackward
     "test_nested_anomaly_printstack_cleanup",  # anomaly NaN error message different
     "test_not_implemented_grad",  # Dynamo changes the types of exceptions
+    "test_grad_call_compiled_backward_fn",  # different functorch error
+    "test_vjp_call_compiled_backward_fn",  # different functorch error
+    "test_vmap_call_compiled_backward_fn",  # different functorch error
 }
 
 skipped_tests = set()
@@ -4495,26 +4506,30 @@ if IS_S390X:
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
+test_higher_order_ops = load_test_module("dynamo/test_higher_order_ops")
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestNestedCheckpointWithCompiledAutograd = wrap_test_class(
     test_autograd.TestNestedCheckpoint
 )
 TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
+HigherOrderOpTestsWithCompiledAutograd = wrap_test_class(
+    test_higher_order_ops.HigherOrderOpTests
+)
+FuncTorchHigherOrderOpTestsWithCompiledAutograd = wrap_test_class(
+    test_higher_order_ops.FuncTorchHigherOrderOpTests
+)
+ActivationCheckpointingTestsWithCompiledAutograd = wrap_test_class(
+    test_higher_order_ops.ActivationCheckpointingTests
+)
+
 if torch.distributed.is_available() and HAS_CUDA:
     test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
     TestDTensorCompileWithCompiledAutograd = wrap_test_class(
         test_dtensor.TestDTensorCompile
     )
 
-xfail_hops = {
-    # AssertionError: Tensor-likes are not close!
-    "auto_functionalize",
-    # BypassAOTAutogradCache: Cannot cache a graph with compiled autograd enabled
-    "invoke_subgraph",
-    # AssertionError: assert type(args[1].realize()) is TensorVariable
-    "map",
-}
+xfail_hops = {}
 
 
 class TestCompiledAutogradOpInfo(TestCase):
@@ -4561,7 +4576,7 @@ class TestCompiledAutogradOpInfo(TestCase):
             # 1. Run eager
             torch.manual_seed(123)
             dummy = torch.randn(2, 2, dtype=dtype, device=device, requires_grad=True)
-            fn, op_out_ref = create_bwd_fn_closure(compiled_args, compiled_kwargs)
+            fn, op_out_ref = create_bwd_fn_closure(eager_args, eager_kwargs)
             fn(dummy).backward()
             self.assertEqual(len(op_out_ref), 1)
             expected = op_out_ref[0]
@@ -4578,7 +4593,7 @@ class TestCompiledAutogradOpInfo(TestCase):
             self.assertEqual(expected, actual)
 
 
-instantiate_device_type_tests(TestCompiledAutogradOpInfo, globals(), only_for=("cpu",))
+instantiate_device_type_tests(TestCompiledAutogradOpInfo, globals())
 instantiate_parametrized_tests(TestCompiledAutograd)
 
 if __name__ == "__main__":

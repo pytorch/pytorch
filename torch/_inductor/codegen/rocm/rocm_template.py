@@ -30,6 +30,7 @@ class ArgInfo:
 
 class ROCmTemplate(KernelTemplate):
     index_counter = itertools.count()
+    gfx9_threads_per_warp = 64
 
     def __init__(
         self,
