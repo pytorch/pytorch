@@ -17,16 +17,12 @@ get_pip_version() {
 if [ -n "${XPU_VERSION}" ]; then
   TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
   TRITON_TEXT_FILE="triton-xpu"
-  # https://github.com/triton-lang/triton/commit/a782a3665c48707752f1d71f8db832f10e522d5a
-  SETUP_PY_FOLDER="."
 elif [ -n "${TRITON_CPU}" ]; then
   TRITON_REPO="https://github.com/triton-lang/triton-cpu"
   TRITON_TEXT_FILE="triton-cpu"
-  SETUP_PY_FOLDER="python"
 else
   TRITON_REPO="https://github.com/triton-lang/triton"
   TRITON_TEXT_FILE="triton"
-  SETUP_PY_FOLDER="python"
 fi
 
 # The logic here is copied from .ci/pytorch/common_utils.sh
@@ -55,7 +51,12 @@ as_jenkins git clone --recursive ${TRITON_REPO} triton
 cd triton
 as_jenkins git checkout ${TRITON_PINNED_COMMIT}
 as_jenkins git submodule update --init --recursive
-cd ${SETUP_PY_FOLDER}
+
+# Old versions of python have setup.py in ./python; newer versions have it in ./
+if [ ! -f setup.py ]; then
+  cd python
+fi
+
 pip_install pybind11==2.13.6
 
 if [ -z "${XPU_VERSION}" ]; then

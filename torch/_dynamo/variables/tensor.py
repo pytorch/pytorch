@@ -625,6 +625,31 @@ class TensorVariable(VariableTracker):
         if name == "__eq__" and isinstance(args[0], UserDefinedClassVariable):
             return variables.ConstantVariable(False)
 
+        # For historical reasons, these ops decompose down to syntactically
+        # invalid aten ops because they contain the python keyword `from`, see
+        # discussions in #151432 for more details.
+        # We graph break for now since this use case is uncommon.
+        if name == "random_":
+            unimplemented_v2(
+                gb_type="Tensor.random_ op",
+                context=f"Tensor.{name}({args=}, {kwargs=})",
+                explanation="This is currently not supported.",
+                hints=[
+                    "Use the out-of-place version of this op",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        elif name == "uniform_" and "from" in kwargs:
+            unimplemented_v2(
+                gb_type="Tensor.uniform_ op called with `from` keyword",
+                context=f"Tensor.{name}({args=}, {kwargs=})",
+                explanation="This is currently not supported.",
+                hints=[
+                    "Avoid using the `from` keyword.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
         try:
             handler_method = getattr(self, f"method_{name}")
         except AttributeError:
@@ -1394,7 +1419,7 @@ class NumpyNdarrayVariable(TensorVariable):
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
-        if name in ("tostring", "tobytes"):
+        if name in ("tostring", "tobytes", "__delattr__"):
             unimplemented(f"{name} is not modelled in torch._numpy")
         proxy = tx.output.create_proxy(
             "call_function",

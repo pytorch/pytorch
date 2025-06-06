@@ -1324,6 +1324,19 @@ class TestPatternMatcher(TestCase):
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    def test_replace_mul_zero(self):
+        def test(x, y):
+            return x + (y * 0)
+
+        x = torch.rand([256], device=GPU_TYPE)
+        y = torch.rand([256], device=GPU_TYPE)
+
+        test_c = torch.compile(test)
+
+        out, code = run_and_get_code(test_c, x, y)
+        FileCheck().check_not(".run").run(code[0])
+        self.assertEqual(out, test(x, y))
+
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
         counter = 0
