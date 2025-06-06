@@ -607,7 +607,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     return ptr;
   }
 
-  void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {
+  void recordStream(const DataPtr& ptr, c10::Stream stream) override {
     std::lock_guard<std::mutex> lk(general_mutex);
     auto ptr_val = ptr.get();
     // Empty tensor's storage().data() might be a null ptr. As there is no
@@ -620,7 +620,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     auto it = ptr_info.find(ptr_val);
     TORCH_INTERNAL_ASSERT(it != ptr_info.end(), "ptr not found in ptr_info");
 
-    UsageStream to_record{stream.stream(), stream.device_index()};
+    c10::cuda::CUDAStream cuda_stream{stream};
+    UsageStream to_record{cuda_stream.stream(), stream.device_index()};
     if (to_record == it->second.creation_stream) {
       TORCH_WARN_ONCE(
           "Called record_stream on tensor whose original creation stream "
