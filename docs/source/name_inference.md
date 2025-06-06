@@ -387,7 +387,7 @@ name as {attr}`dim`.
 ('C', 'N')
 ```
 
-(contracts-away-dims-doc)=
+(contracts_away_dims-doc)=
 
 ## Contracts away dims
 
