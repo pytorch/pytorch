@@ -46,7 +46,7 @@ See also the [general pytorch profiler guide](https://pytorch.org/tutorials/reci
 **Viewing chrome traces**: In the Chrome browser, open chrome://tracing and load the json file. Use the “w” and “s” keys to zoom in and out, and use “a” and “d” to scroll left and right. “?” will show a “help” screen with a list of shortcuts.
 
 ```{figure}  _static/img/profiling_torch_compile/basic_chrome_trace.png
-    [Alt text] Example of a basic chrome trace, visualized in the chrome://tracing viewer
+:alt: Example of a basic chrome trace, visualized in the chrome://tracing viewer
 ```
 
 Here, we observe:
