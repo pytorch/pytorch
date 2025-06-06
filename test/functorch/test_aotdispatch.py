@@ -2496,6 +2496,9 @@ def forward(self, primals_1, primals_2):
             torch.ones(3, 3, requires_grad=True),
             torch.ones(3, 3, requires_grad=True),
         ]
+        compiled_f = torch.compile(f)
+        actual = compiled_f(*inp_grad)
+        self.assertEqual(actual, f(*inp_grad))
         self.verify_aot_autograd(f, inp_grad, test_mutation=True)
 
     def test_backward_mutation_metadata(self):

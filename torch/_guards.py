@@ -13,7 +13,7 @@ import unittest.mock
 import weakref
 from abc import abstractmethod
 from collections import defaultdict
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -823,13 +823,16 @@ class TracingContext:
             "TracingContext.get() must be called within an ongoing trace."
         )
 
-    def __init__(self, fake_mode):
+    def __init__(self, fake_mode, functional_mode=None):
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
         self.previously_inlined_functions = dict()
         self.previously_cleaned_instructions = dict()
         self.fake_mode = fake_mode
+        self.functional_mode = (
+            functional_mode if functional_mode is not None else nullcontext()
+        )
         self.frame_summary_stack = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated

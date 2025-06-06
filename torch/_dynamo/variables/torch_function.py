@@ -592,6 +592,8 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
         input_tensor_type = kwargs.pop("class_type")
+        # TODO: Figure out why this gets called with FunctionalTensor
+        # and resolve!
         assert input_tensor_type in (torch.Tensor, torch.nn.Parameter), (
             f"invalid class type {input_tensor_type} in TensorWithTFOverrideVariable.from_tensor_var"
         )

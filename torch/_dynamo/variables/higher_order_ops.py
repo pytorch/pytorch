@@ -1564,7 +1564,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from torch._higher_order_ops.utils import _maybe_fake_tracing
         from torch._inductor.utils import is_pointwise_use
 
-        with tx.fake_mode:
+        with tx.fake_mode, tx.functional_mode:
             sub_args_fake = [
                 leaf.node.meta["example_value"].clone()
                 if hasattr(leaf.node.meta["example_value"], "clone")
@@ -1601,7 +1601,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             additional_inputs_proxy,
         )
 
-        with tx.fake_mode:
+        with tx.fake_mode, tx.functional_mode:
             out_meta = tuple(
                 inp_proxy.node.meta["example_value"].clone() for inp_proxy in xs_proxy
             )
@@ -1804,7 +1804,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             additional_inputs_proxy,
         )
 
-        with tx.fake_mode:
+        with tx.fake_mode, tx.functional_mode:
             example_carry = [
                 init_p.node.meta["example_value"].clone() for init_p in init_proxy
             ]
@@ -3037,6 +3037,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         "torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops",
                         [],
                     ):
+                        # Could be a context manager to turn off counter increment
+                        # But we don't want to record the mutations inside speculate_subgraph
+                        # NOTE: May need special attention to Triton Hop (possibly not but maybe)
+                        # May need to also ignore effectful python ops
                         (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
                             tx,
                             bwd_fn,
@@ -3199,7 +3203,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # (e.g, tensor.requires_grad), which would be used by downstream Dynamo tracing.
         # Since there can be other ops like Triton kernels, which depends on python dispatcher, we have to enable it.
         with enable_python_dispatcher():
-            with tx.output.fake_mode:
+            with tx.output.fake_mode, tx.output.functional_mode:
                 fake_args = (
                     tx.output.nn_modules[fwd_node.node.name],
                     tx.output.nn_modules[bwd_node.node.name],
