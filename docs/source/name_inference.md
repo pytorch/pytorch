@@ -2,7 +2,7 @@
 .. currentmodule:: torch
 ```
 
-(name-inference-reference-doc)=
+(name_inference_reference-doc)=
 
 # Named Tensors operator coverage
 
