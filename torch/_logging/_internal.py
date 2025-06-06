@@ -54,10 +54,6 @@ LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
 GET_DTRACE_STRUCTURED = False
 
 
-class ArtifactLogger(logging.Logger, Protocol):
-    artifact_name: str
-
-
 @dataclass
 class LogRegistry:
     # shorthand name to log qualified name
@@ -601,7 +597,7 @@ def register_artifact(
     )
 
 
-def getArtifactLogger(module_qname, artifact_name) -> ArtifactLogger:
+def getArtifactLogger(module_qname, artifact_name) -> logging.Logger:
     if artifact_name not in log_registry.artifact_names:
         raise ValueError(
             f"Artifact name: {repr(artifact_name)} not registered,"
