@@ -1712,7 +1712,7 @@ def make_contiguous_strides_for(
     for l in reversed(shape):
         strides.append(multiplier)
         multiplier *= (
-            l if (is_nested_int(l) and not has_shape_env(l)) else sym_max(l, 1)
+            l if (is_nested_int(l) or not has_shape_env(l)) else sym_max(l, 1)
         )  # type:ignore[assignment]
 
     result = tuple(reversed(strides))
