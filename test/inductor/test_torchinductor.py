@@ -14133,6 +14133,8 @@ if RUN_GPU:
             # it does not move the tensor constructor to cuda and keeps it on CPU.
             self.assertFalse("empty_strided_cuda(()" in code)
 
+        # only uncoalesced without this :)
+        @config.patch("triton.coalesce_tiling_analysis", False)
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
             @torch.compile
@@ -14183,6 +14185,7 @@ if RUN_GPU:
             )
 
         @config.patch("triton.use_block_ptr", True)
+        @config.patch("triton.coalesce_tiling_analysis", False)
         def test_evict_last_non_coalesced_loads_block_ptr(self):
             @torch.compile
             def f(a, b):
@@ -14967,6 +14970,27 @@ if RUN_GPU:
             )
             compiled_out = f_compiled(x, y)
             self.assertEqual(compiled_out, f(x, y))
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_symint_cat_backward(self):
+            def f(x, w):
+                y = torch.cat((x, x), dim=0)
+                z = y @ w
+                return z @ z.T
+
+            compiled_f = torch.compile(f)
+
+            for shape in (2, 3):
+                torch.manual_seed(42)
+                eager_x = torch.randn(shape, 2, device=self.device)
+                eager_w = torch.randn(2, 2, device=self.device, requires_grad=True)
+                torch.manual_seed(42)
+                compiled_x = torch.randn(shape, 2, device=self.device)
+                compiled_w = torch.randn(2, 2, device=self.device, requires_grad=True)
+
+                f(eager_x, eager_w).sum().backward()
+                compiled_f(compiled_x, compiled_w).sum().backward()
+                self.assertEqual(eager_w.grad, compiled_w.grad)
 
         @dynamo_config.patch("capture_dynamic_output_shape_ops", True)
         @config.patch(implicit_fallbacks=True)

@@ -50,30 +50,21 @@ if [[ "$image" == *xla* ]]; then
   exit 0
 fi
 
-if [[ "$image" == *-focal* ]]; then
-  UBUNTU_VERSION=20.04
-elif [[ "$image" == *-jammy* ]]; then
+if [[ "$image" == *-jammy* ]]; then
   UBUNTU_VERSION=22.04
 elif [[ "$image" == *ubuntu* ]]; then
   extract_version_from_image_name ubuntu UBUNTU_VERSION
-elif [[ "$image" == *centos* ]]; then
-  extract_version_from_image_name centos CENTOS_VERSION
 fi
 
 if [ -n "${UBUNTU_VERSION}" ]; then
   OS="ubuntu"
-elif [ -n "${CENTOS_VERSION}" ]; then
-  OS="centos"
 else
   echo "Unable to derive operating system base..."
   exit 1
 fi
 
 DOCKERFILE="${OS}/Dockerfile"
-# When using ubuntu - 22.04, start from Ubuntu docker image, instead of nvidia/cuda docker image.
-if [[ "$image" == *cuda* && "$UBUNTU_VERSION" != "22.04" ]]; then
-  DOCKERFILE="${OS}-cuda/Dockerfile"
-elif [[ "$image" == *rocm* ]]; then
+if [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
 elif [[ "$image" == *xpu* ]]; then
   DOCKERFILE="${OS}-xpu/Dockerfile"
@@ -98,7 +89,7 @@ tag=$(echo $image | awk -F':' '{print $2}')
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$tag" in
-  pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11)
+  pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc11)
     CUDA_VERSION=12.6.3
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
@@ -121,7 +112,31 @@ case "$tag" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9)
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.8.1
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=9
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.13-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.8.1
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.13
+    GCC_VERSION=9
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc9)
     CUDA_VERSION=12.6.3
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
@@ -168,7 +183,7 @@ case "$tag" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-focal-cuda12.8-cudnn9-py3-gcc9)
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9)
     CUDA_VERSION=12.8.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
@@ -179,25 +194,25 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     ;;
-  pytorch-linux-focal-py3-clang10-onnx)
+  pytorch-linux-jammy-py3-clang12-onnx)
     ANACONDA_PYTHON_VERSION=3.9
-    CLANG_VERSION=10
+    CLANG_VERSION=12
     VISION=yes
     ONNX=yes
     ;;
-  pytorch-linux-focal-py3.9-clang10)
+  pytorch-linux-jammy-py3.9-clang12)
     ANACONDA_PYTHON_VERSION=3.9
-    CLANG_VERSION=10
+    CLANG_VERSION=12
     VISION=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-py3.11-clang10)
+  pytorch-linux-jammy-py3.11-clang12)
     ANACONDA_PYTHON_VERSION=3.11
-    CLANG_VERSION=10
+    CLANG_VERSION=12
     VISION=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-py3.9-gcc9)
+  pytorch-linux-jammy-py3.9-gcc9)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=9
     VISION=yes
@@ -303,7 +318,7 @@ case "$tag" in
     GCC_VERSION=11
     TRITON_CPU=yes
     ;;
-  pytorch-linux-focal-linter)
+  pytorch-linux-jammy-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
     # We will need to update mypy version eventually, but that's for another day. The task
     # would be to upgrade mypy to 1.0.0 with Python 3.11
@@ -370,14 +385,6 @@ esac
 
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
-#when using cudnn version 8 install it separately from cuda
-if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
-  IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
-  if [[ ${CUDNN_VERSION} == 9 ]]; then
-    IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
-  fi
-fi
-
 no_cache_flag=""
 progress_flag=""
 # Do not use cache and progress=plain when in CI
@@ -394,7 +401,6 @@ docker build \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "VISION=${VISION:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
-       --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
        --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
        --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
