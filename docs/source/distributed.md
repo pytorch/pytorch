@@ -652,7 +652,8 @@ you are a backend developer and want to support multiple devices per thread,
 please contact PyTorch Distributed's maintainers.
 :::
 
-(object-collectives)=
+(object_collectives)=
+
 ## Object collectives
 
 :::{warning}
