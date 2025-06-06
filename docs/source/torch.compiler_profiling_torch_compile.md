@@ -60,7 +60,7 @@ Every kernel on the accelerator occurs after being launched by code running on t
 To view a flow connection, click on a GPU kernel and click “ac2g”:
 
 ```{figure}  _static/img/profiling_torch_compile/ac2g.png
-    [Alt text] Visualization in the chrome://trace viewer, showing an async flow between a kernel and its launching location.
+:alt: Visualization in the chrome://trace viewer, showing an async flow between a kernel and its launching location.
 ```
 
 Alternatively, turn on *all* flows with the “Flow events” dropdown at the top.
@@ -122,7 +122,7 @@ See an example below:
 ```
 
 ```{figure} _static/img/profiling_torch_compile/compilation_profiling.png
-    [Alt text] A visualization in the chrome://trace viewer, showing dynamo and inductor compilation steps
+:alt: A visualization in the chrome://trace viewer, showing dynamo and inductor compilation steps
 ```
 
 Note a few things:
@@ -211,7 +211,7 @@ When an operator is launched, we expect to see a few events:
 3. GPU-side event
 
 ```{figure} _static/img/profiling_torch_compile/kernel_launch_labeled.png
-    [Alt text] Visualization in the chrome://trace viewer, showing the three types of events: CPU-side event, kernel launch, and GPU-side event
+:alt: Visualization in the chrome://trace viewer, showing the three types of events: CPU-side event, kernel launch, and GPU-side event
 ```
 
 **Inductor-generated Triton kernels:**
@@ -244,7 +244,7 @@ When an operator is launched, we expect to see a few events:
 One common issue is bad GPU utilization. A quick way to identify this is if there are large gaps between kernels on the GPU:
 
 ```{figure} _static/img/profiling_torch_compile/cpu_bound.png
-    [Alt text] Visualization in the chrome://trace viewer, showing large gaps between GPU kernels. This indicates that the model is CPU bound, likely due to overhead during kernel launches.
+:alt: Visualization in the chrome://trace viewer, showing large gaps between GPU kernels. This indicates that the model is CPU bound, likely due to overhead during kernel launches.
 ```
 
 This is often the result of CPU overhead, e.g. if the amount of time spent on the CPU between kernel launches is larger than the amount of time spent by the GPU to process the kernels. The issue is more common for small batch sizes.
