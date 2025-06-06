@@ -1572,7 +1572,6 @@ if TEST_WITH_TORCHDYNAMO:
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
-    else:
         torch._dynamo.config.compiled_autograd = not TEST_DISABLE_CA
 
 
