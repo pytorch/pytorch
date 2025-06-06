@@ -17,6 +17,10 @@ class SetSubclass(set):
     pass
 
 
+class FrozenstSubclass(frozenset):
+    pass
+
+
 class _BaseSetTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -608,6 +612,17 @@ class UserDefinedSetTests(_SetBase, _BaseSetTests):
 
     @unittest.expectedFailure
     def test_equality(self):
+        super().test_in_frozenset()
+
+
+class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
+    class CustomFrozenset(frozenset):
+        pass
+
+    thetype = CustomFrozenset
+
+    @unittest.expectedFailure
+    def test_in_frozenset(self):
         super().test_in_frozenset()
 
 
