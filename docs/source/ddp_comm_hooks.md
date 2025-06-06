@@ -123,7 +123,7 @@ To make a hook serializable, ``__setstate__`` and ``__getstate__`` should be def
 ```
 Here is a simple, end-to-end example of saving and reloading PowerSGD state and hook.
 
-```{code-block} python
+```python
 
 import os
 import sys
