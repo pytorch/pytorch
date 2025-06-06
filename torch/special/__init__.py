@@ -49,7 +49,7 @@ __all__ = [
     "psi",
     "round",
     "shifted_chebyshev_polynomial_t",
-    "shifted_",
+    "shifted_chebyshev_polynomial_u",
     "shifted_chebyshev_polynomial_v",
     "shifted_chebyshev_polynomial_w",
     "scaled_modified_bessel_k0",
