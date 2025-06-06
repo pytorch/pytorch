@@ -175,6 +175,8 @@ do
         ;;
     12.8|12.8.*) install_128;
         ;;
+    12.9|12.9.*) install_129;
+        ;;
     *) echo "bad argument $1"; exit 1
         ;;
     esac
