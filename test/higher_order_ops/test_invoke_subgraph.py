@@ -1925,12 +1925,11 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    @unittest.skip("Repro for an issue which is not fixed yet")
     def test_div(self):
         @mark_compile_region
         def gn(x):
             div = torch.div(1024, 256, rounding_mode="trunc")
-            return div * torch.ones(64, div)
+            return div * torch.ones(64, div) * x
 
         def fn(x):
             return gn(x)
