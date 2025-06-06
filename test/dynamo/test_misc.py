@@ -7055,6 +7055,89 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         optimized_loaded_model = torch.compile(loaded_model, backend="eager")(*inputs)
 
+    def test_precompile_entry(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+        def fn(x):
+            return x + 1
+
+        def injected(x):
+            return x + 42
+
+        args = (torch.randn(3, 2),)
+
+        compiled_fn = torch.compile(fn)
+        _load_precompile_entry(fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(),
+            injected.__code__,
+        )
+        self.assertEqual(compiled_fn(*args), injected(*args))
+        _reset_precompile_entries(fn.__code__)
+
+        self.assertEqual(compiled_fn(*args), fn(*args))
+
+    def test_precompile_entries(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+        def fn(x):
+            return x + 1
+
+        guard_manager = torch._dynamo.guards.RootGuardManager()
+        guard_manager.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
+        def injected(x: int):
+            return x + 42
+
+        guard_manager2 = torch._dynamo.guards.RootGuardManager()
+        guard_manager2.add_lambda_guard(lambda L: isinstance(L["x"], torch.Tensor), [])
+        def injected2(x: torch.Tensor):
+            return x + 100
+
+        guard_manager3 = torch._dynamo.guards.RootGuardManager()
+        guard_manager3.add_lambda_guard(lambda L: isinstance(L["x"], bool), [])
+        def injected3(x: bool):
+            return x + 102
+
+        guard_manager4 = torch._dynamo.guards.RootGuardManager()
+        guard_manager4.add_lambda_guard(lambda L: isinstance(L["x"], str), [])
+        def injected4(x: str):
+            return x + "1"
+
+        args = (torch.randn(3, 2),)
+
+        compiled_fn = torch.compile(fn)
+        _load_precompile_entry(fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager),
+            injected.__code__,
+        )
+
+        _load_precompile_entry(fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager2),
+            injected2.__code__,
+        )
+
+        _load_precompile_entry(fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager3),
+            injected3.__code__,
+        )
+
+
+        _load_precompile_entry(fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager4),
+            injected4.__code__,
+        )
+
+        self.assertEqual(compiled_fn(*args), injected2(*args))
+        self.assertEqual(compiled_fn(True), injected(True))
+        self.assertEqual(compiled_fn(10), injected(10))
+        self.assertEqual(compiled_fn("10"), injected4("10"))
+        _reset_precompile_entries(fn.__code__)
+
+        self.assertEqual(compiled_fn(*args), fn(*args))
+
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):
             z = x * y
