@@ -67,7 +67,7 @@ setup(
     ]
     ...
 )
-```
+:::
 
 Please replace the `my_compiler` before `=` to the name of your backend's name and replace the part after `=` to
 the module and function name of your backend function.
