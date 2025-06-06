@@ -828,8 +828,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     c10::SymIntArrayRef normalized_shape,
     std::array<bool, 3> output_mask);
 
-std::tuple<Tensor, Tensor>
-infinitely_differentiable_native_rms_norm_backward(
+std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
     const Tensor& dY,
     const Tensor& drstd,
     const Tensor& input,
