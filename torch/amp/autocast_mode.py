@@ -217,7 +217,7 @@ class autocast:
 
     def __init__(
         self,
-        device_type: str | torch.device,
+        device_type: Union[str, torch.device],
         dtype: Optional[_dtype] = None,
         enabled: bool = True,
         cache_enabled: Optional[bool] = None,

@@ -5,7 +5,7 @@ import inspect
 import os
 import traceback
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict
 
 import torch._logging._internal
 
@@ -14,6 +14,13 @@ INTERN_TABLE: dict[str, int] = {}
 
 
 DUMPED_FILES: set[str] = set()
+
+
+class TracebackFrame(TypedDict):
+    line: int
+    name: str
+    filename: int
+    loc: Optional[str]
 
 
 def intern_string(s: Optional[str]) -> int:
@@ -47,7 +54,7 @@ def dump_file(filename: str) -> None:
     )
 
 
-def from_traceback(tb: Sequence[traceback.FrameSummary]) -> list[dict[str, Any]]:
+def from_traceback(tb: Sequence[traceback.FrameSummary]) -> list[TracebackFrame]:
     # dict naming convention here coincides with
     # python/combined_traceback.cpp
     r = [
@@ -62,7 +69,7 @@ def from_traceback(tb: Sequence[traceback.FrameSummary]) -> list[dict[str, Any]]
     return r
 
 
-def get_user_stack(num_frames: int) -> list[dict[str, Any]]:
+def get_user_stack(num_frames: int) -> list[TracebackFrame]:
     from torch._guards import TracingContext
     from torch.utils._traceback import CapturedTraceback
 
@@ -85,7 +92,7 @@ def get_user_stack(num_frames: int) -> list[dict[str, Any]]:
 
 def get_framework_stack(
     num_frames: int = 25, cpp: bool = False
-) -> list[dict[str, Any]]:
+) -> list[TracebackFrame]:
     """
     Returns the traceback for the user stack and the framework stack
     """
