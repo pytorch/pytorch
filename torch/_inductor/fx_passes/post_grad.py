@@ -1666,7 +1666,7 @@ class ConstructorMoverPass:
 
                 # noop elimination if there are other device_put for gpu_node to
                 # target device. Alternatively, we could just move the other device_put
-                # ealier in the graph, but that is not supported in fx graph yet.
+                # earlier in the graph, but that is not supported in fx graph yet.
                 noop_device_puts = [
                     user
                     for user in gpu_node.users
