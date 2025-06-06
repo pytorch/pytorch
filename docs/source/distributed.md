@@ -653,7 +653,6 @@ please contact PyTorch Distributed's maintainers.
 :::
 
 (object-collectives)=
-
 ## Object collectives
 
 :::{warning}
