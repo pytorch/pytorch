@@ -249,7 +249,8 @@ The named tensor API is experimental and subject to change.
 
 ```
 
-(keeps_input-names-doc)=
+(keeps_input_names-doc)=
+``
 
 ## Keeps input names
 
@@ -367,7 +368,7 @@ tensors by name or {meth}`Tensor.align_to` to align tensors to a custom
 dimension ordering.
 :::
 
-(permutes_dimensions-do)=
+(permutes_dimensions-doc)=
 
 ## Permutes dimensions
 
@@ -457,7 +458,7 @@ tensor([[0., 0., 0.],
         [0., 0., 0.]], names=('N', 'C'))
 ```
 
-(out-function-semantics-doc)=
+(out_function_semantics-doc)=
 
 ## out function and in-place variants
 
