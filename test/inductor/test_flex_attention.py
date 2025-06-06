@@ -14,6 +14,7 @@ from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
 import torch
+import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import metrics
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
@@ -30,6 +31,7 @@ from torch.nn.attention.flex_attention import (
     BlockMask,
     create_block_mask,
     flex_attention,
+    flex_attention_hop,
     noop_mask,
     or_masks,
 )
@@ -45,7 +47,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipCUDAIf,
 )
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton, has_triton_tma_device
 
 
 # Use this decorator only when hitting Triton bugs on H100
@@ -2259,6 +2261,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     def test_epilogue_fused(self, device):
+        # set so that metrics appear
+        torch._logging.set_logs(inductor_metrics=True)
+
         @torch.compile
         def f(q, k, v):
             out = flex_attention(q, k, v)
@@ -2277,6 +2282,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # We need this fudge factor for now as we write the extraneous logsumexp
         num_accesses += 1
         self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
+        torch._logging.set_logs()
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
@@ -3710,10 +3716,7 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
         self.assertEqual(len(cnt.graphs), 1)
         graph = cnt.graphs[0]
         norm_graph = normalize_gm(graph.print_readable(print_output=False))
-
-        self.assertExpectedInline(
-            norm_graph,
-            """\
+        expected_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_query_: "f64[2, 2, 128, 4]", L_key_: "f64[2, 2, 128, 4]", L_value_: "f64[2, 2, 128, 4]", L_block_mask_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_q_num_blocks: "i32[1, 1, 1]", L_block_mask_q_indices: "i32[1, 1, 1, 1]", L_block_mask_full_q_num_blocks: "i32[1, 1, 1]", L_block_mask_full_q_indices: "i32[1, 1, 1, 1]"):
         l_query_ = L_query_
@@ -3727,8 +3730,6 @@ class GraphModule(torch.nn.Module):
         l_block_mask_q_indices = L_block_mask_q_indices
         l_block_mask_full_q_num_blocks = L_block_mask_full_q_num_blocks
         l_block_mask_full_q_indices = L_block_mask_full_q_indices
-
-        get_device_capability = torch.cuda.get_device_capability('cuda');  get_device_capability = None
 
         score_mod_0 = self.score_mod_0
         mask_fn_0 = self.mask_fn_0
@@ -3745,7 +3746,10 @@ class GraphModule(torch.nn.Module):
         def forward(self, child: "i32[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]"):
             ge: "b8[]" = child_2 >= child_3;  child_2 = child_3 = None
             return ge
-""",  # noqa: B950
+"""
+        self.assertExpectedInline(
+            norm_graph,
+            expected_graph,  # noqa: B950
         )
         # Save the AOT graphs
         aot_graphs = []
@@ -3842,6 +3846,132 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cpu
+    @common_utils.parametrize(
+        "ops_to_save",
+        [
+            [
+                torch.ops.aten.mm.default,
+            ],
+            [
+                flex_attention_hop,
+            ],
+            [torch.ops.aten.mm.default, flex_attention_hop],
+        ],
+    )
+    def test_selective_ac(self, device, ops_to_save):
+        class FlexAttentionModule(nn.Module):
+            def __init__(self, hidden_size, num_heads):
+                super().__init__()
+                self.hidden_size = hidden_size
+                self.num_heads = num_heads
+                self.head_dim = hidden_size // num_heads
+
+                # In-projections (query, key, value)
+                self.q_proj = nn.Linear(hidden_size, hidden_size)
+                self.k_proj = nn.Linear(hidden_size, hidden_size)
+                self.v_proj = nn.Linear(hidden_size, hidden_size)
+
+                # Out-projection
+                self.out_proj = nn.Linear(hidden_size, hidden_size)
+
+            def forward(self, x):
+                batch_size, seq_len, _ = x.size()
+
+                # Project queries, keys, and values
+                q = (
+                    self.q_proj(x)
+                    .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                    .transpose(1, 2)
+                )
+                k = (
+                    self.k_proj(x)
+                    .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                    .transpose(1, 2)
+                )
+                v = (
+                    self.v_proj(x)
+                    .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                    .transpose(1, 2)
+                )
+
+                # Apply flex attention
+                attn_output = flex_attention(
+                    q,
+                    k,
+                    v,
+                )
+
+                # Reshape output
+                attn_output = (
+                    attn_output.transpose(1, 2)
+                    .contiguous()
+                    .view(batch_size, seq_len, self.hidden_size)
+                )
+
+                # Out projection
+                output = self.out_proj(attn_output)
+
+                return output
+
+        from torch.utils.checkpoint import (
+            checkpoint,
+            create_selective_checkpoint_contexts,
+        )
+
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts, ops_to_save
+        )
+
+        # Define a model that uses FlexAttention with selective activation checkpointing
+        class SacModule(nn.Module):
+            def __init__(self, hidden_size, num_heads, context_fn):
+                super().__init__()
+                self.flex_attn = FlexAttentionModule(hidden_size, num_heads)
+                self.context_fn = context_fn
+
+            def forward(self, x):
+                def flex_attn_fn(x):
+                    return self.flex_attn(x)
+
+                output = checkpoint(
+                    flex_attn_fn,
+                    x,
+                    use_reentrant=False,
+                    context_fn=self.context_fn,
+                )
+
+                return output
+
+        flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
+            "cuda", dtype=torch.bfloat16
+        )
+        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
+
+        # Run without compilation
+        output_module = flex_module(x)
+        compiled_module = torch.compile(flex_module)
+        output_compiled = compiled_module(x)
+
+        torch.testing.assert_close(output_module, output_compiled, rtol=1e-2, atol=1e-2)
+
+        # Calculate gradients and compare them
+        x.requires_grad_(True)
+        output_module = flex_module(x)
+        output_compiled = compiled_module(x)
+        grad_output = torch.ones_like(output_module)
+
+        grad_module = torch.autograd.grad(
+            outputs=output_module, inputs=x, grad_outputs=grad_output, retain_graph=True
+        )[0]
+
+        grad_compiled = torch.autograd.grad(
+            outputs=output_compiled, inputs=x, grad_outputs=grad_output
+        )[0]
+
+        torch.testing.assert_close(grad_module, grad_compiled, rtol=1e-2, atol=1e-2)
+
+    @supported_platform
+    @skip_on_cpu
     def test_validate_small_embedding_size_error_message(self, device):
         # eager support for small embedding size
         q, k, v = [torch.randn(2, 2, 128, 8, device=device) for _ in range(3)]
@@ -3907,6 +4037,34 @@ class GraphModule(torch.nn.Module):
         assert torch.allclose(
             C1, C2, atol=1e-2, rtol=1e-2
         ), "Warp specialized kernel result differs from reference"
+
+    @supported_platform
+    @skip_on_cpu
+    @skipCUDAIf(not has_triton_tma_device(), "Requires TMA enabled CUDA device")
+    def test_tma_with_customer_kernel_options(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (1, 1, 256, 128),
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        kernel_options_1 = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "USE_TMA": False,
+        }
+        kernel_options_2 = {"BLOCK_M": 128, "BLOCK_N": 128, "USE_TMA": True}
+
+        flex_compile = torch.compile(flex_attention, fullgraph=True, dynamic=True)
+        out_compiled = flex_compile(query, key, value, kernel_options=kernel_options_1)
+        out_tma_compiled = flex_compile(
+            query, key, value, kernel_options=kernel_options_2
+        )
+
+        # vanilla compiled vs TMA compiled
+        torch.testing.assert_close(out_tma_compiled, out_compiled, atol=2e-1, rtol=2e-1)
 
 
 class TestBlockMask(InductorTestCase):

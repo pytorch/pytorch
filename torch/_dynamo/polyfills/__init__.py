@@ -9,7 +9,7 @@ Python polyfills for common builtins.
 # mypy: allow-untyped-defs
 
 import types
-from collections.abc import MutableMapping, Sequence
+from collections.abc import Iterable, MutableMapping, Sequence
 from itertools import repeat as _repeat
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -101,6 +101,23 @@ def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequenc
     return op(len(left), len(right))
 
 
+def set_symmetric_difference(set1, set2):
+    symmetric_difference_set = set()
+    for x in set1:
+        if x not in set2:
+            symmetric_difference_set.add(x)
+    for x in set2:
+        if x not in set1:
+            symmetric_difference_set.add(x)
+    return symmetric_difference_set
+
+
+def set_symmetric_difference_update(set1, set2):
+    result = set1.symmetric_difference(set2)
+    set1.clear()
+    set1.update(result)
+
+
 def set_isdisjoint(set1, set2):
     for x in set1:
         if x in set2:
@@ -108,33 +125,65 @@ def set_isdisjoint(set1, set2):
     return True
 
 
-def set_intersection(set1, set2):
+def set_intersection(set1, *others):
+    if len(others) == 0:
+        return set1.copy()
+
     intersection_set = set()
     for x in set1:
-        if x in set2:
+        for set2 in others:
+            if x not in set2:
+                break
+        else:
             intersection_set.add(x)
     return intersection_set
 
 
-def set_union(set1, set2):
-    union_set = set1.copy()
-    set_update(union_set, set2)
-    return union_set
+def set_intersection_update(set1, *others):
+    result = set1.intersection(*others)
+    set1.clear()
+    set1.update(result)
 
 
-def set_update(set1, set2):
-    for x in set2:
-        if x not in set1:
-            set1.add(x)
-    return set1
+def set_union(set1, *others):
+    # frozenset also uses this function
+    union_set = set(set1.copy())
+    for set2 in others:
+        set_update(union_set, set2)
+    return type(set1)(union_set)
 
 
-def set_difference(set1, set2):
+def set_update(set1, *others):
+    if len(others) == 0:
+        return set1
+
+    for set2 in others:
+        for x in set2:
+            if x not in set1:
+                set1.add(x)
+
+
+def set_difference(set1, *others):
+    if len(others) == 0:
+        return set1.copy()
+
+    if not all(isinstance(s, Iterable) for s in others):
+        raise TypeError(f"set.difference expected an iterable, got {type(others)}")
+
     difference_set = set()
     for x in set1:
-        if x not in set2:
+        for set2 in others:
+            if x in set2:
+                break
+        else:
             difference_set.add(x)
     return difference_set
+
+
+def set_difference_update(set1, *others):
+    result = set1.difference(*others)
+    set1.clear()
+    set1.update(result)
 
 
 def getattr_and_trace(*args, **kwargs):

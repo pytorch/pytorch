@@ -939,6 +939,12 @@ class GitHubPR:
                     summary=None,
                 )
 
+        # Making an exception for Apply lint auggestions/autoformat because the
+        # bot adds a merged label -> triggers workflow -> sometimes needs
+        # approval -> is read as failure, which results in a blocked merge, but
+        # this workflow doesn't provide mergability info
+        self.conclusions.pop("Apply lint suggestions", None)
+
         return self.conclusions
 
     def get_authors(self) -> dict[str, str]:
@@ -1938,6 +1944,7 @@ def get_ghstack_dependent_prs(
 
 def do_revert_prs(
     repo: GitRepo,
+    original_pr: GitHubPR,
     shas_and_prs: list[tuple[str, GitHubPR]],
     *,
     author_login: str,
@@ -1959,9 +1966,16 @@ def do_revert_prs(
 
     # Comment/reopen PRs
     for commit_sha, pr in shas_and_prs:
-        revert_message = (
-            f"@{pr.get_pr_creator_login()} your PR has been successfully reverted."
-        )
+        revert_message = ""
+        if pr.pr_num == original_pr.pr_num:
+            revert_message += (
+                f"@{pr.get_pr_creator_login()} your PR has been successfully reverted."
+            )
+        else:
+            revert_message += (
+                f"@{pr.get_pr_creator_login()} your PR has been reverted as part of the stack under "
+                f"#{original_pr.pr_num}.\n"
+            )
         if (
             pr.has_internal_changes()
             and not pr.has_no_connected_diff()
@@ -2013,6 +2027,7 @@ def try_revert(
 
     do_revert_prs(
         repo,
+        pr,
         shas_and_prs,
         author_login=author_login,
         extra_msg=extra_msg,
