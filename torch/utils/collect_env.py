@@ -319,7 +319,7 @@ def get_intel_gpu_driver_version(run_lambda):
     lst = []
     platform = get_platform()
     if platform == "linux":
-        pkgs = {. # type: ignore[var-annotated]
+        pkgs = {  # type: ignore[var-annotated]
             "dpkg": {
                 "intel-opencl-icd",
                 "libze1",
