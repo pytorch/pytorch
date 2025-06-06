@@ -862,7 +862,7 @@ class GraphModule(torch.nn.Module):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
         ) as cm:
             opt_fn(x, y)
 
@@ -889,7 +889,7 @@ class GraphModule(torch.nn.Module):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
         ) as cm:
             opt_fn(x, y)
 
@@ -958,7 +958,7 @@ class GraphModule(torch.nn.Module):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
         ) as cm:
             opt_fn(x, y)
 
@@ -982,7 +982,7 @@ class GraphModule(torch.nn.Module):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
         ) as cm:
             opt_fn(x)
 
@@ -1007,7 +1007,7 @@ class GraphModule(torch.nn.Module):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
         ) as cm:
             opt_fn(x)
 
@@ -1044,7 +1044,7 @@ class GraphModule(torch.nn.Module):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
         ) as cm:
             opt_fn(x, y)
 
@@ -1984,6 +1984,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
 
 
+@skipIfTorchDynamo("Not a torch._dynamo test")
 @parameterized_class(
     [
         {"strict": False},
@@ -2149,7 +2150,7 @@ class NegativeTesting(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "torch.compile could not capture the `mark_compile_region` decorated function in one graph",
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
         ):
             torch.compile(fn, backend="eager")(x)
 
