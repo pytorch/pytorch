@@ -69,7 +69,7 @@ x = queue.get()
 # do everything else (producer have to keep x in memory)
 ```
 
-2\. Keep producer process running until all consumers exits. This will prevent
+2. Keep producer process running until all consumers exits. This will prevent
 the situation when the producer process releasing memory which is still in use
 by the consumer.
 
