@@ -1,205 +1,200 @@
+```{eval-rst}
 .. currentmodule:: torch
+```
 
-.. _tensor-doc:
+(tensor-doc)=
 
-torch.Tensor
-===================================
+# torch.Tensor
 
-A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
+A {class}`torch.Tensor` is a multi-dimensional matrix containing elements of
 a single data type.
 
-
-Data types
-----------
+## Data types
 
 Torch defines tensor types with the following data types:
 
-======================================= ===========================================
-Data type                               dtype
-======================================= ===========================================
-32-bit floating point                   ``torch.float32`` or ``torch.float``
-64-bit floating point                   ``torch.float64`` or ``torch.double``
-16-bit floating point [1]_              ``torch.float16`` or ``torch.half``
-16-bit floating point [2]_              ``torch.bfloat16``
-32-bit complex                          ``torch.complex32`` or ``torch.chalf``
-64-bit complex                          ``torch.complex64`` or ``torch.cfloat``
-128-bit complex                         ``torch.complex128`` or ``torch.cdouble``
-8-bit integer (unsigned)                ``torch.uint8``
-16-bit integer (unsigned)               ``torch.uint16`` (limited support) [4]_
-32-bit integer (unsigned)               ``torch.uint32`` (limited support) [4]_
-64-bit integer (unsigned)               ``torch.uint64`` (limited support) [4]_
-8-bit integer (signed)                  ``torch.int8``
-16-bit integer (signed)                 ``torch.int16`` or ``torch.short``
-32-bit integer (signed)                 ``torch.int32`` or ``torch.int``
-64-bit integer (signed)                 ``torch.int64`` or ``torch.long``
-Boolean                                 ``torch.bool``
-quantized 8-bit integer (unsigned)      ``torch.quint8``
-quantized 8-bit integer (signed)        ``torch.qint8``
-quantized 32-bit integer (signed)       ``torch.qint32``
-quantized 4-bit integer (unsigned) [3]_ ``torch.quint4x2``
-8-bit floating point, e4m3 [5]_         ``torch.float8_e4m3fn`` (limited support)
-8-bit floating point, e5m2 [5]_         ``torch.float8_e5m2`` (limited support)
-======================================= ===========================================
+| Data type                                        | dtype                                          |
+| ------------------------------------------------ | ---------------------------------------------- |
+| 32-bit floating point                            | `torch.float32` or `torch.float`               |
+| 64-bit floating point                            | `torch.float64` or `torch.double`              |
+| 16-bit floating point [^footnote-1]              | `torch.float16` or `torch.half`                |
+| 16-bit floating point [^footnote-2]              | `torch.bfloat16`                               |
+| 32-bit complex                                   | `torch.complex32` or `torch.chalf`             |
+| 64-bit complex                                   | `torch.complex64` or `torch.cfloat`            |
+| 128-bit complex                                  | `torch.complex128` or `torch.cdouble`          |
+| 8-bit integer (unsigned)                         | `torch.uint8`                                  |
+| 16-bit integer (unsigned)                        | `torch.uint16` (limited support) [^footnote-4] |
+| 32-bit integer (unsigned)                        | `torch.uint32` (limited support) [^footnote-4] |
+| 64-bit integer (unsigned)                        | `torch.uint64` (limited support) [^footnote-4] |
+| 8-bit integer (signed)                           | `torch.int8`                                   |
+| 16-bit integer (signed)                          | `torch.int16` or `torch.short`                 |
+| 32-bit integer (signed)                          | `torch.int32` or `torch.int`                   |
+| 64-bit integer (signed)                          | `torch.int64` or `torch.long`                  |
+| Boolean                                          | `torch.bool`                                   |
+| quantized 8-bit integer (unsigned)               | `torch.quint8`                                 |
+| quantized 8-bit integer (signed)                 | `torch.qint8`                                  |
+| quantized 32-bit integer (signed)                | `torch.qint32`                                 |
+| quantized 4-bit integer (unsigned) [^footnote-3] | `torch.quint4x2`                               |
+| 8-bit floating point, e4m3 [^footnote-5]         | `torch.float8_e4m3fn` (limited support)        |
+| 8-bit floating point, e5m2 [^footnote-5]         | `torch.float8_e5m2` (limited support)          |
 
-.. [1]
-  Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
-  significand bits. Useful when precision is important at the expense of range.
-.. [2]
-  Sometimes referred to as Brain Floating Point: uses 1 sign, 8 exponent, and 7
-  significand bits. Useful when range is important, since it has the same
-  number of exponent bits as ``float32``
-.. [3]
-  quantized 4-bit integer is stored as a 8-bit signed integer. Currently it's only supported in EmbeddingBag operator.
-.. [4]
-  Unsigned types asides from ``uint8`` are currently planned to only have
-  limited support in eager mode (they primarily exist to assist usage with
-  torch.compile); if you need eager support and the extra range is not needed,
-  we recommend using their signed variants instead.  See
-  https://github.com/pytorch/pytorch/issues/58734 for more details.
-.. [5]
-  ``torch.float8_e4m3fn`` and ``torch.float8_e5m2`` implement the spec for 8-bit
-  floating point types from https://arxiv.org/abs/2209.05433. The op support
-  is very limited.
+[^footnote-1]: Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
+    significand bits. Useful when precision is important at the expense of range.
 
+[^footnote-2]: Sometimes referred to as Brain Floating Point: uses 1 sign, 8 exponent, and 7
+    significand bits. Useful when range is important, since it has the same
+    number of exponent bits as `float32`
+
+[^footnote-3]: quantized 4-bit integer is stored as a 8-bit signed integer. Currently it's only supported in EmbeddingBag operator.
+
+[^footnote-4]: Unsigned types asides from `uint8` are currently planned to only have
+    limited support in eager mode (they primarily exist to assist usage with
+    torch.compile); if you need eager support and the extra range is not needed,
+    we recommend using their signed variants instead. See
+    <https://github.com/pytorch/pytorch/issues/58734> for more details.
+
+[^footnote-5]: `torch.float8_e4m3fn` and `torch.float8_e5m2` implement the spec for 8-bit
+    floating point types from <https://arxiv.org/abs/2209.05433>. The op support
+    is very limited.
 
 For backwards compatibility, we support the following alternate class names
 for these data types:
 
-======================================= ============================= ================================
-Data type                               CPU tensor                    GPU tensor
-======================================= ============================= ================================
-32-bit floating point                   :class:`torch.FloatTensor`    :class:`torch.cuda.FloatTensor`
-64-bit floating point                   :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
-16-bit floating point                   :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
-16-bit floating point                   :class:`torch.BFloat16Tensor` :class:`torch.cuda.BFloat16Tensor`
-8-bit integer (unsigned)                :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
-8-bit integer (signed)                  :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
-16-bit integer (signed)                 :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
-32-bit integer (signed)                 :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
-64-bit integer (signed)                 :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
-Boolean                                 :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
-======================================= ============================= ================================
+| Data type                | CPU tensor                    | GPU tensor                         |
+| ------------------------ | ----------------------------- | ---------------------------------- |
+| 32-bit floating point    | {class}`torch.FloatTensor`    | {class}`torch.cuda.FloatTensor`    |
+| 64-bit floating point    | {class}`torch.DoubleTensor`   | {class}`torch.cuda.DoubleTensor`   |
+| 16-bit floating point    | {class}`torch.HalfTensor`     | {class}`torch.cuda.HalfTensor`     |
+| 16-bit floating point    | {class}`torch.BFloat16Tensor` | {class}`torch.cuda.BFloat16Tensor` |
+| 8-bit integer (unsigned) | {class}`torch.ByteTensor`     | {class}`torch.cuda.ByteTensor`     |
+| 8-bit integer (signed)   | {class}`torch.CharTensor`     | {class}`torch.cuda.CharTensor`     |
+| 16-bit integer (signed)  | {class}`torch.ShortTensor`    | {class}`torch.cuda.ShortTensor`    |
+| 32-bit integer (signed)  | {class}`torch.IntTensor`      | {class}`torch.cuda.IntTensor`      |
+| 64-bit integer (signed)  | {class}`torch.LongTensor`     | {class}`torch.cuda.LongTensor`     |
+| Boolean                  | {class}`torch.BoolTensor`     | {class}`torch.cuda.BoolTensor`     |
 
 However, to construct tensors, we recommend using factory functions such as
-:func:`torch.empty` with the ``dtype`` argument instead.  The
-:class:`torch.Tensor` constructor is an alias for the default tensor type
-(:class:`torch.FloatTensor`).
+{func}`torch.empty` with the `dtype` argument instead. The
+{class}`torch.Tensor` constructor is an alias for the default tensor type
+({class}`torch.FloatTensor`).
 
-Initializing and basic operations
----------------------------------
+## Initializing and basic operations
 
-A tensor can be constructed from a Python :class:`list` or sequence using the
-:func:`torch.tensor` constructor:
+A tensor can be constructed from a Python {class}`list` or sequence using the
+{func}`torch.tensor` constructor:
 
-::
+```
+>>> torch.tensor([[1., -1.], [1., -1.]])
+tensor([[ 1.0000, -1.0000],
+        [ 1.0000, -1.0000]])
+>>> torch.tensor(np.array([[1, 2, 3], [4, 5, 6]]))
+tensor([[ 1,  2,  3],
+        [ 4,  5,  6]])
+```
 
-    >>> torch.tensor([[1., -1.], [1., -1.]])
-    tensor([[ 1.0000, -1.0000],
-            [ 1.0000, -1.0000]])
-    >>> torch.tensor(np.array([[1, 2, 3], [4, 5, 6]]))
-    tensor([[ 1,  2,  3],
-            [ 4,  5,  6]])
-
-.. warning::
-
-    :func:`torch.tensor` always copies :attr:`data`. If you have a Tensor
-    :attr:`data` and just want to change its ``requires_grad`` flag, use
-    :meth:`~torch.Tensor.requires_grad_` or
-    :meth:`~torch.Tensor.detach` to avoid a copy.
-    If you have a numpy array and want to avoid a copy, use
-    :func:`torch.as_tensor`.
+:::{warning}
+{func}`torch.tensor` always copies {attr}`data`. If you have a Tensor
+{attr}`data` and just want to change its `requires_grad` flag, use
+{meth}`~torch.Tensor.requires_grad_` or
+{meth}`~torch.Tensor.detach` to avoid a copy.
+If you have a numpy array and want to avoid a copy, use
+{func}`torch.as_tensor`.
+:::
 
 A tensor of specific data type can be constructed by passing a
-:class:`torch.dtype` and/or a :class:`torch.device` to a
+{class}`torch.dtype` and/or a {class}`torch.device` to a
 constructor or tensor creation op:
 
-::
+```
+>>> torch.zeros([2, 4], dtype=torch.int32)
+tensor([[ 0,  0,  0,  0],
+        [ 0,  0,  0,  0]], dtype=torch.int32)
+>>> cuda0 = torch.device('cuda:0')
+>>> torch.ones([2, 4], dtype=torch.float64, device=cuda0)
+tensor([[ 1.0000,  1.0000,  1.0000,  1.0000],
+        [ 1.0000,  1.0000,  1.0000,  1.0000]], dtype=torch.float64, device='cuda:0')
+```
 
-    >>> torch.zeros([2, 4], dtype=torch.int32)
-    tensor([[ 0,  0,  0,  0],
-            [ 0,  0,  0,  0]], dtype=torch.int32)
-    >>> cuda0 = torch.device('cuda:0')
-    >>> torch.ones([2, 4], dtype=torch.float64, device=cuda0)
-    tensor([[ 1.0000,  1.0000,  1.0000,  1.0000],
-            [ 1.0000,  1.0000,  1.0000,  1.0000]], dtype=torch.float64, device='cuda:0')
-
-For more information about building Tensors, see :ref:`tensor-creation-ops`
-
+For more information about building Tensors, see {ref}`tensor-creation-ops`
 
 The contents of a tensor can be accessed and modified using Python's indexing
 and slicing notation:
 
-::
+```
+>>> x = torch.tensor([[1, 2, 3], [4, 5, 6]])
+>>> print(x[1][2])
+tensor(6)
+>>> x[0][1] = 8
+>>> print(x)
+tensor([[ 1,  8,  3],
+        [ 4,  5,  6]])
+```
 
-    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6]])
-    >>> print(x[1][2])
-    tensor(6)
-    >>> x[0][1] = 8
-    >>> print(x)
-    tensor([[ 1,  8,  3],
-            [ 4,  5,  6]])
-
-Use :meth:`torch.Tensor.item` to get a Python number from a tensor containing a
+Use {meth}`torch.Tensor.item` to get a Python number from a tensor containing a
 single value:
 
-::
+```
+>>> x = torch.tensor([[1]])
+>>> x
+tensor([[ 1]])
+>>> x.item()
+1
+>>> x = torch.tensor(2.5)
+>>> x
+tensor(2.5000)
+>>> x.item()
+2.5
+```
 
-    >>> x = torch.tensor([[1]])
-    >>> x
-    tensor([[ 1]])
-    >>> x.item()
-    1
-    >>> x = torch.tensor(2.5)
-    >>> x
-    tensor(2.5000)
-    >>> x.item()
-    2.5
+For more information about indexing, see {ref}`indexing-slicing-joining`
 
-For more information about indexing, see :ref:`indexing-slicing-joining`
+A tensor can be created with {attr}`requires_grad=True` so that
+{mod}`torch.autograd` records operations on them for automatic differentiation.
 
-A tensor can be created with :attr:`requires_grad=True` so that
-:mod:`torch.autograd` records operations on them for automatic differentiation.
+```
+>>> x = torch.tensor([[1., -1.], [1., 1.]], requires_grad=True)
+>>> out = x.pow(2).sum()
+>>> out.backward()
+>>> x.grad
+tensor([[ 2.0000, -2.0000],
+        [ 2.0000,  2.0000]])
+```
 
-::
-
-    >>> x = torch.tensor([[1., -1.], [1., 1.]], requires_grad=True)
-    >>> out = x.pow(2).sum()
-    >>> out.backward()
-    >>> x.grad
-    tensor([[ 2.0000, -2.0000],
-            [ 2.0000,  2.0000]])
-
-Each tensor has an associated :class:`torch.Storage`, which holds its data.
-The tensor class also provides multi-dimensional, `strided <https://en.wikipedia.org/wiki/Stride_of_an_array>`_
+Each tensor has an associated {class}`torch.Storage`, which holds its data.
+The tensor class also provides multi-dimensional, [strided](https://en.wikipedia.org/wiki/Stride_of_an_array)
 view of a storage and defines numeric operations on it.
 
-.. note::
-   For more information on tensor views, see :ref:`tensor-view-doc`.
+:::{note}
+For more information on tensor views, see {ref}`tensor-view-doc`.
+:::
 
-.. note::
-   For more information on the :class:`torch.dtype`, :class:`torch.device`, and
-   :class:`torch.layout` attributes of a :class:`torch.Tensor`, see
-   :ref:`tensor-attributes-doc`.
+:::{note}
+For more information on the {class}`torch.dtype`, {class}`torch.device`, and
+{class}`torch.layout` attributes of a {class}`torch.Tensor`, see
+{ref}`tensor-attributes-doc`.
+:::
 
-.. note::
-   Methods which mutate a tensor are marked with an underscore suffix.
-   For example, :func:`torch.FloatTensor.abs_` computes the absolute value
-   in-place and returns the modified tensor, while :func:`torch.FloatTensor.abs`
-   computes the result in a new tensor.
+:::{note}
+Methods which mutate a tensor are marked with an underscore suffix.
+For example, {func}`torch.FloatTensor.abs_` computes the absolute value
+in-place and returns the modified tensor, while {func}`torch.FloatTensor.abs`
+computes the result in a new tensor.
+:::
 
-.. note::
-    To change an existing tensor's :class:`torch.device` and/or :class:`torch.dtype`, consider using
-    :meth:`~torch.Tensor.to` method on the tensor.
+:::{note}
+To change an existing tensor's {class}`torch.device` and/or {class}`torch.dtype`, consider using
+{meth}`~torch.Tensor.to` method on the tensor.
+:::
 
-.. warning::
-   Current implementation of :class:`torch.Tensor` introduces memory overhead,
-   thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors.
-   If this is your case, consider using one large structure.
+:::{warning}
+Current implementation of {class}`torch.Tensor` introduces memory overhead,
+thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors.
+If this is your case, consider using one large structure.
+:::
 
+## Tensor class reference
 
-Tensor class reference
-----------------------
-
+```{eval-rst}
 .. class:: Tensor()
 
    There are a few main ways to create a tensor, depending on your use case.
@@ -214,7 +209,9 @@ Tensor class reference
      use ``tensor.new_*`` creation ops.
    - There is a legacy constructor ``torch.Tensor`` whose use is discouraged.
      Use :func:`torch.tensor` instead.
+```
 
+```{eval-rst}
 .. method:: Tensor.__init__(self, data)
 
    This constructor is deprecated, we recommend using :func:`torch.tensor` instead.
@@ -243,12 +240,25 @@ Tensor class reference
        device (:class:`torch.device`, optional): the desired device of returned tensor.
            Default: if None, same :class:`torch.device` as this tensor.
 
+```
 
+```{eval-rst}
 .. autoattribute:: Tensor.T
-.. autoattribute:: Tensor.H
-.. autoattribute:: Tensor.mT
-.. autoattribute:: Tensor.mH
+```
 
+```{eval-rst}
+.. autoattribute:: Tensor.H
+```
+
+```{eval-rst}
+.. autoattribute:: Tensor.mT
+```
+
+```{eval-rst}
+.. autoattribute:: Tensor.mH
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -781,3 +791,4 @@ Tensor class reference
     Tensor.xlogy_
     Tensor.xpu
     Tensor.zero_
+```
