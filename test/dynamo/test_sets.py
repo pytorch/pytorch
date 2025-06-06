@@ -8,9 +8,11 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_utils import munge_exc
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
-class SetGuardsSet(torch._dynamo.test_case.TestCase):
+class TestSetGuards(LoggingTestCase):
     def test_set_with_tensor(self):
         s = {
             torch._C._set_grad_enabled,
@@ -30,10 +32,43 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, x.sin())
         self.assertEqual(cnts.frame_count, 1)
 
-        s.clear()
+        s.remove(torch.amp._exit_autocast)
+        s.add(torch._C._set_fwd_grad_enabled)
         y = fn(x, s)
         self.assertEqual(y, x.cos())
         self.assertEqual(cnts.frame_count, 2)
+
+    @make_logging_test(recompiles=True)
+    def test_in_guard(self, records):
+        s = {
+            "Dynamo",
+            "Inductor",
+            "PyTorch",
+        }
+        cnts = CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x, s):
+            if "PyTorch" in s:
+                return x.sin()
+            return x.cos()
+
+        x = torch.randn(2)
+        y = fn(x, s)
+        self.assertEqual(y, x.sin())
+        self.assertEqual(cnts.frame_count, 1)
+
+        s.remove("PyTorch")
+        s.add("Cuda")
+        y = fn(x, s)
+        self.assertEqual(y, x.cos())
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertGreater(len(records), 0)
+        record = self.getRecord(records, "set.__contains__")
+        self.assertIn(
+            """set.__contains__(s, 'PyTorch')""",
+            munge_exc(record.getMessage()),
+        )
 
     def test_set_with_tensors_2(self):
         s = {
