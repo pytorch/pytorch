@@ -140,9 +140,8 @@ parameter ``report=True``. A markdown report is generated to help the user
 to resolve the issue.
 
 ```{toctree}
-    :hidden:
-
-    onnx_dynamo_memory_usage
+:hidden:
+onnx_dynamo_memory_usage
 ```
 
 ## API Reference

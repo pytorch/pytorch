@@ -144,7 +144,7 @@ a {class}`torch.nn.Module`. If the passed-in model is not already a ``ScriptModu
     outputs can be captured. No tracing will be performed.
 
 See [Introduction to TorchScript](https://pytorch.org/tutorials/beginner/Intro_to_TorchScript_tutorial.html)
-and [TorchScript](jit.html) for more details, including how to compose tracing and scripting to suit the
+and [TorchScript](https://docs.pytorch.org/docs/jit.html) for more details, including how to compose tracing and scripting to suit the
 particular requirements of different models.
 
 
@@ -705,7 +705,9 @@ Q: Are lists of Tensors exportable to ONNX?
 
 ## Python API
 
+```{eval-rst}
 .. automodule:: torch.onnx
+```
 
 ### Functions
 
