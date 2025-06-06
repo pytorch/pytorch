@@ -1516,7 +1516,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def run_node(self, n: torch.fx.Node) -> object:
         def debug(msg: str) -> None:
-            log.debug("lowering %s %s", LazyString(n.format_node), msg)
+            log.debug("lowering %s %s", LazyString(n.format_node), msg)  # type: ignore[arg-type]
 
         from torch._inductor.compiler_bisector import CompilerBisector
 

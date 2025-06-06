@@ -14,7 +14,7 @@ import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generic, Optional, Union
+from typing import Any, Callable, cast, Generic, Optional, Protocol, Union
 from typing_extensions import ParamSpec
 from weakref import WeakSet
 
@@ -52,6 +52,10 @@ DTRACE_ENV_VAR = "TORCH_DTRACE"
 LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
 
 GET_DTRACE_STRUCTURED = False
+
+
+class ArtifactLogger(logging.Logger, Protocol):
+    artifact_name: str
 
 
 @dataclass
@@ -597,7 +601,7 @@ def register_artifact(
     )
 
 
-def getArtifactLogger(module_qname, artifact_name) -> logging.Logger:
+def getArtifactLogger(module_qname, artifact_name) -> ArtifactLogger:
     if artifact_name not in log_registry.artifact_names:
         raise ValueError(
             f"Artifact name: {repr(artifact_name)} not registered,"
@@ -606,6 +610,7 @@ def getArtifactLogger(module_qname, artifact_name) -> logging.Logger:
     qname = module_qname + f".__{artifact_name}"
     log = logging.getLogger(qname)
     log.artifact_name = artifact_name  # type: ignore[attr-defined]
+    log = cast(ArtifactLogger, log)
     log_registry.register_artifact_log(qname)
     configure_artifact_log(log)
     return log
