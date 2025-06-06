@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ..ops_handler import ReductionType, StoreMode
+    from ..shape_propagation import ShapeType
 
 log = logging.getLogger(__name__)
 
@@ -556,6 +557,7 @@ class HalideOverrides(OpOverrides):
             f"hl.cast({result.name}.type(), {halide_constant(other)})",
             [],
             bounds=ValueRanges.wrap(other),
+            shape=result.shape,
         )
         # TODO(jansel): look into removing the where in the same places triton does
         return ops.where(new_mask, result, other)
@@ -576,8 +578,9 @@ class HalideCSEVariable(CSEVariable):
         name,
         bounds: ValueRanges[Any],
         dtype: Optional[torch.dtype] = None,
+        shape: ShapeType = None,
     ) -> None:
-        super().__init__(name, bounds, dtype)
+        super().__init__(name, bounds, dtype, shape=shape)
         self.used_dims: Optional[list[sympy.Symbol]] = None
 
     def update_on_args(self, name, args, kwargs):
@@ -702,9 +705,9 @@ class HalideKernel(SIMDKernel):
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return halide_type(dtype)
 
-    def create_cse_var(self, name, bounds=None, dtype=None):
+    def create_cse_var(self, name, bounds=None, dtype=None, shape=None):
         self.body.writeline(f"{name} = hl.Func({name!r})")
-        return HalideCSEVariable(name, bounds, dtype)
+        return HalideCSEVariable(name, bounds, dtype, shape)
 
     def finalize_indexing(self, indices: Sequence[sympy.Expr]):
         """
@@ -939,7 +942,7 @@ class HalideKernel(SIMDKernel):
 
         # group the expression by variables used
         offset = sympy.S.Zero
-        split_expr = {s: sympy.S.Zero for s in symbols}
+        split_expr = dict.fromkeys(symbols, sympy.S.Zero)
         split_failed: list[tuple[list[sympy.Symbol], sympy.Expr]] = []
         index = sympy.expand(self.rename_indexing(index))
         for part in index.args if isinstance(index, sympy.Add) else [index]:
@@ -1196,12 +1199,13 @@ class HalideKernel(SIMDKernel):
         assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
         reduction_vars = OrderedSet(self.reduction_renames)
         result_var = self.newfunc(
-            [v for v in value.used_dims if v not in reduction_vars]
+            [v for v in value.used_dims if v not in reduction_vars],
         )
         if reduction_vars - OrderedSet(value.used_dims):
             value = self.genfunc(
                 f"{value}",
                 self.sort_used_dims(OrderedSet((*value.used_dims, *reduction_vars))),
+                shape=value.shape,
             )
         value_str = value.subs_str(self.reduction_renames)
         default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
@@ -1291,7 +1295,9 @@ class HalideKernel(SIMDKernel):
             else:
                 values.append(
                     self.genfunc(
-                        f"{value}", [*value.used_dims, [*self.reduction_renames][:1]]
+                        f"{value}",
+                        [*value.used_dims, [*self.reduction_renames][:1]],
+                        shape=value.shape,
                     )
                 )
             all_used_dims.update(value.used_dims)
@@ -1355,15 +1361,20 @@ class HalideKernel(SIMDKernel):
         return tuple(unpack_vars)
 
     def genfunc(
-        self, line, used_dims, *, bounds=ValueRanges.unknown()
+        self,
+        line,
+        used_dims,
+        *,
+        bounds=ValueRanges.unknown(),
+        shape: ShapeType = None,
     ) -> HalideCSEVariable:
-        var = self.cse.generate(self.body, line, bounds=bounds)
+        var = self.cse.generate(self.body, line, bounds=bounds, shape=shape)
         assert isinstance(var, HalideCSEVariable)
         var.used_dims = used_dims
         return var
 
-    def newfunc(self, used_dims) -> HalideCSEVariable:
-        var = self.cse.newvar()
+    def newfunc(self, used_dims, *, shape: ShapeType = None) -> HalideCSEVariable:
+        var = self.cse.newvar(shape=shape)
         assert isinstance(var, HalideCSEVariable)
         var.used_dims = used_dims
         return var
@@ -1535,7 +1546,7 @@ class HalideKernel(SIMDKernel):
         code.splice(self.indexing_code)
 
         def update_index(m):
-            var = cast(HalideCSEVariable, self.cse.varname_map[m.group(1)])
+            var = cast("HalideCSEVariable", self.cse.varname_map[m.group(1)])
             assert var.used_dims is not None, var
             return str(var)
 
