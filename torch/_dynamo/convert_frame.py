@@ -51,6 +51,7 @@ from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._guards import compile_context, CompileContext, CompileId, tracing
+from torch._inductor.async_compile import warm_async_compile_pool
 from torch._logging import structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
@@ -960,6 +961,7 @@ def _compile(
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
         compile_context(CompileContext(compile_id)),
+        warm_async_compile_pool(),
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),

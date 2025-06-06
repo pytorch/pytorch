@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import functools
 import json
 import logging
@@ -50,6 +51,8 @@ from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from torch._inductor.runtime.hints import HalideMeta
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -216,6 +219,15 @@ class CompiledTritonKernels:
             del CompiledTritonKernels._cache[key]
 
 
+@contextlib.contextmanager
+def warm_async_compile_pool() -> Generator[None, None, None]:
+    try:
+        torch._inductor.async_compile.AsyncCompile.warm_pool()
+        yield
+    finally:
+        torch._inductor.async_compile.AsyncCompile.quiesce()
+
+
 class AsyncCompile:
     def __init__(self) -> None:
         pass
@@ -272,9 +284,18 @@ class AsyncCompile:
         if get_compile_threads() <= 1:
             return
         _compile_start()
-        # Pool is initialized on first access
-        cls.process_pool()
+        pool = cls.process_pool()
+        if isinstance(pool, SubprocPool):
+            pool.warmup()
         _compile_end()
+
+    @classmethod
+    def quiesce(cls) -> None:
+        # Don't inadvertently create a process pool if it doesn't already exist:
+        if cls.process_pool.cache_info().currsize:
+            pool = cls.process_pool()
+            if isinstance(pool, SubprocPool):
+                pool.quiesce()
 
     @classmethod
     def submit(cls, task: Callable[..., Any]) -> Any:
