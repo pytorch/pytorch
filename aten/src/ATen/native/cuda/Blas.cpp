@@ -470,6 +470,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           launchTunableGemmAndBias<scalar_t>(
               args,
               alpha,
+	      beta,
               (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
               activation_to_gemm_and_blas_arg(activation));
         } else {
