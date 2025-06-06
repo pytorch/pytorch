@@ -2,8 +2,10 @@
 
 namespace c10 {
 
-// DeviceAllocator::DeviceAllocator() = default;
-// DeviceAllocator::~DeviceAllocator() = default;
+// Ensures proper DLL export of this pure virtual base class on Windows,
+// since it's mainly used in other DLLs outside c10.dll.
+DeviceAllocator::DeviceAllocator() = default;
+DeviceAllocator::~DeviceAllocator() = default;
 
 DeviceAllocator* GetDeviceAllocator(const DeviceType& t) {
   auto* allocator = c10::GetAllocator(t);
