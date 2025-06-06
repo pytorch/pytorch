@@ -15,6 +15,7 @@ import traceback
 import typing
 from collections import Counter, defaultdict
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec, TypeAlias
 
 
 if TYPE_CHECKING:
@@ -75,7 +76,9 @@ log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
-PartitionType = list["BaseSchedulerNode"]
+PartitionType: TypeAlias = list["BaseSchedulerNode"]
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
 @dataclasses.dataclass
@@ -212,7 +215,7 @@ class BaseSchedulerNode:
 
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node: Optional[ir.Operation] = node
-        self.ancestors = OrderedSet[str]()
+        self.ancestors: OrderedSet[str] = OrderedSet()
         self.last_usage = OrderedSet[
             str
         ]()  # buffers that won't be used after this kernel
@@ -325,7 +328,7 @@ class BaseSchedulerNode:
         )
 
     def used_or_aliased_buffer_names(self) -> OrderedSet[str]:
-        used_names = OrderedSet[str]()
+        used_names: OrderedSet[str] = OrderedSet()
 
         deps = [
             dep.name
@@ -1016,13 +1019,14 @@ class SchedulerNode(BaseSchedulerNode):
     def _compute_attrs(
         self,
         extra_indexing_constraints: Optional[tuple[dict[Any, Any], list[Any]]] = None,
-        recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
+        recompute_sizes_body_func: Optional[Callable[_P, _T]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
-        self._sizes, self._body = self.node.simplify_and_reorder(
+        self._sizes, body = self.node.simplify_and_reorder(
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
+        self._body = body  # type: ignore[assignment]
 
         device = self.node.get_device_or_error()
         group_fn = self.scheduler.get_backend(device).group_fn
@@ -1238,7 +1242,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     @cache_on_self
     def _get_atomic_add_buffers(self) -> OrderedSet[str]:
-        buffers_store_as_atomic_add = OrderedSet[str]()
+        buffers_store_as_atomic_add: OrderedSet[str] = OrderedSet()
         if isinstance(self._body, LoopBody):
             for node in self._body.get_nodes():
                 if (
@@ -1441,7 +1445,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         super().set_last_usage(future_used_buffers, mutation_real_name)
         # Set self.last_usage on the snodes
         # This will be used for optimisations within the kernel
-        future_used_buffers = OrderedSet[str]()
+        future_used_buffers: OrderedSet[str] = OrderedSet()
         for node in reversed(self.snodes):
             node.set_last_usage(future_used_buffers, mutation_real_name)
             future_used_buffers.update(node.last_usage)
@@ -1934,7 +1938,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 def pick_loop_order(
     stride_lengths: list[list[int]],
     sizes: Sequence[sympy.Expr],
-    priority_idx: tuple[int, ...] = (),
+    priority_idx: Sequence[int] = (),
 ) -> list[int]:
     """
     A heuristic to decide loop iteration orders.  This has not been well
@@ -2032,7 +2036,7 @@ class Scheduler:
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self._graph_partition_counter = itertools.count()
 
-        self.completed_operations = OrderedSet[str]()
+        self.completed_operations: OrderedSet[str] = OrderedSet()
         self.available_buffer_names = OrderedSet(
             [
                 *V.graph.graph_inputs.keys(),
@@ -2134,7 +2138,7 @@ class Scheduler:
         self.debug_draw_graph()
 
         # used during codegen:
-        self.buffer_names_to_free = OrderedSet[str]()
+        self.buffer_names_to_free: OrderedSet[str] = OrderedSet()
 
         # fx graph node to the position it appears in the graph
         # for debug attribution
@@ -2194,7 +2198,7 @@ class Scheduler:
             raise NotImplementedError(node)
 
     def create_foreach_nodes(self) -> None:
-        removed_node_names = OrderedSet[str]()
+        removed_node_names: OrderedSet[str] = OrderedSet()
         fe_nodes = []
         kept_node_names = self.name_to_fused_node.keys()
 
@@ -2235,9 +2239,7 @@ class Scheduler:
         mutation properly.
         """
 
-        T = TypeVar("T")
-
-        class DedupList(Generic[T]):
+        class DedupList(Generic[_T]):
             """
             This data structure behaves like a list except it makes sure the
             elements remain unique.
@@ -2249,19 +2251,19 @@ class Scheduler:
 
             def __init__(
                 self,
-                items: Optional[list[T]] = None,
-                membership: Optional[OrderedSet[T]] = None,
+                items: Optional[list[_T]] = None,
+                membership: Optional[OrderedSet[_T]] = None,
             ) -> None:
                 self.items = items or []
                 self.membership = membership or OrderedSet()
 
-            def append(self, node_user: T) -> None:
+            def append(self, node_user: _T) -> None:
                 if node_user in self.membership:
                     return
                 self.items.append(node_user)
                 self.membership.add(node_user)
 
-            def __add__(self, other: DedupList[T]) -> DedupList[T]:
+            def __add__(self, other: DedupList[_T]) -> DedupList[_T]:
                 new_membership = OrderedSet.union(self.membership, other.membership)
                 new_items = self.items + [
                     x for x in other.items if x not in self.membership
@@ -2515,7 +2517,7 @@ class Scheduler:
         return result
 
     def _get_unmet_dep_nodes(self, snode: BaseSchedulerNode) -> list[BaseSchedulerNode]:
-        unmet_deps = OrderedSet[str]()
+        unmet_deps: OrderedSet[str] = OrderedSet()
         if isinstance(
             snode,
             (
@@ -2567,7 +2569,7 @@ class Scheduler:
         # note self.nodes is topologically sorted
         name_to_ancestors: dict[str, OrderedSet[str]] = {}
         for node in self.nodes:
-            ancestors = OrderedSet[str]()
+            ancestors: OrderedSet[str] = OrderedSet()
             for dep in node.unmet_dependencies:
                 dep_node_name = self.name_to_buf[dep.name].defining_op_name()
                 ancestors.add(dep_node_name)
@@ -2754,7 +2756,7 @@ class Scheduler:
                     continue
 
                 out_tensorbox = min_node_unfused.output_node()
-                out_storage = out_tensorbox.data
+                out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 assert isinstance(out_storage, ir.StorageBox)
                 out_buffer = out_storage.data
                 assert isinstance(out_buffer, ir.OperationBuffer)
@@ -3659,7 +3661,7 @@ class Scheduler:
             allowed_prologue_inps = template.get_allowed_prologue_inps()
 
             unsupported_prologue_args = (
-                OrderedSet(inp.get_name() for inp in template.inputs)
+                OrderedSet(inp.get_name() for inp in template.inputs)  # type: ignore[union-attr]
                 - allowed_prologue_inps
             )
 
@@ -4251,7 +4253,15 @@ class Scheduler:
             *(get_input_node_symbols(node) for _, node in input_nodes.items())
         )
 
-        return filter_symbols(candidate_symbols)
+        candidate_symbols = filter_symbols(candidate_symbols)
+
+        res: OrderedSet[sympy.Symbol] = OrderedSet()
+        for s in candidate_symbols:
+            symplified_s = V.graph.sizevars.simplify(s)
+            # use free_symbols only when s is simplified to an Integer or expr
+            res.update(symplified_s.free_symbols)
+
+        return OrderedSet(sorted(res, key=operator.attrgetter("name")))
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]

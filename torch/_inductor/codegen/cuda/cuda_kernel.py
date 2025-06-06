@@ -29,6 +29,7 @@ from ...ir import (
     IRNode,
     Layout,
     PrimitiveInfoType,
+    ShapeAsConstantBuffer,
     TensorBox,
 )
 from ...utils import sympy_product
@@ -281,22 +282,28 @@ class CUDATemplateKernel(CUDAKernel):
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
 
-        free_symbols = OrderedSet[Expr]()
+        free_symbols: OrderedSet[Expr] = OrderedSet()
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
-                for expr in [*node.get_size(), *node.get_stride()]:
-                    if isinstance(expr, Expr):
-                        for s in expr.free_symbols:
-                            free_symbols.add(s)  # type: ignore[arg-type]
+                if name not in (
+                    "X",
+                    "W",
+                    "Bias",
+                    "Y",
+                ):  # we handle these symbolic shapes explicitly
+                    for expr in itertools.chain(node.get_size(), node.get_stride()):
+                        if isinstance(expr, Expr):
+                            for s in expr.free_symbols:
+                                free_symbols.add(s)  # type: ignore[arg-type]
 
         arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE)
 
         self.init_layout_args()
         size_vars = ["M", "N", "K", "B", "lda", "ldb", "ldc", "ldd"]
-        size_vars.extend(free_symbols)
+        size_vars.extend(str(s) for s in free_symbols)
         self.size_args.extend(free_symbols)
         size_args = [f"const int {s}" for s in size_vars]
 
@@ -654,7 +661,7 @@ class CUDATemplateCaller(ChoiceCaller):
         else:
             return {"backend": "CUDA", "op_type": "unknown"}
 
-    def output_node(self) -> TensorBox:
+    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
         self.bmreq.update_workspace_size()
         return TensorBox.create(
             CUDATemplateBuffer(
