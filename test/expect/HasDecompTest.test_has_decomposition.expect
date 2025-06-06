@@ -1094,8 +1094,6 @@ aten::randint.low_generator_out
 aten::randint.low_out
 aten::randint.out
 aten::randint_like
-aten::randint_like.Tensor
-aten::randint_like.Tensor_out
 aten::randint_like.low_dtype
 aten::randint_like.low_dtype_out
 aten::randint_like.out

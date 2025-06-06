@@ -68,8 +68,6 @@ _like_tensor_constructors = ordered_set(
     aten.randn_like.default,
     aten.randn_like.out,
     aten.randint_like.default,
-    aten.randint_like.Tensor,
-    aten.randint_like.Tensor_out,
     aten.randint_like.out,
     aten.randint_like.low_dtype,
     aten.randint_like.low_dtype_out,
