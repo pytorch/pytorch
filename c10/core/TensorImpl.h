@@ -2079,7 +2079,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            BackendComponent::XPUBit,
            BackendComponent::HPUBit,
            BackendComponent::MTIABit,
-           BackendComponent::PrivateUse1});
+           BackendComponent::PrivateUse1Bit});
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
       return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };
