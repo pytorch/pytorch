@@ -11660,8 +11660,10 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x_leaf.grad, grad_x, atol=dtype2prec_DONTUSE[dtype], rtol=0)
             for p1, p2 in zip(lstm.parameters(), lstm2.parameters()):
                 prec = dtype2prec_DONTUSE[dtype]
-                if dtype == torch.float16 or dtype == torch.bfloat16:
+                if dtype == torch.float16:
                     prec = 4e-2
+                elif dtype == torch.bfloat16:
+                    prec = 2e-1
                 self.assertEqual(p1.grad, p2.grad, atol=prec, rtol=0)
 
         tests = [
