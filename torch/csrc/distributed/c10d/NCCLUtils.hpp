@@ -83,6 +83,10 @@ static_assert(
 #define NCCL_HAS_CTA_POLICY
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_NVLS_CTAS
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \
