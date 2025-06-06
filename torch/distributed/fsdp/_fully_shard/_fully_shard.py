@@ -204,7 +204,8 @@ def fully_shard(
     # If the user does not provide ``reshard_after_forward``, we set it to True.
     # During lazy_init, we identify which module is the root and override its value to False
     post_forward_mesh_info = _get_post_forward_mesh_info(
-        reshard_after_forward if not auto_reshard_after_forward else True, mesh_info
+        reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
+        mesh_info,
     )
 
     arg_module = module

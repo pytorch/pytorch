@@ -770,6 +770,7 @@ class TestFullyShardPrefetch(FSDPTest):
         )
         expected_backward_events = [
             # Default backward prefetching
+            ("unshard", "", TrainingState.PRE_BACKWARD),
             ("unshard", "layers.3", TrainingState.PRE_BACKWARD),
             ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
             ("reshard", "layers.3", TrainingState.POST_BACKWARD),
@@ -801,6 +802,7 @@ class TestFullyShardPrefetch(FSDPTest):
                 ("unshard", "layers.3", TrainingState.FORWARD),
                 ("reshard", "layers.2", TrainingState.FORWARD),
                 ("reshard", "layers.3", TrainingState.FORWARD),
+                ("reshard", "", TrainingState.FORWARD),
             ]
             self.assertEqual(events, expected_forward_events)
             events.clear()
