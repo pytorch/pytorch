@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import builtins
 import contextlib
 import dataclasses
 import functools
@@ -69,6 +68,7 @@ from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
     ceildiv,
+    do_bench_using_profiling,
     FakeIndentedBuffer,
     get_dtype_size,
     is_gpu,
@@ -1177,6 +1177,7 @@ class GeneratedCodeCache:
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
+        epilogue_fn_hash: Optional[str],
         subgraphs: Optional[list[ir.Buffer]],  # has to be none to cache
         workspace_arg: Optional[WorkspaceArg],  # has to be none to cache
         layout: ir.Layout,
@@ -1205,12 +1206,16 @@ class GeneratedCodeCache:
                     return True
             return False
 
+        if epilogue_fn is identity:
+            assert epilogue_fn_hash is None
+            epilogue_fn_hash = "identity"
+
         # we do not cache under those conditions right now.
         if (
             has_flexible_layout()
             or subgraphs is not None
             or workspace_arg is not None
-            or epilogue_fn is not identity
+            or epilogue_fn_hash is None
         ):
             return None
 
@@ -1227,6 +1232,7 @@ class GeneratedCodeCache:
                 "layout": layout_key(layout),
                 "num_consumer_groups": num_consumer_groups,
                 "num_buffers_warp_spec": num_buffers_warp_spec,
+                "epilogue_fn_hash": epilogue_fn_hash,
                 "kwargs": kwargs,
             }
         )
@@ -1324,6 +1330,7 @@ class TritonTemplate(KernelTemplate):
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
+        epilogue_fn_hash: Optional[str],
         subgraphs: Optional[list[ir.Buffer]],
         workspace_arg: Optional[WorkspaceArg],
         num_consumer_groups: int,
@@ -1348,6 +1355,7 @@ class TritonTemplate(KernelTemplate):
                 prefix_args,
                 suffix_args,
                 epilogue_fn,
+                epilogue_fn_hash,
                 subgraphs,
                 workspace_arg,
                 layout,
@@ -1515,6 +1523,7 @@ class TritonTemplate(KernelTemplate):
         prefix_args: int = 0,
         suffix_args: int = 0,
         epilogue_fn: Optional[Callable[..., Any]] = identity,
+        epilogue_fn_hash: Optional[str] = None,
         subgraphs: Optional[list[ir.Buffer]] = None,
         mutated_inputs: Optional[list[ir.IRNode]] = None,
         call_sizes: Optional[list[sympy.core.symbol.Symbol]] = None,
@@ -1556,13 +1565,14 @@ class TritonTemplate(KernelTemplate):
             prefix_args,
             suffix_args,
             epilogue_fn,
+            epilogue_fn_hash,
             subgraphs,
             workspace_arg,
             num_consumer_groups,
             num_buffers_warp_spec,
             layout,
             kwargs,
-            generate_with_caching,
+            generate_with_caching and self._cache_codegen_enabled_for_template,
         )
 
         # May happen as result of dev by 0.
@@ -1777,6 +1787,9 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
         return self.bmreq.benchmark(*args, out=out)
 
     def precompile(self):
@@ -1860,6 +1873,8 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
+            if config.profile_bandwidth_with_do_bench_using_profiling:
+                return do_bench_using_profiling(lambda: algo(*args))
             return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
@@ -2061,8 +2076,26 @@ def create_precompile_key(
             inputs_key,
             torch.get_float32_matmul_precision(),
         ]
-        + [choice.hash_key() for choice in choices]
+        + [choice.kernel_hash_key() for choice in choices]
     )
+
+
+# Args to FeedbackFunctions
+# timings: mapping from choices to the benchmark time
+# name: name of the op
+# input_nodes: list of input ir.py Nodes
+# choices: list of choices
+# profiled time: Callable that returns a dict mapping from choices to the profiled time
+FeedbackFunction = Callable[
+    [
+        dict[ChoiceCaller, float],
+        str,
+        list[Any],
+        list[ChoiceCaller],
+        Callable[[], dict[ChoiceCaller, float]],
+    ],
+    None,
+]
 
 
 class AlgorithmSelectorCache(PersistentCache):
@@ -2085,11 +2118,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # of a particular key
         self.precompile_cache: dict[str, Callable[[], None]] = {}
         # list of callbacks that are called after benchmarking
-        self.feedback_saver_fns: list[
-            Callable[
-                [dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None
-            ]
-        ] = []
+        self.feedback_saver_fns: list[FeedbackFunction] = []
 
         clear_on_fresh_inductor_cache(self)
 
@@ -2120,9 +2149,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
-
-        # TODO(nmacchioni): remove once CI tests are fixed
-        choices = [choice for choice in choices if choice is not None]
 
         if config.test_configs.autotune_choice_name_regex is not None:
             choices = [
@@ -2236,8 +2262,28 @@ class AlgorithmSelectorCache(PersistentCache):
                     name, input_nodes, timings, autotune_elapse, precompile_elapse
                 )
 
+            def profiler_bench_function():
+                # we're not running through the normal caching autotuner method here because we want to avoid returning
+                # the cached value.
+                # Avoid benchmarking in a separate process because it's not easy to signal to the TuningProcess that we
+                # should use the profiler.
+                with config.patch(
+                    profile_bandwidth_with_do_bench_using_profiling=True,
+                    autotune_in_subproc=False,
+                ):
+                    return self.make_benchmark_fn(
+                        choices, input_nodes, layout, input_gen_fns
+                    )(choices)
+
             for feedback_fn in self.feedback_saver_fns:
-                feedback_fn(timings, name, input_nodes, choices)
+                # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
+                feedback_fn(
+                    timings,
+                    name,
+                    input_nodes,
+                    choices,
+                    profiler_bench_function,
+                )
 
             return timings
 
@@ -2287,13 +2333,34 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
         timings = do_autotuning(choices, precompile_fn)
-        if timings == {} or choices[0] not in timings:
-            return choices[0].output_node()
 
-        selected_key = builtins.min(timings, key=timings.__getitem__)
-        selected_choice = selected_key.output_node()
-        log.debug("selected choice: %s", str(selected_choice))
-        return selected_choice
+        # if timings is empty, we really have no choice but to return a semi-random
+        # choice. returning the first `ExternKernelCaller` is probably the safest bet
+        # in this case, since it will generally be the ATen kernel. if there are no
+        # `ExternKernelCaller`s to return, then returning the 0th kernel is our next
+        # best option (ideally we'd fail whenever there is no ATen kernel to fallback
+        # to, but that's not trivial to figure out)
+        if timings == {}:
+            for choice in choices:
+                if isinstance(choice, ExternKernelCaller):
+                    node = choice.output_node()
+                    log.debug(
+                        "Autotuning returned empty timings, falling back to first `ExternKernelCaller`: %s",
+                        node,
+                    )
+                    return node
+            node = choices[0].output_node()
+            log.debug(
+                "Autotuning returned empty timings, falling back to first choice: %s",
+                node,
+            )
+            return node
+
+        # if we got any timings at all, pick the best of those
+        choice = min(timings, key=timings.__getitem__)
+        node = choice.output_node()
+        log.debug("Autotuning selected choice: %s", node)
+        return node
 
     def make_precompile_fn(
         self,
@@ -2397,11 +2464,11 @@ class AlgorithmSelectorCache(PersistentCache):
         seen_choices: OrderedSet[str] = OrderedSet()
         for c in choices:
             # Skip choices which we have already issued a precompile
-            if c.hash_key() in seen_choices:
+            if c.kernel_hash_key() in seen_choices:
                 log.debug("Skipping already seen choice: %s", c)
                 continue
             else:
-                seen_choices.add(c.hash_key())
+                seen_choices.add(c.kernel_hash_key())
 
             if hasattr(c, "precompile"):
                 triton_cuda_choice = isinstance(c, TritonTemplateCaller) and isinstance(
@@ -2717,11 +2784,11 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # prune choices based on prescreening timings
         candidates_to_prune = OrderedSet(
-            candidate.hash_key() for candidate in sorted_candidates[num_to_keep:]
+            candidate.kernel_hash_key() for candidate in sorted_candidates[num_to_keep:]
         )
         for candidate in sorted_candidates[:num_to_keep]:
             if candidate_timings[candidate] == float("inf"):
-                candidates_to_prune.add(candidate.hash_key())
+                candidates_to_prune.add(candidate.kernel_hash_key())
             else:
                 if isinstance(candidate, CUDATemplateCaller):
                     candidate.bmreq.ensure_dll_loaded()
@@ -2729,7 +2796,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices = [
             choice
             for choice in choices
-            if choice.hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
+            if choice.kernel_hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
         ]
 
         log.debug("After pruning using prescreening timings, %d choices", len(choices))
@@ -2917,12 +2984,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
         )
 
-    def add_feedback_saver(
-        self,
-        fn: Callable[
-            [dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None
-        ],
-    ):
+    def add_feedback_saver(self, fn: FeedbackFunction):
         self.feedback_saver_fns.append(fn)
 
 
@@ -2946,7 +3008,7 @@ def autotune_select_algorithm(*args, **kwargs):
 
 
 def add_feedback_saver(
-    fn: Callable[[dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None],
+    fn: FeedbackFunction,
 ):
     global _ALGORITHM_SELECTOR_CACHE
     if _ALGORITHM_SELECTOR_CACHE is None:

@@ -1471,7 +1471,9 @@ class GuardBuilder(GuardBuilderBase):
 
     def DICT_VERSION(self, guard: Guard):
         if self.serialization_mode == "save":
-            raise RuntimeError("DICT_VERSION guard cannot be serialized.")
+            raise torch._dynamo.exc.PackageError(
+                "DICT_VERSION guard cannot be serialized."
+            )
         # ___check_dict_version is same as `dict_version(x) == y`
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
@@ -1527,7 +1529,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def ID_MATCH(self, guard: Guard):
         if self.serialization_mode == "save":
-            raise RuntimeError("ID_MATCH guard cannot be serialized.")
+            raise torch._dynamo.exc.PackageError("ID_MATCH guard cannot be serialized.")
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
@@ -1663,7 +1665,7 @@ class GuardBuilder(GuardBuilderBase):
             metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
-    def EQUALS_MATCH(self, guard: Guard):
+    def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         if np:
@@ -1760,9 +1762,14 @@ class GuardBuilder(GuardBuilderBase):
             # is immutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
             # pointer equality check.
             val = deepcopy(val)
-        self.get_guard_manager(guard).add_equals_match_guard(
-            val, get_verbose_code_parts(code, guard)
-        )
+
+        verbose_code_parts = get_verbose_code_parts(code, guard)
+        if recompile_hint:
+            verbose_code_parts = [
+                f"{part} (HINT: {recompile_hint})" for part in verbose_code_parts
+            ]
+
+        self.get_guard_manager(guard).add_equals_match_guard(val, verbose_code_parts)
         self._set_guard_export_info(guard, code)
         return
 
@@ -1780,7 +1787,9 @@ class GuardBuilder(GuardBuilderBase):
     def NN_MODULE(self, guard: Guard):
         # don't support this in serialization because it uses unsupported ID_MATCH
         if self.serialization_mode == "save":
-            raise RuntimeError("NN_MODULE guard cannot be serialized.")
+            raise torch._dynamo.exc.PackageError(
+                "NN_MODULE guard cannot be serialized."
+            )
         self.ID_MATCH(guard)
         val = self.get(guard.name)
         if hasattr(val, "training"):
@@ -1801,14 +1810,18 @@ class GuardBuilder(GuardBuilderBase):
         """things like torch.add and user defined functions"""
         # don't support this in serialization because it uses unsupported ID_MATCH
         if self.serialization_mode == "save":
-            raise RuntimeError("FUNCTION_MATCH guard cannot be serialized.")
+            raise torch._dynamo.exc.PackageError(
+                "FUNCTION_MATCH guard cannot be serialized."
+            )
         return self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard):
         """matches a closure by __code__ id."""
         # don't support this in serialization because it uses unsupported FUNCTION_MATCH
         if self.serialization_mode == "save":
-            raise RuntimeError("CLOSURE_MATCH guard cannot be serialized.")
+            raise torch._dynamo.exc.PackageError(
+                "CLOSURE_MATCH guard cannot be serialized."
+            )
         val = self.get(guard.name)
         # Strictly only want user-defined functions
         if type(val) == types.FunctionType and hasattr(val, "__code__"):
@@ -1883,7 +1896,9 @@ class GuardBuilder(GuardBuilderBase):
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard, source_b):
         if self.serialization_mode == "save":
-            raise RuntimeError("DUPLICATE_INPUT guard cannot be serialized yet.")
+            raise torch._dynamo.exc.PackageError(
+                "DUPLICATE_INPUT guard cannot be serialized yet."
+            )
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
 
@@ -1911,7 +1926,9 @@ class GuardBuilder(GuardBuilderBase):
 
     def WEAKREF_ALIVE(self, guard):
         if self.serialization_mode == "save":
-            raise RuntimeError("WEAKREF_ALIVE guard cannot be serialized.")
+            raise torch._dynamo.exc.PackageError(
+                "WEAKREF_ALIVE guard cannot be serialized."
+            )
         code = [f"{self.arg_ref(guard)} is not None"]
 
         self._set_guard_export_info(guard, code)
@@ -2088,11 +2105,17 @@ class GuardBuilder(GuardBuilderBase):
             assert maybe_cpp_code_parts is None or isinstance(
                 maybe_cpp_code_parts, _CppShapeGuardsHelper
             )
+            maybe_shape_env_sources = (
+                []
+                if maybe_cpp_code_parts is None
+                else list(maybe_cpp_code_parts.source_to_symbol.keys())
+            )
             self.check_fn_manager.shape_code_parts = ShapeCodeParts(
                 python_code_parts=python_code_parts,
                 verbose_code_parts=verbose_code_parts,
                 cpp_code_parts=maybe_cpp_code_parts,
                 python_fallback=python_fallback,
+                shape_env_sources=maybe_shape_env_sources,
             )
 
         for code in python_code_parts.exprs:
@@ -2564,6 +2587,7 @@ class ShapeCodeParts:
     verbose_code_parts: _ShapeGuardsHelper
     cpp_code_parts: Optional[_CppShapeGuardsHelper]
     python_fallback: bool
+    shape_env_sources: list[Source]
 
 
 @dataclasses.dataclass
@@ -2693,7 +2717,7 @@ class GuardsStatePickler(pickle.Pickler):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
 
         if type(obj).__qualname__ != type(obj).__name__:
-            raise RuntimeError(
+            raise torch._dynamo.exc.PackageError(
                 f"Type {type(obj)} for object {obj} cannot be saved "
                 + "into torch.compile() package since it's defined in local scope. "
                 + "Please define the class at global scope (top level of a module)."
@@ -2705,7 +2729,10 @@ class GuardsStatePickler(pickle.Pickler):
 def pickle_guards_state(state: GuardsState) -> bytes:
     buf = io.BytesIO()
     pickler = GuardsStatePickler(buf)
-    pickler.dump(state)
+    try:
+        pickler.dump(state)
+    except AttributeError as e:
+        raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 
 
@@ -2836,12 +2863,14 @@ class CheckFunctionManager:
                     self.guard_manager, output_graph.local_scope
                 )
 
-            # NB for developers: n_iters is chosen to be 50 to achieve
-            # statistical significance.  If you are working on a guard
-            # optimization, it might be a good idea to increase this number for
-            # more stabiilty during development.
+            # NB for developers: n_iters is chosen to be 1 to prevent excessive
+            # increase in compile time. We first do a cache flush to measure the
+            # guard latency more accurately. This cache flush is expensive.
+            # Note  - If you are working on a guard optimization, it might be a
+            # good idea to increase this number for more stabiilty during
+            # development.
             latency = profile_guard_manager(
-                self.guard_manager.root, output_graph.local_scope, 50
+                self.guard_manager.root, output_graph.local_scope, 1
             )
             guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
             # Note: We use `increment_toplevel` instead of `compilation_metric`
@@ -2871,7 +2900,13 @@ class CheckFunctionManager:
             output_graph_guards_state = self.output_graph.dump_guards_state()
             # Only serialize the global variables that are actually used in guards.
             for guard in sorted_guards:
-                prune_variable(guard.originating_source)
+                if isinstance(guard.originating_source, ShapeEnvSource):
+                    assert self.shape_code_parts
+                    for source in self.shape_code_parts.shape_env_sources:
+                        prune_variable(source)
+                else:
+                    prune_variable(guard.originating_source)
+
             for source in self.output_graph.guard_on_key_order:
                 prune_variable(source)
 
