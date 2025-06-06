@@ -256,7 +256,7 @@ were replaced in the transformed graph.
 ## Pass Manager
 
 The
-[`PassManager](https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/infra/pass_manager.py)
+[PassManager](https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/infra/pass_manager.py)
 is a class used to run multiple passes on a given graph module. When
 initializing a `PassManager` instance, we pass in a list of passes
 that we want to run and set a couple of flags. To run the collection of
