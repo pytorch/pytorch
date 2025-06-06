@@ -321,8 +321,10 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     _LEAF_SPEC = PyTreeSpec((), None, None, (), None)
 
-    def _is_pytreespec_instance(obj: Any, /) -> TypeIs[PyTreeSpec]:
-        return isinstance(obj, PyTreeSpec)
+    def _is_pytreespec_instance(
+        obj: Any, /
+    ) -> TypeIs[PyTreeSpec | python_pytree.TreeSpec]:
+        return isinstance(obj, (PyTreeSpec, python_pytree.TreeSpec))
 
     @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree.tree_flatten,
@@ -384,7 +386,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     def tree_unflatten(leaves: Iterable[Any], treespec: PyTreeSpec) -> PyTree:
         if not _is_pytreespec_instance(treespec):
             raise TypeError(
-                f"tree_unflatten(leaves, treespec): Expected `treespec` to be instance of "
+                f"Expected `treespec` to be an instance of "
                 f"PyTreeSpec but got item of type {type(treespec)}."
             )
         return treespec.unflatten(leaves)
