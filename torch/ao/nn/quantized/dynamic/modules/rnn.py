@@ -794,7 +794,7 @@ class GRU(RNNBase):
 
         This implementation differs on purpose for efficiency.
 
-    .. include:: ../cudnn_persistent_rnn.rst
+    .. include:: ../cudnn_persistent_rnn.md
 
     Examples::
 
