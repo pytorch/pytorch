@@ -99,6 +99,9 @@ __all__ = [
 ]
 
 
+__name__ = "torch.utils.pytree.cxx"  # sets the __module__ attribute of all functions in this module
+
+
 # In-tree installation may have VCS-based versioning. Update the previous static version.
 python_pytree._optree_version = _TorchVersion(optree.__version__)  # type: ignore[attr-defined]
 
