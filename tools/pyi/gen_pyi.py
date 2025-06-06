@@ -877,6 +877,13 @@ def gen_pyi(
                     "None",
                 )
             ],
+            "_functionalize_mutation_counter": [
+                defs(
+                    "_functionalize_mutation_counter",
+                    ["t: Tensor"],
+                    "_int",
+                )
+            ],
             "_functionalize_are_all_mutations_hidden_from_autograd": [
                 defs(
                     "_functionalize_are_all_mutations_hidden_from_autograd",
