@@ -105,7 +105,6 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             schema_gen.add_arg(f"arg{idx}", arg, is_mutated=idx in mutated_inputs)
         for out in outputs:
             schema_gen.add_output(out)
-        # schema_gen.add_schema_tree_spec(subgraph, identifier, *operands)
 
         return schema_gen.gen_schema()
 
@@ -544,8 +543,8 @@ def _(ctx, subgraph, identifier, *operands):
     )
 
     unwrapped_operands = ctx.unwrap_tensors(operands)
-    hop_schema = invoke_subgraph.gen_schema(subgraph, identifier, *operands)
-    if can_auto_functionalize(HopInstance(invoke_subgraph, hop_schema)):
+    hop_instance = HopInstance.create(invoke_subgraph, subgraph, identifier, *operands)
+    if can_auto_functionalize(hop_instance):
         # NOTE: [auto_functionalize x invoke_subgraph caching]
         # We call auto_functionalized_v2 to support input mutation of invoke_subgraph.
         # See NOTE [Support input mutation of hops] for the overall design.
@@ -557,7 +556,7 @@ def _(ctx, subgraph, identifier, *operands):
         assert isinstance(identifier, str), identifier
         return do_auto_functionalize_v2(
             ctx.mode,
-            invoke_subgraph,
+            hop_instance,
             (subgraph, "auto_functionalized_" + identifier, *operands),
             {},
         )
