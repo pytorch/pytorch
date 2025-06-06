@@ -137,6 +137,26 @@ class AOTInductorTestsTemplate:
             with self.assertRaises(Exception):
                 self.check_model(m, args)
 
+    def test_custom_op_add_constant_folded(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.device = device
+                self.w = torch.randn(3, 3, device=device)
+                self.w1 = torch.randn(3, 3, device=device)
+                self.w2 = torch.randn(3, 3, device=device)
+
+            def forward(self, x):
+                new_w = torch.ops.aoti_custom_ops.custom_add_triplet(
+                    self.w, self.w1, self.w2
+                )
+                return torch.ops.aoti_custom_ops.custom_add(x, new_w)
+
+        m = M(self.device).to(device=self.device)
+        args = (torch.randn(3, 3, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(m, args)
+
     def test_fn_with_optional_tensor_output(self) -> None:
         class M(torch.nn.Module):
             def forward(self, x, y):

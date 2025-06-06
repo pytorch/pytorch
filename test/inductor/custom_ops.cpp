@@ -13,6 +13,10 @@ Tensor custom_add_impl(Tensor t1, Tensor t2) {
   return t1 + t2;
 }
 
+Tensor custom_add_triplet_impl(Tensor t1, Tensor t2, Tensor t3) {
+  return t1 + t2 + t3;
+}
+
 std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>> fn_with_optional_tensor_output_impl(Tensor t1, Tensor t2) {
   Tensor t3 = t1 + t2;
   Tensor t4 = t1 - t2;
@@ -363,6 +367,7 @@ extern "C" {
 
 TORCH_LIBRARY(aoti_custom_ops, m) {
   m.def("custom_add(Tensor t1, Tensor t2) -> Tensor");
+  m.def("custom_add_triplet(Tensor t1, Tensor t2, Tensor t3) -> Tensor");
   m.def("fn_with_optional_tensor_output(Tensor t1, Tensor t2) -> (Tensor, Tensor?, Tensor?)");
   m.def(
       "fn_with_all_inputs(Tensor tensor, "
@@ -409,6 +414,7 @@ TORCH_LIBRARY(aoti_custom_ops, m) {
 
 TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
   m.impl("custom_add", at::custom_add_impl);
+  m.impl("custom_add_triplet", at::custom_add_triplet_impl);
   m.impl("fn_with_optional_tensor_output", at::fn_with_optional_tensor_output_impl);
   m.impl("fn_with_all_inputs", at::fn_with_all_inputs_impl);
   m.impl("fn_with_default_input", at::fn_with_default_input_impl);
