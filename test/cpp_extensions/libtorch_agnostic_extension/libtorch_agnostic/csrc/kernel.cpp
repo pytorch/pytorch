@@ -1,6 +1,7 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/stable/library.h>
+#include <torch/csrc/stable/tensor.h>
 
 #include <optional>
 
@@ -128,18 +129,22 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("identity", &boxed_identity);
 }
 
-RAIIATH my_abs(RAIIATH t) {
+using torch::stable::Tensor;
+
+Tensor my_abs(Tensor t) {
   const auto num_args = 1;
   StableIValue stack[num_args];
-  stack[0] = from(t.release());
+  stack[0] = from(t.get());
   aoti_torch_call_dispatcher("aten::abs", "", stack);
-  return RAIIATH(to<AtenTensorHandle>(stack[0]));
+  return Tensor(to<AtenTensorHandle>(stack[0]));
 }
 
 void boxed_my_abs(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  RAIIATH t(to<AtenTensorHandle>(stack[0]));
-  RAIIATH raiiath_res = my_abs(std::move(t));
-  stack[0] = from(raiiath_res.release());
+  Tensor t;
+  t.reset(to<AtenTensorHandle>(stack[0]));
+  Tensor tensor_res = my_abs(std::move(t));
+  stack[0] = from(tensor_res.get());
+  tensor_res.reset();
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
