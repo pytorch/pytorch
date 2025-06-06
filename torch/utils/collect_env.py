@@ -269,7 +269,7 @@ def get_nvidia_smi():
     return smi
 
 
-def detect_linux_pkg_manager():
+def _detect_linux_pkg_manager():
     if get_platform() != "linux":
         return "N/A"
     for mgr_name in ["dpkg", "dnf", "yum", "zypper"]:
@@ -280,7 +280,7 @@ def detect_linux_pkg_manager():
 
 
 def get_linux_pkg_version(run_lambda, pkg_name):
-    pkg_mgr = detect_linux_pkg_manager()
+    pkg_mgr = _detect_linux_pkg_manager()
     if pkg_mgr == "N/A":
         return "N/A"
 
@@ -319,7 +319,7 @@ def get_intel_gpu_driver_version(run_lambda):
     lst = []
     platform = get_platform()
     if platform == "linux":
-        pkgs = {
+        pkgs = {. # type: ignore[var-annotated]
             "dpkg": {
                 "intel-opencl-icd",
                 "libze1",
@@ -336,7 +336,7 @@ def get_intel_gpu_driver_version(run_lambda):
                 "intel-opencl",
                 "level-zero",
             },
-        }.get(detect_linux_pkg_manager(), {})
+        }.get(_detect_linux_pkg_manager(), {})
         for pkg in pkgs:
             lst.append(f"* {pkg}:\t{get_linux_pkg_version(run_lambda, pkg)}")
     if platform in ["win32", "cygwin"]:
