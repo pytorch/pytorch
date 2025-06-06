@@ -249,7 +249,7 @@ The named tensor API is experimental and subject to change.
 
 ```
 
-(keeps-input-names-doc)=
+(keeps_input-names-doc)=
 
 ## Keeps input names
 
@@ -264,7 +264,7 @@ All pointwise unary functions follow this rule as well as some other unary funct
 ('N', 'C')
 ```
 
-(removes-dimensions-doc)=
+(removes_dimensions-doc)=
 
 ## Removes dimensions
 
@@ -297,7 +297,7 @@ list of dimension names.
 ('N', 'C', 'H', 'W')
 ```
 
-(unifies-names-from-inputs-doc)=
+(unifies_names_from_inputs-doc)=
 
 ## Unifies names from inputs
 
@@ -367,7 +367,7 @@ tensors by name or {meth}`Tensor.align_to` to align tensors to a custom
 dimension ordering.
 :::
 
-(permutes-dimensions-doc)=
+(permutes_dimensions-do)=
 
 ## Permutes dimensions
 
