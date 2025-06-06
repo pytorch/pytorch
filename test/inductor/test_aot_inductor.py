@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest import skip
 from unittest.mock import patch
 
@@ -5970,6 +5971,39 @@ class AOTInductorTestsTemplate:
         self.check_model(Model1(), (x,))
         # the output should have int type
         self.check_model(Model2(), (x,))
+
+    def test_using_model_name_for_files(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        model = Model().to(self.device)
+        with torch.no_grad():
+            package_path: str = AOTIRunnerUtil.compile(
+                model,
+                example_inputs,
+                inductor_configs={
+                    "aot_inductor.model_name_for_generated_files": "test_model"
+                },
+            )
+
+        with zipfile.ZipFile(package_path, "r") as zip_ref:
+            all_files = zip_ref.namelist()
+            base_dir = "test_model.wrapper/data/aotinductor/model/test_model"
+            self.assertTrue(f"{base_dir}.wrapper.cpp" in all_files)
+            self.assertTrue(f"{base_dir}.kernel.cpp" in all_files)
+            self.assertTrue(f"{base_dir}.wrapper.so" in all_files)
+
+        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
+        self.assertEqual(aot_inductor_module(*example_inputs), model(*example_inputs))
 
 
 class AOTInductorLoggingTest(LoggingTestCase):

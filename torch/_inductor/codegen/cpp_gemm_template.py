@@ -1209,7 +1209,7 @@ class CppGemmTemplate(CppTemplate):
                 permute_size[-2], permute_size[-3] = permute_size[-3], permute_size[-2]
                 blocked_w = L.constant_pad_nd(W, (0, padding))
                 blocked_w = L.permute(
-                    L.view(blocked_w, permute_size),
+                    L.view(blocked_w, permute_size),  # type: ignore[arg-type]
                     permute_dims,
                 )
         else:
@@ -1341,7 +1341,7 @@ class CppGemmTemplate(CppTemplate):
         reindexers: list[Optional[Callable[[list[Any]], list[Any]]]] = []
         epilogue_creators: list[Callable[[ir.Buffer], ir.Pointwise]] = []
         fake_buffers: list[ir.Buffer] = []
-        Y_aliases = OrderedSet[str]()
+        Y_aliases: OrderedSet[str] = OrderedSet()
 
         use_local_acc = (
             self.layout.dtype != torch.float

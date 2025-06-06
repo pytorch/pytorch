@@ -531,7 +531,10 @@ def reorder_compute_and_comm_for_overlap(
             overlap_log.debug(
                 f"==== Visualize overlap before reordering pass {p}, {peak_memory=} ===="  # noqa: G004
             )
-            visualize_overlap(order)
+            try:
+                visualize_overlap(order)
+            except Exception as e:
+                overlap_log.debug("", exc_info=e)
         t0 = time.time()
         order = p(order)  # type: ignore[operator]
         t = time.time() - t0
@@ -542,7 +545,7 @@ def reorder_compute_and_comm_for_overlap(
             try:
                 visualize_overlap(order)
             except Exception as e:
-                overlap_log.debug(str(e))
+                overlap_log.debug("", exc_info=e)
         peak_memory, _ = estimate_peak_memory(
             snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
         )
