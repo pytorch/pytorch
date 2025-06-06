@@ -72,6 +72,9 @@ install_ubuntu() {
         rm -rf HIP clr
     fi
 
+    # temporary hipblasLT dependency install
+    apt install libmsgpackc2
+
     # Cleanup
     apt-get autoclean && apt-get clean
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
