@@ -1040,11 +1040,11 @@ If the above doesn't work, please subtmit an issue to GitHub.
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 4)
 
-        try:
-            fn3(torch.randn(4, 5))
-            self.assertFalse(True)
-        except torch._dynamo.exc.Unsupported as e:
-            self.assertIn("Skip calling `torch.compiler.disable()`d function", str(e))
+        cnts.clear()
+        torch._dynamo.reset()
+        fn3(torch.randn(4, 5))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 4)
 
     def test_disable_optimize(self):
         cnt = torch._dynamo.testing.CompileCounter()
