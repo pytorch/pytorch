@@ -221,19 +221,19 @@ PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
 MEM_EFF_CAPABILITY_MATCHES_SM80 = SM80OrLater or TEST_WITH_ROCM
 
 
-def _get_ck_dropout_mask(batch_size, q_len, kv_len, p, device) -> torch.Tensor:
+def _get_ck_dropout_mask(batch_size,nheads, q_len, kv_len, p, device) -> torch.Tensor:
     """
     TODO_ANDY: Write full doc
     """
-    mask = torch.empty((batch_size, 1, q_len, kv_len), device=device)
+    mask = torch.empty((batch_size, nheads, q_len, kv_len), device=device)
 #    blah = torch.ops.xformers._andy_lugo(p)
     #rand_uniform is an int8 tensor
     rand_uniform = torch.ops.ck._ck_rand_uniform(p, mask)
     print("_GET_CK_DROPOUT_MASK rand_uniform")
     print(rand_uniform)
 
-    mask = rand_uniform > 0.0
-    #mask = (rand_uniform <=int((1.0 -p) * 255.0)).to(torch.float32)
+    #mask = rand_uniform > 0.0
+    mask = (rand_uniform <=int((1.0 -p) * 255.0)).to(torch.float32)
     mask = mask.reshape(batch_size, q_len, kv_len)
 
     return mask
@@ -3586,8 +3586,8 @@ class TestSDPACudaOnly(NNTestCase):
     #@parametrize("seq_len_q", [1])
     #@parametrize("seq_len_k", [1])
     #@parametrize("head_dim", [16])
-    @parametrize("seq_len_q", [4])
-    @parametrize("seq_len_k", [4])
+    @parametrize("seq_len_q", [8])
+    @parametrize("seq_len_k", [8])
     @parametrize("head_dim", [8])
     @parametrize("is_causal", [False])
     @parametrize("dropout_p", [0.22])
@@ -3629,7 +3629,7 @@ class TestSDPACudaOnly(NNTestCase):
         value = torch.rand(batch_size, num_heads_kv, seq_len_k, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
         
-        ck_dropout = _get_ck_dropout_mask(batch_size, seq_len_q, seq_len_k, dropout_p, device)
+        ck_dropout = _get_ck_dropout_mask(batch_size, num_heads_q, seq_len_q, seq_len_k, dropout_p, device)
         print("q size: ", query.size())
         print("k size: ", key.size())
         print("v size: ", value.size())
@@ -3678,8 +3678,11 @@ class TestSDPACudaOnly(NNTestCase):
             print("MATH RETURNED DROPOUT_MASK")
             print(softmax_mask)
 
-            dropout_mask = softmax_mask >= 0
+            #dropout_mask = softmax_mask >= 0
             #dropout_mask = ck_dropout >= 0
+
+            dropout_mask = (softmax_mask <=int((1.0 - dropout_p) * 255.0)).to(torch.float32)
+            #dropout_mask = dropout_mask.reshape(batch_size, seq_len_q, seq_len_k)
             print("PYTHON SIDE DROPOUT_MASK")
             print("dropout_mask size: ", dropout_mask.size())
             print(dropout_mask)
@@ -3687,10 +3690,12 @@ class TestSDPACudaOnly(NNTestCase):
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal,
                 scale=scale, dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
+            #out_ref = torch.ops.aten._scaled_dot_product_attention_math(
+            #    query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal,
+            #    scale=scale, dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
-                dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
+                query, key, value, dropout_mask=dropout_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
