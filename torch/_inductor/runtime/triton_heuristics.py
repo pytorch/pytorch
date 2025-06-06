@@ -1,3 +1,6 @@
+warning: Selection `PLW1507` has no effect because preview is not enabled.
+warning: Selection `RUF041` has no effect because preview is not enabled.
+warning: Selection `RUF048` has no effect because preview is not enabled.
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
@@ -1100,8 +1103,11 @@ class CachingAutotuner(KernelInterface):
         **kwargs,
     ):  # type:ignore[override]
         if hasattr(triton, "set_allocator"):
+
             def alloc_fn(size: int, align: int, stream: Optional[int]):
-                return torch.empty(size, dtype=torch.int8, device=self.device_props.type)
+                return torch.empty(
+                    size, dtype=torch.int8, device=self.device_props.type
+                )
 
             triton.set_allocator(alloc_fn)
 
