@@ -137,7 +137,8 @@ class MetalShaderLibrary {
   void exec_unary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,
-      std::optional<int64_t> extra = std::nullopt);
+      const std::optional<c10::Scalar> extra = std::nullopt,
+      const std::optional<c10::ScalarType> extra_type = std::nullopt);
   void exec_binary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,

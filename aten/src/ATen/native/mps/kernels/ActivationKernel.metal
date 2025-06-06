@@ -6,7 +6,7 @@ using namespace c10::metal;
 
 struct hardshrink_functor {
   template <typename T>
-  inline T operator()(const T x, float lambda) {
+  inline T operator()(const T x, const float lambda) {
     return (x > lambda || x < -lambda) ? x : T(0);
   }
 };
