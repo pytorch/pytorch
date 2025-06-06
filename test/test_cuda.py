@@ -1387,6 +1387,8 @@ except RuntimeError as e:
             for e in errors:
                 if "device-side assert triggered" not in str(e):
                     self.fail(e)
+                if e.error_code != 710:  # cudaErrorAssert == 710
+                    self.fail(e)
 
     @staticmethod
     def _test_index_bounds_cuda(idx):
@@ -5111,6 +5113,33 @@ class TestMemPool(TestCase):
             "dummy_free",
         )
         return allocator, dummy_allocator
+
+    def test_mempool_empty_cache_inactive(self):
+        torch.cuda.empty_cache()
+        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
+        self.assertEqual(called_dummy_alloc.value, 0)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        def f():
+            pool = torch.cuda.MemPool(allocator.allocator())
+
+            # allocate memory with ncclMemAlloc
+            with torch.cuda.use_mem_pool(pool):
+                x = torch.arange(1024 * 1024 * 2, device="cuda")
+            # Note: pool will be destroyed upon function return, but x, which
+            # was allocated via the pool is still alive.
+            return x
+
+        x = f()
+        self.assertEqual(called_dummy_alloc.value, 123)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        del x
+        torch.cuda.empty_cache()
+        self.assertEqual(called_dummy_free.value, 321)
 
     def test_mempool_with_allocator(self):
         pool = torch.cuda.MemPool()
