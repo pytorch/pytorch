@@ -7811,6 +7811,41 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         ).sum().backward()
         self.assertEqual(ref, inplace)
 
+    def test_mutation_of_input_in_fw_and_bw(self):
+        class AF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, dummy, inplace_tensor):
+                inplace_tensor.add_(1)
+
+                ctx.inplace_tensor = inplace_tensor
+                return dummy.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                inplace_tensor = ctx.inplace_tensor
+                inplace_tensor.add_(1)
+                return grad_output, None, None
+
+        def fn(dummy, inplace_tensor):
+            return AF.apply(dummy, inplace_tensor)
+
+        def inps():
+            dummy = torch.randn((2,), requires_grad=True)
+            inplace_tensor = torch.zeros((2,), requires_grad=False)
+            return dummy, inplace_tensor
+
+        dummy, inplace = inps()
+        y = fn(dummy, inplace)
+        ref0 = inplace.clone().detach()
+        y.sum().backward()
+        ref = inplace.clone().detach()
+
+        dummy, inplace = inps()
+        y = torch.compile(fn, backend="aot_eager", fullgraph=True)(dummy, inplace)
+        self.assertEqual(ref0, inplace)
+        y.sum().backward()
+        self.assertEqual(ref, inplace)
+
 
 class MockFXGraphCache:
     """

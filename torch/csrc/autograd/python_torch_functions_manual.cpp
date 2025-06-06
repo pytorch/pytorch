@@ -698,6 +698,11 @@ void initTorchFunctions(PyObject* module) {
     auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
     return t_impl->has_data_mutation();
   });
+  py_module.def("_functionalize_mutation_counter", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+    return t_impl->mutation_counter();
+  });
   py_module.def(
       "_functionalize_get_storage_size", [](const at::Tensor& t, bool before) {
         TORCH_INTERNAL_ASSERT(

@@ -11,6 +11,7 @@ import functools
 import inspect
 import logging
 import operator
+import threading
 import traceback
 import typing
 import typing_extensions
@@ -200,6 +201,24 @@ def set_proxy_slot(
     ...
 
 
+_TLS = threading.local()
+_TLS._proxy_tensor_disable_update_tensor_tracker = False
+
+
+def is_proxy_tensor_update_tensor_tracker_disabled() -> bool:
+    return _TLS._proxy_tensor_disable_update_tensor_tracker
+
+
+@contextmanager
+def proxy_tensor_disable_update_tensor_tracker() -> Generator[None, None, None]:
+    orig_value = _TLS._proxy_tensor_disable_update_tensor_tracker
+    _TLS._proxy_tensor_disable_update_tensor_tracker = True
+    try:
+        yield
+    finally:
+        _TLS._proxy_tensor_disable_update_tensor_tracker = orig_value
+
+
 def set_proxy_slot(
     obj: Union[PySymType, _AnyScriptObjectType, Tensor],
     tracer: _ProxyTracer,
@@ -210,7 +229,8 @@ def set_proxy_slot(
         # We DO want to clobber proxies whenever we run an inplace operation
         # on a tensor, and it affects the metadata on the proxy.
         assert isinstance(proxy, _ProxyTensor)
-        tracer.tensor_tracker[obj] = proxy
+        if not is_proxy_tensor_update_tensor_tracker_disabled():
+            tracer.tensor_tracker[obj] = proxy
     elif isinstance(obj, (_AnyScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
         assert isinstance(proxy, Proxy)
