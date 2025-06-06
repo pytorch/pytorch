@@ -5022,39 +5022,40 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 }
 
-std::tuple<at::Tensor, at::Tensor>
-infinitely_differentiable_native_rms_norm_backward(
-    const at::Tensor& dY,
-    const at::Tensor& drstd,
-    const at::Tensor& input,
+std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
+    const Tensor& dY,
+    const Tensor& drstd,
+    const Tensor& input,
     IntArrayRef normalized_shape,
-    const at::Tensor& rstd,
-    const std::optional<at::Tensor>& weight_opt,
+    const Tensor& rstd,
+    const std::optional<Tensor>& weight_opt,
     std::array<bool, 2> grad_input_mask) {
-  
-  c10::MaybeOwned<at::Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const at::Tensor& weight = *weight_maybe_owned; 
+  c10::MaybeOwned<at::Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
   const auto input_shape = input.sizes();
   const auto input_ndim = input.dim();
   const int normalized_ndim = normalized_shape.size();
   const int axis = input_ndim - normalized_ndim;
-      
+
   int64_t N_rms = 1;
   for (int i = 0; i < normalized_ndim; ++i) {
     N_rms *= input_shape[axis + i];
   }
-  
+
   Tensor dX;
   Tensor dgamma;
 
   std::vector<int64_t> rstd_view_shape = rstd.sizes().vec();
-  for (int i = 0; i < std::max(static_cast<int>(normalized_ndim - rstd.sizes().size()), 0); ++i) {
-      rstd_view_shape.push_back(1);
+  for (int i = 0;
+       i < std::max(static_cast<int>(normalized_ndim - rstd.sizes().size()), 0);
+       ++i) {
+    rstd_view_shape.push_back(1);
   }
-  at::Tensor rstd_broadcast = rstd.view(rstd_view_shape);
-  at::Tensor rstd_pow3 = rstd_broadcast.pow(3);
-  at::Tensor grad_x_hat;
+  Tensor rstd_broadcast = rstd.view(rstd_view_shape);
+  Tensor rstd_pow3 = rstd_broadcast.pow(3);
+  Tensor grad_x_hat;
 
   if (dY.defined()) {
     if (weight.defined()) {
@@ -5075,13 +5076,17 @@ infinitely_differentiable_native_rms_norm_backward(
     }
 
     if (dY.defined() && grad_x_hat.defined()) {
-      at::Tensor sum_input_times_grad_x_hat = at::sum(input * grad_x_hat, inner_sum_dims, /*keepdim=*/true);
-      dX_from_dY_path = rstd_broadcast * grad_x_hat - (input * rstd_pow3 / static_cast<double>(N_rms)) * sum_input_times_grad_x_hat;
+      Tensor sum_input_times_grad_x_hat =
+          sum(input * grad_x_hat, inner_sum_dims, /*keepdim=*/true);
+      dX_from_dY_path = rstd_broadcast * grad_x_hat -
+          (input * rstd_pow3 / static_cast<double>(N_rms)) *
+              sum_input_times_grad_x_hat;
     }
 
     if (drstd.defined()) {
-      at::Tensor drstd_broadcast = drstd.view(rstd_view_shape);
-      dX_from_drstd_path = -(input * rstd_pow3 / static_cast<double>(N_rms)) * drstd_broadcast;
+      Tensor drstd_broadcast = drstd.view(rstd_view_shape);
+      dX_from_drstd_path =
+          -(input * rstd_pow3 / static_cast<double>(N_rms)) * drstd_broadcast;
     }
 
     if (dX_from_dY_path.defined() && dX_from_drstd_path.defined()) {
@@ -5095,16 +5100,16 @@ infinitely_differentiable_native_rms_norm_backward(
 
   if (grad_input_mask[1] && weight.defined()) {
     if (dY.defined()) {
-      at::Tensor x_hat = input * rstd_broadcast;
-      at::Tensor dgamma_full_shape = dY * x_hat;
-      
+      Tensor x_hat = input * rstd_broadcast;
+      Tensor dgamma_full_shape = dY * x_hat;
+
       if (axis > 0) {
         std::vector<int64_t> outer_sum_dims;
         outer_sum_dims.reserve(axis);
         for (int i = 0; i < axis; ++i) {
           outer_sum_dims.push_back(i);
         }
-        dgamma = at::sum(dgamma_full_shape, outer_sum_dims, /*keepdim=*/false);
+        dgamma = sum(dgamma_full_shape, outer_sum_dims, /*keepdim=*/false);
       } else {
         dgamma = dgamma_full_shape;
       }
@@ -6475,7 +6480,6 @@ Tensor rms_norm_jvp(
     const Tensor& weight_t,
     const Tensor& saved_rstd,
     IntArrayRef normalized_shape) {
-
   auto dims = std::vector<int64_t>{};
   auto view_size = input_t.sizes().vec();
   auto view_size_affine = input_t.sizes().vec();
@@ -6507,7 +6511,7 @@ Tensor rms_norm_jvp(
   Tensor result_t;
   if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
       input_t._is_zerotensor()) {
-    result_t = (input_t) * rstd_p + (input_p) * rstd_t;
+    result_t = (input_t)*rstd_p + (input_p)*rstd_t;
   } else {
     result_t = input_t * rstd_p;
     auto temp = input_p * rstd_t;
