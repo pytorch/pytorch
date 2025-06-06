@@ -366,7 +366,7 @@ inline void setMemoryFraction(double fraction, c10::DeviceIndex device) {
 }
 
 inline void emptyCache(MempoolId_t mempool_id = {0, 0}) {
-  return get()->emptyCache();
+  return get()->emptyCache(mempool_id);
 }
 
 inline void enable(bool value) {
