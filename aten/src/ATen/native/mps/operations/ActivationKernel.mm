@@ -15,8 +15,7 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #endif
 
 static void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0.5) {
-  std::pair<c10::Scalar, c10::ScalarType> extra = {lambda, ScalarType::Float};
-  lib.exec_unary_kernel(iter, "hardshrink", extra);
+  lib.exec_unary_kernel(iter, "hardshrink", lambda, ScalarType::Float);
 }
 
 REGISTER_DISPATCH(hardshrink_stub, hardshrink_kernel);
