@@ -469,7 +469,7 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
     at::Tensor& out,
     at::Tensor& in_out_splits,
     std::string group_name,
-    int64_t major_align) {
+    std::optional<int64_t> major_align) {
   /* Perform a 2D AllToAllv shuffle operation using NVSHMEM, with split information provided on device.
    * Arguments:
    *  - `input` is the input tensor
@@ -513,6 +513,10 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
   int world_size = input_hdl->get_world_size();
   // TODO: world_size is currently limited by the number of elements in a WarpScan.
   TORCH_CHECK(world_size <= A2AV_TILE_SIZE, "world_size must be smaller than A2AV_TILE_SIZE", A2AV_TILE_SIZE);
+
+  // If `major_align` is not provided, use 1 as the default value.
+  int64_t major_align_val = major_align.value_or(1);
+  TORCH_CHECK(major_align_val > 0, "major_align must be positive");
 
   void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
   void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
@@ -579,7 +583,7 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
       &rank,
       &world_size,
       &ne,
-      &major_align};
+      &major_align_val};
   nvshmemx_collective_launch(
       (const void*)allToAllV_2d,
       dim3(num_blocks),

@@ -13,6 +13,8 @@ import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 from torch.testing._internal.common_distributed import MultiProcContinousTest
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
@@ -42,6 +44,7 @@ device_type = "cuda"
 device_module = torch.get_device_module(device_type)
 
 
+@instantiate_parametrized_tests
 @requires_nvshmem()
 class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
     def _init_device(self) -> None:
@@ -129,7 +132,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         torch.testing.assert_close(out[:out_numel], expected)
 
     @skipIfRocm
-    def test_nvshmem_all_to_all_vdev_2d(self) -> None:
+    @parametrize("align", [1, 8, 16])  # `major_align` of output
+    def test_nvshmem_all_to_all_vdev_2d(self, align: int) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
 
@@ -142,8 +146,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         nsplits = ne * self.world_size
         # Number of elements for an expert is random between [0, k)
         k = 3
-        # Align
-        align = 16
         inp_splits = torch.randint(k, (nsplits,), device=self.device)
         inp_numel = inp_splits.sum().item()
         # Exchange input splits to get output splits
@@ -168,7 +170,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         in_out_splits[0].copy_(inp_splits)
 
         torch.ops.symm_mem.nvshmem_all_to_all_vdev_2d(
-            inp, out, in_out_splits, group_name, align
+            inp, out, in_out_splits, group_name, major_align=align
         )
         received_out_splits = in_out_splits[1]
         received_out_offsets = in_out_splits[2]
