@@ -51,7 +51,7 @@ def my_compiler(gm, example_inputs):
 Besides the `register_backend` decorator, if your backend is in another python package, you could also register your
 backend through entry points of python package, which provides a way for a package to register a plugin for another one.
 
-**Hint**\
+:::{hint}
 You can learn more about `entry_points` in the
 [python packaging documentation](https://setuptools.pypa.io/en/latest/userguide/entry_point.html).
 
