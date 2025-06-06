@@ -125,6 +125,7 @@ struct TORCH_API AccumulateGrad : public Node {
           at::caching::adjusted_use_count(new_grad) <= num_expected_refs &&
           (new_grad.is_mkldnn() ||
            utils::obeys_layout_contract(new_grad, variable))) {
+        // Scenario 1.1: Stealable dense new_grad
         // we aren't setting up for double-backward
         // not sparse
         // no other user-visible tensor references new_grad
@@ -142,6 +143,7 @@ struct TORCH_API AccumulateGrad : public Node {
           new_grad._indices().use_count() <= 1 &&
           new_grad._values().use_count() <= 1 &&
           new_grad.use_count() <= num_expected_refs) {
+        // Scenario 1.2: Stealable sparse new_grad
         // Can't detach sparse tensor (since metadata changes are not allowed
         // after detach), so just create a new one for the grad which is a
         // shallow copy. We need a shallow copy so that modifying the original
@@ -166,12 +168,15 @@ struct TORCH_API AccumulateGrad : public Node {
       } else {
         if (new_grad.is_sparse() || new_grad.is_sparse_csr() ||
             new_grad.is_nested()) {
+          // Scenario 1.3: Cloning sparse/nested new_grad
           update_grad(new_grad.clone());
         } else {
           if (new_grad.is_mkldnn()) {
+            // Scenario 1.4: Cloning MKLDNN new_grad
             update_grad(new_grad.clone());
           } else {
-            // Deep copies new_grad according to the "Gradient Layout Contract."
+            // Scenario 1.5: Deep copies new_grad according to the "Gradient
+            // Layout Contract."
             update_grad(utils::clone_obey_contract(new_grad, variable));
           }
         }
@@ -180,6 +185,7 @@ struct TORCH_API AccumulateGrad : public Node {
       // This case is not strictly necessary, but it makes the first-order only
       // case slightly more efficient.
       if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
+        // Scenario 2.1: Sparse variable_grad + Dense new_grad
         // If `variable_grad` is sparse and `new_grad` is not sparse, their
         // sum is not sparse, and we must change the TensorImpl type of
         // `variable_grad` for it to store the result. However, changing the
@@ -189,6 +195,7 @@ struct TORCH_API AccumulateGrad : public Node {
         CHECK_RESULT(result, variable);
         update_grad(std::move(result));
       } else if (!at::inplaceIsVmapCompatible(variable_grad, new_grad)) {
+        // Scenario 2.2: Vmap-incompatible
         // Ideally we'd perform an in-place operation to avoid changing
         // the grad tensor. However, if that's impossible because the grads
         // are vmap-incompatible (See NOTE: [vmap-incompatible in-place
@@ -197,6 +204,7 @@ struct TORCH_API AccumulateGrad : public Node {
         CHECK_RESULT(result, variable);
         update_grad(std::move(result));
       } else {
+        // Scenario 2.3: In-place addition
         // In this case we can avoid changing the grad tensor. There are three
         // scenarios when we'll hit this case:
         //
@@ -233,8 +241,9 @@ struct TORCH_API AccumulateGrad : public Node {
     } else {
       at::Tensor result;
       if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
-        // CPU backend throws an error on sparse + dense, so prefer dense +
-        // sparse here.
+        // Scenario 3.1: Sparse variable_grad + Dense new_grad
+        // CPU backend throws an error on sparse + dense, so
+        // prefer dense + sparse here.
         result = new_grad + variable_grad;
       } else {
         // Assumes operator+ result typically matches strides of first arg,
