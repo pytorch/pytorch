@@ -13,7 +13,10 @@ from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._subclasses.functional_tensor import disable_functional_mode
+from torch._subclasses.functional_tensor import (
+    disable_functional_mode,
+    FunctionalTensor,
+)
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     disable_proxy_modes_tracing,
@@ -420,7 +423,6 @@ def unique_graph_name_with_root(
 
 def _from_fun(t):
     from torch._functorch.aot_autograd import from_fun
-    from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, torch.Tensor):
         if t.dtype != torch.bool:
@@ -770,8 +772,25 @@ def check_input_alias_and_mutation_return_outputs(
     list[int],
     Union[tuple[Any, ...], list[Any]],
 ]:
-    with disable_functional_mode(), suspend_functionalization():
-        fake_args = pytree.tree_map_only(torch.Tensor, _from_fun, fake_args)
+    # This function can be called under autograd, functional, proxy and fake tensor mode.
+    # We need to return either a fake tensor or a real tensor depending on the mode.
+    # to detect the input mutation/aliasing.
+    with disable_proxy_modes_tracing(), disable_functional_mode(), suspend_functionalization():
+
+        def _from_functional_tensor(t: torch.Tensor) -> torch.Tensor:
+            if isinstance(t, FunctionalTensor) or torch._is_functional_tensor(t):
+                return torch.empty_strided(
+                    t.size(),
+                    t.stride(),
+                    dtype=t.dtype,
+                    requires_grad=t.requires_grad,
+                    device=t.device,
+                )
+            return t
+
+        fake_args = pytree.tree_map_only(
+            torch.Tensor, _from_functional_tensor, fake_args
+        )
     # We want to disable active functional, proxy and fake modes if any.
     # to create a encapsulated environment for fake tensor prop
     with torch.utils._python_dispatch._disable_current_modes():
