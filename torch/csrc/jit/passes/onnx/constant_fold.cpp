@@ -93,7 +93,7 @@ static std::optional<at::Tensor> runTorchSlice_opset9(
     // ONNX slice accepts negative starts and ends values.
     int64_t axis = axesAttr[i], start = startsAttr[i], end = endsAttr[i];
     // ONNX slice accepts negative axis, fix this for aten op
-    axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
+    axis += axis < 0 ? inputTensorValues[0].dim() : 0;
     handleNegativeStartEndIndex(start, end, axis, updated_val.sizes());
     int64_t length = end - start;
     if (length < 0 || start > updated_val.sizes()[axis] - length)
@@ -116,8 +116,7 @@ static std::optional<at::Tensor> runTorchSlice_opset10(
     return std::nullopt;
   }
   // Checking validity of 'starts' and 'ends' input
-  if (inputTensorValues[1].sizes().size() != 1 ||
-      inputTensorValues[2].sizes().size() != 1) {
+  if (inputTensorValues[1].dim() != 1 || inputTensorValues[2].dim() != 1) {
     TORCH_WARN(
         "Constant folding - Invalid 'starts' or 'ends' inputs found for opset >= 10 onnx::Slice op. "
         "Constant folding not applied.");
@@ -131,7 +130,7 @@ static std::optional<at::Tensor> runTorchSlice_opset10(
   // Checking 'axes' input, if available.
   std::vector<int64_t> axes;
   if (inputTensorValues.size() > 3) {
-    if (inputTensorValues[3].sizes().size() != 1) {
+    if (inputTensorValues[3].dim() != 1) {
       TORCH_WARN(
           "Constant folding - Invalid 'axes' input found for opset >= 10 onnx::Slice op. "
           "Constant folding not applied.");
@@ -149,15 +148,15 @@ static std::optional<at::Tensor> runTorchSlice_opset10(
     axes.resize(inputTensorValues[3].sizes()[0]);
     // ONNX slice accepts negative axis, fix this for aten op
     for (const auto i : c10::irange(inputTensorValues[3].sizes()[0])) {
-      axes[i] = axes_a[i] < 0 ? axes_a[i] + inputTensorValues[0].sizes().size()
-                              : axes_a[i];
+      axes[i] =
+          axes_a[i] < 0 ? axes_a[i] + inputTensorValues[0].dim() : axes_a[i];
     }
   } else {
     axes = std::vector<int64_t>(inputTensorValues[1].sizes()[0], 0);
   }
   // Checking 'steps' input, if available.
   if (inputTensorValues.size() > 4) {
-    if (inputTensorValues[4].sizes().size() != 1) {
+    if (inputTensorValues[4].dim() != 1) {
       TORCH_WARN(
           "Constant folding - Invalid 'steps' input found for opset >= 10 onnx::Slice op. "
           "Constant folding not applied.");
@@ -305,7 +304,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
     if (opset_version >= ONNX_OPSET_13) {
       assert(inputTensorValues.size() == 2);
       // Checking validity of 'axes' input
-      if (inputTensorValues[1].sizes().size() != 1) {
+      if (inputTensorValues[1].dim() != 1) {
         TORCH_WARN(
             "Constant folding - Invalid 'axes' inputs found for opset 13 onnx::Unsqueeze op. "
             "Constant folding not applied.");
@@ -318,8 +317,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
         // From https://pytorch.org/docs/stable/generated/torch.unsqueeze.html
         // Negative dim will correspond to unsqueeze() applied at dim = dim +
         // input.dim() + 1.
-        axes_a[i] +=
-            axes_a[i] < 0 ? inputTensorValues[0].sizes().size() + 1 : 0;
+        axes_a[i] += axes_a[i] < 0 ? inputTensorValues[0].dim() + 1 : 0;
         axes.push_back(axes_a[i]);
       }
       std::sort(axes.begin(), axes.end());
@@ -354,7 +352,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
       updated_val = inputTensorValues[0];
       if (inputTensorValues.size() == 2) {
         // Checking validity of 'axes' input
-        if (inputTensorValues[1].sizes().size() != 1) {
+        if (inputTensorValues[1].dim() != 1) {
           TORCH_WARN(
               "Constant folding - Invalid 'axes' inputs found for opset 13 onnx::Squeeze op. "
               "Constant folding not applied.");
@@ -364,7 +362,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
         std::vector<int64_t> axes;
         for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
           // ONNX Squeeze accepts negative axes
-          axes_a[i] += axes_a[i] < 0 ? inputTensorValues[0].sizes().size() : 0;
+          axes_a[i] += axes_a[i] < 0 ? inputTensorValues[0].dim() : 0;
           axes.push_back(axes_a[i]);
         }
         std::sort(axes.begin(), axes.end());
@@ -423,7 +421,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
       // at::reshape does not support shape dim value to be zero
       assert(shape_a[i] >= -1);
       if (shape_a[i] == 0 && !allowzero) {
-        if (i >= inputTensorValues[0].sizes().size()) {
+        if (i >= inputTensorValues[0].dim()) {
           throw std::runtime_error(
               "Dimension with value 0 exceeds the input size dimensions.");
         }
@@ -450,7 +448,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
         inputTensorValues[0], p, node->is(attr::axes), node->i(attr::keepdims));
     return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::ReduceProd) {
-    int64_t rank = inputTensorValues[0].sizes().size();
+    int64_t rank = inputTensorValues[0].dim();
     std::vector<int64_t> axes;
     if (!node->hasAttributeS("axes")) {
       axes = std::vector<int64_t>(rank);
@@ -478,7 +476,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
     }
     // If axis attribute for onnx::Gather has a value less than 0,
     // It needs to be adjusted (+= dim sizes) for aten op
-    axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
+    axis += axis < 0 ? inputTensorValues[0].dim() : 0;
     at::Tensor indices = inputTensorValues[1];
     auto q = indices.dim();
     // at::index_select only supports indices with rank <= 1.

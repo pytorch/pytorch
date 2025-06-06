@@ -68,7 +68,7 @@ struct ThreadLocalCachedOutputTensor<ArrayRefTensor<T>> {
     AtenTensorHandle handle = nullptr;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
         storage_.get(),
-        t.sizes().size(),
+        t.dim(),
         t.sizes().data(),
         t.strides().data(),
         0,
