@@ -7060,6 +7060,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             _load_precompile_entry,
             _reset_precompile_entries,
         )
+
         def fn(x):
             return x + 1
 
@@ -7069,7 +7070,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         args = (torch.randn(3, 2),)
 
         compiled_fn = torch.compile(fn)
-        _load_precompile_entry(fn.__code__,
+        _load_precompile_entry(
+            fn.__code__,
             torch._dynamo.guards.GuardManagerWrapper(),
             injected.__code__,
         )
@@ -7083,49 +7085,57 @@ utils_device.CURRENT_DEVICE == None""".split(
             _load_precompile_entry,
             _reset_precompile_entries,
         )
+
         def fn(x):
             return x + 1
 
         guard_manager = torch._dynamo.guards.RootGuardManager()
         guard_manager.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
+
         def injected(x: int):
             return x + 42
 
         guard_manager2 = torch._dynamo.guards.RootGuardManager()
         guard_manager2.add_lambda_guard(lambda L: isinstance(L["x"], torch.Tensor), [])
+
         def injected2(x: torch.Tensor):
             return x + 100
 
         guard_manager3 = torch._dynamo.guards.RootGuardManager()
         guard_manager3.add_lambda_guard(lambda L: isinstance(L["x"], bool), [])
+
         def injected3(x: bool):
             return x + 102
 
         guard_manager4 = torch._dynamo.guards.RootGuardManager()
         guard_manager4.add_lambda_guard(lambda L: isinstance(L["x"], str), [])
+
         def injected4(x: str):
             return x + "1"
 
         args = (torch.randn(3, 2),)
 
         compiled_fn = torch.compile(fn)
-        _load_precompile_entry(fn.__code__,
+        _load_precompile_entry(
+            fn.__code__,
             torch._dynamo.guards.GuardManagerWrapper(guard_manager),
             injected.__code__,
         )
 
-        _load_precompile_entry(fn.__code__,
+        _load_precompile_entry(
+            fn.__code__,
             torch._dynamo.guards.GuardManagerWrapper(guard_manager2),
             injected2.__code__,
         )
 
-        _load_precompile_entry(fn.__code__,
+        _load_precompile_entry(
+            fn.__code__,
             torch._dynamo.guards.GuardManagerWrapper(guard_manager3),
             injected3.__code__,
         )
 
-
-        _load_precompile_entry(fn.__code__,
+        _load_precompile_entry(
+            fn.__code__,
             torch._dynamo.guards.GuardManagerWrapper(guard_manager4),
             injected4.__code__,
         )
