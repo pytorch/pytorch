@@ -775,6 +775,17 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
+        # handle negative 1 in size argument of view
+        def f(x):
+            x = aten.view.default(x, [3, 5, 7])
+            x = aten.view.default(x, [-1, 7])
+            return x
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
     def test_pointless_permute_pair(self):
         def f(x):
             x = aten.permute.default(x, [1, 0])
