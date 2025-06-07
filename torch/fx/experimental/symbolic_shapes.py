@@ -98,6 +98,10 @@ from torch.utils._sympy.value_ranges import (
     ValueRanges,
 )
 from torch.utils._traceback import CapturedTraceback, format_frame
+from torch._C._functorch import (
+    get_unwrapped,
+    is_batchedtensor,
+)
 
 
 if TYPE_CHECKING:
@@ -1141,7 +1145,10 @@ def _free_unbacked_symbols_with_path(
         for attr in attrs:
             sub = getattr(a, attr)
             r.update(go(sub, path + (InnerTensorKey(attr),)))
-    elif isinstance(a, torch.Tensor):
+    elif isinstance(a, torch.Tensor) and is_batchedtensor(a):
+        unwrapped_tensor = get_unwrapped(a)
+        r.update(go(unwrapped_tensor, path))
+    elif isinstance(a, torch.Tensor) and not is_batchedtensor(a):
         from torch._subclasses.fake_tensor import FakeTensor
 
         assert isinstance(a, FakeTensor)

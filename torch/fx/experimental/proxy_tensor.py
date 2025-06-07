@@ -868,6 +868,7 @@ def proxy_call(
     proxy_flat_args_kwargs = [
         e.proxy if isinstance(e, _ProxyTensor) else e for e in f_flat_args_kwargs
     ]
+    
     proxy_flat_args_kwargs = [
         (fetch_sym_proxy(proxy_mode.tracer)(e) if isinstance(e, py_sym_types) else e)
         for e in proxy_flat_args_kwargs
@@ -1371,6 +1372,38 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             return node
             # Don't actually run the function! We just want to trace the calls
             # into a graph. We don't actualy want to change global autograd state.
+        if func in [torch._C._functorch._add_batch_dim, torch._C._functorch._remove_batch_dim]:
+            # Don't actually run the function! We just want to trace the calls
+            # into a graph. We don't actualy want to change global functorch state.
+
+            def fetch_proxy(x):
+                if isinstance(x, torch.Tensor) or isinstance(x, py_sym_types):
+                    slot = get_proxy_slot(x, self.tracer)
+                    if isinstance(slot, torch.utils._thunk.Thunk):
+                        return slot.force()
+                    return slot.proxy
+                return x
+            proxy_args = pytree.tree_map(lambda x: fetch_proxy(x), args)
+            
+            proxy_out = self.tracer.create_proxy("call_function", func, proxy_args, kwargs)  # type: ignore[arg-type]
+            out = func(*args, **kwargs)
+            track_tensor_tree(out, proxy_out, constant=None, tracer=self.tracer)
+            return out
+        if func in [torch._C._functorch._vmap_increment_nesting, torch._C._functorch._vmap_decrement_nesting]:
+            def fetch_proxy(x):
+                if isinstance(x, torch.Tensor) or isinstance(x, py_sym_types):
+                    slot = get_proxy_slot(x, self.tracer)
+                    if isinstance(slot, torch.utils._thunk.Thunk):
+                        return slot.force()
+                    return slot.proxy
+                return x
+            
+            proxy_args = pytree.tree_map(lambda x: fetch_proxy(x), args)
+
+            proxy = self.tracer.create_proxy("call_function", func, proxy_args, kwargs)  # type: ignore[arg-type]
+            proxy.node.meta["val"] = None
+            out = func(*args, **kwargs)
+            return out
         return func(*args, **kwargs)
 
 
