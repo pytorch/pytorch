@@ -1068,10 +1068,11 @@ def configure_extension_build():
     ################################################################################
 
     extensions = []
+    includes = ["torch", "torch.*", "torchgen", "torchgen.*"]
     excludes = ["tools", "tools.*", "caffe2", "caffe2.*"]
     if not cmake_cache_vars["BUILD_FUNCTORCH"]:
         excludes.extend(["functorch", "functorch.*"])
-    packages = find_packages(exclude=excludes)
+    packages = find_packages(include=includes, exclude=excludes)
     C = Extension(
         "torch._C",
         libraries=main_libraries,
