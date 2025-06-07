@@ -1297,7 +1297,13 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
 
         out = func(*args, **kwargs)
 
-        any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
+        # HOPs don't support func._schema
+        # HOPs don't alias -> this is always true today and will be always true for a long time
+        # TODO HOPs don't mutate -> this is always true today but will not be true forever
+        if isinstance(func, torch._ops.HigherOrderOperator):
+            any_ret_has_alias_info = False
+        else:
+            any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
             self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)), out))
@@ -1396,7 +1402,7 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
     #     context_fn anyway, so proceed as usual.
     if isinstance(policy_fn_or_list, list):
         for op in policy_fn_or_list:
-            if not isinstance(op, torch._ops.OpOverload):
+            if not isinstance(op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
                 _extra_msg = (
                     "Please update the OpOverloadPacket to a specific OpOverload."
                     "For example, if you have `torch.ops.aten.mm`, change it to `torch.ops.aten.mm.default`."

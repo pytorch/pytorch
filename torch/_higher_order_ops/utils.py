@@ -531,6 +531,24 @@ def _maybe_fake_prop_ignore_unbacked(fn, args):
         return fn(*args)
 
 
+def redirect_to_mode(hop: OperatorBase, mode):
+    """Utility for redispatching HOP to underlying mode
+
+    Args:
+        hop: The HOP to redispatch
+        mode: The mode to redispatch to
+
+    Returns:
+        A decorated function that implements the HOP for the given mode
+    """
+
+    @hop.py_impl(mode)
+    def impl(mode, *args, **kwargs):
+        return mode.__torch_dispatch__(hop, [], args, kwargs)
+
+    return impl
+
+
 # TODO: The parameter use_output_and_grad_bw is required because some operations
 # that utilize this function, such as the while_loop, may require (grad, fwd_outputs)
 def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
@@ -897,10 +915,7 @@ def register_fake(hop, fn=None):
     def register(func):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
-        # Redirect the hop to the fake tensor mode implementation.
-        @hop.py_impl(FakeTensorMode)
-        def _(mode, *args, **kwargs):
-            return mode.__torch_dispatch__(hop, [], args, kwargs)
+        redirect_to_mode(hop, FakeTensorMode)
 
         registered_hop_fake_fns[hop] = func
         return func

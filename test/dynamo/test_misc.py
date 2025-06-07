@@ -12603,17 +12603,6 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         res = opt_f()
         self.assertEqual(ref, res)
 
-    def test_randint_no_graphbreak(self):
-        @torch.compile(backend="aot_eager", fullgraph=True)
-        def f(actions, n_act, epsilon=0.1):
-            actions_random = torch.randint_like(actions, n_act)
-
-            return actions_random
-
-        x = torch.ones([1], dtype=torch.int64)
-        y = torch.tensor(5)
-        f(x, y)
-
 
 devices = ("cuda", "hpu")
 instantiate_device_type_tests(MiscTestsDevice, globals(), only_for=devices)

@@ -330,39 +330,6 @@ partition& find_or_create_graph_partition(
   }
   return *partition_;
 }
-
-void alloc_with_matching_layout(
-    const at::Tensor& q,
-    at::Tensor& output,
-    const std::vector<int64_t>& shape) {
-  TORCH_INTERNAL_ASSERT(
-      shape.size() == q.sizes().size(),
-      "OneDNN SDPA alloc_with_matching_layout got requested shape ndim != q ndim");
-
-  if (std::equal(q.sizes().begin(), q.sizes().end(), shape.begin())) {
-    output = at::empty_like(q);
-    return;
-  }
-
-  // get the "fill order," which is just an argsort on the strides
-  std::vector<int> fill_order(shape.size());
-  std::iota(fill_order.begin(), fill_order.end(), 0);
-  const auto q_strides = q.strides();
-  std::stable_sort(
-      fill_order.begin(), fill_order.end(), [&q_strides](int idx1, int idx2) {
-        return q_strides[idx1] < q_strides[idx2];
-      });
-  std::vector<int64_t> ordered_strides(shape.size());
-  int64_t current_stride = 1;
-  for (const int dim_idx : fill_order) {
-    ordered_strides[dim_idx] = current_stride;
-    current_stride *= shape[dim_idx];
-  }
-  output = at::empty(at::IntArrayRef(shape), q.options())
-               .as_strided(
-                   at::IntArrayRef(shape), at::IntArrayRef(ordered_strides), 0);
-}
-
 } // namespace
 
 namespace at::native::onednn {
@@ -380,14 +347,7 @@ void gpu_float_sdpa(
     std::optional<at::Tensor> attn_mask,
     bool is_causal,
     float softmax_scale,
-    Tensor& output) {
-  if (!output.defined()) {
-    // allocate output tensor with layout matched to query
-    std::vector<int64_t> output_shape = {
-        batch_size, num_head, seq_len_q, head_dim_v};
-    alloc_with_matching_layout(query, output, output_shape);
-  }
-
+    const Tensor& output) {
   auto& eng = GpuEngineManager::Instance().get_engine();
   auto& strm = GpuStreamManager::Instance().get_stream();
 

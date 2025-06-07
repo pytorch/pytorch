@@ -4781,14 +4781,6 @@
     CompositeExplicitAutograd: randint_like
   autogen: randint_like.out
 
-- func: randint_like.Tensor(Tensor self, Tensor high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  tags: nondeterministic_seeded
-  dispatch:
-    # NB: Although this composite mutates on the inside, it is
-    # non-differentiable so NonFunctional doesn't apply
-    CompositeExplicitAutograd: randint_like
-  autogen: randint_like.Tensor_out
-
 - func: randint_like.low_dtype(Tensor self, SymInt low, SymInt high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:

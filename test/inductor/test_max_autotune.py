@@ -1144,7 +1144,7 @@ class TestMaxAutotune(TestCase):
         # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
         # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
         self.assertEqual(generate_and_load_args - 1, make_key_args)
-        self.assertEqual(generate_and_load_args, 15)
+        self.assertEqual(generate_and_load_args, 16)
 
     @fresh_inductor_cache()
     @config.patch(
@@ -1227,14 +1227,15 @@ class TestMaxAutotune(TestCase):
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
                     remove_white_space(
-                        f"""
-                    {{'input_nodes': ["[[10, 22], [22, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
-                                    "[[22, 30], [30, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]"],
-                    'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0,
-                    'call_sizes': [10, 30], 'layout': "[[10, 30], [30, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
-                    'num_consumer_groups': 0, 'num_buffers_warp_spec': 0,
-                    'kwargs': {{'EVEN_K': False, 'ALLOW_TF32': True, 'USE_FAST_ACCUM': False, 'ACC_TYPE': 'tl.float32',
-                    'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}}}"""
+                        """{
+                        'input_nodes':[
+                            "[[10,22],[22,1],torch.float32,device(type='cuda',index=0),0]",
+                            "[[22,30],[30,1],torch.float32,device(type='cuda',index=0),0]"],
+                        'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[10,30],
+                        'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
+                        'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity',
+                        'kwargs':{'EVEN_K':False,'ALLOW_TF32':True,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
+                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8}}"""
                     ),
                 )
 
@@ -1265,13 +1266,14 @@ class TestMaxAutotune(TestCase):
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
                     remove_white_space(
-                        f"""{{'input_nodes': ["[[s77, s17], [s17, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
-                                            "[[s17, s94], [s94, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]"],
-                            'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0, 'call_sizes': [s77, s94],
-                            'layout': "[[s77, s94], [s94, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
-                            'num_consumer_groups': 0, 'num_buffers_warp_spec': 0, 'kwargs': {{'EVEN_K': False,
-                            'ALLOW_TF32': True, 'USE_FAST_ACCUM': False,
-                            'ACC_TYPE': 'tl.float32', 'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}}}"""
+                        """{
+                    'input_nodes':[
+                        "[[s77,s17],[s17,1],torch.float32,device(type='cuda',index=0),0]",
+                        "[[s17,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
+                    'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
+                    'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
+                    'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','kwargs':{'EVEN_K':False,'ALLOW_TF32':True,
+                    'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8}}"""
                     ),
                 )
 
@@ -1353,6 +1355,81 @@ class TestMaxAutotune(TestCase):
 
             self.assertEqual(hits(), 0)
             self.assertEqual(misses(), 7)
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "test_configs.max_mm_configs": 4,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_triton_template_generated_code_caching_bmm(self):
+        def func_test1(x, y, z, m):
+            a = torch.bmm(x, y)
+            b = torch.bmm(z, m)
+            return a, b
+
+        a = torch.rand(10, 10, 22, device=GPU_TYPE)
+        b = torch.rand(10, 22, 30, device=GPU_TYPE)
+
+        def hits():
+            return torch._dynamo.utils.counters["inductor"][
+                "generated_module_cache_hit"
+            ]
+
+        def misses():
+            return torch._dynamo.utils.counters["inductor"][
+                "generated_module_cache_miss"
+            ]
+
+        # Valid cache hit.
+        with fresh_inductor_cache():
+            torch._dynamo.utils.counters.clear()
+            compile_results = torch.compile(func_test1, dynamic=False)(a, b, a, b)
+            eager_results = func_test1(a, b, a, b)
+            self.assertEqual(compile_results, eager_results, atol=0.05, rtol=0.05)
+            self.assertEqual(hits(), 4)
+            self.assertEqual(misses(), 4)
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "test_configs.max_mm_configs": 4,
+            "max_autotune_gemm_backends": "ATEN, TRITON",
+        }
+    )
+    def test_triton_template_generated_code_caching_mm_plus_mm(self):
+        def func_test1(x, y, z, m):
+            a = torch.mm(x, y)
+            b = torch.mm(z, m)
+            sum1 = a + b
+
+            c = torch.mm(x, y)
+            d = torch.mm(z, m)
+            sum2 = c + d
+            return sum1, sum2
+
+        a = torch.rand(10, 40, device=GPU_TYPE)
+        b = torch.rand(40, 30, device=GPU_TYPE)
+
+        def hits():
+            return torch._dynamo.utils.counters["inductor"][
+                "generated_module_cache_hit"
+            ]
+
+        def misses():
+            return torch._dynamo.utils.counters["inductor"][
+                "generated_module_cache_miss"
+            ]
+
+        # Valid cache hit.
+        with fresh_inductor_cache():
+            torch._dynamo.utils.counters.clear()
+            compile_results = torch.compile(func_test1, dynamic=False)(a, b, a, b)
+            eager_results = func_test1(a, b, a, b)
+            self.assertEqual(compile_results, eager_results, atol=0.05, rtol=0.05)
+            self.assertEqual(hits(), 4)
+            self.assertEqual(misses(), 4)
 
     @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")

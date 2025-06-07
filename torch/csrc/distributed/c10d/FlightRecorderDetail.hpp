@@ -1,6 +1,7 @@
 #include <nlohmann/json.hpp>
 
 #include <c10/util/WaitCounter.h>
+#include <c10/util/thread_name.h>
 
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 
@@ -85,6 +86,8 @@ std::optional<size_t> FlightRecorder<EventType>::record(
       {},
       {},
       {},
+      std::this_thread::get_id(),
+      c10::getThreadName(),
       false};
 
   for (const auto& input : inputs) {
@@ -286,6 +289,8 @@ const c10::List<c10::IValue> FlightRecorder<EventType>::getCollectiveTrace(
     dict.insert(record_id_key, int64_t(e.id_));
     dict.insert(pg_id_key, int64_t(e.pg_id_));
     dict.insert(pg_name_key, e.pg_name_);
+    dict.insert(thread_name_key, e.thread_name_);
+    dict.insert(thread_id_key, c10::str(e.thread_id_));
     dict.insert(collective_seq_id_key, int64_t(e.collective_seq_id_));
     dict.insert(p2p_seq_id_key, int64_t(e.p2p_seq_id_));
     dict.insert(op_id_key, int64_t(e.op_id_));
@@ -433,6 +438,8 @@ std::string FlightRecorder<EventType>::dump_json(
       j[record_id_key_str] = int64_t(e.id_);
       j[pg_id_key_str] = int64_t(e.pg_id_);
       j[pg_name_key_str] = e.pg_name_;
+      j[thread_name_key_str] = e.thread_name_;
+      j[thread_id_key_str] = c10::str(e.thread_id_);
       j[collective_seq_id_key_str] = int64_t(e.collective_seq_id_);
       j[p2p_seq_id_key_str] = int64_t(e.p2p_seq_id_);
       j[op_id_key_str] = int64_t(e.op_id_);
