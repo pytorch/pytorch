@@ -579,6 +579,16 @@ class MiscTests(torch._inductor.test_case.TestCase):
             self.assertEqual(obj.y, x + 1)
         self.assertEqual(obj.__dict__.keys(), {"pfx_x", "pfx_y"})
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_repeat_cat(self):
+        def f(x, n):
+            m = x.item()
+            x = torch.empty(x).repeat(n)  # s0*u0
+            return torch.cat([x, x], dim=0)
+
+        fn = torch.compile(f, backend="eager", dynamic=True, fullgraph=True)
+        fn(torch.tensor([5]), 5)
+
     def test_tensor_setattr_getset_descriptor(self):
         # Tensor attribute `real` has special getter/setter for complex dtype.
         def f(x):

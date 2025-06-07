@@ -4078,6 +4078,11 @@ def meta_repeat(self, repeats):
         len(repeats) >= self.dim(),
         lambda: "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor",
     )
+    for i, rep in enumerate(repeats):
+        torch._check(
+            rep >= 0,
+            lambda: f"Repeats cannot be negative, found {rep} at index {i}",
+        )
     # Add new leading dimensions to the tensor if the
     # number of target dimensions is larger than the
     # number of source dimensions.
