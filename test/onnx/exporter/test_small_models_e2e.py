@@ -224,7 +224,7 @@ class DynamoExporterTest(common_utils.TestCase):
             def forward(self):
                 return torch.empty([1], dtype=torch.float4_e2m1fn_x2)
 
-        onnx_program = self.export(Float4Module())
+        onnx_program = self.export(Float4Module(), optimize=False)
         output = onnx_program.model.graph.outputs[0]
         self.assertEqual(output.dtype, ir.DataType.FLOAT4E2M1)
         # The shape is [*shape, 2] because ONNX stores the shape of the unpacked tensor
