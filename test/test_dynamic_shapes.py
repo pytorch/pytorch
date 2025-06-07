@@ -765,6 +765,25 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 == 10 - i1))
         self.assertExpectedInline(str(i0), """u0""")
 
+    def test_unbacked_slice(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(xs):
+            u0, u1, u2 = xs.tolist()
+            x = torch.empty(u0)
+            y = x[u1:u2]
+            z = x[(u2 - u1) : (u1 + 2 * u2)]
+            return y, z
+
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            fn(torch.tensor([32, 3, 6]))
+        y, z = fn(torch.tensor([5, 0, 1]))
+        self.assertEqual(y.size(0), 1)
+        self.assertEqual(z.size(0), 1)
+        with self.assertRaisesRegex(
+            RuntimeError, r"Runtime assertion failed for expression u1 <= u0 .*"
+        ):
+            fn(torch.tensor([5, 6, -2]))
+
     def test_expect_true_double_digits(self):
         shape_env = ShapeEnv()
         ia = [shape_env.create_unbacked_symint() for _ in range(11)]  # allocate 10
