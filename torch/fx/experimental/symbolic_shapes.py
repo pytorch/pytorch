@@ -1363,7 +1363,8 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
         assert isinstance(a, bool)
         return a
 
-    # if backed_size_oblivious is True we treat backed as unbacked here.
+    # xla nodes do not support sym_max, remove after this get merged.
+    # https://github.com/pytorch/xla/pull/9291
     if torch.fx.experimental._config.backed_size_oblivious:
         result = _static_eval_sym_bool(a)
         return result if result is not None else default

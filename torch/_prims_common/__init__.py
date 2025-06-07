@@ -273,6 +273,9 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         is_nested_int,
     )
 
+    def has_shape_env(l):
+        return not isinstance(l, torch.SymInt) or hasattr(l.node, "shape_env")
+
     maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
     maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
 
@@ -281,7 +284,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
 
     expected_stride = 1
     for x, y in reversed(tuple(zip(a.shape, a.stride()))):
-        # Skips checking strides when a dimension has length 1
+        # Skips checking strides when a dimension has length 1.
         if maybe_guard_or_false(x == 1):
             continue
 
@@ -293,7 +296,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         # make_contiguous_strides_for. If we make a tensor and used strides from make_contiguous_strides_for
         # and then called definitely_contiguous we should get True.
         expected_stride *= (
-            x if is_nested_int(x) else sym_max(x, 1)
+            x if (is_nested_int(x) or not has_shape_env(x)) else sym_max(x, 1)
         )  # type:ignore[assignment]
 
     return True
@@ -1702,6 +1705,9 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
+    def has_shape_env(l):
+        return not isinstance(l, torch.SymInt) or hasattr(l.node, "shape_env")
+
     from torch.fx.experimental.symbolic_shapes import is_nested_int
 
     multiplier: Union[_IntLikeT, int] = 1
@@ -1709,7 +1715,7 @@ def make_contiguous_strides_for(
     for l in reversed(shape):
         strides.append(multiplier)
         multiplier *= (
-            l if is_nested_int(l) else sym_max(l, 1)
+            l if (is_nested_int(l) or not has_shape_env(l)) else sym_max(l, 1)
         )  # type:ignore[assignment]
 
     result = tuple(reversed(strides))

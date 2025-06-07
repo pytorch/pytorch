@@ -4103,7 +4103,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual((4, 8, nt.size(1), 10), tuple(view2.size()))
         self.assertTrue(view2._base is None)
 
-    @xfailIfTorchDynamo
     @parametrize("requires_grad", [False, True])
     def test_reshape_decomp(self, device, requires_grad):
         # contiguous NT should result in view.
