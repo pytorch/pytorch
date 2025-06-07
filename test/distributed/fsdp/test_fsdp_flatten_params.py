@@ -647,6 +647,36 @@ class TestFlattenParams(FSDPTest):
             ),
         )
 
+    @skip_if_lt_x_gpu(1)
+    def test_writeback_orig_params_no_shard(self):
+        class EmbeddingModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.emb = nn.Embedding(5, 4)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.emb(x).sum()
+
+        model = EmbeddingModel().half().to(self.rank)
+        fsdp_model = FSDP(
+            model,
+            sharding_strategy=HandleShardingStrategy.NO_SHARD,
+            use_orig_params=True,
+        )
+
+        # Copied from https://github.com/huggingface/accelerate/blob/main/src/accelerate/accelerator.py#L1679-1719
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model):
+            if not fsdp_module._has_params:
+                continue
+            param = fsdp_module._flat_param
+            param.data = param.data.float()
+            fsdp_module._handle._orig_param_dtype = torch.float32
+
+        x = torch.randint(0, 5, (20,), device=self.rank)
+        with torch.no_grad():
+            out = fsdp_model(x)
+        self.assertEqual(out.shape, torch.Size([]))
+
 
 instantiate_parametrized_tests(TestFlattenParams)
 
