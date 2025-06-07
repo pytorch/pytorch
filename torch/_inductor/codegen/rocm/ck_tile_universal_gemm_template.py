@@ -2,7 +2,6 @@
 import functools
 import logging
 import random
-from collections import namedtuple
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -18,12 +17,6 @@ from ...utils import IndentedBuffer
 
 
 log = logging.getLogger(__name__)
-
-
-CKTileChoice = namedtuple(
-    "CKTileChoice",
-    ["op", "k_batch"],
-)
 
 
 def is_static_int(number):
@@ -446,9 +439,8 @@ class CKTileGemmTemplate(CKTileTemplate):
             return True
 
         if op.layout_a == "Row":
-            pass
-            # if not check(K, op.tile_k * self.k_batch, op.k_is_padded):
-            #     return False
+            # handle in kBatch check
+            return True
         elif op.layout_a == "Col":
             if not check(M, op.tile_m, op.m_is_padded):
                 return False
@@ -459,9 +451,8 @@ class CKTileGemmTemplate(CKTileTemplate):
             if not check(N, op.tile_n, op.n_is_padded):
                 return False
         elif op.layout_b == "Col":
-            # if not check(K, op.tile_k * self.k_batch, op.k_is_padded):
-            #     return False
-            pass
+            # handle in kBatch check
+            return True
         else:
             raise AssertionError(f"Invalid {op.layout_b=}")
 
@@ -920,6 +911,7 @@ class CKTileGemmTemplate(CKTileTemplate):
         Returns a list of k_batch choices for the template.
         """
         default_choices = (1, 2, 4, 8, 16, 32)
+
         def check(dim_size, tile_size, is_padded):
             if (
                 is_static_int(dim_size)
@@ -928,9 +920,13 @@ class CKTileGemmTemplate(CKTileTemplate):
             ):
                 return False
             return True
+
         _, _, K, _, _, _ = self.size_args()
         if op.layout_a == "Row" or op.layout_b == "Col":
-            choices = filter(lambda k_batch: check(K, op.tile_k * k_batch, op.k_is_padded), default_choices)
+            choices = filter(
+                lambda k_batch: check(K, op.tile_k * k_batch, op.k_is_padded),
+                default_choices,
+            )
         else:
             choices = default_choices
 
