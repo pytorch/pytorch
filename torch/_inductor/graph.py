@@ -74,7 +74,6 @@ from .ir import (
     InputBuffer,
     Pointwise,
     Reduction,
-    ShapeAsConstantBuffer,
     StorageBox,
     TensorBox,
     TorchBindObject,
@@ -1032,7 +1031,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def add_tensor_constant(
         self, data: Tensor, name: Optional[str] = None
-    ) -> Union[TensorBox, ir.ShapeAsConstantBuffer]:
+    ) -> TensorBox:
         new_name = self.allocate_non_dup_const_name(name, data)
         return TensorBox.create(
             ir.ConstantBuffer(
@@ -1136,7 +1135,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.graph_inputs[target] = tensor
         self.graph_input_names.append(target)
-        self.graph_inputs_original[target] = tensor.data.data  # type: ignore[union-attr]
+        self.graph_inputs_original[target] = tensor.data.data
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
             self.add_device_info(example.device)
 
@@ -1278,9 +1277,7 @@ class GraphLowering(torch.fx.Interpreter):
         target: str,  # type: ignore[override]
         args: tuple[()],  # type: ignore[override]
         kwargs: dict[str, object],
-    ) -> Union[
-        Constant, TensorBox, ShapeAsConstantBuffer, ir.Subgraph, TorchBindObject
-    ]:
+    ) -> Union[Constant, TensorBox, ir.Subgraph, TorchBindObject]:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
 
@@ -1520,7 +1517,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def run_node(self, n: torch.fx.Node) -> object:
         def debug(msg: str) -> None:
-            log.debug("lowering %s %s", LazyString(n.format_node), msg)
+            log.debug("lowering %s %s", LazyString(n.format_node), msg)  # type: ignore[arg-type]
 
         from torch._inductor.compiler_bisector import CompilerBisector
 

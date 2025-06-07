@@ -69,23 +69,22 @@ if torch._C._has_mkldnn:
             )
 
     class CpuMkldnnDeviceOp(MkldnnDeviceOpBase):
-        def get_linear_transpose_weight(self, weight_node) -> torch.fx.Node:
+        def get_linear_transpose_weight(self, weight_node):
+            print("weight_node:", type(weight_node), weight_node)
             packed_weight_node = weight_node
             assert packed_weight_node.target == mkldnn._reorder_linear_weight
             transpose_weight_node = packed_weight_node.args[0]
             assert transpose_weight_node.target == aten.permute.default
             return transpose_weight_node
 
-        def pack_conv_weight(
-            self, graph, packed_weight_op, packed_weight_inputs
-        ) -> torch.fx.Node:
+        def pack_conv_weight(self, graph, packed_weight_op, packed_weight_inputs):
             return graph.create_node(
                 "call_function", packed_weight_op, args=packed_weight_inputs
             )
 
         def pack_linear_weight(
             self, graph, is_lp_weight, transpose_weight_node, batch_size
-        ) -> torch.fx.Node:
+        ):
             # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
             packed_weight_inputs = (
                 transpose_weight_node,
@@ -114,7 +113,7 @@ if torch._C._has_mkldnn:
 
         def pack_linear(
             self, graph, is_lp_weight, batch_size, input, packed_weight_node, bias
-        ) -> torch.fx.Node:
+        ):
             packed_linear_inputs: tuple[Any, ...] = (input, packed_weight_node)
             transpose_weight_node = packed_weight_node.args[0]
             if is_lp_weight or mkldnn._is_mkldnn_acl_supported() or V.aot_compilation:
@@ -129,24 +128,23 @@ if torch._C._has_mkldnn:
             )
 
     class XpuMkldnnDeviceOp(MkldnnDeviceOpBase):
-        def get_linear_transpose_weight(self, weight_node) -> torch.fx.Node:
+        def get_linear_transpose_weight(self, weight_node):
+            print("weight_node:", type(weight_node), weight_node)
             transpose_weight_node = weight_node
             assert transpose_weight_node.target == aten.permute.default
             return transpose_weight_node
 
-        def pack_conv_weight(
-            self, graph, packed_weight_op, packed_weight_inputs
-        ) -> torch.fx.Node:
+        def pack_conv_weight(self, graph, packed_weight_op, packed_weight_inputs):
             return packed_weight_inputs[0]
 
         def pack_linear_weight(
             self, graph, is_lp_weight, transpose_weight_node, batch_size
-        ) -> torch.fx.Node:
+        ):
             return transpose_weight_node
 
         def pack_linear(
             self, graph, is_lp_weight, batch_size, input, packed_weight_node, bias
-        ) -> torch.fx.Node:
+        ):
             packed_linear_inputs: tuple[Any, ...] = (
                 input,
                 packed_weight_node,
