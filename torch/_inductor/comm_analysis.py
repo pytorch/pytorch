@@ -67,7 +67,7 @@ def get_collective_input_size_bytes(node: ir.IRNode) -> int:
 
 
 def get_collective_group_size(node: ir.IRNode) -> int:
-    if type(node) == ir._CollectiveKernel:
+    if isinstance(node, ir._CollectiveKernel) and not isinstance(node, ir._WaitKernel):
         from torch.distributed.distributed_c10d import _get_group_size_by_name
 
         return _get_group_size_by_name(node.constant_args[-1])
