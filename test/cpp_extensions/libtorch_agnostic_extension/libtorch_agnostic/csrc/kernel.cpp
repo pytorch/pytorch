@@ -1,6 +1,7 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/stable/library.h>
+#include <torch/standalone/util/Exception.h>
 
 #include <optional>
 
@@ -36,6 +37,7 @@ RAIIATH sgd_out_of_place(
 
   int64_t param_dim;
   aoti_torch_get_dim(param.get(), &param_dim);
+  STD_TORCH_CHECK(param_dim == 1, "param must be 1D");
 
   int64_t *param_sizes;
   int64_t *param_strides;
