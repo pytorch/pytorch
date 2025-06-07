@@ -7,4 +7,5 @@ target_sources(
   flatbuffers
   INTERFACE ${FlatBuffers_Library_SRCS}
 )
+target_compile_definitions(flatbuffers PUBLIC FLATBUFFERS_USE_STD_SPAN)
 target_include_directories(flatbuffers INTERFACE ${FlatBuffers_Include})
