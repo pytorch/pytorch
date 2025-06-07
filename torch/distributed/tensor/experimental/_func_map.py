@@ -27,6 +27,7 @@ def local_map(
     func: Callable,
     out_placements: OutputPlacements,
     in_placements: Optional[InputPlacements] = None,
+    in_grad_placements: Optional[InputPlacements] = None,
     device_mesh: Optional[DeviceMesh] = None,
     *,
     redistribute_inputs: bool = False,
@@ -66,6 +67,13 @@ def local_map(
             will be skipped and the argument will be directly passed to ``func``.
             If ``in_placements`` is ``None``, no placements examination will be performed.
             Default: None
+        in_grad_placements (Tuple[`PlacementType`, ...], optional):
+            the required placements of the :class:`DTensor` s gradient during back backpropagation.
+            It only works when input tensor to ``func`` is of type :class:`DTensor`. Input
+            :class:`DTensor` to ``func`` will be converted to tensor first with gradient
+            ``in_grad_placements`` enforced on the original :class:`DTensor`. Afterwards,
+            tensor will be converted back to :class:`DTensor` using original placement or
+            ``in_placements`` if specified.
         device_mesh (:class:`DeviceMesh`, optional):
             the device mesh that all the :class:`DTensor` s are placed on. If not
             specified, this will be inferred from the input :class:`DTensor` s' device
@@ -127,6 +135,42 @@ def local_map(
     .. note:: This API is currently experimental and subject to change
     """
 
+    def maybe_redistribute(
+        input_tensor: Union[DTensor, torch.Tensor],
+        device_mesh: DeviceMesh,
+        spec: PlacementType,
+        redistribute_inputs: bool = True,
+    ) -> DTensor:
+        """
+        Try redistrubute a tensor. If the input_tensor is not a DTensor, convert to DTensor first.
+        """
+        assert spec is not None, (
+            f"DTensor input {input_tensor} expects placements but received {spec}!"
+        )
+        if not isinstance(spec, tuple):
+            spec = tuple(spec)
+        if not isinstance(input_tensor, DTensor):
+            input_tensor = DTensor.from_local(
+                input_tensor, device_mesh, spec, run_check=False
+            )
+            return input_tensor
+
+        # case when input_tensor is DTensor already
+        placements_orig = input_tensor.placements
+        if placements_orig != spec:
+            if redistribute_inputs:
+                # redistribute to specified placements
+                input_tensor = input_tensor.redistribute(device_mesh, spec)
+            else:
+                raise ValueError(
+                    f"arg {input_tensor} in local_map has a mismatched placements: "
+                    f"arg placements is placements_orig but the input "
+                    f"placements is {spec}! "
+                    "If redistribute_inputs is wanted, set "
+                    "redistribute_inputs=True to local_map."
+                )
+        return input_tensor
+
     def wrapped(device_mesh: Optional[DeviceMesh], *args, **kwargs):
         # process input args
         flat_args, args_spec = pytree.tree_flatten(args)
@@ -155,8 +199,15 @@ def local_map(
                     f"{arg} has device mesh {arg.device_mesh} while "
                     f"the expected device mesh is {device_mesh}!"
                 )
-                if in_placements is not None:
-                    spec = in_placements[idx]
+
+                if in_grad_placements is not None:
+                    if not arg.requires_grad:
+                        raise ValueError(
+                            f"arg {arg} in local_map specified `in_grad_placements` but it is not marked as requires_grad!"
+                        )
+                    placement_orig = arg.placements
+                    spec = in_grad_placements[idx]
+
                     assert spec is not None, (
                         f"DTensor input {arg} expects placements but received {spec}!"
                     )
@@ -164,18 +215,16 @@ def local_map(
                     if not isinstance(spec, tuple):
                         spec = tuple(spec)
 
-                    if arg.placements != spec:
-                        if redistribute_inputs:
-                            # redistribute to input placements
-                            arg = arg.redistribute(device_mesh, spec)
-                        else:
-                            raise ValueError(
-                                f"arg {arg} in local_map has a mismatched placements: "
-                                f"arg placements is {arg.placements} but the input "
-                                f"placements is {spec}! "
-                                "If redistribute_inputs is wanted, set "
-                                "redistribute_inputs=True to local_map."
-                            )
+                    # convert to tensor to force grad_placements on the original tensor
+                    arg = arg.to_local(grad_placements=spec)
+                    # convert back to Dtensor to redistribute
+                    arg = maybe_redistribute(arg, device_mesh, placement_orig, True)
+
+                if in_placements is not None:
+                    spec = in_placements[idx]
+                    arg = maybe_redistribute(
+                        arg, device_mesh, spec, redistribute_inputs
+                    )
 
                 local_arg = arg.to_local()
                 if isinstance(local_arg, AsyncCollectiveTensor):
