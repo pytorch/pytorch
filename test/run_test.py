@@ -1816,17 +1816,19 @@ def run_tests(
         ):
             shutil.copy(os.path.join(test_directory, conftest_file), cpp_file)
 
-    def handle_error_messages(failure: Optional[TestFailure]):
-        if failure is None:
+    def handle_complete(failure: Optional[TestFailure]):
+        failed = failure is not None
+        if IS_CI and options.upload_artifacts_while_running:
+            zip_and_upload_artifacts(failed)
+        if not failed:
             return False
         failures.append(failure)
         print_to_stderr(failure.message)
         return True
 
     def parallel_test_completion_callback(failure):
-        test_failed = handle_error_messages(failure)
-        if IS_CI and options.upload_artifacts_while_running:
-            zip_and_upload_artifacts(test_failed)
+        test_failed = handle_complete(failure)
+        print_to_stderr(f"parallel {test_failed}")
         if (
             test_failed
             and not options.continue_through_error
@@ -1845,7 +1847,7 @@ def run_tests(
             if can_run_in_pytest(test):
                 options_clone.pytest = True
             failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(failure)
+            test_failed = handle_complete(failure)
             if (
                 test_failed
                 and not options.continue_through_error
@@ -1860,7 +1862,7 @@ def run_tests(
                 options_clone.pytest = True
             options_clone.additional_args.extend(["-m", "serial"])
             failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(failure)
+            test_failed = handle_complete(failure)
             if (
                 test_failed
                 and not options.continue_through_error
