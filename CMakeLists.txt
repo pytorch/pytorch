@@ -985,6 +985,9 @@ endif()
 # ---[ Build flags Re-include to override append_cxx_flag_if_supported from
 # third_party/FBGEMM
 include(cmake/public/utils.cmake)
+if(USE_COLORIZE_OUTPUT)
+  set(CMAKE_COLOR_DIAGNOSTICS ON)
+endif()
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
 
@@ -1059,19 +1062,6 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable"
                                CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
-
-  if(${USE_COLORIZE_OUTPUT})
-    # Why compiler checks are necessary even when `try_compile` is used Because
-    # of the bug in ccache that can incorrectly identify `-fcolor-diagnostics`
-    # As supported by GCC, see https://github.com/ccache/ccache/issues/740 (for
-    # older ccache) and https://github.com/ccache/ccache/issues/1275 (for newer
-    # ones)
-    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-      append_cxx_flag_if_supported("-fdiagnostics-color=always" CMAKE_CXX_FLAGS)
-    else()
-      append_cxx_flag_if_supported("-fcolor-diagnostics" CMAKE_CXX_FLAGS)
-    endif()
-  endif()
 
   append_cxx_flag_if_supported("-faligned-new" CMAKE_CXX_FLAGS)
 
