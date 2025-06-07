@@ -6555,6 +6555,109 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         self.assertEqual(ep.module()(*inputs), model(*inputs))
 
+    def test_export_aten_to_unflatten(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                to = x.to(torch.float)
+                return self.bar(to).sum()
+
+        inp = torch.randn(4, 4)
+
+        ep = export(
+            Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
+        )
+        mod = ep.module()
+        self.assertTrue(torch.allclose(mod(inp), Foo()(inp)))
+
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
+    @testing.expectedFailureRetraceabilityNonStrict  # when we retrace, ep.module() is hierarchical
+    @testing.expectedFailureRetraceability  # when we retrace, ep.module() is hierarchical
+    def test_export_aten_to_unflatten_subclass(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.param = torch.nn.Parameter(
+                    TwoTensor(torch.ones(4, 4), torch.ones(4, 4))
+                )
+
+            def forward(self, x):
+                to = self.param.to(torch.float)
+                return (self.bar(to).sum() + x.sum()).get_elem_a()
+
+        inp = torch.randn(4, 4)
+
+        with self.assertRaisesRegex(
+            ValueError, "It looks like p_param is a tensor subclass."
+        ):
+            export(
+                Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
+            ).run_decompositions({})
+
+    def test_export_aten_to_unflatten_subclass_pre_dispatch(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.param = torch.nn.Parameter(
+                    TwoTensor(torch.ones(4, 4), torch.ones(4, 4))
+                )
+
+            def forward(self, x):
+                to = self.param.to(torch.float)
+                return (self.bar(to).sum() + x.sum()).get_elem_a()
+
+        inp = torch.randn(4, 4)
+
+        ep = export_for_training(
+            Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
+        )
+        unflat = unflatten(ep).bar
+        self.assertExpectedInline(
+            str(unflat.graph).strip(),
+            """\
+graph():
+    %_positional_arg_0 : [num_users=1] = placeholder[target=_positional_arg_0]
+    %_spec_0 : [num_users=1] = get_attr[target=_spec_0]
+    %tree_flatten_spec : [num_users=1] = call_function[target=torch.fx._pytree.tree_flatten_spec](args = (((%_positional_arg_0,), {}), %_spec_0), kwargs = {})
+    %to : [num_users=1] = call_function[target=operator.getitem](args = (%tree_flatten_spec, 0), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%to,), kwargs = {})
+    %_spec_1 : [num_users=1] = get_attr[target=_spec_1]
+    %tree_unflatten : [num_users=1] = call_function[target=torch.utils._pytree.tree_unflatten](args = ((%sum_1,), %_spec_1), kwargs = {})
+    return tree_unflatten""",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "It looks like p_param is a tensor subclass."
+        ):
+            ep.run_decompositions()
+
     def test_float_conversion(self):
         class Module(torch.nn.Module):
             def forward(self, x):
