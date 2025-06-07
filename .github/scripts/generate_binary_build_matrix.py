@@ -16,15 +16,13 @@ from typing import Optional
 
 
 # NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
-CUDA_ARCHES = ["11.8", "12.6", "12.8"]
+CUDA_ARCHES = ["12.6", "12.8"]
 CUDA_STABLE = "12.6"
 CUDA_ARCHES_FULL_VERSION = {
-    "11.8": "11.8.0",
     "12.6": "12.6.3",
     "12.8": "12.8.1",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
-    "11.8": "9",
     "12.6": "9",
     "12.8": "9",
 }
@@ -42,19 +40,6 @@ CUDA_AARCH64_ARCHES = ["12.8-aarch64"]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
-    "11.8": (
-        "nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
-        "nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'"
-    ),
     "12.6": (
         "nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -313,10 +298,10 @@ def generate_wheels_matrix(
                 continue
 
             if use_split_build and (
-                arch_version not in ["12.6", "12.8", "11.8", "cpu"] or os != "linux"
+                arch_version not in ["12.6", "12.8", "cpu"] or os != "linux"
             ):
                 raise RuntimeError(
-                    "Split build is only supported on linux with cuda 12*, 11.8, and cpu.\n"
+                    "Split build is only supported on linux with cuda 12*, and cpu.\n"
                     f"Currently attempting to build on arch version {arch_version} and os {os}.\n"
                     "Please modify the matrix generation to exclude this combination."
                 )
@@ -324,7 +309,7 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["12.8", "12.6", "11.8"]
+                arch_version in ["12.8", "12.6"]
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
@@ -415,4 +400,3 @@ def generate_wheels_matrix(
 
 validate_nccl_dep_consistency("12.8")
 validate_nccl_dep_consistency("12.6")
-validate_nccl_dep_consistency("11.8")
