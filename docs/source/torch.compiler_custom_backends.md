@@ -54,6 +54,7 @@ backend through entry points of python package, which provides a way for a packa
 :::{hint}
 You can learn more about `entry_points` in the
 [python packaging documentation](https://setuptools.pypa.io/en/latest/userguide/entry_point.html).
+:::
 
 To register your backend through `entry_points`, you could add your backend function to the `torch_dynamo_backends` entry point group in the
 `setup.py` file of your package like:
@@ -67,7 +68,7 @@ setup(
     ]
     ...
 )
-:::
+```
 
 Please replace the `my_compiler` before `=` to the name of your backend's name and replace the part after `=` to
 the module and function name of your backend function.
