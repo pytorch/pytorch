@@ -94,6 +94,7 @@ if [ -n "$CUDA_VERSION" ]; then
   # of the PATH, and set CUDA_NVCC_EXECUTABLE so that we make use of it.
 
   write_sccache_stub nvcc
+  mv /opt/cache/bin/nvcc /opt/cache/lib/
 fi
 
 if [ -n "$ROCM_VERSION" ]; then
