@@ -177,13 +177,15 @@ class ExperimentalConfigWrapper {
     return !config_.profiler_metrics.empty();
   }
 
-  void prepareTraceWithExperimentalOptions(bool add_cpu_activity) {
+  void prepareTraceWithExperimentalOptions(
+      std::set<libkineto::ActivityType>&& enabled_activities) {
+    std::set<libkineto::ActivityType> k_activities =
+        std::move(enabled_activities);
 #ifdef USE_KINETO
-    std::set<libkineto::ActivityType> k_activities{
-        libkineto::ActivityType::CUDA_PROFILER_RANGE};
+    k_activities.insert(libkineto::ActivityType::CUDA_PROFILER_RANGE);
 
-    // Only add CPU activities if we are measuring per kernel ranges
-    if (add_cpu_activity && config_.profiler_measure_per_kernel) {
+    // Add CPU activities if we are measuring per kernel ranges
+    if (config_.profiler_measure_per_kernel) {
       k_activities.insert(kCpuTypes.begin(), kCpuTypes.end());
     }
 
@@ -288,7 +290,7 @@ void prepareTrace(
 
   // Experimental Configuration options are present
   if (config && configWrap.assertValid()) {
-    configWrap.prepareTraceWithExperimentalOptions(has_cpu_activity);
+    configWrap.prepareTraceWithExperimentalOptions(std::move(k_activities));
     return;
   }
 
