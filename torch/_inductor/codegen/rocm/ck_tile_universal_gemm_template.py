@@ -908,18 +908,36 @@ class CKTileGemmTemplate(CKTileTemplate):
         )
         ops = template.gen_ops()
         for op in ops:
-            for k_batch in template.k_batch_choices():
+            for k_batch in template.k_batch_choices(op):
                 template.maybe_append_choice(
                     choices,
                     op=op,
                     kBatch=k_batch,
                 )
 
-    def k_batch_choices(self):
+    def k_batch_choices(self, op: "CKTileGemmOperation") -> list[int]:
         """
         Returns a list of k_batch choices for the template.
         """
-        return [1]
+        default_choices = (1, 2, 4, 8, 16, 32)
+        def check(dim_size, tile_size, is_padded):
+            if (
+                is_static_int(dim_size)
+                and dim_size % tile_size != 0
+                and is_padded == "false"
+            ):
+                return False
+            return True
+        _, _, K, _, _, _ = self.size_args()
+        if op.layout_a == "Row" or op.layout_b == "Col":
+            choices = filter(lambda k_batch: check(K, op.tile_k * k_batch, op.k_is_padded), default_choices)
+        else:
+            choices = default_choices
+
+        if op.epilogue == "Default":
+            choices = (1,)
+
+        return choices
 
     def size_args(self):
         """
