@@ -13218,6 +13218,27 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         foo()
 
     @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_read_cpu_tensor_graph_input(self):
+        def f(x, y, cpu_scalar_tensor):
+            z = x + y
+            z = z + cpu_scalar_tensor
+            return z
+
+        f = torch.compile(f)
+
+        x, y, cpu_scalar_tensor = (
+            torch.randn(2, 2, device=self.device),
+            torch.randn(2, 2, device=self.device),
+            torch.tensor(1, device="cpu"),
+        )
+        _, code = run_and_get_code(f, x, y, cpu_scalar_tensor)
+
+        if not config.cpp_wrapper:
+            # f has only 1 scheduler node which reads cpu_scalar_tensor.
+            # So we don't have any partitions.
+            FileCheck().check("runner = Runner(partitions=[])").run(code[0])
+
+    @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_mutation_real_name(self):
         def f(x, y, z, other):
             mul = x * y
