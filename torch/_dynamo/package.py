@@ -8,6 +8,9 @@ be provided about cache hit for a specific compiled model. Users can load the co
 from a different process or host.
 """
 
+from abc import ABC, abstractmethod
+
+import os
 import contextlib
 import dataclasses
 import functools
@@ -23,6 +26,8 @@ from collections.abc import Generator
 from typing import Any, NewType, Optional
 
 import torch
+from torch._dynamo.precompile_context import PrecompileContext, PrecompileCacheArtifact
+from torch.compiler._cache import CacheArtifactFactory
 import torch._inductor.package
 
 from .bytecode_transformation import get_code_keys
@@ -168,6 +173,14 @@ class _DynamoCacheEntry:
                 merged_codes[py_code] = code
         return _DynamoCacheEntry(codes=list(merged_codes.values()))
 
+@CacheArtifactFactory.register
+class _DynamoCacheArtifact(PrecompileCacheArtifact[_DynamoCacheEntry]):
+    @staticmethod
+    def type() -> str:
+        return "precompile_dynamo"
+
+    def after_deserialization(self) -> _DynamoCacheEntry:
+        return pickle.loads(self.content)
 
 class _CompilePackage:
     """
@@ -320,7 +333,7 @@ class _CompilePackage:
 
         _reset_precompile_entries(self._innermost_fn.__code__)
 
-    def install(self, storage_context) -> None:
+    def install(self, backends: dict[_BackendId, Any]) -> None:
         """
         Sync the package states to the compiled function. This includes the following actions:
           1. Clean up the previously installed states.
@@ -343,7 +356,11 @@ class _CompilePackage:
                 fn = types.FunctionType(code, module.__dict__, function_name)
                 self._install_global(module, function_name, fn)
             for backend_id in entry.backend_ids:
-                backend = storage_context.read_backend(backend_id)
+                if backend_id not in backends:
+                    raise RuntimeError(
+                        f"Backend {backend_id} is not found in the given backends"
+                    )
+                backend = backends[backend_id]
                 torch._dynamo.eval_frame.skip_code(
                     innermost_fn(backend).__code__, recursive=True
                 )
@@ -371,8 +388,63 @@ class _CompilePackage:
 
     def save(self, storage_context) -> None:
         self.validate()
-        for backend_id in self.backend_ids:
-            storage_context.write_backend(backend_id)
+        # # TODO: this shouldn't be needed
+        # for backend_id in self.backend_ids:
+        #     storage_context.write_backend(backend_id)
         storage_context.write_dynamo(
             _DynamoCacheEntry(codes=list(self._codes.values()))
         )
+
+
+@CacheArtifactFactory.register
+class EagerCacheArtifact(PrecompileCacheArtifact[Any]):
+    @staticmethod
+    def type() -> str:
+        return "precompile_eager"
+
+    def after_deserialization(self) -> Any:
+        return pickle.loads(self.content)
+
+
+
+class DynamoStore:
+
+    def record_package(self, package: _CompilePackage) -> None:
+        # records a package to PrecompileContext
+        cache_entry = _DynamoCacheEntry(codes=list(package._codes.values()))
+        pickled_result = pickle.dumps(cache_entry)
+        PrecompileContext.record_artifact(_DynamoCacheArtifact.type(), key=package.source_id, content = pickled_result)
+
+    def record_eager_backend(self, backend_id: _BackendId, backend: Any) -> None:
+        # Records eager fx graphs to PrecompileContext for testing
+        pickled_result = pickle.dumps(backend)
+        PrecompileContext.record_artifact(EagerCacheArtifact.type(), key=backend_id, content = pickled_result)
+
+    def save_package(self, package: _CompilePackage, path: str) -> None:
+        # saves a package to a given path
+        backend_content = {}
+        for code in package._codes.values():
+            for backend_id in code.backend_ids:
+                backend_content[backend_id] = PrecompileContext.serialize_artifact_by_key(backend_id)
+        cache_entry = _DynamoCacheEntry(codes=list(package._codes.values()))
+        try:
+            with open(os.path.join(path, "dynamo"), "wb") as dynamo_path:
+                pickle.dump(cache_entry, dynamo_path)
+            with open(os.path.join(path, "backends"), "wb") as backend_path:
+                pickle.dump(backend_content, backend_path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to save package to {path}: {e}")
+
+    def load_package(self, fn, path: str) -> tuple[_CompilePackage, dict[_BackendId, Any]]:
+        # loads a package from a given path and installs proper backends to it
+        try:
+            with open(os.path.join(path, "dynamo"), "rb") as dynamo_path:
+                cache_entry = pickle.load(dynamo_path)
+            with open(os.path.join(path, "backends"), "rb") as backend_path:
+                backend_content = pickle.load(backend_path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load package from path {path}: {e}")
+        for backend_id, backend in backend_content.items():
+            backend_content[backend_id] = backend.after_deserialization()
+        package = _CompilePackage(fn, cache_entry)
+        return package, backend_content
