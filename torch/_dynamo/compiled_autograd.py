@@ -1422,7 +1422,7 @@ def _enable(compiler_fn, dynamic: bool = True):
             functools.partial(AutogradCompilerInstance, compiler_fn), dynamic
         )
         if snapshot_verbose_logging_enabled():
-            torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)
+            torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)  # type:ignore[arg-type]
         global compiled_autograd_enabled
         compiled_autograd_enabled = True
         try:

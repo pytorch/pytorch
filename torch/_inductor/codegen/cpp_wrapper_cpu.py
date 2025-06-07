@@ -56,7 +56,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if not hasattr(self, "device"):
             self.device = "cpu"
         # must be initialized prior to calling super().__init__()
-        self.included_devices = OrderedSet[str]()
+        self.included_devices: OrderedSet[str] = OrderedSet()
         super().__init__()
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
@@ -66,14 +66,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.supports_intermediate_hooks = False
         self.kernel_callsite_id = count()
         self.int_array_id = count()  # for int array local variable declarations
-        self.declared_int_array_vars = OrderedSet[str]()
+        self.declared_int_array_vars: OrderedSet[str] = OrderedSet()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
-        self.used_cached_devices = OrderedSet[str]()
-        self.used_cached_dtypes = OrderedSet[str]()
-        self.used_cached_layouts = OrderedSet[str]()
-        self.used_cached_memory_formats = OrderedSet[str]()
-        self.used_cond_predicate = OrderedSet[str]()
+        self.used_cached_devices: OrderedSet[str] = OrderedSet()
+        self.used_cached_dtypes: OrderedSet[str] = OrderedSet()
+        self.used_cached_layouts: OrderedSet[str] = OrderedSet()
+        self.used_cached_memory_formats: OrderedSet[str] = OrderedSet()
+        self.used_cond_predicate: OrderedSet[str] = OrderedSet()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -2388,7 +2388,7 @@ if (!custom_op_wrapper) {
             return "int64_t"
         elif isinstance(
             type_, (torch.BoolType, torch.SymBoolType, torch.EnumType)
-        ) or repr(type_) in ("ScalarType", "Layout", "MemoryFormat"):
+        ) or repr(type_) in ("ScalarType", "Layout"):
             return "int32_t"
         elif isinstance(type_, torch.FloatType):
             return "double"
