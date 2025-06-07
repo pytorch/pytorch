@@ -15,10 +15,14 @@ from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
+    AllGather,
     AllGatherResult,
+    DefaultAllGather,
+    DefaultReduceScatter,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
+    ReduceScatter,
 )
 from ._fsdp_common import (
     compiled_autograd_enabled,
@@ -159,6 +163,8 @@ class FSDPParamGroup:
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._all_reduce_hook: Optional[Callable[[torch.Tensor], None]] = None
+        self._all_gather_comm: AllGather = DefaultAllGather()
+        self._reduce_scatter_comm: ReduceScatter = DefaultReduceScatter()
         # Optional stream to run the user-defined all-reduce hook in
         # Saved here and not in the comm. context because we allow the user to
         # specify it, possibly at construction time before lazy init
@@ -276,6 +282,7 @@ class FSDPParamGroup:
                 async_op,
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
+                self._all_gather_comm,
             )
 
     def wait_for_unshard(self):

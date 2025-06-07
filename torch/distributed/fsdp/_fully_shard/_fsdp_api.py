@@ -1,8 +1,12 @@
 # mypy: allow-untyped-defs
+from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 import torch
+import torch.distributed as dist
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,126 @@ class MixedPrecisionPolicy:
     reduce_dtype: Optional[torch.dtype] = None
     output_dtype: Optional[torch.dtype] = None
     cast_forward_inputs: bool = True
+
+
+class Comm(ABC):
+    """
+    Interface for communication primitives.
+    A primitive primarily needs to handle 3 tasks, namely:
+
+    1. How to allocate memory for communication
+       Depending on the goal, an implementation can choose to:
+       a. associate each call to a temporary buffer
+          (best for flexibility and simplicity)
+       b. reuse an persistent buffer for efficiency reasons
+
+    2. Where to allocate memory
+       (e.g. NCCL mem pool orregular cuda caching allocator)
+
+    3. What to do/call upon the comm is called
+       (see `AllGather` interface as an example)
+    """
+
+    @abstractmethod
+    def allocate(
+        self,
+        size: Sequence[Union[int, torch.SymInt]],
+        *,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """
+        This handles the "how to allocate memory" part.
+
+        A default implementation could be simply:
+
+        .. code-block:: python
+            with self.mem_pool:
+                torch.empty(...)
+
+        Args:
+            size (Sequence[Union[int, torch.SymInt]]): size of the tensor buffer
+            dtype (torch.dtype): dtype of the tensor buffer
+            device (torch.device): which device to allocate the tensor onto
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def mem_pool(self) -> AbstractContextManager[None]:
+        """
+        A context manager to help handle the "where to allocate memory" part.
+
+        A typical usage is like:
+
+        .. code-block:: python
+            with self.mem_pool:
+                actual_malloc()
+
+        See :meth:`allocate` for details.
+        """
+        ...
+
+
+class BaseComm(Comm):
+    """
+    Base implementation that:
+    1. uses the default cuda caching allocator (CCA) managed memory pool
+    2. allocates a temporary buffer from CCA (and relies on the regular
+       refcounting mechanism for reclaiming)
+
+    The idea behind is end user should probably choose to extend
+    any implementation from this for simplicity (e.g. if one just wants to
+    override the mem pool).
+    """
+
+    @property
+    def mem_pool(self) -> AbstractContextManager[None]:
+        """
+        Use the regular CCA context.
+        """
+        return nullcontext()
+
+    def allocate(
+        self,
+        size: Sequence[Union[int, torch.SymInt]],
+        *,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> torch.Tensor:
+        with self.mem_pool:
+            return torch.empty(*size, dtype=dtype, device=device)
+
+
+class AllGather(Comm):
+    """
+    Interface for all_gather comm primitive
+    """
+
+    @abstractmethod
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        all_gather_group: dist.ProcessGroup,
+        async_op: bool = False,
+    ) -> Optional[dist.Work]: ...
+
+
+class ReduceScatter(Comm):
+    """
+    Interface for reduce_scatter comm primitive
+    """
+
+    @abstractmethod
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        reduce_scatter_group: dist.ProcessGroup,
+        op: dist.ReduceOp,
+        async_op: bool = False,
+    ) -> Optional[dist.Work]: ...
 
 
 @dataclass
