@@ -265,7 +265,7 @@ Pass Manager
 ------------
 
 The
-```PassManager`` <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/infra/pass_manager.py>`__
+`PassManager <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/infra/pass_manager.py>`_
 is a class used to run multiple passes on a given graph module. When
 initializing a ``PassManager`` instance, we pass in a list of passes
 that we want to run and set a couple of flags. To run the collection of
@@ -316,7 +316,7 @@ Subgraph Matcher
 
 For finding subgraphs within a graph that match a specific pattern, we
 can utilize FX’s
-```SubgraphMatcher`` <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/utils/matcher_utils.py>`__.
+`SubgraphMatcher <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/utils/matcher_utils.py>`__.
 
 Class Attributes:
 
@@ -384,7 +384,7 @@ Capability Based Partitioner
 
 To find the largest subgraphs of nodes that support a specific
 invariant, we can utilize FX’s
-```CapabilityBasedPartitioner`` <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/infra/partitioner.py#L34>`__.
+`CapabilityBasedPartitioner <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/infra/partitioner.py#L34>`__.
 
 Class Attributes
 
@@ -402,14 +402,14 @@ Class Attributes
    set of ops that are allowed to be in a single node partition.
 
 The
-```OperatorSupportBase`` <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/operator_support.py#LL28C1-L28C1>`__
+`OperatorSupportBase <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/operator_support.py#LL28C1-L28C1>`__
 class is used by the partitioner to determine if a specific node in the
 graph belongs in the partition. This is done by overriding the
 ``is_node_supported`` function. You can chain multiple
 ``OperatorSupportBase`` by using
-```chain`` <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/operator_support.py#L150>`__\ (which
+`chain <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/operator_support.py#L150>`__\ (which
 returns False if any of the OperatorSupportBase return False) and
-```any_chain`` <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/operator_support.py#L164>`__
+`any_chain <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/operator_support.py#L164>`__
 (which returns True if any of the OperatorSupportBase returns True).
 
 An example:

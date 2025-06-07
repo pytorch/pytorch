@@ -310,7 +310,7 @@ your model code correctly.
 
 Interpreting Graphs
 ~~~~~~~~~~~~~~~~~~~
-TorchScript also has a representation at a lower level than the code pretty-
+TorchScript also has a representation at a lower level than the code pretty-\
 printer, in the form of IR graphs.
 
 TorchScript uses a static single assignment (SSA) intermediate representation
