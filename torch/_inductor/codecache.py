@@ -51,6 +51,7 @@ from torch import SymInt, Tensor
 from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
+from torch._inductor.codegen.common import custom_backend_passes
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
@@ -72,7 +73,11 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
-from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
+from torch._inductor.custom_graph_pass import (
+    CustomGraphModulePass,
+    CustomGraphPass,
+    CustomGraphPassType,
+)
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
@@ -407,7 +412,7 @@ def get_path(
 def get_hash(
     content: Union[str, bytes], extra: str = "", hash_type: str = "code"
 ) -> str:
-    if hash_type in {"amdgcn", "code", "ptx"}:
+    if hash_type in {"amdgcn", "code", "ptx", "spv"}:
         return code_hash(content, extra)
     if hash_type in {"cubin", "hsaco", "spv"}:
         return code_hash(repr(content))
@@ -891,12 +896,16 @@ class FxGraphHashDetails:
             config.post_grad_custom_post_pass
         )
 
+        self.custom_backend_passes = tuple(
+            map(self._get_custom_pass_detail, custom_backend_passes.values())
+        )
+
     def _get_custom_pass_detail(
-        self, custom_pass: CustomGraphPassType
+        self, custom_pass: Union[CustomGraphPassType, CustomGraphModulePass]
     ) -> Optional[Any]:
         if not custom_pass:
             return None
-        assert isinstance(custom_pass, CustomGraphPass)
+        assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
         return custom_pass.uuid()
 
 
@@ -1576,9 +1585,12 @@ class CudaKernelParamCache:
         basename, _ = get_name_and_dir_from_output_file_path(bin_path)
 
         if config.aot_inductor.emit_multi_arch_kernel:
-            assert bin_type == "cubin", "emit_multi_arch_kernel only supported in CUDA"
+            bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv"}
+            assert bin_type in bin_type_to_ext.keys(), (
+                "multi_arch_kernel_binary only supported in CUDA/XPU"
+            )
             base_path, _ = os.path.splitext(bin_path)
-            bin_path = base_path + ".fatbin"
+            bin_path = base_path + bin_type_to_ext[bin_type]
 
         asm_path: str = ""
         if (
@@ -1612,6 +1624,10 @@ class CudaKernelParamCache:
 
 
 class AotCodeCompiler:
+    """
+    Compile AOT Inductor generated code.
+    """
+
     @classmethod
     def compile(
         cls,
@@ -1673,6 +1689,7 @@ class AotCodeCompiler:
             "wrapper.cpp",
             extra=cpp_command,
             specified_dir=specified_output_path,
+            key=config.aot_inductor.model_name_for_generated_files,
         )
         kernel_code = (
             f"// Triton kernels are embedded as comments in {wrapper_path}\n"
@@ -1683,6 +1700,7 @@ class AotCodeCompiler:
             "kernel.cpp",
             extra=cpp_command,
             specified_dir=specified_output_path,
+            key=config.aot_inductor.model_name_for_generated_files,
         )
 
         # Log the AOTInductor wrapper and kernel code, if needed.
@@ -2054,7 +2072,7 @@ class AotCodeCompiler:
                     asm_files.append(asm_file)
 
                 cubin_file = value[get_cpp_wrapper_cubin_path_name()]
-                if config.aot_inductor.emit_multi_arch_kernel:
+                if config.aot_inductor.emit_multi_arch_kernel and device_type == "cuda":
                     current_arch = _nvcc_arch_as_compile_option()
                     cmd = (
                         f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
@@ -3258,6 +3276,8 @@ class PyCodeCache:
         cls, path: str, lineno: int
     ) -> Optional[list[dict[str, Any]]]:
         if path not in cls.linemaps:
+            return None
+        if len(cls.linemaps[path]) == 0:
             return None
         # [(starting_line, <fx node>), ...]
         lines, nodes = cls.linemaps[path]
