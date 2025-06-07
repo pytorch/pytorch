@@ -19,7 +19,7 @@ from torch.utils._foreach_utils import (
 __all__: list[str] = []
 
 
-_tensor_or_tensors = Union[
+_tensor_or_tensors: TypeAlias = Union[  # noqa: PYI042
     torch.Tensor,
     typing.Iterable[torch.Tensor],  # noqa: UP006 - needed until XLA's patch is updated
 ]
