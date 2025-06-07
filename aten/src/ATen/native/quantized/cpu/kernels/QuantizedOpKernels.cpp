@@ -2699,10 +2699,12 @@ void _fake_quantize_tensor_helper(
           bool* mask_val = (bool*)(data[1] + i * strides[1]);
           scalar_t* input_val = (scalar_t*)(data[2] + i * strides[2]);
 
-          const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
           if (fake_quant_on) {
-          *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
-          *mask_val = ((quant_min <= qval) && (qval <= quant_max));
+            auto qval_f = z_point + std::nearbyint(*input_val * inv_scale);
+            qval_f = std::fmin(std::fmax(qval_f, quant_min), quant_max);
+            const auto qval = static_cast<int64_t>(qval_f);
+            *output_val = (qval - z_point) * sc;
+            *mask_val = ((quant_min <= qval) && (qval <= quant_max));
           } else {
             *output_val = *input_val;
             *mask_val = 1;
@@ -2718,10 +2720,12 @@ void _fake_quantize_tensor_helper(
           bool* mask_val = (bool*)(data[1] + i * strides[1]);
           scalar_t* input_val = (scalar_t*)(data[2] + i * strides[2]);
 
-          const auto qval = static_cast<int64_t>((int32_t)z_point + std::nearbyint(*input_val * inv_scale));
           if (fake_quant_on) {
-          *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
-          *mask_val = ((quant_min <= qval) && (qval <= quant_max));
+            auto qval_f = z_point + std::nearbyint(*input_val * inv_scale);
+            qval_f = std::fmin(std::fmax(qval_f, quant_min), quant_max);
+            const auto qval = static_cast<int64_t>(qval_f);
+            *output_val = (qval - z_point) * sc;
+            *mask_val = ((quant_min <= qval) && (qval <= quant_max));
           } else {
             *output_val = *input_val;
             *mask_val = 1;
