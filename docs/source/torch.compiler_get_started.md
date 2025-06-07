@@ -1,4 +1,4 @@
-(torch-compiler-get-started)=
+(torch_compiler_get_started)=
 
 # Getting Started
 
