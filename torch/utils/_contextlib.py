@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Extra utilities for working with context managers that should have been
 # in the standard library but are not
 
@@ -6,16 +5,21 @@ import functools
 import inspect
 import warnings
 import sys
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, Callable, Generic, Optional, Union, TypeVar, cast, overload
+from collections.abc import Generator
+from typing_extensions import ParamSpec
 
 # Used for annotating the decorator usage of _DecoratorContextManager (e.g.,
 # 'no_grad' and 'enable_grad').
 # See https://mypy.readthedocs.io/en/latest/generics.html#declaring-decorators
-FuncType = Callable[..., Any]
-F = TypeVar('F', bound=FuncType)
+P = ParamSpec("P")
+T = TypeVar("T")
+R = TypeVar("R")
 
-
-def _wrap_generator(ctx_factory, func):
+def _wrap_generator(
+    ctx_factory: Callable[[], Any],
+    func: Callable[P, Generator[T, Any, R]]
+) -> Callable[P, Generator[T, Any, R]]:
     """
     Wrap each generator invocation with the context manager factory.
 
@@ -23,7 +27,7 @@ def _wrap_generator(ctx_factory, func):
     not a context manager itself, to handle one-shot context managers.
     """
     @functools.wraps(func)
-    def generator_context(*args, **kwargs):
+    def generator_context(*args: P.args, **kwargs: P.kwargs) -> Generator[T, Any, R]:
         gen = func(*args, **kwargs)
 
         # Generators are suspended and unsuspended at `yield`, hence we
@@ -66,8 +70,10 @@ def _wrap_generator(ctx_factory, func):
 
     return generator_context
 
-
-def context_decorator(ctx, func):
+def context_decorator(
+    ctx: Any,
+    func: Callable[P, R],
+) -> Callable[P, Union[R, Generator[Any, Any, R]]]:
     """
     Like contextlib.ContextDecorator.
 
@@ -92,7 +98,7 @@ def context_decorator(ctx, func):
     )
 
     if not callable(ctx):
-        def ctx_factory():
+        def ctx_factory() -> Any:
             return ctx
     else:
         ctx_factory = ctx
@@ -111,17 +117,17 @@ def context_decorator(ctx, func):
         return _wrap_generator(ctx_factory, func)
 
     @functools.wraps(func)
-    def decorate_context(*args, **kwargs):
+    def decorate_context(*args: P.args, **kwargs: P.kwargs) -> R:
         with ctx_factory():
             return func(*args, **kwargs)
 
     return decorate_context
 
 
-class _DecoratorContextManager:
+class _DecoratorContextManager(Generic[P, R]):
     """Allow a context manager to be used as a decorator."""
 
-    def __call__(self, orig_func: F) -> F:
+    def __call__(self, orig_func: Callable[P, R]) -> Callable[P, R]:
         if inspect.isclass(orig_func):
             warnings.warn(
                 "Decorating classes is deprecated and will be disabled in "
@@ -131,11 +137,11 @@ class _DecoratorContextManager:
                 FutureWarning,
                 stacklevel=2,
             )
-            func = cast(F, lambda *args, **kwargs: orig_func(*args, **kwargs))
+            func = cast(Callable[P, R], lambda *args, **kwargs: orig_func(*args, **kwargs))
         else:
             func = orig_func
 
-        return cast(F, context_decorator(self.clone, func))
+        return cast(Callable[P, R], context_decorator(self.clone, func))
 
     def __enter__(self) -> None:
         raise NotImplementedError
@@ -143,15 +149,26 @@ class _DecoratorContextManager:
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         raise NotImplementedError
 
-    def clone(self):
+    def clone(self) -> "_DecoratorContextManager[P, R]":
         # override this method if your children class takes __init__ parameters
         return self.__class__()
 
 
-class _NoParamDecoratorContextManager(_DecoratorContextManager):
+class _NoParamDecoratorContextManager(_DecoratorContextManager[P, R]):
     """Allow a context manager to be used as a decorator without parentheses."""
 
-    def __new__(cls, orig_func=None):
+    @overload
+    def __new__(cls) -> "_NoParamDecoratorContextManager": ...  # type: ignore[misc]
+
+    @overload
+    def __new__(cls, orig_func: Callable[P, R]) -> Callable[P, R]: ...  # type: ignore[misc]
+
+    def __new__(  # type: ignore[misc]
+        cls,
+        orig_func: Optional[Callable[P, R]] = None
+    ) -> Union["_NoParamDecoratorContextManager", Callable[P, R]]:
         if orig_func is None:
             return super().__new__(cls)
         return cls()(orig_func)
+        instance = super().__new__(cls)
+        return cast(Callable[P, R], instance(orig_func))  # type: ignore[misc]

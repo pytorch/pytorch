@@ -122,7 +122,7 @@ def skip(fn=None):
     return fn
 
 
-class set_stance(_DecoratorContextManager):
+class set_stance(_DecoratorContextManager[_P, _R]):
     """
     Decorator, context manager, function to set the current stance of the compiler.
 
@@ -144,7 +144,7 @@ class set_stance(_DecoratorContextManager):
         self.stance = DynamoStance(stance, skip_guard_eval_unsafe, force_backend)
         self.prev = _set_stance(self.stance)
 
-    def __call__(self, fn):
+    def __call__(self, fn: Callable[_P, _R]) -> Callable[_P, _R]:
         _set_stance(self.prev)
         wrapper = super().__call__(fn)
         # forbid wrapper in graph
