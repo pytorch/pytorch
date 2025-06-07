@@ -4795,6 +4795,65 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         return (min_choice, self.choice_timings[min_choice])
 
 
+class MultiDimTemplateBuffer(MultiTemplateBuffer):
+    """
+    Extension of MultiTemplateBuffer that uses runtime dispatching based on symbolic integers.
+
+    This class generates multiple specialized kernels for different ranges of symbolic integers
+    and dispatches to the closest one at runtime using MultiDimKernelDispatcher.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: list[IRNode],
+        choice_timings: Callable[[], dict[ChoiceCaller, float]],
+        unfiltered_choices: list[ChoiceCaller],
+        allowed_prologue_inps: OrderedSet[str],
+        symint_specializations: Optional[
+            list[tuple[ChoiceCaller, Sequence[float]]]
+        ] = None,
+    ) -> None:
+        super().__init__(
+            layout=layout,
+            inputs=inputs,
+            choice_timings=choice_timings,
+            unfiltered_choices=unfiltered_choices,
+            allowed_prologue_inps=allowed_prologue_inps,
+        )
+        self.symint_specializations = symint_specializations or []
+        self._dispatcher: Optional[
+            torch._inductor.kernel_dispatcher.MultiDimKernelDispatcher
+        ] = None
+
+    @property
+    def has_symint_specializations(self) -> bool:
+        """Check if this buffer has specialized kernels for different symint ranges."""
+        return len(self.symint_specializations) > 0
+
+    def get_dispatcher(
+        self,
+    ) -> torch._inductor.kernel_dispatcher.MultiDimKernelDispatcher:
+        """Get or create the kernel dispatcher for runtime selection."""
+        if self._dispatcher is None:
+            from torch._inductor.kernel_dispatcher import MultiDimKernelDispatcher
+
+            self._dispatcher = MultiDimKernelDispatcher(self.symint_specializations)
+        return self._dispatcher
+
+    def get_runtime_dispatch_choice(
+        self, runtime_values: Sequence[float]
+    ) -> ChoiceCaller:
+        """Get the best kernel choice based on runtime values."""
+        if not self.has_symint_specializations:
+            # Fall back to traditional static selection
+            return self.get_min_choice()[0]
+
+        dispatcher = self.get_dispatcher()
+        kernel, _ = dispatcher.dispatch(runtime_values)
+        return kernel
+
+
 class CUDATemplateBuffer(TemplateBuffer):
     def __init__(  # type: ignore[no-untyped-def]
         self,

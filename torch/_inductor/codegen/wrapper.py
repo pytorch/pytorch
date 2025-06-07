@@ -41,6 +41,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 from .. import async_compile, config, ir
 from ..codecache import output_code_log
 from ..ir import IRNode, ReinterpretView
+from ..kernel_dispatcher import MultiDimKernelDispatcher
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..utils import (
@@ -830,6 +831,45 @@ class SymbolicCallArgLine(WrapperLine):
         return converter._generate_symbolic_call_arg
 
 
+class MultiDimDispatcherLine(WrapperLine):
+    """
+    Generate code for MultiDimKernelDispatcher initialization and runtime dispatch.
+    """
+
+    def __init__(
+        self,
+        wrapper: PythonWrapperCodegen,
+        dispatcher_name: str,
+        specialized_kernels: list[tuple[str, Sequence[float]]],
+        dispatch_args: list[str],
+        kernel_call_template: str,
+    ):
+        self.wrapper = wrapper
+        self.dispatcher_name = dispatcher_name
+        self.specialized_kernels = specialized_kernels
+        self.dispatch_args = dispatch_args
+        self.kernel_call_template = kernel_call_template
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        # Generate dispatcher initialization
+        code.writeline(f"# Initialize MultiDimKernelDispatcher")
+        code.writeline(f"{self.dispatcher_name} = MultiDimKernelDispatcher([")
+        with code.indent():
+            for kernel_name, specialization in self.specialized_kernels:
+                spec_str = f"({', '.join(map(str, specialization))})"
+                code.writeline(f"({kernel_name}, {spec_str}),")
+        code.writeline("])")
+        code.writeline("")
+
+        # Generate runtime dispatch call
+        point_args = f"({', '.join(self.dispatch_args)})"
+        code.writeline(f"# Runtime dispatch based on {point_args}")
+        code.writeline(f"kernel, grid = {self.dispatcher_name}.dispatch({point_args})")
+
+        # Generate kernel call using the dispatched kernel
+        code.writeline(self.kernel_call_template.format(kernel="kernel", grid="*grid"))
+
+
 BufferName = str
 Line = Union[MemoryPlanningLine, LineContext]
 
@@ -984,6 +1024,7 @@ class PythonWrapperCodegen(CodeGen):
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
+                from torch._inductor.kernel_dispatcher import MultiDimKernelDispatcher
                 {aot_inductor_debug_utils}
             """,
             strip=True,

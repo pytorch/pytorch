@@ -62,6 +62,10 @@ from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_m
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
+from .kernel_dispatcher import (
+    create_symint_specialization_points,
+    get_symint_range_bounds,
+)
 from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
@@ -2927,6 +2931,100 @@ class AlgorithmSelectorCache(PersistentCache):
 
 
 _ALGORITHM_SELECTOR_CACHE: Optional[AlgorithmSelectorCache] = None
+
+
+def create_symint_specialized_choices(
+    original_choices: list[ChoiceCaller],
+    symint_args: list,
+    num_specializations: int = 4,
+) -> list[ChoiceCaller]:
+    """
+    Create specialized kernel choices for different symint ranges.
+
+    For kernels that depend on symbolic integers, we create multiple specialized
+    variants optimized for different ranges of the symint values.
+
+    Args:
+        original_choices: List of original kernel choices
+        symint_args: Arguments containing symbolic integers
+        num_specializations: Number of specialization points to create
+
+    Returns:
+        List of specialized choices, or original choices if no symints found
+    """
+    if not symint_args or not original_choices:
+        return original_choices
+
+    # Find symbolic integers in the arguments
+    symint_exprs = []
+    for arg in symint_args:
+        if hasattr(arg, "get_size") and hasattr(arg.get_size(), "__iter__"):
+            for size_dim in arg.get_size():
+                if hasattr(size_dim, "free_symbols") and size_dim.free_symbols:
+                    symint_exprs.append(size_dim)
+
+    if not symint_exprs:
+        return original_choices
+
+    # For now, specialize on the first symbolic integer found
+    # TODO: Support multi-dimensional specialization
+    primary_symint = symint_exprs[0]
+
+    # Get bounds for the symbolic integer
+    min_val, max_val = get_symint_range_bounds(primary_symint)
+
+    # Create specialization points
+    specialization_points = create_symint_specialization_points(
+        min_val, max_val, num_specializations
+    )
+
+    # Create specialized choices for each point
+    specialized_choices = []
+    for i, point in enumerate(specialization_points):
+        for choice in original_choices:
+            # Create a specialized version of each choice
+            specialized_choice = create_specialized_choice(choice, point, i)
+            specialized_choices.append(specialized_choice)
+
+    return specialized_choices
+
+
+def create_specialized_choice(
+    original_choice: ChoiceCaller, specialization_point: float, variant_id: int
+) -> ChoiceCaller:
+    """
+    Create a specialized version of a kernel choice for a specific symint value.
+
+    Args:
+        original_choice: The original kernel choice
+        specialization_point: The symint value to specialize for
+        variant_id: Unique identifier for this variant
+
+    Returns:
+        A new ChoiceCaller specialized for the given point
+    """
+    # Create a copy of the choice with specialized name and description
+    specialized_name = f"{original_choice.name}_symint_{variant_id}"
+    specialized_desc = (
+        f"{original_choice.description} (specialized for {specialization_point:.0f})"
+    )
+
+    # TODO: This is a placeholder - actual implementation would depend on
+    # the specific choice type (TritonTemplate, ExternKernel, etc.)
+    # For now, return the original choice with modified metadata
+    class SpecializedChoice(type(original_choice)):
+        def __init__(self):
+            super().__init__(
+                name=specialized_name,
+                input_nodes=original_choice.input_nodes,
+                layout=original_choice.layout,
+                description=specialized_desc,
+            )
+            self.specialization_point = specialization_point
+            self.variant_id = variant_id
+            self.original_choice = original_choice
+
+    return SpecializedChoice()
 
 
 def autotune_select_algorithm(*args, **kwargs):
