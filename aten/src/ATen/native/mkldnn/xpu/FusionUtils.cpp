@@ -122,7 +122,7 @@ onednn::Attr& construct_unary_attr(
   // If further unary operations required, they can be added to these sets or
   // add new sets according to their new categories.
   static const std::set<std::string_view> argument_less = {
-      "relu", "sigmoid", "tanh", "hardswish", "swish", "hardsigmoid"};
+      "none", "relu", "sigmoid", "tanh", "hardswish", "swish", "hardsigmoid"};
   static const std::set<std::string_view> need_scalars = {
       "leaky_relu", "hardtanh"};
   static const std::set<std::string_view> need_algorithm = {"gelu"};

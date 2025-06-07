@@ -3129,3 +3129,28 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
         isinstance(wrapper, SubgraphPythonWrapperCodegen)
         and wrapper.partition_signatures is not None
     )
+
+
+SUPPORTED_MKLDNN_DEVICES = ("cpu", "xpu")
+
+
+def is_mkldnn_bf16_supported(device_type: str) -> bool:
+    """
+    Returns True if the device supports MKL-DNN BF16.
+    """
+    if device_type == "cpu":
+        return torch.ops.mkldnn._is_mkldnn_bf16_supported()
+    elif device_type == "xpu":
+        return True
+    return False
+
+
+def is_mkldnn_fp16_supported(device_type: str) -> bool:
+    """
+    Returns True if the device supports MKL-DNN FP16.
+    """
+    if device_type == "cpu":
+        return torch.ops.mkldnn._is_mkldnn_fp16_supported()
+    elif device_type == "xpu":
+        return True
+    return False
