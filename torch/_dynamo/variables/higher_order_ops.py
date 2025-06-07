@@ -3384,6 +3384,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         return body_name
 
+    @raise_hard_error_if_graph_break(
+        reason="torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
+    )
     def call_function(
         self,
         tx: "InstructionTranslator",
