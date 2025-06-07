@@ -56,7 +56,7 @@ function install_118 {
 
 function install_126 {
   CUDNN_VERSION=9.5.1.17
-  echo "Installing CUDA 12.6.3 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.3"
+  echo "Installing CUDA 12.6.3 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.7.1"
   install_cuda 12.6.3 cuda_12.6.3_560.35.05_linux
 
   install_cudnn 12 $CUDNN_VERSION
@@ -135,7 +135,7 @@ function prune_126 {
 
 function install_128 {
   CUDNN_VERSION=9.8.0.87
-  echo "Installing CUDA 12.8.1 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.3"
+  echo "Installing CUDA 12.8.1 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.7.1"
   # install CUDA 12.8.1 in the same container
   install_cuda 12.8.1 cuda_12.8.1_570.124.06_linux
 
