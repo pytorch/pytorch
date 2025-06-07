@@ -496,6 +496,9 @@ def add(
         reshaped_tensor = tensor.view(new_shape)
         return reshaped_tensor
 
+    x = aten.conj_physical(x)
+    z = aten.conj_physical(z)
+
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
     result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
@@ -504,7 +507,8 @@ def add(
 
 @register_decomposition([aten.conj_physical])
 def conj_physical(self: torch.Tensor) -> torch.Tensor:
-    assert not self.is_complex(), "TODO: implement this"
+    if self.is_complex():
+        return NotImplemented
     return self
 
 
