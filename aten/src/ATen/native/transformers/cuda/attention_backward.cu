@@ -750,7 +750,7 @@ _efficient_attention_backward(
       // when we need a staging area for gK/gV. let's avoid that
       if (Kernel::kNeedsAccumGradK || Kernel::kNeedsAccumGradV) {
         p.num_splits_key = std::min(
-            int(p.num_splits_key), 200 / (p.num_batches * p.num_heads));
+            int32_t(p.num_splits_key), 200 / ((int32_t)(p.num_batches * p.num_heads)));
       }
     }
     if (!Kernel::kEnableSplitKeys || p.num_splits_key < 1) {
