@@ -1511,6 +1511,20 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(m(*args), ep.module()(*args))
 
+    @testing.expectedFailureCppRuntime
+    def test_unbacked_select(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x[y.item()]
+
+        mod = Foo()
+        x = torch.arange(10)
+        y = torch.tensor([5])
+        ep = export(mod, (x, y))
+        self.assertEqual(mod(x, y), ep.module()(x, y))
+        y = torch.tensor([-3])
+        self.assertEqual(mod(x, y), ep.module()(x, y))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cond_contains_unbacked_no_escape(self):
         class M(torch.nn.Module):
