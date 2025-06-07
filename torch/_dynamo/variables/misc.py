@@ -1176,6 +1176,13 @@ class GetAttrVariable(VariableTracker):
                 # This matches how `setattr` is handled for NNModuleVariable
                 self.obj.convert_to_unspecialized(tx)
 
+        elif name == "keys" and self.name == "__dict__" and not args and not kwargs:
+            if isinstance(self.obj, variables.UserDefinedClassVariable):
+                cls_dict = self.obj.value.__dict__
+                mp_vt = VariableTracker.build(tx, cls_dict, self.source)
+                keys = mp_vt.call_method(tx, "keys", args=[], kwargs={})
+                return keys
+
         return super().call_method(tx, name, args, kwargs)
 
 
