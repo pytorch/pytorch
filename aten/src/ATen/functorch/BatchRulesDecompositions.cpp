@@ -343,7 +343,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("upsample_linear1d.vec", native::upsample_linear1d);
   m.impl("upsample_nearest1d.vec", native::upsample_nearest1d);
   m.impl("upsample_nearest2d.vec", native::upsample_nearest2d);
-  m.impl("upsample_nearest3d.vec", native::upsample_nearest3d);
+  // Skip upsample_nearest3d.vec as it's handled in MPS backend
   m.impl("upsample_trilinear3d.vec", native::upsample_trilinear3d);
 
   // views on complex tensor
