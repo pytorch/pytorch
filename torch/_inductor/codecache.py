@@ -109,6 +109,7 @@ from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler
+from .utils import TensorProperties, Weights
 from .virtualized import V
 
 
@@ -1638,7 +1639,7 @@ class AotCodeCompiler:
         *,
         device_type: str,
         additional_files: list[str],
-    ) -> Union[list[str], str]:
+    ) -> Union[list[str], str, Weights]:
         """
         Returns the .so path, or returns a list of files that were generated if
         config.aot_inductor.package=True.
@@ -1918,6 +1919,19 @@ class AotCodeCompiler:
                 )
             else:
                 serialized_weights = b""
+
+                # We need to return a storage key here because the original value tensor might be a clone
+                weights_dict = Weights(
+                    {
+                        name: (
+                            graph.get_original_value_of_constant(name),
+                            TensorProperties(graph.constants[name]),
+                        )
+                        for name in graph.constants.keys()
+                        if name not in graph.folded_constants
+                    }
+                )
+                generated_files.append(weights_dict)
 
             consts_size = len(serialized_weights)
 

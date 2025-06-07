@@ -82,6 +82,7 @@ from torch._inductor.utils import (
     should_assume_input_aligned,
     should_use_remote_fx_graph_cache,
     tensor_is_aligned,
+    Weights,
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import trace_structured
@@ -1935,7 +1936,7 @@ def compile_fx(
     config_patches: Optional[dict[str, Any]] = None,
     decompositions: Optional[dict[OpOverload, Callable[..., Any]]] = None,
     ignore_shape_env: bool = False,
-) -> Union[Callable[[list[object]], Sequence[torch.Tensor]], str, list[str]]:
+) -> Union[Callable[[list[object]], Sequence[torch.Tensor]], str, list[str], Weights]:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
     lives in :mod:`torch._inductor`, this function is responsible for calling

@@ -77,6 +77,7 @@ def compile_so(aoti_dir: str, aoti_files: list[str], so_path: str) -> str:
 def package_aoti(
     archive_file: FileLike,
     aoti_files: Union[list[str], dict[str, list[str]]],
+    package_weights_to_disk: bool = False,
 ) -> FileLike:
     """
     Saves the AOTInductor generated files to the PT2Archive format.
@@ -88,7 +89,9 @@ def package_aoti(
         path to its AOTInductor generated files.
     """
 
-    return package_pt2(archive_file, aoti_files=aoti_files)
+    return package_pt2(
+        archive_file, aoti_files=aoti_files, package_weights_to_disk=package_weights_to_disk
+    )
 
 
 def load_package(

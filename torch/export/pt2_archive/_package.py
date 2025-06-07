@@ -1,5 +1,6 @@
 import glob
 import io
+import json
 import logging
 import os
 import tempfile
@@ -25,6 +26,7 @@ from torch.export.pt2_archive.constants import (
     MODELS_DIR,
     MODELS_FILENAME_FORMAT,
     SAMPLE_INPUTS_FILENAME_FORMAT,
+    WEIGHT_FILENAME_PREFIX,
     WEIGHTS_DIR,
 )
 from torch.types import FileLike
@@ -205,6 +207,7 @@ class PT2ArchiveReader:
 def _package_aoti_files(
     archive_writer: PT2ArchiveWriter,
     aoti_files: Optional[Union[list[str], dict[str, list[str]]]],
+    package_weights_to_disk: bool = False,
 ) -> None:
     if aoti_files is None:
         return
@@ -214,12 +217,24 @@ def _package_aoti_files(
 
     assert isinstance(aoti_files, dict)
 
+    from torch._inductor.utils import get_complete, group_weights, Weights
+
+    all_weights: dict[str, Weights] = {}  # model_name -> weight
+    weights_configs = (
+        {}
+    )  # model_name -> (weight_name -> (filename, shape, stride, offset))
+
     for model_name, files in aoti_files.items():
         num_so_files = 0
         num_cpp_files = 0
+        weights_configs[model_name] = {}
 
         for file in files:
             if file == "":
+                continue
+
+            if isinstance(file, Weights):
+                all_weights[model_name] = file
                 continue
 
             if file.endswith(".so"):
@@ -252,6 +267,35 @@ def _package_aoti_files(
                 file,
             )
 
+    if package_weights_to_disk:
+        # Dedup weights
+        grouped_tensors: list[set[tuple[str, str]]] = group_weights(all_weights)
+        for idx, group in enumerate(grouped_tensors):
+            filename = f"{WEIGHT_FILENAME_PREFIX}{idx}"
+            model_name, weight_name = get_complete(group, all_weights)
+            complete_tensor, _ = all_weights[model_name].get_weight(weight_name)
+            buffer = io.BytesIO()
+            torch.save(complete_tensor, buffer)
+            archive_writer.write_bytes(
+                os.path.join(WEIGHTS_DIR, filename), buffer.getvalue()
+            )
+            for model_name, weight_name in group:
+                _, w_property = all_weights[model_name].get_weight(weight_name)
+                weights_configs[model_name][weight_name] = (
+                    filename,
+                    w_property.shape,
+                    w_property.stride,
+                    w_property.offset,
+                )
+
+        for model_name, weights_config in weights_configs.items():
+            archive_writer.write_string(
+                os.path.join(AOTINDUCTOR_DIR, model_name, "weights_config.json"),
+                json.dumps(weights_config),
+            )
+            logger.debug("packaging weights_config for model %s", model_name)
+            logger.debug(weights_config)
+
 
 def _package_exported_programs(
     archive_writer: PT2ArchiveWriter,
@@ -273,6 +317,7 @@ def _package_exported_programs(
         archive_writer.write_bytes(
             MODELS_FILENAME_FORMAT.format(model_name), artifact.exported_program
         )
+        # TODO: will this overlap with the weights saved in package aoti_files?
         archive_writer.write_bytes(f"{WEIGHTS_DIR}{model_name}.pt", artifact.state_dict)
         archive_writer.write_bytes(
             f"{CONSTANTS_DIR}{model_name}.pt", artifact.constants
@@ -303,6 +348,7 @@ def package_pt2(
     extra_files: Optional[dict[str, Any]] = None,
     opset_version: Optional[dict[str, int]] = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+    package_weights_to_disk: bool = False,
 ) -> FileLike:
     """
     Saves the artifacts to a PT2Archive format
@@ -358,7 +404,7 @@ def package_pt2(
 
     with PT2ArchiveWriter(f) as archive_writer:
         _package_exported_programs(archive_writer, exported_programs)
-        _package_aoti_files(archive_writer, aoti_files)
+        _package_aoti_files(archive_writer, aoti_files, package_weights_to_disk)
         _package_extra_files(archive_writer, extra_files)
 
     if isinstance(f, (io.IOBase, IO)):
@@ -484,6 +530,7 @@ def load_pt2(
     run_single_threaded: bool = False,
     num_runners: int = 1,
     device_index: int = -1,
+    load_weights_from_disk: bool = False,
 ) -> PT2ArchiveContents:  # type: ignore[type-arg]
     """
     Loads all the artifacts previously saved with ``package_pt2``.
@@ -524,6 +571,8 @@ def load_pt2(
     if isinstance(f, (str, os.PathLike)):
         f = os.fspath(f)
 
+    weights = {}
+    weight_maps = {}
     with PT2ArchiveReader(f) as archive_reader:
         version = archive_reader.read_string(ARCHIVE_VERSION_PATH)
         if version != ARCHIVE_VERSION_VALUE:
@@ -543,11 +592,23 @@ def load_pt2(
         aoti_model_names = set()
         for file in file_names:
             if file.startswith(AOTINDUCTOR_DIR):
-                file = file[len(AOTINDUCTOR_DIR) :]  # remove data/aotinductor/ prefix
-                model_name = file.split("/")[
+                file_end = file[
+                    len(AOTINDUCTOR_DIR) :
+                ]  # remove data/aotinductor/ prefix
+                model_name = file_end.split("/")[
                     0
                 ]  # split "model_name/...cpp" into "model_name"
                 aoti_model_names.add(model_name)
+                if load_weights_from_disk and file.endswith("weights_config.json"):
+                    weight_map = json.loads(archive_reader.read_string(file))
+                    weight_maps[model_name] = weight_map
+            elif load_weights_from_disk and file.startswith(WEIGHTS_DIR):
+                weight_file_name = file[
+                    len(WEIGHTS_DIR) :
+                ]  # remove data/weights/ prefix
+                weight_bytes = archive_reader.read_bytes(file)
+                loaded_weight = torch.load(io.BytesIO(weight_bytes))
+                weights[weight_file_name] = loaded_weight
 
     if isinstance(f, (io.IOBase, IO)) and len(aoti_model_names) > 0:
         # Workaround for AOTIModelPackageLoader not reading buffers
@@ -580,4 +641,33 @@ def load_pt2(
             for model_name in aoti_model_names
         }
 
+    if weight_maps:
+        for model_name in aoti_model_names:
+            model_weights = {}
+            for weight_name, (file, shape, stride, storage_offset) in weight_maps[
+                model_name
+            ].items():
+                weight = weights[file]
+                model_weights[weight_name] = weight.as_strided(
+                    shape, stride, storage_offset
+                )
+
+            # user_managed=True ensures the weights updates are shared by all runners.
+            aoti_runners[model_name].load_constants(
+                model_weights, check_full_update=True, user_managed=True
+            )
+
     return PT2ArchiveContents(exported_programs, aoti_runners, extra_files)
+
+
+def load_weights_to_pt2_contents(pt2_contents: PT2ArchiveContents, weights_map: dict[str, Any]) -> None:
+    """
+    Load weights into the models in PT2 archive contents
+
+    Args:
+        pt2_contents (PT2ArchiveContents): The contents of the PT2 archive.
+    """
+    for model_name, weights in weights_map.items():
+        if model_name not in pt2_contents.aoti_runners:
+            raise RuntimeError(f"Model {model_name} not found in PT2 archive contents.")
+        pt2_contents.aoti_runners[model_name].load_constants(weights, check_full_update=True, user_managed=True)

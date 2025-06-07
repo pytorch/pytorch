@@ -13,7 +13,7 @@ from .standalone_compile import CompiledArtifact  # noqa: TC001
 
 
 if TYPE_CHECKING:
-    from torch._inductor.utils import InputType
+    from torch._inductor.utils import InputType, Weights
     from torch.export import ExportedProgram
     from torch.types import FileLike
 
@@ -274,7 +274,7 @@ def aot_compile(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     options: Optional[dict[str, Any]] = None,
-) -> Union[str, list[str]]:
+) -> Union[str, list[str], Weights]:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 
