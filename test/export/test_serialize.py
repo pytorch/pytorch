@@ -49,6 +49,12 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
+try:
+    from . import testing
+except ImportError:
+    import testing  # @manual=fbcode//caffe2/test:test_export-library
+
+
 def get_filtered_export_db_tests():
     return [
         (name, case)
@@ -59,6 +65,10 @@ def get_filtered_export_db_tests():
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
+    def setUp(self):
+        # manually set rand seed for reproducibility
+        torch.manual_seed(0)
+
     def test_export_with_extension_op_serialization(self):
         class TestModule(torch.nn.Module):
             def forward(self, x):
@@ -708,28 +718,11 @@ class TestDeserialize(TestCase):
     ) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
 
-        def _deepcopy_inputs(inputs):
-            # copy.deepcopy(deepcopy) can fail if tensor inputs have attribute (i.e. __dict__).
-            # we remove __dict__ when deepcopying.
-            dict_mapping = dict()
-            inputs_clone = ()
-            for idx, i in enumerate(inputs):
-                if isinstance(i, torch.Tensor) and hasattr(inputs[0], "__dict__"):
-                    dict_mapping[idx] = i.__dict__
-                    i.__dict__ = {}
-                inputs_clone += (copy.deepcopy(i),)
-
-            # Add __dict__ back.
-            for k, v in dict_mapping.items():
-                inputs[k].__dict__ = v
-                inputs_clone[k].__dict__ = v
-            return inputs_clone
-
         def _check_graph(pre_dispatch):
             if pre_dispatch:
                 ep = torch.export.export_for_training(
                     fn,
-                    _deepcopy_inputs(inputs),
+                    testing._deepcopy_inputs(inputs),
                     {},
                     dynamic_shapes=dynamic_shapes,
                     strict=strict,
@@ -740,7 +733,7 @@ class TestDeserialize(TestCase):
                 # export API.
                 ep = torch.export._trace._export(
                     fn,
-                    _deepcopy_inputs(inputs),
+                    testing._deepcopy_inputs(inputs),
                     {},
                     dynamic_shapes=dynamic_shapes,
                     strict=strict,
@@ -754,8 +747,8 @@ class TestDeserialize(TestCase):
             )
             deserialized_ep.graph.eliminate_dead_code()
 
-            orig_outputs = ep.module()(*_deepcopy_inputs(inputs))
-            loaded_outputs = deserialized_ep.module()(*_deepcopy_inputs(inputs))
+            orig_outputs = ep.module()(*testing._deepcopy_inputs(inputs))
+            loaded_outputs = deserialized_ep.module()(*testing._deepcopy_inputs(inputs))
 
             flat_orig_outputs = pytree.tree_leaves(orig_outputs)
             flat_loaded_outputs = pytree.tree_leaves(loaded_outputs)
@@ -793,7 +786,7 @@ class TestDeserialize(TestCase):
             )
 
             @torch.library.impl("mylib::foo", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo")
+            @torch.library.register_fake("mylib::foo", lib=lib)
             def foo_impl(a, b, c):
                 res2 = None
                 if c is not None:
@@ -804,7 +797,24 @@ class TestDeserialize(TestCase):
                 def forward(self, a, b, c):
                     return torch.ops.mylib.foo(a, b, c)
 
-            self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
+            self.check_graph(
+                M(),
+                (torch.randn(3), torch.randn(3), torch.randn(3)),
+            )
+            # TODO: artifact doesn't roundtrip
+            # graph string doesn't match
+            # - foo = torch.ops.mylib.foo.default(a, b, c);  a = b = c = None
+            # - getitem: "f32[3]" = foo[0]
+            # - getitem_1: "f32[3]" = foo[1];  foo = None
+            # + foo_default = torch.ops.mylib.foo.default(a, b, c);  a = b = c = None
+            # + getitem: "f32[3]" = foo_default[0]
+            # + getitem_1: "f32[3]" = foo_default[1];  foo_default = None
+            # testing.check_artifact(
+            #     self,
+            #     self._testMethodName,
+            #     M(),
+            #     (torch.randn(3), torch.randn(3), torch.randn(3)),
+            # )
 
     def test_unbacked_bindings_serialize(self):
         from torch._export.utils import _get_shape_env_from_gm
@@ -859,6 +869,13 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"x": {}, "y": {0: Dim("seqlen", max=4)}}
         # Compile with dynamic_shapes set to get operator.neg involved
         self.check_graph(MyModule(), inputs, dynamic_shapes=dynamic_shapes)
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            MyModule(),
+            inputs,
+            dynamic_shapes=dynamic_shapes,
+        )
 
     def test_auto_functionalize(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -916,6 +933,14 @@ class TestDeserialize(TestCase):
 
             # TODO Auto_functionalize is not supported on pre_dispatch IR
             self.check_graph(M(), orig_args, use_pre_dispatch=False)
+            # TODO: artifact doesn't roundtrip
+            # graph module string doesn't match
+            # testing.check_artifact(
+            #     self,
+            #     self._testMethodName,
+            #     M(),
+            #     orig_args,
+            # )
 
     def test_hoo_symint_input(self):
         class Mod(torch.nn.Module):
@@ -933,6 +958,9 @@ class TestDeserialize(TestCase):
 
         inp = (torch.ones(3, 3), torch.ones(3, 3), torch.tensor(2))
         self.check_graph(Mod(), inp, use_pre_dispatch=False)
+        # TODO: artifact doesn't roundtrip
+        # unbacked symint input is not supported yet
+        # testing.check_artifact(self, self._testMethodName, Mod(), inp)
 
     def test_none_input(self):
         """
@@ -984,6 +1012,12 @@ class TestDeserialize(TestCase):
             torch.ones([512]),
         )
         self.check_graph(MyModule(), inputs)
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            MyModule(),
+            inputs,
+        )
 
     def test_basic(self) -> None:
         class MyModule(torch.nn.Module):
@@ -998,6 +1032,12 @@ class TestDeserialize(TestCase):
 
         inputs = (torch.ones([512], requires_grad=True),)
         self.check_graph(MyModule(), inputs)
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            MyModule(),
+            inputs,
+        )
 
     def test_dynamic(self) -> None:
         class DynamicShapeSimpleModel(torch.nn.Module):
@@ -1016,6 +1056,14 @@ class TestDeserialize(TestCase):
         dim0_ac = torch.export.Dim("dim0_ac")
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
+        # TODO: cannot testing.check_artifact
+        # testing.check_artifact(
+        #     self,
+        #     self._testMethodName,
+        #     DynamicShapeSimpleModel(),
+        #     inputs,
+        #     dynamic_shapes,
+        # )
 
     def test_sym_bool(self):
         class Module(torch.nn.Module):
@@ -1025,6 +1073,14 @@ class TestDeserialize(TestCase):
 
         f = Module()
         self.check_graph(f, (torch.ones(1), torch.ones(3)))
+        # TODO: artifact doesn't roundtrip
+        # Could not guard on data-dependent expression Eq(u0, 1) (unhinted: Eq(u0, 1))
+        # testing.check_artifact(
+        #     self,
+        #     self._testMethodName,
+        #     f,
+        #     (torch.ones(1), torch.ones(3)),
+        # )
 
     def test_sym_bool_torch_check_equal(self):
         class Module(torch.nn.Module):
@@ -1036,6 +1092,12 @@ class TestDeserialize(TestCase):
                 return y
 
         self.check_graph(Module(), (torch.Tensor([1, 0, 1, 0]),))
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            Module(),
+            (torch.Tensor([1, 0, 1, 0]),),
+        )
 
     def test_sym_int_torch_check_equal(self):
         class Module(torch.nn.Module):
@@ -1048,6 +1110,12 @@ class TestDeserialize(TestCase):
                 return y
 
         self.check_graph(Module(), (torch.Tensor([1, 0, 1, 0, 1, 0]),))
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            Module(),
+            (torch.Tensor([1, 0, 1, 0, 1, 0]),),
+        )
 
     def test_shape(self):
         class Foo(torch.nn.Module):
@@ -1059,6 +1127,13 @@ class TestDeserialize(TestCase):
         dim0_x, dim1_x = torch.export.dims("dim0_x", "dim1_x")
         dynamic_shapes = {"x": (dim0_x, dim1_x)}
         self.check_graph(Foo(), inputs, dynamic_shapes)
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            Foo(),
+            inputs,
+            dynamic_shapes,
+        )
 
     def test_module(self):
         class M(torch.nn.Module):
@@ -1077,6 +1152,12 @@ class TestDeserialize(TestCase):
 
         inputs = (torch.randn(3, 3),)
         self.check_graph(M(), inputs)
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            M(),
+            inputs,
+        )
 
     def test_module_meta(self):
         class M(torch.nn.Module):
@@ -1092,6 +1173,12 @@ class TestDeserialize(TestCase):
 
         inputs = (torch.randn(3, 3, device="meta"),)
         self.check_graph(mod, inputs)
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            mod,
+            inputs,
+        )
 
     def test_pytree_namedtuple(self):
         N1 = namedtuple("N1", ["a", "b"])
@@ -1158,6 +1245,14 @@ class TestDeserialize(TestCase):
                 return cond(x[0][0] > 4, t, f, [x, y])
 
         self.check_graph(M(), inputs)
+        # TODO: artifact doesn't roundtrip
+        # graph string doesn't match
+        # testing.check_artifact(
+        #     self,
+        #     self._testMethodName,
+        #     M(),
+        #     inputs,
+        # )
 
     def test_sym_float(self):
         class M(torch.nn.Module):
@@ -1166,6 +1261,12 @@ class TestDeserialize(TestCase):
                 return b * 0.1
 
         self.check_graph(M(), (torch.tensor(1.0),))
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            M(),
+            (torch.tensor(1.0),),
+        )
 
     def test_arg_from(self):
         class M(torch.nn.Module):
@@ -1186,6 +1287,12 @@ class TestDeserialize(TestCase):
 
         with torch.no_grad():
             self.check_graph(M(), ())
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            M(),
+            (),
+        )
 
     def test_map(self):
         from functorch.experimental import control_flow
@@ -1200,6 +1307,12 @@ class TestDeserialize(TestCase):
         g = Module()
         inputs = (torch.ones(3, 2, 2), torch.ones(2))
         self.check_graph(g, inputs, _check_meta=False)
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            g,
+            inputs,
+        )
 
     def test_positional_argument_with_default_value(self):
         class MyLinear(torch.nn.Module):
@@ -1214,6 +1327,12 @@ class TestDeserialize(TestCase):
                 return torch.ops.aten.linear.default(x, self.weight, self.bias)
 
         self.check_graph(MyLinear(), (torch.randn(10, 10),))
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            MyLinear(),
+            (torch.randn(10, 10),),
+        )
 
     def test_tensor_tensor_list(self):
         with torch.library._scoped_library("_export", "FRAGMENT") as lib:
@@ -1244,6 +1363,13 @@ class TestDeserialize(TestCase):
                     return a + b[0]
 
             self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
+            # TODO: artifact doesn't roundtrip
+            # testing.check_artifact(
+            #     self,
+            #     self._testMethodName,
+            #     M(),
+            #     (torch.rand(3, 2), torch.rand(3, 2)),
+            # )
 
     def test_list_of_optional_tensors(self) -> None:
         class MyModule(torch.nn.Module):
@@ -1257,6 +1383,12 @@ class TestDeserialize(TestCase):
 
         inputs = (torch.rand(8, 8, 8), torch.rand(8, 8, 8), torch.rand(8, 8, 4))
         self.check_graph(MyModule(), inputs)
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            MyModule(),
+            inputs,
+        )
 
     def test_sym_ite(self):
         class Foo(torch.nn.Module):
@@ -1267,6 +1399,13 @@ class TestDeserialize(TestCase):
 
         dynamic_shapes = {"x": {0: Dim("dim0"), 1: Dim("dim1")}}
         self.check_graph(Foo(), (torch.ones(4, 5),), dynamic_shapes=dynamic_shapes)
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            Foo(),
+            (torch.ones(4, 5),),
+            dynamic_shapes=dynamic_shapes,
+        )
 
     def test_multiple_getitem(self):
         class M(torch.nn.Module):
@@ -1320,6 +1459,20 @@ def forward(self, x):
         model = case.model
         _check_meta = "map" not in name
         self.check_graph(model, case.example_args, _check_meta=_check_meta)
+        # TODO: artifact doesn't roundtrip
+        EXPORT_DB_ARTIFACT_SKIP_LIST = {
+            "test_exportdb_supported_case_cond_closed_over_variable",
+            "test_exportdb_supported_case_assume_constant_result",
+        }
+        # cond error: graph string doesn't matach
+        # assume_constant_result error: data dependent error u0 < 0 (unhinted: u0 < 0)
+        if self._testMethodName not in EXPORT_DB_ARTIFACT_SKIP_LIST:
+            testing.check_artifact(
+                self,
+                self._testMethodName,
+                model,
+                case.example_args,
+            )
 
     def test_constraints(self):
         class Module(torch.nn.Module):
@@ -1330,6 +1483,12 @@ def forward(self, x):
 
         f = Module()
         self.check_graph(f, (torch.tensor(3), torch.randn(4, 5)))
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            f,
+            (torch.tensor(3), torch.randn(4, 5)),
+        )
 
     def test_get_attr(self) -> None:
         class Module(torch.nn.Module):
@@ -1338,6 +1497,12 @@ def forward(self, x):
 
         f = Module()
         self.check_graph(f, (torch.tensor(3),))
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            f,
+            (torch.tensor(3),),
+        )
 
     def test_get_attr_list(self) -> None:
         class Module(torch.nn.Module):
@@ -1346,6 +1511,12 @@ def forward(self, x):
 
         f = Module()
         self.check_graph(f, (torch.tensor([1, 1]),))
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            f,
+            (torch.tensor([1, 1]),),
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
     def test_device(self) -> None:
@@ -1364,6 +1535,12 @@ def forward(self, x):
         inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to("cuda")
         model = MyModule().eval().cuda()
         self.check_graph(model, (inp,))
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            model,
+            (inp,),
+        )
 
     def test_custom_obj_tuple_out(self):
         class MyModule(torch.nn.Module):
@@ -1380,6 +1557,14 @@ def forward(self, x):
         m = MyModule()
         inputs = (torch.ones(2, 3),)
         self.check_graph(m, inputs, strict=False)
+        # TODO: artifact doesn't roundtrip
+        # graph module string doesn't match
+        # testing.check_artifact(
+        #     self,
+        #     self._testMethodName,
+        #     m,
+        #     inputs,
+        # )
 
     def test_custom_obj(self):
         class MyModule(torch.nn.Module):
@@ -1395,6 +1580,12 @@ def forward(self, x):
         m = MyModule()
         inputs = (torch.ones(2, 3),)
         self.check_graph(m, inputs, strict=False)
+        testing.check_artifact(
+            self,
+            self._testMethodName,
+            m,
+            inputs,
+        )
 
     def test_custom_obj_list_out(self):
         class MyModule(torch.nn.Module):
@@ -1411,6 +1602,14 @@ def forward(self, x):
         m = MyModule()
         inputs = (torch.ones(2, 3),)
         self.check_graph(m, inputs, strict=False)
+        # TODO: artifact doesn't roundtrip
+        # graph module string doesn't match
+        # testing.check_artifact(
+        #     self,
+        #     self._testMethodName,
+        #     m,
+        #     inputs,
+        # )
 
     def test_export_no_inputs(self):
         class M(torch.nn.Module):
@@ -1436,6 +1635,12 @@ def forward(self, x):
             m = MyModule()
             inputs = (torch.ones(2, 3),)
             self.check_graph(m, inputs, strict=False)
+            testing.check_artifact(
+                self,
+                self._testMethodName + str(dtype),
+                m,
+                inputs,
+            )
 
 
 instantiate_parametrized_tests(TestDeserialize)
@@ -1465,6 +1670,7 @@ class TestSchemaVersioning(TestCase):
 
 
 # We didn't set up kwargs input yet
+unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_fn_with_kwargs)
 unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_fn_with_kwargs)
 
 
