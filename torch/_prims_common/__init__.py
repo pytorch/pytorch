@@ -273,6 +273,9 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         is_nested_int,
     )
 
+    def has_shape_env(l):
+        return not isinstance(l, torch.SymInt) or hasattr(l.node, "shape_env")
+
     maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
     maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
 
@@ -293,7 +296,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         # make_contiguous_strides_for. If we make a tensor and used strides from make_contiguous_strides_for
         # and then called definitely_contiguous we should get True.
         expected_stride *= (
-            x if is_nested_int(x) else sym_max(x, 1)
+            x if (is_nested_int(x) or not has_shape_env(x)) else sym_max(x, 1)
         )  # type:ignore[assignment]
 
     return True
