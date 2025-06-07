@@ -1,10 +1,34 @@
 # mypy: allow-untyped-defs
 """
-This module defines runtime wrappers, which, based on previous analysis attempts to:
-1. process the inputs and outputs
-2. apply mutations
-3. handle functionalized randomness
-4. deduplicate inputs and consolidate views into their bases (see input_output_analysis)
+Runtime wrapper infrastructure for AOT (Ahead-of-Time) compiled functions in PyTorch functorch.
+
+This module provides comprehensive runtime wrapper capabilities that handle the complex task of
+bridging between PyTorch's high-level tensor operations and compiled function execution. The
+wrappers manage input/output processing, mutation handling, memory management, and subclass
+dispatch for AOT compiled functions.
+
+Core Functionality:
+1. Input/Output Processing: Handles tensor metadata, aliasing, and view relationships
+2. Mutation Application: Manages in-place operations and tensor mutations at runtime
+3. Functionalized Randomness: Handles random number generation in compiled contexts
+4. Input Deduplication: Consolidates duplicate inputs and views into base tensors
+5. Subclass Dispatch: Manages tensor subclass unwrapping/wrapping during execution
+6. Memory Management: Optimizes memory usage through view consolidation and sharing
+
+Key Classes:
+- CompilerWrapper: Abstract base for all compiler wrapper implementations
+- RuntimeWrapper: Main wrapper handling runtime aliasing and mutation logic
+- Various specialized wrappers for different compilation scenarios (inference, autograd, etc.)
+
+Primary Components:
+- Runtime epilogue logic for compiled function execution
+- Input/output metadata management and validation
+- Tensor aliasing and mutation tracking systems
+- Memory format and storage optimization utilities
+- Subclass-aware tensor processing pipelines
+
+This module is critical for maintaining PyTorch's tensor semantics and memory behavior while
+enabling efficient compiled execution through AOT compilation systems.
 """
 import builtins
 import collections

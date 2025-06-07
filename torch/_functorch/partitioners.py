@@ -1,3 +1,33 @@
+"""
+Graph partitioning utilities for AOT (Ahead-of-Time) compilation in PyTorch functorch.
+
+This module provides comprehensive graph partitioning capabilities for PyTorch's AOT compilation
+system, enabling efficient compilation and execution of forward and backward passes. The primary
+focus is on optimizing computation graphs through strategic partitioning, activation checkpointing,
+and memory management.
+
+Key Components:
+- Graph partitioning algorithms for forward/backward pass separation
+- Activation checkpointing strategies using min-cut and knapsack algorithms  
+- Memory optimization through selective recomputation
+- Operator classification and fusion optimization
+- Symbolic computation handling for dynamic shapes
+
+Core Classes:
+- OpTypes: Categorizes operators (fusible, compute-intensive, random, view, recomputable)
+- NodeInfo: Tracks node relationships and execution order in forward/backward graphs
+- MinCutOptions: Configuration for min-cut partitioning algorithms
+- Various partitioner implementations for different optimization strategies
+
+Main Functions:
+- extract_graph_with_inputs_outputs: Extracts subgraphs with specified inputs/outputs
+- Partitioning functions for forward/backward graph separation
+- Min-cut algorithms for optimal activation checkpointing
+- Memory usage analysis and optimization utilities
+
+This module is central to PyTorch's compilation infrastructure, handling the complex task of
+graph partitioning while maintaining correctness and optimizing for memory and compute efficiency.
+"""
 # mypy: allow-untyped-defs
 import copy
 import functools

@@ -1,3 +1,44 @@
+"""
+Public API and core implementation for AOT (Ahead-of-Time) Autograd in PyTorch functorch.
+
+This module provides the main user-facing API for AOT compilation with automatic differentiation
+support in PyTorch. AOT Autograd enables ahead-of-time compilation of PyTorch functions and
+modules while preserving full autograd functionality, memory efficiency, and correctness.
+
+Main API Functions:
+- aot_function: Compiles individual functions with AOT autograd
+- aot_module: Compiles PyTorch nn.Module instances with AOT autograd  
+- aot_module_simplified: Streamlined module compilation for common use cases
+- aot_export_module: Export-focused module compilation for deployment
+- aot_export_joint_simple: Joint forward/backward export for analysis
+
+Core Features:
+- Automatic differentiation preservation through compilation
+- Memory-efficient execution via graph optimization and partitioning
+- Support for both training and inference compilation modes
+- Integration with PyTorch's autograd system and gradient computation
+- Flexible compilation backend integration (Inductor, TensorRT, etc.)
+- Advanced mutation and aliasing handling
+- Subclass and meta-tensor support
+
+Compilation Pipeline:
+1. Function/Module Analysis: Input/output analysis, mutation detection, memory planning
+2. Graph Tracing: Captures computation graphs with symbolic shape support
+3. Graph Partitioning: Separates forward/backward passes for optimal compilation
+4. Backend Compilation: Dispatches to configured compilation backends
+5. Runtime Wrapping: Adds necessary runtime checks and mutation handling
+6. Caching Integration: Leverages compilation caches for performance
+
+Advanced Capabilities:
+- Dynamic shape support through symbolic computation
+- Activation checkpointing integration for memory optimization  
+- Custom partitioning strategies for specialized workloads
+- Comprehensive logging and debugging infrastructure
+- Export functionality for deployment and analysis workflows
+
+This module serves as the primary entry point for users wanting to leverage AOT compilation
+while maintaining the flexibility and correctness of PyTorch's eager execution model.
+"""
 # mypy: ignore-errors
 
 import itertools
