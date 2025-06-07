@@ -108,6 +108,13 @@ _unsafe_index_put_ = make_prim(
     ),
     doc="Unsafe index_put_ (doesn't issue device asserts)",
 )
+_unsafe_nowrap_index_put = make_prim(
+    "_unsafe_nowrap_index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor",
+    lambda self, indices, values, accumulate=False: torch.ops.aten.index_put(
+        self, indices, values, accumulate
+    ),
+    doc="Unsafe & wrap_neg=False index_put",
+)
 fma = make_prim(
     "fma(Tensor a, Tensor b, Tensor c) -> Tensor",
     lambda a, b, c: (a * b) + c,
