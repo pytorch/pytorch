@@ -5989,7 +5989,6 @@ GPU_TEST_FAILURES = {
     "test_stft": fail_gpu(("xpu",)),
 }
 
-
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
     device_type = "cpu"

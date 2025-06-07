@@ -666,7 +666,7 @@ class AOTInductorModelContainer {
   std::shared_mutex model_exec_mutex_;
 
   RAIIDataPtr allocate_constant_blob() {
-#if defined(USE_CUDA) || defined(USE_XPU)
+#if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
     return RAII_gpuMalloc(blob_size_);
 #else
     return RAII_cpuMalloc(blob_size_);
