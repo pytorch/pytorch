@@ -2,8 +2,6 @@
 
 #if AT_USE_EIGEN_SPARSE()
 
-#include <iostream>
-
 #include <ATen/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -194,7 +192,7 @@ void add_out_sparse_eigen(
 
   c10::ScalarType result_index_dtype;
 
-  if(result.layout() == kSparseCsr) {
+  if (result.layout() == kSparseCsr) {
     result_index_dtype = result.col_indices().scalar_type();
   } else if (result.layout() == kSparseCsc) {
     result_index_dtype = result.row_indices().scalar_type();
@@ -211,7 +209,7 @@ void add_out_sparse_eigen(
         typedef Eigen::SparseMatrix<scalar_t, Eigen::RowMajor, index_t>
             EigenCsrMatrix;
 
-        if(result.layout() == kSparseCsr) {
+        if (result.layout() == kSparseCsr) {
           const Eigen::Map<EigenCsrMatrix> mat1_eigen =
               Tensor_to_EigenCsr<scalar_t, index_t>(mat1);
           const Eigen::Map<EigenCsrMatrix> mat2_eigen =
@@ -246,15 +244,17 @@ void addmm_out_sparse_eigen(
   }
 
   // If beta is zero NaN and Inf should not be propagated to the result
+  // In addition, beta = 0 lets us enable a fast-path for result = alpha * A @ B
+  bool is_beta_zero = false;
   if (beta.toComplexDouble() == 0.) {
+    is_beta_zero = true;
     result.values().zero_();
   } else {
     result.values().mul_(beta);
   }
 
   c10::ScalarType result_index_dtype;
-
-  if(result.layout() == kSparseCsr) {
+  if (result.layout() == kSparseCsr) {
     result_index_dtype = result.col_indices().scalar_type();
   } else if (result.layout() == kSparseCsc) {
     result_index_dtype = result.row_indices().scalar_type();
@@ -270,17 +270,14 @@ void addmm_out_sparse_eigen(
         typedef Eigen::SparseMatrix<scalar_t, Eigen::RowMajor, index_t>
             EigenCsrMatrix;
 
-        if(result.layout() == kSparseCsr) {
-          result.crow_indices().mutable_data_ptr<index_t>()[0] = (index_t) 0;
-         std::cout<<result.crow_indices()<<'\n';
-        } else if (result.layout() == kSparseCsc) {
-          result.ccol_indices().mutable_data_ptr<index_t>()[0] = (index_t) 0;
-         std::cout<<result.ccol_indices()<<'\n';
+        at::Tensor mat1_mat2;
+        if (is_beta_zero) {
+          mat1_mat2 = result;
+        } else {
+          mat1_mat2 = at::empty_like(result, result.options());
         }
 
-        at::Tensor mat1_mat2 = at::empty_like(result, result.options());
-
-        if(mat1_mat2.layout() == kSparseCsr) {
+        if (mat1_mat2.layout() == kSparseCsr) {
           if (mat1.layout() == kSparseCsr) {
             const Eigen::Map<EigenCsrMatrix> mat1_eigen =
                 Tensor_to_EigenCsr<scalar_t, index_t>(mat1);
@@ -342,7 +339,11 @@ void addmm_out_sparse_eigen(
           }
         }
 
-        result.add_(mat1_mat2, alpha.to<scalar_t>());
+        if (is_beta_zero) {
+          result.mul_(alpha.to<scalar_t>());
+        } else {
+          result.add_(mat1_mat2, alpha.to<scalar_t>());
+        }
       });
 }
 
@@ -404,7 +405,7 @@ void addmm_out_sparse(
     const at::Scalar& beta) {
     TORCH_CHECK(
       false,
-      "eigen::addmm_out_sparse: Eigen was not enabled  ",
+      "eigen::addmm_out_sparse: Eigen was not enabled for ",
       result.layout(),
       " + ",
       mat1.layout(),
@@ -419,7 +420,7 @@ void add_out_sparse(
     const at::Tensor& result) {
     TORCH_CHECK(
       false,
-      "eigen::add_out_sparse: Eigen was not enabled ",
+      "eigen::add_out_sparse: Eigen was not enabled for ",
       mat1.layout(),
       " + ",
       mat2.layout(),
