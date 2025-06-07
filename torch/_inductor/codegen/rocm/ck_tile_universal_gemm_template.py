@@ -4,11 +4,13 @@ import functools
 import logging
 import random
 from dataclasses import asdict, dataclass
+from typing import Any
 
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_tile_template import CKTileTemplate
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
+from torch._inductor.codegen.rocm.rocm_template import ArgInfo
 from torch._inductor.ir import Buffer, Layout
 
 from ...utils import IndentedBuffer
@@ -238,8 +240,6 @@ class CKTileGemmTemplate(CKTileTemplate):
     extern "C" {
     PT_EXPORT {{kernel_definition}} {
 
-        constexpr int32_t kBatch = {{k_batch}};
-
         using {{instance_namespace}}::BaseGemmPipeline;
         using {{instance_namespace}}::TilePartitioner;
 
@@ -304,7 +304,6 @@ class CKTileGemmTemplate(CKTileTemplate):
             input_nodes=input_nodes,
             layout=layout,
         )
-        self.k_batch = 1
 
     def header(self) -> IndentedBuffer:
         res = super().header()
@@ -444,8 +443,9 @@ class CKTileGemmTemplate(CKTileTemplate):
             return True
 
         if op.layout_a == "Row":
-            if not check(K, op.tile_k * self.k_batch, op.k_is_padded):
-                return False
+            pass
+            # if not check(K, op.tile_k * self.k_batch, op.k_is_padded):
+            #     return False
         elif op.layout_a == "Col":
             if not check(M, op.tile_m, op.m_is_padded):
                 return False
@@ -456,8 +456,9 @@ class CKTileGemmTemplate(CKTileTemplate):
             if not check(N, op.tile_n, op.n_is_padded):
                 return False
         elif op.layout_b == "Col":
-            if not check(K, op.tile_k * self.k_batch, op.k_is_padded):
-                return False
+            # if not check(K, op.tile_k * self.k_batch, op.k_is_padded):
+            #     return False
+            pass
         else:
             raise AssertionError(f"Invalid {op.layout_b=}")
 
@@ -744,7 +745,6 @@ class CKTileGemmTemplate(CKTileTemplate):
         The primary entry point for the code rendering process used in this template.
         """
         epilogue_nodes = kwargs.get("epilogue_nodes", None)
-        k_batch = kwargs.get("k_batch", None)
         assert epilogue_nodes is None or 0 == len(epilogue_nodes)
         template_buffer_node = kwargs.get("template_buffer_node", None)
         if template_buffer_node is not None:
@@ -855,7 +855,6 @@ class CKTileGemmTemplate(CKTileTemplate):
             instance_namespace=op.name(),
             version_comment=version_comment,
             rendered_dispatch=render_dispatch(op.pipeline, op.name()),
-            k_batch=k_batch,
         )
 
     def gen_ops(self):
@@ -910,7 +909,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                 template.maybe_append_choice(
                     choices,
                     op=op,
-                    k_batch=k_batch,
+                    kBatch=k_batch,
                 )
 
     def k_batch_choices(self):
@@ -935,3 +934,16 @@ class CKTileGemmTemplate(CKTileTemplate):
         LDC = Y.get_stride()[0 if Y.get_stride()[1] == 1 else 1]
 
         return M, N, K, LDA, LDB, LDC
+    
+    def get_runtime_arg_info(self) -> list[ArgInfo]:
+        return [ArgInfo("kBatch", "int32_t")]
+
+    def get_runtime_arg_values(self, **kwargs: Any) -> list[Any]:
+        # maybe_append_choice kwarg for k_batch must match the name of the argument
+        arg_names = {arg.name for arg in self.get_runtime_arg_info()}
+        if not arg_names.issubset(kwargs):
+            raise ValueError(
+                "Missing runtime arguments: "
+                + ", ".join(arg_names - kwargs.keys())
+            )
+        return [kwargs[k] for k in arg_names]
