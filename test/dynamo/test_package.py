@@ -9,40 +9,49 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
+from torch._functorch import config as functorch_config
 from torch._dynamo.package import _CompilePackage, DynamoStore
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
-
+@instantiate_parametrized_tests
 class TestPackage(torch._inductor.test_case.TestCase):
     def path(self):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
         os.makedirs(path, exist_ok=True)
         return path
 
-    def test_basic_fn(self):
+    @parametrize("backend", ("eager", "inductor"))
+    @functorch_config.patch("bundled_autograd_cache", True)
+    def test_basic_fn(self, backend):
         ctx = DynamoStore()
 
         def fn(x):
             return x + 1
 
-        args = (torch.randn(3, 2),)
+        args = (torch.randn(3, 2, device="cpu",),)
 
         # Saving
         package = _CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
         expected = compiled_fn(*args)
-        for backend_id, backend in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, backend)
-        ctx.save_package(package, self.path())
+        if backend == "eager":
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
 
+        ctx.save_package(package, self.path())
         # Loading
         torch._dynamo.reset()
         with torch.compiler.set_stance("fail_on_recompile"):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
-            ):
-                compiled_fn(*args)
+            if backend == "eager":
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Detected recompile when torch.compile stance is 'fail_on_recompile'",
+                ):
+                    compiled_fn(*args)
 
             package, backends = ctx.load_package(fn, self.path())
             compiled_fn = torch._dynamo.optimize(package=package)(fn)

@@ -425,7 +425,10 @@ class DynamoStore:
         backend_content = {}
         for code in package._codes.values():
             for backend_id in code.backend_ids:
-                backend_content[backend_id] = PrecompileContext.serialize_artifact_by_key(backend_id)
+                serialized_backend = PrecompileContext.serialize_artifact_by_key(backend_id)
+                if serialized_backend is None:
+                    raise RuntimeError(f"Backend {backend_id} is not found in the given backends")
+                backend_content[backend_id] = serialized_backend
         cache_entry = _DynamoCacheEntry(codes=list(package._codes.values()))
         try:
             with open(os.path.join(path, "dynamo"), "wb") as dynamo_path:
@@ -436,15 +439,16 @@ class DynamoStore:
             raise RuntimeError(f"Failed to save package to {path}: {e}")
 
     def load_package(self, fn, path: str) -> tuple[_CompilePackage, dict[_BackendId, Any]]:
-        # loads a package from a given path and installs proper backends to it
-        try:
-            with open(os.path.join(path, "dynamo"), "rb") as dynamo_path:
-                cache_entry = pickle.load(dynamo_path)
-            with open(os.path.join(path, "backends"), "rb") as backend_path:
-                backend_content = pickle.load(backend_path)
-        except Exception as e:
-            raise RuntimeError(f"Failed to load package from path {path}: {e}")
-        for backend_id, backend in backend_content.items():
-            backend_content[backend_id] = backend.after_deserialization()
-        package = _CompilePackage(fn, cache_entry)
-        return package, backend_content
+        with torch._dynamo.utils.dynamo_timed("dynamo"):
+            # loads a package from a given path and installs proper backends to it
+            try:
+                with open(os.path.join(path, "dynamo"), "rb") as dynamo_path:
+                    cache_entry = pickle.load(dynamo_path)
+                with open(os.path.join(path, "backends"), "rb") as backend_path:
+                    backend_content = pickle.load(backend_path)
+            except Exception as e:
+                raise RuntimeError(f"Failed to load package from path {path}: {e}")
+            for backend_id, backend in backend_content.items():
+                backend_content[backend_id] = backend.after_deserialization()
+            package = _CompilePackage(fn, cache_entry)
+            return package, backend_content
