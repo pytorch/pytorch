@@ -172,38 +172,6 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     return torch._C._mtia_getDefaultStream(_get_device_index(device, optional=True))
 
 
-def record_memory_history(
-    enabled: Optional[str] = "all", stacks: str = "python", max_entries: int = 0
-) -> None:
-    r"""Enable/Disable the memory profiler on MTIA allocator
-
-    Args:
-        enabled (all or state, optional) selected device. Returns
-            statistics for the current device, given by current_device(),
-            if device is None (default).
-
-        stacks ("python" or "cpp", optional). Select the stack trace to record.
-
-        max_entries (int, optional). Maximum number of entries to record.
-    """
-    if not is_initialized():
-        return
-    torch._C._mtia_recordMemoryHistory(enabled, stacks, max_entries)
-
-
-def snapshot() -> dict[str, Any]:
-    r"""Return a dictionary of MTIA memory allocator history"""
-
-    return torch._C._mtia_memorySnapshot()
-
-
-def attach_out_of_memory_observer(
-    observer: Callable[[int, int, int, int], None]
-) -> None:
-    r"""Attach an out-of-memory observer to MTIA memory allocator"""
-    torch._C._mtia_attachOutOfMemoryObserver(observer)
-
-
 def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
@@ -405,4 +373,5 @@ __all__ = [
     "device",
     "set_rng_state",
     "get_rng_state",
+    "dump_snapshot",
 ]
