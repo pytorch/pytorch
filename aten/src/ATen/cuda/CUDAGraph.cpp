@@ -9,8 +9,6 @@
 
 namespace at::cuda {
 
-static bool _cuda_graphs_debug = false;
-
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
@@ -38,9 +36,10 @@ MempoolId_t graph_pool_handle() {
  * describes memory management for captures.
  */
 
-CUDAGraph::CUDAGraph()
+CUDAGraph::CUDAGraph(bool instantiate_eagerly)
   // CUDAStreams may not be default-constructed.
-  : capture_stream_(at::cuda::getCurrentCUDAStream()) {
+  : capture_stream_(at::cuda::getCurrentCUDAStream()),
+    instantiate_eagerly_(instantiate_eagerly) {
 }
 
 void CUDAGraph::register_generator_state(
@@ -110,9 +109,10 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
 
   cudaStreamCaptureStatus status{};
-  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_));
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(stream, &status, &capture_id_, &graph_, nullptr, nullptr));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
 
+  has_graph_ = true;
 }
 
 void CUDAGraph::capture_end() {
@@ -126,8 +126,32 @@ void CUDAGraph::capture_end() {
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
-  has_graph_ = true;
 
+  for (auto& [generator_state, wholegraph_increments] :
+       captured_generator_states_) {
+    wholegraph_increments = generator_state->capture_epilogue();
+  }
+
+  size_t numCUDAGraphNodes = 0;
+  AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &numCUDAGraphNodes));
+  if (numCUDAGraphNodes == 0) {
+      TORCH_WARN("The CUDA Graph is empty. This usually means that the graph was ",
+                 "attempted to be captured on wrong device or stream.");
+  }
+
+  capture_ended_ = true;
+
+  if (instantiate_eagerly_) {
+    instantiate();
+  }
+}
+
+void CUDAGraph::instantiate() {
+  TORCH_CHECK(capture_ended_, "capture_end() must have been called before calling instantiate");
+
+  if (has_graph_exec_) {
+    AT_CUDA_CHECK(cudaGraphExecDestroy(graph_exec_));
+  }
   // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not freed
   // between replays.
   // If Pytorch compiles and runs with a CUDA 11.4+ toolkit, there's a chance the allocator backend
@@ -161,35 +185,16 @@ void CUDAGraph::capture_end() {
                                                 cudaGraphInstantiateFlagAutoFreeOnLaunch));
   }
 #endif
-
   has_graph_exec_ = true;
-
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    wholegraph_increments = generator_state->capture_epilogue();
-  }
-
-  size_t numCUDAGraphNodes = 0;
-  AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &numCUDAGraphNodes));
-  if (numCUDAGraphNodes == 0) {
-      TORCH_WARN("The CUDA Graph is empty. This usually means that the graph was ",
-                 "attempted to be captured on wrong device or stream.");
-  }
-
-  // check if debug path is set
-  if (!_cuda_graphs_debug) {
-    // Now that we've instantiated graph_ into graph_exec_,
-    // we don't need graph_ anymore.
-    AT_CUDA_CHECK(cudaGraphDestroy(graph_));
-    has_graph_ = false;
-  } else {
-    TORCH_WARN("DEBUG: TORCH_CUDAGRAPHS_DEBUG_PATH detected. graph_ will not be freed until debug_dump is called.");
-  }
 }
 
 void CUDAGraph::replay() {
-  TORCH_CHECK(has_graph_exec_,
+  TORCH_CHECK(has_graph_,
               "Called CUDAGraph::replay without a preceding successful capture.");
+
+  if (!has_graph_exec_) {
+    instantiate();
+  }
 
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
 
@@ -212,25 +217,21 @@ void CUDAGraph::replay() {
 }
 
 void CUDAGraph::enable_debug_mode() {
-  _cuda_graphs_debug = true;
+  TORCH_WARN("[graph].enable_debug_mode() is now a no-op and can be removed safely");
 }
 
 void CUDAGraph::debug_dump(const std::string& debug_path) {
 #if defined(CUDA_VERSION) || defined(USE_ROCM)
-  if (_cuda_graphs_debug) {
-    TORCH_WARN("DEBUG: calling debug_dump()");
-    if (has_graph_) {
-      TORCH_WARN("DEBUG: calling cudaGraphDebugDotPrint() with ", debug_path);
-      C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), cudaGraphDebugDotFlagsVerbose)); // most verbose output
-      AT_CUDA_CHECK(cudaGraphDestroy(graph_));
-      has_graph_ = false;
-    }
-  } else {
-    TORCH_WARN("CUDA Graphs debug not enabled, set with [graph].enable_debug_mode()");
-  }
+  TORCH_WARN("DEBUG: calling debug_dump()");
+  C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), cudaGraphDebugDotFlagsVerbose)); // most verbose output
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.3 or ROCM >= 5.6");
 #endif
+}
+
+cudaGraph_t CUDAGraph::raw_cuda_graph() {
+  TORCH_CHECK(has_graph_, "You cannot access the raw cudaGraph_t instance until capture_begin() has been called");
+  return graph_;
 }
 
 void CUDAGraph::reset() {
@@ -253,9 +254,10 @@ void CUDAGraph::reset() {
   // and the allocator could end up in all kinds of weird states depending where failure occurred.
   // If the user catches the failure exception in a script, or is running in REPL or (god forbid)
   // a Jupyter notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
-  if (has_graph_ || has_graph_exec_) {
+  if (capture_ended_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+    capture_ended_ = false;
   }
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
@@ -269,7 +271,7 @@ void CUDAGraph::reset() {
 
 // Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
 MempoolId_t CUDAGraph::pool() {
-TORCH_CHECK(has_graph_exec_,
+TORCH_CHECK(capture_ended_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
   return mempool_id_;
 }

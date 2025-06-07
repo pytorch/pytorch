@@ -46,12 +46,38 @@ def graph_pool_handle():
 class CUDAGraph(torch._C._CUDAGraph):
     r"""Wrapper around a CUDA graph.
 
+    Arguments:
+        instantiate_eagerly (bool, optional): if True, a
+        cudaGraphExec_t will be created at the end of capture_end(),
+        which is the default behavior.
+
+            Previously, the graph would always and immediately be
+            instantiated at the end of capture_end(). Then, the
+            cudaGraph_t would be destroyed. However, that prevents
+            users from modifying the cudaGraph_t before the
+            cudaGraphExec_t is made. We now always retain the
+            cudaGraph_t so that it can be modified. If a user does
+            modify a cudaGraph_t, we would like to allow them to opt
+            out of having to instantiate twice. If
+            instantiate_eagerly=True, on the first call to replay(),
+            instantiate() will be called if it hasn't been called
+            already. Since replay() is expected to be run on
+            performance-critical paths, we want to retain the prior
+            behavior of instantiating at the end of graph capture to
+            prevent a latency spike on the first call of replay() in
+            existing latency-sensitive code in the common case where
+            the user is not modifying the cudaGraph_t. If a user knows
+            that they will be modifying the cudaGraph_t after graph
+            capture is done, they should set instantiate_eagerly to
+            true to avoid the overhead of instantiating twice. They
+            can call instantiate() manually before replay() to prevent
+
     .. warning::
         This API is in beta and may change in future releases.
     """
 
-    def __new__(cls):
-        return super().__new__(cls)
+    def __new__(cls, instantiate_eagerly=True):
+        return super().__new__(cls, instantiate_eagerly)
 
     def capture_begin(self, pool=None, capture_error_mode="global"):
         r"""Begin capturing CUDA work on the current stream.
@@ -82,6 +108,14 @@ class CUDAGraph(torch._C._CUDAGraph):
         which call ``capture_end`` internally.
         """
         super().capture_end()
+
+    def instantiate(self):
+        r"""Instantiate the CUDA graph. Will be called by
+        capture_end() if eagerly_instantiate=True, or by replay() if
+        eagerly_instantiate=False and instantiate() has not already
+        been explicitly called.
+        """
+        super().instantiate()
 
     def replay(self):
         r"""Replay the CUDA work captured by this graph."""
