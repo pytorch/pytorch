@@ -281,6 +281,8 @@ else
       python -mpip install numpy==2.0.2
 
       WERROR=1 python setup.py clean
+      WERROR=1 python setup.py bdist_wheel --cmake-only
+      WERROR=1 python -m tools.pre_build_flash_attention
 
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
         python3 tools/packaging/split_wheel.py bdist_wheel
@@ -296,6 +298,8 @@ else
         echo "USE_SPLIT_BUILD cannot be used with xla or rocm"
         exit 1
       else
+        python setup.py bdist_wheel --cmake-only
+        python -m tools.pre_build_flash_attention
         python setup.py bdist_wheel
       fi
     fi
