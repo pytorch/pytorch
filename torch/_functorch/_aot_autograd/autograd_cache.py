@@ -1,6 +1,47 @@
 # mypy: allow-untyped-defs
 """
-Utils for caching the outputs of AOTAutograd
+Comprehensive caching infrastructure for AOT (Ahead-of-Time) Autograd compilation artifacts.
+
+This module implements sophisticated caching mechanisms to optimize AOT compilation performance
+by storing and reusing compiled artifacts across compilation sessions. The caching system
+handles the complex requirements of AOT autograd including graph correctness, metadata
+preservation, and distributed compilation scenarios.
+
+Caching Architecture:
+- Local filesystem-based caching for individual development workflows
+- Remote distributed caching for team and CI/CD environments  
+- Multi-level cache hierarchy with fallback mechanisms
+- Cache key generation based on graph structure and input metadata
+- Artifact serialization with full metadata preservation
+
+Core Components:
+- AOTAutogradCache: Main cache interface and orchestration logic
+- Cache key computation: Graph hashing with input/output metadata
+- Artifact serialization: Preserves compiled functions and associated data
+- Safety validation: Ensures cached artifacts match current graph requirements
+- Remote cache integration: Distributed caching for build systems
+
+Key Features:
+1. Graph-based Cache Keys: Uses FX graph structure and tensor metadata for precise matching
+2. Compilation Artifact Storage: Caches compiled functions, runtime wrappers, and metadata
+3. Safety Guarantees: Validates that cached artifacts are safe for current execution context
+4. Performance Optimization: Significantly reduces compilation time for repeated patterns
+5. Multi-environment Support: Works across different machines and build environments
+
+Cache Safety Mechanisms:
+- Node-level safety validation for supported operations
+- Input/output metadata verification for correctness
+- Version compatibility checks for runtime environment
+- Bypass mechanisms for unsupported or unsafe operations
+
+Integration Points:
+- FX graph caching infrastructure integration
+- Inductor compilation backend coordination  
+- AOT dispatch system cache lookup and storage
+- Runtime wrapper cache artifact management
+
+This caching system is crucial for making AOT compilation practical in production environments
+where compilation speed directly impacts development and deployment workflows.
 """
 from __future__ import annotations
 
