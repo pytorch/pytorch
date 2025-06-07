@@ -317,6 +317,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("conv_transpose1d", native::conv_transpose1d_symint);
   m.impl("conv_transpose2d.input", native::conv_transpose2d_symint);
   m.impl("conv_transpose3d.input", native::conv_transpose3d_symint);
+  m.impl("conv_transpose1d.padding", native::conv_transpose1d_padding_symint);
+  m.impl("conv_transpose2d.padding", native::conv_transpose2d_padding_symint);
+  m.impl("conv_transpose3d.padding", native::conv_transpose3d_padding_symint);
+  m.impl("_convolution_transpose_mode", native::_convolution_transpose_mode_symint);
   m.impl("conv1d", native::conv1d_symint);
   m.impl("conv2d", native::conv2d_symint);
   m.impl("conv3d", native::conv3d_symint);
