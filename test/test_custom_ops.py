@@ -225,6 +225,23 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         example = torch.zeros([10, 20], device=device)
         torch.library.opcheck(f, args=[example])
 
+
+    def test_single_element_tuple_output(self, device):
+        @torch.library.custom_op("test::id", mutates_args=[])
+        def id(x: torch.Tensor) -> Tuple[torch.Tensor]:
+            return (x.clone(),)
+
+        @id.register_fake
+        def _(x: torch.Tensor,) -> Tuple[torch.Tensor]:
+            return (x.clone(),)
+
+        x = torch.randn(3, device=device)
+        ret = id(x)
+        # Check if ret is a tuple and has exactly one element
+        self.assertIsInstance(ret, tuple)
+        self.assertEqual(len(ret), 1)
+        self.assertEqual(x, ret[0])
+
     def test_missing_abstract_impl(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
