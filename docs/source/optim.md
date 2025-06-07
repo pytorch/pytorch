@@ -36,7 +36,7 @@ Per-parameter options
 {py:class}`Optimizer` s also support specifying per-parameter options. To do this, instead
 of passing an iterable of {py:class}`~torch.autograd.Variable` s, pass in an iterable of
 {py:class}`dict` s. Each of them will define a separate parameter group, and should contain
-a ``params`` key, containing a list of parameters belonging to it. Other keys
+a `params` key, containing a list of parameters belonging to it. Other keys
 should match the keyword arguments accepted by the optimizers, and will be used
 as optimization options for this group.
 
@@ -54,9 +54,9 @@ optim.SGD([
 ], lr=1e-3, momentum=0.9)
 ```
 
-This means that ``model.base``'s parameters will use a learning rate of ``1e-2``, whereas
-``model.classifier``'s parameters will stick to the default learning rate of ``1e-3``.
-Finally a momentum of ``0.9`` will be used for all parameters.
+This means that `model.base`'s parameters will use a learning rate of `1e-2`, whereas
+`model.classifier`'s parameters will stick to the default learning rate of `1e-3`.
+Finally a momentum of `0.9` will be used for all parameters.
 
 ```{eval-rst}
 .. note::
@@ -83,8 +83,8 @@ optim.SGD([
 ], weight_decay=1e-2, lr=1e-2)
 ```
 
-In this manner, bias terms are isolated from non-bias terms, and a ``weight_decay``
-of ``0`` is set specifically for the bias terms, as to avoid any penalization for
+In this manner, bias terms are isolated from non-bias terms, and a `weight_decay`
+of `0` is set specifically for the bias terms, as to avoid any penalization for
 this group.
 
 
@@ -298,14 +298,13 @@ algorithms.
     >>>     validate(...)
     >>>     scheduler.step()
 
-```{eval-rst}
-.. warning::
+```{warning}
   Prior to PyTorch 1.1.0, the learning rate scheduler was expected to be called before
   the optimizer's update; 1.1.0 changed this behavior in a BC-breaking way.  If you use
-  the learning rate scheduler (calling ``scheduler.step()``) before the optimizer's update
-  (calling ``optimizer.step()``), this will skip the first value of the learning rate schedule.
+  the learning rate scheduler (calling `scheduler.step()`) before the optimizer's update
+  (calling `optimizer.step()`), this will skip the first value of the learning rate schedule.
   If you are unable to reproduce results after upgrading to PyTorch 1.1.0, please check
-  if you are calling ``scheduler.step()`` at the wrong time.
+  if you are calling `scheduler.step()` at the wrong time.
 ```
 
 ```{eval-rst}
@@ -333,10 +332,10 @@ algorithms.
 
 ## How to utilize named parameters to load optimizer state dict
 
-The function {py:func}`~Optimizer.load_state_dict` stores the optional ``param_names`` content from the
+The function {py:func}`~Optimizer.load_state_dict` stores the optional `param_names` content from the
 loaded state dict if present. However, the process of loading the optimizer state is not affected,
 as the order of the parameters matters to maintain compatibility (in case of different ordering).
-To utilize the loaded parameters names from the loaded state dict, a custom ``register_load_state_dict_pre_hook``
+To utilize the loaded parameters names from the loaded state dict, a custom `register_load_state_dict_pre_hook`
 needs to be implemented according to the desired behavior.
 
 This can be useful, for instance, when the model architecture changes, but the weights and optimizer states need to
@@ -358,8 +357,8 @@ optimizer = optim.SGD(model.named_parameters(), lr=0.01, momentum=0.9)
 torch.save(optimizer.state_dict(), PATH)
 ```
 
-Let's say that ``model`` implements an expert (MoE), and we want to duplicate it and resume training
-for two experts, both initialized the same way as the ``fc`` layer. For the following ``model2`` we create two layers identical to ``fc`` and resume training by loading the model weights and optimizer states from ``model`` into both ``fc1`` and ``fc2`` of ``model2`` (and adjust them accordingly)::
+Let's say that `model` implements an expert (MoE), and we want to duplicate it and resume training
+for two experts, both initialized the same way as the `fc` layer. For the following `model2` we create two layers identical to `fc` and resume training by loading the model weights and optimizer states from `model` into both `fc1` and `fc2` of `model2` (and adjust them accordingly)::
 
 ```python
 class TwoLayerModel(nn.Module):
@@ -376,9 +375,9 @@ model2 = TwoLayerModel()
 optimizer2 = optim.SGD(model2.named_parameters(), lr=0.01, momentum=0.9)
 ```
 
-To load the state dict for ``optimizer2`` with the state dict of the previous optimizer such that both
-``fc1`` and ``fc2`` will be initialized with a copy of ``fc`` optimizer states
-(to resume training for each layer from ``fc``), we can use the following hook::
+To load the state dict for `optimizer2` with the state dict of the previous optimizer such that both
+`fc1` and `fc2` will be initialized with a copy of `fc` optimizer states
+(to resume training for each layer from `fc`), we can use the following hook::
 
 ```python
 def adapt_state_dict_ids(optimizer, state_dict):
@@ -411,15 +410,15 @@ optimizer2.register_load_state_dict_pre_hook(adapt_state_dict_ids)
 optimizer2.load_state_dict(torch.load(PATH)) # The previous optimizer saved state_dict
 ```
 
-This ensures that the adapted state_dict with the correct states for the layers of ``model2`` will be used
+This ensures that the adapted state_dict with the correct states for the layers of `model2` will be used
 during model loading.
 Note that this code is designed specifically for this example (e.g., assuming a single parameter group),
 and other cases might require different adaptations.
 
 The following example shows how to handle missing parameters in a loaded
-``state dict`` when the model structure changes.
-The ``Model_bypass`` adds a new ``bypass`` layer, which is not present in the original ``Model1``.
-To resume training, a custom ``adapt_state_dict_missing_param`` hook is used to adapt the optimizer's ``state_dict``,
+`state dict` when the model structure changes.
+The `Model_bypass` adds a new `bypass` layer, which is not present in the original `Model1`.
+To resume training, a custom `adapt_state_dict_missing_param` hook is used to adapt the optimizer's `state_dict`,
 ensuring existing parameters are mapped correctly, while missing ones (like the bypass layer) remain unchanged
 (as initialized in this example).
 This approach enables smooth loading and resuming of the optimizer state despite model changes.
@@ -535,7 +534,7 @@ You can create an SWA averaged model by running:
 >>> averaged_model = AveragedModel(model)
 ```
 
-EMA models are constructed by specifying the ``multi_avg_fn`` argument as follows:
+EMA models are constructed by specifying the `multi_avg_fn` argument as follows:
 
 ```python
 >>> decay = 0.999
@@ -550,26 +549,26 @@ $$W^\textrm{EMA}_{t+1} = \alpha W^\textrm{EMA}_{t} + (1 - \alpha) W^\textrm{mode
 
 where alpha is the EMA decay.
 
-Here the model ``model`` can be an arbitrary {py:class}`torch.nn.Module` object. ``averaged_model``
-will keep track of the running averages of the parameters of the ``model``. To update these
+Here the model `model` can be an arbitrary {py:class}`torch.nn.Module` object. `averaged_model`
+will keep track of the running averages of the parameters of the `model`. To update these
 averages, you should use the {py:func}`update_parameters` function after the `optimizer.step()`:
 
 ```python
 >>> averaged_model.update_parameters(model)
 ```
 
-For SWA and EMA, this call is usually done right after the optimizer ``step()``. In the case of SWA, this is usually skipped for some numbers of steps at the beginning of the training.
+For SWA and EMA, this call is usually done right after the optimizer `step()`. In the case of SWA, this is usually skipped for some numbers of steps at the beginning of the training.
 
 ### Custom averaging strategies
 
 By default, {py:class}`torch.optim.swa_utils.AveragedModel` computes a running equal average of
 the parameters that you provide, but you can also use custom averaging functions with the
-``avg_fn`` or ``multi_avg_fn`` parameters:
+`avg_fn` or `multi_avg_fn` parameters:
 
-- ``avg_fn`` allows defining a function operating on each parameter tuple (averaged parameter, model parameter) and should return the new averaged parameter.
-- ``multi_avg_fn`` allows defining more efficient operations acting on a tuple of parameter lists, (averaged parameter list, model parameter list), at the same time, for example using the ``torch._foreach*`` functions. This function must update the averaged parameters in-place.
+- `avg_fn` allows defining a function operating on each parameter tuple (averaged parameter, model parameter) and should return the new averaged parameter.
+- `multi_avg_fn` allows defining more efficient operations acting on a tuple of parameter lists, (averaged parameter list, model parameter list), at the same time, for example using the `torch._foreach*` functions. This function must update the averaged parameters in-place.
 
-In the following example ``ema_model`` computes an exponential moving average using the ``avg_fn`` parameter:
+In the following example `ema_model` computes an exponential moving average using the `avg_fn` parameter:
 
 ```python
 >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
@@ -577,7 +576,7 @@ In the following example ``ema_model`` computes an exponential moving average us
 >>> ema_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg)
 ```
 
-In the following example ``ema_model`` computes an exponential moving average using the more efficient ``multi_avg_fn`` parameter:
+In the following example `ema_model` computes an exponential moving average using the more efficient `multi_avg_fn` parameter:
 
 ```python
 >>> ema_model = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(0.9))
@@ -596,34 +595,33 @@ learning rate from its initial value to 0.05 in 5 epochs within each parameter g
 ```
 
 You can also use cosine annealing to a fixed value instead of linear annealing by setting
-``anneal_strategy="cos"``.
+`anneal_strategy="cos"`.
 
 
 ### Taking care of batch normalization
 
 {py:func}`update_bn` is a utility function that allows to compute the batchnorm statistics for the SWA model
-on a given dataloader ``loader`` at the end of training:
+on a given dataloader `loader` at the end of training:
 
 ```python
 >>> torch.optim.swa_utils.update_bn(loader, swa_model)
 ```
 
-{py:func}`update_bn` applies the ``swa_model`` to every element in the dataloader and computes the activation
+{py:func}`update_bn` applies the `swa_model` to every element in the dataloader and computes the activation
 statistics for each batch normalization layer in the model.
 
-```{eval-rst}
-.. warning::
-    {py:func}`update_bn` assumes that each batch in the dataloader ``loader`` is either a tensors or a list of
-    tensors where the first element is the tensor that the network ``swa_model`` should be applied to.
+```{warning}
+    {py:func}`update_bn` assumes that each batch in the dataloader `loader` is either a tensors or a list of
+    tensors where the first element is the tensor that the network `swa_model` should be applied to.
     If your dataloader has a different structure, you can update the batch normalization statistics of the
-    ``swa_model`` by doing a forward pass with the ``swa_model`` on each element of the dataset.
+    `swa_model` by doing a forward pass with the `swa_model` on each element of the dataset.
 ```
 
 
 
 ### Putting it all together: SWA
 
-In the example below, ``swa_model`` is the SWA model that accumulates the averages of the weights.
+In the example below, `swa_model` is the SWA model that accumulates the averages of the weights.
 We train the model for a total of 300 epochs and we switch to the SWA learning rate schedule
 and start to collect SWA averages of the parameters at epoch 160:
 
@@ -653,7 +651,7 @@ and start to collect SWA averages of the parameters at epoch 160:
 
 ### Putting it all together: EMA
 
-In the example below, ``ema_model`` is the EMA model that accumulates the exponentially-decayed averages of the weights with a decay rate of 0.999.
+In the example below, `ema_model` is the EMA model that accumulates the exponentially-decayed averages of the weights with a decay rate of 0.999.
 We train the model for a total of 300 epochs and start to collect EMA averages immediately.
 
 ```python

@@ -6,23 +6,22 @@
 ```
 
 # torch.package
-``torch.package`` adds support for creating packages containing both artifacts and arbitrary
+`torch.package` adds support for creating packages containing both artifacts and arbitrary
 PyTorch code. These packages can be saved, shared, used to load and execute models
 at a later date or on a different machine, and can even be deployed to production using
-``torch::deploy``.
+`torch::deploy`.
 
 This document contains tutorials, how-to guides, explanations, and an API reference that
-will help you learn more about ``torch.package`` and how to use it.
+will help you learn more about `torch.package` and how to use it.
 
-```{eval-rst}
-.. warning::
+```{warning}
 
-    This module depends on the ``pickle`` module which is not secure. Only unpackage data you trust.
+    This module depends on the `pickle` module which is not secure. Only unpackage data you trust.
 
     It is possible to construct malicious pickle data which will **execute arbitrary code during unpickling**.
     Never unpackage data that could have come from an untrusted source, or that could have been tampered with.
 
-    For more information, review the `documentation <https://docs.python.org/3/library/pickle.html>`_ for the ``pickle`` module.
+    For more information, review the `documentation <https://docs.python.org/3/library/pickle.html>`_ for the `pickle` module.
 
 
 .. contents:: :local:
@@ -42,10 +41,10 @@ Torch packages.
 
 #### Treat the package like a ZIP archive
 
-The container format for a ``torch.package`` is ZIP, so any tools that work with standard ZIP files should
+The container format for a `torch.package` is ZIP, so any tools that work with standard ZIP files should
 work for exploring the contents. Some common ways to interact with ZIP files:
 
-* ``unzip my_package.pt`` will unzip the ``torch.package`` archive to disk, where you can freely inspect its contents.
+* `unzip my_package.pt` will unzip the `torch.package` archive to disk, where you can freely inspect its contents.
 
 ```
     $ unzip my_package.pt && tree my_package
@@ -65,7 +64,7 @@ work for exploring the contents. Some common ways to interact with ZIP files:
     ...
 ```
 
-* The Python ``zipfile`` module provides a standard way to read and write ZIP archive contents.
+* The Python `zipfile` module provides a standard way to read and write ZIP archive contents.
 
 ```python
 from zipfile import ZipFile
@@ -75,7 +74,7 @@ with ZipFile("my_package.pt") as myzip:
     myzip.writestr("torchvision/models/resnet.py", new_file_bytes)
 ```
 
-* vim has the ability to natively read ZIP archives. You can even edit files and :``write`` them back into the archive!
+* vim has the ability to natively read ZIP archives. You can even edit files and :`write` them back into the archive!
 
 ```vim
 # add this to your .vimrc to treat `*.pt` files as zip files
@@ -84,13 +83,13 @@ au BufReadCmd *.pt call zip#Browse(expand("<amatch>"))
 ~ vi my_package.pt
 ```
 
-#### Use the ``file_structure()`` API
-{py:class}`PackageImporter` provides a ``file_structure()`` method, which will return a printable
-and queryable :class:`Directory` object. The :class:`Directory` object is a simple directory structure that you can use to explore the
-current contents of a ``torch.package``.
+#### Use the `file_structure()` API
+{py:class}`PackageImporter` provides a `file_structure()` method, which will return a printable
+and queryable {py:class}`Directory` object. The {py:class}`Directory` object is a simple directory structure that you can use to explore the
+current contents of a `torch.package`.
 
 The {py:class}`Directory` object itself is directly printable and will print out a file tree representation. To filter what is returned,
-use the glob-style ``include`` and ``exclude`` filtering arguments.
+use the glob-style `include` and `exclude` filtering arguments.
 
 ```python
 with PackageExporter('my_package.pt') as pe:
@@ -129,7 +128,7 @@ Output:
             └── utils.py
 ```
 
-You can also query {py:class}`Directory` objects with the ``has_file()`` method.
+You can also query {py:class}`Directory` objects with the `has_file()` method.
 
 ```python
 importer_file_structure = importer.file_structure()
@@ -138,18 +137,18 @@ found: bool = importer_file_structure.has_file("package_a/subpackage.py")
 
 ### See why a given module was included as a dependency?
 
-Say there is a given module ``foo``, and you want to know why your {py:class}`PackageExporter` is pulling in ``foo`` as a dependency.
+Say there is a given module `foo`, and you want to know why your {py:class}`PackageExporter` is pulling in `foo` as a dependency.
 
-:meth:`PackageExporter.get_rdeps` will return all modules that directly depend on ``foo``.
+:meth:`PackageExporter.get_rdeps` will return all modules that directly depend on `foo`.
 
-If you would like to see how a given module ``src`` depends on ``foo``, the :meth:`PackageExporter.all_paths` method will
-return a DOT-formatted graph showing all the dependency paths between ``src`` and ``foo``.
+If you would like to see how a given module `src` depends on `foo`, the :meth:`PackageExporter.all_paths` method will
+return a DOT-formatted graph showing all the dependency paths between `src` and `foo`.
 
 If you would just like to see the whole dependency graph of your :class:`PackageExporter`, you can use :meth:`PackageExporter.dependency_graph_string`.
 
 
 ### Include arbitrary resources with my package and access them later?
-{py:class}`PackageExporter` exposes three methods, ``save_pickle``, ``save_text`` and ``save_binary`` that allow you to save
+{py:class}`PackageExporter` exposes three methods, `save_pickle`, `save_text` and `save_binary` that allow you to save
 Python objects, text, and binary data to a package.
 
 ```python
@@ -160,7 +159,7 @@ with torch.PackageExporter("package.pt") as exporter:
     exporter.save_binary("raw_data", "binary", my_bytes)
 
 ```
-{py:class}`PackageImporter` exposes complementary methods named ``load_pickle``, ``load_text`` and ``load_binary`` that allow you to load
+{py:class}`PackageImporter` exposes complementary methods named `load_pickle`, `load_text` and `load_binary` that allow you to load
 Python objects, text and binary data from a package.
 
 ```python
@@ -171,14 +170,14 @@ binary = importer.load_binary("raw_data", "binary")
 ```
 
 ### Customize how a class is packaged?
-``torch.package`` allows for the customization of how classes are packaged. This behavior is accessed through defining the method
-``__reduce_package__`` on a class and by defining a corresponding de-packaging function. This is similar to defining ``__reduce__`` for
+`torch.package` allows for the customization of how classes are packaged. This behavior is accessed through defining the method
+`__reduce_package__` on a class and by defining a corresponding de-packaging function. This is similar to defining `__reduce__` for
 Python’s normal pickling process.
 
 Steps:
 
-1. Define the method ``__reduce_package__(self, exporter: PackageExporter)`` on the target class. This method should do the work to save the class instance inside of the package, and should return a tuple of the corresponding de-packaging function with the arguments needed to invoke the de-packaging function. This method is called by the ``PackageExporter`` when it encounters an instance of the target class.
-2. Define a de-packaging function for the class. This de-packaging function should do the work to reconstruct and return an instance of the class. The function signature’s first parameter should be a ``PackageImporter`` instance, and the rest of the parameters are user defined.
+1. Define the method `__reduce_package__(self, exporter: PackageExporter)` on the target class. This method should do the work to save the class instance inside of the package, and should return a tuple of the corresponding de-packaging function with the arguments needed to invoke the de-packaging function. This method is called by the `PackageExporter` when it encounters an instance of the target class.
+2. Define a de-packaging function for the class. This de-packaging function should do the work to reconstruct and return an instance of the class. The function signature’s first parameter should be a `PackageImporter` instance, and the rest of the parameters are user defined.
 
 
 ```python
@@ -278,7 +277,7 @@ foo_1 import time: 9857706.652698385
 
 ### Test in my source code whether or not it is executing inside a package?
 
-A {py:class}`PackageImporter` will add the attribute ``__torch_package__`` to every module that it initializes. Your code can check for the
+A {py:class}`PackageImporter` will add the attribute `__torch_package__` to every module that it initializes. Your code can check for the
 presence of this attribute to determine whether it is executing in a packaged context or not.
 
 ```python
@@ -297,7 +296,7 @@ else:
 ```
 
 Now, the code will behave differently depending on whether it’s imported normally through your Python environment or imported from a
-``torch.package``.
+`torch.package`.
 
 ```python
 from foo.bar import is_in_package
@@ -314,7 +313,7 @@ your code so that it behaves the same way no matter how it was loaded.
 
 
 ### Patch code into a package?
-{py:class}`PackageExporter` offers a ``save_source_string()`` method that allows one to save arbitrary Python source code to a module of your choosing.
+{py:class}`PackageExporter` offers a `save_source_string()` method that allows one to save arbitrary Python source code to a module of your choosing.
 ```python
 with PackageExporter(f) as exporter:
     # Save the my_module.foo available in your current Python environment.
@@ -357,7 +356,7 @@ with PackageExporter(f) as exporter:
     exporter.save_module("bar")
 ```
 
-The ``importlib.resources`` API allows access to resources from within packaged code.
+The `importlib.resources` API allows access to resources from within packaged code.
 
 
 ```python
@@ -370,7 +369,7 @@ def get_my_resource():
     return importlib.resources.read_text(my_resource, "a.txt")
 ```
 
-Using ``importlib.resources`` is the recommended way to access package contents from within packaged code, since it complies
+Using `importlib.resources` is the recommended way to access package contents from within packaged code, since it complies
 with the Python standard. However, it is also possible to access the parent :class:`PackageImporter` instance itself from within
 packaged code.
 
@@ -389,9 +388,9 @@ def get_my_pickle():
 ```
 
 ### Distinguish between packaged code and non-packaged code?
-To tell if an object’s code is from a ``torch.package``, use the ``torch.package.is_from_package()`` function.
-Note: if an object is from a package but its definition is from a module marked ``extern`` or from ``stdlib``,
-this check will return ``False``.
+To tell if an object’s code is from a `torch.package`, use the `torch.package.is_from_package()` function.
+Note: if an object is from a package but its definition is from a module marked `extern` or from `stdlib`,
+this check will return `False`.
 
 ```python
 importer = PackageImporter(f)
@@ -418,7 +417,7 @@ with PackageExporter(f2, importer=(importer, sys_importer)) as exporter:
 ```
 
 ### Package a TorchScript module?
-To package a TorchScript model, use the same ``save_pickle`` and ``load_pickle`` APIs as you would with any other object.
+To package a TorchScript model, use the same `save_pickle` and `load_pickle` APIs as you would with any other object.
 Saving TorchScript objects that are attributes or submodules is supported as well with no extra work.
 
 ```python
@@ -434,13 +433,13 @@ loaded_mixed = importer.load_pickle("res", "mixed_model.pkl"
 
 ## Explanation
 
-### ``torch.package`` Format Overview
-A ``torch.package`` file is a ZIP archive which conventionally uses the ``.pt`` extension. Inside the ZIP archive, there are two kinds of files:
+### `torch.package` Format Overview
+A `torch.package` file is a ZIP archive which conventionally uses the `.pt` extension. Inside the ZIP archive, there are two kinds of files:
 
-* Framework files, which are placed in the ``.data/``.
+* Framework files, which are placed in the `.data/`.
 * User files, which is everything else.
 
-As an example, this is what a fully packaged ResNet model from ``torchvision`` looks like:
+As an example, this is what a fully packaged ResNet model from `torchvision` looks like:
 
 ```
 resnet
@@ -460,15 +459,15 @@ resnet
 ```
 
 #### Framework files
-The ``.data/`` directory is owned by torch.package, and its contents are considered to be a private implementation detail.
-The ``torch.package`` format makes no guarantees about the contents of ``.data/``, but any changes made will be backward compatible
-(that is, newer version of PyTorch will always be able to load older ``torch.packages``).
+The `.data/` directory is owned by torch.package, and its contents are considered to be a private implementation detail.
+The `torch.package` format makes no guarantees about the contents of `.data/`, but any changes made will be backward compatible
+(that is, newer version of PyTorch will always be able to load older `torch.packages`).
 
-Currently, the ``.data/`` directory contains the following items:
+Currently, the `.data/` directory contains the following items:
 
-* ``version``: a version number for the serialized format, so that the ``torch.package`` import infrastructures knows how to load this package.
-* ``extern_modules``: a list of modules that are considered ``extern``. ``extern`` modules will be imported using the loading environment’s system importer.
-* ``*.storage``: serialized tensor data.
+* `version`: a version number for the serialized format, so that the `torch.package` import infrastructures knows how to load this package.
+* `extern_modules`: a list of modules that are considered `extern`. `extern` modules will be imported using the loading environment’s system importer.
+* `*.storage`: serialized tensor data.
 
 ```
 .data
@@ -499,49 +498,49 @@ with the [`Python reference documentation`](https://docs.python.org/3/library/im
         └── utils.py    # torchvision.models.utils
 ```
 
-### How ``torch.package`` finds your code's dependencies
+### How `torch.package` finds your code's dependencies
 #### Analyzing an object's dependencies
-When you issue a ``save_pickle(obj, ...)`` call, {py:class}`PackageExporter` will pickle the object normally. Then, it uses the
-``pickletools`` standard library module to parse the pickle bytecode.
+When you issue a `save_pickle(obj, ...)` call, {py:class}`PackageExporter` will pickle the object normally. Then, it uses the
+`pickletools` standard library module to parse the pickle bytecode.
 
-In a pickle, an object is saved along with a ``GLOBAL`` opcode that describes where to find the implementation of the object’s type, like:
+In a pickle, an object is saved along with a `GLOBAL` opcode that describes where to find the implementation of the object’s type, like:
 
 ```
 GLOBAL 'torchvision.models.resnet Resnet`
 ```
 
-The dependency resolver will gather up all ``GLOBAL`` ops and mark them as dependencies of your pickled object.
+The dependency resolver will gather up all `GLOBAL` ops and mark them as dependencies of your pickled object.
 For more information about pickling and the pickle format, please consult [`the Python docs`](https://docs.python.org/3/library/pickle.html).
 
 #### Analyzing a module's dependencies
-When a Python module is identified as a dependency, ``torch.package`` walks the module’s python AST representation and looks for import statements with
-full support for the standard forms: ``from x import y``, ``import z``, ``from w import v as u``, etc. When one of these import statements are
-encountered, ``torch.package`` registers the imported modules as dependencies that are then themselves parsed in the same AST walking way.
+When a Python module is identified as a dependency, `torch.package` walks the module’s python AST representation and looks for import statements with
+full support for the standard forms: `from x import y`, `import z`, `from w import v as u`, etc. When one of these import statements are
+encountered, `torch.package` registers the imported modules as dependencies that are then themselves parsed in the same AST walking way.
 
-**Note**: AST parsing has limited support for the ``__import__(...)`` syntax and does not support ``importlib.import_module`` calls. In general, you should
-not expect dynamic imports to be detected by ``torch.package``.
+**Note**: AST parsing has limited support for the `__import__(...)` syntax and does not support `importlib.import_module` calls. In general, you should
+not expect dynamic imports to be detected by `torch.package`.
 
 
 ### Dependency Management
-``torch.package`` automatically finds the Python modules that your code and objects depend on. This process is called dependency resolution.
+`torch.package` automatically finds the Python modules that your code and objects depend on. This process is called dependency resolution.
 For each module that the dependency resolver finds, you must specify an *action* to take.
 
 The allowed actions are:
 
-* ``intern``: put this module into the package.
-* ``extern``: declare this module as an external dependency of the package.
-* ``mock``: stub out this module.
-* ``deny``: depending on this module will raise an error during package export.
+* `intern`: put this module into the package.
+* `extern`: declare this module as an external dependency of the package.
+* `mock`: stub out this module.
+* `deny`: depending on this module will raise an error during package export.
 
-Finally, there is one more important action that is not technically part of ``torch.package``:
+Finally, there is one more important action that is not technically part of `torch.package`:
 
 * Refactoring: remove or change the dependencies in your code.
 
 Note that actions are only defined on entire Python modules. There is no way to package “just” a function or class from a module and leave the rest out.
 This is by design. Python does not offer clean boundaries between objects defined in a module. The only defined unit of dependency organization is a
-module, so that’s what ``torch.package`` uses.
+module, so that’s what `torch.package` uses.
 
-Actions are applied to modules using patterns. Patterns can either be module names (``"foo.bar"``) or globs (like ``"foo.**"``). You associate a pattern
+Actions are applied to modules using patterns. Patterns can either be module names (`"foo.bar"`) or globs (like `"foo.**"`). You associate a pattern
 with an action using methods on {py:class}`PackageExporter`, e.g.
 
 ```python
@@ -553,42 +552,42 @@ If a module matches a pattern, the corresponding action is applied to it. For a 
 and the first action will be taken.
 
 
-#### ``intern``
-If a module is ``intern``-ed, it will be placed into the package.
+#### `intern`
+If a module is `intern`-ed, it will be placed into the package.
 
-This action is your model code, or any related code you want to package. For example, if you are trying to package a ResNet from ``torchvision``,
-you will need to ``intern`` the module torchvision.models.resnet.
+This action is your model code, or any related code you want to package. For example, if you are trying to package a ResNet from `torchvision`,
+you will need to `intern` the module torchvision.models.resnet.
 
-On package import, when your packaged code tries to import an ``intern``-ed module, PackageImporter will look inside your package for that module.
+On package import, when your packaged code tries to import an `intern`-ed module, PackageImporter will look inside your package for that module.
 If it can’t find that module, an error will be raised. This ensures that each {py:class}`PackageImporter` is isolated from the loading environment—even
-if you have ``my_interned_module`` available in both your package and the loading environment, {py:class}`PackageImporter` will only use the version in your
+if you have `my_interned_module` available in both your package and the loading environment, {py:class}`PackageImporter` will only use the version in your
 package.
 
-**Note**: Only Python source modules can be ``intern``-ed. Other kinds of modules, like C extension modules and bytecode modules, will raise an error if
-you attempt to ``intern`` them. These kinds of modules need to be ``mock``-ed or ``extern``-ed.
+**Note**: Only Python source modules can be `intern`-ed. Other kinds of modules, like C extension modules and bytecode modules, will raise an error if
+you attempt to `intern` them. These kinds of modules need to be `mock`-ed or `extern`-ed.
 
 
-#### ``extern``
-If a module is ``extern``-ed, it will not be packaged. Instead, it will be added to a list of external dependencies for this package. You can find this
-list on ``package_exporter.extern_modules``.
+#### `extern`
+If a module is `extern`-ed, it will not be packaged. Instead, it will be added to a list of external dependencies for this package. You can find this
+list on `package_exporter.extern_modules`.
 
-On package import, when the packaged code tries to import an ``extern``-ed module, {py:class}`PackageImporter` will use the default Python importer to find
-that module, as if you did ``importlib.import_module("my_externed_module")``. If it can’t find that module, an error will be raised.
+On package import, when the packaged code tries to import an `extern`-ed module, {py:class}`PackageImporter` will use the default Python importer to find
+that module, as if you did `importlib.import_module("my_externed_module")`. If it can’t find that module, an error will be raised.
 
-In this way, you can depend on third-party libraries like ``numpy`` and ``scipy`` from within your package without having to package them too.
+In this way, you can depend on third-party libraries like `numpy` and `scipy` from within your package without having to package them too.
 
 **Warning**: If any external library changes in a backwards-incompatible way, your package may fail to load. If you need long-term reproducibility
-for your package, try to limit your use of ``extern``.
+for your package, try to limit your use of `extern`.
 
 
-#### ``mock``
-If a module is ``mock``-ed, it will not be packaged. Instead a stub module will be packaged in its place. The stub module will allow you to retrieve
-objects from it (so that ``from my_mocked_module import foo`` will not error), but any use of that object will raise a ``NotImplementedError``.
+#### `mock`
+If a module is `mock`-ed, it will not be packaged. Instead a stub module will be packaged in its place. The stub module will allow you to retrieve
+objects from it (so that `from my_mocked_module import foo` will not error), but any use of that object will raise a `NotImplementedError`.
 
-``mock`` should be used for code that you “know” will not be needed in the loaded package, but you still want available for use in non-packaged contents.
+`mock` should be used for code that you “know” will not be needed in the loaded package, but you still want available for use in non-packaged contents.
 For example, initialization/configuration code, or code only used for debugging/training.
 
-**Warning**: In general, ``mock`` should be used as a last resort. It introduces behavioral differences between packaged code and non-packaged code,
+**Warning**: In general, `mock` should be used as a last resort. It introduces behavioral differences between packaged code and non-packaged code,
 which may lead to later confusion. Prefer instead to refactor your code to remove unwanted dependencies.
 
 
@@ -599,11 +598,11 @@ guidelines for writing code with clean dependencies (which are also generally go
 **Include only what you use**. Do not leave unused imports in your code. The dependency resolver is not smart enough to tell that they are indeed unused,
 and will try to process them.
 
-**Qualify your imports**. For example, instead of writing import foo and later using ``foo.bar.baz``, prefer to write ``from foo.bar import baz``. This more
-precisely specifies your real dependency (``foo.bar``) and lets the dependency resolver know you don’t need all of ``foo``.
+**Qualify your imports**. For example, instead of writing import foo and later using `foo.bar.baz`, prefer to write `from foo.bar import baz`. This more
+precisely specifies your real dependency (`foo.bar`) and lets the dependency resolver know you don’t need all of `foo`.
 
-**Split up large files with unrelated functionality into smaller ones**. If your ``utils`` module contains a hodge-podge of unrelated functionality, any module
-that depends on ``utils`` will need to pull in lots of unrelated dependencies, even if you only needed a small part of it. Prefer instead to define
+**Split up large files with unrelated functionality into smaller ones**. If your `utils` module contains a hodge-podge of unrelated functionality, any module
+that depends on `utils` will need to pull in lots of unrelated dependencies, even if you only needed a small part of it. Prefer instead to define
 single-purpose modules that can be packaged independently of one another.
 
 
@@ -612,19 +611,19 @@ Patterns allow you to specify groups of modules with a convenient syntax. The sy
 [`glob()`](https://docs.bazel.build/versions/master/be/functions.html#glob).
 
 A module that we are trying to match against a pattern is called a candidate. A candidate is composed of a list of segments separated by a
-separator string, e.g. ``foo.bar.baz``.
+separator string, e.g. `foo.bar.baz`.
 
 A pattern contains one or more segments. Segments can be:
 
-* A literal string (e.g. ``foo``), which matches exactly.
-* A string containing a wildcard (e.g. ``torch``, or ``foo*baz*``). The wildcard matches any string, including the empty string.
-* A double wildcard (``**``). This matches against zero or more complete segments.
+* A literal string (e.g. `foo`), which matches exactly.
+* A string containing a wildcard (e.g. `torch`, or `foo*baz*`). The wildcard matches any string, including the empty string.
+* A double wildcard (`**`). This matches against zero or more complete segments.
 
 Examples:
 
-* ``torch.**``: matches ``torch`` and all its submodules, e.g. ``torch.nn`` and ``torch.nn.functional``.
-* ``torch.*``: matches ``torch.nn`` or ``torch.functional``, but not ``torch.nn.functional`` or ``torch``
-* ``torch*.**``: matches ``torch``, ``torchvision``, and all of their submodules
+* `torch.**`: matches `torch` and all its submodules, e.g. `torch.nn` and `torch.nn.functional`.
+* `torch.*`: matches `torch.nn` or `torch.functional`, but not `torch.nn.functional` or `torch`
+* `torch*.**`: matches `torch`, `torchvision`, and all of their submodules
 
 When specifying actions, you can pass multiple patterns, e.g.
 
@@ -642,19 +641,19 @@ exporter.mock("**", exclude=["torchvision.**"])
 
 
 A module will not match against this action if it matches any of the exclude patterns. In this example, we are mocking all modules except
-``torchvision`` and its submodules.
+`torchvision` and its submodules.
 
 When a module could potentially match against multiple actions, the first action defined will be taken.
 
 
-### ``torch.package`` sharp edges
+### `torch.package` sharp edges
 #### Avoid global state in your modules
 Python makes it really easy to bind objects and run code at module-level scope. This is generally fine—after all, functions and classes are bound to
 names this way. However, things become more complicated when you define an object at module scope with the intention of mutating it, introducing mutable
 global state.
 
 Mutable global state is quite useful—it can reduce boilerplate, allow for open registration into tables, etc. But unless employed very carefully, it can
-cause complications when used with ``torch.package``.
+cause complications when used with `torch.package`.
 
 Every {py:class}`PackageImporter` creates an independent environment for its contents. This is nice because it means we load multiple packages and ensure
 they are isolated from each other, but when modules are written in a way that assumes shared mutable global state, this behavior can create hard-to-debug
@@ -679,9 +678,9 @@ assert isinstance(my_class_instance, MyClass)  # works
 assert isinstance(my_class_instance, imported_MyClass)  # ERROR!
 ```
 
-In this example, ``MyClass`` and ``imported_MyClass`` are *not the same type*. In this specific example, ``MyClass`` and ``imported_MyClass`` have exactly the
-same implementation, so you might think it’s okay to consider them the same class. But consider the situation where ``imported_MyClass`` is coming from an
-older package with an entirely different implementation of ``MyClass`` — in that case, it’s unsafe to consider them the same class.
+In this example, `MyClass` and `imported_MyClass` are *not the same type*. In this specific example, `MyClass` and `imported_MyClass` have exactly the
+same implementation, so you might think it’s okay to consider them the same class. But consider the situation where `imported_MyClass` is coming from an
+older package with an entirely different implementation of `MyClass` — in that case, it’s unsafe to consider them the same class.
 
 Under the hood, each importer has a prefix that allows it to uniquely identify classes:
 
@@ -690,36 +689,36 @@ print(MyClass.__name__)  # prints "foo.MyClass"
 print(imported_MyClass.__name__)  # prints <torch_package_0>.foo.MyClass
 ```
 
-That means you should not expect ``isinstance`` checks to work when one of the arguments is from a package and the other is not. If you need this
+That means you should not expect `isinstance` checks to work when one of the arguments is from a package and the other is not. If you need this
 functionality, consider the following options:
 
 * Doing duck typing (just using the class instead of explicitly checking that it is of a given type).
-* Make the typing relationship an explicit part of the class contract. For example, you can add an attribute tag ``self.handler = "handle_me_this_way"`` and have client code check for the value of ``handler`` instead of checking the type directly.
+* Make the typing relationship an explicit part of the class contract. For example, you can add an attribute tag `self.handler = "handle_me_this_way"` and have client code check for the value of `handler` instead of checking the type directly.
 
 
-### How ``torch.package`` keeps packages isolated from each other
+### How `torch.package` keeps packages isolated from each other
 Each {py:class}`PackageImporter` instance creates an independent, isolated environment for its modules and objects. Modules in a package can only import
-other packaged modules, or modules marked ``extern``. If you use multiple {py:class}`PackageImporter` instances to load a single package, you will get
+other packaged modules, or modules marked `extern`. If you use multiple {py:class}`PackageImporter` instances to load a single package, you will get
 multiple independent environments that do not interact.
 
 This is achieved by extending Python’s import infrastructure with a custom importer. {py:class}`PackageImporter` provides the same core API as the
-``importlib`` importer; namely, it implements the ``import_module`` and ``__import__`` methods.
+`importlib` importer; namely, it implements the `import_module` and `__import__` methods.
 
 When you invoke :meth:`PackageImporter.import_module`, {py:class}`PackageImporter` will construct and return a new module, much as the system importer does.
-However, {py:class}`PackageImporter` patches the returned module to use ``self`` (i.e. that {py:class}`PackageImporter` instance) to fulfill future import
+However, {py:class}`PackageImporter` patches the returned module to use `self` (i.e. that {py:class}`PackageImporter` instance) to fulfill future import
 requests by looking in the package rather than searching the user’s Python environment.
 
 #### Mangling
-To avoid confusion (“is this ``foo.bar`` object the one from my package, or the one from my Python environment?”), {py:class}`PackageImporter` mangles the
-``__name__`` and ``__file__`` of all imported modules, by adding a *mangle prefix* to them.
+To avoid confusion (“is this `foo.bar` object the one from my package, or the one from my Python environment?”), {py:class}`PackageImporter` mangles the
+`__name__` and `__file__` of all imported modules, by adding a *mangle prefix* to them.
 
-For ``__name__``, a name like ``torchvision.models.resnet18`` becomes ``<torch_package_0>.torchvision.models.resnet18``.
+For `__name__`, a name like `torchvision.models.resnet18` becomes `<torch_package_0>.torchvision.models.resnet18`.
 
-For ``__file__``, a name like ``torchvision/models/resnet18.py`` becomes ``<torch_package_0>.torchvision/modules/resnet18.py``.
+For `__file__`, a name like `torchvision/models/resnet18.py` becomes `<torch_package_0>.torchvision/modules/resnet18.py`.
 
 Name mangling helps avoid inadvertent punning of module names between different packages, and helps you debug by making stack traces and print
 statements more clearly show whether they are referring to packaged code or not. For developer-facing details about mangling, consult
-``mangling.md`` in ``torch/package/``.
+`mangling.md` in `torch/package/`.
 
 
 ## API Reference

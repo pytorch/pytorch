@@ -4,7 +4,7 @@
 ## Overview
 
 [`Open Neural Network eXchange (ONNX)`](https://onnx.ai/) is an open standard
-format for representing machine learning models. The ``torch.onnx`` module captures the computation graph from a
+format for representing machine learning models. The `torch.onnx` module captures the computation graph from a
 native PyTorch {py:class}`torch.nn.Module` model and converts it into an
 [`ONNX graph`](https://github.com/onnx/onnx/blob/main/docs/IR.md).
 
@@ -65,7 +65,7 @@ the model and capture a static computation graph.
 As a consequence, the resulting graph has a couple limitations:
 
 * It does not record any control-flow, like if-statements or loops;
-* Does not handle nuances between ``training`` and ``eval`` mode;
+* Does not handle nuances between `training` and `eval` mode;
 * Does not truly handle dynamic inputs
 
 As an attempt to support the static tracing limitations, the exporter also supports TorchScript scripting
