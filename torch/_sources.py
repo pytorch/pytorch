@@ -2,6 +2,7 @@
 import ast
 import functools
 import inspect
+import operator
 from textwrap import dedent
 from typing import Any, NamedTuple, Optional
 
@@ -117,6 +118,27 @@ class ParsedDef(NamedTuple):
     file_lineno: int
 
 
+UNARY_OPS: dict = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+    ast.Not: operator.not_,
+    ast.Invert: operator.invert,
+}
+
+
+class UnaryOpCombiner(ast.NodeTransformer):
+    def visit_UnaryOp(self, node):
+        self.generic_visit(node)
+        if isinstance(node.operand, ast.Constant):
+            v = node.operand.value
+            if isinstance(v, (float, int, complex)):
+                return ast.copy_location(
+                    ast.Constant(value=UNARY_OPS[type(node.op)](v)), old_node=node
+                )
+
+        return node
+
+
 def parse_def(fn):
     sourcelines, file_lineno, filename = get_source_lines_and_file(
         fn, ErrorReport.call_stack()
@@ -125,6 +147,9 @@ def parse_def(fn):
     source = "".join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
+    py_ast = UnaryOpCombiner().visit(py_ast)
+    ast.fix_missing_locations(py_ast)
+
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError(
             f"Expected a single top-level function: {filename}:{file_lineno}"
