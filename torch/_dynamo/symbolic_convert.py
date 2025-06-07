@@ -23,6 +23,7 @@ The symbolic conversion process handles:
 This is a core part of TorchDynamo's tracing system that enables ahead-of-time
 optimization of PyTorch programs.
 """
+from __future__ import annotations
 
 import collections
 import collections.abc
@@ -337,7 +338,7 @@ def _step_logger():
 
 
 @contextlib.contextmanager
-def save_and_restart_speculation_log(tx: "InstructionTranslatorBase"):
+def save_and_restart_speculation_log(tx: InstructionTranslatorBase):
     # When reconstructing a generator after a graph break, we advance it until
     # it is fully exhausted. This process adds new entries to the speculation
     # log that were not previously observed. Without temporarily clearing the
@@ -355,7 +356,7 @@ def save_and_restart_speculation_log(tx: "InstructionTranslatorBase"):
 
 
 @contextlib.contextmanager
-def temporarely_allow_writes_to_output_graph(tx: "InstructionTranslatorBase"):
+def temporarely_allow_writes_to_output_graph(tx: InstructionTranslatorBase):
     try:
         tmp = tx.output.should_exit
         tx.output.should_exit = False
@@ -418,14 +419,14 @@ def stack_op(fn: typing.Callable[..., object]):
     fn_var = BuiltinVariable(fn)
 
     @functools.wraps(fn)
-    def impl(self: "InstructionTranslator", inst: Instruction):
+    def impl(self: InstructionTranslator, inst: Instruction):
         self.push(fn_var.call_function(self, self.popn(nargs), {}))
 
     return impl
 
 
 def _detect_and_normalize_assert_statement(
-    self: "InstructionTranslatorBase",
+    self: InstructionTranslatorBase,
     truth_fn: typing.Callable[[object], bool],
     push: bool,
 ):
@@ -627,7 +628,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         jump_inst.copy_positions(inst)
         self.output.add_output_instructions([jump_inst] + if_next + if_jump)
 
-    def inner(self: "InstructionTranslatorBase", inst: Instruction):
+    def inner(self: InstructionTranslatorBase, inst: Instruction):
         value: VariableTracker = self.pop()
         if (
             config.rewrite_assert_with_torch_assert
@@ -822,7 +823,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
 def break_graph_if_unsupported(*, push):
     def decorator(inner_fn):
         @functools.wraps(inner_fn)
-        def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
+        def wrapper(self: InstructionTranslatorBase, inst: Instruction):
             speculation = self.speculate()
             if speculation.failed:
                 assert speculation.reason is not None
@@ -872,7 +873,7 @@ def break_graph_if_unsupported(*, push):
             speculation.fail_and_restart_analysis()
 
         def handle_graph_break(
-            self: "InstructionTranslatorBase",
+            self: InstructionTranslatorBase,
             inst: Instruction,
             reason: GraphCompileReason,
         ):
@@ -3275,7 +3276,7 @@ class InstructionTranslatorBase(
 
 class InstructionTranslator(InstructionTranslatorBase):
     @staticmethod
-    def current_tx() -> "InstructionTranslator":
+    def current_tx() -> InstructionTranslator:
         return tls.current_tx
 
     @contextlib.contextmanager
