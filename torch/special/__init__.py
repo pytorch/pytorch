@@ -49,7 +49,7 @@ __all__ = [
     "psi",
     "round",
     "shifted_chebyshev_polynomial_t",
-    "shifted_chebyshev_polynomial_u",
+    "shifted_",
     "shifted_chebyshev_polynomial_v",
     "shifted_chebyshev_polynomial_w",
     "scaled_modified_bessel_k0",
@@ -1162,7 +1162,7 @@ Keyword args:
 chebyshev_polynomial_u = _add_docstr(
     _special.special_chebyshev_polynomial_u,
     r"""
-chebyshev_polynomial_u(input, n, \*, out=None) -> Tensor
+chebyshev_polynomial_u(input, n, *, out=None) -> Tensor
 
 Chebyshev polynomial of the second kind :math:`U_{n}(\text{input})`.
 
