@@ -39,7 +39,7 @@ requires = [
     "requests",
 ]
 # Use legacy backend to import local packages in setup.py
-build-backend = "setuptools.build_meta:__legacy__"
+build-backend = "setuptools.build_meta"
 
 
 [tool.black]
