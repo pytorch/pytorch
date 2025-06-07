@@ -103,6 +103,7 @@ ENV SSL_CERT_FILE=/opt/_internal/certs.pem
 # Install LLVM version
 COPY --from=openssl            /opt/openssl                          /opt/openssl
 COPY --from=base               /opt/python                           /opt/python
+COPY --from=base               /usr/local/lib/                       /usr/local/lib/
 COPY --from=base               /opt/_internal                        /opt/_internal
 COPY --from=base               /usr/local/bin/auditwheel             /usr/local/bin/auditwheel
 COPY --from=intel              /opt/intel                            /opt/intel
