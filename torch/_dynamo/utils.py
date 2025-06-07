@@ -2153,14 +2153,20 @@ def preserve_rng_state():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
         if torch.cuda.is_available():
-            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+            gpu_rng_state = torch.clone(torch.cuda.get_rng_state())
+        elif custom_backend_mod := getattr(torch, torch._C._get_privateuse1_backend_name(), None):
+            if getattr(custom_backend_mod, "is_available")():
+                gpu_rng_state = torch.clone(getattr(custom_backend_mod, "get_rng_state")())
     try:
         yield
     finally:
         with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+                torch.cuda.set_rng_state(gpu_rng_state)  # type: ignore[possibly-undefined]
+            elif custom_backend_mod := getattr(torch, torch._C._get_privateuse1_backend_name(), None):
+                if getattr(custom_backend_mod, "is_available")():
+                    getattr(custom_backend_mod, "set_rng_state")(gpu_rng_state)
 
 
 def is_jit_model(
