@@ -2091,6 +2091,7 @@ optim_db: list[OptimizerInfo] = [
         ),
         optim_error_inputs_func=optim_error_inputs_func_sgd,
         supported_impls=("foreach", "differentiable", "fused"),
+        has_capturable_arg=True,
         not_og_supported_flags=(
             "foreach",
             "differentiable",
