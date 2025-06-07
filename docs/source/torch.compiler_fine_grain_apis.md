@@ -1,4 +1,4 @@
-(torchdynamo-fine-grain-tracing)=
+(torchdynamo_fine_grain_tracing)=
 
 # TorchDynamo APIs for fine-grained tracing
 
