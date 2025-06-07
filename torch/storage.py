@@ -236,7 +236,13 @@ class _StorageBase:
         memo = memo.setdefault("torch", {})
         if self._cdata in memo:
             return memo[self._cdata]
-        new_storage = self.clone()
+
+        def storage_deepcopy():
+            if torch._utils.staging_copy_context.stager is not None:
+                return torch._utils.staging_copy_context.stager.stage_storage(self)
+            return self.clone()
+
+        new_storage = storage_deepcopy()
         memo[self._cdata] = new_storage
         return new_storage
 

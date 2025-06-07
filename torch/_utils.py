@@ -4,8 +4,11 @@ import functools
 import importlib
 import logging
 import sys
+import threading
 import traceback
 import warnings
+import abc
+
 from collections import defaultdict
 from types import ModuleType
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING
@@ -682,6 +685,21 @@ def _take_tensors(tensors, size_limit):
     for buf, _ in buf_dict.values():
         if len(buf) > 0:
             yield buf
+
+# This allows checkpointing to hook into torch.Tensor deepcopy to enable
+# cpu staging for storages.
+class _StateDictStager(abc.ABC):
+    @abc.abstractmethod
+    def stage_storage(self, storage):
+        pass
+
+# Thread-local context for activating storage staging
+class _StagingCopyContext(threading.local):
+    def __init__(self):
+        self.stager = None  # Will hold a StateDictStager instance
+        self.non_blocking = False
+
+staging_copy_context = _StagingCopyContext()
 
 
 # annotation decorator to get annotations in a way that is compatible
