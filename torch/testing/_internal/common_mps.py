@@ -385,7 +385,6 @@ if torch.backends.mps.is_available():
             "cholesky_solve": None,
             "cummax": None,
             "cummin": None,
-            "erfc": None,
             "frexp": None,
             "gcd": None,
             "geqrf": None,

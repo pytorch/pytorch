@@ -45,31 +45,30 @@ if torch._C._has_mkldnn:
 
     class MkldnnDeviceOpBase:
         def get_linear_transpose_weight(self, weight_node):
-            raise NotImplementedError(
-                "get_linear_transpose_weight should be implemented in the derived class."
-            )
+            raise NotImplementedError
 
-        def pack_conv_weight(self, graph, packed_weight_op, packed_weight_inputs):
-            raise NotImplementedError(
-                "pack_conv_weight should be implemented in the derived class."
-            )
+        def pack_conv_weight(
+            self,
+            graph,
+            is_transposed,
+            weight,
+            constant_args,
+            input_size,
+        ):
+            raise NotImplementedError
 
         def pack_linear_weight(
             self, graph, is_lp_weight, transpose_weight_node, batch_size
         ):
-            raise NotImplementedError(
-                "pack_linear_weight should be implemented in the derived class."
-            )
+            raise NotImplementedError
 
         def pack_linear(
             self, graph, is_lp_weight, batch_size, input, packed_weight_node, bias
         ):
-            raise NotImplementedError(
-                "pack_linear should be implemented in the derived class."
-            )
+            raise NotImplementedError
 
     class CpuMkldnnDeviceOp(MkldnnDeviceOpBase):
-        def get_linear_transpose_weight(self, weight_node) -> torch.fx.Node:
+        def get_linear_transpose_weight(self, weight_node):
             packed_weight_node = weight_node
             assert packed_weight_node.target == mkldnn._reorder_linear_weight
             transpose_weight_node = packed_weight_node.args[0]
@@ -77,15 +76,26 @@ if torch._C._has_mkldnn:
             return transpose_weight_node
 
         def pack_conv_weight(
-            self, graph, packed_weight_op, packed_weight_inputs
-        ) -> torch.fx.Node:
+            self,
+            graph,
+            is_transposed,
+            weight,
+            constant_args,
+            input_size,
+        ):
+            packed_weight_op = mkldnn._reorder_convolution_weight
+            if is_transposed:
+                packed_weight_op = mkldnn._reorder_convolution_transpose_weight
+
+            # mkldnn_reorder_conv_weight(self, padding, stride, dilation, groups, input_size)
+            packed_weight_inputs = (weight,) + tuple(constant_args) + (input_size,)
             return graph.create_node(
                 "call_function", packed_weight_op, args=packed_weight_inputs
             )
 
         def pack_linear_weight(
             self, graph, is_lp_weight, transpose_weight_node, batch_size
-        ) -> torch.fx.Node:
+        ):
             # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
             packed_weight_inputs = (
                 transpose_weight_node,
@@ -114,7 +124,7 @@ if torch._C._has_mkldnn:
 
         def pack_linear(
             self, graph, is_lp_weight, batch_size, input, packed_weight_node, bias
-        ) -> torch.fx.Node:
+        ):
             packed_linear_inputs: tuple[Any, ...] = (input, packed_weight_node)
             transpose_weight_node = packed_weight_node.args[0]
             if is_lp_weight or mkldnn._is_mkldnn_acl_supported() or V.aot_compilation:
@@ -129,24 +139,32 @@ if torch._C._has_mkldnn:
             )
 
     class XpuMkldnnDeviceOp(MkldnnDeviceOpBase):
-        def get_linear_transpose_weight(self, weight_node) -> torch.fx.Node:
+        def get_linear_transpose_weight(self, weight_node):
             transpose_weight_node = weight_node
             assert transpose_weight_node.target == aten.permute.default
             return transpose_weight_node
 
         def pack_conv_weight(
-            self, graph, packed_weight_op, packed_weight_inputs
-        ) -> torch.fx.Node:
-            return packed_weight_inputs[0]
+            self,
+            graph,
+            is_transposed,
+            weight,
+            constant_args,
+            input_size,
+        ):
+            assert not is_transposed, (
+                "'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
+            )
+            return weight
 
         def pack_linear_weight(
             self, graph, is_lp_weight, transpose_weight_node, batch_size
-        ) -> torch.fx.Node:
+        ):
             return transpose_weight_node
 
         def pack_linear(
             self, graph, is_lp_weight, batch_size, input, packed_weight_node, bias
-        ) -> torch.fx.Node:
+        ):
             packed_linear_inputs: tuple[Any, ...] = (
                 input,
                 packed_weight_node,
@@ -1321,23 +1339,24 @@ if torch._C._has_mkldnn:
             input_size = conv_node.args[0].meta.get("val").shape
             with graph.inserting_before(conv_node):
                 constant_args = [args[4], args[3], args[5], args[-1]]
-                packed_weight_op = mkldnn._reorder_convolution_weight
                 packed_conv_op = mkldnn._convolution_pointwise.default
                 if is_transposed:
                     constant_args.insert(1, args[-2])  # output_padding
-                    packed_weight_op = mkldnn._reorder_convolution_transpose_weight
                     packed_conv_op = mkldnn._convolution_transpose_pointwise.default
+
                 if not has_free_symbols(input_size):
-                    packed_weight_inputs = (
-                        (args[1],) + tuple(constant_args) + (input_size,)
-                    )
                     packed_weight_node = mkldnn_device_op.pack_conv_weight(
-                        graph, packed_weight_op, packed_weight_inputs
+                        graph,
+                        is_transposed,
+                        args[1],
+                        constant_args,
+                        input_size,
                     )
                 else:
                     assert not is_transposed
                     # For dynamic shape case, we need to pack weight in runtime.
                     packed_weight_node = args[1]
+
                 packed_conv_inputs = (
                     (args[0], packed_weight_node, args[2])
                     + tuple(constant_args)
