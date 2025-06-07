@@ -30,6 +30,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
     override_quantized_engine,
 )
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 """
@@ -1956,3 +1957,6 @@ def _get_prepped_for_calibration_model_helper(model, detector_set, example_input
     prepared_for_callibrate_model = model_report.prepare_detailed_calibration()
 
     return (prepared_for_callibrate_model, model_report)
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")
