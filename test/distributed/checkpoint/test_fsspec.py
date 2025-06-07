@@ -18,12 +18,15 @@ from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
+
+device = get_devtype()
 
 
 def with_temp_dir(
@@ -75,14 +78,23 @@ class TestFSSpec(ShardedTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @with_comms(init_rpc=False)
+    def backend(device) -> str:
+        if device.type == "cuda":
+            return "nccl"
+        elif device.type == "hpu":
+            return "hccl"
+        elif device.type == "xccl":
+            return "xccl"
+        else:
+            return "gloo"
+
+    @with_comms(backend=backend(device), init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
     @with_temp_dir
     def test_fsspec(self):
         CHECKPOINT_DIR = self.temp_dir
 
-        model = FSDP(MyTestModule().cuda())
+        model = FSDP(MyTestModule().to(device))
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
         model(torch.rand(8, 8, device=dist.get_rank())).sum().backward()
         optim.step()
@@ -99,7 +111,7 @@ class TestFSSpec(ShardedTensorTestBase):
                 planner=dcp.DefaultSavePlanner(),
             )
 
-        model_2 = FSDP(MyTestModule().cuda())
+        model_2 = FSDP(MyTestModule().to(device))
         optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
 
         with FSDP.summon_full_params(model):
@@ -108,13 +120,11 @@ class TestFSSpec(ShardedTensorTestBase):
                     model.named_parameters(), model_2.named_parameters()
                 ):
                     self.assertNotEqual(n_p1[1], n_p2[1])
-
         # now load the model and ensure the values are the same
         with FSDP.state_dict_type(model_2, StateDictType.SHARDED_STATE_DICT):
             state_dict = {
                 "model": model_2.state_dict(),
             }
-
             dcp.load(
                 state_dict=state_dict,
                 storage_reader=FsspecReader(CHECKPOINT_DIR),
@@ -149,9 +159,8 @@ class TestFSSpec(ShardedTensorTestBase):
             opt_at(optim, 0)["exp_avg_sq"], opt_at(optim_2, 0)["exp_avg_sq"]
         )
 
-    @with_comms(init_rpc=False)
+    @with_comms(backend=backend(device), init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
     @with_temp_dir
     def test_overwrite(self):
         t1, t2 = torch.randn(10), torch.randn(10)
