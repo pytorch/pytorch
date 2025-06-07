@@ -1957,6 +1957,8 @@ if HAS_CUDA:
                 self.assertEqual(foo(torch.tensor(3, device="cuda")), 3)
                 self.assertEqual(foo(torch.tensor(6, device="cuda")), 6)
 
+            print(captured_output)
+
             # NOTE: this test is named after incompatible ops, but is not skipping due to incompatible ops.
             # This should get fixed.
             FileCheck().check(

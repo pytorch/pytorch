@@ -981,7 +981,11 @@ def get_first_incompatible_cudagraph_node(
             # op and cudagraphifying the subgraphs.
             return node
 
-        if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
+        if (
+            (val := node.meta.get("val")) is not None
+            and isinstance(val, torch.Tensor)
+            and free_unbacked_symbols(val)
+        ):
             return node
 
     return None
