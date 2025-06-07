@@ -436,6 +436,9 @@ def ttir_to_functions(
         #   desc_ptr = tt.experimental_tensormap_create(desc_ptr, global_address, ...)
         # by re-assigning the ID associated with the desc_ptr object to a new
         # reindexed ID.
+        #
+        # Note: this is a partial fix - it's essentially a "partial" functionalization;
+        #       but note that it won't work properly with control flow or function calls.
         if name == "tt.experimental_tensormap_create":
             assert not result_ids
             assert len(operand_ids) > 0
