@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs, disable-error-code="attr-defined, valid-type"
-from collections import namedtuple
 import functools
 import logging
 import random
+from collections import namedtuple
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -12,6 +12,7 @@ from torch._inductor.codegen.rocm.ck_tile_template import CKTileTemplate
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.codegen.rocm.rocm_template import ArgInfo
 from torch._inductor.ir import Buffer, Layout
+from torch.utils._ordered_set import OrderedSet
 
 from ...utils import IndentedBuffer
 
@@ -21,7 +22,9 @@ log = logging.getLogger(__name__)
 
 CKTileChoice = namedtuple(
     "CKTileChoice",
-    ["op", "k_batch"],)
+    ["op", "k_batch"],
+)
+
 
 def is_static_int(number):
     import sympy
@@ -934,16 +937,15 @@ class CKTileGemmTemplate(CKTileTemplate):
         LDC = Y.get_stride()[0 if Y.get_stride()[1] == 1 else 1]
 
         return M, N, K, LDA, LDB, LDC
-    
+
     def get_runtime_arg_info(self) -> list[ArgInfo]:
         return [ArgInfo("kBatch", "int32_t")]
 
     def get_runtime_arg_values(self, **kwargs: Any) -> list[Any]:
         # maybe_append_choice kwarg for k_batch must match the name of the argument
-        arg_names = {arg.name for arg in self.get_runtime_arg_info()}
+        arg_names = OrderedSet([arg.name for arg in self.get_runtime_arg_info()])
         if not arg_names.issubset(kwargs):
             raise ValueError(
-                "Missing runtime arguments: "
-                + ", ".join(arg_names - kwargs.keys())
+                "Missing runtime arguments: " + ", ".join(arg_names - kwargs.keys())
             )
         return [kwargs[k] for k in arg_names]
