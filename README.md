@@ -392,7 +392,8 @@ ccmake build  # or cmake-gui build
 
 #### Using pre-built images
 
-You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
+You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+ 
+(requires the [Nvidia Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) being installed when using Linux distributions).
 
 ```bash
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
