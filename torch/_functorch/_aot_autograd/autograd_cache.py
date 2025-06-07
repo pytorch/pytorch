@@ -875,6 +875,7 @@ def sanitize_gm_for_cache(gm: torch.fx.GraphModule):
         "meta",  # metadata used by export
         "compile_subgraph_reason",  # Used by dynamo only for logging, no change in inductor/autograd behavior
         "_param_name_to_source",  # Encapsulated by aot_config.aot_autograd_arg_pos_to_source
+        "_backend_id",
     )
     saved_fields = {}
     for field in IGNORED_FIELDS:
@@ -913,7 +914,12 @@ class BundledAOTAutogradCacheArtifact(
     @override
     def after_deserialization(self) -> BundledAOTAutogradCacheEntry:
         entry = pickle.loads(self.content)
-        return entry
+        compiled_fn = entry.wrap_post_compile([], entry.sanitized_aot_config, {"cudagraphs": False})
+
+        # TODO: this is completely incorrect lol because of flat args
+        def forward(*runtime_args: tuple[Any]):
+            return compiled_fn(list(runtime_args))
+        return forward
 
 
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
@@ -1068,7 +1074,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 symints = AOTAutogradCache._filter_backed_symints(args)
                 if cache_key is not None:
                     aot_config.cache_info = AOTAutogradCacheInfo(
-                        cache_key, time.time_ns(), forward_symints=symints
+                        cache_key, time.time_ns(), forward_symints=symints,
                     )
                 compiled_fn = dispatch_and_compile()
 
@@ -1200,10 +1206,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             CacheArtifactManager.record_artifact(
                 AOTAutogradCacheArtifact.type(), key, content
             )
-            if config.bundled_autograd_cache:
+            if config.bundled_autograd_cache and entry.sanitized_aot_config.precompile_backend_id is not None:
                 # TODO: the key here isn't correct
+                precompile_key = entry.sanitized_aot_config.precompile_backend_id
                 PrecompileContext.record_artifact(
-                    BundledAOTAutogradCacheArtifact.type(), key, content
+                    BundledAOTAutogradCacheArtifact.type(), precompile_key, content
                 )
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
