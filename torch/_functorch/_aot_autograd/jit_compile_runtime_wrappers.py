@@ -1,12 +1,34 @@
 # mypy: allow-untyped-defs
 """
-Functions in this module do most of the "work" of AOTAutograd.
-An aot_dispatch_* function:
-- Takes in the input flat_fn, flat_args, and some metadata
-- Runs a set of pre compile wrappers (e.g. argument deduping)
-- Runs the actual compiler
-- Wraps the returned callable in a set of post compile wrappers
-- Returns the wrapped callable and metadata.
+Core AOT compilation and dispatch infrastructure for PyTorch functorch autograd.
+
+This module contains the primary orchestration logic for AOT (Ahead-of-Time) compilation
+in PyTorch's functorch system. It handles the complete compilation pipeline from function
+tracing through compilation to runtime wrapper generation, serving as the central dispatch
+mechanism for AOT autograd operations.
+
+Core AOT Dispatch Pipeline:
+1. Input Processing: Handles function flattening, argument preprocessing, and metadata extraction
+2. Pre-compilation Wrappers: Applies argument deduplication, synthetic base handling, and other optimizations
+3. Graph Compilation: Dispatches to appropriate compilation backend (autograd vs. base graphs)
+4. Post-compilation Wrappers: Applies runtime safety checks, mutation handling, and output processing
+5. Function Return: Provides compiled callable with associated metadata for execution
+
+Key Functions:
+- aot_dispatch_*: Main dispatch functions for different compilation scenarios (export, autograd, base)
+- Wrapper orchestration: Manages pre/post compilation wrapper chains
+- Graph compilation dispatch: Routes to appropriate compilation backends
+- Cache integration: Interfaces with AOT autograd caching systems
+- Configuration management: Handles AOTConfig sanitization and validation
+
+Compilation Variants:
+- Export dispatch: Specialized for torch.export workflows with graph-only requirements
+- Autograd dispatch: Full autograd-aware compilation with backward pass support
+- Base dispatch: Inference-only compilation without autograd machinery
+- JIT integration: Runtime compilation and caching mechanisms
+
+This module represents the main entry point for AOT compilation workflows and coordinates
+the complex interaction between tracing, compilation, caching, and runtime execution systems.
 """
 
 import copy
