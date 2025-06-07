@@ -1,12 +1,14 @@
+```{eval-rst}
 .. _cuda_environment_variables:
+```
 
-CUDA Environment Variables
-==========================
+# CUDA Environment Variables
+
 For more information on CUDA runtime environment variables, see `CUDA Environment Variables <https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#env-vars>`_.
 
 **PyTorch Environment Variables**
 
-.. list-table::
+```{list-table}
   :header-rows: 1
 
   * - Variable
@@ -29,10 +31,11 @@ For more information on CUDA runtime environment variables, see `CUDA Environmen
     - If set to ``0``, enables fallback to record streams-based synchronization behavior in NCCL.
   * - ``TORCH_CUDNN_V8_API_DEBUG``
     - If set to ``1``, sanity check whether cuDNN V8 is being used.
+```
 
 **CUDA Runtime and Libraries Environment Variables**
 
-.. list-table::
+```{list-table}
   :header-rows: 1
 
   * - Variable
@@ -53,3 +56,4 @@ For more information on CUDA runtime environment variables, see `CUDA Environmen
     - Can be set to a file path for an errata filter that can be passed to cuDNN to avoid specific engine configs, used primarily for debugging or to hardcode autotuning.
   * - ``NVIDIA_TF32_OVERRIDE``
     - If set to ``0``, disables TF32 globally across all kernels, overriding all PyTorch settings.
+```
