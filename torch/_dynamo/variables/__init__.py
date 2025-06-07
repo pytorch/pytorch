@@ -66,6 +66,7 @@ from .functions import (
     TMADescriptorVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    CommunicationFunctionVariable,
 )
 from .higher_order_ops import (
     FunctionalCallVariable,

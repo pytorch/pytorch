@@ -43,6 +43,7 @@ from .variables import (
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    CommunicationFunctionVariable,
 )
 
 
@@ -325,6 +326,9 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch.sparse_csc_tensor": SkipFunctionVariable,
     "torch.sparse_csr_tensor": SkipFunctionVariable,
     "torch.sparse_compressed_tensor": SkipFunctionVariable,
+    # Specially handle system-level communication functions 
+    "torch.distributed.distributed_c10d.send": CommunicationFunctionVariable,
+    "torch.distributed.distributed_c10d.recv": CommunicationFunctionVariable,
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
     # avoid skipping user defined modules in distributed unit tests
     "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
