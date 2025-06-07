@@ -239,6 +239,7 @@ class ComposabilityTest(MultiProcessTestCase):
         pp_mesh = device_mesh["pp"]
         pp_group = device_mesh["pp"].get_group()
 
+        # test changes here
         # create "entire model"
         total_layers = 8
         full_model = nn.ModuleList([MLPModuleEven(dim) for _ in range(total_layers)])
