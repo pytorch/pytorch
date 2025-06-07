@@ -39,10 +39,10 @@ Untyped storages are somewhat independent of the tensors that are built on them.
 with different dtypes or shape can point to the same storage.
 It also implies that a tensor storage can be changed, as the following example shows:
 
-> ```python
-> >>> t = torch.ones(3)
-> >>> s0 = t.untyped_storage()
-> >>> s0
+```python
+>>> t = torch.ones(3)
+>>> s0 = t.untyped_storage()
+>>> s0
 >  0
 >  0
 >  128
@@ -56,8 +56,8 @@ It also implies that a tensor storage can be changed, as the following example s
 >  128
 >  63
 > [torch.storage.UntypedStorage(device=cpu) of size 12]
-> >>> s1 = s0.clone()
-> >>> s1.fill_(0)
+>>> s1 = s0.clone()
+>>> s1.fill_(0)
 >  0
 >  0
 >  0
@@ -71,8 +71,8 @@ It also implies that a tensor storage can be changed, as the following example s
 >  0
 >  0
 > [torch.storage.UntypedStorage(device=cpu) of size 12]
-> >>> # Fill the tensor with a zeroed storage
-> >>> t.set_(s1, storage_offset=t.storage_offset(), stride=t.stride(), size=t.size())
+>>> # Fill the tensor with a zeroed storage
+>>> t.set_(s1, storage_offset=t.storage_offset(), stride=t.stride(), size=t.size())
 > tensor([0., 0., 0.])
 > ```
 
