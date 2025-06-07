@@ -10,7 +10,6 @@ AOTITorchError aoti_torch_mps_set_arg(
     AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     auto t = tensor_handle_to_tensor_pointer(tensor);
-    std::cout << "aoti_torch_mps_set_arg: " << static_cast<void*>(tensor) << std::endl;
     if (t == nullptr) {
       throw std::runtime_error("Tensor is null.");
     }

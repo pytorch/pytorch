@@ -27,8 +27,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_memcpy(
     size_t data_size,
     uint8_t* constants_start);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_print(AtenTensorHandle tensor);
-
 #ifdef __cplusplus
 } // extern "C"
 #endif
