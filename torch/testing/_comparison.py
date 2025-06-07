@@ -1593,6 +1593,13 @@ def assert_close(
     "You can find detailed upgrade instructions in https://github.com/pytorch/pytorch/issues/61844.",
     category=FutureWarning,
 )
+def assert_fp8_close(actual, expected, *, rtol=1e-1, atol=1e-2, **kwargs):
+    actual32  = actual.to(torch.float32)
+    expected32 = expected.to(torch.float32)
+    torch.testing.assert_close(
+        actual32, expected32, rtol=rtol, atol=atol, **kwargs
+    )
+
 def assert_allclose(
     actual: Any,
     expected: Any,
