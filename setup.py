@@ -1348,6 +1348,9 @@ def main():
     if EMIT_BUILD_WARNING:
         print_box(build_update_message)
 
+'''
+A comment to test
+'''
 
 if __name__ == "__main__":
     main()
