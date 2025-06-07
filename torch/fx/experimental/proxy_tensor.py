@@ -813,12 +813,7 @@ def proxy_call(
 
     if func is torch.ops.aten.is_nonzero.default:
         with proxy_mode:
-            from .symbolic_shapes import guard_size_oblivious
-
-            if guard_size_oblivious(args[0].numel() != 1):  # type: ignore[attr-defined]
-                raise RuntimeError(
-                    "Boolean value of Tensor with more than one value is ambiguous"
-                )
+            torch._check(args[0].numel() == 1, lambda: "Boolean value of Tensor with more than one value is ambiguous")  # type: ignore[attr-defined]
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 
     tracer = proxy_mode.tracer

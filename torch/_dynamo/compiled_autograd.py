@@ -534,6 +534,17 @@ class AutogradCompilerInstance:
                     )
                     result.name = make_unique(node.name)
                     value_remap[node] = result
+                elif node.op == "call_module":
+                    name = node.target
+                    qualname = self.fx_tracer.get_fresh_qualname(name)
+                    setattr(
+                        self.fx_tracer.root, qualname, getattr(ctx._bw_module, name)
+                    )
+                    result = self.fx_tracer.graph.node_copy(
+                        node, lambda n: value_remap[n]
+                    )
+                    result.target = qualname
+                    value_remap[node] = result
                 else:
                     raise AssertionError("shouldn't get here")
 

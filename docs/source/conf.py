@@ -999,7 +999,6 @@ coverage_ignore_functions = [
     "to_node",
     "wrap_node",
     "sym_sqrt",
-    "sym_ite",
     # torch.fx.experimental.symbolic_shapes
     "bind_symbols",
     "cast_symbool_to_symint_guardless",
@@ -2283,7 +2282,6 @@ coverage_ignore_classes = [
     "UnsynchronizedAccessError",
     # torch.cuda.memory
     "MemPool",
-    "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",

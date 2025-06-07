@@ -51,7 +51,7 @@ import torch._prims as prims  # noqa: F401
 from torch.utils import _pytree as pytree
 
 
-from packaging import version
+from torch._vendor.packaging import version
 
 from torch.testing._internal.opinfo.core import (  # noqa: F401
     L,

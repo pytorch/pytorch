@@ -519,6 +519,23 @@ void OSSProxyExecutor::get_output_info_from_serialized(
         }
         break;
       }
+      case c10::TypeKind::OptionalType: {
+        auto inner_type =
+            schema_return_type->castRaw<at::OptionalType>()->getElementType();
+        if (inner_type->kind() == c10::TypeKind::TensorType) {
+          TORCH_CHECK(serialized_output_type == "as_optional_tensor");
+          if (serialized_output_val.begin().key() == "as_none") {
+            outputs.emplace_back(output_index, DynamicArgType::NoneType, 1);
+          } else if (serialized_output_val.begin().key() == "as_tensor") {
+            outputs.emplace_back(output_index, DynamicArgType::TensorType, 1);
+          } else {
+            TORCH_CHECK(
+                false,
+                "Only as_none or as_tensor is supported for as_optional_tensor");
+          }
+        }
+        break;
+      }
       default: {
         TORCH_CHECK(
             false,
@@ -797,7 +814,6 @@ void OSSProxyExecutor::call_function(
   const auto& schema_returns = schema.returns();
 
   TORCH_CHECK(op_kernel->outputs_.size() == stack.size());
-  // TODO: what about optional outputs? This assert may not hold
   TORCH_CHECK(stack.size() == schema_returns.size());
 
   int index = 0;
@@ -816,6 +832,24 @@ void OSSProxyExecutor::call_function(
         at::Tensor* tensor =
             tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
         *tensor = t;
+      }
+    } else if (
+        schema_return.type()->kind() == c10::TypeKind::OptionalType &&
+        schema_return.type()
+                ->castRaw<at::OptionalType>()
+                ->getElementType()
+                ->kind() == c10::TypeKind::TensorType) {
+      if (op_kernel->outputs_[index].arg_type == DynamicArgType::TensorType) {
+        auto stack_tensor = stack[index++].toOptional<at::Tensor>();
+        at::Tensor* tensor =
+            tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
+        if (stack_tensor.has_value()) {
+          *tensor = stack_tensor.value();
+        } else {
+          TORCH_CHECK(false, "Expected tensor, got None");
+        }
+      } else {
+        continue;
       }
     } else {
       TORCH_CHECK(
