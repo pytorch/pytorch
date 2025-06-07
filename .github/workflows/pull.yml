@@ -437,27 +437,6 @@ jobs:
       allow-reuse-old-whl: true
     secrets: inherit
 
-  unstable-linux-jammy-cuda12_6-py3_10-gcc11-sm89-build-xfail:
-    # A version of the build that sets a larger number of jobs for a build.  May
-    # OOM
-    name: unstable-linux-jammy-cuda12.6-py3.10-gcc11-sm89-xfail
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.6-py3.10-gcc11-sm89
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc11
-      cuda-arch-list: 8.9
-      max-jobs: 4
-      # Doesn't actually run tests, but need this in order to prevent the build
-      # from being skipped
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-        ]}
-      allow-reuse-old-whl: true
-    secrets: inherit
-
   linux-jammy-cuda12_6-py3_10-gcc11-sm89-test:
     name: linux-jammy-cuda12.6-py3.10-gcc11-sm89
     uses: ./.github/workflows/_linux-test.yml
