@@ -3423,7 +3423,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=cudnn_enabled):
                 torch.autograd.gradcheck(conv2d_depthwise, (x, weight))
 
-    @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_conv_thnn_nhwc(self, device, dtype):
         def helper(
@@ -3856,7 +3855,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     # Test that faster algorithms used for inference produce the same results
     # Validates depthwise3x3 bug reported in https://github.com/pytorch/pytorch/issues/60176
-    @onlyCPU
     @dtypes(torch.float)
     def test_conv2d_no_grad(self, device, dtype):
         for batch in [1, 2, 3]:
