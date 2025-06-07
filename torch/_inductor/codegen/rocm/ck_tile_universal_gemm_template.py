@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs, disable-error-code="attr-defined, valid-type"
+from collections import namedtuple
 import functools
 import logging
 import random
@@ -15,6 +16,10 @@ from ...utils import IndentedBuffer
 
 log = logging.getLogger(__name__)
 
+
+CKTileChoice = namedtuple(
+    "CKTileChoice",
+    ["op", "k_batch"],)
 
 def is_static_int(number):
     import sympy
@@ -739,6 +744,7 @@ class CKTileGemmTemplate(CKTileTemplate):
         The primary entry point for the code rendering process used in this template.
         """
         epilogue_nodes = kwargs.get("epilogue_nodes", None)
+        k_batch = kwargs.get("k_batch", None)
         assert epilogue_nodes is None or 0 == len(epilogue_nodes)
         template_buffer_node = kwargs.get("template_buffer_node", None)
         if template_buffer_node is not None:
@@ -849,7 +855,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             instance_namespace=op.name(),
             version_comment=version_comment,
             rendered_dispatch=render_dispatch(op.pipeline, op.name()),
-            k_batch=self.k_batch,
+            k_batch=k_batch,
         )
 
     def gen_ops(self):
@@ -900,10 +906,18 @@ class CKTileGemmTemplate(CKTileTemplate):
         )
         ops = template.gen_ops()
         for op in ops:
-            template.maybe_append_choice(
-                choices,
-                op=op,
-            )
+            for k_batch in template.k_batch_choices():
+                template.maybe_append_choice(
+                    choices,
+                    op=op,
+                    k_batch=k_batch,
+                )
+
+    def k_batch_choices(self):
+        """
+        Returns a list of k_batch choices for the template.
+        """
+        return [1]
 
     def size_args(self):
         """
