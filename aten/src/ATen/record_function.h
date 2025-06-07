@@ -427,9 +427,8 @@ struct TORCH_API RecordFunction {
   // before functions initialize RecordFunction members and call
   // start callbacks
   using schema_ref_t = std::reference_wrapper<const c10::FunctionSchema>;
-  void before(const char* name, int64_t sequence_nr = -1);
-  void before(std::string name, int64_t sequence_nr = -1);
   void before(schema_ref_t schema, int64_t sequence_nr = -1);
+  void before(std::string_view name, int64_t sequence_nr = -1);
 
   // Sets node ID for distributed profiling
   static void setDefaultNodeId(int64_t defaultNodeId);
