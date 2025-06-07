@@ -1,3 +1,43 @@
+"""
+Eager-mode functional transformations for PyTorch functorch.
+
+This module provides the core implementation of functional transformations that operate
+directly on PyTorch tensors in eager mode, without requiring compilation or graph
+manipulation. These transformations enable composable functional programming patterns
+for automatic differentiation, function transformation, and mathematical operations.
+
+Core Transformations:
+- grad: Computes gradients of scalar-valued functions
+- vjp: Vector-Jacobian product for reverse-mode automatic differentiation  
+- jvp: Jacobian-vector product for forward-mode automatic differentiation
+- jacfwd/jacrev: Jacobian computation using forward/reverse mode
+- hessian: Second-order derivatives (Hessian matrix)
+- linearize: Function linearization for optimization and analysis
+- functionalize: Converts mutation-based operations to functional equivalents
+
+Key Features:
+- Composable transformations that can be arbitrarily nested
+- Support for both forward and reverse mode automatic differentiation
+- Efficient handling of higher-order derivatives
+- Integration with PyTorch's autograd system
+- Memory-efficient implementations using functional tensor representations
+- Support for functions with auxiliary outputs (has_aux parameter)
+
+Functional Programming Support:
+- Pure functional interfaces without side effects
+- Argument specification via argnums for partial derivatives
+- Tree-structured input/output handling via PyTree utilities
+- Nested transformation support with proper level tracking
+
+Internal Infrastructure:
+- Tensor wrapping/unwrapping for gradient tracking
+- Nesting level management for composed transformations
+- Functional tensor integration for mutation handling
+- Autograd integration and optimization
+
+This module serves as the foundation for functional programming in PyTorch, enabling
+mathematical operations that are compositional, differentiable, and efficient.
+"""
 # mypy: ignore-errors
 
 # Copyright (c) Facebook, Inc. and its affiliates.
