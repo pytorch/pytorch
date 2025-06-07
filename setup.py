@@ -1295,9 +1295,11 @@ def main():
     package_data = {
         "torch": torch_package_data,
     }
+    exclude_package_data = {}
 
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data
+        exclude_package_data["torchgen"] = ["*.py[co]"]
     else:
         # no extensions in BUILD_LIBTORCH_WHL mode
         extensions = []
@@ -1311,6 +1313,7 @@ def main():
         entry_points=entry_points,
         install_requires=install_requires,
         package_data=package_data,
+        exclude_package_data=exclude_package_data,
         include_package_data=True,
     )
     if EMIT_BUILD_WARNING:

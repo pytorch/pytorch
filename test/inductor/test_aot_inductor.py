@@ -6095,7 +6095,6 @@ GPU_TEST_FAILURES = {
     "test_scaled_dot_product_efficient_attention": fail_gpu(("xpu",)),
     # No fft implementation for XPU yet.
     "test_fft_c2c": fail_gpu(("xpu",), is_skip=True),
-    "test_stft": fail_gpu(("xpu",)),
 }
 
 
