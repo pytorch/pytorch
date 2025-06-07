@@ -87,7 +87,7 @@ bool file_exists(std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc {};
+  struct stat rc{};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
@@ -251,6 +251,11 @@ bool aoti_torch_grad_mode_is_enabled() {
 
 void aoti_torch_grad_mode_set_enabled(bool enabled) {
   return c10::GradMode::set_enabled(enabled);
+}
+
+size_t aoti_torch_dtype_element_size(int32_t dtype) {
+  auto scalar_type = static_cast<at::ScalarType>(dtype);
+  return c10::elementSize(scalar_type);
 }
 
 AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {

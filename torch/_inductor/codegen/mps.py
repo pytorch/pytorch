@@ -789,8 +789,12 @@ class MetalKernel(SIMDKernel):
                 for header in self.headers:
                     code.writeline(f"#include <c10/metal/{header}.h>")
             else:
-                headers = [f"#include <c10/metal/{header}.h>" for header in self.headers]
-                header_contents = _embed_headers(headers, [Path(__file__).parent.parent.parent / "include"], set())
+                headers = [
+                    f"#include <c10/metal/{header}.h>" for header in self.headers
+                ]
+                header_contents = _embed_headers(
+                    headers, [Path(__file__).parent.parent.parent / "include"], OrderedSet()
+                )
                 code.writeline(header_contents)
 
             if self.inside_reduction:

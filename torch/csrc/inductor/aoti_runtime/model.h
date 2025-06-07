@@ -345,7 +345,7 @@ class AOTInductorModelBase {
       auto size = this->constant_shape(i);
       auto stride = this->constant_stride(i);
 #ifdef USE_MPS
-      auto offset = this->constant_offset(i) + constants_internal_offset[i];
+      auto offset = this->constant_offset(i) + (constants_internal_offset[i] / aoti_torch_dtype_element_size(dtype));
 #else
       auto offset = this->constant_offset(i);
 #endif
