@@ -1,5 +1,6 @@
-torch.utils.deterministic
-=========================
+# torch.utils.deterministic
+
+```{eval-rst}
 .. py:module:: torch.utils.deterministic
 .. currentmodule:: torch.utils.deterministic
 
@@ -26,3 +27,4 @@ torch.utils.deterministic
         * :func:`torch.empty_strided`
         * :func:`torch.empty_permuted`
         * :func:`torch.empty_like`
+```

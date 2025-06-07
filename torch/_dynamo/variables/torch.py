@@ -133,6 +133,7 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 
 constant_fold_functions_need_guards = [
     torch.cuda.current_device,
+    torch.cuda.is_initialized,
 ]
 
 constant_fold_functions = [

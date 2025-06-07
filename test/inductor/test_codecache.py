@@ -27,7 +27,11 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
-from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
+from torch._inductor.custom_graph_pass import (
+    CustomGraphModulePass,
+    CustomGraphPass,
+    get_hash_for_files,
+)
 from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -53,6 +57,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MULTIGPU,
     HAS_TRITON,
+    patch_inductor_backend,
     requires_gpu,
     requires_triton,
 )
@@ -2164,6 +2169,42 @@ class TestFxGraphCacheHashing(TestCase):
 
         custom_pass = TestCustomGraphPass()
         with config.patch({"post_grad_custom_pre_pass": custom_pass}):
+            custom_pass._uuid = "1"
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+            custom_pass._uuid = "2"
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+            gm = torch.fx.GraphModule({}, torch.fx.Graph())
+            pickler = FxGraphCachePickler(gm)
+
+            self.assertEqual(
+                pickler.dumps(details1),
+                pickler.dumps(details2),
+            )
+            self.assertNotEqual(
+                pickler.dumps(details1),
+                pickler.dumps(details3),
+            )
+
+    def test_hash_custom_backend_pass(self):
+        """
+        Test CustomGraphModulePass usage.
+        """
+
+        class TestCustomGraphModulePass(CustomGraphModulePass):
+            def __init__(self):
+                self._uuid = None
+
+            def __call__(self, gm: torch.fx.GraphModule) -> None:
+                return None
+
+            def uuid(self) -> Optional[Union[bytes, str]]:
+                return self._uuid
+
+        custom_pass = TestCustomGraphModulePass()
+        with patch_inductor_backend("cpu", custom_pass=custom_pass):
             custom_pass._uuid = "1"
             details1 = FxGraphHashDetails(None, [], {}, [])
             details2 = FxGraphHashDetails(None, [], {}, [])
