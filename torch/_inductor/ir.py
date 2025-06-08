@@ -90,6 +90,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     do_bench_using_profiling,
+    dtype_from_size,
     get_dtype_size,
     get_kernel_metadata,
     GPU_ALIGN_BYTES,
@@ -1494,6 +1495,31 @@ class Reduction(Loops):
                 ranges=ranges,
             )
 
+        if (
+            reduction_type == "sum"
+            and src_dtype in (torch.float, torch.bfloat16, torch.float16)
+            and isinstance(reduction_numel, Integer)
+            and reduction_numel > 1_000_000
+        ):
+            split = 1024
+            log.info(
+                "Using cascade_sum style reduction for large tensor: numel=%s, split=%s",
+                reduction_numel,
+                split,
+            )
+            return cls.create_multilayer(
+                device,
+                dst_dtype,
+                src_dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                reduction_type,
+                split,
+                ReductionHint.OUTER,
+                input_node,
+            )
+
         # triton doesn't support reduce to single element well, so break it up
         hint, split = cls.num_splits(
             device,
@@ -1678,9 +1704,10 @@ class Reduction(Loops):
                 return loader(new_index, reindex([indices]))
 
             if need_mask:
+                index_dtype = dtype_from_size(reduction_numel)
                 mask = ops.lt(
-                    ops.index_expr(indices, torch.int32),
-                    ops.index_expr(reduction_numel, torch.int32),
+                    ops.index_expr(indices, index_dtype),
+                    ops.index_expr(reduction_numel, index_dtype),
                 )
                 return ops.masked(mask, body, default)
             else:
