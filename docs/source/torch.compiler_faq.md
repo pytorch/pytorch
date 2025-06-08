@@ -59,7 +59,7 @@ For the vast majority of models you probably don’t and you can use
 full graphs are necessary and you can can ensure a full graph by simply
 running `torch.compile(..., fullgraph=True)`. These situations include:
 
-- Large scale training runs, such as \$250K+ that require pipeline parallelism
+- Large scale training runs, such as $250K+ that require pipeline parallelism
   and other advanced sharding strategies.
 - Inference optimizers like [TensorRT](https://github.com/pytorch/TensorRT)
   or [AITemplate](https://github.com/facebookincubator/AITemplate) that
