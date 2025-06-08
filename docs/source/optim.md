@@ -57,10 +57,10 @@ This means that `model.base`'s parameters will use a learning rate of `1e-2`, wh
 Finally a momentum of `0.9` will be used for all parameters.
 
 ```{note}
-    You can still pass options as keyword arguments. They will be used as
-    defaults, in the groups that didn't override them. This is useful when you
-    only want to vary a single option, while keeping all others consistent
-    between parameter groups.
+You can still pass options as keyword arguments. They will be used as
+defaults, in the groups that didn't override them. This is useful when you
+only want to vary a single option, while keeping all others consistent
+between parameter groups.
 ```
 
 Also consider the following example related to the distinct penalization of parameters.
@@ -89,8 +89,8 @@ this group.
 All optimizers implement a {py:func}`~Optimizer.step` method, that updates the
 parameters. It can be used in two ways:
 
-`optimizer.step()`
-------------------
+``optimizer.step()``
+~~~~~~~~~~~~~~~~~~~~
 
 This is a simplified version supported by most optimizers. The function can be
 called once the gradients are computed using e.g.
@@ -106,8 +106,9 @@ for input, target in dataset:
     loss.backward()
     optimizer.step()
 ```
-`optimizer.step(closure)`
--------------------------
+
+``optimizer.step(closure)``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Some optimization algorithms such as Conjugate Gradient and LBFGS need to
 reevaluate the function multiple times, so you have to pass in a closure that
@@ -126,12 +127,12 @@ for input, target in dataset:
     optimizer.step(closure)
 ```
 
-
 (optimizer-algorithms)=
 ## Base class
 
 ```{eval-rst}
 .. autoclass:: Optimizer
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
