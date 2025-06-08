@@ -458,11 +458,6 @@ class TestControlFlow(TestCase):
         expected_grads = torch.autograd.grad(result_exp_flatten, params_flatten if params_exp is None else params_exp_flatten, grad_exp_init, retain_graph=True)
         grad_init = [torch.ones_like(el) for el in result_flatten]
         grads = torch.autograd.grad(result_flatten, params_flatten, grad_init, retain_graph=True)
-        # print('=' * 80)
-        # print('\n'.join([f'Layer {i // 2} grad: {grads[i].view(-1)[:5]} {grads[i].view(-1)[-5:]} {grads[i].sum().item():2f}' for i in [0, 2, 4]]))
-        # print('-' * 80)
-        # print('\n'.join([f'Layer {i // 2} grad: {expected_grads[i].view(-1)[:5]} {expected_grads[i].view(-1)[-5:]} {expected_grads[i].sum().item():2f}' for i in [0, 2, 4]]))
-        # print('=' * 80)
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
 
     def test_cond_no_trace(self):
@@ -2928,18 +2923,11 @@ class GraphModule(torch.nn.Module):
             
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    # @parametrize("reverse", [False, True])
-    @parametrize("reverse", [False])
-    # @parametrize("compile_mode", ["none", "eager", "compile"])
-    @parametrize("compile_mode", ["compile"])
-    # @parametrize("compile_mode", ["eager"])
-    # @parametrize("n_layers", [1, 2, 3, 5])
-    @parametrize("n_layers", [3])
-    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("device", [torch.device("cuda")])
-    # @parametrize("autograd", [False, True])
-    @parametrize("autograd", [True])
-    def test_scan_closure_RNNScanList_multiple_layers(self, reverse, compile_mode, n_layers, device, autograd):
+    @parametrize("compile_mode", ["none", "eager", "compile"])
+    @parametrize("n_layers", [1, 2, 3, 5])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_RNNScanList_multiple_layers(self, compile_mode, n_layers, device, autograd):
         torch._dynamo.config.capture_scalar_outputs = True
         batch_size = 2
         seq_len = 5
@@ -2967,7 +2955,6 @@ class GraphModule(torch.nn.Module):
                     all_out.append(input)
 
                 return torch.stack(all_out, dim=1)
-                # return inputs_sequence + initial[0].unsqueeze(1)
         
         class RNNScanList(torch.nn.Module):
             def __init__(self, op):
@@ -2986,20 +2973,16 @@ class GraphModule(torch.nn.Module):
                         h_curr_li = h_prev_li + update
                         hs_list[li] = h_curr_li
                         input = h_curr_li
-                    # return [t.clone() for t in hs_list], input.clone()
                     return [t for t in hs_list], input + 0.
 
                 _, all_outputs_scan = self.op(step, initial, input_sequence, dim=1)
                 return all_outputs_scan.transpose(0, 1)
-                # return input_sequence + initial[0].unsqueeze(1)
             
         def run_model(model, initial_hs, inputs):
             for param in model.parameters():
                 if param.grad is not None:
                     param.grad.zero_()
 
-            # current_initial_hs = [h.detach().clone().requires_grad_(h.requires_grad) for h in initial_hs]
-            # current_inputs = inputs.detach().clone().requires_grad_(inputs.requires_grad)
             current_initial_hs = initial_hs
             current_inputs = inputs
 
@@ -3015,35 +2998,189 @@ class GraphModule(torch.nn.Module):
         model = RNNScanList(scan_fct).to(device)
         model.load_state_dict(fake_state_dict)
         result = run_model(model, initial_hs_template, inputs_template)
-        # model_loop = RNNLoop().to(device)
-        # model_loop.load_state_dict(fake_state_dict)
-        # result_loop = run_model(model_loop, initial_hs_template, inputs_template)
+        model_loop = RNNLoop().to(device)
+        model_loop.load_state_dict(fake_state_dict)
+        result_loop = run_model(model_loop, initial_hs_template, inputs_template)
         self.assertEqual(result, result_exp)
-        # self.assertEqual(result, result_loop)
+        self.assertEqual(result, result_loop)
 
         if autograd:
             result_flat = pytree.tree_leaves(result)
             result_exp_flat = pytree.tree_leaves(result_exp)
-            # result_loop_flat = pytree.tree_leaves(result_loop)
+            result_loop_flat = pytree.tree_leaves(result_loop)
             exp_grad_mask = [
                 True if r.requires_grad else False for r in result_exp_flat
             ]
             self.check_autograd(
                 [r for r, m in zip(result_flat, exp_grad_mask) if m],
                 [r for r, m in zip(result_exp_flat, exp_grad_mask) if m],
+                # Does not work
                 # params=list(model.parameters()),
-                # params_exp=list(model_fake.parameters())
+                # params_exp=list(model_fake.parameters()),
+
+                # Works
+                # params=(inputs_template,),
+                # params_exp=(inputs_template,),
+
+                # Does not work
                 params=(inputs_template,*list(model.parameters())),
                 params_exp=(inputs_template,*list(model_fake.parameters()))
+                
+            )
+            self.check_autograd(
+                [r for r, m in zip(result_flat, exp_grad_mask) if m],
+                [r for r, m in zip(result_loop_flat, exp_grad_mask) if m],
+                # Does not work
+                # params=list(model.parameters()),
+                # params_exp=list(model_loop.parameters()),
+
+                # Works
                 # params=(inputs_template,),
                 # params_exp=(inputs_template,)
+
+                # Does not work
+                params=(inputs_template,*list(model.parameters())),
+                params_exp=(inputs_template,*list(model_loop.parameters()))
             )
-            # self.check_autograd(
-            #     [r for r, m in zip(result_flat, exp_grad_mask) if m],
-            #     [r for r, m in zip(result_loop_flat, exp_grad_mask) if m],
-            #     params=list(model.parameters()),
-            #     params_exp=list(model_loop.parameters())
-            # )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile"])
+    @parametrize("n_layers", [1, 2, 3, 5])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_RNNScanList_multiple_layers_no_additional(self, compile_mode, n_layers, device, autograd):
+        torch._dynamo.config.capture_scalar_outputs = True
+        batch_size = 2
+        seq_len = 5
+        feature_dim = 10
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        
+        class Linear(torch.nn.Module):
+            def __init__(self, *args):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    torch.ones(*args)
+                )
+                self.bias = torch.nn.Parameter(torch.ones(args[1]))
+            
+            def forward(self, x, W, b):
+                return x @ W + b
+
+        class RNNLoop(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Linear(feature_dim*2, feature_dim) for _ in range(n_layers)])
+                self.num_layers = n_layers
+
+            def forward(self, initial, inputs_sequence):
+                B, T, _ = inputs_sequence.shape
+                hs_list = initial
+                all_out = []
+                for t in range(T):
+                    input = inputs_sequence[:, t, :]
+                    for li, layer in enumerate(self.layers):
+                        input_concat = torch.cat((hs_list[li], input), dim=-1)
+                        update = layer(input_concat, *list(layer.parameters()))
+                        hs_list[li] = hs_list[li] + update
+                        input = hs_list[li]
+                    all_out.append(input)
+
+                return torch.stack(all_out, dim=1)
+        
+        class RNNScanList(torch.nn.Module):
+            def __init__(self, op):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Linear(feature_dim*2, feature_dim) for _ in range(n_layers)])
+                self.num_layers = n_layers
+                self.op = op
+
+            def forward(self, initial, input_sequence):
+                def step(carry, input):
+                    hs_list = carry[:]
+                    for li, layer in enumerate(self.layers):
+                        h_prev_li = hs_list[li]
+                        input_concat = torch.cat((h_prev_li, input), dim=-1)
+                        update = layer(input_concat, *list(layer.parameters()))
+                        h_curr_li = h_prev_li + update
+                        hs_list[li] = h_curr_li
+                        input = h_curr_li
+                    return [t for t in hs_list], input + 0.
+
+                _, all_outputs_scan = self.op(step, initial, input_sequence, dim=1)
+                return all_outputs_scan.transpose(0, 1)
+            
+        def run_model(model, initial_hs, inputs):
+            for param in model.parameters():
+                if param.grad is not None:
+                    param.grad.zero_()
+
+            current_initial_hs = initial_hs
+            current_inputs = inputs
+
+            out = model(current_initial_hs, current_inputs)
+            return out
+
+        initial_hs_template = [torch.zeros(batch_size, feature_dim, requires_grad=True, dtype=torch.float32).to(device) for _ in range(n_layers)]
+        inputs_template = torch.randn(batch_size, seq_len, feature_dim, requires_grad=True, dtype=torch.float32).to(device)
+        
+        initial_hs_template_fake = [i.detach().clone().requires_grad_(inputs_template.requires_grad) for i in initial_hs_template]
+        inputs_template_fake = inputs_template.detach().clone().requires_grad_(inputs_template.requires_grad)
+        
+        initial_hs_template_loop = [i.detach().clone().requires_grad_(inputs_template.requires_grad) for i in initial_hs_template]
+        inputs_template_loop = inputs_template.detach().clone().requires_grad_(inputs_template.requires_grad)
+        
+        model_fake = RNNScanList(_fake_scan).to(device)
+        fake_state_dict = model_fake.state_dict()
+        result_exp = run_model(model_fake, initial_hs_template_fake, inputs_template_fake)
+        model = RNNScanList(scan_fct).to(device)
+        model.load_state_dict(fake_state_dict)
+        result = run_model(model, initial_hs_template, inputs_template)
+        model_loop = RNNLoop().to(device)
+        model_loop.load_state_dict(fake_state_dict)
+        result_loop = run_model(model_loop, initial_hs_template_loop, inputs_template_loop)
+        self.assertEqual(result, result_exp)
+        self.assertEqual(result, result_loop)
+
+        if autograd:
+            result_flat = pytree.tree_leaves(result)
+            result_exp_flat = pytree.tree_leaves(result_exp)
+            result_loop_flat = pytree.tree_leaves(result_loop)
+            exp_grad_mask = [
+                True if r.requires_grad else False for r in result_exp_flat
+            ]
+            self.check_autograd(
+                [r for r, m in zip(result_flat, exp_grad_mask) if m],
+                [r for r, m in zip(result_exp_flat, exp_grad_mask) if m],
+
+                # Does not work
+                # params=list(model.parameters()),
+                # params_exp=list(model_fake.parameters()),
+
+                # Works
+                # params=(inputs_template,),
+                # params_exp=(inputs_template,),
+
+                # Does not work
+                params=(inputs_template,*list(model.parameters())),
+                params_exp=(inputs_template_fake,*list(model_fake.parameters()))
+            )
+            self.check_autograd(
+                [r for r, m in zip(result_flat, exp_grad_mask) if m],
+                [r for r, m in zip(result_loop_flat, exp_grad_mask) if m],
+
+                # Does not work
+                # params=list(model.parameters()),
+                # params_exp=list(model_loop.parameters()),
+
+                # Works
+                # params=(inputs_template,),
+                # params_exp=(inputs_template,),
+
+                # Does not work
+                params=(inputs_template,*list(model.parameters())),
+                params_exp=(inputs_template_loop,*list(model_loop.parameters()))
+            )
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda

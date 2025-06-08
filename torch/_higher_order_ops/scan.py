@@ -585,11 +585,12 @@ class ScanAutogradOp(torch.autograd.Function):
         with torch._C._AutoDispatchBelowAutograd():
             # 2.) Compute the all carries, the last carry and all outputs using ``combine_fn_with_carry_checkpoint``
             c_T, carries_ys = _extract_carry_and_out(
-                scan_op(
+                # scan_op(
+                generic_scan(
                     combine_fn_with_carry_checkpoint,
                     init,
                     xs,
-                    additional_inputs,
+                    additional_inputs=additional_inputs,
                 ),
                 num_leaves_init,
             )
@@ -751,8 +752,8 @@ class ScanAutogradOp(torch.autograd.Function):
                 *sliced_ys,
                 *fw_init,
                 *fw_xs_slice,
-                # *additional_inputs,
-                *additional_inputs_fw,
+                *additional_inputs,
+                # *additional_inputs_fw,
             )
 
         args_single_step_bw = construct_args_single_step_bw()
@@ -795,6 +796,7 @@ class ScanAutogradOp(torch.autograd.Function):
         # The ``combine_fn_bw_wrapped`` receives the
         # initial_g_additional_inputs and the last carry as the ``bwd_init`` and the
         # gradients of the outputs (g_ys), as well as the fw_carries and the fw_xs of the forward as the ``bwd_xs``
+        # TODO: When using the generic_scan in the backward, the tests pass
         # gradients = scan_op(
         gradients = generic_scan(
             combine_fn_bw_grad_accumulation_gm,
