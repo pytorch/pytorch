@@ -1,7 +1,5 @@
 # mypy: allow-untyped-defs
 """
-Runtime wrapper infrastructure for AOT (Ahead-of-Time) compiled functions in PyTorch functorch.
-
 This module provides comprehensive runtime wrapper capabilities that handle the complex task of
 bridging between PyTorch's high-level tensor operations and compiled function execution. The
 wrappers manage input/output processing, mutation handling, memory management, and subclass
@@ -28,7 +26,7 @@ Primary Components:
 - Subclass-aware tensor processing pipelines
 
 This module is critical for maintaining PyTorch's tensor semantics and memory behavior while
-enabling efficient compiled execution through AOT compilation systems.
+enabling efficient compilation.
 """
 import builtins
 import collections
