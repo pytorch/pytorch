@@ -13,7 +13,7 @@
 3. Each pair of forward and backward graph are (optionally) min-cut
    partitioned to save the minimal state between forward and backward.
 4. The forward and backward pairs are wrapped in `autograd.function` modules.
-5. Usercode calling`.backward()` still triggers eager’s autograd engine,
+5. User code calling `.backward()` still triggers eager’s autograd engine,
    which runs each *compiled backward* graph as if it were one op, also running
    any non-compiled eager ops’ `.backward()` functions.
 
