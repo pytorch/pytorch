@@ -8,7 +8,7 @@ and memory management.
 
 Key Components:
 - Graph partitioning algorithms for forward/backward pass separation
-- Activation checkpointing strategies using min-cut and knapsack algorithms  
+- Activation checkpointing strategies using min-cut and knapsack algorithms
 - Memory optimization through selective recomputation
 - Operator classification and fusion optimization
 - Symbolic computation handling for dynamic shapes
