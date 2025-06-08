@@ -5114,6 +5114,20 @@ class TestMemPool(TestCase):
         )
         return allocator, dummy_allocator
 
+    def test_mempool_empty_cache(self):
+        torch.cuda.empty_cache()
+        pool = torch.cuda.MemPool()
+        x = torch.empty(1024, 1024, device="cuda")
+
+        with torch.cuda.use_mem_pool(pool):
+            y = torch.empty(1024, 1024, device="cuda")
+
+        del y
+        del x
+        del pool
+        segments = torch.cuda.memory._snapshot()["segments"]
+        self.assertTrue(len(segments) > 0, "expected more than one segment")
+
     def test_mempool_empty_cache_inactive(self):
         torch.cuda.empty_cache()
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
