@@ -1,3 +1,30 @@
+"""
+Operation Lowering Framework for PyTorch Inductor.
+
+This module implements the core lowering infrastructure that converts PyTorch operations
+(primarily ATen operations) into Inductor's intermediate representation (IR). It serves
+as the bridge between high-level PyTorch operations and low-level, optimizable IR
+constructs that can be compiled to efficient backend code.
+
+Key Components:
+- Lowering Registration: Decorators and utilities for registering operation lowerings
+- Operation Implementations: Lowering functions for ATen operators to IR nodes
+- Broadcasting and Type Promotion: Utilities for handling tensor broadcasting semantics
+- Layout Constraints: System for managing memory layout requirements
+- Fallback Management: Handling operations not yet lowered to Inductor IR
+
+The lowering system supports:
+- Automatic broadcasting and type promotion following PyTorch semantics
+- Dynamic shape handling with symbolic computations
+- Memory layout optimization and constraint propagation
+- Elementwise operation fusion and optimization
+- Backend-specific optimizations through IR transformations
+- Foreach operation batching for improved performance
+
+This module acts as the translation layer in Inductor's compilation pipeline,
+converting PyTorch's eager execution model into an optimizable intermediate
+representation suitable for code generation across different backends.
+"""
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
