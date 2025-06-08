@@ -35,9 +35,8 @@ dev-discuss](https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-co
 For an in-depth overview, read the sections below, watch the deep-dive video,
 and check out the dev-discuss topics.
 
-> - [Dynamo deep-dive video](https://www.youtube.com/watch?v=egZB5Uxki0I)
-> - [dev-discuss topics](https://dev-discuss.pytorch.org/search?q=TorchDynamo%20order%3Alatest)
-
+- [Dynamo deep-dive video](https://www.youtube.com/watch?v=egZB5Uxki0I)
+- [dev-discuss topics](https://dev-discuss.pytorch.org/search?q=TorchDynamo%20order%3Alatest)
 ## Dynamo Internals
 
 **Author**: [Jason Ansel](https://github.com/jansel) and [Kaichao You](https://github.com/youkaichao)
