@@ -67,6 +67,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   if [[ $(uname -m) == "aarch64" ]]; then
     conda_install "openblas==0.3.29=*openmp*"
+  else
+    pip_install mkl==2024.2.0
+    pip_install mkl-static==2024.2.0
+    pip_install mkl-include==2024.2.0
   fi
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
@@ -83,10 +87,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 
-  # Install PyTorch mkl deps, as per https://github.com/pytorch/pytorch README
-  if [[ $(uname -m) != "aarch64" ]]; then
-    pip_install mkl-static==2024.2.0 mkl-include==2024.2.0
-  fi
 
   if [ -n "$DOCS" ]; then
     apt-get update
