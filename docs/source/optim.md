@@ -9,8 +9,7 @@
 To use {py:mod}`torch.optim` you have to construct an optimizer object that will hold
 the current state and will update the parameters based on the computed gradients.
 
-Constructing it
-^^^^^^^^^^^^^^^
+### Constructing it
 
 To construct an {py:class}`Optimizer` you have to give it an iterable containing the
 parameters (all should be {py:class}`~torch.nn.Parameter` s) or named parameters
@@ -30,8 +29,7 @@ optimizer = optim.SGD(model.named_parameters(), lr=0.01, momentum=0.9)
 optimizer = optim.Adam([('layer0', var1), ('layer1', var2)], lr=0.0001)
 ```
 
-Per-parameter options
-^^^^^^^^^^^^^^^^^^^^^
+### Per-parameter options
 
 {py:class}`Optimizer` s also support specifying per-parameter options. To do this, instead
 of passing an iterable of {py:class}`~torch.autograd.Variable` s, pass in an iterable of
