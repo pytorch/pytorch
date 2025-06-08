@@ -10,12 +10,9 @@ and operations during graph compilation. It handles symbolic execution of:
 - Type constructors (int, float, str, list, dict, etc.)
 - Built-in operators and methods
 - Special Python constructs (super, hasattr, etc.)
-- Iterator and sequence operations
-- Dictionary and list comprehensions
 
 Key classes:
 - BuiltinVariable: Tracks built-in functions and handles their execution
-- ConstDictVariable: Handles constant dictionary creation and operations
 - TypeVariable: Manages type constructor calls and type checking
 - SuperVariable: Handles super() calls in class hierarchies
 
