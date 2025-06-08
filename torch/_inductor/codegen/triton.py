@@ -1,3 +1,45 @@
+"""
+Triton GPU Code Generation Backend for PyTorch Inductor.
+
+This module implements the Triton code generation backend for PyTorch's Inductor compiler,
+targeting GPU execution with high-performance kernel generation. Triton is a Python-like
+domain-specific language for writing efficient GPU kernels that automatically handles
+memory coalescing, shared memory usage, and other GPU-specific optimizations.
+
+Key Components:
+- TritonKernel: Main kernel generation class for Triton GPU code
+- TritonOverrides: GPU-specific operation implementations and optimizations
+- TritonScheduling: Scheduling system optimized for GPU execution patterns
+- BlockParameters: Block-level optimization and memory access patterns
+- CooperativeReductionWorkspaceCache: Optimized reductions across thread blocks
+
+Triton Backend Features:
+- Automatic memory coalescing and bandwidth optimization
+- Block-level parallel programming with automatic scheduling
+- Shared memory management and synchronization
+- Support for mixed-precision computation (FP16, BF16, FP32)
+- Integration with CUDA cooperative groups and tensor cores
+- Automatic kernel parameter tuning and optimization
+
+GPU Optimization Strategies:
+- Block and grid-level parallelization strategies
+- Memory access pattern optimization for high bandwidth utilization
+- Loop unrolling and vectorization for computational efficiency
+- Reduction operation optimization with shared memory
+- Support for irregular memory access patterns through block pointers
+- Integration with GPU-specific features (tensor cores, async memory ops)
+
+Code Generation Features:
+- Python-like syntax with automatic GPU kernel generation
+- Type inference and automatic casting for mixed-precision workloads  
+- CSE (Common Subexpression Elimination) optimization
+- Integration with autotuning for optimal performance parameters
+- Support for dynamic shapes and symbolic computation
+
+This module serves as the primary GPU backend for Inductor, generating
+high-performance Triton kernels that leverage modern GPU architectures
+for maximum computational throughput and memory bandwidth utilization.
+"""
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
