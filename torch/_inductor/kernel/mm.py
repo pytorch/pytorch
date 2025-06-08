@@ -616,10 +616,13 @@ def tuned_mm(mat1, mat2, *, layout=None):
     device_type = ir.get_device_type(mat1)
     name = "mm"
 
+    b = layout.size[0]
+
     # below is for getting an overview logging info of inductor mms
-    counters["aten_mm_info"][f"aten.mm_{m}_{n}_{k}"] += 1
+    counters["aten_mm_info"][f"aten.mm_{b}_{m}_{n}_{k}"] += 1
     log.info(
-        "Tuned aten.mm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        "Tuned aten.mm: b=%s, m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        b,
         m,
         n,
         k,
@@ -792,10 +795,13 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         mat1, mat2, layout=layout, out_dtype=torch.int32
     )
 
+    b = layout.size[0]
+
     # below is for getting an overview logging info of inductor mms
-    counters["aten_mm_info"][f"aten._int_mm_{m}_{n}_{k}"] += 1
+    counters["aten_mm_info"][f"aten._int_mm_{b}_{m}_{n}_{k}"] += 1
     log.info(
-        "Tuned aten._int_mm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        "Tuned aten._int_mm: b=%s, m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        b,
         m,
         n,
         k,
@@ -840,10 +846,13 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
 
+    b = layout.size[0]
+
     # below is for getting an overview logging info of inductor mms
-    counters["aten_mm_info"][f"aten.addmm_{m}_{n}_{k}"] += 1
+    counters["aten_mm_info"][f"aten.addmm_{b}_{m}_{n}_{k}"] += 1
     log.info(
-        "Tuned aten.addmm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        "Tuned aten.addmm: b=%s, m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        b,
         m,
         n,
         k,
@@ -1035,10 +1044,14 @@ def tuned_scaled_mm(
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
+
+    b = layout.size[0]
+
     # below is for getting an overview logging info of inductor mms
-    counters["aten_mm_info"][f"aten._scaled_mm.default_{m}_{n}_{k}"] += 1
+    counters["aten_mm_info"][f"aten._scaled_mm.default_{b}_{m}_{n}_{k}"] += 1
     log.info(
-        "Tuned aten._scaled_mm.default: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        "Tuned aten._scaled_mm.default: b=%s, m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        b,
         m,
         n,
         k,

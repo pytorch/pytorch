@@ -178,10 +178,13 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
 
+    b = layout.size[0]
+
     # below is for getting an overview logging info of inductor mms
-    counters["aten_mm_info"][f"aten.bmm_{m}_{n}_{k}"] += 1
+    counters["aten_mm_info"][f"aten.bmm_{b}_{m}_{n}_{k}"] += 1
     log.info(
-        "Tuned aten.bmm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        "Tuned aten.bmm: b=%s, m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        b,
         m,
         n,
         k,
@@ -240,10 +243,13 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 
+    b = layout.size[0]
+
     # below is for getting an overview logging info of inductor mms
-    counters["aten_mm_info"][f"aten.baddbmm_{m}_{n}_{k}"] += 1
+    counters["aten_mm_info"][f"aten.baddbmm_{b}_{m}_{n}_{k}"] += 1
     log.info(
-        "Tuned aten.baddbmm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, inp=%s, output_layout=%s",
+        "Tuned aten.baddbmm: b=%s, m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, inp=%s, output_layout=%s",
+        b,
         m,
         n,
         k,
