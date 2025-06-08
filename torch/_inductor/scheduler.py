@@ -1,3 +1,37 @@
+"""
+Kernel Scheduling and Fusion System for PyTorch Inductor.
+
+This module implements the core scheduling infrastructure that orchestrates the compilation
+and execution of computational kernels in PyTorch's Inductor compiler. It handles kernel
+fusion optimization, memory management, and efficient execution ordering to maximize
+performance across different backend targets.
+
+Key Components:
+- Scheduler: Main scheduling class that coordinates kernel compilation and execution
+- BaseSchedulerNode: Base class for all schedulable computation nodes
+- SchedulerNode: Individual computation nodes (pointwise, reduction operations)
+- FusedSchedulerNode: Fused kernels combining multiple operations
+- ExternKernelSchedulerNode: External library calls (cuDNN, cuBLAS, MKL-DNN)
+- ForeachKernelSchedulerNode: Batched operations for improved efficiency
+
+Scheduling Features:
+- Kernel Fusion: Automatically fuses compatible operations to reduce memory bandwidth
+- Memory Planning: Optimizes buffer allocation and reuse for minimal memory footprint
+- Loop Ordering: Determines optimal loop nest structures for cache efficiency
+- Parallelization: Manages thread-level and data-level parallelism strategies
+- Backend Selection: Routes operations to appropriate backends (Triton, C++, CUDA)
+
+Optimization Strategies:
+- Operation fusion based on memory access patterns and compute intensity
+- Buffer lifetime analysis for memory reuse opportunities
+- Load balancing across available compute resources
+- Minimization of kernel launch overhead through batching
+- Integration with hardware-specific optimizations (CUDA graphs, vectorization)
+
+The scheduler operates as the orchestration layer in Inductor's compilation pipeline,
+transforming the IR representation into an optimized execution plan that maximizes
+hardware utilization while minimizing memory traffic and synchronization overhead.
+"""
 from __future__ import annotations
 
 import collections
