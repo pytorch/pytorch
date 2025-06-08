@@ -920,7 +920,9 @@ TEST(TensorTest, Arange) {
 }
 
 TEST(TensorTest, PrettyPrintTensorDataContainer) {
-  { ASSERT_EQ(c10::str(torch::detail::TensorDataContainer(1.1)), "1.1"); }
+  {
+    ASSERT_EQ(c10::str(torch::detail::TensorDataContainer(1.1)), "1.1");
+  }
   {
     ASSERT_EQ(
         c10::str(torch::detail::TensorDataContainer({1.1, 2.2})), "{1.1, 2.2}");

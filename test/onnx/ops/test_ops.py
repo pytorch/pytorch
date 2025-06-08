@@ -414,5 +414,106 @@ class SymbolicOpsTest(common_utils.TestCase):
             )
 
 
+class NativeOnnxOpsTest(common_utils.TestCase):
+    def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
+        onnx_program = torch.onnx.export(
+            model,
+            args,
+            kwargs=kwargs,
+            dynamo=True,
+            fallback=False,
+            verbose=False,
+            **options,
+        )
+        assert onnx_program is not None
+        return onnx_program
+
+    def test_onnx_ops_can_be_decomposed_to_aten(self):
+        input_data = torch.rand(2, 3, 4, 8)
+        position_ids_data = torch.randint(0, 50, (2, 3)).long()
+        sin_cache_data = torch.rand(50, 4)
+        cos_cache_data = torch.rand(50, 4)
+
+        class Model(torch.nn.Module):
+            def forward(
+                self, input_data, cos_cache_data, sin_cache_data, position_ids_data
+            ):
+                return torch.onnx.ops.rotary_embedding(
+                    input_data,
+                    cos_cache_data,
+                    sin_cache_data,
+                    position_ids_data,
+                    interleaved=True,
+                )
+
+        model = Model()
+
+        ep = torch.export.export(
+            model,
+            (input_data, cos_cache_data, sin_cache_data, position_ids_data),
+        )
+        self.assertIn(
+            "onnx.RotaryEmbedding.opset23",
+            [str(node.target) for node in ep.graph.nodes],
+        )
+        # The program can be decomposed into aten ops so it is fully compatible with the PyTorch ecosystem
+        aten_decomped = ep.run_decompositions(torch.onnx.ops.aten_decompositions())
+        self.assertNotIn(
+            "onnx.RotaryEmbedding.opset23",
+            [str(node.target) for node in aten_decomped.graph.nodes],
+        )
+        torch.testing.assert_close(
+            aten_decomped.module()(
+                input_data, cos_cache_data, sin_cache_data, position_ids_data
+            ),
+            model(input_data, cos_cache_data, sin_cache_data, position_ids_data),
+        )
+
+    def test_rotary_embedding(self):
+        input_data = torch.rand(2, 3, 4, 8)
+        position_ids_data = torch.randint(0, 50, (2, 3)).long()
+        sin_cache_data = torch.rand(50, 4)
+        cos_cache_data = torch.rand(50, 4)
+
+        # Eager mode is supported. Autograd is also supported so users can choose to use the op
+        # in development and production
+        result = torch.onnx.ops.rotary_embedding(
+            input_data, cos_cache_data, sin_cache_data, position_ids_data
+        )
+        self.assertEqual(result.shape, input_data.shape)
+
+        class Model(torch.nn.Module):
+            def forward(
+                self, input_data, cos_cache_data, sin_cache_data, position_ids_data
+            ):
+                return torch.onnx.ops.rotary_embedding(
+                    input_data,
+                    cos_cache_data,
+                    sin_cache_data,
+                    position_ids_data,
+                    interleaved=True,
+                )
+
+        model = Model()
+
+        # Dynamic shapes are supported
+        dynamic_shapes = {
+            "input_data": {0: torch.export.Dim.DYNAMIC},
+            "cos_cache_data": None,
+            "sin_cache_data": None,
+            "position_ids_data": {0: torch.export.Dim.DYNAMIC},
+        }
+
+        onnx_program = self.export(
+            model,
+            (input_data, cos_cache_data, sin_cache_data, position_ids_data),
+            dynamic_shapes=dynamic_shapes,
+            opset_version=23,
+        )
+        self.assertEqual(onnx_program.model.opset_imports[""], 23)
+        self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
+        print(onnx_program)
+
+
 if __name__ == "__main__":
     common_utils.run_tests()

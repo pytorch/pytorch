@@ -181,6 +181,22 @@ class MPSBasicTests(TestCase):
         )
 
 
+class MPSBasicTestsAOTI(TestCase):
+    def test_add_mps(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
+        m = M().to("mps")
+        res2 = m(*inp)
+        ep = torch.export.export(m, inp)
+        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
+        m = torch._inductor.aoti_load_package(path)
+        res = m(*inp)
+        assert torch.allclose(res, res2)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

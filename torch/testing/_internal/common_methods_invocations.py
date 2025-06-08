@@ -51,7 +51,7 @@ import torch._prims as prims  # noqa: F401
 from torch.utils import _pytree as pytree
 
 
-from packaging import version
+from torch._vendor.packaging import version
 
 from torch.testing._internal.opinfo.core import (  # noqa: F401
     L,
@@ -776,9 +776,13 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
 
 def error_inputs_arange(op, device, **kwargs):
-    yield ErrorInput(SampleInput(0, args=(3, 0)), error_type=RuntimeError, error_regex='step must be nonzer')
-    yield ErrorInput(SampleInput(0, args=(-3, 2)), error_type=RuntimeError, error_regex='bound inconsistent with step sign')
-    yield ErrorInput(SampleInput(0, args=(3, -2)), error_type=RuntimeError, error_regex='bound inconsistent with step sign')
+    yield ErrorInput(SampleInput(0, args=(3, 0)), error_type=RuntimeError, error_regex='step must be nonzero')
+    yield ErrorInput(SampleInput(0, args=(-3, 2)), error_type=RuntimeError,
+                     error_regex='upper bound and lower bound inconsistent with step sign')
+    yield ErrorInput(SampleInput(0, args=(3, -2)), error_type=RuntimeError,
+                     error_regex='upper bound and lower bound inconsistent with step sign')
+    yield ErrorInput(SampleInput(1549556900, args=(1549556828, 1989724)), error_type=RuntimeError,
+                     error_regex='upper bound and lower bound inconsistent with step sign')
     yield ErrorInput(SampleInput(0, args=(float('inf'), 2)), error_type=RuntimeError, error_regex='unsupported range')
     yield ErrorInput(SampleInput(float('-inf'), args=(1, 2)), error_type=RuntimeError, error_regex='unsupported range')
 
@@ -3266,17 +3270,17 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
     test_args = [
         ([1, 2],),
         (slice(0, 3),),
-        ([slice(0, 3), 1],),
-        ([[0, 2, 3], [1, 3, 3], [0, 0, 2]],),
-        ([[0, 0, 3], [1, 1, 3], [0, 0, 2]],),
-        ([slice(None), slice(None), [0, 3]],),
-        ([slice(None), [0, 3], slice(None)],),
-        ([[0, 3], slice(None), slice(None)],),
-        ([[0, 3], [1, 2], slice(None)],),
-        ([[0, 3], ],),
-        ([[0, 3], slice(None)],),
-        ([[0, 3], Ellipsis],),
-        ([[0, 2, 3], [1, 3, 3], torch.LongTensor([0, 0, 2])],),
+        ((slice(0, 3), 1),),
+        (([0, 2, 3], [1, 3, 3], [0, 0, 2]),),
+        (([0, 0, 3], [1, 1, 3], [0, 0, 2]),),
+        ((slice(None), slice(None), [0, 3]),),
+        ((slice(None), [0, 3], slice(None)),),
+        (([0, 3], slice(None), slice(None)),),
+        (([0, 3], [1, 2], slice(None)),),
+        (([0, 3], ),),
+        (([0, 3], slice(None)),),
+        (([0, 3], Ellipsis),),
+        (([0, 2, 3], [1, 3, 3], torch.LongTensor([0, 0, 2])),),
         (index_variable(2, S, device=device),),
         (mask_not_all_zeros((S,)),),
     ]
@@ -3284,7 +3288,7 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
     for args in test_args:
         yield SampleInput(make_arg((S, S, S)), args=args)
 
-    yield SampleInput(make_arg((S, S, S, S)), args=([slice(None), [0, 1], slice(None), [0, 1]],))
+    yield SampleInput(make_arg((S, S, S, S)), args=((slice(None), [0, 1], slice(None), [0, 1]),))
 
 def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)

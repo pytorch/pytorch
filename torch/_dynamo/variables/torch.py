@@ -133,6 +133,7 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 
 constant_fold_functions_need_guards = [
     torch.cuda.current_device,
+    torch.cuda.is_initialized,
 ]
 
 constant_fold_functions = [
@@ -919,6 +920,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # TODO: some of the other symbolic_shapes special tools can also get this treatment too
                 return variables.ConstantVariable.create(
                     torch.fx.experimental.symbolic_shapes.guard_or_false(expr.sym_num)
+                )
+            elif isinstance(expr, ConstantVariable):
+                return expr
+
+        @register(torch.fx.experimental.symbolic_shapes.statically_known_false)
+        def handle_statically_known_false(self, tx: "InstructionTranslator", expr):
+            if isinstance(expr, SymNodeVariable):
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.statically_known_false(
+                        expr.sym_num
+                    )
                 )
             elif isinstance(expr, ConstantVariable):
                 return expr

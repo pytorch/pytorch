@@ -1,5 +1,28 @@
 # mypy: allow-untyped-defs
 
+"""
+Side effect tracking and management for TorchDynamo's compilation system.
+
+This module provides infrastructure for tracking and managing side effects that occur
+during symbolic execution, including:
+
+- Tracking mutations to objects, attributes, and variables
+- Managing context changes (cell variables, global namespace modifications)
+- Handling aliasing and object identity preservation
+- Managing stack frame state and local variable changes
+- Tracking function calls with side effects
+
+Key classes:
+- SideEffects: Main container for tracking all side effects during execution
+- MutableSideEffects: Specialization for mutable object tracking
+- AttributeMutation/ValueMutation: Track specific types of mutations
+- Various specialized side effect classes for different scenarios
+
+The side effect system ensures that mutations performed during symbolic execution
+are properly replayed during runtime, maintaining the correctness of compiled code
+while enabling optimizations where safe.
+"""
+
 import collections
 import contextlib
 import inspect
@@ -256,6 +279,7 @@ class SideEffects:
             int.__getattribute__,
             str.__getattribute__,
             list.__getattribute__,
+            tuple.__getattribute__,
             BaseException.__getattribute__,
         )
 
@@ -997,6 +1021,23 @@ class SideEffects:
                             suffixes.append(
                                 [create_instruction("DELETE_ATTR", argval=name)]
                             )
+                    elif isinstance(
+                        var, variables.UserDefinedObjectVariable
+                    ) and var.should_skip_descriptor_setter(name):
+                        cg.add_push_null(
+                            lambda: cg.load_import_from(
+                                utils.__name__, "object_setattr_ignore_descriptor"
+                            )
+                        )
+                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(variables.ConstantVariable(name))
+                        cg(value)
+                        suffixes.append(
+                            [
+                                *create_call_function(3, False),
+                                create_instruction("POP_TOP"),
+                            ]
+                        )
                     elif (
                         isinstance(var, variables.UserDefinedObjectVariable)
                         and var.needs_slow_setattr()

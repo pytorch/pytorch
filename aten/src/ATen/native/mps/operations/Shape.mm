@@ -168,7 +168,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
   TORCH_CHECK(canCast(out_dtype, out.scalar_type()),
               "torch.cat(): input types can't be cast to the desired output type ",
               out.scalar_type());
-  TORCH_CHECK(inputs.size() > 0, "torch.cat(): invalid number of inputs ", inputs.size());
+  TORCH_CHECK(!inputs.empty(), "torch.cat(): invalid number of inputs ", inputs.size());
 
   dimension = legacy_cat_wrap_dim(dimension, materialized_inputs);
   TORCH_CHECK(dimension >= 0, "torch.cat(): invalid dimension ", dimension);

@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 
-from __future__ import annotations
-
 import os
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import Union
 
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 import argparse
@@ -31,10 +27,11 @@ from tools.stats.utilization_stats_lib import (
 )
 
 
-USAGE_LOG_FILENAME = "usage_log.txt"
+TEST_USAGE_LOG_FILENAME = "usage_log.txt"
 CMD_PYTHON_LEVEL = "CMD_PYTHON"
 UTILIZATION_BUCKET = "ossci-utilization"
 PYTORCH_REPO = "pytorch/pytorch"
+JOB_TEST_ARTIFACT_PREFIX = "logs-test"
 
 
 class SegmentGenerator:
@@ -190,19 +187,30 @@ class UploadUtilizationData:
 
     def __init__(
         self,
+        artifact_prefix: str,
         info: WorkflowInfo,
         dry_run: bool = False,
         debug: bool = False,
+        local_path: str = "",
     ):
+        self.artifact_prefix = artifact_prefix
         self.info = info
         self.segment_generator = SegmentGenerator()
         self.debug_mode = debug
         self.dry_run = dry_run
+        self.local_path = local_path
 
     def start(self) -> None:
-        metadata, valid_records, _ = self.get_log_data(
-            self.info.workflow_run_id, self.info.job_id, self.info.run_attempt
-        )
+        if self.local_path:
+            metadata, valid_records, _ = self.get_log_data_from_local(self.local_path)
+        else:
+            print(f"Search for test log in s3 bucket: {UTILIZATION_BUCKET}")
+            metadata, valid_records, _ = self.get_log_data_from_s3(
+                self.info.workflow_run_id,
+                self.info.job_id,
+                self.info.run_attempt,
+                self.artifact_prefix,
+            )
 
         if not metadata:
             print("[Log Model] Failed to process test log, metadata is None")
@@ -270,13 +278,33 @@ class UploadUtilizationData:
         key = f"{collection}/{version}/{repo}/{workflow_run_id}/{workflow_run_attempt}/{job_id}/{file_name}"
         upload_to_s3(bucket_name, key, docs)
 
-    def get_log_data(
-        self, workflow_run_id: int, job_id: int, workflow_run_attempt: int
+    def get_log_data_from_local(
+        self,
+        file_path: str,
+        artifact_prefix: str = "",
+    ) -> tuple[
+        Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
+    ]:
+        test_log_content = read_file(file_path)
+        if not test_log_content:
+            return None, [], []
+        metadata, records, error_records = self.convert_to_log_models(test_log_content)
+        if metadata is None:
+            return None, [], []
+        print(f"Converted Log Model: UtilizationMetadata:\n {metadata}")
+        return metadata, records, error_records
+
+    def get_log_data_from_s3(
+        self,
+        workflow_run_id: int,
+        job_id: int,
+        workflow_run_attempt: int,
+        artifact_prefix: str = JOB_TEST_ARTIFACT_PREFIX,
     ) -> tuple[
         Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
     ]:
         artifact_paths = download_s3_artifacts(
-            "logs-test", workflow_run_id, workflow_run_attempt, job_id
+            artifact_prefix, workflow_run_id, workflow_run_attempt, job_id
         )
         if len(artifact_paths) == 0:
             print(
@@ -290,7 +318,10 @@ class UploadUtilizationData:
             return None, [], []
 
         p = artifact_paths[0]
-        test_log_content = unzip_file(p, USAGE_LOG_FILENAME)
+
+        test_log_content = handle_file(p)
+        if not test_log_content:
+            return None, [], []
 
         metadata, records, error_records = self.convert_to_log_models(test_log_content)
         if metadata is None:
@@ -354,6 +385,38 @@ class UploadUtilizationData:
         return metadata, result_logs, error_logs
 
 
+def handle_file(file_path: Path) -> str:
+    if file_path.match("*.zip"):
+        print(f"extracting {TEST_USAGE_LOG_FILENAME} from zip file {file_path}")
+        return unzip_file(file_path, TEST_USAGE_LOG_FILENAME)
+    elif file_path.match("*.txt"):
+        print(f"extracting {file_path}")
+        return read_file(file_path)
+    print(f"{file_path} is not a supported file type")
+    return ""
+
+
+def read_file(file_path: Union[str, Path]) -> str:
+    try:
+        if isinstance(file_path, Path):
+            if file_path.is_file():
+                with file_path.open("r") as f:
+                    return f.read()
+            else:
+                print(f"::warning file {file_path} does not exist.")
+        elif isinstance(file_path, str):
+            if os.path.isfile(file_path):
+                with open(file_path) as f:
+                    return f.read()
+            else:
+                print(f"::warning file {file_path} does not exist.")
+        else:
+            print(f"::warning unsupported file_path type: {type(file_path)}")
+    except Exception as e:
+        print(f"::warning trying to read file {file_path} failed by: {e}")
+    return ""
+
+
 def unzip_file(path: Path, file_name: str) -> str:
     try:
         with zipfile.ZipFile(path) as zip_file:
@@ -412,6 +475,19 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--dry-run", action="store_true", help="Enable dry-run mode")
 
+    parser.add_argument(
+        "--artifact-prefix",
+        type=str,
+        required=False,
+        help="artifact prefix to download raw utilizarion data from s3",
+    )
+    parser.add_argument(
+        "--local-path",
+        type=str,
+        required=False,
+        help="path of the raw utilizarion data from local location",
+    )
+
     return parser.parse_args()
 
 
@@ -435,9 +511,17 @@ if __name__ == "__main__":
         repo=repo,
     )
 
+    artifact_prefix = JOB_TEST_ARTIFACT_PREFIX
+    if args.artifact_prefix:
+        artifact_prefix = args.artifact_prefix
+        print(f"args.artifact_prefix: {args.artifact_prefix}")
+        print(f"artifact_prefix: {artifact_prefix}")
+
     ud = UploadUtilizationData(
         info=workflow_info,
         dry_run=args.dry_run,
         debug=args.debug,
+        artifact_prefix=artifact_prefix,
+        local_path=args.local_path,
     )
     ud.start()

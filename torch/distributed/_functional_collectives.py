@@ -582,7 +582,7 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, elem: torch.Tensor):
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             elem.size(),
             strides=elem.stride(),

@@ -207,6 +207,17 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     { *dtype = container->constant_dtype(idx); })
 }
 
+AOTIRuntimeError AOTInductorModelContainerGetConstantDataSize(
+  AOTInductorModelContainerHandle container_handle,
+  size_t idx,
+  size_t* data_size) {
+  auto* container =
+    reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+        container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+    { *data_size = container->constant_data_size(idx); })
+}
+
 AOTIRuntimeError AOTInductorModelContainerExtractConstantsMap(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,

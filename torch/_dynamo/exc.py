@@ -271,6 +271,10 @@ class FailOnRecompileLimitHit(Exception):
     pass
 
 
+class PackageError(TorchDynamoException):
+    pass
+
+
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
     pass

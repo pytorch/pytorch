@@ -1,4 +1,5 @@
 import copy
+import typing_extensions
 import warnings
 from typing import Any, Optional, Union
 
@@ -18,6 +19,7 @@ from .fx.utils import (  # noqa: F401
     get_skipped_module_name_and_classes,
 )
 from .qconfig_mapping import QConfigMapping
+from .utils import DEPRECATION_WARNING
 
 
 def attach_preserved_attrs_to_model(
@@ -249,6 +251,7 @@ def fuse_fx(
     return graph_module
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def prepare_fx(
     model: torch.nn.Module,
     qconfig_mapping: Union[QConfigMapping, dict[str, Any]],
@@ -400,6 +403,7 @@ def prepare_fx(
     )
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def prepare_qat_fx(
     model: torch.nn.Module,
     qconfig_mapping: Union[QConfigMapping, dict[str, Any]],
@@ -470,7 +474,7 @@ def prepare_qat_fx(
         # in the model through qconfig_mapping
         # the following call will get the qconfig_mapping that works best for models
         # that target "fbgemm" backend
-        qconfig_mapping = get_default_qat_qconfig("fbgemm")
+        qconfig_mapping = get_default_qat_qconfig_mapping("fbgemm")
 
         # We can customize qconfig_mapping in different ways, please take a look at
         # the docstring for :func:`~torch.ao.quantization.prepare_fx` for different ways
@@ -554,6 +558,7 @@ def _convert_fx(
     return quantized
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def convert_fx(
     graph_module: GraphModule,
     convert_custom_config: Union[ConvertCustomConfig, dict[str, Any], None] = None,

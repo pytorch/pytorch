@@ -1095,6 +1095,16 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
         super().__init__(pack_hook, unpack_hook)
 
 
+# torch._disable_dynamo creates a reference cycle with decorated function
+# This function is used to ensure that the decorated function does not have
+# a closure, so that other objects aren't also kept alive.
+# https://github.com/pytorch/pytorch/issues/154642
+# Note: does not work when fn is compiled
+@torch._disable_dynamo
+def _run_fn_with_dynamo_disabled(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
+
+
 class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
     def __init__(self, frame):
         def pack_hook(x):
@@ -1121,7 +1131,8 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     with _recomputation_hook(
                         weakref.ref(frame), gid
                     ), torch.autograd.enable_grad():
-                        frame.recompute_fn(*args)
+                        # See Note: [compiled autograd and checkpoint unpack hook]
+                        _run_fn_with_dynamo_disabled(frame.recompute_fn, *args)
                 except _StopRecomputationError:
                     pass
                 frame.is_recomputed[gid] = True
@@ -1286,7 +1297,13 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
 
         out = func(*args, **kwargs)
 
-        any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
+        # HOPs don't support func._schema
+        # HOPs don't alias -> this is always true today and will be always true for a long time
+        # TODO HOPs don't mutate -> this is always true today but will not be true forever
+        if isinstance(func, torch._ops.HigherOrderOperator):
+            any_ret_has_alias_info = False
+        else:
+            any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
             self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)), out))
@@ -1385,7 +1402,7 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
     #     context_fn anyway, so proceed as usual.
     if isinstance(policy_fn_or_list, list):
         for op in policy_fn_or_list:
-            if not isinstance(op, torch._ops.OpOverload):
+            if not isinstance(op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
                 _extra_msg = (
                     "Please update the OpOverloadPacket to a specific OpOverload."
                     "For example, if you have `torch.ops.aten.mm`, change it to `torch.ops.aten.mm.default`."
@@ -1492,8 +1509,6 @@ def _checkpoint_without_reentrant_generator(
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
-    # See Note: [compiled autograd and checkpoint unpack hook]
-    @torch._disable_dynamo
     def recompute_fn(*inputs):
         kwargs, *args = inputs
         # This will be called later during recomputation. This wrapping enables

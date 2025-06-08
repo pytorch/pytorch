@@ -534,6 +534,17 @@ class AutogradCompilerInstance:
                     )
                     result.name = make_unique(node.name)
                     value_remap[node] = result
+                elif node.op == "call_module":
+                    name = node.target
+                    qualname = self.fx_tracer.get_fresh_qualname(name)
+                    setattr(
+                        self.fx_tracer.root, qualname, getattr(ctx._bw_module, name)
+                    )
+                    result = self.fx_tracer.graph.node_copy(
+                        node, lambda n: value_remap[n]
+                    )
+                    result.target = qualname
+                    value_remap[node] = result
                 else:
                     raise AssertionError("shouldn't get here")
 
@@ -1411,7 +1422,7 @@ def _enable(compiler_fn, dynamic: bool = True):
             functools.partial(AutogradCompilerInstance, compiler_fn), dynamic
         )
         if snapshot_verbose_logging_enabled():
-            torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)
+            torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)  # type:ignore[arg-type]
         global compiled_autograd_enabled
         compiled_autograd_enabled = True
         try:

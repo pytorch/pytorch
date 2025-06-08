@@ -12,8 +12,6 @@ import torch
 import torch.library
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._inductor import metrics
-from torch._inductor.codegen.common import device_codegens, register_backend_for_device
-from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
@@ -34,7 +32,12 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    patch_inductor_backend,
+)
 
 
 # Make the helper files in test/ importable
@@ -367,18 +370,20 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_item_to_inputs_kernel_nobreak(self, device):
-        @torch.library.custom_op("test::foo", mutates_args=())
-        def foo(x: torch.Tensor, y: int) -> torch.Tensor:
+        @torch.library.custom_op(
+            "test_inductor_dynamic_shapes::nobreak_test", mutates_args=()
+        )
+        def nobreak_test(x: torch.Tensor, y: int) -> torch.Tensor:
             return x.clone()
 
-        @foo.register_fake
+        @nobreak_test.register_fake
         def _(x: torch.Tensor, y: int) -> torch.Tensor:
             return x.clone()
 
         @torch.compile(fullgraph=True)
         def f(x, r):
             y = x.item()
-            return torch.ops.test.foo(r, y)
+            return torch.ops.test_inductor_dynamic_shapes.nobreak_test(r, y)
 
         f(torch.tensor([3], device=device), torch.randn(10, device=device))
 
@@ -591,11 +596,13 @@ class TestInductorDynamic(TestCase):
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_multi_output_unbacked_custom_op(self, device):
-        @torch.library.custom_op("test::foo", mutates_args=())
-        def foo(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        @torch.library.custom_op(
+            "test_inductor_dynamic_shapes::unbacked_test", mutates_args=()
+        )
+        def unbacked_test(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             return torch.empty(2, device=x.device), torch.empty(3, device=x.device)
 
-        @foo.register_fake
+        @unbacked_test.register_fake
         def _(x: torch.Tensor) -> torch.Tensor:
             ctx = torch.library.get_ctx()
             u0 = ctx.new_dynamic_size()
@@ -603,7 +610,7 @@ class TestInductorDynamic(TestCase):
 
         @torch.compile(fullgraph=True)
         def f(x):
-            a, b = torch.ops.test.foo(x)
+            a, b = torch.ops.test_inductor_dynamic_shapes.unbacked_test(x)
             return a.sum() + b.sum()
 
         f(torch.tensor([3], device=device))
@@ -928,23 +935,13 @@ class TestInductorDynamic(TestCase):
                 _test_wrapper_codegen_statically_known_int_or_none_in_context()
                 return super().generate(is_inference, *args, **kwargs)
 
-        if "cpu" not in device_codegens:
-            register_backend_for_device("cpu", CppScheduling, PythonWrapperCodegen)
-        orig_cpu_codegens = device_codegens["cpu"]
-        try:
-            register_backend_for_device(
-                "cpu", orig_cpu_codegens.scheduling, TestWrapperCodegen
-            )
+        with patch_inductor_backend("cpu", python_wrapper_codegen=TestWrapperCodegen):
             # Compile each of the functions above, with an example input
             # that has 5 in the first dimension, but is marked as dynamic
 
             torch.compile(backend="inductor", dynamic=None)(fn_1)(_x)
             torch.compile(backend="inductor", dynamic=None)(fn_2)(_x)
             torch.compile(backend="inductor", dynamic=None)(fn_3)(_x)
-        finally:
-            register_backend_for_device(
-                "cpu", orig_cpu_codegens.scheduling, orig_cpu_codegens.wrapper_codegen
-            )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_unbacked_stride_nobreak(self, device):

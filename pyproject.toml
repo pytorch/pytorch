@@ -168,10 +168,12 @@ select = [
     "PLW0406", # import self
     "PLW0711", # binary op exception
     "PLW1501", # bad open mode
+    "PLW1507", # shallow copy os.environ
     "PLW1509", # preexec_fn not safe with threads
     "PLW2101", # useless lock statement
     "PLW3301", # nested min max
     "PT006", # TODO: enable more PT rules
+    "PT014", # duplicate parameterize case
     "PT022",
     "PT023",
     "PT024",
@@ -209,6 +211,11 @@ select = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = [
     "F401",
+]
+"*.pyi" = [
+    "PYI011", # typed-argument-default-in-stub
+    "PYI021", # docstring-in-stub
+    "PYI053", # string-or-bytes-too-long
 ]
 "functorch/notebooks/**" = [
     "F401",
@@ -262,10 +269,6 @@ select = [
     "PGH004"
 ]
 "torchgen/api/types/__init__.py" = [
-    "F401",
-    "F403",
-]
-"torchgen/executorch/api/types/__init__.py" = [
     "F401",
     "F403",
 ]

@@ -180,7 +180,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
           [computeEncoder useResource:getMTLBufferStorage(tensor_lists[d][tensor_index])
                                 usage:MTLResourceUsageRead | MTLResourceUsageWrite];
         }
-        if (state_steps.size() > 0) {
+        if (!state_steps.empty()) {
           mtl_setBuffer(tensorArgumentEncoder, state_steps[tensor_index], depth * kmaxTensors + tensor_loc);
           [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
         }
@@ -230,7 +230,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
                 [computeEncoder useResource:getMTLBufferStorage(tensor_lists[d][tensor_index])
                                       usage:MTLResourceUsageWrite | MTLResourceUsageRead];
               }
-              if (state_steps.size() > 0) {
+              if (!state_steps.empty()) {
                 mtl_setBuffer(tensorArgumentEncoder, state_steps[tensor_index], depth * kmaxTensors);
                 [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
               }

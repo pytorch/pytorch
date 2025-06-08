@@ -1638,6 +1638,7 @@ function unpickle_and_annotate(data) {
 
 function snapshot_change(f) {
   const view_value = view.node().value;
+  let no_starting_gpu = gpu.node().value == '';
   let device = Number(gpu.node().value);
   const snapshot = snapshot_cache[f];
   gpu.selectAll('option').remove();
@@ -1646,9 +1647,15 @@ function snapshot_change(f) {
     has_segments[s.device] = true;
   }
   let device_valid = false;
+  let maxTraceLength = -1;
+  let defaultDevice = null;
   for (const [i, trace] of snapshot.device_traces.entries()) {
     if (trace.length > 0 || i in has_segments) {
       gpu.append('option').text(i);
+      if (trace.length > maxTraceLength) {
+        maxTraceLength = trace.length;
+        defaultDevice = i;
+      }
       if (i === device) {
         device_valid = true;
         gpu.node().selectedIndex = gpu.node().children.length - 1;
@@ -1658,6 +1665,12 @@ function snapshot_change(f) {
   if (!device_valid) {
     device = Number(gpu.node().value);
   }
+
+  if (no_starting_gpu) {
+    device = defaultDevice;
+    gpu.node().value = device;
+  }
+
   const key = [f, view_value, device];
   if (!(key in selection_to_div)) {
     selection_to_div[key] = d3.select('body').append('div');

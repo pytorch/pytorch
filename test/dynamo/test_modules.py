@@ -1299,6 +1299,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 6)
 
+    @patch.object(torch._dynamo.config, "allow_unspec_int_on_nn_module", True)
     def test_self_mutating1(self):
         m1 = torch.nn.Linear(10, 10)
         m2 = SelfMutatingModule(m1)
@@ -3083,6 +3084,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         "inductor backend is not available",
     )
     def test_save_and_load_inductor(self):
+        torch._logging.set_logs(inductor_metrics=True)
         mod = MockModule()
         opt_mod = torch.compile(mod, backend="inductor")
         inp = torch.randn(10, 10)
@@ -3102,8 +3104,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         torch._inductor.metrics.generated_kernel_count = 0
         loaded_model(inp)
         self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+        torch._logging.set_logs()
 
     def test_save_and_load_all_backends(self):
+        torch._logging.set_logs(inductor_metrics=True)
         mod = MockModule()
         inp = torch.randn(10, 10)
         for backend in torch._dynamo.list_backends():
@@ -3126,6 +3130,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 self.assertEqual(opt_success, loaded_success)
             except torch._dynamo.exc.BackendCompilerFailed:
                 pass
+
+    torch._logging.set_logs()
 
     def test_monkeypatching_forward(self):
         class FakeModule(torch.nn.Module):
