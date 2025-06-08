@@ -233,5 +233,9 @@ register_artifact(
     "Logs Inductor metrics, such as num_bytes, nodes_num_elem, node_runtimes",
     off_by_default=True,
 )
-
+register_artifact(
+    "hierarchical_compile",
+    "Logs debug info for hierarchical compilation",
+    off_by_default=True,
+)
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
