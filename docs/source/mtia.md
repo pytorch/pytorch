@@ -1,11 +1,16 @@
-torch.mtia
-===================================
+# torch.mtia
 
 The MTIA backend is implemented out of the tree, only interfaces are be defined here.
 
+```{eval-rst}
 .. automodule:: torch.mtia
-.. currentmodule:: torch.mtia
+```
 
+```{eval-rst}
+.. currentmodule:: torch.mtia
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -32,12 +37,15 @@ The MTIA backend is implemented out of the tree, only interfaces are be defined 
     set_rng_state
     get_rng_state
     DeferredMtiaCallError
+```
 
-Streams and events
-------------------
+## Streams and events
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     Event
     Stream
+```

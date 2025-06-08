@@ -1,11 +1,12 @@
+```{eval-rst}
 .. currentmodule:: torch
+```
 
-.. _name_inference_reference-doc:
+(name_inference_reference-doc)=
 
-Named Tensors operator coverage
-===============================
+# Named Tensors operator coverage
 
-Please read :ref:`named_tensors-doc` first for an introduction to named tensors.
+Please read {ref}`named_tensors-doc` first for an introduction to named tensors.
 
 This document is a reference for *name inference*, a process that defines how
 named tensors:
@@ -17,11 +18,13 @@ Below is a list of all operations that are supported with named tensors
 and their associated name inference rules.
 
 If you don't see an operation listed here, but it would help your use case, please
-`search if an issue has already been filed <https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+named+tensor%22>`_ and if not, `file one <https://github.com/pytorch/pytorch/issues/new/choose>`_.
+[search if an issue has already been filed](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+named+tensor%22) and if not, [file one](https://github.com/pytorch/pytorch/issues/new/choose).
 
-.. warning::
-    The named tensor API is experimental and subject to change.
+:::{warning}
+The named tensor API is experimental and subject to change.
+:::
 
+```{eval-rst}
 .. csv-table:: Supported Operations
    :header: API, Name inference rule
    :widths: 20, 20
@@ -244,226 +247,221 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.zero_`,None
    :func:`torch.zeros`,:ref:`factory-doc`
 
+```
 
-.. _keeps_input_names-doc:
+(keeps_input_names-doc)=
 
-Keeps input names
-^^^^^^^^^^^^^^^^^
+## Keeps input names
 
 All pointwise unary functions follow this rule as well as some other unary functions.
 
 - Check names: None
 - Propagate names: input tensor's names are propagated to the output.
 
-::
+```
+>>> x = torch.randn(3, 3, names=('N', 'C'))
+>>> x.abs().names
+('N', 'C')
+```
 
-    >>> x = torch.randn(3, 3, names=('N', 'C'))
-    >>> x.abs().names
-    ('N', 'C')
+(removes_dimensions-doc)=
 
-.. _removes_dimensions-doc:
+## Removes dimensions
 
-Removes dimensions
-^^^^^^^^^^^^^^^^^^
-
-All reduction ops like :meth:`~Tensor.sum` remove dimensions by reducing
-over the desired dimensions. Other operations like :meth:`~Tensor.select` and
-:meth:`~Tensor.squeeze` remove dimensions.
+All reduction ops like {meth}`~Tensor.sum` remove dimensions by reducing
+over the desired dimensions. Other operations like {meth}`~Tensor.select` and
+{meth}`~Tensor.squeeze` remove dimensions.
 
 Wherever one can pass an integer dimension index to an operator, one can also pass
 a dimension name. Functions that take lists of dimension indices can also take in a
 list of dimension names.
 
-- Check names: If :attr:`dim` or :attr:`dims` is passed in as a list of names,
-  check that those names exist in :attr:`self`.
-- Propagate names: If the dimensions of the input tensor specified by :attr:`dim`
-  or :attr:`dims` are not present in the output tensor, then the corresponding names
-  of those dimensions do not appear in ``output.names``.
+- Check names: If {attr}`dim` or {attr}`dims` is passed in as a list of names,
+  check that those names exist in {attr}`self`.
+- Propagate names: If the dimensions of the input tensor specified by {attr}`dim`
+  or {attr}`dims` are not present in the output tensor, then the corresponding names
+  of those dimensions do not appear in `output.names`.
 
-::
+```
+>>> x = torch.randn(1, 3, 3, 3, names=('N', 'C', 'H', 'W'))
+>>> x.squeeze('N').names
+('C', 'H', 'W')
 
-    >>> x = torch.randn(1, 3, 3, 3, names=('N', 'C', 'H', 'W'))
-    >>> x.squeeze('N').names
-    ('C', 'H', 'W')
+>>> x = torch.randn(3, 3, 3, 3, names=('N', 'C', 'H', 'W'))
+>>> x.sum(['N', 'C']).names
+('H', 'W')
 
-    >>> x = torch.randn(3, 3, 3, 3, names=('N', 'C', 'H', 'W'))
-    >>> x.sum(['N', 'C']).names
-    ('H', 'W')
+# Reduction ops with keepdim=True don't actually remove dimensions.
+>>> x = torch.randn(3, 3, 3, 3, names=('N', 'C', 'H', 'W'))
+>>> x.sum(['N', 'C'], keepdim=True).names
+('N', 'C', 'H', 'W')
+```
 
-    # Reduction ops with keepdim=True don't actually remove dimensions.
-    >>> x = torch.randn(3, 3, 3, 3, names=('N', 'C', 'H', 'W'))
-    >>> x.sum(['N', 'C'], keepdim=True).names
-    ('N', 'C', 'H', 'W')
+(unifies_names_from_inputs-doc)=
 
-
-.. _unifies_names_from_inputs-doc:
-
-Unifies names from inputs
-^^^^^^^^^^^^^^^^^^^^^^^^^
+## Unifies names from inputs
 
 All binary arithmetic ops follow this rule. Operations that broadcast still
 broadcast positionally from the right to preserve compatibility with unnamed
-tensors. To perform explicit broadcasting by names, use :meth:`Tensor.align_as`.
+tensors. To perform explicit broadcasting by names, use {meth}`Tensor.align_as`.
 
 - Check names: All names must match positionally from the right. i.e., in
-  ``tensor + other``, ``match(tensor.names[i], other.names[i])`` must be true for all
-  ``i`` in ``(-min(tensor.dim(), other.dim()) + 1, -1]``.
+  `tensor + other`, `match(tensor.names[i], other.names[i])` must be true for all
+  `i` in `(-min(tensor.dim(), other.dim()) + 1, -1]`.
 - Check names: Furthermore, all named dimensions must be aligned from the right.
-  During matching, if we match a named dimension ``A`` with an unnamed dimension
-  ``None``, then ``A`` must not appear in the tensor with the unnamed dimension.
+  During matching, if we match a named dimension `A` with an unnamed dimension
+  `None`, then `A` must not appear in the tensor with the unnamed dimension.
 - Propagate names: unify pairs of names from the right from both tensors to
   produce output names.
 
 For example,
 
-::
-
-    # tensor: Tensor[   N, None]
-    # other:  Tensor[None,    C]
-    >>> tensor = torch.randn(3, 3, names=('N', None))
-    >>> other = torch.randn(3, 3, names=(None, 'C'))
-    >>> (tensor + other).names
-    ('N', 'C')
+```
+# tensor: Tensor[   N, None]
+# other:  Tensor[None,    C]
+>>> tensor = torch.randn(3, 3, names=('N', None))
+>>> other = torch.randn(3, 3, names=(None, 'C'))
+>>> (tensor + other).names
+('N', 'C')
+```
 
 Check names:
 
-- ``match(tensor.names[-1], other.names[-1])`` is ``True``
-- ``match(tensor.names[-2], tensor.names[-2])`` is ``True``
-- Because we matched ``None`` in :attr:`tensor` with ``'C'``,
-  check to make sure ``'C'`` doesn't exist in :attr:`tensor` (it does not).
-- Check to make sure ``'N'`` doesn't exists in :attr:`other` (it does not).
+- `match(tensor.names[-1], other.names[-1])` is `True`
+- `match(tensor.names[-2], tensor.names[-2])` is `True`
+- Because we matched `None` in {attr}`tensor` with `'C'`,
+  check to make sure `'C'` doesn't exist in {attr}`tensor` (it does not).
+- Check to make sure `'N'` doesn't exists in {attr}`other` (it does not).
 
 Finally, the output names are computed with
-``[unify('N', None), unify(None, 'C')] = ['N', 'C']``
+`[unify('N', None), unify(None, 'C')] = ['N', 'C']`
 
-More examples::
+More examples:
 
-    # Dimensions don't match from the right:
-    # tensor: Tensor[N, C]
-    # other:  Tensor[   N]
-    >>> tensor = torch.randn(3, 3, names=('N', 'C'))
-    >>> other = torch.randn(3, names=('N',))
-    >>> (tensor + other).names
-    RuntimeError: Error when attempting to broadcast dims ['N', 'C'] and dims
-    ['N']: dim 'C' and dim 'N' are at the same position from the right but do
-    not match.
+```
+# Dimensions don't match from the right:
+# tensor: Tensor[N, C]
+# other:  Tensor[   N]
+>>> tensor = torch.randn(3, 3, names=('N', 'C'))
+>>> other = torch.randn(3, names=('N',))
+>>> (tensor + other).names
+RuntimeError: Error when attempting to broadcast dims ['N', 'C'] and dims
+['N']: dim 'C' and dim 'N' are at the same position from the right but do
+not match.
 
-    # Dimensions aren't aligned when matching tensor.names[-1] and other.names[-1]:
-    # tensor: Tensor[N, None]
-    # other:  Tensor[      N]
-    >>> tensor = torch.randn(3, 3, names=('N', None))
-    >>> other = torch.randn(3, names=('N',))
-    >>> (tensor + other).names
-    RuntimeError: Misaligned dims when attempting to broadcast dims ['N'] and
-    dims ['N', None]: dim 'N' appears in a different position from the right
-    across both lists.
+# Dimensions aren't aligned when matching tensor.names[-1] and other.names[-1]:
+# tensor: Tensor[N, None]
+# other:  Tensor[      N]
+>>> tensor = torch.randn(3, 3, names=('N', None))
+>>> other = torch.randn(3, names=('N',))
+>>> (tensor + other).names
+RuntimeError: Misaligned dims when attempting to broadcast dims ['N'] and
+dims ['N', None]: dim 'N' appears in a different position from the right
+across both lists.
+```
 
-.. note::
+:::{note}
+In both of the last examples, it is possible to align the tensors by names
+and then perform the addition. Use {meth}`Tensor.align_as` to align
+tensors by name or {meth}`Tensor.align_to` to align tensors to a custom
+dimension ordering.
+:::
 
-    In both of the last examples, it is possible to align the tensors by names
-    and then perform the addition. Use :meth:`Tensor.align_as` to align
-    tensors by name or :meth:`Tensor.align_to` to align tensors to a custom
-    dimension ordering.
+(permutes_dimensions-doc)=
 
-.. _permutes_dimensions-doc:
+## Permutes dimensions
 
-Permutes dimensions
-^^^^^^^^^^^^^^^^^^^
-
-Some operations, like :meth:`Tensor.t()`, permute the order of dimensions. Dimension names
+Some operations, like {meth}`Tensor.t()`, permute the order of dimensions. Dimension names
 are attached to individual dimensions so they get permuted as well.
 
-If the operator takes in positional index :attr:`dim`, it is also able to take a dimension
-name as :attr:`dim`.
+If the operator takes in positional index {attr}`dim`, it is also able to take a dimension
+name as {attr}`dim`.
 
-- Check names: If :attr:`dim` is passed as a name, check that it exists in the tensor.
+- Check names: If {attr}`dim` is passed as a name, check that it exists in the tensor.
 - Propagate names: Permute dimension names in the same way as the dimensions that are
   being permuted.
 
-::
+```
+>>> x = torch.randn(3, 3, names=('N', 'C'))
+>>> x.transpose('N', 'C').names
+('C', 'N')
+```
 
-    >>> x = torch.randn(3, 3, names=('N', 'C'))
-    >>> x.transpose('N', 'C').names
-    ('C', 'N')
+(contracts_away_dims-doc)=
 
-.. _contracts_away_dims-doc:
-
-Contracts away dims
-^^^^^^^^^^^^^^^^^^^
+## Contracts away dims
 
 Matrix multiply functions follow some variant of this. Let's go through
-:func:`torch.mm` first and then generalize the rule for batch matrix multiplication.
+{func}`torch.mm` first and then generalize the rule for batch matrix multiplication.
 
-For ``torch.mm(tensor, other)``:
+For `torch.mm(tensor, other)`:
 
 - Check names: None
-- Propagate names: result names are ``(tensor.names[-2], other.names[-1])``.
+- Propagate names: result names are `(tensor.names[-2], other.names[-1])`.
 
-::
-
-    >>> x = torch.randn(3, 3, names=('N', 'D'))
-    >>> y = torch.randn(3, 3, names=('in', 'out'))
-    >>> x.mm(y).names
-    ('N', 'out')
+```
+>>> x = torch.randn(3, 3, names=('N', 'D'))
+>>> y = torch.randn(3, 3, names=('in', 'out'))
+>>> x.mm(y).names
+('N', 'out')
+```
 
 Inherently, a matrix multiplication performs a dot product over two dimensions,
 collapsing them. When two tensors are matrix-multiplied, the contracted dimensions
 disappear and do not show up in the output tensor.
 
-:func:`torch.mv`, :func:`torch.dot` work in a similar way: name inference does not
+{func}`torch.mv`, {func}`torch.dot` work in a similar way: name inference does not
 check input names and removes the dimensions that are involved in the dot product:
 
-::
+```
+>>> x = torch.randn(3, 3, names=('N', 'D'))
+>>> y = torch.randn(3, names=('something',))
+>>> x.mv(y).names
+('N',)
+```
 
-    >>> x = torch.randn(3, 3, names=('N', 'D'))
-    >>> y = torch.randn(3, names=('something',))
-    >>> x.mv(y).names
-    ('N',)
-
-Now, let's take a look at ``torch.matmul(tensor, other)``. Assume that ``tensor.dim() >= 2``
-and ``other.dim() >= 2``.
+Now, let's take a look at `torch.matmul(tensor, other)`. Assume that `tensor.dim() >= 2`
+and `other.dim() >= 2`.
 
 - Check names: Check that the batch dimensions of the inputs are aligned and broadcastable.
-  See :ref:`unifies_names_from_inputs-doc` for what it means for the inputs to be aligned.
+  See {ref}`unifies_names_from_inputs-doc` for what it means for the inputs to be aligned.
 - Propagate names: result names are obtained by unifying the batch dimensions and removing
   the contracted dimensions:
-  ``unify(tensor.names[:-2], other.names[:-2]) + (tensor.names[-2], other.names[-1])``.
+  `unify(tensor.names[:-2], other.names[:-2]) + (tensor.names[-2], other.names[-1])`.
 
-Examples::
+Examples:
 
-    # Batch matrix multiply of matrices Tensor['C', 'D'] and Tensor['E', 'F'].
-    # 'A', 'B' are batch dimensions.
-    >>> x = torch.randn(3, 3, 3, 3, names=('A', 'B', 'C', 'D'))
-    >>> y = torch.randn(3, 3, 3, names=('B', 'E', 'F'))
-    >>> torch.matmul(x, y).names
-    ('A', 'B', 'C', 'F')
+```
+# Batch matrix multiply of matrices Tensor['C', 'D'] and Tensor['E', 'F'].
+# 'A', 'B' are batch dimensions.
+>>> x = torch.randn(3, 3, 3, 3, names=('A', 'B', 'C', 'D'))
+>>> y = torch.randn(3, 3, 3, names=('B', 'E', 'F'))
+>>> torch.matmul(x, y).names
+('A', 'B', 'C', 'F')
+```
 
+Finally, there are fused `add` versions of many matmul functions. i.e., {func}`addmm`
+and {func}`addmv`. These are treated as composing name inference for i.e. {func}`mm` and
+name inference for {func}`add`.
 
-Finally, there are fused ``add`` versions of many matmul functions. i.e., :func:`addmm`
-and :func:`addmv`. These are treated as composing name inference for i.e. :func:`mm` and
-name inference for :func:`add`.
+(factory-doc)=
 
-.. _factory-doc:
+## Factory functions
 
-Factory functions
-^^^^^^^^^^^^^^^^^
-
-
-Factory functions now take a new :attr:`names` argument that associates a name
+Factory functions now take a new {attr}`names` argument that associates a name
 with each dimension.
 
-::
+```
+>>> torch.zeros(2, 3, names=('N', 'C'))
+tensor([[0., 0., 0.],
+        [0., 0., 0.]], names=('N', 'C'))
+```
 
-    >>> torch.zeros(2, 3, names=('N', 'C'))
-    tensor([[0., 0., 0.],
-            [0., 0., 0.]], names=('N', 'C'))
+(out_function_semantics-doc)=
 
-.. _out_function_semantics-doc:
+## out function and in-place variants
 
-out function and in-place variants
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-A tensor specified as an ``out=`` tensor has the following behavior:
+A tensor specified as an `out=` tensor has the following behavior:
 
 - If it has no named dimensions, then the names computed from the operation
   get propagated to it.
@@ -473,13 +471,13 @@ A tensor specified as an ``out=`` tensor has the following behavior:
 All in-place methods modify inputs to have names equal to the computed names
 from name inference. For example:
 
-::
+```
+>>> x = torch.randn(3, 3)
+>>> y = torch.randn(3, 3, names=('N', 'C'))
+>>> x.names
+(None, None)
 
-    >>> x = torch.randn(3, 3)
-    >>> y = torch.randn(3, 3, names=('N', 'C'))
-    >>> x.names
-    (None, None)
-
-    >>> x += y
-    >>> x.names
-    ('N', 'C')
+>>> x += y
+>>> x.names
+('N', 'C')
+```
