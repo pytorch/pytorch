@@ -528,7 +528,6 @@ if(USE_LIGHTWEIGHT_DISPATCH AND NOT STATIC_DISPATCH_BACKEND)
 endif()
 option(TRACING_BASED
        "Master flag to build Lite Interpreter with tracing build option" OFF)
-option(BUILD_EXECUTORCH "Master flag to build Executorch" ON)
 # This is a fix for a rare build issue on Ubuntu: symbol lookup error:
 # miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol:
 # mkl_blas_dsyrk
