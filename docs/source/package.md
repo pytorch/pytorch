@@ -15,15 +15,15 @@ This document contains tutorials, how-to guides, explanations, and an API refere
 will help you learn more about `torch.package` and how to use it.
 
 ```{warning}
-
-    This module depends on the `pickle` module which is not secure. Only unpackage data you trust.
+    This module depends on the ``pickle`` module which is not secure. Only unpackage data you trust.
 
     It is possible to construct malicious pickle data which will **execute arbitrary code during unpickling**.
     Never unpackage data that could have come from an untrusted source, or that could have been tampered with.
 
-    For more information, review the `documentation <https://docs.python.org/3/library/pickle.html>`_ for the `pickle` module.
+    For more information, review the `documentation <https://docs.python.org/3/library/pickle.html>`_ for the ``pickle`` module.
+```
 
-
+```{eval-rst}
 .. contents:: :local:
     :depth: 2
 ```
@@ -31,7 +31,7 @@ will help you learn more about `torch.package` and how to use it.
 ## Tutorials
 ### Packaging your first model
 A tutorial that guides you through packaging and unpackaging a simple model is available
-[`on Colab`](https://colab.research.google.com/drive/1lFZkLyViGfXxB-m3jqlyTQuYToo3XLo-).
+[on Colab](https://colab.research.google.com/drive/1lFZkLyViGfXxB-m3jqlyTQuYToo3XLo-).
 After completing this exercise, you will be familiar with the basic API for creating and using
 Torch packages.
 
@@ -47,21 +47,21 @@ work for exploring the contents. Some common ways to interact with ZIP files:
 * `unzip my_package.pt` will unzip the `torch.package` archive to disk, where you can freely inspect its contents.
 
 ```
-    $ unzip my_package.pt && tree my_package
-    my_package
-    ├── .data
-    │   ├── 94304870911616.storage
-    │   ├── 94304900784016.storage
-    │   ├── extern_modules
-    │   └── version
-    ├── models
-    │   └── model_1.pkl
-    └── torchvision
-        └── models
-            ├── resnet.py
-            └── utils.py
-    ~ cd my_package && cat torchvision/models/resnet.py
-    ...
+$ unzip my_package.pt && tree my_package
+my_package
+├── .data
+│   ├── 94304870911616.storage
+│   ├── 94304900784016.storage
+│   ├── extern_modules
+│   └── version
+├── models
+│   └── model_1.pkl
+└── torchvision
+    └── models
+        ├── resnet.py
+        └── utils.py
+~ cd my_package && cat torchvision/models/resnet.py
+...
 ```
 
 * The Python `zipfile` module provides a standard way to read and write ZIP archive contents.
@@ -480,9 +480,9 @@ Currently, the `.data/` directory contains the following items:
 
 #### User files
 All other files in the archive were put there by a user. The layout is identical to a Python
-[`regular package`](https://docs.python.org/3/reference/import.html#regular-packages). For a deeper dive in how Python packaging works,
-please consult [`this essay`](https://www.python.org/doc/essays/packages/) (it’s slightly out of date, so double-check implementation details
-with the [`Python reference documentation`](https://docs.python.org/3/library/importlib.html).
+[regular package](https://docs.python.org/3/reference/import.html#regular-packages). For a deeper dive in how Python packaging works,
+please consult [this essay](https://www.python.org/doc/essays/packages/) (it’s slightly out of date, so double-check implementation details
+with the [Python reference documentation](https://docs.python.org/3/library/importlib.html).
 
 ```
 <package root>
@@ -510,7 +510,7 @@ GLOBAL 'torchvision.models.resnet Resnet`
 ```
 
 The dependency resolver will gather up all `GLOBAL` ops and mark them as dependencies of your pickled object.
-For more information about pickling and the pickle format, please consult [`the Python docs`](https://docs.python.org/3/library/pickle.html).
+For more information about pickling and the pickle format, please consult [the Python docs](https://docs.python.org/3/library/pickle.html).
 
 #### Analyzing a module's dependencies
 When a Python module is identified as a dependency, `torch.package` walks the module’s python AST representation and looks for import statements with
@@ -608,7 +608,7 @@ single-purpose modules that can be packaged independently of one another.
 
 #### Patterns
 Patterns allow you to specify groups of modules with a convenient syntax. The syntax and behavior of patterns follows the Bazel/Buck
-[`glob()`](https://docs.bazel.build/versions/master/be/functions.html#glob).
+[glob()](https://docs.bazel.build/versions/master/be/functions.html#glob).
 
 A module that we are trying to match against a pattern is called a candidate. A candidate is composed of a list of segments separated by a
 separator string, e.g. `foo.bar.baz`.

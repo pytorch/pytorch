@@ -3,14 +3,14 @@
 
 ## Overview
 
-[`Open Neural Network eXchange (ONNX)`](https://onnx.ai/) is an open standard
+[Open Neural Network eXchange (ONNX)](https://onnx.ai/) is an open standard
 format for representing machine learning models. The `torch.onnx` module captures the computation graph from a
 native PyTorch {py:class}`torch.nn.Module` model and converts it into an
-[`ONNX graph`](https://github.com/onnx/onnx/blob/main/docs/IR.md).
+[ONNX graph](https://github.com/onnx/onnx/blob/main/docs/IR.md).
 
 The exported model can be consumed by any of the many
-[`runtimes that support ONNX`](https://onnx.ai/supported-tools.html#deployModel), including
-Microsoft's [`ONNX Runtime`](https://www.onnxruntime.ai).
+[runtimes that support ONNX](https://onnx.ai/supported-tools.html#deployModel), including
+Microsoft's [ONNX Runtime](https://www.onnxruntime.ai).
 
 **There are two flavors of ONNX exporter API that you can use, as listed below.**
 Both can be called through function {py:func}`torch.onnx.export`.
@@ -50,7 +50,7 @@ TorchDynamo engine is leveraged to hook into Python's frame evaluation API and d
 bytecode into an FX Graph. The resulting FX Graph is then polished before it is finally translated into an
 ONNX graph.
 
-The main advantage of this approach is that the [`FX graph`](https://pytorch.org/docs/stable/fx.html) is captured using
+The main advantage of this approach is that the [FX graph](https://pytorch.org/docs/stable/fx.html) is captured using
 bytecode analysis that preserves the dynamic nature of the model instead of using traditional static tracing techniques.
 
 {doc}`Learn more about the TorchDynamo-based ONNX Exporter <onnx_dynamo>`
@@ -59,7 +59,7 @@ bytecode analysis that preserves the dynamic nature of the model instead of usin
 
 *The TorchScript-based ONNX exporter is available since PyTorch 1.2.0*
 
-[`TorchScript`](https://pytorch.org/docs/stable/jit.html) is leveraged to trace (through {py:func}`torch.jit.trace`)
+[TorchScript](https://pytorch.org/docs/stable/jit.html) is leveraged to trace (through {py:func}`torch.jit.trace`)
 the model and capture a static computation graph.
 
 As a consequence, the resulting graph has a couple limitations:
@@ -77,8 +77,8 @@ itself is a subset of the Python language, so not all features in Python are sup
 ## Contributing / Developing
 
 The ONNX exporter is a community project and we welcome contributions. We follow the
-[`PyTorch guidelines for contributions`](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md), but you might
-also be interested in reading our [`development wiki`](https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter).
+[PyTorch guidelines for contributions](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md), but you might
+also be interested in reading our [development wiki](https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter).
 
 ```{eval-rst}
 .. toctree::

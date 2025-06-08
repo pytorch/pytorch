@@ -56,9 +56,7 @@ This means that `model.base`'s parameters will use a learning rate of `1e-2`, wh
 `model.classifier`'s parameters will stick to the default learning rate of `1e-3`.
 Finally a momentum of `0.9` will be used for all parameters.
 
-```{eval-rst}
-.. note::
-
+```{note}
     You can still pass options as keyword arguments. They will be used as
     defaults, in the groups that didn't override them. This is useful when you
     only want to vary a single option, while keeping all others consistent
