@@ -70,10 +70,9 @@ lint:
 quicklint:
 	lintrunner
 
-.PHONY: setup_env setup_env_cuda setup_env_rocm
+# Deprecated target aliases
+.PHONY: setup_env setup_env_cuda setup_env_rocm setup_lint
 setup_env: setup-env
 setup_env_cuda: setup-env-cuda
 setup_env_rocm: setup-env-rocm
-
-.PHONY: setup_lint
 setup_lint: setup-lint
