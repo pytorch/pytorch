@@ -1038,8 +1038,8 @@ class TestFakeQuantizeOps(TestCase):
                     input, scale, zero_point, axis, quant_min, quant_max
                 )
 
-    @given(dtype=st.sampled_from([torch.float, torch.float64, torch.half, torch.bfloat16]),)
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),)
+    @given(dtype=st.sampled_from([torch.float, torch.float64, torch.half, torch.bfloat16]),
+           device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
     def test_fake_quantize_per_tensor_affine_inf(self, dtype, device) -> None:
         # https://github.com/pytorch/pytorch/issues/154328
         input_tensor = torch.tensor([torch.inf], dtype=dtype, device=device)
