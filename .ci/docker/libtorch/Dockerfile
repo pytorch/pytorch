@@ -59,11 +59,6 @@ RUN bash ./install_cuda.sh 11.8
 RUN bash ./install_magma.sh 11.8
 RUN ln -sf /usr/local/cuda-11.8 /usr/local/cuda
 
-FROM cuda as cuda12.4
-RUN bash ./install_cuda.sh 12.4
-RUN bash ./install_magma.sh 12.4
-RUN ln -sf /usr/local/cuda-12.4 /usr/local/cuda
-
 FROM cuda as cuda12.6
 RUN bash ./install_cuda.sh 12.6
 RUN bash ./install_magma.sh 12.6

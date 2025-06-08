@@ -24,7 +24,6 @@ set CUDNN_LIB_FOLDER="lib\x64"
 if exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\nvcc.exe" goto set_cuda_env_vars
 
 if %CUDA_VER% EQU 118 goto cuda118
-if %CUDA_VER% EQU 124 goto cuda124
 if %CUDA_VER% EQU 126 goto cuda126
 if %CUDA_VER% EQU 128 goto cuda128
 
