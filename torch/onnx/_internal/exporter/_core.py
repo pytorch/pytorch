@@ -621,15 +621,15 @@ def _handle_call_function_node_with_lowering(
             output.name = f"{node.name}__{i}"
             # Set the name of the producing node using the value name for correspondence
             producer = output.producer()
-            assert producer is not None
-            producer.name = f"node_{output.name}"
+            if producer is not None:
+                producer.name = f"node_{output.name}"
     else:
         _set_shape_type(outputs, node.meta["val"], complex_to_float=True)
         node_name_to_values[node.name] = outputs
         outputs.name = node.name
         producer = outputs.producer()
-        assert producer is not None
-        producer.name = f"node_{outputs.name}"
+        if producer is not None:
+            producer.name = f"node_{outputs.name}"
 
     for ir_node in onnx_nodes:
         ir_node.meta["node"] = node
