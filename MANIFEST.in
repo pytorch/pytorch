@@ -1,3 +1,5 @@
+# Reference: https://setuptools.pypa.io/en/latest/userguide/miscellaneous.html
+
 # Include source files in SDist
 include CMakeLists.txt
 include *.bzl
