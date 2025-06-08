@@ -512,7 +512,7 @@ Available options:
   to free old & unused blocks first to avoid freeing blocks that are actively being
   reused. The threshold value should be between greater than 0.0 and less than 1.0.
   The default value is set at 1.0.
-  
+
   ``garbage_collection_threshold`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``garbage_collection_threshold`` is ignored.
 * ``expandable_segments`` (experimental, default: `False`) If set to `True`, this setting instructs
