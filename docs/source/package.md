@@ -15,17 +15,17 @@ This document contains tutorials, how-to guides, explanations, and an API refere
 will help you learn more about `torch.package` and how to use it.
 
 ```{warning}
-    This module depends on the ``pickle`` module which is not secure. Only unpackage data you trust.
+This module depends on the `pickle` module which is not secure. Only unpackage data you trust.
 
-    It is possible to construct malicious pickle data which will **execute arbitrary code during unpickling**.
-    Never unpackage data that could have come from an untrusted source, or that could have been tampered with.
+It is possible to construct malicious pickle data which will **execute arbitrary code during unpickling**.
+Never unpackage data that could have come from an untrusted source, or that could have been tampered with.
 
-    For more information, review the `documentation <https://docs.python.org/3/library/pickle.html>`_ for the ``pickle`` module.
+For more information, review the [documentation](https://docs.python.org/3/library/pickle.html) for the `pickle` module.
 ```
 
-```{eval-rst}
-.. contents:: :local:
-    :depth: 2
+```{contents}
+:local:
+:depth: 2
 ```
 
 ## Tutorials
