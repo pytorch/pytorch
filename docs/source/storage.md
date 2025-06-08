@@ -43,38 +43,38 @@ It also implies that a tensor storage can be changed, as the following example s
 >>> t = torch.ones(3)
 >>> s0 = t.untyped_storage()
 >>> s0
->  0
->  0
->  128
->  63
->  0
->  0
->  128
->  63
->  0
->  0
->  128
->  63
-> [torch.storage.UntypedStorage(device=cpu) of size 12]
+0
+0
+128
+63
+0
+0
+128
+63
+0
+0
+128
+63
+[torch.storage.UntypedStorage(device=cpu) of size 12]
 >>> s1 = s0.clone()
 >>> s1.fill_(0)
->  0
->  0
->  0
->  0
->  0
->  0
->  0
->  0
->  0
->  0
->  0
->  0
-> [torch.storage.UntypedStorage(device=cpu) of size 12]
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+[torch.storage.UntypedStorage(device=cpu) of size 12]
 >>> # Fill the tensor with a zeroed storage
 >>> t.set_(s1, storage_offset=t.storage_offset(), stride=t.stride(), size=t.size())
-> tensor([0., 0., 0.])
-> ```
+tensor([0., 0., 0.])
+```
 
 :::{warning}
 Please note that directly modifying a tensor's storage as shown in this example is not a recommended practice.
@@ -98,12 +98,12 @@ We mentioned that a tensor that has a non-None `grad` attribute has actually two
 In this case, {meth}`~torch.Tensor.untyped_storage` will return the storage of the {attr}`~torch.Tensor.data` attribute,
 whereas the storage of the gradient can be obtained through `tensor.grad.untyped_storage()`.
 
-> ```python
-> >>> t = torch.zeros(3, requires_grad=True)
-> >>> t.sum().backward()
-> >>> assert list(t.untyped_storage()) == [0] * 12  # the storage of the tensor is just 0s
-> >>> assert list(t.grad.untyped_storage()) != [0] * 12  # the storage of the gradient isn't
-> ```
+```python
+>>> t = torch.zeros(3, requires_grad=True)
+>>> t.sum().backward()
+>>> assert list(t.untyped_storage()) == [0] * 12  # the storage of the tensor is just 0s
+>>> assert list(t.grad.untyped_storage()) != [0] * 12  # the storage of the gradient isn't
+```
 
 There are also special cases where tensors do not have a typical storage, or no storage at all:
 : - Tensors on `"meta"` device: Tensors on the `"meta"` device are used for shape inference
