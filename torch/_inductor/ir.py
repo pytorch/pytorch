@@ -1,3 +1,30 @@
+"""
+Core Intermediate Representation (IR) for PyTorch Inductor.
+
+This module defines the fundamental IR constructs used by PyTorch's Inductor compiler
+system to represent and transform computational graphs. The IR provides a hierarchical
+representation of tensors, operations, and memory layouts that enables efficient code
+generation for various backends.
+
+Key Components:
+- TensorBox: Top-level IR construct representing torch.Tensor outputs
+- StorageBox: Manages memory allocation and layout information  
+- Buffer: Represents actual memory allocations and computations
+- View: Handles tensor views that share underlying storage
+- IRNode: Base class for all IR nodes in the computation graph
+
+The IR supports:
+- Functional transformations with automatic buffer management
+- View operations that share underlying storage
+- Memory layout optimizations and stride calculations
+- Backend-agnostic code generation through operation lowering
+- Symbolic shape computation and dynamic shapes
+- Memory fusion and kernel optimization
+
+This module serves as the foundation for Inductor's compilation pipeline,
+bridging the gap between PyTorch's eager execution model and optimized
+backend code generation.
+"""
 from __future__ import annotations
 
 import contextlib
