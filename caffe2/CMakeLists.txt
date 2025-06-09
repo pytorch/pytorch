@@ -1317,12 +1317,6 @@ install(FILES
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 if(BUILD_TEST)
-  if(BUILD_EXECUTORCH)
-    add_subdirectory(
-            ${TORCH_ROOT}/test/edge
-            ${CMAKE_BINARY_DIR}/test_edge_op_registration
-    )
-  endif()
   if(BUILD_LITE_INTERPRETER)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
@@ -1949,7 +1943,7 @@ if(BUILD_TEST)
         set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
         hip_add_executable(${test_name} "${test_src}")
         list(JOIN PYTORCH_ROCM_ARCH " " ROCM_PROPERTY_ARCH_LIST)
-        set_target_properties(${test_name} PROPERTIES HIP_ARCHITECTURES ROCM_PROPERTY_ARCH_LIST)
+        set_target_properties(${test_name} PROPERTIES HIP_ARCHITECTURES ${ROCM_PROPERTY_ARCH_LIST})
       else()
         add_executable(${test_name} "${test_src}")
       endif()
