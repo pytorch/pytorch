@@ -30,7 +30,7 @@ The ONNX exporter depends on extra Python packages:
   - [ONNX](https://onnx.ai)
   - [ONNX Script](https://microsoft.github.io/onnxscript)
 
-They can be installed through [pip]{https://pypi.org/project/pip/):
+They can be installed through [pip](https://pypi.org/project/pip/):
 
 ```{code-block} bash
 
