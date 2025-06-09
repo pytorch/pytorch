@@ -1013,7 +1013,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                  iter.is_contiguous() ? "dense" : "strided",
                                  scalarToMetalTypeString(outputTensor),
                                  scalarToMetalTypeString(inputTensor),
-                                 alpha.has_value() ? scalarToMetalTypeString(alpha_type) : "");
+                                 alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "");
   @autoreleasepool {
     auto cplState = getPipelineStateForFunc(kernel_name);
 
