@@ -19,14 +19,12 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/RMSNorm_metallib.h>
 #endif
 
-std::tuple<Tensor, Tensor> _fused_rms_norm_mps(
-    const Tensor& input,
-    IntArrayRef normalized_shape,
-    const std::optional<Tensor>& weight_opt,
-    const std::optional<double> eps) { 
-
+std::tuple<Tensor, Tensor> _fused_rms_norm_mps(const Tensor& input,
+                                               IntArrayRef normalized_shape,
+                                               const std::optional<Tensor>& weight_opt,
+                                               const std::optional<double> eps) {
   const Tensor weight = weight_opt.value().contiguous();
-  const int64_t normalized_ndim = normalized_shape.size()
+  const int64_t normalized_ndim = normalized_shape.size();
   auto eps_val = eps.value_or(std::numeric_limits<double>::epsilon());
 
   TORCH_CHECK(input.is_contiguous() && weight.is_contiguous(), "Expected contiguous input and weight tensors");
