@@ -829,12 +829,19 @@ class _SymmetricMemory:
     def signal_pad_size(self) -> int: ...
 
 class ProcessGroupXCCL(Backend):
+    class Options(Backend.Options):
+        global_ranks_in_group: list[int]
+        group_name: str
+
+        def __init__(self): ...
+
     def __init__(
         self,
         store: Store,
         rank: int,
         size: int,
-    ): ...
+        options: Options,
+    ) -> None: ...
 
 def _set_process_group(pg: ProcessGroup) -> None: ...
 def _current_process_group() -> ProcessGroup: ...
