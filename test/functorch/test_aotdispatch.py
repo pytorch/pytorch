@@ -620,6 +620,48 @@ class TestAOTAutograd(AOTTestCase):
 
         self.verify_aot_autograd(F(), inp)
 
+    @torch._functorch.config.patch(assume_standard_autocast=True)
+    def test_assume_standard_autocast(self):
+        def do_test(device):
+            class Model(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("linear1", torch.ones(4, 4))
+                    self.linear2 = nn.Linear(4, 1)
+
+                def forward(self, x):
+                    y = x @ self.linear1
+                    with torch.amp.autocast(device_type="cuda", enabled=False):
+                        y = y.float()
+                        y = self.linear2(y)
+                    return y
+
+            model = Model().to(device=device)
+            x = torch.ones(1, 4, dtype=torch.float, device=device)
+
+            with torch.amp.autocast(device_type=device, enabled=True):
+                y = model(x)
+            loss = (y * 16384).sum()
+            loss.backward()
+            expected = [p.grad.clone() for p in model.parameters()]
+
+            for p in model.parameters():
+                p.grad.data.zero_()
+
+            model = torch.compile(model, fullgraph=True, backend="aot_eager")
+            with torch.amp.autocast(device_type=device, enabled=True):
+                y = model(x)
+            loss = (y * 16384).sum()
+            loss.backward()
+            result = [p.grad.clone() for p in model.parameters()]
+            self.assertEqual(result, expected)
+
+        devices = ["cpu"]
+        if torch.cuda.is_available():
+            devices.append("cuda")
+        for device in devices:
+            do_test(device)
+
     def test_embedding_bag_view_dynamic(self):
         # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
         # test that this works even though the sparse tensor has no storage.

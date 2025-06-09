@@ -11,6 +11,7 @@ It does so by:
 4. dispatching subclasses
 """
 
+import contextlib
 import warnings
 from contextlib import contextmanager, nullcontext
 from functools import wraps
@@ -258,7 +259,12 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                 )
                 functional_tensor_mode._tokens = {}
 
-            with set_partitioner_tag_is_backward(), fx_traceback.preserve_node_meta():
+            with set_partitioner_tag_is_backward(), fx_traceback.preserve_node_meta(), contextlib.ExitStack() as stack:
+                if config.assume_standard_autocast:
+                    autocast_enabled_devices = torch._C._autocast_enabled_devices()
+                    for device_type in autocast_enabled_devices:
+                        stack.enter_context(torch.autocast(device_type, enabled=False))
+
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
                 if aot_config.no_tangents:
                     assert len(needed_tangents) == 1 and needed_tangents[0].numel() == 1
