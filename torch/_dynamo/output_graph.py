@@ -1399,7 +1399,7 @@ class OutputGraph(OutputGraphGuardsState):
             # temporary local source. This (a). speeds up loading VTs with long
             # chained source, and (b). avoids redundantly saving single-user VT
             # into a temporary local.
-            tempvars = {}
+            tempvars = {}  # type: ignore[var-annotated]
             for val, count in pass1.uses.items():
                 # If it's already a local source, no need to cache it
                 if count > 1 and not istype(val, (SyntheticLocalSource, LocalSource)):
