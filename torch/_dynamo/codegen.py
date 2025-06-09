@@ -198,7 +198,7 @@ class PyCodegen:
                 self.top_of_stack = source
                 return
 
-            self.uses[value] += 1
+            self.uses[source] += 1
             try:
                 self.call_reconstruct(source)
             except NotImplementedError:
@@ -208,9 +208,9 @@ class PyCodegen:
                     explanation=f"Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
-            if value in self.tempvars:
+            if source in self.tempvars:
                 self._output.append(create_dup_top())
-                self.add_cache(value)
+                self.add_cache(source)
             self.top_of_stack = source
 
             return
