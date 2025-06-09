@@ -1,8 +1,14 @@
-torch.mps
-===================================
-.. automodule:: torch.mps
-.. currentmodule:: torch.mps
+# torch.mps
 
+```{eval-rst}
+.. automodule:: torch.mps
+```
+
+```{eval-rst}
+.. currentmodule:: torch.mps
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -19,9 +25,11 @@ torch.mps
     driver_allocated_memory
     recommended_max_memory
     compile_shader
+```
 
-MPS Profiler
-------------
+## MPS Profiler
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -33,17 +41,27 @@ MPS Profiler
     profiler.is_capturing_metal
     profiler.is_metal_capture_enabled
     profiler.metal_capture
+```
 
-MPS Event
-------------
+## MPS Event
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     event.Event
 
+```
 
-.. This module needs to be documented. Adding here in the meantime
-.. for tracking purposes
+% This module needs to be documented. Adding here in the meantime
+
+% for tracking purposes
+
+```{eval-rst}
 .. py:module:: torch.mps.event
+```
+
+```{eval-rst}
 .. py:module:: torch.mps.profiler
+```
