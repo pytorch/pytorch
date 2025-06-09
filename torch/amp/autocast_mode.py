@@ -2,7 +2,7 @@
 import collections
 import functools
 import warnings
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import torch
 from torch.types import _dtype
