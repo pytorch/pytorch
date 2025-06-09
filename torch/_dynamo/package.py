@@ -210,6 +210,10 @@ class _CompilePackage:
                 raise RuntimeError(
                     f"Compile package was created with a different Python version: {dynamo.python_version}"
                 )
+            if dynamo.torch_version != torch.__version__:
+                raise RuntimeError(
+                    f"Compile package was created with a different PyTorch version: {dynamo.torch_version}"
+                )
 
             main, *codes = dynamo.codes
             self._codes = {self._innermost_fn.__code__: main}
