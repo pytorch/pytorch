@@ -799,7 +799,7 @@ Tensor concatenate(TensorList tensors, Dimname dim) {
 }
 
 Tensor& concatenate_out(TensorList tensors, int64_t dim, Tensor& result) {
-  return at::cat_out(result, tensors, dim);
+  return at::cat_out(tensors, dim, result);
 }
 
 Tensor concatenate(TensorList tensors, int64_t dim) {
