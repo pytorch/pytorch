@@ -1088,7 +1088,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   const auto cast_needed = input.scalar_type() != other.scalar_type();
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
-  const auot alpha_suffix = alpha.has_value() ? scalarToMetalTypeString(alpha_type) : "";
+  const auto alpha_suffix = alpha.has_value() ? scalarToMetalTypeString(alpha_type) : "";
   // TODO: Implicitly pass both input and output types to non-cast kernels
   const auto kernel_name = cast_needed
       ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(out), alpha_suffix)
