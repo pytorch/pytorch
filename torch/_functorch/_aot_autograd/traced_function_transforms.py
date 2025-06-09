@@ -531,7 +531,7 @@ def create_functionalized_fn(
                 f_args = pytree.tree_map(to_fun, args)
 
                 if trace_joint and has_input_mutated_in_graph and joint_fn_handle:
-
+                    # TODO(ivankobzarev): Support fw and bw mutations for subclasses
                     def _post_forward(primals):
                         nonlocal primals_after_forward
                         primals_after_forward = pytree.tree_map(from_fun, primals)
@@ -686,7 +686,7 @@ def create_functionalized_fn(
                 inputs_mutated_in_graph_applied_mutation_counters: list[int] = [
                     0
                 ] * len(meta.input_info)
-                if trace_joint and has_input_mutated_in_graph and joint_fn_handle:
+                if f_args_mutation_counter_after_forward is not None:
                     primals_before = args[0]
                     for idx, (f_inpt, before, after, inpt_info) in enumerate(
                         zip(
@@ -733,10 +733,13 @@ def create_functionalized_fn(
                         != MutationType.MUTATED_IN_GRAPH
                     ):
                         continue
-                    mc = torch._functionalize_mutation_counter(f_inpt.elem)  # type: ignore[attr-defined]
-                    if mc == inputs_mutated_in_graph_applied_mutation_counters[idx]:
-                        # No mutation in backward; mutation was already applied.
-                        continue
+                    if f_args_mutation_counter_after_forward is not None:
+                        # This could happen for subclasses tracing
+                        # Subclasses support for mutations in fw and bw is TBD.
+                        mc = torch._functionalize_mutation_counter(f_inpt.elem)  # type: ignore[attr-defined]
+                        if mc == inputs_mutated_in_graph_applied_mutation_counters[idx]:
+                            # No mutation in backward; mutation was already applied.
+                            continue
 
                     with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag_must_be_in_backward():
                         apply_in_graph_mutations(
