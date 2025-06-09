@@ -202,9 +202,10 @@ class autocast:
     (see :ref:`Working with Multiple GPUs<amp-multigpu>`).
 
     Args:
-        device_type(str or torch.device, required):  Device type to use. Possible values are: 'cuda', 'cpu', 'mtia', 'maia', 'xpu', and 'hpu'.
-                                     The type is the same as the `type` attribute of a :class:`torch.device`.
-                                     Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
+        device_type(str or torch.device, required):  Device type to use. Possible values are:
+                                     'cuda', 'cpu', 'mtia', 'maia', 'xpu', and 'hpu'.
+                                     If you pass a device, we will use the device type of that
+                                     device.
         enabled(bool, optional):  Whether autocasting should be enabled in the region.
             Default: ``True``
         dtype(torch_dtype, optional):  Data type for ops run in autocast. It uses the default value
@@ -229,7 +230,7 @@ class autocast:
             raise ValueError(
                 f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
             )
-        
+
         if dtype is None:
             dtype = torch.get_autocast_dtype(device_type)
         if torch._jit_internal.is_scripting():
