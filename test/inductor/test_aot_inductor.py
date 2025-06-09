@@ -124,6 +124,18 @@ except (unittest.SkipTest, ImportError):
     raise
 
 
+class Bar:
+    def __init__(self):
+        self.bar = 5
+        self.bar_bar = 6
+
+    def __eq__(self, other):
+        return self.bar == other.bar and self.bar_bar == other.bar_bar
+
+    def __hash__(self):
+        return hash(self.bar) + hash(self.bar_bar)
+
+
 class AOTInductorTestsTemplate:
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     def test_simple(self, embed_kernel_binary):
@@ -244,6 +256,19 @@ class AOTInductorTestsTemplate:
             model, example_inputs, options={"aot_inductor.output_path": expected_path}
         )
         self.assertTrue(actual_path == expected_path)
+
+    def test_aoti_pytree_constant(self):
+        class Foo(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.device = device
+
+            def forward(self, x, bar):
+                return x + bar.bar + bar.bar_bar
+
+        torch.utils._pytree.register_constant(Bar, serialized_type_name="Bar")
+        example_inputs = (torch.randn(4, 4), Bar())
+        self.check_model(Foo(self.device), example_inputs)
 
     def test_empty_constant_folding(self):
         class Model(torch.nn.Module):
