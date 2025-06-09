@@ -8978,6 +8978,34 @@ graph():
         ep = export(m, inputs)
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
+    def test_view_as_complex_unbacked(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, xs):
+                u0, u1, u2 = xs.tolist()
+                seq_len = u0*u1*u2
+                torch._check(seq_len >= 0)
+                torch._check(seq_len <= x.shape[1])
+                x = x[0, :seq_len]
+                x = x.to(torch.float64)
+                x = x.reshape(seq_len, 40, -1, 2)
+                x = torch.view_as_complex(x)
+                return x
+
+        x = torch.randn(1, 75600, 40, 128)
+        xs = torch.tensor([8, 8, 8])
+        ep = export(Foo(), (x, xs), strict=False)
+        print(ep)
+
+    def test_reshape_product_unbacked(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                x = torch.empty(u0, u1, u2, 64)
+                return x.reshape(u0*u1*u2, 1, -1)
+
+        ep = export(Foo(), (torch.tensor([8, 8, 8]),), strict=False)
+        print(ep)
+
     def test_sym_sqrt(self):
         import math
 
