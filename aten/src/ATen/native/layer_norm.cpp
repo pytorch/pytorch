@@ -24,7 +24,6 @@
 #include <ATen/ops/pow.h>
 #include <ATen/ops/rsqrt.h>
 #include <ATen/ops/rms_norm.h>
-#include <ATen/ops/native_rms_norm.h>
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
@@ -262,7 +261,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   return outputs;
 }
 
-std::tuple<Tensor, Tensor> rms_norm_cpu(
+std::tuple<Tensor, Tensor> rms_norm_composite(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,
@@ -331,7 +330,7 @@ Tensor rms_norm_symint(
   const Tensor& weight = *weight_maybe_owned;
   _check_rms_norm_inputs_symint(input, normalized_shape, weight);
 
-#ifdef USE_MPS
+  #ifdef USE_MPS
   if (input.device().type() == DeviceType::MPS && weight_opt.has_value()) {
     const Tensor weight = weight_opt.value();
     const bool any_nested = input.is_nested() || weight.is_nested();
@@ -340,13 +339,12 @@ Tensor rms_norm_symint(
     const bool is_weight_fp = isFloatingType(weight.scalar_type());
 
     if (!(GradMode::is_enabled() && any_inputs_require_grad) && !any_nested && is_input_fp && is_weight_fp) {
-      auto eps_val = eps.value_or(std::numeric_limits<double>::epsilon());
-      return at::_fused_rms_norm(input.contiguous(), normalized_shape.size(), weight.contiguous(), eps_val);
+      return std::get<0>(at::_fused_rms_norm(input.contiguous(), IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), weight_opt, eps));
     }
   }
-#endif
+  #endif
 
-  return std::get<0>(at::native_rms_norm(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
+  return std::get<0>(at::_fused_rms_norm(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
 }
 
 } // namespace at::native
