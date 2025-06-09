@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import inspect
 import logging
+import operator
 import threading
 from collections import defaultdict
 from collections.abc import Sequence
@@ -1246,7 +1247,7 @@ class TritonHOPifier:
                 ]
                 configs = [
                     config[0]
-                    for config in sorted(est_timing, key=lambda x: x[1])[:top_k]
+                    for config in sorted(est_timing, key=operator.itemgetter(1))[:top_k]
                 ]
         return configs
 
