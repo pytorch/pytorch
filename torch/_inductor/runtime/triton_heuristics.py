@@ -33,6 +33,7 @@ import torch
 from torch._dynamo.utils import set_feature_use
 from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._triton import triton_set_allocator
 
 from ..triton_bundler import TritonBundler
 from ..utils import prefix_is_reduction, triton_version_uses_attrs_dict
@@ -52,6 +53,7 @@ from .hints import (
 )
 from .runtime_utils import (
     ceildiv,
+    compilation_callback,
     conditional_product,
     create_bandwidth_info_str,
     dynamo_timed,
@@ -785,29 +787,14 @@ class CachingAutotuner(KernelInterface):
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
             args_with_constexprs = self._get_args_with_constexprs(cloned_args, launcher)
-            if autograd_profiler._is_profiler_enabled:
-                profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
-                with torch._C._profiler._RecordFunctionFast(
-                    self.inductor_meta.get("kernel_name", "triton kernel"),
-                    args_with_constexprs,
-                    profiler_kwargs,
-                ):
-                    launcher(
-                        *args_with_constexprs,
-                        **cloned_kwargs,
-                        stream=stream,
-                    )
-
-            else:
-                launcher(
-                    *args_with_constexprs,
-                    **cloned_kwargs,
-                    stream=stream,
-                )
+            launcher(
+                *args_with_constexprs,
+                **cloned_kwargs,
+                stream=stream,
+            )
             self.restore_args_from_cpu(cpu_copies)
 
-        # only use profiler when not already in a profiler instance
-        if with_profiler and not autograd_profiler._is_profiler_enabled:
+        if with_profiler:
             from torch._inductor.utils import do_bench_using_profiling
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
@@ -929,15 +916,21 @@ class CachingAutotuner(KernelInterface):
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
-        with dynamo_timed(
-            "CachingAutotuner.benchmark_all_configs",
-            log_pt2_compile_event=True,
-            metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-            dynamo_compile_column_us="runtime_triton_autotune_time_us",
-            compile_id=self.compile_id,
-            is_backward=self.is_backward,
-            log_waitcounter=True,
-            waitcounter_name_override="triton_autotuner",
+        with (
+            dynamo_timed(
+                "CachingAutotuner.benchmark_all_configs",
+                log_pt2_compile_event=True,
+                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
+                dynamo_compile_column_us="runtime_triton_autotune_time_us",
+                compile_id=self.compile_id,
+                is_backward=self.is_backward,
+                log_waitcounter=True,
+                waitcounter_name_override="triton_autotuner",
+            ),
+            compilation_callback.callback_handler.install_callbacks(
+                compilation_callback.CallbackTrigger.TRITON_AUTOTUNING,
+                str(self.compile_id),
+            ),
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
@@ -1107,28 +1100,6 @@ class CachingAutotuner(KernelInterface):
             ).make_launcher()
         return config2launcher[best_config]
 
-    def get_profiler_kwargs(self, stream, launcher):
-        kernel_kwargs_str = ",".join(
-            f"{k}={v}" for (k, v) in launcher.config.kwargs.items()
-        )
-
-        ret = {
-            "kernel_file": (self.filename or ""),
-            "kernel_hash": self.kernel_hash,
-            "kernel_backend": "triton",
-            "stream": stream,
-            "num_warps": launcher.config.num_warps,
-            "num_stages": launcher.config.num_stages,
-            "kernel_kwargs": kernel_kwargs_str,
-        }
-        if "kernel_name" in self.inductor_meta:
-            ret["kernel_name"] = self.inductor_meta["kernel_name"]
-        if "kernel_flop" in self.inductor_meta:
-            ret["kernel_flop"] = self.inductor_meta["kernel_flop"]
-        if "kernel_num_gb" in self.inductor_meta:
-            ret["kernel_num_gb"] = self.inductor_meta["kernel_num_gb"]
-        return ret
-
     def run(
         self,
         *args,
@@ -1143,6 +1114,8 @@ class CachingAutotuner(KernelInterface):
                 **kwargs,
                 **self.configs[0].kwargs,
             )
+
+        triton_set_allocator(self.triton_meta["device"])
 
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
@@ -1172,7 +1145,19 @@ class CachingAutotuner(KernelInterface):
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
-            profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
+            kernel_kwargs_str = ",".join(
+                f"{k}={v}" for (k, v) in launcher.config.kwargs.items()
+            )
+
+            profiler_kwargs = {
+                "kernel_file": (self.filename or ""),
+                "kernel_hash": self.kernel_hash,
+                "kernel_backend": "triton",
+                "stream": stream,
+                "num_warps": launcher.config.num_warps,
+                "num_stages": launcher.config.num_stages,
+                "kernel_kwargs": kernel_kwargs_str,
+            }
 
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
@@ -1574,6 +1559,10 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             launch_enter = knobs.runtime.launch_enter_hook
             launch_exit = knobs.runtime.launch_exit_hook
 
+        import math as math_lib
+
+        import torch as torch_lib
+
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
@@ -1604,6 +1593,8 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             ),
             "function": get_first_attr(binary, "function", "cu_function"),
             "runner": get_first_attr(binary, "run", "c_wrapper"),
+            "math": math_lib,
+            "torch": torch_lib,
         }
 
         if not hasattr(binary, "launch_metadata"):
