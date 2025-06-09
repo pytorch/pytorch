@@ -7602,6 +7602,8 @@ class InvokeSubgraph(ExternKernel):
 
     @classmethod
     def create(cls, subgraph: Subgraph, *operands):  # type: ignore[no-untyped-def]
+        from .lowering import constrain_to_fake_tensor
+
         # TODO(anijain2305) - Support sym expr as operands in future.
         current_node = V.graph.current_node
 
@@ -7625,10 +7627,9 @@ class InvokeSubgraph(ExternKernel):
             if isinstance(operand, ShapeAsConstantBuffer):
                 new_operands.append(operand)
             else:
-                stride_order = get_stride_order(
-                    fake_operands[idx].stride(), V.graph.sizevars.shape_env
+                new_operands.append(
+                    constrain_to_fake_tensor(operand, fake_operands[idx])
                 )
-                new_operands.append(cls.require_stride_order(operand, stride_order))
 
         operands = new_operands
 
