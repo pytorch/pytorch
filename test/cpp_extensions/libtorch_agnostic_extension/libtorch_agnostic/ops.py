@@ -81,6 +81,7 @@ def exp_neg_is_leaf(t1, t2, t3) -> tuple[Tensor, Tensor, bool]:
     """
     return torch.ops.libtorch_agnostic.exp_neg_is_leaf.default(t1, t2, t3)
 
+
 def neg_exp(t) -> Tensor:
     """
     Returns a Tensor composing neg of exp
@@ -91,6 +92,7 @@ def neg_exp(t) -> Tensor:
     Returns: neg(exp(t))
     """
     return torch.ops.libtorch_agnostic.neg_exp.default(t)
+
 
 def divide_neg_exp(t) -> Tensor:
     """

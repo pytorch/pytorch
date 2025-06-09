@@ -134,7 +134,7 @@ using torch::stable::Tensor;
 Tensor my_abs(Tensor t) {
   const auto num_args = 1;
   StableIValue stack[num_args];
-  stack[0] = t.get_SIV();
+  stack[0] = t.get_StableIValue();
   aoti_torch_call_dispatcher("aten::abs", "", stack);
   return Tensor(stack[0]);
 }
@@ -142,7 +142,7 @@ Tensor my_abs(Tensor t) {
 void boxed_my_abs(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
   Tensor t(stack[0]);
   Tensor tensor_res = my_abs(std::move(t));
-  stack[0] = tensor_res.get_SIV();
+  stack[0] = tensor_res.get_StableIValue();
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
@@ -228,7 +228,7 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
 
 Tensor neg_exp(Tensor t) {
   StableIValue stack[1];
-  stack[0] = t.get_SIV();
+  stack[0] = t.get_StableIValue();
   aoti_torch_call_dispatcher("aten::exp", "", stack);
   aoti_torch_call_dispatcher("aten::neg", "", stack);
   return Tensor(stack[0]);
@@ -237,7 +237,7 @@ Tensor neg_exp(Tensor t) {
 void boxed_neg_exp(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
   Tensor t(stack[0]);
   Tensor res = neg_exp(std::move(t));
-  stack[0] = res.get_SIV();
+  stack[0] = res.get_StableIValue();
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
@@ -250,10 +250,10 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
 
 Tensor divide_neg_exp(Tensor t) {
   StableIValue stack1[1];
-  stack1[0] = t.get_SIV();
+  stack1[0] = t.get_StableIValue();
 
   StableIValue stack2[1];
-  stack2[0] = t.get_SIV();
+  stack2[0] = t.get_StableIValue();
   aoti_torch_call_dispatcher("aten::exp", "", stack2);
   aoti_torch_call_dispatcher("aten::neg", "", stack1);
 
@@ -267,7 +267,7 @@ Tensor divide_neg_exp(Tensor t) {
 void boxed_divide_neg_exp(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
   Tensor t(stack[0]);
   Tensor res = divide_neg_exp(std::move(t));
-  stack[0] = res.get_SIV();
+  stack[0] = res.get_StableIValue();
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {

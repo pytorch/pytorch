@@ -25,7 +25,7 @@ if not IS_WINDOWS:
         @classmethod
         def setUpClass(cls):
             try:
-                import libtorch_agnostic
+                pass
             except Exception:
                 install_cpp_extension(extension_root=Path(__file__).parent.parent)
 
@@ -115,14 +115,14 @@ if not IS_WINDOWS:
                 cuda_res = libtorch_agnostic.ops.neg_exp(t)
                 self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
                 self.assertEqual(cuda_res, torch.neg(torch.exp(t)))
-            
+
             if t.is_cuda:
                 init_mem = torch.cuda.memory_allocated(device)
                 for _ in range(3):
                     _make_cuda_tensors(init_mem)
                     curr_mem = torch.cuda.memory_allocated(device)
                     self.assertEqual(curr_mem, init_mem)
-        
+
         def test_divide_neg_exp(self, device):
             import libtorch_agnostic
 
@@ -134,7 +134,7 @@ if not IS_WINDOWS:
                 cuda_res = libtorch_agnostic.ops.divide_neg_exp(t)
                 self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
                 self.assertEqual(cuda_res, torch.neg(t) / torch.exp(t))
-            
+
             if t.is_cuda:
                 init_mem = torch.cuda.memory_allocated(device)
                 for _ in range(3):
