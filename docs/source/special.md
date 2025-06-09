@@ -1,17 +1,18 @@
 .. role:: hidden
     :class: hidden-section
 
-torch.special
-=============
+# torch.special
 
-The torch.special module, modeled after SciPy's `special <https://docs.scipy.org/doc/scipy/reference/special.html>`_ module.
+The torch.special module, modeled after SciPy's [special](https://docs.scipy.org/doc/scipy/reference/special.html) module.
 
+```{eval-rst}
 .. automodule:: torch.special
 .. currentmodule:: torch.special
+```
 
-Functions
------------------------
+## Functions
 
+```{eval-rst}
 .. autofunction:: airy_ai
 .. autofunction:: bessel_j0
 .. autofunction:: bessel_j1
@@ -50,3 +51,4 @@ Functions
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
+```
