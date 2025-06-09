@@ -6117,11 +6117,6 @@ def multi_head_attention_forward(
 ) -> tuple[Tensor, Optional[Tensor]]:
     r"""Forward method for MultiHeadAttention.
 
-    .. note::
-        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
-        for an in depth discussion of the performant building blocks PyTorch offers for building your own
-        transformer layers.
-
     See :class:`torch.nn.MultiheadAttention` for details.
 
     Args:
