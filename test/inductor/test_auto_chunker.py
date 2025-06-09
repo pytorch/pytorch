@@ -1,8 +1,6 @@
 # Owner(s): ["module: inductor"]
 import os
 
-from triton.testing import do_bench
-
 import torch
 from torch import nn
 from torch._dynamo.utils import same
@@ -148,6 +146,8 @@ class AutoChunkerTest(TestCase):
         self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
 
         if DO_PERF_TEST:
+            from triton.testing import do_bench
+
             ms_eager = do_bench(lambda: f(x, y))
             ms_opt = do_bench(lambda: opt_f(x, y))
             print(f"Eager v.s. Compile perf: {ms_eager:.3f}ms v.s. {ms_opt:.3f}ms")
