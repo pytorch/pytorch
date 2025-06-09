@@ -2713,6 +2713,127 @@ if HAS_CUDA:
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar1(self):
+            def f(x, y):
+                return x + y
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            inputs = (torch.ones(2, 2, device="cuda"), torch.ones((), device="cpu"))
+            for i in range(3):
+                if i == 0:
+                    _, code = run_and_get_code(compiled_f, *inputs)
+                    FileCheck().check_count(".copy_", 1, exactly=True).run(code[0])
+                else:
+                    compiled_f(*inputs)
+            self.assertEqual(compiled_f(*inputs), f(*inputs))
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar2(self):
+            def f(x, y, z):
+                return x + y, x + z
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            inputs = (
+                torch.ones((), device="cpu"),
+                torch.ones(2, 2, device="cuda"),
+                torch.ones(2, 2, device="cuda"),
+            )
+            for i in range(3):
+                if i == 0:
+                    _, code = run_and_get_code(compiled_f, *inputs)
+                    FileCheck().check_count(".copy_", 1, exactly=True).run(code[0])
+                else:
+                    compiled_f(*inputs)
+            self.assertEqual(compiled_f(*inputs), f(*inputs))
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar3(self):
+            def f(x, y, cpu_scalar_tensor):
+                z = x + y
+                z = z + cpu_scalar_tensor
+                return z
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            inputs = (
+                torch.randn(2, 2, device="cuda"),
+                torch.randn(2, 2, device="cuda"),
+                torch.tensor(1, device="cpu"),
+            )
+            for i in range(3):
+                if i == 0:
+                    _, code = run_and_get_code(compiled_f, *inputs)
+                    FileCheck().check_count(".copy_", 1, exactly=True).run(code[0])
+                else:
+                    compiled_f(*inputs)
+            self.assertEqual(compiled_f(*inputs), f(*inputs))
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar4(self):
+            # cpu_scalar_tensor is accessed by cpu_scalar2 which is
+            # added with a gpu tensor z. This test checks the cpu
+            # scalar tensors are still moved in this case.
+            def f(x, y, cpu_scalar_tensor):
+                cpu_scalar2 = cpu_scalar_tensor + 1
+                z = x + y
+                z = z + cpu_scalar2
+                return z
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            inputs = (
+                torch.randn(2, 2, device="cuda"),
+                torch.randn(2, 2, device="cuda"),
+                torch.tensor(1, device="cpu"),
+            )
+            for i in range(3):
+                if i == 0:
+                    _, code = run_and_get_code(compiled_f, *inputs)
+                    FileCheck().check_count(".copy_", 1, exactly=True).run(code[0])
+                else:
+                    compiled_f(*inputs)
+            self.assertEqual(compiled_f(*inputs), f(*inputs))
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar_mutation(self):
+            # tests that input mutation on a cpu scalar tensor x is correctly
+            # handled when moving x to gpu at the beginning of the graph.
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x, y):
+                return x.copy_(y)
+
+            x = torch.tensor(1)
+            y = torch.tensor(2, device="cuda")
+
+            for _ in range(3):
+                foo(x, y)
+
+            self.assertEqual(x, torch.tensor(2, device="cpu"))
+            self.assertEqual(y, torch.tensor(2, device="cuda"))
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar_device_put(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                y = x.to("cuda")
+                z = y.to("cpu")
+                return z
+
+            x = torch.tensor(1)
+            for _ in range(3):
+                foo(x)
+
+            self.assertEqual(x, torch.tensor(1, device="cpu"))
+
+        @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraphs", False)
         def test_graph_partition_reduce_overhead_mode_effectiveness(self):
             # test that `mode="reduce-overhead"` still controls whether

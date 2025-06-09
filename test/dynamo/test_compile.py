@@ -81,11 +81,11 @@ class InPlaceCompilationTests(TestCase):
         torch._dynamo.reset()
 
         @torch._dynamo.on_compile_start
-        def start_callback():
+        def start_callback(_):
             print("Compilation started.")
 
         @torch._dynamo.on_compile_end
-        def end_callback():
+        def end_callback(_):
             print("Compilation ended.")
 
         mod = ToyModel()
@@ -116,13 +116,13 @@ class InPlaceCompilationTests(TestCase):
         counter = 0
 
         @torch._dynamo.on_compile_start
-        def start_callback():
+        def start_callback(_):
             nonlocal counter
             counter += 1
             print(f"Counter = {counter}")
 
         @torch._dynamo.on_compile_end
-        def end_callback():
+        def end_callback(_):
             nonlocal counter
             counter += 1
             print(f"Counter = {counter}")

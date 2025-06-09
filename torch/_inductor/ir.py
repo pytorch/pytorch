@@ -5,6 +5,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import operator
 import textwrap
 import traceback
 import typing
@@ -88,6 +89,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    do_bench_using_profiling,
     get_dtype_size,
     get_kernel_metadata,
     GPU_ALIGN_BYTES,
@@ -4697,6 +4699,8 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:  # type: ignore[no-untyped-def]
         algo = self.to_callable()
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            return do_bench_using_profiling(lambda: algo(*args))
         return benchmarker.benchmark(algo, args, {"out": out})
 
     def call_name(self) -> str:
@@ -4704,6 +4708,13 @@ class ChoiceCaller:
 
     def to_callable(self):  # type: ignore[no-untyped-def]
         raise NotImplementedError
+
+    def kernel_hash_key(self) -> str:
+        """
+        Hash key for the underlying kernel. By default, we assume there are no
+        runtime params, so kernel hash key defaults to choice caller's hash key.
+        """
+        return self.hash_key()
 
     def hash_key(self) -> str:
         raise NotImplementedError
@@ -5805,6 +5816,17 @@ class ExternKernel(InputsKernel):
             ]
         return kwargs
 
+    def get_op_name(self) -> str:
+        if self.fx_node is not None:
+            target = self.fx_node.target
+            op_namespace = getattr(target, "__module__", "unknown_namespace")
+            op_namespace = op_namespace.replace("._ops.", ".ops.")
+            op_namespace = op_namespace.rsplit(".", 1)[0]
+            op_name = f"{op_namespace}.{target}"
+        else:
+            op_name = "unknown_op"
+        return op_name
+
     def codegen_size_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if config.size_asserts and not V.graph.cpp_wrapper:
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
@@ -5812,19 +5834,24 @@ class ExternKernel(InputsKernel):
                 return
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-
+            op_name = self.get_op_name()
             wrapper.writeline(
-                f"assert_size_stride({self.get_name()}, {size}, {stride})"
+                f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
             )
 
     def codegen_alignment_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if config.alignment_asserts and not V.graph.cpp_wrapper:
             name = self.get_name()
             aligned = name not in V.graph.unaligned_buffers
+            op_name = self.get_op_name()
             if aligned:
-                wrapper.writeline(f"assert_alignment({name}, {GPU_ALIGN_BYTES})")
+                wrapper.writeline(
+                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
+                )
             else:
-                wrapper.writeline(f"# buffer {name} is assumed to be not aligned")
+                wrapper.writeline(
+                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
+                )
 
     def get_group_stride(self):  # type: ignore[no-untyped-def]
         """
@@ -6922,13 +6949,15 @@ class FallbackKernel(ExternKernelAlloc):
         assert len(self.mutation_names) <= 1
         return self.mutation_names
 
-    # ProxyExecutor Design Note
-    # We export the ExternFallbackNodes (for custom ops) into a serialized file
-    # and run it with a host side proxy executor to address the ABI problem
-    # This is currently only implemented for fbcode. Eventually, we will also make this work for OSS.
-    # Detailed design doc can be found at
-    # https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
     def export_extern_kernel_node(self):  # type: ignore[no-untyped-def]
+        """
+        ProxyExecutor Design Note
+        We export the ExternFallbackNodes (for custom ops) into a serialized file
+        and run it with a host side proxy executor to address the ABI problem
+        This is currently only implemented for fbcode. Eventually, we will also make this work for OSS.
+        Detailed design doc can be found at
+        https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
+        """
         log.debug(
             "Extern kernel node added for node %s with target %s.",
             self.get_name(),
@@ -6976,6 +7005,24 @@ class FallbackKernel(ExternKernelAlloc):
                         for out in output
                     ]
                 )
+            elif isinstance(return_type, torch.OptionalType) and isinstance(
+                return_type.getElementType(), torch.TensorType
+            ):
+                # For OptionalTensor
+                if output is None:
+                    return export_schema.Argument.create(
+                        as_optional_tensor=export_schema.OptionalTensorArgument.create(
+                            as_none=True
+                        )
+                    )
+                else:
+                    return export_schema.Argument.create(
+                        as_optional_tensor=export_schema.OptionalTensorArgument.create(
+                            as_tensor=export_schema.TensorArgument(
+                                name=output.get_name()
+                            )
+                        )
+                    )
             else:
                 raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
@@ -8065,7 +8112,7 @@ class TorchBindObject(NonTensorObj):
             for x in flat_elems
             if isinstance(x, torch.Tensor)
         ]
-        return functools.reduce(lambda x, y: x + y, flat_sizes, 0)
+        return functools.reduce(operator.add, flat_sizes, 0)
 
 
 @ir_dataclass

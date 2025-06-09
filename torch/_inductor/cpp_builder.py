@@ -1749,9 +1749,12 @@ class CppBuilder:
 
             """
         )
-        if device_type == "cuda":
+        if device_type == "cuda" and torch.version.hip is None:
+            from torch._inductor.codecache import _nvcc_arch_as_compile_option
+
+            current_arch = _nvcc_arch_as_compile_option()
             contents += textwrap.dedent(
-                """
+                f"""
                 find_package(CUDA REQUIRED)
 
                 find_program(OBJCOPY_EXECUTABLE objcopy)
@@ -1763,49 +1766,47 @@ class CppBuilder:
                 set(KERNEL_OBJECT_FILES "")
                 # Function to embed a single kernel
                 function(embed_gpu_kernel KERNEL_NAME PTX_FILE)
-                    set(FATBIN_BASENAME ${KERNEL_NAME}.fatbin)
-                    set(FATBIN_FILE ${CMAKE_CURRENT_BINARY_DIR}/${FATBIN_BASENAME})
-                    set(OBJECT_BASENAME ${KERNEL_NAME}.fatbin.o)
-                    set(OBJECT_FILE ${CMAKE_CURRENT_BINARY_DIR}/${OBJECT_BASENAME})
+                    set(FATBIN_BASENAME ${{KERNEL_NAME}}.fatbin)
+                    set(FATBIN_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{FATBIN_BASENAME}})
+                    set(OBJECT_BASENAME ${{KERNEL_NAME}}.fatbin.o)
+                    set(OBJECT_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{OBJECT_BASENAME}})
 
                     # --- Define UNIQUE C symbol names ---
-                    set(SYMBOL_START __${KERNEL_NAME}_start)
-                    set(SYMBOL_END __${KERNEL_NAME}_end)
-                    set(SYMBOL_SIZE __${KERNEL_NAME}_size)
-                    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" MANGLED_BASENAME ${FATBIN_FILE})
-                    set(OBJCOPY_START_SYM _binary_${MANGLED_BASENAME}_start)
-                    set(OBJCOPY_END_SYM _binary_${MANGLED_BASENAME}_end)
-                    set(OBJCOPY_SIZE_SYM _binary_${MANGLED_BASENAME}_size)
+                    set(SYMBOL_START __${{KERNEL_NAME}}_start)
+                    set(SYMBOL_END __${{KERNEL_NAME}}_end)
+                    set(SYMBOL_SIZE __${{KERNEL_NAME}}_size)
+                    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" MANGLED_BASENAME ${{FATBIN_FILE}})
+                    set(OBJCOPY_START_SYM _binary_${{MANGLED_BASENAME}}_start)
+                    set(OBJCOPY_END_SYM _binary_${{MANGLED_BASENAME}}_end)
+                    set(OBJCOPY_SIZE_SYM _binary_${{MANGLED_BASENAME}}_size)
 
                     # --- PTX to FATBIN Command & Target ---
                     add_custom_command(
-                        OUTPUT ${FATBIN_FILE}
-                        COMMAND ${CUDA_NVCC_EXECUTABLE} --fatbin ${PTX_FILE} -o ${FATBIN_FILE} ${NVCC_GENCODE_FLAGS}
+                        OUTPUT ${{FATBIN_FILE}}
+                        COMMAND ${{CUDA_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
                                 -gencode arch=compute_80,code=compute_80
-                                -gencode arch=compute_86,code=compute_86
-                                -gencode arch=compute_89,code=compute_89
-                                -gencode arch=compute_90,code=compute_90
-                        DEPENDS ${PTX_FILE}
+                                -gencode arch=compute_{current_arch},code=sm_{current_arch}
+                        DEPENDS ${{PTX_FILE}}
                     )
 
                     # --- FATBIN to Object File (.o) Command ---
                     add_custom_command(
-                        OUTPUT ${OBJECT_FILE}
-                        COMMAND ${CMAKE_LINKER} -r -b binary -z noexecstack -o ${OBJECT_FILE} ${FATBIN_FILE}
-                        COMMAND ${OBJCOPY_EXECUTABLE} --rename-section .data=.rodata,alloc,load,readonly,data,contents
-                                ${OBJECT_FILE}
-                        COMMAND ${OBJCOPY_EXECUTABLE}
-                                --redefine-sym ${OBJCOPY_START_SYM}=${SYMBOL_START}
-                                --redefine-sym ${OBJCOPY_END_SYM}=${SYMBOL_END}
-                                --redefine-sym ${OBJCOPY_SIZE_SYM}=${SYMBOL_SIZE}
-                                ${OBJECT_FILE}
-                        DEPENDS ${FATBIN_FILE}
+                        OUTPUT ${{OBJECT_FILE}}
+                        COMMAND ${{CMAKE_LINKER}} -r -b binary -z noexecstack -o ${{OBJECT_FILE}} ${{FATBIN_FILE}}
+                        COMMAND ${{OBJCOPY_EXECUTABLE}} --rename-section .data=.rodata,alloc,load,readonly,data,contents
+                                ${{OBJECT_FILE}}
+                        COMMAND ${{OBJCOPY_EXECUTABLE}}
+                                --redefine-sym ${{OBJCOPY_START_SYM}}=${{SYMBOL_START}}
+                                --redefine-sym ${{OBJCOPY_END_SYM}}=${{SYMBOL_END}}
+                                --redefine-sym ${{OBJCOPY_SIZE_SYM}}=${{SYMBOL_SIZE}}
+                                ${{OBJECT_FILE}}
+                        DEPENDS ${{FATBIN_FILE}}
                     )
-                    add_custom_target(build_kernel_object_${KERNEL_NAME} DEPENDS ${OBJECT_FILE})
+                    add_custom_target(build_kernel_object_${{KERNEL_NAME}} DEPENDS ${{OBJECT_FILE}})
 
                     # --- Add to a list for linking later ---
-                    set(KERNEL_TARGETS ${KERNEL_TARGETS} build_kernel_object_${KERNEL_NAME} PARENT_SCOPE)
-                    set(KERNEL_OBJECT_FILES ${KERNEL_OBJECT_FILES} ${OBJECT_FILE} PARENT_SCOPE)
+                    set(KERNEL_TARGETS ${{KERNEL_TARGETS}} build_kernel_object_${{KERNEL_NAME}} PARENT_SCOPE)
+                    set(KERNEL_OBJECT_FILES ${{KERNEL_OBJECT_FILES}} ${{OBJECT_FILE}} PARENT_SCOPE)
                 endfunction()
 
                 """
