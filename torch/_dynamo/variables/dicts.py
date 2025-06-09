@@ -440,7 +440,8 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(None)
         elif name == "__getitem__":
             # Key guarding - Nothing to do. LazyVT for value will take care.
-            assert len(args) == 1
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
             return self.getitem_const_raise_exception_if_absent(tx, args[0])
         elif name == "items":
             if args or kwargs:
