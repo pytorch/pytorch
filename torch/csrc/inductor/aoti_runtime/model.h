@@ -345,15 +345,14 @@ class AOTInductorModelBase {
       auto size = this->constant_shape(i);
       auto stride = this->constant_stride(i);
 #ifdef USE_MPS
-      auto offset = this->constant_offset(i) + (constants_internal_offset[i] / aoti_torch_dtype_element_size(dtype));
+      auto offset = this->constant_offset(i) +
+          (constants_internal_offset[i] / aoti_torch_dtype_element_size(dtype));
 #else
       auto offset = this->constant_offset(i);
 #endif
       auto layout = this->constant_layout(i);
       auto opaque_metadata_ptr = this->opaque_metadata(i);
       auto opaque_metadata_size = this->opaque_metadata_size(i);
-
-      std::cout << "load_constants:: " << static_cast<void*>(internal_ptr) << " " << offset << std::endl;
 
       AtenTensorHandle tensor_handle = nullptr;
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(

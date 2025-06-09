@@ -467,7 +467,6 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
                                 .options(options)
                                 .make_tensor()
                           : at::empty_strided(sizes, strides, options));
-    std::cout << "aoti_torch_create_tensor_from_blob: " << data << " " << storage_offset << " " << static_cast<void*>(*ret_new_tensor) << std::endl;
   });
 }
 

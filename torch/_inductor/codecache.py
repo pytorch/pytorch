@@ -2151,8 +2151,7 @@ class AotCodeCompiler:
                     if o_file in gpu_kernels_o:
                         continue
                     # Remove these as they are not needed anymore
-                    pass
-                    # os.remove(o_file)
+                    os.remove(o_file)
 
                 if use_mmap_weights:
                     import resource
