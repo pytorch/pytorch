@@ -330,6 +330,16 @@ Tensor rms_norm_symint(
   const Tensor& weight = *weight_maybe_owned;
   _check_rms_norm_inputs_symint(input, normalized_shape, weight);
 
+  // composite fallback for channels last
+  if(input.suggest_memory_format() == c10::MemoryFormat::ChannelsLast || input.suggest_memory_format() == c10::MemoryFormat::ChannelsLast3d){
+    return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
+  }
+
+  // composite fallback for complex datatypes
+  if(input.is_complex()){
+    return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
+  }
+
   #ifdef USE_MPS
   if (input.device().type() == DeviceType::MPS && weight_opt.has_value()) {
     const Tensor weight = weight_opt.value();
@@ -343,16 +353,6 @@ Tensor rms_norm_symint(
     }
   }
   #endif
-
-  // composite fallback for channels last
-  if(input.suggest_memory_format() == c10::MemoryFormat::ChannelsLast || input.suggest_memory_format() == c10::MemoryFormat::ChannelsLast3d){
-    return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
-  }
-
-  // composite fallback for complex datatypes
-  if(input.is_complex()){
-    return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
-  }
 
   return std::get<0>(at::_fused_rms_norm(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
 }
