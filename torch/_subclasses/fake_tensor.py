@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
 log = logging.getLogger(__name__)
+hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 
 # TODO: Hack to unblock https://github.com/pytorch/pytorch/pull/108186
 # Proper fix tracked by https://github.com/pytorch/pytorch/issues/120105
@@ -1433,6 +1434,15 @@ class FakeTensorMode(TorchDispatchMode):
             key = self._cache_key(state, func, args, kwargs)
         except _BypassDispatchCache as e:
             # We couldn't create the cache key at all
+            if (
+                isinstance(func, torch._ops.HigherOrderOperator)
+                and func.name() == "invoke_subgraph"
+            ):
+                hc_log.debug(
+                    "Fake tensor cache failed: identifier = %s, reason = %s",
+                    args[1],
+                    e.reason,
+                )
             FakeTensorMode.cache_bypasses[e.reason] += 1
 
         if key is None:
@@ -1477,6 +1487,15 @@ class FakeTensorMode(TorchDispatchMode):
             # We ran "extra" checks on the cache key and determined that it's no
             # good. Record the reason and mark it so we don't bother validating
             # again.
+            if (
+                isinstance(func, torch._ops.HigherOrderOperator)
+                and func.name() == "invoke_subgraph"
+            ):
+                hc_log.debug(
+                    "Fake tensor cache failed: identifier = %s, reason = %s",
+                    args[1],
+                    e.reason,
+                )
             FakeTensorMode.cache_bypasses[e.reason] += 1
             set_cache_key(cache, key, _DispatchCacheBypassEntry(e.reason))
             return output

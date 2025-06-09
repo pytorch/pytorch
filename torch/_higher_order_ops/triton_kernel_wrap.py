@@ -720,7 +720,7 @@ def analyze_kernel_mutations(
         "tt.atomic_cas": [0],
         "tt.atomic_rmw": [0],
         "tt.experimental_descriptor_store": [0],
-        # "tt.experimental_tensormap_create": [0],
+        "tt.experimental_tensormap_create": [0],
     }
     # Ops that we want to bail out on
     UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
@@ -745,7 +745,14 @@ def analyze_kernel_mutations(
                 )
 
             if op.name == "tt.experimental_tensormap_create":
-                # TODO: description here
+                # Note: this is how we implement experimental_descriptor_store mutation analysis.
+                # for on-device TMA.
+                # experimental_tensormap_store(a, b, ...) stores b to the location specified
+                # by descriptor in the memory of a.
+                # To track this, we first find all the intermediates/params to which we store via
+                # experimental_tensormap_store (get_tma_stores, called above). Then, during this
+                # analysis we wait to find the corresponding experimental_tensormap_create (if it
+                # exists), at which point we will mark the global_ptr as mutated (as done below).
                 assert len(op.args) >= 2
                 print(f"  on device TMA: looking for {op.args[0]} in {tma_stores}")
                 if op.args[0] in tma_stores:
