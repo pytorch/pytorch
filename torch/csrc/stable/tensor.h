@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/stable/library.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 namespace torch::stable {
@@ -12,18 +13,22 @@ static inline void delete_tensor_object(AtenTensorHandle ath) {
       aoti_torch_delete_tensor_object(ath));
 }
 
+// The torch::stable::Tensor class is a highlevel C++ header-only wrapper around the C
+// shim Tensor APIs.
 class Tensor {
  private:
-  std::shared_ptr<AtenTensorOpaque> shared_ath_;
-  // The torch::stable::Tensor class is a highlevel C++ wrapper around the C
-  // shim Tensor APIs. I'm starting to think this will look a lot like
-  // RAIIAtenTensorHandle but use a shared pointer instead of a uniq_ptr.
+  std::shared_ptr<AtenTensorOpaque> ath_;
+
  public:
   Tensor() = delete;
-
+ 
   // Wrap AtenTensorHandle
   explicit Tensor(AtenTensorHandle ath)
-    : shared_ath_(ath, delete_tensor_object) {}
+    : ath_(ath, delete_tensor_object) {}
+  
+  // Wrap StableIValue
+  explicit Tensor(StableIValue siv)
+    : ath_(to<AtenTensorHandle>(siv), delete_tensor_object) {}
 
   // Copy and move constructors can be default cuz the underlying handle is a shared_ptr
   Tensor(const Tensor& other) = default;
@@ -37,18 +42,39 @@ class Tensor {
   ~Tensor() = default;
 
   AtenTensorHandle get() const {
-    return shared_ath_.get();
+    return ath_.get();
+  }
+
+  StableIValue get_SIV() {
+    AtenTensorHandle handle = ath_.get();
+
+    // The following is our way of incrementing the refcount of the underlying
+    // at::Tensor that we point to. Why do we want this weird behavior?
+    // Because! We expect users to only need a StableIValue when they are trying
+    // to pass the Tensor into a stack-based API, e,g., aoti_torch_call_dispatcher.
+    //
+    // A stack-based API is one that expects a stack of inputs converted to
+    // StableIValues. Our contract with any stack-based API is that the stack
+    // has ownership of its Tensor arguments. Since this torch::stable::Tensor
+    // object will likely go out of scope by the end of the user extension's
+    // local function and will thus delete its reference on the at::Tensor,
+    // we create a new unused AtenTensorHandle to indirectly increment the
+    // refcount on the at::Tensor.
+    AtenTensorHandle new_ath;
+    aoti_torch_new_tensor_handle(handle, &new_ath);
+
+    return from(new_ath);
   }
 
   void* data_ptr() const {
     void* data_ptr;
-    aoti_torch_get_data_ptr(shared_ath_.get(), &data_ptr);
+    aoti_torch_get_data_ptr(ath_.get(), &data_ptr);
     return data_ptr;
   }
 
   int64_t stride(int64_t dim) const {
     int64_t stride;
-    aoti_torch_get_stride(shared_ath_.get(), dim, &stride);
+    aoti_torch_get_stride(ath_.get(), dim, &stride);
     return stride;
   }
 
@@ -61,19 +87,19 @@ class Tensor {
   /// Returns a `Tensor`'s device index.
   DeviceIndex get_device() const {
     int32_t device_index;
-    aoti_torch_get_device_index(shared_ath_.get(), &device_index);
+    aoti_torch_get_device_index(ath_.get(), &device_index);
     return static_cast<DeviceIndex>(device_index);
   }
 
   bool is_cuda() const {
     int32_t device_type;
-    aoti_torch_get_device_type(shared_ath_.get(), &device_type);
+    aoti_torch_get_device_type(ath_.get(), &device_type);
     return device_type == aoti_torch_device_type_cuda();
   }
 
   int64_t size(int64_t dim) const {
     int64_t size;
-    aoti_torch_get_size(shared_ath_.get(), dim, &size);
+    aoti_torch_get_size(ath_.get(), dim, &size);
     return size;
   }
 

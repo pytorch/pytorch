@@ -134,17 +134,15 @@ using torch::stable::Tensor;
 Tensor my_abs(Tensor t) {
   const auto num_args = 1;
   StableIValue stack[num_args];
-  stack[0] = from(t.get());
+  stack[0] = t.get_SIV();
   aoti_torch_call_dispatcher("aten::abs", "", stack);
-  return Tensor(to<AtenTensorHandle>(stack[0]));
+  return Tensor(stack[0]);
 }
 
 void boxed_my_abs(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  Tensor t;
-  t.reset(to<AtenTensorHandle>(stack[0]));
+  Tensor t(stack[0]);
   Tensor tensor_res = my_abs(std::move(t));
-  stack[0] = from(tensor_res.get());
-  tensor_res.reset();
+  stack[0] = tensor_res.get_SIV();
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
@@ -226,4 +224,56 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("exp_neg_is_leaf", &boxed_exp_neg_is_leaf);
+}
+
+Tensor neg_exp(Tensor t) {
+  StableIValue stack[1];
+  stack[0] = t.get_SIV();
+  aoti_torch_call_dispatcher("aten::exp", "", stack);
+  aoti_torch_call_dispatcher("aten::neg", "", stack);
+  return Tensor(stack[0]);
+}
+
+void boxed_neg_exp(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  Tensor t(stack[0]);
+  Tensor res = neg_exp(std::move(t));
+  stack[0] = res.get_SIV();
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("neg_exp(Tensor t) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("neg_exp", &boxed_neg_exp);
+}
+
+Tensor divide_neg_exp(Tensor t) {
+  StableIValue stack1[1];
+  stack1[0] = t.get_SIV();
+
+  StableIValue stack2[1];
+  stack2[0] = t.get_SIV();
+  aoti_torch_call_dispatcher("aten::exp", "", stack2);
+  aoti_torch_call_dispatcher("aten::neg", "", stack1);
+
+  StableIValue stack3[2];
+  stack3[0] = stack1[0];
+  stack3[1] = stack2[0];
+  aoti_torch_call_dispatcher("aten::divide", "Tensor", stack3);
+  return Tensor(stack3[0]);
+}
+
+void boxed_divide_neg_exp(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  Tensor t(stack[0]);
+  Tensor res = divide_neg_exp(std::move(t));
+  stack[0] = res.get_SIV();
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("divide_neg_exp(Tensor t) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("divide_neg_exp", &boxed_divide_neg_exp);
 }
