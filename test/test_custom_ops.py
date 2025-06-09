@@ -225,6 +225,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         example = torch.zeros([10, 20], device=device)
         torch.library.opcheck(f, args=[example])
 
+    # https://github.com/pytorch/pytorch/issues/150472
     def test_single_element_tuple_output(self, device):
         # Helper function to register id_tuple custom and the fake tensor implementation
         # so that Dynamo has the fake tensor implementation
