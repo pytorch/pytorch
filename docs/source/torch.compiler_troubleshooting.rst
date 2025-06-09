@@ -305,7 +305,7 @@ Where to apply torch.compile?
 
 We recommend applying ``torch.compile`` to the highest-level function that doesn't cause excessive problems.
 Typically, it is your train or eval step with the optimizer but without the loop, your top-level ``nn.Module``,
-or some sub-``nn.Module``s. ``torch.compile`` specifically doesn't handle distributed wrapper modules like
+or some sub-\ ``nn.Module``\ s. ``torch.compile`` specifically doesn't handle distributed wrapper modules like
 DDP or FSDP very well, so consider applying ``torch.compile`` to the inner module passed to the wrapper.
 
 .. code-block:: py
