@@ -105,7 +105,6 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             schema_gen.add_arg(f"arg{idx}", arg, is_mutated=idx in mutated_inputs)
         for out in outputs:
             schema_gen.add_output(out)
-        # schema_gen.add_schema_tree_spec(subgraph, identifier, *operands)
 
         return schema_gen.gen_schema()
 

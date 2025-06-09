@@ -115,7 +115,11 @@ class HopSchemaGenerator:
         if not flat_spec.is_leaf():
             raise RuntimeError(
                 f"example_value {example_value} is not a leaf node. "
-                "Please only add flattened inputs to the hop schema."
+                "Please only add flattened inputs to the hop schema. "
+                "If you need some structure in the arguments, please"
+                "add_arg for flattened args one by one then "
+                "call add_schema_tree_spec to register the original pytree "
+                " spec of the args."
             )
 
         arg_info = HopArgumentInfoGen.from_example(
