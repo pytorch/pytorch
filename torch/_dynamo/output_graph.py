@@ -125,6 +125,7 @@ from .utils import (
     get_unique_name_wrt,
     graph_break_reasons,
     increment_op_count,
+    istype,
     lazy_format_graph_code,
     LazyString,
     nn_module_proxy,
@@ -1394,12 +1395,20 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.codegen_suffix(tx, stack_values_flat, pass1)
 
-            # one more time now that we have established tempvars
+            # Use `pass1.uses` to selectively cache multi-user variables into a
+            # temporary local source. This (a). speeds up loading VTs with long
+            # chained source, and (b). avoids redundantly saving single-user VT
+            # into a temporary local.
+            tempvars = {}  # type: ignore[var-annotated]
+            for val, count in pass1.uses.items():
+                # If it's already a local source, no need to cache it
+                if count > 1 and not istype(val, (SyntheticLocalSource, LocalSource)):
+                    tempvars[val] = None
             pass2 = PyCodegen(
                 self.root_tx,
                 root,
                 graph_output_var,
-                tempvars={val: None for val, count in pass1.uses.items() if count > 1},
+                tempvars=tempvars,
                 overridden_sources=overridden_sources,
             )
             self.codegen_suffix(tx, stack_values_flat, pass2)
