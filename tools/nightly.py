@@ -117,7 +117,12 @@ PACKAGES_TO_INSTALL = (
     "clang-tidy",
     "sphinx",
 )
-DEFAULT_VENV_DIR = _find_repo_root() / "venv"
+
+
+@functools.lru_cache
+def default_venv_dir() -> Path:
+    """Get the default virtual environment directory."""
+    return _find_repo_root() / "venv"
 
 
 @functools.lru_cache
@@ -1044,7 +1049,10 @@ def install_torch_metadata(wheel_site_dir: Path, venv: Venv) -> None:
     shutil.copytree(source_dist_info, target_dist_info)
 
     # Create direct_url.json to indicate this is an editable install
-    direct_url_json = {"dir_info": {"editable": True}, "url": f"file://{_find_repo_root()}"}
+    direct_url_json = {
+        "dir_info": {"editable": True},
+        "url": f"file://{_find_repo_root()}",
+    }
 
     direct_url_file = target_dist_info / "direct_url.json"
     direct_url_file.write_text(json.dumps(direct_url_json, indent=2), encoding="utf-8")
@@ -1301,7 +1309,7 @@ def make_parser() -> argparse.ArgumentParser:
             type=lambda p: Path(p).absolute(),
             help='Path to virtual environment directory (e.g. "./venv")',
             dest="prefix",
-            default=str(DEFAULT_VENV_DIR),
+            default=str(default_venv_dir()),
             metavar="PATH",
         )
         subparser.add_argument(
