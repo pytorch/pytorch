@@ -86,7 +86,7 @@ struct hardswish_backward_functor {
     T zero(0);
     T three(3);
     T neg_three(-3);
-    T one_half(0.5);
+    T one_half(T(0.5));
 
     if (self <= neg_three) {
       return zero;
