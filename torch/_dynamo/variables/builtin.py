@@ -2181,7 +2181,7 @@ class BuiltinVariable(VariableTracker):
                     # This handles options prop, guards and ends with a clone
                     # Step 4 - replace all reference to the current object with the new one
                     return out
-                elif name == "_grad":
+                elif name in ("_grad", "grad"):
                     # NOTE: [Tensor "grad" and "_grad" attr]
                     # _grad and grad share the same setter/getter, see
                     # THPVariable_properties, and here we make sure setting one
