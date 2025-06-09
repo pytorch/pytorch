@@ -7322,6 +7322,19 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f2(torch.ones(3)), torch.ones(3) + 1)
 
+    def test_torch_cuda_is_initialized(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            if torch.cuda.is_initialized():
+                return x + 1
+            return x + 2
+
+        inp = torch.randn(3)
+        self.assertEqual(f(inp), inp + 1)
+
+        with mock.patch("torch.cuda.is_initialized", lambda: False):
+            self.assertEqual(f(inp), inp + 2)
+
 
 instantiate_parametrized_tests(ReproTests)
 
