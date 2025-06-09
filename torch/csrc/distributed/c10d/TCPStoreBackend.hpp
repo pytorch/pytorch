@@ -69,6 +69,7 @@ class BackgroundThread {
 };
 
 std::unique_ptr<BackgroundThread> create_tcpstore_backend(
+    const std::string& host,
     const TCPStoreOptions& opts);
 std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(
     const TCPStoreOptions& opts);
