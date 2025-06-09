@@ -28,7 +28,7 @@ Here is an example of a simple synchronization error in PyTorch:
         torch.mul(a, 5, out=a)
 ```
 
-The ``a`` tensor is initialized on the default stream and, without any synchronization
+The `a` tensor is initialized on the default stream and, without any synchronization
 methods, modified on a new stream. The two kernels will run concurrently on the same tensor,
 which might cause the second kernel to read uninitialized data before the first one was able
 to write it, or the first kernel might overwrite part of the result of the second.
@@ -74,15 +74,15 @@ the following output is printed by CSAN:
 This gives extensive insight into the origin of the error:
 
 - A tensor was incorrectly accessed from streams with ids: 0 (default stream) and 94646435460352 (new stream)
-- The tensor was allocated by invoking ``a = torch.rand(10000, device="cuda")``
+- The tensor was allocated by invoking `a = torch.rand(10000, device="cuda")`
 - The faulty accesses were caused by operators
-    - ``a = torch.rand(10000, device="cuda")`` on stream 0
-    - ``torch.mul(a, 5, out=a)`` on stream 94646435460352
+    - `a = torch.rand(10000, device="cuda")` on stream 0
+    - `torch.mul(a, 5, out=a)` on stream 94646435460352
 - The error message also displays the schemas of the invoked operators, along with a note
   showing which arguments of the operators correspond to the affected tensor.
 
-  - In the example, it can be seen that tensor ``a`` corresponds to arguments ``self``, ``out``
-    and the ``output`` value of the invoked operator ``torch.mul``.
+  - In the example, it can be seen that tensor `a` corresponds to arguments `self`, `out`
+    and the `output` value of the invoked operator `torch.mul`.
 
 ```{seealso}
     The list of supported torch operators and their schemas can be viewed
