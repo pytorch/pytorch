@@ -178,5 +178,5 @@ void gpu_float_sdpa(
     std::optional<at::Tensor> attn_mask,
     bool is_causal,
     float softmax_scale,
-    Tensor& output);
+    const Tensor& output);
 } // namespace at::native::onednn
