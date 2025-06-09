@@ -70,8 +70,8 @@ using CaptureId_t = unsigned long long;
 using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
 
 struct C10_API DeviceAllocator : public c10::Allocator {
-  DeviceAllocator();
-  ~DeviceAllocator() override;
+  // DeviceAllocator();
+  // ~DeviceAllocator() override;
 
   // Returns true if the allocator has been properly initialized and is ready
   // for use
@@ -100,6 +100,15 @@ struct C10_API DeviceAllocator : public c10::Allocator {
 
 // This function is used to get the DeviceAllocator for a specific device type
 // and keep backward compatibility with c10::GetAllocator.
-C10_API DeviceAllocator* GetDeviceAllocator(const DeviceType& t);
+C10_API inline DeviceAllocator* GetDeviceAllocator(const DeviceType& t) {
+  TORCH_CHECK(
+      t != DeviceType::CPU,
+      "GetDeviceAllocator is not supported for CPU device type.");
+  auto* allocator = c10::GetAllocator(t);
+  auto* device_allocator = dynamic_cast<DeviceAllocator*>(allocator);
+  TORCH_INTERNAL_ASSERT(
+      device_allocator, "Allocator for ", t, " is not a DeviceAllocator.");
+  return device_allocator;
+}
 
 } // namespace c10
