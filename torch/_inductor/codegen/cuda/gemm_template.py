@@ -422,7 +422,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         alpha: float,
         beta: float,
         input_reorder: Optional[list[int]] = None,
-        fast_accum: Optional[bool] = None,
+        use_fast_accum: Optional[bool] = None,
     ) -> None:
         """
         Args:
@@ -438,7 +438,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
         self.alpha = alpha
         self.beta = beta
-        self.fast_accum = fast_accum
+        self.use_fast_accum = use_fast_accum
         assert 2 <= len(input_nodes) <= 5
         assert self._are_inputs_layout_compatible(
             [node.get_layout() for node in input_nodes]
@@ -455,7 +455,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
         input_reorder: Optional[list[int]] = None,
-        fast_accum: Optional[bool] = None,
+        use_fast_accum: Optional[bool] = None,
         **extra_kwargs,
     ) -> None:
         raise NotImplementedError
@@ -877,9 +877,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         # TODO: update epilogue functor according to epilogues.
         op.element_epilogue = op.accumulator_type()
 
-        if self.fast_accum is not None:
+        if self.use_fast_accum is not None:
             is_op_fast_accum = "fastaccum" in op.configuration_name()
-            if self.fast_accum ^ is_op_fast_accum:
+            if self.use_fast_accum ^ is_op_fast_accum:
                 return None
 
         # Set bias layout and alignment.
@@ -1252,9 +1252,11 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         alpha: float,
         beta: float,
         input_reorder: Optional[list[int]] = None,
-        fast_accum: Optional[bool] = None,
+        use_fast_accum: Optional[bool] = None,
     ):
-        super().__init__(input_nodes, layout, alpha, beta, input_reorder, fast_accum)
+        super().__init__(
+            input_nodes, layout, alpha, beta, input_reorder, use_fast_accum
+        )
 
     @staticmethod
     def add_cutlass_gemm_choices(
@@ -1264,7 +1266,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
         input_reorder: Optional[list[int]] = None,
-        fast_accum: Optional[bool] = None,
+        use_fast_accum: Optional[bool] = None,
         **extra_kwargs,
     ) -> None:
         template = CUTLASS3xGemmTemplate(
@@ -1273,7 +1275,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             alpha,
             beta,
             input_reorder,
-            fast_accum,
+            use_fast_accum,
         )
         template._add_cutlass_gemm_choices(
             choices, layout, input_nodes, alpha, beta, input_reorder, **extra_kwargs
@@ -1642,6 +1644,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
         input_reorder: Optional[list[int]] = None,
+        use_fast_accum: Optional[bool] = False,
         **extra_kwargs,
     ) -> None:
         template = CUTLASS2xGemmTemplate(
