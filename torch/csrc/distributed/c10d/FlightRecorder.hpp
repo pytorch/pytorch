@@ -53,6 +53,8 @@ DEFINE_CONSTANT(time_discovered_completed_key, "time_discovered_completed_ns")
 DEFINE_CONSTANT(completed_state, "completed")
 DEFINE_CONSTANT(scheduled_state, "scheduled")
 DEFINE_CONSTANT(started_state, "started")
+DEFINE_CONSTANT(thread_id_key, "thread_id")
+DEFINE_CONSTANT(thread_name_key, "thread_name")
 #undef DEFINE_CONSTANT
 
 // Write NCCL debug info to local disk or any storage users define.
@@ -154,6 +156,8 @@ struct FlightRecorder {
     c10::SmallVector<int64_t, 4> output_dims_;
     std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
+    std::thread::id thread_id_;
+    std::string thread_name_;
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
 
