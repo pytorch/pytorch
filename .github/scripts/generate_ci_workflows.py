@@ -110,7 +110,7 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX,
-            arches=["12.6", "12.8"],
+            arches=["cpu", "12.6", "12.8"],
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
@@ -193,7 +193,8 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         os=OperatingSystem.WINDOWS,
         package_type="wheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.WINDOWS
+            OperatingSystem.WINDOWS,
+            arches=["cpu", "12.6", "12.8"]
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
