@@ -68,3 +68,44 @@ REGISTER_BINARY_OP(hardsigmoid_backward, half, half);
 #if __METAL_VERSION__ >= 310
 REGISTER_BINARY_OP(hardsigmoid_backward, bfloat, bfloat);
 #endif
+
+struct hardswish_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    T zero(0);
+    T three(3);
+    T six(6);
+    T result = x * (min(max(x + three, zero), six) / six);
+    return result;
+  }
+};
+
+struct hardswish_backward_functor {
+  template <typename T>
+  inline T operator()(const T grad_output, const T self) {
+    T zero(0);
+    T three(3);
+    T neg_three(-3);
+    T one_half(0.5);
+
+    if (self <= neg_three) {
+      return zero;
+    } else if (self >= three) {
+      return grad_output;
+    } else {
+      return grad_output * (self / three + one_half);
+    }
+  }
+};
+
+REGISTER_UNARY_OP(hardswish, float, float);
+REGISTER_UNARY_OP(hardswish, half, half);
+#if __METAL_VERSION__ >= 310
+REGISTER_UNARY_OP(hardswish, bfloat, bfloat);
+#endif
+
+REGISTER_BINARY_OP(hardswish_backward, float, float);
+REGISTER_BINARY_OP(hardswish_backward, half, half);
+#if __METAL_VERSION__ >= 310
+REGISTER_BINARY_OP(hardswish_backward, bfloat, bfloat);
+#endif

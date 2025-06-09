@@ -11971,28 +11971,24 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA: hardswish_out
-    MPS: hardswish_out_mps
+    CPU, CUDA, MPS: hardswish_out
 
 - func: hardswish(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA: hardswish
-    MPS: hardswish_mps
+    CPU, CUDA, MPS: hardswish
 
 - func: hardswish_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA: hardswish_
-    MPS: hardswish_mps_
+    CPU, CUDA, MPS: hardswish_
 
 - func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
   dispatch:
-    CPU, CUDA: hardswish_backward
-    MPS: hardswish_backward_mps
+    CPU, CUDA, MPS: hardswish_backward
   autogen: hardswish_backward.out
 
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
