@@ -3072,10 +3072,19 @@ class MutationTests(torch._inductor.test_case.TestCase):
     @make_mutation_test
     def test_on_device_tma_store_old_api():
         @triton.jit
-        def on_device_tma_kernel(A, workspace_ptr, m, n, BLOCK_SIZE: tl.constexpr):
+        def on_device_tma_kernel(A, B, workspace_ptr, m, n, BLOCK_SIZE: tl.constexpr):
+            workspace_ptr_A = workspace_ptr
+            workspace_ptr_B = workspace_ptr + 128
             tl.extra.cuda.experimental_device_tensormap_create2d(
-                desc_ptr=workspace_ptr,
+                desc_ptr=workspace_ptr_A,
                 global_address=A,
+                load_size=[BLOCK_SIZE, BLOCK_SIZE],
+                global_size=[m, n],
+                element_ty=A.dtype.element_ty,
+            )
+            tl.extra.cuda.experimental_device_tensormap_create2d(
+                desc_ptr=workspace_ptr_B,
+                global_address=B,
                 load_size=[BLOCK_SIZE, BLOCK_SIZE],
                 global_size=[m, n],
                 element_ty=A.dtype.element_ty,
@@ -3086,26 +3095,32 @@ class MutationTests(torch._inductor.test_case.TestCase):
             m_block_id = pid // n_blocks
             n_block_id = pid % n_blocks
 
-            ones = tl.full([BLOCK_SIZE, BLOCK_SIZE], 1, A.dtype.element_ty)
-
+            data = tl._experimental_descriptor_load(
+                workspace_ptr_A,
+                [m_block_id * BLOCK_SIZE, n_block_id * BLOCK_SIZE],
+                [BLOCK_SIZE, BLOCK_SIZE],
+                A.dtype.element_ty,
+            )
             tl._experimental_descriptor_store(
-                workspace_ptr,
-                ones,
+                workspace_ptr_B,
+                data,
                 [m_block_id * BLOCK_SIZE, n_block_id * BLOCK_SIZE],
             )
 
-        A = torch.zeros(1024, 1024)
-        workspace = torch.empty(128, dtype=torch.int8)
+        B = torch.randn(1024, 1024)
+        A = torch.empty(1024, 1024)
+        workspace = torch.empty(256, dtype=torch.int8)
         return (
             on_device_tma_kernel,
             {
                 "A": A,
+                "B": B,
                 "workspace_ptr": workspace,
                 "m": 1024,
                 "n": 1024,
                 "BLOCK_SIZE": 32,
             },
-            ["A", "workspace_ptr"],
+            ["B", "workspace_ptr"],
         )
 
 

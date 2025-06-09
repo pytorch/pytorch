@@ -381,8 +381,8 @@ def ttir_to_functions(
     reindex_map: dict[int, int] = {}
     next_fake_intermediate = 0
 
-    def reindex(idx: int, override: bool = False) -> int:
-        if idx not in reindex_map or override:
+    def reindex(idx: int) -> int:
+        if idx not in reindex_map:
             reindex_map[idx] = len(reindex_map)
         return reindex_map[idx]
 
@@ -422,30 +422,6 @@ def ttir_to_functions(
                     region_id_to_block_ids[parent_region.id()].append(parent_block_id)
 
         nonlocal next_fake_intermediate
-
-        # [Note: modify experimental_tensormap_create]
-        # experimental_tensormap_create(desc_ptr, global_address, ...)
-        # will fill desc_ptr with a TMA descriptor that points to global_address.
-        #
-        # Later, experimental_descriptor_store(desc_ptr, ...) can cause a
-        # write to global_address.
-        #
-        # To simplify analysis of this: we rewrite the IR from
-        #   experimental_tensormap_create(desc_ptr, global_address, ...)
-        # to
-        #   desc_ptr = tt.experimental_tensormap_create(desc_ptr, global_address, ...)
-        # by re-assigning the ID associated with the desc_ptr object to a new
-        # reindexed ID.
-        #
-        # Note: this is a partial fix - it's essentially a "partial" functionalization;
-        #       but note that it won't work properly with control flow or function calls.
-        if name == "tt.experimental_tensormap_create":
-            assert not result_ids
-            assert len(operand_ids) > 0
-            raw_operand_0 = op.get_operand(0).id()
-
-            artificial_return = reindex(raw_operand_0, override=True)
-            result_ids.append(artificial_return)
 
         if name == "tt.func":
             # for function ops: gather and inline
@@ -655,18 +631,74 @@ class MemoizeWithCycleCheck:
         self,
         functions: dict[str, dict[Intermediate, list[Op]]],
         fn_name: str,
-        num_args: int,
+        *args: Sequence[Any],
     ) -> list[bool]:
-        key = (fn_name, num_args)
+        key = (fn_name, *args)
         if key not in self.cache:
             self.cache[key] = None
-            self.cache[key] = self.fn(functions, fn_name, num_args)
+            self.cache[key] = self.fn(functions, fn_name, *args)
         if self.cache[key] is None:
             raise RuntimeError("Recursion is not supported")
         return self.cache[key]
 
     def reset(self) -> None:
         self.cache = {}
+
+
+@MemoizeWithCycleCheck
+def get_tma_stores(
+    functions: dict[str, dict[Intermediate, list[Op]]], fn_name: str
+) -> set[Union[Intermediate, Param]]:
+    """
+    Identifies all intermediates and parameters that are written to by a
+    `tt.experimental_descriptor_store`. It tracks only the specific values
+    written to via experimental_descriptor_store and the input values to
+    `tt.reinterpret_tensor_descriptor` used to construct the direct inputs
+    to tt.experimental_descriptor_store - not any recursive values
+    used to construct those values.
+
+    For example: for
+      tt.reinterpret_tensor_descriptor(Intermediate(idx=0), ...)
+      Intermediate(idx=1) = tt.experimental_descriptor_store(Intermediate(idx=0), ...)
+    this function will return [Intermediate(idx=0), Intermediate(idx=1)],
+
+    However
+      Intermediate(idx=4) = arith.addptr(Intermediate(idx=2), Intermediate(idx=3))
+      Intermediate(idx=5) = tt.experimental_descriptor_store(Intermediate(idx=4), ...)
+      tt.experimental_descriptor_store(Intermediate(idx=5), ...)
+    this function will mark only idx=4 and idx=5 (but not idx=2 or idx=3)
+
+    If an intermediate/parameter is passed into a function and is written to
+    via experimental_descriptor_store within that function, the argument to the
+    function will also be marked.
+    """
+
+    result: set[Union[Intermediate, Param]] = set()
+
+    ops = functions[fn_name]
+    for op_list in ops.values():
+        for op in op_list:
+            if op.name == "tt.call":
+                assert op.fn_call_name in functions
+                tma_stores = get_tma_stores(functions, op.fn_call_name)
+                for i, inp in enumerate(op.args):
+                    if Param(idx=i) in tma_stores:
+                        result.add(inp)
+            elif op.name == "tt.experimental_descriptor_store":
+                assert len(op.args) >= 1
+                result.add(op.args[0])
+
+    for val in list(result):
+        print(f"   !! {val}")
+        if val in ops:
+            if not isinstance(val, Intermediate):
+                continue
+            for op in ops[val]:
+                if op.name == "tt.reinterpret_tensor_descriptor":
+                    assert len(op.args) >= 1
+                    result.add(op.args[0])
+
+    return result
 
 
 @MemoizeWithCycleCheck
@@ -688,6 +720,7 @@ def analyze_kernel_mutations(
         "tt.atomic_cas": [0],
         "tt.atomic_rmw": [0],
         "tt.experimental_descriptor_store": [0],
+        # "tt.experimental_tensormap_create": [0],
     }
     # Ops that we want to bail out on
     UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
@@ -695,6 +728,8 @@ def analyze_kernel_mutations(
     stack: list[Union[Param, Intermediate]] = []
     visited = set()
     ops = functions[fn_name]
+    tma_stores = get_tma_stores(functions, fn_name)
+
     for op_list in ops.values():
         for op in op_list:
             # If we encounter an operation with effects that cannot be reliably analyzed
@@ -708,6 +743,14 @@ def analyze_kernel_mutations(
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
                 )
+
+            if op.name == "tt.experimental_tensormap_create":
+                # TODO: description here
+                assert len(op.args) >= 2
+                print(f"  on device TMA: looking for {op.args[0]} in {tma_stores}")
+                if op.args[0] in tma_stores:
+                    print(f"   found it, add {op.args[1]} as mutated")
+                    stack.append(op.args[1])
 
             if op.name == "tt.call":
                 assert op.fn_call_name in functions
@@ -766,6 +809,7 @@ def identify_mutated_tensors(
         # The cache for analyze kernel mutations is mainly used for cycle
         # detection, so each top level invocation needs a clean cache
         analyze_kernel_mutations.reset()
+        get_tma_stores.reset()
         mutations = analyze_kernel_mutations(
             functions, kernel_name, len(ordered_tensor_names)
         )
