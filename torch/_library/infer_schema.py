@@ -77,7 +77,7 @@ def infer_schema(
             )
 
     def unstringify_types(
-        tys: tuple[Union[type[object], str], ...]
+        tys: tuple[Union[type[object], str], ...],
     ) -> tuple[tuple[typing.Any, ...], bool]:
         res = []
         changed = False

@@ -225,14 +225,15 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         example = torch.zeros([10, 20], device=device)
         torch.library.opcheck(f, args=[example])
 
-
     def test_single_element_tuple_output(self, device):
         @torch.library.custom_op("test::id", mutates_args=[])
         def id(x: torch.Tensor) -> Tuple[torch.Tensor]:
             return (x.clone(),)
 
         @id.register_fake
-        def _(x: torch.Tensor,) -> Tuple[torch.Tensor]:
+        def _(
+            x: torch.Tensor,
+        ) -> Tuple[torch.Tensor]:
             return (x.clone(),)
 
         x = torch.randn(3, device=device)
