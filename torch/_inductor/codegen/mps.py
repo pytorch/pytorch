@@ -793,7 +793,9 @@ class MetalKernel(SIMDKernel):
                     f"#include <c10/metal/{header}.h>" for header in self.headers
                 ]
                 header_contents = _embed_headers(
-                    headers, [Path(__file__).parent.parent.parent / "include"], OrderedSet()
+                    headers, 
+                    [Path(__file__).parent.parent.parent / "include"],
+                    OrderedSet(),
                 )
                 code.writeline(header_contents)
 
@@ -881,7 +883,7 @@ class MetalKernel(SIMDKernel):
             ]
 
             if V.graph.cpp_wrapper:
-                args += [f"{', '.join(threads)}"]
+                args += [f"{{{', '.join(threads)}}}"]
             else:
                 args += [f"threads=[{', '.join(threads)}]"]
         else:
