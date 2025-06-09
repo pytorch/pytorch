@@ -107,7 +107,7 @@ As the code above shows, all you need is to provide {func}`torch.onnx.export` wi
 The exporter will then return an instance of {class}`torch.onnx.ONNXProgram` that contains the exported ONNX graph along with extra information.
 
 The in-memory model available through ``onnx_program.model_proto`` is an ``onnx.ModelProto`` object in compliance with the [ONNX IR spec](https://github.com/onnx/onnx/blob/main/docs/IR.md).
-The ONNX model may then be serialized into a [Protobuf file](https://protobuf.dev/)_ using the :meth:`torch.onnx.ONNXProgram.save` API.
+The ONNX model may then be serialized into a [Protobuf file](https://protobuf.dev/) using the {meth}`torch.onnx.ONNXProgram.save` API.
 
 ```{code-block} python
   onnx_program.save("mlp.onnx")

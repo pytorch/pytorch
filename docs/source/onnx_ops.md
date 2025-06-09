@@ -21,7 +21,7 @@ inside an ``if torch.onnx.is_in_onnx_export`` block.
 The following operators are implemented as native PyTorch ops and can be exported as
 ONNX operators. They can be used natively in an ``nn.Module``.
 
-For example, you can define a module::
+For example, you can define a module:
 
 ```{code-block} python
 class Model(torch.nn.Module):
