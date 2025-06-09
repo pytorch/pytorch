@@ -1,15 +1,16 @@
+# Raw Sphinx Markdown Format
+
+````markdown
 # AOTInductor: Ahead-Of-Time Compilation for Torch.Export-ed Models
 
-.. warning::
-
-```
+```{warning}
 AOTInductor and its related features are in prototype status and are
 subject to backwards compatibility breaking changes.
 ```
 
 AOTInductor is a specialized version of
-`TorchInductor <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`\_\_
-, designed to process exported PyTorch models, optimize them, and produce shared libraries as well
+[TorchInductor](https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747),
+designed to process exported PyTorch models, optimize them, and produce shared libraries as well
 as other relevant artifacts.
 These compiled artifacts are specifically crafted for deployment in non-Python environments,
 which are frequently employed for inference deployments on the server side.
@@ -20,27 +21,25 @@ compiling it into an artifact, and conducting model predictions using C++.
 ## Model Compilation
 
 To compile a model using AOTInductor, we first need to use
-:func:`torch.export.export` to capture a given PyTorch model into a
-computational graph. :ref:`torch.export <torch.export>` provides soundness
+{func}`torch.export.export` to capture a given PyTorch model into a
+computational graph. {ref}`torch.export <torch.export>` provides soundness
 guarantees and a strict specification on the IR captured, which AOTInductor
 relies on.
 
-We will then use :func:`torch._inductor.aoti_compile_and_package` to compile the
+We will then use {func}`torch._inductor.aoti_compile_and_package` to compile the
 exported program using TorchInductor, and save the compiled artifacts into one
 package.
 
-.. note::
-
+```{note}
 If you have a CUDA-enabled device on your machine and you installed PyTorch with CUDA support,
 the following code will compile the model into a shared library for CUDA execution.
 Otherwise, the compiled artifact will run on CPU. For better performance during CPU inference,
 it is suggested to enable freezing by setting `export TORCHINDUCTOR_FREEZING=1`
 before running the Python script below. The same behavior works in an environment with Intel®
 GPU as well.
-
-.. code-block:: python
-
 ```
+
+```python
 import os
 import torch
 
@@ -86,12 +85,10 @@ To access this path from the C++ side, we save it to a file for later retrieval 
 ## Inference in Python
 
 There are multiple ways to deploy the compiled artifact for inference, and one of that is using Python.
-We have provided a convinient utility API in Python :func:`torch._inductor.aoti_load_package` for loading
+We have provided a convinient utility API in Python {func}`torch._inductor.aoti_load_package` for loading
 and running the artifact, as shown in the following example:
 
-.. code-block:: python
-
-```
+```python
 import os
 import torch
 
@@ -107,9 +104,7 @@ The input at inference time should have the same size, dtype, and stride as the 
 Next, we use the following example C++ file `inference.cpp` to load the compiled artifact,
 enabling us to conduct model predictions directly within a C++ environment.
 
-.. code-block:: cpp
-
-```
+```cpp
 #include <iostream>
 #include <vector>
 
@@ -140,9 +135,7 @@ For building the C++ file, you can make use of the provided `CMakeLists.txt` fil
 automates the process of invoking `python model.py` for AOT compilation of the model and compiling
 `inference.cpp` into an executable binary named `aoti_example`.
 
-.. code-block:: cmake
-
-```
+```cmake
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 project(aoti_example)
 
@@ -165,8 +158,6 @@ to construct the binary. It is essential to note that the `CMAKE_PREFIX_PATH` va
 is crucial for CMake to locate the LibTorch library, and it should be set to an absolute path.
 Please be mindful that your path may vary from the one illustrated in this example.
 
-.. code-block:: shell
-
 ```
 aoti_example/
     CMakeLists.txt
@@ -174,9 +165,7 @@ aoti_example/
     model.py
 ```
 
-.. code-block:: shell
-
-```
+```bash
 $ mkdir build
 $ cd build
 $ CMAKE_PREFIX_PATH=/path/to/python/install/site-packages/torch/share/cmake cmake ..
@@ -186,9 +175,7 @@ $ cmake --build . --config Release
 After the `aoti_example` binary has been generated in the `build` directory, executing it will
 display results akin to the following:
 
-.. code-block:: shell
-
-```
+```bash
 $ ./aoti_example
 Result from the first inference:
 0.4866
@@ -210,16 +197,20 @@ Result from the second inference:
 
 Below are some useful tools for debugging AOT Inductor.
 
-.. toctree::
+```{toctree}
 :caption: Debugging Tools
 :maxdepth: 1
 
 logging
 torch.compiler_aot_inductor_minifier
+```
 
 To enable runtime checks on inputs, set the environment variable `AOTI_RUNTIME_CHECK_INPUTS` to 1. This will raise a `RuntimeError` if the inputs to the compiled model differ in size, data type, or strides from those used during export.
 
 ## API Reference
 
-.. autofunction:: torch.\_inductor.aoti_compile_and_package
-.. autofunction:: torch.\_inductor.aoti_load_package
+```{eval-rst}
+.. autofunction:: torch._inductor.aoti_compile_and_package
+.. autofunction:: torch._inductor.aoti_load_package
+````
+````
