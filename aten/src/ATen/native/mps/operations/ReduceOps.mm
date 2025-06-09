@@ -440,6 +440,12 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
+
+  // TEMP - Remove this before merging
+  [axes release];
+  [wrappedAxes release];
+  [apparent_output_shape release];
+  [apparent_input_shape release];
 }
 
 static Tensor std_var_common_impl_mps(const Tensor& input_t,
