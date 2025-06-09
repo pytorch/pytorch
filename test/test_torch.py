@@ -255,9 +255,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(prev_cf, 1)
         b = a.view(2, 5)
         self.assertEqual(a.untyped_storage()._cdata, b.untyped_storage()._cdata)
-        self.assertEqual(torch._C._storage_Use_Count(a.untyped_storage()._cdata, prev_cf + 1))
+        self.assertEqual(torch._C._storage_Use_Count(a.untyped_storage()._cdata), prev_cf + 1)
         del b
-        self.assertEqual(torch._C._storage_Use_Count(a.untyped_storage()._cdata, prev_cf))
+        self.assertEqual(torch._C._storage_Use_Count(a.untyped_storage()._cdata), prev_cf)
 
     @xfailIfTorchDynamo
     @onlyNativeDeviceTypes
