@@ -256,6 +256,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             cuda_matmul_fp32_prec = torch._C._get_fp32_precision_getter(
                 "cuda", "matmul"
             )
+            # print("torch/_dynamo/convert_frame.py: 259 ", cuda_matmul_fp32_prec)
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
             cleanup = setup_compile_debug()
@@ -290,6 +291,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch._C._set_fp32_precision_setter(
                     "cuda", "matmul", cuda_matmul_fp32_prec
                 )
+                # print("torch/_dynamo/convert_frame.py: 292 set fp32 precision setter")
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
                 assert guards.check(), (
                     f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"

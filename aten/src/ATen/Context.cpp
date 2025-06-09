@@ -190,6 +190,7 @@ bool Context::allowTF32CuDNN(const std::string& op) const {
     return float32Precision("cuda", op) == "tf32";
   }
   warn_deprecated_fp32_precision_api();
+  std::cout<<"aten/src/ATen/Context.cpp : 193 allowTF32CuDNN return "<< allow_tf32_cudnn <<"\n";
   return allow_tf32_cudnn;
 }
 
@@ -198,6 +199,7 @@ void Context::setAllowTF32CuDNN(bool b) {
   setFloat32Precision("cuda", "conv", b ? "tf32" : "none");
   allow_tf32_cudnn = b;
   warn_deprecated_fp32_precision_api();
+  std::cout<<"aten/src/ATen/Context.cpp : 193 setallowTF32CuDNN set "<< b <<"\n";
 }
 
 void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
@@ -345,12 +347,14 @@ bool Context::allowTF32CuBLAS() const {
       "We suggest only using the new API to set the TF32 flag. See also: ",
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
   warn_deprecated_fp32_precision_api();
+  std::cout<<"aten/src/ATen/Context.cpp : 350 allowTF32CuBlas return "<< allow_tf32_new <<"\n";
   return allow_tf32_new;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
 #ifdef USE_ROCM
   const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+  std::cout<<"aten/src/ATen/Context.cpp : 357 setAllowTF32CuBLAS "<< (allow_tf32 == true) <<"\n";
   if (allow_tf32 != true) {
     C10_LOG_FIRST_N(INFO, 10) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
                               << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
@@ -359,6 +363,7 @@ void Context::setAllowTF32CuBLAS(bool b) {
 #endif
   float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
   setFloat32Precision("cuda", "matmul", b ? "tf32" : "ieee");
+  std::cout<<"aten/src/ATen/Context.cpp : 366 setAllowTF32CuBLAS set "<< b <<"\n";
 }
 
 Float32MatmulPrecision Context::float32MatmulPrecision() const {
@@ -374,6 +379,7 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
       "We suggest only using the new API for matmul precision. See also: ",
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
   warn_deprecated_fp32_precision_api();
+  std::cout<<"aten/src/ATen/Context.cpp : 382 float32MatmulPrecision return " <<"\n";
   return float32_matmul_precision;
 }
 
@@ -385,6 +391,7 @@ std::string Context::float32Precision(const std::string& backend, const std::str
   if (precision == "none")
     precision = fp32_precision.find("generic")->second.find("all")->second;
   bool valid_prec = validate_fp32_prec(backend, precision);
+  std::cout<<"aten/src/ATen/Context.cpp : 394 float32Precision return "<< valid_prec<<"\n";
   return valid_prec ? precision : "none";
 }
 
@@ -417,6 +424,7 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
   if (match(sl)) { return; }
   TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current"
     "setFloat32MatmulPrecision call has no effect.");
+  std::cout<<"aten/src/ATen/Context.cpp : 427 setFloat32MatmulPrecision return " <<"\n";
 }
 
 void Context::setFloat32Precision(const std::string& backend, const std::string& op, const std::string& p) {
@@ -438,6 +446,7 @@ void Context::setFloat32Precision(const std::string& backend, const std::string&
         "Please choose precision from: ",
         msg);
   }
+  std::cout<<"aten/src/ATen/Context.cpp : 449 setFloat32Precision return " <<"\n";
 }
 
 at::LinalgBackend Context::linalgPreferredBackend() const {
