@@ -906,7 +906,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                     kBatch=k_batch,
                 )
 
-    def k_batch_choices(self, op: "CKTileGemmOperation") -> tuple[int]:
+    def k_batch_choices(self, op: "CKTileGemmOperation") -> tuple[int, ...]:
         """
         Returns a list of k_batch choices for the template.
         """
