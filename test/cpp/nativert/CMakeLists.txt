@@ -9,7 +9,9 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/graph/Graph.cpp
   ${TORCH_ROOT}/torch/nativert/graph/GraphSignature.cpp
   ${TORCH_ROOT}/torch/nativert/executor/PlacementUtils.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/Weights.cpp
   ${TORCH_ROOT}/torch/nativert/common/FileUtil.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/FunctionSchema.cpp
 )
 
 add_executable(test_nativert

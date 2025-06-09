@@ -2548,8 +2548,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: erf_out
-    MPS: erf_out_mps
+    CPU, CUDA, MPS: erf_out
     SparseCPU, SparseCUDA: erf_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: erf_sparse_csr_out
   tags: pointwise
@@ -2571,7 +2570,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: erfc_out
+    CPU, CUDA, MPS: erfc_out
   tags: pointwise
 
 - func: exp(Tensor self) -> Tensor
@@ -4780,6 +4779,14 @@
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd: randint_like
   autogen: randint_like.out
+
+- func: randint_like.Tensor(Tensor self, Tensor high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
+  autogen: randint_like.Tensor_out
 
 - func: randint_like.low_dtype(Tensor self, SymInt low, SymInt high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded

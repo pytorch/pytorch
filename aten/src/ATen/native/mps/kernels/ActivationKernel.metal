@@ -45,7 +45,7 @@ struct hardsigmoid_backward_functor {
   template <typename T>
   inline T operator()(const T grad_output, const T self) {
     T zero(0);
-    T one_sixth(1.0 / 6.0);
+    T one_sixth(T(1.0 / 6.0));
     T neg_three(-3);
     T three(3);
 
