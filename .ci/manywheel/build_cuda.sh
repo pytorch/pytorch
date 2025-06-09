@@ -165,6 +165,7 @@ if [[ $CUDA_VERSION == 12* ]]; then
             '$ORIGIN/../../nvidia/curand/lib'
             '$ORIGIN/../../nvidia/cusolver/lib'
             '$ORIGIN/../../nvidia/cusparse/lib'
+            '$ORIGIN/../../nvidia/cusparselt/lib'
             '$ORIGIN/../../cusparselt/lib'
             '$ORIGIN/../../nvidia/nccl/lib'
             '$ORIGIN/../../nvidia/nvshmem/lib'
