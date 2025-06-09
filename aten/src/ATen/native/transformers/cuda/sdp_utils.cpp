@@ -72,6 +72,7 @@ bool priority_order_init_ = false;
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
+  return false; // not default for now
 #if defined(CUDNN_VERSION)
 
 #if CUDNN_VERSION > 90000
