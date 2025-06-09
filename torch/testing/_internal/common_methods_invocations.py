@@ -15455,7 +15455,6 @@ op_db: list[OpInfo] = [
            aliases=('rms_norm',),
            ref=reference_rms_norm,
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
