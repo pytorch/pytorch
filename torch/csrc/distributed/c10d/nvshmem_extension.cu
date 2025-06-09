@@ -17,6 +17,7 @@ using c10d::symmetric_memory::StoreExchange;
 static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
 
 #define THREADS_PER_BLOCK 512
+#define WARP_SIZE 32
 
 constexpr int MiB = 1024 * 1024;
 
@@ -143,7 +144,7 @@ at::Tensor nvshmem_all_to_all(
 }
 
 // This is an exclusive prefix sum function that calculates read (or write) offsets for each peer.
-__device__ void prefixSum(int64_t *odata, int64_t *idata, int n) {
+__device__ int64_t prefixSum(int64_t *odata, int64_t *idata, int n) {
   // Specialize BlockScan for a 1D block of threads, of type int64_t.
   // - `BLOCK_SCAN_WARP_SCANS` is a low-latency scan algorithm (instead of high
   // throughput which we don't need here).
@@ -161,12 +162,12 @@ __device__ void prefixSum(int64_t *odata, int64_t *idata, int n) {
   int64_t thread_data = (tid < n) ? idata[tid] : 0;
 
   // Collectively compute the block-wide exclusive prefix sum
-  BlockScanT(temp_storage).ExclusiveSum(thread_data, thread_data);
+  int64_t block_aggregate;
+  BlockScanT(temp_storage).ExclusiveSum(thread_data, thread_data, block_aggregate);
 
   // Store the result
-  if (tid < n) {
-    odata[tid] = thread_data;
-  }
+  odata[tid] = thread_data;
+  return block_aggregate;
 }
 
 // This kernel is used to exchange output splits and source offsets between peers.
@@ -318,6 +319,288 @@ at::Tensor nvshmem_all_to_all_vdev(
   return out;
 }
 
+// Start of `nvshmem_all_to_all_vdev_2d`
+// This kernel is used to exchange output splits and source offsets between peers.
+// For meaning of `mype` and `npes`, see the docstring of `nvshmem_all_to_all_vdev_2d`.
+// `in_out_splits` is of size (3, npes * ne) and contains:
+// - input splits (IN)
+// - output splits (OUT) and
+// - source offsets (OUT).
+__global__ void exchangeSplitAndOffset_2d(int64_t* in_out_splits, int mype, int npes, int ne, size_t input_dim0) {
+  int nsplits = npes * ne;
+  auto input_splits = in_out_splits;
+  auto output_splits = in_out_splits + nsplits;
+  auto source_offsets = in_out_splits + nsplits * 2;
+  int tid = threadIdx.x;
+
+  __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
+
+  // Scan input splits to get the source offsets
+  auto sum_of_splits = prefixSum(peer_offsets, input_splits, nsplits);
+  __syncthreads();;
+  CUDA_KERNEL_ASSERT(sum_of_splits <= input_dim0);
+
+  // Use 1 block to do the exchange
+  if (tid < nsplits) {
+    int peer = tid / ne;
+    int e = tid % ne;
+    // This does a transpose from rank-major order to expert-major order
+    int dst_offset = e * npes + mype;
+    auto split_val = input_splits[tid];
+    CUDA_KERNEL_ASSERT(split_val >= 0);
+    nvshmem_int64_p(source_offsets + dst_offset, peer_offsets[tid], peer);
+    nvshmem_int64_p(output_splits + dst_offset, split_val, peer);
+  }
+  // This barrier ensures that all remote PEs see the updated values
+  nvshmemx_barrier_all_block();
+}
+
+// This is an warp-scope, exclusive prefix sum. When called by a block of
+// threads, each warp will perform an independent prefix sum, concurrently.
+// Returns the sum of all elements in the warp.
+// `NUM_WARPS` is the number of warps participating the concurrent prefix sum.
+template <int NUM_WARPS>
+__device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
+  CUDA_KERNEL_ASSERT(n <= WARP_SIZE);
+
+  // Specialize WarpScan for type int
+  using WarpScan = at_cuda_detail::cub::WarpScan<int64_t>;
+  // Allocate WarpScan shared memory for N warps
+  __shared__ typename WarpScan::TempStorage temp_storage[NUM_WARPS];
+
+  int warp_id = threadIdx.x / WARP_SIZE;
+  if (warp_id >= NUM_WARPS) {
+    return 0;
+  }
+
+  // Obtain input item for each thread
+  int tid = threadIdx.x % WARP_SIZE;
+  int64_t thread_data = (tid < n) ? idata[tid] : 0;
+
+  // Total sum of all elements in the warp
+  int64_t warp_aggregate;
+  // Compute the warp-wide exclusive prefix sum
+  WarpScan(temp_storage[warp_id]).ExclusiveSum(thread_data, thread_data, warp_aggregate);
+
+  // Store the result
+  odata[tid] = thread_data;
+  return warp_aggregate;
+}
+
+// This is for abstracting a thread-group-scope, exclusive prefix sum.
+// Since we use warp-scope prefix sum, the thread group size is limited to warp size.
+#define A2AV_TILE_SIZE WARP_SIZE
+
+// This kernel is used to do the actual data exchange.
+// `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
+// `stride` is the stride at dim 0, unit in byte.
+// For meaning of `mype` and `npes`, see the docstring of `nvshmem_all_to_all_vdev_2d`.
+__global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes, int ne, int64_t major_align) {
+  int nsplits = npes * ne;
+  auto output_splits = in_out_splits + nsplits;
+  auto source_offsets = in_out_splits + nsplits * 2;
+  int bid = blockIdx.x;
+  int tid = threadIdx.x;
+
+  // Split the thread block into tiles
+  constexpr int NUM_TILES = THREADS_PER_BLOCK / A2AV_TILE_SIZE;
+  int tileId = tid / A2AV_TILE_SIZE;
+  int laneId = tid % A2AV_TILE_SIZE;
+  // Each tile calculates its own prefix sum
+  __shared__ int64_t tile_prefix_sums[NUM_TILES][A2AV_TILE_SIZE];
+  // A tile takes care of npes worth of splits
+  int nsplits_per_tile = min(npes, nsplits - tileId * npes);
+  // TODO: currently it is assumed that the number of PE's is smaller than
+  // `A2AV_TILE_SIZE` bc the warp-scope prefix sum can only handle up to
+  // WARP_SIZE elements
+  CUDA_KERNEL_ASSERT(npes <= A2AV_TILE_SIZE);
+  // Similarly, the number of experts per rank is also assumed to be smaller
+  // than `NUM_TILES`
+  CUDA_KERNEL_ASSERT(ne <= NUM_TILES);
+
+  // Total length of each tile
+  __shared__ int64_t len_per_tile[NUM_TILES];
+  // When `nsplits` is small, not every tile gets data to sum. They can skip
+  // this local prefix sum.
+  if (nsplits_per_tile > 0) {
+    // Each tile calculates its own prefix sum, return value is the sum of all elements in the tile.
+    int64_t my_tile_len = prefixSum_warp<NUM_TILES>(tile_prefix_sums[tileId], output_splits + tileId * npes, nsplits_per_tile);
+    // Last thread in each tile does the up aligning.
+    if (laneId == A2AV_TILE_SIZE - 1) {
+      auto aligned_len = (my_tile_len + major_align - 1) / major_align * major_align;
+      // In case `aligned_len` is 0, we set it to `major_align` to avoid an
+      // empty bin, bc cutlass currently does not support it. See
+      // https://github.com/pytorch/pytorch/issues/152668.
+      len_per_tile[tileId] = max(aligned_len, major_align);
+    }
+  }
+  __syncthreads();
+
+  // Starting offset of each tile
+  __shared__ int64_t start_offset_per_tile[NUM_TILES];
+  // Prefix sum again to get the tiles' start offsets.
+  // `NUM_TILES` is typically not greater than 32, because 32 tiles * 32 threads
+  // = 1024 threads, and this kernel is launched within 1024 threads. Thus, we
+  // can use warp-scope prefix sum.
+  static_assert(NUM_TILES <= WARP_SIZE);
+  // Only 1 warp is needed
+  prefixSum_warp<1>(start_offset_per_tile, len_per_tile, NUM_TILES);
+  __syncthreads();
+
+  // Add tile offset to every element in the tile
+  tile_prefix_sums[tileId][laneId] += start_offset_per_tile[tileId];
+  __syncthreads();
+
+  // Target a different e based on bid
+  for (int eid = bid; eid < nsplits; eid += gridDim.x) {
+    int peer = eid % npes;
+    // Amount from `peer` for `e`
+    auto peer_size = output_splits[eid] * stride;
+    auto source_offset = source_offsets[eid] * stride;
+    auto e_offset = tile_prefix_sums[eid / npes][peer];
+    auto write_offset = e_offset * stride;
+    nvshmemx_getmem_block(
+      (char*)recv_data + write_offset,
+      (char*)send_data + source_offset,
+      peer_size,
+      peer);
+  }
+  // Write out the output offsets (to the scratchpad line)
+  if (bid == 0 && tid < nsplits) {
+    source_offsets[tid] = tile_prefix_sums[tid / npes][tid % npes];
+  }
+}
+
+at::Tensor nvshmem_all_to_all_vdev_2d(
+    at::Tensor& input,
+    at::Tensor& out,
+    at::Tensor& in_out_splits,
+    std::string group_name,
+    std::optional<int64_t> major_align) {
+  /* Perform a 2D AllToAllv shuffle operation using NVSHMEM, with split information provided on device.
+   * Arguments:
+   *  - `input` is the input tensor
+   *  - `out` is the output tensor
+   *  - `in_out_splits` is a 2D tensor of size (3, `world_size` * `ne`). In the
+        scenario of Mixture-of-Experts models, `ne` is the number of experts per
+        rank. The rows of `in_out_splits` are (in order):
+        input splits (IN)
+        output splits (OUT) and
+        output offsets (OUT).
+   *  - `group_name` is the name of the group to use for the collective operation.
+   *  - `major_align` is the alignment of the "major dimension" of the output
+        sequence. See below for details.
+
+   *  A 2D AllToAllv shuffle is illustrated below:
+        (world_size = 2, ne = 2, total number of experts = 4)
+        Source: |       Rank 0      |       Rank 1      |
+                | c0 | c1 | c2 | c3 | d0 | d1 | d2 | d3 |
+
+        Dest  : |       Rank 0      |       Rank 1      |
+                | c0 | d0 | c1 | d1 | c2 | d2 | c3 | d3 |
+        where each `c_i` / `d_i` are slices of the `input` tensor, targeting
+        expert `i`, with length indicated by input splits (in
+        `in_out_splits[0]`).  That is, the 2D AllToAllv shuffle achives a
+        transpose from rank-major order at input to expert-major order at
+        output.
+
+   *  If `major_align` is not 1, the output offsets of c1, c2, c3 will be
+      up-aligned to this value. For example, if c0 has length 5 and d0 has
+      length 7 (making a total of 12), and if the `major_align` is set to 16,
+      the output offset of c1 will be 16. Similar for c2 and c3. This value has
+      no effect on the offset of the minor dimension, i.e.  d0, d1, d2 and d3.
+      Note: since cutlass does not support empty bins, we set the aligned length
+      to `major_align` if it is 0. See
+      https://github.com/pytorch/pytorch/issues/152668.
+  */
+  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
+  auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
+  auto splits_hdl = c10d::symmetric_memory::rendezvous(in_out_splits, group_name);
+  int rank = input_hdl->get_rank();
+  int world_size = input_hdl->get_world_size();
+  // TODO: world_size is currently limited by the number of elements in a WarpScan.
+  TORCH_CHECK(world_size <= A2AV_TILE_SIZE, "world_size must be smaller than A2AV_TILE_SIZE", A2AV_TILE_SIZE);
+
+  // If `major_align` is not provided, use 1 as the default value.
+  int64_t major_align_val = major_align.value_or(1);
+  TORCH_CHECK(major_align_val > 0, "major_align must be positive");
+
+  void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
+  void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
+  int64_t* splits_ptr = (int64_t*)(splits_hdl->get_buffer_ptrs()[rank]);
+
+  // Shape checks
+  auto split_shape = in_out_splits.sizes();
+  TORCH_CHECK(in_out_splits.is_contiguous()
+      && input.is_contiguous()
+      && out.is_contiguous(),
+      "input, out and in_out_splits must be contiguous");
+  TORCH_CHECK(split_shape.size() == 2
+      && split_shape[0] == 3
+      && split_shape[1] % world_size == 0,
+      "in_out_splits must be 2D with 3 rows, "
+      "each row must be a multiple of world_size");
+
+  // Consistency checks
+  TORCH_CHECK(input.dtype() == out.dtype()
+      && input.stride(0) == out.stride(0),
+      "input and out must have the same dtype and same stride at dim 0");
+  TORCH_CHECK(in_out_splits.scalar_type() == at::kLong, "in_out_splits must be int64");
+
+  // Number of experts per rank
+  int ne = split_shape[1] / world_size;
+  constexpr int NUM_TILES = THREADS_PER_BLOCK / A2AV_TILE_SIZE;
+  TORCH_CHECK(ne <= NUM_TILES, "Number of experts must be smaller than NUM_TILES", NUM_TILES);
+
+  // Set device context for getting the stream and launching kernels below
+  c10::cuda::CUDAGuard guard(input.device());
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // Exchange output splits and source offsets
+  auto input_dim0 = input.size(0);
+  // Use collective launch because kernel involves nvshmem barrier
+  void* args0[] = {
+      &splits_ptr,
+      &rank,
+      &world_size,
+      &ne,
+      &input_dim0};
+  nvshmemx_collective_launch(
+      (const void*)exchangeSplitAndOffset_2d,
+      dim3(1),
+      dim3(THREADS_PER_BLOCK),
+      args0,
+      0,
+      stream);
+
+  // CTA Tuning
+  // Naive for now, use 1 block per expert.
+  // Total number of blocks is limited to 64 (intra-node) or 8 (inter-node).
+  int num_blocks = std::min(world_size * ne, world_size > 8 ? 8 : 64);
+
+  // Stride at dim 0
+  size_t stride_bytes = input.stride(0) * input.element_size();
+
+  // All to all data exchange
+  void* args1[] = {
+      &input_ptr,
+      &output_ptr,
+      &splits_ptr,
+      &stride_bytes,
+      &rank,
+      &world_size,
+      &ne,
+      &major_align_val};
+  nvshmemx_collective_launch(
+      (const void*)allToAllV_2d,
+      dim3(num_blocks),
+      dim3(THREADS_PER_BLOCK),
+      args1,
+      0,
+      stream);
+  return out;
+}
+
 } // namespace c10d::nvshmem_extension
 
 
@@ -325,4 +608,5 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
   m.impl("nvshmem_all_to_all_vdev", c10d::nvshmem_extension::nvshmem_all_to_all_vdev);
+  m.impl("nvshmem_all_to_all_vdev_2d", c10d::nvshmem_extension::nvshmem_all_to_all_vdev_2d);
 }

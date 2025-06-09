@@ -211,7 +211,7 @@ class MPSBasicTestsAOTI(TestCase):
         path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
         m = torch._inductor.aoti_load_package(path)
         res = m(*inp)
-        assert torch.allclose(res, res2)
+        self.assertTrue(torch.allclose(res, res2))
 
     def test_c10(self):
         class M(torch.nn.Module):
@@ -228,7 +228,7 @@ class MPSBasicTestsAOTI(TestCase):
         path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
         m = torch._inductor.aoti_load_package(path)
         res = m(*inp)
-        assert torch.allclose(res, res2)
+        self.assertTrue(torch.allclose(res, res2))
 
     def test_const(self):
         class M(torch.nn.Module):
@@ -239,16 +239,14 @@ class MPSBasicTestsAOTI(TestCase):
             def forward(self, x):
                 return x + self.y
 
-        inp = (
-            torch.randn(10, 10, device="mps"),
-        )
+        inp = (torch.randn(10, 10, device="mps"),)
         m = M().to("mps")
         res2 = m(*inp)
         ep = torch.export.export(m, inp)
         path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
         m = torch._inductor.aoti_load_package(path)
         res = m(*inp)
-        assert torch.allclose(res, res2)
+        self.assertTrue(torch.allclose(res, res2))
 
     def test_two_const(self):
         class Model(torch.nn.Module):
@@ -260,19 +258,15 @@ class MPSBasicTestsAOTI(TestCase):
             def forward(self, x):
                 return x + self.y + self.z
 
-        inp = (
-            torch.ones(3, 3, device="mps", dtype=torch.int32),
-        )
+        inp = (torch.ones(3, 3, device="mps", dtype=torch.int32),)
         m = Model().to(device="mps")
         res2 = m(*inp)
         ep = torch.export.export(m, inp)
-        path = torch._inductor.aot_compile(ep.module(), inp)
-        print(f"{path[:-3]}.cpp")  # you can directly modify this cpp file and rerun this test case to test your changes
-        model = torch._export.aot_load(path, device="mps:0")
-        res = model(*inp)
-        print(res)
-        print(res2)
-        assert torch.allclose(res, res2)
+        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
+        m = torch._inductor.aoti_load_package(path)
+        res = m(*inp)
+        self.assertTrue(torch.allclose(res, res2))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
