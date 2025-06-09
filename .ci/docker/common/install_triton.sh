@@ -59,8 +59,10 @@ fi
 
 pip_install pybind11==2.13.6
 
-# TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
-as_jenkins sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
+if [ -z "${XPU_VERSION}" ]; then
+  # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
+  as_jenkins sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
+fi
 
 if [ -n "${UBUNTU_VERSION}" ] && [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
   # Triton needs at least gcc-9 to build
