@@ -4447,7 +4447,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         try:
             import einops
         except ImportError:
-            unittest.skip("Needs einops")
+            self.skipTest("Needs einops")
 
         from einops import einsum, pack, rearrange, reduce, repeat, unpack
 
