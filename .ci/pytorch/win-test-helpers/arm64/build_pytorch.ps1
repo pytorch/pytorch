@@ -79,7 +79,7 @@ if ($whl) {
 }
 
 # Copy final wheel
-Copy-Item -Path "dist\*.whl" -Destination $env:PYTORCH_FINAL_PACKAGE_DIR -Force
+robocopy "dist" "$env:PYTORCH_FINAL_PACKAGE_DIR" *.whl
 
 # Export test times
 python tools/stats/export_test_times.py
