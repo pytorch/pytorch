@@ -409,9 +409,18 @@ __host__ __device__
 // never triggered. We choose to use abort() instead which will still
 // terminate the application but without a more useful error message.
 #if !defined(C10_USE_ROCM_KERNEL_ASSERT) and defined(USE_ROCM)
-#define CUDA_KERNEL_ASSERT(cond) if C10_UNLIKELY(!(cond)) { abort(); }
-#define CUDA_KERNEL_ASSERT_MSG(cond, msg) if C10_UNLIKELY(!(cond)) { abort(); }
-#define SYCL_KERNEL_ASSERT(cond) if C10_UNLIKELY(!(cond)) { abort(); }
+#define CUDA_KERNEL_ASSERT(cond) \
+  if C10_UNLIKELY (!(cond)) {    \
+    abort();                     \
+  }
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg) \
+  if C10_UNLIKELY (!(cond)) {             \
+    abort();                              \
+  }
+#define SYCL_KERNEL_ASSERT(cond) \
+  if C10_UNLIKELY (!(cond)) {    \
+    abort();                     \
+  }
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
