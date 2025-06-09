@@ -536,9 +536,9 @@ class TestTensorCreation(TestCase):
     def test_concat_empty_list_error(self, device):
         # Regression test for https://github.com/pytorch/pytorch/issues/155306
         msg = "expected a non-empty list of Tensors"
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(ValueError, msg):
             torch.concat([], dim='N')
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(ValueError, msg):
             torch.concatenate([], dim='N')
 
     def test_cat_out(self, device):
