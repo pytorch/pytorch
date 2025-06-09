@@ -204,9 +204,12 @@ class TestAccelerator(TestCase):
         del tmp
         gc.collect()
         torch.accelerator.empty_cache()
+        torch.accelerator.reset_peak_memory_stats()
         self.assertEqual(torch.accelerator.memory_allocated(), prev_allocated)
         self.assertEqual(torch.accelerator.memory_reserved(), prev_reserved)
         torch.accelerator.reset_accumulated_memory_stats()
+        prev_max_allocated = torch.accelerator.max_memory_allocated()
+        prev_max_reserved = torch.accelerator.max_memory_reserved()
         # Activate 1kB memory
         prev_active_current = torch.accelerator.memory_stats()[
             "active_bytes.all.current"
@@ -220,6 +223,7 @@ class TestAccelerator(TestCase):
         self.assertEqual(torch.accelerator.memory_stats()["active_bytes.all.freed"], 0)
         del tmp
         gc.collect()
+        torch.accelerator.empty_cache()
         self.assertEqual(
             torch.accelerator.memory_stats()["active_bytes.all.current"],
             prev_active_current,
