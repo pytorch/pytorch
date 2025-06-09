@@ -192,21 +192,21 @@ class TestAutocastMPS(TestCase):
                          f"Autocast & non-autocast tensors did not match, \
                          got:\n{autocast_output_tensor} \n{output_tensor.to(torch.float16)}")
 
-    # Regression test for https://github.com/pytorch/pytorch/issues/141774
-    def test_scaled_dot_product_attention_autocast(self):
-        # TODO(hvaara): Parameterize the dtypes for cleaner code and better failure debugability
-        dtypes = [torch.float16] if MACOS_VERSION < 14.0 else [torch.bfloat16, torch.float16]
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_scaled_dot_product_attention_autocast(self, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/141774
+        if dtype == torch.bfloat16 and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("bfloat16 needs MacOS14+")
 
-        for dtype in dtypes:
-            query = torch.rand(4, 1, 16, 8, dtype=torch.float32, device="mps")
-            key = torch.rand(4, 1, 16, 8, dtype=torch.float32, device="mps")
-            value = torch.rand(4, 1, 16, 8, dtype=dtype, device="mps")
+        query = torch.rand(4, 1, 16, 8, dtype=torch.float32, device="mps")
+        key = torch.rand(4, 1, 16, 8, dtype=torch.float32, device="mps")
+        value = torch.rand(4, 1, 16, 8, dtype=dtype, device="mps")
 
-            with torch.amp.autocast(device_type="mps"):
-                y_autocast = F.scaled_dot_product_attention(query, key, value)
+        with torch.amp.autocast(device_type="mps"):
+            y_autocast = F.scaled_dot_product_attention(query, key, value)
 
-            y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
-            self.assertEqual(y.to(y_autocast.dtype), y_autocast)
+        y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
+        self.assertEqual(y.to(y_autocast.dtype), y_autocast)
 
     def test_gradscaler_mps(self):
         # big model to force chunking/depth in the gradscaler dispatch
@@ -1735,8 +1735,8 @@ class TestMPS(TestCaseMPS):
         # This used to crash, see https://github.com/pytorch/pytorch/issues/98602
         outputs.sum().backward()
 
-    # Regression test for https://github.com/pytorch/pytorch/issues/133520
     def test_batch_norm_slices(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/133520
         bn_cpu = nn.BatchNorm2d(100, affine=False, device='cpu')
         bn_mps = nn.BatchNorm2d(100, affine=False, device='mps')
 
@@ -2033,8 +2033,8 @@ class TestMPS(TestCaseMPS):
         # Expecting the inverted to yield the original signal
         self.assertEqual(ifft_result, signal)
 
-    # Regression test for https://github.com/pytorch/pytorch/issues/135223
     def test_fftfreq(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/135223
         freq_cpu = torch.fft.fftfreq(10**4, device='cpu')
         freq_mps = torch.fft.fftfreq(10**4, device='mps')
         self.assertEqual(freq_cpu, freq_mps)
@@ -7955,6 +7955,20 @@ class TestMPS(TestCaseMPS):
             x[::2].bitwise_not_()
         self.assertEqual(x_mps.cpu(), x_cpu)
 
+
+class TestLargeTensors(TestCaseMPS):
+    def test_64bit_binops(self):
+        if torch.mps.recommended_max_memory() < 16_000_000_000:
+            raise unittest.SkipTest("Needs at least 16Gb of RAM")
+        a = torch.rand(1, 1024, 1024, dtype=torch.float16, device='mps')
+        b = torch.rand(5000, 1, 1, dtype=torch.float16, device='mps')
+        rc = (a + b).sin()
+        slice_idx = -2
+        rc_slice = rc[slice_idx:]
+        rc_slice_cpu = (a.cpu() + b.cpu()[slice_idx:]).sin()
+        self.assertEqual(rc_slice, rc_slice_cpu)
+
+
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
         return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -12508,6 +12522,7 @@ instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_f
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
+instantiate_parametrized_tests(TestAutocastMPS)
 instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
