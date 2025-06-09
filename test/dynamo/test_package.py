@@ -13,7 +13,7 @@ from torch._dynamo.package import _CompilePackage
 from torch._inductor.runtime.runtime_utils import cache_dir
 
 
-class TestStorageContext:
+class StorageForTesting:
     def __init__(self, path: str):
         self.path = path
         self.backends = {}
@@ -42,15 +42,27 @@ class TestStorageContext:
     def add_backend(self, backend_id, backend):
         self.backends[backend_id] = backend
 
+    def save_package(self, dynamo_cache_entry):
+        self.write_dynamo(dynamo_cache_entry)
+        for backend_id in dynamo_cache_entry.backend_ids:
+            self.write_backend(backend_id)
+
+    def load_package(self):
+        dynamo = self.read_dynamo()
+        self.backends = {}
+        for backend_id in dynamo.backend_ids:
+            self.backends[backend_id] = self.read_backend(backend_id)
+        return dynamo
+
 
 class TestPackage(torch._inductor.test_case.TestCase):
-    def context(self):
+    def storage(self):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
         os.makedirs(path, exist_ok=True)
-        return TestStorageContext(path)
+        return StorageForTesting(path)
 
     def test_basic_fn(self):
-        ctx = self.context()
+        storage = self.storage()
 
         def fn(x):
             return x + 1
@@ -62,8 +74,8 @@ class TestPackage(torch._inductor.test_case.TestCase):
         compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
         expected = compiled_fn(*args)
         for backend_id, backend in package.cached_backends.items():
-            ctx.add_backend(backend_id, backend)
-        package.save(ctx)
+            storage.add_backend(backend_id, backend)
+        storage.save_package(package.save())
 
         # Loading
         torch._dynamo.reset()
@@ -74,13 +86,13 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(*args)
 
-            package = _CompilePackage(fn, ctx.read_dynamo())
+            package = _CompilePackage(fn, storage.load_package())
             compiled_fn = torch._dynamo.optimize(package=package)(fn)
-            package.install(ctx)
+            package.install(storage.backends)
             self.assertEqual(expected, compiled_fn(*args))
 
     def test_graph_break_bomb(self):
-        ctx = self.context()
+        storage = self.storage()
 
         def fn(x, l, r):
             if l > r:
@@ -109,8 +121,8 @@ class TestPackage(torch._inductor.test_case.TestCase):
         for args in args_list:
             compiled_fn(*args)
         for backend_id, backend in package.cached_backends.items():
-            ctx.add_backend(backend_id, backend)
-        package.save(ctx)
+            storage.add_backend(backend_id, backend)
+        storage.save_package(package.save())
 
         # Loading
         torch._dynamo.reset()
@@ -121,12 +133,11 @@ class TestPackage(torch._inductor.test_case.TestCase):
                     "Detected recompile when torch.compile stance is 'fail_on_recompile'",
                 ):
                     compiled_fn(*args)
-            dynamo_artifacts = ctx.read_dynamo()
-            package = _CompilePackage(fn, dynamo_artifacts)
+            package = _CompilePackage(fn, storage.load_package())
             compiled_fn = torch._dynamo.optimize(
                 backend="eager", package=package, guard_filter_fn=guard_filter_fn
             )(fn)
-            package.install(ctx)
+            package.install(storage.backends)
             for args in args_list:
                 self.assertEqual(compiled_fn(*args), args[0].sum())
 
@@ -137,7 +148,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 compiled_fn(torch.tensor(N), 0, N - 1)
 
     def test_dynamic_shape(self):
-        ctx = self.context()
+        storage = self.storage()
 
         def fn(x):
             return x + x.shape[0]
@@ -154,8 +165,8 @@ class TestPackage(torch._inductor.test_case.TestCase):
         compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
         compiled_fn(*args)
         for backend_id, backend in package.cached_backends.items():
-            ctx.add_backend(backend_id, backend)
-        package.save(ctx)
+            storage.add_backend(backend_id, backend)
+        storage.save_package(package.save())
 
         # Loading
         torch._dynamo.reset()
@@ -166,9 +177,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(*args1)
 
-            package = _CompilePackage(fn, ctx.read_dynamo())
+            package = _CompilePackage(fn, storage.load_package())
             compiled_fn = torch._dynamo.optimize(package=package)(fn)
-            package.install(ctx)
+            package.install(storage.backends)
 
             self.assertEqual(expected1, compiled_fn(*args1))
 
