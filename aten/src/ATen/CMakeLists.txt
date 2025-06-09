@@ -66,6 +66,12 @@ file(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
 file(GLOB cudnn_cpp "cudnn/*.cpp")
 file(GLOB ops_h "ops/*.h")
 
+# MTIA
+file(GLOB mtia_h "mtia/*.h" "mtia/detail/*.h")
+file(GLOB mtia_cpp "mtia/*.cpp" "mtia/detail/*.cpp")
+file(GLOB_RECURSE native_mtia_cpp "native/mtia/*.cpp")
+file(GLOB_RECURSE native_mtia_h "native/mtia/*.h")
+
 file(GLOB xpu_h "xpu/*.h" "xpu/detail/*.h")
 file(GLOB xpu_cpp "xpu/*.cpp" "xpu/detail/*.cpp")
 
@@ -268,6 +274,10 @@ if(USE_VULKAN)
   set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp} ${native_vulkan_cpp} ${vulkan_generated_cpp})
 else()
   set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp})
+endif()
+
+if(USE_MTIA)
+    set(ATen_MTIA_SRCS ${ATen_MTIA_SRCS} ${mtia_cpp} ${mtia_h} ${native_mtia_cpp} ${native_mtia_h})
 endif()
 
 if(USE_XPU)
@@ -749,6 +759,7 @@ set(ATen_CUDA_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY} PARENT_SC
 set(ATen_NVRTC_STUB_SRCS ${ATen_NVRTC_STUB_SRCS} PARENT_SCOPE)
 set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
 set(ATen_MPS_SRCS ${ATen_MPS_SRCS} PARENT_SCOPE)
+set(ATen_MTIA_SRCS ${ATen_MTIA_SRCS} PARENT_SCOPE)
 set(ATen_XPU_SRCS ${ATen_XPU_SRCS} PARENT_SCOPE)
 set(ATen_QUANTIZED_SRCS ${ATen_QUANTIZED_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
