@@ -3313,6 +3313,7 @@ class TestCase(expecttest.TestCase):
 
                 from .dynamo_test_failures import compiled_autograd_skips
                 if torch._dynamo.config.compiled_autograd and key in compiled_autograd_skips:
+                    # Still run the test, but with compiled autograd disabled
                     super_run = runWithoutCompiledAutograd()(super_run)
 
             super_run(result=result)
