@@ -16,8 +16,15 @@ void MPSGuardImpl::destroyEvent(void* event, const DeviceIndex device_index) con
 }
 
 void MPSGuardImpl::record(void** event,
+                          const Stream& stream,
                           const DeviceIndex device_index,
                           const EventFlag flag) const {
+  TORCH_CHECK(device_index == -1 || device_index == stream.device_index(),
+              "Event device index ",
+              device_index,
+              " does not match recording stream's device index ",
+              stream.device_index(),
+              ".");
 
   // Check if the MPS event ID is valid. If not, acquire a new event from the
   // MPS event pool and assign it to the event pointer. Then record the event in

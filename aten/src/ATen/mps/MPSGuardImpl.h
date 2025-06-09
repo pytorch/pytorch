@@ -101,6 +101,7 @@ struct TORCH_API MPSGuardImpl final
 
   void record(
       void** event,
+      const Stream& stream,
       const DeviceIndex device_index,
       const EventFlag flag) const override;
 
