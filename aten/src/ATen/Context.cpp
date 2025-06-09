@@ -116,10 +116,12 @@ void Context::setUserEnabledNNPACK(bool e) {
 }
 
 bool Context::allowTF32CuDNN() const {
+  std::cout<<"aten/src/ATen/Context.cpp 119 allowTF32CuDNN return "<<allow_tf32_cudnn<<"\n";
   return allow_tf32_cudnn;
 }
 
 void Context::setAllowTF32CuDNN(bool b) {
+  std::cout<<"aten/src/ATen/Context.cpp 124 setAllowTF32CuDNN set "<<b<<"\n";
   allow_tf32_cudnn = b;
 }
 
@@ -255,30 +257,36 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 bool Context::allowTF32CuBLAS() const {
 #ifdef USE_ROCM
     const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+    std::cout<<"aten/src/ATen/Context.cpp 260 allowTF32CuBLAS return "<<(allow_tf32 == true)<<"\n";
     if (allow_tf32 != true) {
       return false;
     }
 #endif
+  std::cout<<"aten/src/ATen/Context.cpp 265 allowTF32CuBLAS return "<<(float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST)<<"\n";
   return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
 #ifdef USE_ROCM
   const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+  std::cout<<"aten/src/ATen/Context.cpp 272 setAllowTF32CuBLAS return "<<(allow_tf32 == true)<<"\n";
   if (allow_tf32 != true) {
     C10_LOG_FIRST_N(INFO, 10) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
                               << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
     return;
   }
 #endif
+  std::cout<<"aten/src/ATen/Context.cpp 279 setAllowTF32CuBLAS set "<<b<<"\n";
   float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
 }
 
 Float32MatmulPrecision Context::float32MatmulPrecision() const {
+  std::cout<<"aten/src/ATen/Context.cpp 284 float32MatmulPrecision return "<<"\n";
   return float32_matmul_precision;
 }
 
 void Context::setFloat32MatmulPrecision(Float32MatmulPrecision p) {
+  std::cout<<"aten/src/ATen/Context.cpp 279 setFloat32MatmulPrecision set "<<"\n";
   float32_matmul_precision = p;
 }
 
@@ -304,6 +312,7 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
   if (match(sl)) { return; }
   TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current"
     "setFloat32MatmulPrecision call has no effect.");
+  std::cout<<"aten/src/ATen/Context.cpp 315 setFloat32MatmulPrecision set "<<"\n";
 }
 
 at::LinalgBackend Context::linalgPreferredBackend() const {
