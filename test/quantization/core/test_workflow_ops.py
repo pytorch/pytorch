@@ -1043,14 +1043,14 @@ class TestFakeQuantizeOps(TestCase):
            device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
     def test_fake_quantize_per_tensor_affine_inf(self, dtype, device) -> None:
         # https://github.com/pytorch/pytorch/issues/154328
-        input_tensor = torch.tensor([torch.inf], dtype=dtype, device=device)
+        input_tensor = torch.tensor([torch.inf], dtype=dtype).to(device)
         scale = 0.01
         zero_point = 0
         quant_min = 0
         quant_max = 255
         result = torch.fake_quantize_per_tensor_affine(input_tensor, scale, zero_point, quant_min, quant_max)
         ref_result = (min(quant_max, max(quant_min, torch.round(input_tensor / scale) + zero_point)) - zero_point) * scale
-        ref_result = torch.Tensor([ref_result], device=device).to(dtype)
+        ref_result = torch.Tensor([ref_result]).to(dtype).to(device)
         self.assertEqual(result, ref_result)
 
 
