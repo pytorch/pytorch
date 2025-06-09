@@ -16,7 +16,7 @@
 `Here is sample code which will generate an error because we injected an error on relu with`
 `torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY = "compile_error"`.`
 
-````
+
 ```python
 import torch
 from torch._inductor import config as inductor_config
@@ -46,21 +46,19 @@ with torch.no_grad():
     compiled_model = torch._inductor.aoti_load_package(package_path)
     result = compiled_model(*example_inputs)
 ```
-````
+
 
 `The code above generates the following error:`
 
-````
 ```text
 RuntimeError: Failed to import /tmp/torchinductor_shangdiy/fr/cfrlf4smkwe4lub4i4cahkrb3qiczhf7hliqqwpewbw3aplj5g3s.py
 SyntaxError: invalid syntax (cfrlf4smkwe4lub4i4cahkrb3qiczhf7hliqqwpewbw3aplj5g3s.py, line 29)
 ```
-````
+
 
 `This is because we injected an error on relu, and so the generated triton kernel looks like below. Note that we have `compile error!``
 `instead if `relu`, so we get a `SyntaxError`.`
 
-````
 ```python
 @triton.jit
 def triton_poi_fused_addmm_relu_sigmoid_0(in_out_ptr0, in_ptr0, xnumel, XBLOCK : tl.constexpr):
@@ -77,18 +75,17 @@ def triton_poi_fused_addmm_relu_sigmoid_0(in_out_ptr0, in_ptr0, xnumel, XBLOCK :
     tmp4 = tl.sigmoid(tmp3)
     tl.store(in_out_ptr0 + (x2), tmp4, xmask)
 ```
-````
+
 
 `Since we have `torch._inductor.config.aot_inductor.dump_aoti_minifier=True`, we also see an additional line indicating where `minifier_launcher.py` has`
 `been written to. The output directory is configurable by setting`
 `torch._dynamo.config.debug_dir_root` to a valid directory name.`
 
-````
 ```text
 W1031 16:21:08.612000 2861654 pytorch/torch/_dynamo/debug_utils.py:279] Writing minified repro to:
 W1031 16:21:08.612000 2861654 pytorch/torch/_dynamo/debug_utils.py:279] /data/users/shangdiy/pytorch/torch_compile_debug/run_2024_10_31_16_21_08_602433-pid_2861654/minifier/minifier_launcher.py
 ```
-````
+
 
 `## Minifier Launcher`
 
@@ -96,7 +93,7 @@ W1031 16:21:08.612000 2861654 pytorch/torch/_dynamo/debug_utils.py:279] /data/us
 `The `command='minify'` parameter means the script will run the minifier to create a minimal graph module that reproduce the error. Alternatively, you set`
 `use `command='run'` to just compile, load, and run the loaded model (without running the minifier).`
 
-````
+
 ```python
 import torch
 import torch._inductor.inductor_prims
@@ -139,18 +136,17 @@ if __name__ == '__main__':
     with torch.no_grad():
         run_repro(exported_program, config_patches=config_patches, accuracy=False, command='minify', save_dir='/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_11_06_13_52_35_711642-pid_3567062/minifier/checkpoints', check_str=None)
 ```
-````
+
 
 `Suppose we kept the `command='minify'` option, and run the script, we would get the following output:`
 
-````
 ```text
 ...
 W1031 16:48:08.938000 3598491 torch/_dynamo/repro/aoti.py:89] Writing checkpoint with 3 nodes to /data/users/shangdiy/pytorch/torch_compile_debug/run_2024_10_31_16_48_02_720863-pid_3598491/minifier/checkpoints/3.py
 W1031 16:48:08.975000 3598491 torch/_dynamo/repro/aoti.py:101] Copying repro file for convenience to /data/users/shangdiy/pytorch/repro.py
 Wrote minimal repro out to repro.py
 ```
-````
+
 
 `If you get an `AOTIMinifierError` when running `minifier_launcher.py`, please report a bug [here](https://github.com/pytorch/pytorch/issues/new?assignees=&labels=&projects=&template=bug-report.yml).`
 
@@ -158,7 +154,7 @@ Wrote minimal repro out to repro.py
 
 `The `repro.py` looks like this. Notice that the exported program is printed at the top of the file, and it contains only the relu node. The minifier successfully reduced the graph to the op that raises the error.`
 
-````
+
 ```python
 # from torch.nn import *
 # class Repro(torch.nn.Module):
@@ -218,4 +214,3 @@ if __name__ == '__main__':
     with torch.no_grad():
         run_repro(exported_program, config_patches=config_patches, accuracy=False, command='run', save_dir='/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_11_25_13_59_33_102283-pid_3658904/minifier/checkpoints', check_str=None)
 ```
-````

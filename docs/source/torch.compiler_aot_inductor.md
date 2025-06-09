@@ -1,6 +1,6 @@
 # Raw Sphinx Markdown Format
 
-````markdown
+
 # AOTInductor: Ahead-Of-Time Compilation for Torch.Export-ed Models
 
 ```{warning}
@@ -212,5 +212,5 @@ To enable runtime checks on inputs, set the environment variable `AOTI_RUNTIME_C
 ```{eval-rst}
 .. autofunction:: torch._inductor.aoti_compile_and_package
 .. autofunction:: torch._inductor.aoti_load_package
-````
-````
+```
+
