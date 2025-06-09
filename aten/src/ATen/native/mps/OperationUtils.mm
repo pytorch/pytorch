@@ -1111,8 +1111,10 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
         // Please note that shapes and strides of the iterator might be
         // different than that of its operands, for example binary op
         // between 4x4 tensor and scalar will result in 1D 16 element iterator
-        std::array<int, 3> ndim_and_types = {
-            iter.ndim(), static_cast<int>(input.scalar_type()), static_cast<int>(other.scalar_type())};
+        std::array<int, 4> ndim_and_types = {iter.ndim(),
+                                             static_cast<int>(input.scalar_type()),
+                                             static_cast<int>(other.scalar_type()),
+                                             static_cast<int>(out.scalar_type())};
         if (alpha) {
           mtl_setArgs<3>(computeEncoder,
                          getMPSScalar(*alpha, iter.common_dtype()),

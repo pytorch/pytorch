@@ -526,7 +526,7 @@ class LoopOrderingTest(TestCase):
         "triton.unique_kernel_names": True,
         "loop_ordering_after_fusion": True,
         "triton.max_tiles": 3,
-        "test_configs.global_tiling_analysis": True,
+        "triton.coalesce_tiling_analysis": True,
     }
 )
 @instantiate_parametrized_tests
@@ -798,13 +798,14 @@ class MemoryCoalescingTest(MockSchedulerTest):
             # coalesce twice as many bytes as first dimension
             # if not downcasted
             # if downcasted, should be equal, bc larger dtype size
+            # we also weight writes x 2
             cont_reads = coalesce_analysis.coalesced_by_var[i_vars[1]]
             t_reads = coalesce_analysis.coalesced_by_var[i_vars[0]]
 
             if not downcast_transposed_v:
-                self.assertEqual(cont_reads, t_reads * 2)
+                self.assertEqual(cont_reads, t_reads * 3)
             else:
-                self.assertEqual(cont_reads, t_reads)
+                self.assertEqual(cont_reads, t_reads * 1.5)
 
             return nodes
 
@@ -908,8 +909,7 @@ layouts = ("cont", "NHWC", "T")
     {
         "triton.unique_kernel_names": True,
         "loop_ordering_after_fusion": True,
-        "test_configs.global_tiling_analysis": True,
-        "triton.max_tiles": 3,
+        "triton.coalesce_tiling_analysis": True,
     }
 )
 @instantiate_parametrized_tests
@@ -999,8 +999,8 @@ class TestTiling(TestCase):
         self.assertEqual(out, f(*inps))
 
     def test_penalized_small_dim(self):
-        x = torch.rand([2000, 1], device="cuda")
-        y = torch.rand([4, 1], device="cuda").T
+        x = torch.rand([2000, 1], device=GPU_TYPE)
+        y = torch.rand([4, 1], device=GPU_TYPE).T
 
         # dont tile when it doesnt affect total coalesced mem accesses much
         def f(x, y):
