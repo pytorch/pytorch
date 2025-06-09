@@ -296,6 +296,13 @@ struct bitwise_not_functor {
   }
 };
 
+template <typename T>
+float erfc(T x) {
+  return 1.0 - erf(x);
+}
+
+DEFINE_UNARY_FLOATING_FUNCTOR(erf);
+DEFINE_UNARY_FLOATING_FUNCTOR(erfc);
 DEFINE_UNARY_FLOATING_FUNCTOR(erfinv);
 DEFINE_UNARY_FLOATING_FUNCTOR(sinc);
 
@@ -315,6 +322,8 @@ REGISTER_UNARY_OP(bitwise_not, uchar, uchar);
 REGISTER_UNARY_OP(bitwise_not, bool, bool);
 
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
+  REGISTER_UNARY_OP(erf, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(erfc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
   REGISTER_UNARY_OP(exp, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(sigmoid, DTYPE1, DTYPE0);      \
