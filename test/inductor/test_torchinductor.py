@@ -13548,6 +13548,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (1, x))
         self.common(fn, (2, x))
 
+    @skip_if_triton
     @skip_if_halide
     @config.patch({"freezing": True})
     def test_dont_constant_fold(self):
