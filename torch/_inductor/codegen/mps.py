@@ -793,9 +793,9 @@ class MetalKernel(SIMDKernel):
                     f"#include <c10/metal/{header}.h>" for header in self.headers
                 ]
                 header_contents = _embed_headers(
-                    headers, 
+                    headers,
                     [Path(__file__).parent.parent.parent / "include"],
-                    OrderedSet(),
+                    OrderedSet(),  # type: ignore[arg-type]
                 )
                 code.writeline(header_contents)
 
