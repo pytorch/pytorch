@@ -596,6 +596,7 @@ libtorch_nativert_sources = [
     "torch/nativert/graph/TensorMeta.cpp",
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/PlacementUtils.cpp",
+    "torch/nativert/executor/memory/FunctionSchema.cpp",
     "torch/nativert/common/FileUtil.cpp",
 ]
 
