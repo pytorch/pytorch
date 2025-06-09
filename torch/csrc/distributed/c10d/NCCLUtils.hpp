@@ -220,7 +220,7 @@ TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 TORCH_API std::string getNcclVersion();
 TORCH_API int getNcclVersionNumber();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
-int nccl_nonblocking_timeout();
+TORCH_API int nccl_nonblocking_timeout();
 
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
@@ -352,11 +352,12 @@ class NCCLComm {
    *                was allocated as a single cuMem allocation which should be
    *                passed to ncclCommRegister.
    * @param regSnapshot Memory can be registered by either hitting the callback
-   *                    after CCA allocates it (regSnapshot=False) or during nccl
-   *                    pg creation when the pg loops through the existing snapshot
-   *                    so that each previous memory allocation before the pg was
-   *                    created is registered to it (regSnapshot=True).
-   * @param snapshotSegmentSize Size of the memory to register if regSnapshot=true
+   *                    after CCA allocates it (regSnapshot=False) or during
+   * nccl pg creation when the pg loops through the existing snapshot so that
+   * each previous memory allocation before the pg was created is registered to
+   * it (regSnapshot=True).
+   * @param snapshotSegmentSize Size of the memory to register if
+   * regSnapshot=true
    */
   ncclResult_t registerSegment(
       void* ptr,
