@@ -144,6 +144,29 @@ class MapAutogradOp(torch.autograd.Function):
         num_pos_args = ctx._num_pos_args
         num_grads = len(flat_grads)
 
+        with disable_functional_mode():
+            fw_mapped_args, pos_args = split_into_chunks(
+                fw_args, [num_mapped_args, num_pos_args]
+            )
+
+        # Prepare the backward graph:
+        # The fw_mapped_args need to be sliced along the first dimension
+        fw_args_prepared = (*_unstack_pytree(fw_mapped_args)[0], *pos_args)
+        bw_f = create_bw_fn(ctx._f, fw_args_prepared)
+
+        # Create a wrapper around thefor the bw_f
+        def bw_f_wrapper(*args):
+            # Dissect args and re-order them for the ``ctx._bw_f``
+            # args provided to the wrapper are composed of [*fw_mapped_args, *flat_grads, *pos_args]
+            # The content of ``bw_f_tangents`` are the upstream gradients, i.e. flat_grads
+            # The content of ``bw_f_primals`` are the fw_args, i.e., [*fw_mapped_args, *pos_args]
+            # The bw_f requires *bw_f_primals, *bw_f_tangents
+            fw_m_args, bw_f_tangents, pos_args = split_into_chunks(
+                args, [num_mapped_args, num_grads, num_pos_args]
+            )
+            bw_f_primals = *fw_m_args, *pos_args
+            return bw_f(*bw_f_primals, *bw_f_tangents)
+
         def construct_args_single_step_bw():
             unwrapped_mapped_xs = pytree.tree_map(_from_fun, fw_mapped_args)
             example_xs = _unstack_pytree(unwrapped_mapped_xs)[0]
@@ -156,28 +179,6 @@ class MapAutogradOp(torch.autograd.Function):
             return *example_xs, *example_grads, *example_pos_args
 
         with suspend_functionalization(), disable_functional_mode():
-            fw_mapped_args, pos_args = split_into_chunks(
-                fw_args, [ctx._num_mapped_args, ctx._num_pos_args]
-            )
-
-            # Prepare the backward graph:
-            # The fw_mapped_args need to be sliced along the first dimension
-            fw_args_prepared = (*_unstack_pytree(fw_mapped_args)[0], *pos_args)
-            bw_f = create_bw_fn(ctx._f, fw_args_prepared)
-
-            # Create a wrapper around thefor the bw_f
-            def bw_f_wrapper(*args):
-                # Dissect args and re-order them for the ``ctx._bw_f``
-                # args provided to the wrapper are composed of [*fw_mapped_args, *flat_grads, *pos_args]
-                # The content of ``bw_f_tangents`` are the upstream gradients, i.e. flat_grads
-                # The content of ``bw_f_primals`` are the fw_args, i.e., [*fw_mapped_args, *pos_args]
-                # The bw_f requires *bw_f_primals, *bw_f_tangents
-                fw_m_args, bw_f_tangents, pos_args = split_into_chunks(
-                    args, [num_mapped_args, num_grads, num_pos_args]
-                )
-                bw_f_primals = *fw_m_args, *pos_args
-                return bw_f(*bw_f_primals, *bw_f_tangents)
-
             with disable_proxy_modes_tracing():
                 args_single_step_bw = construct_args_single_step_bw()
 
