@@ -8,6 +8,11 @@ from torch.quantization import FakeQuantize
 from torch.quantization.observer import MinMaxObserver
 
 
+__all__ = [
+    "AdaroundFakeQuantizer",
+]
+
+
 class AdaroundFakeQuantizer(FakeQuantize):
     """
     This is a FakeQuantizer that enables an adaptive rounding fake quantizer.
@@ -147,8 +152,3 @@ class AdaroundFakeQuantizer(FakeQuantize):
             return X_q_dq
         else:
             return X
-
-
-__all__ = [
-    "AdaroundFakeQuantizer",
-]

@@ -9,6 +9,12 @@ from torch.ao.quantization.experimental.observer import APoTObserver
 from torch.ao.quantization.fake_quantize import FakeQuantizeBase
 
 
+__all__ = [
+    "APoTFakeQuantize",
+    "fake_quantize_function",
+]
+
+
 class APoTFakeQuantize(FakeQuantizeBase):
     alpha: Tensor
     gamma: Tensor
@@ -45,9 +51,3 @@ class APoTFakeQuantize(FakeQuantizeBase):
             )
 
         return X
-
-
-__all__ = [
-    "APoTFakeQuantize",
-    "fake_quantize_function",
-]

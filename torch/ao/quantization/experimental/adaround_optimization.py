@@ -13,6 +13,11 @@ from torch.nn.parallel import DataParallel
 from torch.utils.data import DataLoader, TensorDataset
 
 
+__all__ = [
+    "AdaptiveRoundingOptimizer",
+]
+
+
 class AdaptiveRoundingOptimizer:
     def __init__(
         self,
@@ -252,8 +257,3 @@ class AdaptiveRoundingOptimizer:
         q_module.weight.data.copy_(q_weight)  # type: ignore[operator]
         # Eager mode requires observer to be set as "weight_fake_quant" to be parsed
         q_module.weight_fake_quant = ada_quantizer.activation_post_process
-
-
-__all__ = [
-    "AdaptiveRoundingOptimizer",
-]
