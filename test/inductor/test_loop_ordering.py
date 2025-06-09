@@ -17,7 +17,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
-from torch._inductor.utils import sympy_index_symbol
+from torch._inductor.utils import run_and_get_code, sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
@@ -522,9 +523,10 @@ class LoopOrderingTest(TestCase):
 
 @inductor_config.patch(
     {
-        "benchmark_kernel": True,
-        "loop_ordering_after_fusion": True,
         "triton.unique_kernel_names": True,
+        "loop_ordering_after_fusion": True,
+        "triton.max_tiles": 3,
+        "triton.coalesce_tiling_analysis": True,
     }
 )
 @instantiate_parametrized_tests
@@ -772,7 +774,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
             # More complex floor division
             (j + FloorDiv(i, 3), {i: 6, j: 12}, j),
             # Addition inside modular indexing
-            (ModularIndexing(i + 3, 1, 5), {i: 8, j: 12}, i),
+            (ModularIndexing(i + 3, 1, 6), {i: 8, j: 12}, i),
         ]
 
         for expr, var_ranges, expected in test_cases:
@@ -796,13 +798,14 @@ class MemoryCoalescingTest(MockSchedulerTest):
             # coalesce twice as many bytes as first dimension
             # if not downcasted
             # if downcasted, should be equal, bc larger dtype size
+            # we also weight writes x 2
             cont_reads = coalesce_analysis.coalesced_by_var[i_vars[1]]
             t_reads = coalesce_analysis.coalesced_by_var[i_vars[0]]
 
             if not downcast_transposed_v:
-                self.assertEqual(cont_reads, t_reads * 2)
+                self.assertEqual(cont_reads, t_reads * 3)
             else:
-                self.assertEqual(cont_reads, t_reads)
+                self.assertEqual(cont_reads, t_reads * 1.5)
 
             return nodes
 
@@ -893,7 +896,154 @@ class MemoryCoalescingTest(MockSchedulerTest):
             arg0_1 = torch.randn([XDIM, YDIM], device=GPU_TYPE, dtype=torch.bfloat16)
             permute = torch.ops.aten.permute.default(arg0_1, [1, 0])
 
-            torch.compile(forward)(permute)
+            out, code = run_and_get_code(torch.compile(forward), (permute))
+
+            self.assertEqual(out, forward(permute))
+            FileCheck().check("YBLOCK").check("XBLOCK").run(code[0])
+
+
+layouts = ("cont", "NHWC", "T")
+
+
+@inductor_config.patch(
+    {
+        "triton.unique_kernel_names": True,
+        "loop_ordering_after_fusion": True,
+        "triton.coalesce_tiling_analysis": True,
+    }
+)
+@instantiate_parametrized_tests
+class TestTiling(TestCase):
+    def T(self, layout: str):
+        SIZE_A = 128
+        SIZE_B = 256
+        SIZE_C = 512
+
+        if layout == "cont":
+            return torch.rand(SIZE_A, SIZE_B, SIZE_C, device=GPU_TYPE).unsqueeze(0)
+        elif layout == "T":
+            return (
+                torch.rand(SIZE_A, SIZE_B, SIZE_C, device=GPU_TYPE)
+                .transpose(1, 2)
+                .contiguous()
+                .transpose(1, 2)
+                .unsqueeze(0)
+            )
+        else:
+            assert layout == "NHWC"
+            return torch.rand([1, SIZE_A, SIZE_B, SIZE_C], device=GPU_TYPE).to(
+                memory_format=torch.channels_last
+            )
+
+    @parametrize("a", layouts)
+    @parametrize("b", layouts)
+    def test_pointwise(self, a, b):
+        def foo(x, y):
+            return x + y
+
+        x, y = self.T(a), self.T(b)
+        res, code = run_and_get_code(torch.compile(foo), x, y)
+
+        if a != b:
+            FileCheck().check("ynumel").run(code[0])
+        else:
+            FileCheck().check_not("ynumel").run(code[0])
+
+        self.assertEqual(res, foo(x, y))
+
+    def test_tiled_reduction(self):
+        def f(a, b):
+            return (a * b).sum(dim=-1)
+
+        N = 512
+        inps = (
+            torch.randn(N, N, N, device=GPU_TYPE).permute(2, 1, 0),
+            torch.randn(N, N, N, device=GPU_TYPE).permute(1, 2, 0),
+        )
+        f_c = torch.compile(f)
+        out, code = run_and_get_code(f_c, *inps)
+
+        FileCheck().check_dag("xnumel = 512").check_dag("ynumel = 512").check_dag(
+            "rnumel"
+        ).run(code[0])
+        self.assertEqual(out, f(*inps), atol=0.001, rtol=0.04)
+
+    def test_3d_pointwise(self):
+        inps = (self.T("cont"), self.T("T"), self.T("NHWC"))
+
+        def f(x, y, z):
+            return x + y + z
+
+        f_c = torch.compile(f)
+        out, code = run_and_get_code(f_c, *inps)
+
+        FileCheck().check_dag("znumel").check_dag("ynumel").check_dag("xnumel").run(
+            code[0]
+        )
+        self.assertEqual(out, f(*inps))
+
+    def test_cat(self):
+        # test unwrapping Identity
+
+        def f(x, y):
+            return torch.cat((x, y)) + 1
+
+        x = self.T("cont")
+        y = self.T("T")
+
+        inps = (x, y)
+
+        f_c = torch.compile(f)
+        out, code = run_and_get_code(f_c, *inps)
+        FileCheck().check_dag("ynumel").check_dag("xnumel").run(code[0])
+        self.assertEqual(out, f(*inps))
+
+    def test_penalized_small_dim(self):
+        x = torch.rand([2000, 1], device=GPU_TYPE)
+        y = torch.rand([4, 1], device=GPU_TYPE).T
+
+        # dont tile when it doesnt affect total coalesced mem accesses much
+        def f(x, y):
+            return x + y
+
+        inps = (x, y)
+
+        f_c = torch.compile(f)
+        out, code = run_and_get_code(f_c, *inps)
+        FileCheck().check_not("ynumel").check_dag("xnumel").run(code[0])
+        self.assertEqual(out, f(*inps))
+
+    def test_mutation_deps(self):
+        def f(x):
+            return x.add_(1)
+
+        x = self.T("cont")
+
+        from torch._inductor import tiling_utils
+
+        def fn(nodes):
+            self.assertTrue(len(nodes) == 1)
+
+            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
+            assert coalesce_analysis is not None
+
+            reads = coalesce_analysis.norm_read_writes.reads
+            writes = coalesce_analysis.norm_read_writes.writes
+
+            self.assertTrue(len(reads) == 1 and len(writes) == 1)
+            self.assertEqual(
+                list(coalesce_analysis.norm_read_writes.reads.values()),
+                [OrderedSet(("arg0_1",))],
+            )
+            self.assertEqual(
+                list(coalesce_analysis.norm_read_writes.writes.values()),
+                [OrderedSet(("buf1",))],
+            )
+
+            return nodes
+
+        with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
+            torch.compile(f)(x)
 
 
 if __name__ == "__main__":
