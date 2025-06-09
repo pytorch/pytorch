@@ -44,17 +44,13 @@ struct sigmoid_functor {
 };
 
 struct abs_functor {
-  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
-    return static_cast<T>(precise::abs(static_cast<float>(x)));
+    return static_cast<T>(precise::abs(x));
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
-    return T(::precise::sqrt(x.x * x.x + x.y * x.y), 0);
-  }
-  template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
-  inline T operator()(const T x) {
-    return static_cast<T>(precise::abs(x));
+    return T(::precise::sqrt(dot(x, x)), 0);
   }
 };
 
