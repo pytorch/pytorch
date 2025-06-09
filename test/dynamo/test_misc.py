@@ -52,7 +52,7 @@ from torch._dynamo.testing import (
     skipIfNotPy311,
     unsupported,
 )
-from torch._dynamo.utils import counters, ifdynstaticdefault
+from torch._dynamo.utils import call_size, counters, ifdynstaticdefault
 from torch._dynamo.variables import builder
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch.ao.quantization import MinMaxObserver
@@ -7171,6 +7171,32 @@ utils_device.CURRENT_DEVICE == None""".split(
         _reset_precompile_entries(fn.__code__)
 
         self.assertEqual(compiled_fn(*args), fn(*args))
+
+    def test_precompile_fail_on_recompile(self):
+        from torch._C._dynamo.eval_frame import _load_precompile_entry
+
+        @torch.compiler.disable
+        def graph(x, s0):
+            return x + s0
+
+        def fn(x):
+            nonlocal graph  # Forcing fn and injected to have the same closure.
+            return x - 1
+
+        def injected(x):
+            s0 = call_size(x, 0)
+            return graph(x, s0)
+
+        args = (torch.randn(3, 2),)
+
+        compiled_fn = torch.compile(fn)
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(),
+            injected.__code__,
+        )
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(*args), injected(*args))
 
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):
