@@ -86,23 +86,18 @@ except ImportError:
     Version = None  # type: ignore[assignment,misc]
 
 
+@functools.lru_cache
 def _find_repo_root() -> Path:
     """Find the root of the git repository where this script is located."""
     script_dir = Path.cwd().absolute()
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=script_dir,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return Path(result.stdout.strip()).absolute()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print(
-            "Error: Script is not in a git repository or git not found", file=sys.stderr
-        )
-        sys.exit(1)
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=script_dir,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return Path(result.stdout.strip()).absolute()
 
 
 REPO_ROOT = _find_repo_root()
@@ -173,7 +168,7 @@ def cleanup_wheel_cache() -> None:
             print(f"Cleaned up old wheel cache entry: {old_entry.name}")
         except OSError:
             # Ignore errors during cleanup
-            pass
+            logging.exception("Couldn't clean old cache entry %s", old_entry.name)  # noqa: LOG015
 
 
 LOGGER: logging.Logger | None = None
@@ -734,9 +729,10 @@ def get_torch_install_info(venv: Venv) -> tuple[str, Path | None]:
     try:
         # Run this check in the venv's Python environment
         # Change cwd to avoid picking up local torch module
-        result = venv.python(
-            "-c",
-            """
+        with tempfile.TemporaryDirectory() as temp_cwd:
+            result = venv.python(
+                "-c",
+                """
 import json
 from importlib import metadata, util
 from pathlib import Path
@@ -774,11 +770,11 @@ except ModuleNotFoundError:
     print(json.dumps({"type": "none", "path": None}))
 except Exception as e:
     print(json.dumps({"type": "error", "path": None, "error": str(e)}))
-            """,
-            capture_output=True,
-            check=False,
-            cwd="/",
-        )
+                """,
+                capture_output=True,
+                check=False,
+                cwd=temp_cwd,
+            )
 
         if result.returncode != 0:
             return "none", None
