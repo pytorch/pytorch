@@ -65,7 +65,6 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .fx_utils import count_flops_fx
 from .ir import (
     Constant,
     DonatedBuffer,
@@ -218,7 +217,6 @@ def mark_nodes_dislike_padding(
             aten.convolution,
             aten.convolution_backward,
             aten._scaled_mm,
-            aten._scaled_grouped_mm,
         ]
     )
     # what's a better way to collect the reduction ops?
@@ -344,7 +342,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
         self.partition_maps: Optional[list[GraphPartitionMap]] = None
-        self.zero_dim_cpu_tensor_list = OrderedSet[str]()
+        self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
         )
@@ -381,12 +379,12 @@ class GraphLowering(torch.fx.Interpreter):
         ] = {}
         self.seen_subgraphs: dict[str, ir.Subgraph] = {}
         self.constant_reprs: dict[str, str] = {}
-        self.removed_operations = OrderedSet[str]()
-        self.removed_buffers = OrderedSet[str]()
-        self.removed_inplace_buffers = OrderedSet[str]()
-        self.mutated_buffers = OrderedSet[str]()
-        self.never_reuse_buffers = OrderedSet[str]()
-        self.inplaced_to_remove = OrderedSet[str]()
+        self.removed_operations: OrderedSet[str] = OrderedSet()
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
+        self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
+        self.mutated_buffers: OrderedSet[str] = OrderedSet()
+        self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
+        self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
@@ -402,7 +400,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
         self.lists: dict[str, list[str]] = {}
-        self.mutated_inputs = OrderedSet[str]()
+        self.mutated_inputs: OrderedSet[str] = OrderedSet()
         self.mutated_input_idxs: list[int] = []
         self.name_to_buffer: dict[str, ir.Buffer] = {}
         self.name_to_users: defaultdict[str, list[ir.IRNode]] = defaultdict(list)
@@ -467,14 +465,14 @@ class GraphLowering(torch.fx.Interpreter):
         # This can either be a graph input or the output of fallback
         # kernels.
         self.unaligned_buffers: OrderedSet[str] = OrderedSet()
-        self.no_fuse_buffer_names = OrderedSet[str]()
+        self.no_fuse_buffer_names: OrderedSet[str] = OrderedSet()
 
         self.low_precision_codegen_ops: OrderedSet[str] = OrderedSet()
         # more aggressive prologue fusion
         self.invoke_quant_ops: OrderedSet[str] = OrderedSet()
 
         # Below field is related to printing debug intermediate tensor values info for debugging
-        self.all_codegen_kernel_names = OrderedSet[str]()
+        self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
         # state used by for Kernel.workspace
         self.workspace_id = itertools.count()
@@ -659,24 +657,32 @@ class GraphLowering(torch.fx.Interpreter):
 
         # only grouped convolutions benchmarked as slower in conv samples for inference only
         if is_inference:
+            from torch.utils.flop_counter import FlopCounterMode
+
             flop_counts: dict[str, float] = defaultdict(float)
             for node in conv_nodes:
-                counted_flops = count_flops_fx(node)
-                if counted_flops is None:
-                    continue
+                success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(
+                    node
+                )
 
-                if is_grouped(node):
-                    node_type = "grouped"
-                elif is_small_channel(node):
-                    node_type = "small"
-                elif is_in_out_channel(node):
-                    node_type = "in_out"
+                if success:
+                    with FlopCounterMode(display=False) as flop_counter_mode:
+                        with V.fake_mode:
+                            node.target(*args, **kwargs)
+
+                    counted_flops = flop_counter_mode.get_total_flops()
+                    if is_grouped(node):
+                        node_type = "grouped"
+                    elif is_small_channel(node):
+                        node_type = "small"
+                    elif is_in_out_channel(node):
+                        node_type = "in_out"
+                    else:
+                        node_type = "default"
+
+                    flop_counts[node_type] += counted_flops
                 else:
-                    node_type = "default"
-
-                flop_counts[node_type] += counted_flops
-            else:
-                log.debug("Conv inputs meta not found")
+                    log.debug("Conv inputs meta not found")
 
             # average benchmarked channels last speedup / slowdown, < 1 is speedup.
             # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/
@@ -1509,7 +1515,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def run_node(self, n: torch.fx.Node) -> object:
         def debug(msg: str) -> None:
-            log.debug("lowering %s %s", LazyString(n.format_node), msg)
+            log.debug("lowering %s %s", LazyString(n.format_node), msg)  # type: ignore[arg-type]
 
         from torch._inductor.compiler_bisector import CompilerBisector
 

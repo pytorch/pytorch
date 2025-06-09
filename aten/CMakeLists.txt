@@ -101,8 +101,8 @@ else()
   set(AT_CUSPARSELT_ENABLED 1)
 endif()
 
-# Add hipSPARSELt support flag
-if(USE_ROCM AND ROCM_VERSION VERSION_GREATER_EQUAL "6.4.0")
+# Add hipSPARSELt support flag if the package is available.
+if(USE_ROCM AND hipsparselt_FOUND)
   set(AT_HIPSPARSELT_ENABLED 1)
 else()
   set(AT_HIPSPARSELT_ENABLED 0)
