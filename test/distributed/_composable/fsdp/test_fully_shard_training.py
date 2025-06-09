@@ -103,7 +103,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         """Tests the parameter registration after forward."""
         device = torch.device(device_type.type, 0)
         # Single FSDP group
-        for reshard_after_forward in (True, False, 2):
+        for reshard_after_forward in (True, False, 2, None):
             torch.manual_seed(42)
             model = MLP(3, device)
             # Since seed is per process, not per thread, we broadcast to ensure
@@ -115,15 +115,18 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             inp = torch.randn((2, 3), device=device_type.type)
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
-            model(inp)  # root does not reshard after forward
-            self._assert_tensor_params(model.parameters())
+            model(inp)
+            if reshard_after_forward:
+                self._assert_dtensor_params(model.parameters())
+            else:
+                self._assert_tensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
             model.reshard()  # however, we can manually reshard
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
 
         # Multiple FSDP groups
-        for reshard_after_forward in (True, False, 2):
+        for reshard_after_forward in (True, False, 2, None):
             torch.manual_seed(42)
             model = nn.Sequential(MLP(3, device), MLP(3, device))
             for param in model.parameters():
@@ -136,11 +139,19 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
             model(inp)
-            params = list(model.parameters())
-            if reshard_after_forward is False:
-                self._assert_tensor_params(params)
+            non_root_params = list(model[0].in_proj.parameters()) + list(
+                model[0].out_proj.parameters()
+            )
+            root_params = list(set(model.parameters()) - set(non_root_params))
+            if reshard_after_forward is None:
+                self._assert_dtensor_params(non_root_params)
+                self._assert_tensor_params(root_params)
+            elif reshard_after_forward:
+                self._assert_dtensor_params(non_root_params)
+                self._assert_dtensor_params(root_params)
             else:
-                self._assert_dtensor_params(params)
+                self._assert_tensor_params(non_root_params)
+                self._assert_tensor_params(root_params)
             self._assert_same_params(model.parameters(), ref_model.parameters())
             for module in model.modules():
                 if isinstance(module, FSDPModule):
@@ -172,13 +183,16 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
 
     def _assert_tensor_params(self, params: Iterable[nn.Parameter]):
-        self.assertGreater(len(list(params)), 0)
+        # need to iterate over the list multiple times
+        params = list(params)
+        self.assertGreater(len(params), 0)
         for param in params:
             self.assertNotIsInstance(param, DTensor)
             self.assertIsInstance(param, torch.Tensor)
 
     def _assert_dtensor_params(self, params: Iterable[nn.Parameter]):
-        self.assertGreater(len(list(params)), 0)
+        params = list(params)
+        self.assertGreater(len(params), 0)
         for param in params:
             self.assertIsInstance(param, DTensor)
 
