@@ -3846,7 +3846,15 @@ module_db: list[ModuleInfo] = [
                skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
-               )
+                   # Fails on backward check on MPS
+                   # See https://github.com/pytorch/pytorch/issues/107214
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_memory_format',
+                       active_if=operator.itemgetter('training') and not _macos15_or_newer,
+                       device_type='mps',
+                   ),)
                ),
     ModuleInfo(torch.nn.LPPool3d,
                module_inputs_func=module_inputs_torch_nn_LPPool3d,
