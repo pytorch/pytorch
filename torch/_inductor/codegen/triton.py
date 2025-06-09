@@ -749,7 +749,7 @@ class TritonCSEVariable(CSEVariable):
     def __init__(self, name, bounds: ValueRanges[Any], dtype: torch.dtype) -> None:
         super().__init__(name, bounds, dtype)
         # We'll use this to track which masks the variable needs when used for indirect indexing
-        self.mask_vars = OrderedSet[str]()
+        self.mask_vars: OrderedSet[str] = OrderedSet()
         assert dtype is not None, "TritonCSEVariable must have dtype"
 
     def update_on_args(self, name, args, kwargs):
@@ -1769,7 +1769,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         index_vars = index.free_symbols
         has_rindex = False
 
-        mask_vars: OrderedSet[str] = OrderedSet[str]()
+        mask_vars: OrderedSet[str] = OrderedSet()
         for var in sorted(index_vars, key=operator.attrgetter("name")):
             assert isinstance(var, sympy.Symbol)
             has_rindex = has_rindex or symbol_is_type(
@@ -1811,7 +1811,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         have_dense = True
         have_loop_vars = False
-        dense_mask_vars = OrderedSet[str]()
+        dense_mask_vars: OrderedSet[str] = OrderedSet()
 
         for tree in self.active_range_trees():
             if index_vars.intersection(tree.var_list):
@@ -3550,7 +3550,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
                     )
 
-        mutated_args = OrderedSet[str]()
+        mutated_args: OrderedSet[str] = OrderedSet()
         for mutation in self.mutations:
             if mutation in self.args.input_buffers:
                 mutated_args.add(self.args.input_buffers[mutation])
