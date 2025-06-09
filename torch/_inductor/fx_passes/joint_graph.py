@@ -14,7 +14,7 @@ import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch._inductor.utils import get_gpu_type
-from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
@@ -719,7 +719,8 @@ def definitely_equal(
     Useful to compare sizes, strides etc.
 
     Can handle -1 in new_sizes which happens in the size arguments of a
-    view op.
+    view op. old_sizes is supposed to be the tensor shape and should not
+    contain -1.
     """
 
     num_neg1 = 0
@@ -728,10 +729,10 @@ def definitely_equal(
         return False
 
     for lhs_item, rhs_item in zip(old_sizes, new_sizes):
-        if guard_or_false(lhs_item == rhs_item):
+        if lhs_item == rhs_item:
             continue
 
-        if not guard_or_false(rhs_item == -1):
+        if rhs_item != -1:
             return False
 
         num_neg1 += 1
