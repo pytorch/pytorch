@@ -107,6 +107,7 @@ if torch.backends.mps.is_available():
             "nn.functional.unfold",
             "nonzero",
             "ones",
+            "ones_like",
             "outer",
             "permute",
             "permute_copy",
@@ -167,6 +168,7 @@ if torch.backends.mps.is_available():
             "vsplit",
             "zero_",
             "zeros",
+            "zeros_like",
         }
 
         AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
