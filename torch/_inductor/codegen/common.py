@@ -2311,22 +2311,22 @@ class CSEProxy(DefaultHandler):
 
         backend = get_current_backend()
 
+        shape_op = getattr(shape_handler, name)
         output_dtype = None
+        output_shape = None
 
         if name == "masked" and backend == "triton":
             output_dtype = value.dtype
+            output_shape = value.shape
         elif name == "masked" and backend == "cpp":
             output_dtype = V.interpreter.current_node.meta.get(
                 OptimizationContext.key, None
             ).dtype
+            # TODO: fix me
+            output_shape = None
         elif backend in ("triton", "cpp"):
             dtype_op = getattr(dtype_handler, name)
             output_dtype = dtype_op(*args, **kwargs)
-
-        shape_op = getattr(shape_handler, name)
-        if name == "masked":
-            output_shape = value.shape
-        else:
             output_shape = shape_op(*args, **kwargs)
 
         if backend in ("triton", "cpp"):

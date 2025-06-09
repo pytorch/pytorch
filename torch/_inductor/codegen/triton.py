@@ -1378,7 +1378,7 @@ class TritonKernelOverrides(TritonOverrides):
                 indexing.index_str,
                 bounds=get_bounds_index_expr(expr),
                 dtype=dtype,
-                shape=[],
+                shape=indexing.expand_shape,
             )
         finally:
             config.test_configs.runtime_triton_dtype_assert = orig
@@ -2035,7 +2035,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         index_str = self.index_to_str(index)
         if isinstance(index, sympy.Integer):
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
-            expand_shape = None if copy_shape else self.dense_size_list()
+            expand_shape = None if copy_shape else tuple(self.dense_size_list())
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
                 mask_vars = OrderedSet(["xmask"])
@@ -2054,7 +2054,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if need_dense and not have_dense:
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
-            expand_shape = None if copy_shape else self.dense_size_list()
+            expand_shape = None if copy_shape else tuple(self.dense_size_list())
             index_str = f"tl.broadcast_to({index_str}, {expand_str})"
             mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
@@ -2062,8 +2062,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             mask_vars = dense_mask_vars
 
         if expand_shape is None:
-            if need_dense:
-                expand_shape = None if copy_shape else self.dense_size_list()
+            if need_dense or have_dense:
+                expand_shape = None if copy_shape else tuple(self.dense_size_list())
             else:
                 expand_shape = ()
 
@@ -2484,7 +2484,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             buffer,
             triton_reshape(str(value), initial_shape, target_shape),
             dtype=dtype,
-            shape=target_shape,
+            shape=tuple(target_shape),
         )
 
     def reduction(
@@ -2535,7 +2535,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.compute,
                 f"tl.broadcast_to({v}, {dense_size_str})",
                 dtype=v.dtype,
-                shape=self.dense_size_list(),
+                shape=tuple(self.dense_size_list()),
             ),
             value,
         )
@@ -2603,7 +2603,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         torch_acc_type = upcast_acc_dtype(src_dtype)
         result_shape = list(self.dense_size_list())
         del result_shape[dim]
-        result_var: Any = self.cse.newvar(dtype=torch_acc_type, shape=result_shape)
+        result_var: Any = self.cse.newvar(
+            dtype=torch_acc_type, shape=tuple(result_shape)
+        )
         result_var.mask_vars = OrderedSet(
             var for var in masks if not prefix_is_reduction(var[0])
         )
@@ -2683,7 +2685,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
         else:
             accumulator = self.cse.namedvar(
-                f"_{result_var}", dtype=torch_acc_type, shape=self.dense_size_list()
+                f"_{result_var}",
+                dtype=torch_acc_type,
+                shape=tuple(self.dense_size_list()),
             )
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
             default = self._map_tuple_or_scalar(constant_repr, default)
@@ -2935,19 +2939,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         accumulator = TritonCSEVariable(
             f"{result_var}_mean",
-            shape=self.dense_size_list(),
+            shape=tuple(self.dense_size_list()),
             dtype=acc_type,
             bounds=ValueRanges.unknown(),
         )
         accumulator_m2 = TritonCSEVariable(
             f"{result_var}_m2",
-            shape=self.dense_size_list(),
+            shape=tuple(self.dense_size_list()),
             dtype=acc_type,
             bounds=ValueRanges.unknown(),
         )
         accumulator_weight = TritonCSEVariable(
             f"{result_var}_weight",
-            shape=self.dense_size_list(),
+            shape=tuple(self.dense_size_list()),
             dtype=acc_type,
             bounds=ValueRanges.unknown(),
         )
@@ -3209,7 +3213,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.compute,
                 f"tl.broadcast_to({value_dtype}, {self.dense_size_str()})",
                 dtype=dtype,
-                shape=self.dense_size_list(),
+                shape=tuple(self.dense_size_list()),
             )
             broadcasted_values.append(value)
 
@@ -3327,7 +3331,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             cse_compute(
                 f"tl.broadcast_to({value}, {self.dense_size_str()})",
                 dtype=dtypes[i],
-                shape=self.dense_size_list(),
+                shape=tuple(self.dense_size_list()),
             )
             for i, value in enumerate(values)
         ]

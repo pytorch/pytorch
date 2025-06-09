@@ -6,7 +6,7 @@ import sympy
 
 import torch
 
-from .virtualized import OpsValue
+from .virtualized import OpsValue, V
 
 
 ShapeType = Optional[Sequence[Union[int, str]]]
@@ -77,7 +77,14 @@ class ShapePropagationOpsHandler:
 
     @staticmethod
     def constant(value: torch.types.Number, dtype: torch.dtype) -> ShapeType:
-        return ()
+        # See implementation of constant for triton for the reason
+        from torch._inductor.codegen.triton import TritonKernel
+
+        if isinstance(V.kernel, TritonKernel):
+            ndim = V.kernel.triton_tensor_ndim()
+            return tuple([1] * ndim)
+        else:
+            return ()
 
     @staticmethod
     def store_reduction(name: str, index: int, value: ShapeArg) -> None:
