@@ -774,7 +774,7 @@ Tensor cat(TensorList tensors, Dimname dim) {
 
 // torch.concat, alias for torch.cat
 Tensor& concat_out(TensorList tensors, Dimname dim, Tensor& result) {
-  return at::cat_out(tensors, dim, result);
+  return cat_out(tensors, dim, result);
 }
 
 Tensor concat(TensorList tensors, Dimname dim) {
@@ -791,7 +791,7 @@ Tensor concat(TensorList tensors, int64_t dim) {
 
 // torch.concatenate, alias for torch.cat
 Tensor& concatenate_out(TensorList tensors, Dimname dim, Tensor& result) {
-  return at::cat_out(tensors, dim, result);
+  return cat_out(tensors, dim, result);
 }
 
 Tensor concatenate(TensorList tensors, Dimname dim) {
@@ -799,7 +799,7 @@ Tensor concatenate(TensorList tensors, Dimname dim) {
 }
 
 Tensor& concatenate_out(TensorList tensors, int64_t dim, Tensor& result) {
-  return at::cat_out(tensors, dim, result);
+  return at::cat_out(result, tensors, dim);
 }
 
 Tensor concatenate(TensorList tensors, int64_t dim) {
