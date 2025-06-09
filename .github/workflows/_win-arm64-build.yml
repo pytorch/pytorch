@@ -138,7 +138,7 @@ jobs:
         id: build
         shell: cmd
         env:
-          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+          PYTORCH_FINAL_PACKAGE_DIR: ${{ github.run_id }}/build-results/
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BUILD_WHEEL: 1
