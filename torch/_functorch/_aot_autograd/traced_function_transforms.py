@@ -509,6 +509,10 @@ def create_functionalized_fn(
     primals_after_forward = None
     f_args_after_forward = None
     f_args_mutation_counter_after_forward: Optional[list[int]] = None
+    inputs_mutated_in_graph = [
+        info.mutation_type == MutationType.MUTATED_IN_GRAPH for info in meta.input_info
+    ]
+    has_input_mutated_in_graph = any(inputs_mutated_in_graph)
 
     @wraps(fn)
     def _functionalized_f_helper(*args):
@@ -526,18 +530,21 @@ def create_functionalized_fn(
                 # Wrap inputs into functional wrappers
                 f_args = pytree.tree_map(to_fun, args)
 
-                if trace_joint and joint_fn_handle:
+                if trace_joint and has_input_mutated_in_graph and joint_fn_handle:
 
                     def _post_forward(primals):
-                        # primals_after = pytree.tree_map(from_fun, f_args[0])
                         nonlocal primals_after_forward
                         primals_after_forward = pytree.tree_map(from_fun, primals)
                         nonlocal f_args_after_forward
                         f_args_after_forward = f_args[0]
                         nonlocal f_args_mutation_counter_after_forward
                         f_args_mutation_counter_after_forward = [
-                            torch._functionalize_mutation_counter(f_arg.elem)  # type: ignore[attr-defined]
-                            for f_arg in f_args_after_forward
+                            -1
+                            if not inputs_mutated_in_graph[i]
+                            else torch._functionalize_mutation_counter(  # type: ignore[attr-defined]
+                                f_arg.elem
+                            )
+                            for i, f_arg in enumerate(f_args_after_forward)
                         ]
 
                     joint_fn_handle.post_forward = _post_forward
@@ -664,8 +671,20 @@ def create_functionalized_fn(
                 # about synthetic bases.
 
                 # Apply in graph forward mutations only in joint case.
+                # Note: Mutations of primals in forward AND backward.
+                # If we have mutations of the same input in forward and in backward,
+                # we can not fuse them into one copy_ node. As in this case partitioner will put it
+                # either in forward or in backward. This will lead to incorrect state
+                # after forward and before backward.
+                # We have to emit two copy_ nodes, marking with additional meta each node,
+                # if it must be in forward or backward.
+                # We memorize mutation counter of the inputs after forward.
+                # Based on this after joint graph we check if backward also mutated input or not.
+                # We emit copy_ only in the end of joint tracing, to provide invariant for joint
+                # graph passes, that our graph is functional, except only some number of copy_ nodes
+                # in the end.
                 inputs_in_graph_mutations_state: list[int] = [0] * len(meta.input_info)
-                if trace_joint:
+                if trace_joint and has_input_mutated_in_graph and joint_fn_handle:
                     primals_before = args[0]
                     for idx, (f_inpt, before, after, inpt_info) in enumerate(
                         zip(
