@@ -2199,10 +2199,21 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def autotune(choices):
             log.debug("Starting autotuning")
+
+            autotuning_data = {
+                "shape": ", ".join(
+                    ["x".join(map(str, n.get_size())) for n in input_nodes]
+                ),
+                "strides": ", ".join([str(n.get_stride()) for n in input_nodes]),
+                "dtypes": ", ".join([str(n.get_dtype()) for n in input_nodes]),
+                "offset": ", ".join([str(n.get_layout().offset) for n in input_nodes]),
+            }
+
             with dynamo_timed(
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
+                metadata={"autotuning_data": autotuning_data},
             ):
                 return make_benchmark_fn()(choices)
 
