@@ -201,22 +201,22 @@ def set_proxy_slot(
     ...
 
 
-class DisableUpdateTensorTracker(threading.local):
+class _DisableUpdateTensorTracker(threading.local):
     value: bool = False
 
 
-disable_update_tensor_tracker_tls = DisableUpdateTensorTracker()
+_disable_update_tensor_tracker_tls = _DisableUpdateTensorTracker()
 
 
-def is_proxy_tensor_update_tensor_tracker_disabled() -> bool:
+def _is_proxy_tensor_update_tensor_tracker_disabled() -> bool:
     """
     Returns current state of disabling update tensor tracker.
     """
-    return disable_update_tensor_tracker_tls.value
+    return _disable_update_tensor_tracker_tls.value
 
 
 @contextmanager
-def proxy_tensor_disable_update_tensor_tracker() -> Generator[None, None, None]:
+def _proxy_tensor_disable_update_tensor_tracker() -> Generator[None, None, None]:
     """
     By default tensor_tracker is updated every time.
     This leads to chaining every operation on the FakeTensor.
@@ -224,12 +224,12 @@ def proxy_tensor_disable_update_tensor_tracker() -> Generator[None, None, None]:
     we want emitted nodes to be disconnected that partitioner will be able
     to separate them into different subgraphs.
     """
-    orig_value = disable_update_tensor_tracker_tls.value
-    disable_update_tensor_tracker_tls.value = True
+    orig_value = _disable_update_tensor_tracker_tls.value
+    _disable_update_tensor_tracker_tls.value = True
     try:
         yield
     finally:
-        disable_update_tensor_tracker_tls.value = orig_value
+        _disable_update_tensor_tracker_tls.value = orig_value
 
 
 def set_proxy_slot(  # type: ignore[no-redef]
@@ -242,7 +242,7 @@ def set_proxy_slot(  # type: ignore[no-redef]
         # We DO want to clobber proxies whenever we run an inplace operation
         # on a tensor, and it affects the metadata on the proxy.
         assert isinstance(proxy, _ProxyTensor)
-        if not is_proxy_tensor_update_tensor_tracker_disabled():
+        if not _is_proxy_tensor_update_tensor_tracker_disabled():
             tracer.tensor_tracker[obj] = proxy
     elif isinstance(obj, (_AnyScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.

@@ -25,9 +25,9 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
+    _proxy_tensor_disable_update_tensor_tracker,
     maybe_disable_thunkify,
     maybe_enable_thunkify,
-    proxy_tensor_disable_update_tensor_tracker,
 )
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_true,
@@ -397,7 +397,7 @@ def set_partitioner_tag_must_be_in_forward():
     return set_partitioner_tag("must_be_in_forward")
 
 
-def apply_in_graph_mutations(input_info, inpt_old, inpt_new, inpt_f, input_idx):
+def apply_in_graph_mutations(input_info, inpt_old, inpt_new, f_inpt, input_idx):
     assert input_info.mutation_type == MutationType.MUTATED_IN_GRAPH
     # See Note [set_() Input Mutations in AOTAutograd]
     # all mutations on the input must be under no_grad, so it is safe to put in the graph
@@ -428,12 +428,12 @@ def apply_in_graph_mutations(input_info, inpt_old, inpt_new, inpt_f, input_idx):
         # resizing is not supported on subclasses (we error earlier if this happens)
         from torch._subclasses.functional_tensor import FunctionalTensor
 
-        assert isinstance(inpt_f, FunctionalTensor)
+        assert isinstance(f_inpt, FunctionalTensor)
         old_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
-            inpt_f.elem, before=True
+            f_inpt.elem, before=True
         )
         new_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
-            inpt_f.elem, before=False
+            f_inpt.elem, before=False
         )
         if old_storage_size != new_storage_size:
             assert (
@@ -683,7 +683,9 @@ def create_functionalized_fn(
                 # We emit copy_ only in the end of joint tracing, to provide invariant for joint
                 # graph passes, that our graph is functional, except only some number of copy_ nodes
                 # in the end.
-                inputs_in_graph_mutations_state: list[int] = [0] * len(meta.input_info)
+                inputs_mutated_in_graph_applied_mutation_counters: list[int] = [
+                    0
+                ] * len(meta.input_info)
                 if trace_joint and has_input_mutated_in_graph and joint_fn_handle:
                     primals_before = args[0]
                     for idx, (f_inpt, before, after, inpt_info) in enumerate(
@@ -696,15 +698,17 @@ def create_functionalized_fn(
                     ):
                         if inpt_info.mutation_type != MutationType.MUTATED_IN_GRAPH:
                             continue
+
                         assert f_args_mutation_counter_after_forward
                         post_fw_mc = f_args_mutation_counter_after_forward[idx]
                         mc = torch._functionalize_mutation_counter(f_inpt.elem)  # type: ignore[attr-defined]
 
-                        if post_fw_mc < mc:
+                        if mc > 0:
+                            # Mutation in forward.
                             with (
                                 torch.fx.traceback.preserve_node_meta(),
                                 set_partitioner_tag_must_be_in_forward(),
-                                proxy_tensor_disable_update_tensor_tracker(),
+                                _proxy_tensor_disable_update_tensor_tracker(),
                             ):
                                 apply_in_graph_mutations(
                                     inpt_info,
@@ -713,27 +717,35 @@ def create_functionalized_fn(
                                     f_inpt,
                                     idx,
                                 )
-                            inputs_in_graph_mutations_state[idx] = post_fw_mc
+                            inputs_mutated_in_graph_applied_mutation_counters[
+                                idx
+                            ] = post_fw_mc
 
-                for i, (inpt_old, inpt_f) in enumerate(
+                for idx, (inpt_old, f_inpt) in enumerate(
                     zip(args, f_args) if not trace_joint else zip(args[0], f_args[0])
                 ):
-                    if not isinstance(inpt_f, torch.Tensor):
+                    if not isinstance(f_inpt, torch.Tensor):
                         continue
-                    assert is_fun(inpt_f)
-                    inpt_new = from_fun(inpt_f)
+                    assert is_fun(f_inpt)
+                    inpt_new = from_fun(f_inpt)
                     if (
-                        meta.input_info[i].mutation_type
-                        == MutationType.MUTATED_IN_GRAPH
+                        meta.input_info[idx].mutation_type
+                        != MutationType.MUTATED_IN_GRAPH
                     ):
-                        with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag_must_be_in_backward():
-                            apply_in_graph_mutations(
-                                meta.input_info[i],
-                                inpt_old,
-                                inpt_new,
-                                inpt_f,
-                                i,
-                            )
+                        continue
+                    mc = torch._functionalize_mutation_counter(f_inpt.elem)  # type: ignore[attr-defined]
+                    if mc == inputs_mutated_in_graph_applied_mutation_counters[idx]:
+                        # No mutation in backward; mutation was already applied.
+                        continue
+
+                    with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag_must_be_in_backward():
+                        apply_in_graph_mutations(
+                            meta.input_info[idx],
+                            inpt_old,
+                            inpt_new,
+                            f_inpt,
+                            idx,
+                        )
 
                 # When an output tensor is a functionalized mutated input, and we
                 # were able to move the mutation in to the graph then we can return
