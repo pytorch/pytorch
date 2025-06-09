@@ -16,13 +16,13 @@ parameters (all should be {class}`~torch.nn.Parameter` s) or named parameters
 (tuples of (str, {class}`~torch.nn.Parameter`)) to optimize. Then,
 you can specify optimizer-specific options such as the learning rate, weight decay, etc.
 
-Example::
+Example:
 ```python
 optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 optimizer = optim.Adam([var1, var2], lr=0.0001)
 ```
 
-Named parameters example::
+Named parameters example:
 
 ```python
 optimizer = optim.SGD(model.named_parameters(), lr=0.01, momentum=0.9)
@@ -38,7 +38,7 @@ a `params` key, containing a list of parameters belonging to it. Other keys
 should match the keyword arguments accepted by the optimizers, and will be used
 as optimization options for this group.
 
-For example, this is very useful when one wants to specify per-layer learning rates::
+For example, this is very useful when one wants to specify per-layer learning rates:
 
 ```python
 optim.SGD([
@@ -67,7 +67,7 @@ Also consider the following example related to the distinct penalization of para
 Remember that {func}`~torch.nn.Module.parameters` returns an iterable that
 contains all learnable parameters, including biases and other
 parameters that may prefer distinct penalization. To address this, one can specify
-individual penalization weights for each parameter group::
+individual penalization weights for each parameter group:
 
 ```python
 bias_params = [p for name, p in self.named_parameters() if 'bias' in name]
@@ -89,7 +89,7 @@ this group.
 All optimizers implement a {func}`~Optimizer.step` method, that updates the
 parameters. It can be used in two ways:
 
-``optimizer.step()``
+`optimizer.step()`
 ~~~~~~~~~~~~~~~~~~~~
 
 This is a simplified version supported by most optimizers. The function can be
@@ -107,7 +107,7 @@ for input, target in dataset:
     optimizer.step()
 ```
 
-``optimizer.step(closure)``
+`optimizer.step(closure)`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Some optimization algorithms such as Conjugate Gradient and LBFGS need to
@@ -115,7 +115,7 @@ reevaluate the function multiple times, so you have to pass in a closure that
 allows them to recompute your model. The closure should clear the gradients,
 compute the loss, and return it.
 
-Example::
+Example:
 ```python
 for input, target in dataset:
     def closure():
@@ -128,6 +128,7 @@ for input, target in dataset:
 ```
 
 (optimizer-algorithms)=
+
 ## Base class
 
 ```{eval-rst}
@@ -250,7 +251,7 @@ allows dynamic learning rate reducing based on some validation measurements.
 Learning rate scheduling should be applied after optimizer's update; e.g., you
 should write your code this way:
 
-Example::
+Example:
 ```python
 optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 scheduler = ExponentialLR(optimizer, gamma=0.9)
@@ -269,7 +270,7 @@ Most learning rate schedulers can be called back-to-back (also referred to as
 chaining schedulers). The result is that each scheduler is applied one after the
 other on the learning rate obtained by the one preceding it.
 
-Example::
+Example:
 ```python
 optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 scheduler1 = ExponentialLR(optimizer, gamma=0.9)
@@ -289,11 +290,13 @@ for epoch in range(20):
 In many places in the documentation, we will use the following template to refer to schedulers
 algorithms.
 
-    >>> scheduler = ...
-    >>> for epoch in range(100):
-    >>>     train(...)
-    >>>     validate(...)
-    >>>     scheduler.step()
+```python
+>>> scheduler = ...
+>>> for epoch in range(100):
+>>>     train(...)
+>>>     validate(...)
+>>>     scheduler.step()
+```
 
 ```{warning}
   Prior to PyTorch 1.1.0, the learning rate scheduler was expected to be called before
@@ -338,7 +341,7 @@ needs to be implemented according to the desired behavior.
 This can be useful, for instance, when the model architecture changes, but the weights and optimizer states need to
 remain unchanged. The following example demonstrates how to implement this customization.
 
-Example::
+Example:
 ```python
 class OneLayerModel(nn.Module):
     def __init__(self):
@@ -355,7 +358,7 @@ torch.save(optimizer.state_dict(), PATH)
 ```
 
 Let's say that `model` implements an expert (MoE), and we want to duplicate it and resume training
-for two experts, both initialized the same way as the `fc` layer. For the following `model2` we create two layers identical to `fc` and resume training by loading the model weights and optimizer states from `model` into both `fc1` and `fc2` of `model2` (and adjust them accordingly)::
+for two experts, both initialized the same way as the `fc` layer. For the following `model2` we create two layers identical to `fc` and resume training by loading the model weights and optimizer states from `model` into both `fc1` and `fc2` of `model2` (and adjust them accordingly):
 
 ```python
 class TwoLayerModel(nn.Module):
@@ -374,7 +377,7 @@ optimizer2 = optim.SGD(model2.named_parameters(), lr=0.01, momentum=0.9)
 
 To load the state dict for `optimizer2` with the state dict of the previous optimizer such that both
 `fc1` and `fc2` will be initialized with a copy of `fc` optimizer states
-(to resume training for each layer from `fc`), we can use the following hook::
+(to resume training for each layer from `fc`), we can use the following hook:
 
 ```python
 def adapt_state_dict_ids(optimizer, state_dict):
@@ -419,7 +422,7 @@ To resume training, a custom `adapt_state_dict_missing_param` hook is used to ad
 ensuring existing parameters are mapped correctly, while missing ones (like the bypass layer) remain unchanged
 (as initialized in this example).
 This approach enables smooth loading and resuming of the optimizer state despite model changes.
-The new bypass layer will be trained from scratch::
+The new bypass layer will be trained from scratch:
 
 ```python
 class Model1(nn.Module):
@@ -482,7 +485,7 @@ optimizer2.load_state_dict(torch.load(PATH)) # The previous optimizer saved stat
 
 
 As a third example, instead of loading a state according to the order of parameters (the default approach),
-this hook can be used to load according to the parameters' names::
+this hook can be used to load according to the parameters' names:
 
 ```python
 def names_matching(optimizer, state_dict):
