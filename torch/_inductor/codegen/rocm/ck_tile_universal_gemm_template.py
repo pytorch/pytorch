@@ -906,7 +906,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                     kBatch=k_batch,
                 )
 
-    def k_batch_choices(self, op: "CKTileGemmOperation") -> list[int]:
+    def k_batch_choices(self, op: "CKTileGemmOperation") -> tuple[int]:
         """
         Returns a list of k_batch choices for the template.
         """
@@ -923,9 +923,11 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         _, _, K, _, _, _ = self.size_args()
         if op.layout_a == "Row" or op.layout_b == "Col":
-            choices = filter(
-                lambda k_batch: check(K, op.tile_k * k_batch, op.k_is_padded),
-                default_choices,
+            choices = tuple(
+                filter(
+                    lambda k_batch: check(K, op.tile_k * k_batch, op.k_is_padded),
+                    default_choices,
+                )
             )
         else:
             choices = default_choices
