@@ -863,7 +863,7 @@ def _sdpa_handler(
     assert output_sharding is not None, "output sharding should not be None"
     assert not output_sharding.needs_redistribute, "inputs need to be redistributed"
 
-    call_maps = {
+    call_maps: dict[torch._ops.OpOverload, Callable] = {
         aten._scaled_dot_product_flash_attention.default: _scaled_dot_product_ring_flash_attention,
         aten._scaled_dot_product_efficient_attention.default: _scaled_dot_product_ring_efficient_attention,
         aten._scaled_dot_product_cudnn_attention.default: _scaled_dot_product_ring_cudnn_attention,
