@@ -63,8 +63,8 @@ and one for the backward graph.
 For our example command, we get the following compiled module for the
 forward and backward graphs respectively:
 
--  https://gist.github.com/shunting314/c2a4d8a28b00fcb5586d0e9d9bf77f9f
--  https://gist.github.com/shunting314/48efc83b12ec3ead950052e4a0220b10
+-  [Forward graph compiled module](https://gist.github.com/shunting314/c2a4d8a28b00fcb5586d0e9d9bf77f9f)
+-  [Backward graph compiled module](https://gist.github.com/shunting314/48efc83b12ec3ead950052e4a0220b10)
 
 3. Now we can dive into the perf for each individual compiled module.
    Let’s pick the one for the forward graph for illustration purposes.
