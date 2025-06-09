@@ -3041,9 +3041,19 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(f"{x_clean.stride()}", "(8, 1)")
         self.assertEqual(f"{x_clean.shape}", "torch.Size([5, 8])")
 
+
+def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
+    for node in graph.nodes:
+        if node.name == "arg3_1":
+            assert node.meta["val"].size()[0] == 2
+    return graph
+
+
+class TestUnbacked(TestCase):
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_deferred_neq_assert(self):
-        @torch.compile(fullgraph=True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_neq_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
         def func(a):
             torch._check(a.item() != 5)
             return a.item() * 10
@@ -3053,9 +3063,44 @@ class TestGuardsExpressions(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.tensor([5]))
 
+    # Test a situation where we generate a runtime assert i.e: u1==s1, then we specialize s1
+    # later on to a constant.
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_deferred_sym_or_assert(self):
-        @torch.compile(fullgraph=True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_post_specialize_runtime_assert1(self, backend):
+        @torch.compile(dynamic=True, backend=backend)
+        def func(x, y):
+            u0 = y.item()
+            s0 = x.size()[0]
+            s1 = x.size()[1]
+            torch._check(u0 + s0 + s1 == 102)
+            assert s0 == 2
+            return x * 10
+
+        func(torch.rand(2, 50), torch.tensor([50]))
+        with self.assertRaises(RuntimeError):
+            func(torch.rand(2, 50), torch.tensor([51]))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch(post_grad_custom_pre_pass=custom_pass)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_post_specialize_runtime_assert2(self, backend):
+        @torch.compile(dynamic=True, backend=backend)
+        def func(x, y):
+            u0 = y.item()
+            s0 = x.size()[0]
+            s1 = x.size()[1]
+            torch._check(u0 + s0 + s1 == 102)
+            return x * 10
+
+        func(torch.rand(2, 50), torch.tensor([50]))
+        with self.assertRaises(RuntimeError):
+            func(torch.rand(2, 50), torch.tensor([51]))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_sym_or_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
         def func(a, b):
             torch._check(operator.or_(a.item() == 5, b.item() == 5))
             return a.item() * 10
@@ -3074,8 +3119,9 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_deferred_sym_eq_assert(self):
-        @torch.compile(fullgraph=True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_sym_eq_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
         def func(a, b):
             torch._check(b.item() == 5)
             return a * 10
@@ -3084,10 +3130,11 @@ class TestGuardsExpressions(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.tensor([100]), torch.tensor([1]))
 
-    @skipIfTorchDynamo("mark_unbacked is not traceable")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_deferred_with_unbacked_input(self):
-        @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
+    @parametrize("backend", ["inductor", "eager"])
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_deferred_with_unbacked_input(self, backend):
+        @torch.compile(fullgraph=True, dynamic=True, backend=backend)
         def func(a, b):
             torch._check(a.size()[0] == b.size()[0])
             return a * 10
@@ -3369,6 +3416,9 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         with self.assertRaises(torch._dynamo.exc.UserError):
             # throws a data dependent error.
             compiled_func(x, torch.tensor([5, 20]))
+
+
+instantiate_parametrized_tests(TestUnbacked)
 
 
 if __name__ == "__main__":
