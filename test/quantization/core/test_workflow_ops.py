@@ -1049,6 +1049,7 @@ class TestFakeQuantizeOps(TestCase):
         quant_max = 255
         result = torch.fake_quantize_per_tensor_affine(input_tensor, scale, zero_point, quant_min, quant_max)
         ref_result = (min(quant_max, max(quant_min, torch.round(input_tensor / scale) + zero_point)) - zero_point) * scale
+        ref_result = torch.Tensor([ref_result], device=device).to(dtype)
         self.assertEqual(result, ref_result)
 
 
