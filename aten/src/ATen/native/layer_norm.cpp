@@ -339,7 +339,7 @@ Tensor rms_norm_symint(
     const bool is_weight_fp = isFloatingType(weight.scalar_type());
 
     if (!(GradMode::is_enabled() && any_inputs_require_grad) && !any_nested && is_input_fp && is_weight_fp) {
-      return std::get<0>(at::_fused_rms_norm(input.contiguous(), IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), weight_opt, eps)));
+      return std::get<0>(at::_fused_rms_norm(input.contiguous(), IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
     }
   }
   #endif
