@@ -403,6 +403,9 @@ enable_cpp_symbolic_shape_guards = False
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
 
+# Enable tracing through einops instead of using allow_in_graph
+enable_trace_einops = True
+
 # Enable tracing through unittest
 enable_trace_unittest = False
 

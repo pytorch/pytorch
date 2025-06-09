@@ -96,11 +96,6 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
-try:
-    import einops
-except ImportError:
-    einops = None
-
 if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
 else:
@@ -4448,12 +4443,21 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(ref1 == res1)
         self.assertTrue(ref2 == res2)
 
-    @unittest.skipIf(not einops, reason="Needs einops")
     def test_trace_einops(self):
-        # Test copied from arogozhnikov/einops at
-        # https://github.com/arogozhnikov/einops/blob/5dac4043970e0a74c81fcc5a73d7386ca696113e/einops/tests/test_other.py#L254-L301
+        try:
+            import einops
+        except ImportError:
+            unittest.skip("Needs einops")
+
         from einops import einsum, pack, rearrange, reduce, repeat, unpack
 
+        # Ensure that einops is not using allow_in_graph
+        for fn in (einsum, pack, rearrange, reduce, repeat, unpack):
+            fn_id = id(fn)
+            self.assertNotIn(fn_id, torch._dynamo.trace_rules._allowed_callable_ids, fn)
+
+        # Test copied from arogozhnikov/einops at
+        # https://github.com/arogozhnikov/einops/blob/5dac4043970e0a74c81fcc5a73d7386ca696113e/einops/tests/test_other.py#L254-L301
         from torch import nn
 
         class TorchModuleWithOperations(nn.Module):

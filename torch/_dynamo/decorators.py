@@ -8,6 +8,7 @@ This module provides decorators and utilities for controlling TorchDynamo's beha
 import functools
 import inspect
 import sys
+import warnings
 import weakref
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
@@ -175,6 +176,17 @@ def allow_in_graph(fn):
 
     WARNING: this API can be a footgun, please read the documentation carefully.
     """
+    if torch._dynamo.config.enable_trace_einops and "einops" in fn.__module__:
+        # There's should be a better way to do this!
+        warnings.warn(
+            "Tracing through einops is experimental. If you encounter any issues, please report them. "
+            "To disable tracing, set `torch._dynamo.config.enable_trace_einops = False`. "
+            "Alternatively, add the desired einops function to the graph using "
+            "`torch._dynamo.allow_in_graph(einops_function)`.",
+            UserWarning,
+        )
+        return
+
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
     assert callable(fn), "allow_in_graph expects a callable"
@@ -766,7 +778,7 @@ def _allow_in_graph_einops():
                     allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 
-# trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
+trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 
 
 # Proxy class for torch._dynamo.config patching - so dynamo can identify context managers/decorators

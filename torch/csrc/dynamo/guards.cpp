@@ -1952,7 +1952,6 @@ class DICT_CONTAINS : public LeafGuard {
       PyErr_Clear();
       return false;
     }
-    printf("result: %d - contains: %d\n", result, _contains);
     return result == _contains;
   }
 
