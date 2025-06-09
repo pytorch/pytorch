@@ -1007,11 +1007,13 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     return;
   }
   using namespace mps;
-  auto kernel_name = fmt::format("{}_{}_{}_{}",
+  const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
+  auto kernel_name = fmt::format("{}_{}_{}_{}{}",
                                  name,
                                  iter.is_contiguous() ? "dense" : "strided",
                                  scalarToMetalTypeString(outputTensor),
-                                 scalarToMetalTypeString(inputTensor));
+                                 scalarToMetalTypeString(inputTensor),
+                                 alpha.has_value() ? scalarToMetalTypeString(alpha_type) : "");
   @autoreleasepool {
     auto cplState = getPipelineStateForFunc(kernel_name);
 
@@ -1032,7 +1034,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
       }
       if (alpha) {
         mtl_setBytes(computeEncoder,
-                     getMPSScalar(*alpha, scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype()),
+                     getMPSScalar(*alpha, alpha_type),
                      iter.is_contiguous() ? 2 : 6);
       }
       mtl_dispatch1DJob(computeEncoder, cplState, length);
@@ -1059,7 +1061,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_binary_kernel(sub_iter, name, alpha);
+      exec_binary_kernel(sub_iter, name, alpha, scalar_arg_type);
     }
     return;
   }
@@ -1085,10 +1087,12 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto cast_needed = input.scalar_type() != other.scalar_type();
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
+  const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
+  const auot alpha_suffix = alpha.has_value() ? scalarToMetalTypeString(alpha_type) : "";
   // TODO: Implicitly pass both input and output types to non-cast kernels
   const auto kernel_name = cast_needed
-      ? fmt::format("{}_{}_cast_{}", name, suffix, scalarToMetalTypeString(out))
-      : fmt::format("{}_{}_{}_{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input));
+      ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(out), alpha_suffix)
+      : fmt::format("{}_{}_{}_{}{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input), alpha_suffix);
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
@@ -1104,7 +1108,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
         if (alpha) {
           mtl_setBytes(
               computeEncoder,
-              getMPSScalar(*alpha, scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype()),
+              getMPSScalar(*alpha, alpha_type),
               3);
         }
         if (cast_needed) {
@@ -1125,7 +1129,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
         if (alpha) {
           mtl_setArgs<3>(
               computeEncoder,
-              getMPSScalar(*alpha, scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype()),
+              getMPSScalar(*alpha, alpha_type),
               iter.shape(),
               iter.strides(0),
               iter.strides(1),
