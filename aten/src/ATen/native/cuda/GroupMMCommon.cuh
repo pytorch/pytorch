@@ -55,8 +55,6 @@ __global__ void prepare_grouped_gemm_data(
     if ((K < 0 && (a_row_major || !b_row_major)) ||  // 2D/2D: check along K dimension
         (M < 0 && !a_row_major) ||                   // 2D/3D: check along M dimension
         (N < 0 && b_row_major)) {                    // 3D/2D: check along N dimension
-      int32_t start = tid == 0 ? 0 : offs[tid - 1];
-      delta = offs[tid] - start;
       int align = 128 / cutlass::sizeof_bits<DtypeA>::value;
       CUDA_KERNEL_ASSERT(
         delta % align == 0 &&
