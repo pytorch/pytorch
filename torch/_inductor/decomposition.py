@@ -22,6 +22,7 @@ from torch._decomp.decompositions import (
     _index_add,
     embedding_dense_backward as decomp_embedding_dense_backward,
     pw_cast_for_opmath,
+    pw_cast_for_opmath_non_tensor_args,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._dynamo.utils import counters
@@ -181,7 +182,7 @@ def sym_constrain_range_for_size(
 
 
 @register_decomposition([aten.clamp])
-@pw_cast_for_opmath
+@pw_cast_for_opmath_non_tensor_args
 def clamp(
     x: torch.Tensor,
     min: Optional[torch.types.Number] = None,
