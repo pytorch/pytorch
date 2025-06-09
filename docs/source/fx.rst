@@ -474,7 +474,7 @@ example:
     """
 
 Here, we've tried to check equality of the values of two deep learning
-models with the ``==`` equality operator. However, this is not well-
+models with the ``==`` equality operator. However, this is not well-\
 defined both due to the issue of that operator returning a tensor
 and not a bool, but also because comparison of floating point values
 should use a margin of error (or epsilon) to account for the
