@@ -1742,8 +1742,8 @@ def native_layer_norm_backward_out(
     return grad_input
 
 
-@register_decomposition(aten.native_rms_norm_backward.default)
-def native_rms_norm_backward(
+@register_decomposition(aten._fused_rms_norm_backward.default)
+def _fused_rms_norm_backward(
     grad_out: Tensor,
     input: Tensor,
     normalized_shape: list[int],

@@ -106,7 +106,7 @@ void layer_norm_cpu_out(
     int64_t M,
     int64_t N);
 
-std::tuple<Tensor, Tensor> rms_norm_cpu(
+std::tuple<Tensor, Tensor> rms_norm_composite(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,
