@@ -132,31 +132,31 @@ kernel void unary_alpha_strided(
   output[output_offs] = f(input[input_offs], alpha);
 }
 
-#define REGISTER_UNARY_ALPHA_OP(NAME, DTYPE_IN, DTYPE_A, DTYPE_OUT)           \
-  static_assert(                                                              \
-      ::metal::is_same_v<                                                     \
-          DTYPE_OUT,                                                          \
-          ::c10::metal::result_of<NAME##_functor, DTYPE_IN, DTYPE_A>>,        \
-      "Output dtype mismatch for unary op " #NAME " and input " #DTYPE_IN);   \
-  template [[host_name(#NAME "_dense_" #DTYPE_OUT                             \
-                             "_" #DTYPE_IN)]] kernel void ::c10::metal::      \
-      unary_alpha_dense<DTYPE_IN, DTYPE_A, NAME##_functor>(                   \
-          device ::c10::metal::result_of<NAME##_functor, DTYPE_IN, DTYPE_A> * \
-              output,                                                         \
-          constant DTYPE_IN * input,                                          \
-          constant DTYPE_A & alpha,                                           \
-          uint index);                                                        \
-  template [[host_name(#NAME "_strided_" #DTYPE_OUT                           \
-                             "_" #DTYPE_IN)]] kernel void ::c10::metal::      \
-      unary_alpha_strided<DTYPE_IN, DTYPE_A, NAME##_functor>(                 \
-          device ::c10::metal::result_of<NAME##_functor, DTYPE_IN, DTYPE_A> * \
-              output,                                                         \
-          constant DTYPE_IN * input,                                          \
-          constant long* sizes,                                               \
-          constant long* input_strides,                                       \
-          constant long* output_strides,                                      \
-          constant uint& ndim,                                                \
-          constant DTYPE_A& alpha,                                            \
+#define REGISTER_UNARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO)              \
+  static_assert(                                                           \
+      ::metal::is_same_v<                                                  \
+          DTYPEO,                                                          \
+          ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEA>>,        \
+      "Output dtype mismatch for unary op " #NAME " and input " #DTYPEI);  \
+  template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI                 \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::     \
+      unary_alpha_dense<DTYPEI, DTYPEA, NAME##_functor>(                   \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEA> * \
+              output,                                                      \
+          constant DTYPEI * input,                                         \
+          constant DTYPEA & alpha,                                         \
+          uint index);                                                     \
+  template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI               \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::     \
+      unary_alpha_strided<DTYPEI, DTYPEA, NAME##_functor>(                 \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEA> * \
+              output,                                                      \
+          constant DTYPEI * input,                                         \
+          constant long* sizes,                                            \
+          constant long* input_strides,                                    \
+          constant long* output_strides,                                   \
+          constant uint& ndim,                                             \
+          constant DTYPEA& alpha,                                          \
           uint index)
 
 template <typename T>
@@ -430,8 +430,9 @@ kernel void binary_alpha_dense_cast(
           DTYPEO,                                                              \
           ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA>>,    \
       "Output dtype mismatch for binary op " #NAME " and input " #DTYPEI);     \
-  template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
-      c10::metal::binary_alpha_strided<DTYPEI, DTYPEA, NAME##_functor>(        \
+  template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI                   \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
+      binary_alpha_strided<DTYPEI, DTYPEA, NAME##_functor>(                    \
           device void* out,                                                    \
           constant void* input,                                                \
           constant void* other,                                                \
@@ -442,8 +443,9 @@ kernel void binary_alpha_dense_cast(
           constant long* other_strides,                                        \
           constant uint3& ndim,                                                \
           uint tid);                                                           \
-  template [[host_name(#NAME "_strided_cast_" #DTYPEI)]] kernel void ::c10::   \
-      metal::binary_alpha_strided_cast<DTYPEI, DTYPEA, NAME##_functor>(        \
+  template [[host_name(#NAME "_strided_cast_" #DTYPEI                          \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
+      binary_alpha_strided_cast<DTYPEI, DTYPEA, NAME##_functor>(               \
           device void* out,                                                    \
           constant void* input,                                                \
           constant void* other,                                                \
@@ -454,8 +456,9 @@ kernel void binary_alpha_dense_cast(
           constant long* other_strides,                                        \
           constant uint3& ndim_types,                                          \
           uint tid);                                                           \
-  template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
-      c10::metal::binary_alpha_dense<DTYPEI, DTYPEA, NAME##_functor>(          \
+  template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI                     \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
+      binary_alpha_dense<DTYPEI, DTYPEA, NAME##_functor>(                      \
           device ::c10::metal::                                                \
                   result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
               out_,                                                            \
@@ -463,15 +466,16 @@ kernel void binary_alpha_dense_cast(
           constant DTYPEI * other_,                                            \
           constant DTYPEA & alpha,                                             \
           uint tid);                                                           \
-  template [[host_name(#NAME "_dense_cast_" #DTYPEI)]] kernel void ::c10::     \
-      metal::binary_alpha_dense_cast<DTYPEI, DTYPEA, NAME##_functor>(          \
-          device ::c10::metal::                                                \
-                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
-              out_,                                                            \
-          constant void* input,                                                \
-          constant void* other,                                                \
-          constant DTYPEA& alpha,                                              \
-          constant uint4& sizes_types,                                         \
-          uint tid)
+  template                                                                     \
+      [[host_name(#NAME "_dense_cast_" #DTYPEI "_" #DTYPEA)]] kernel void ::   \
+          c10::metal::binary_alpha_dense_cast<DTYPEI, DTYPEA, NAME##_functor>( \
+              device ::c10::metal::                                            \
+                      result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *      \
+                  out_,                                                        \
+              constant void* input,                                            \
+              constant void* other,                                            \
+              constant DTYPEA& alpha,                                          \
+              constant uint4& sizes_types,                                     \
+              uint tid)
 } // namespace metal
 } // namespace c10
