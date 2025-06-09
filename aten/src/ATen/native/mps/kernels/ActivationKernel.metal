@@ -6,28 +6,29 @@ using namespace c10::metal;
 
 struct hardshrink_functor {
   template <typename T>
-  inline T operator()(const T x, const float lambda) {
-    return (x > lambda || x < -lambda) ? x : T(0);
+  inline T operator()(const T x, const T lambda) {
+    return (x >= -lambda && x <= lambda) ? T(0) : x;
   }
 };
 
 struct hardshrink_backward_functor {
   template <typename T>
-  inline T operator()(const T grad_output, const T x, const float lambda) {
-    return (x > lambda || x < -lambda) ? grad_output : T(0);
+  inline T operator()(const T grad_output, const T x, const T lambda) {
+    return (x >= -lambda && x <= lambda) ? T(0) : grad_output;
   }
 };
 
 REGISTER_UNARY_ALPHA_OP(hardshrink, float, float, float);
-REGISTER_UNARY_ALPHA_OP(hardshrink, half, float, half);
+REGISTER_UNARY_ALPHA_OP(hardshrink, half, half, half);
 #if __METAL_VERSION__ >= 310
-REGISTER_UNARY_ALPHA_OP(hardshrink, bfloat, float, bfloat);
+REGISTER_UNARY_ALPHA_OP(hardshrink, bfloat, bfloat, bfloat);
 #endif
 
 REGISTER_BINARY_ALPHA_OP(hardshrink_backward, float, float, float);
-REGISTER_BINARY_ALPHA_OP(hardshrink_backward, half, float, half);
+REGISTER_BINARY_ALPHA_OP(hardshrink_backward, half, half, half);
 #if __METAL_VERSION__ >= 310
-REGISTER_BINARY_ALPHA_OP(hardshrink_backward, bfloat, float, bfloat);
+REGISTER_BINARY_ALPHA_OP(hardshrink_backward, bfloat, bfloat, bfloat);
+#endif
 
 struct hardsigmoid_functor {
   template <typename T>
@@ -62,8 +63,8 @@ REGISTER_UNARY_OP(hardsigmoid, half, half);
 REGISTER_UNARY_OP(hardsigmoid, bfloat, bfloat);
 #endif
 
-REGISTER_BINARY_OP(hardsigmoid_backward, float, float, float);
-REGISTER_BINARY_OP(hardsigmoid_backward, half, half, half);
+REGISTER_BINARY_OP(hardsigmoid_backward, float, float);
+REGISTER_BINARY_OP(hardsigmoid_backward, half, half);
 #if __METAL_VERSION__ >= 310
-REGISTER_BINARY_OP(hardsigmoid_backward, bfloat, bfloat, bfloat);
+REGISTER_BINARY_OP(hardsigmoid_backward, bfloat, bfloat);
 #endif

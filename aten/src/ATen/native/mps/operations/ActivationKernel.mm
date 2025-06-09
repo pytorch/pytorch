@@ -14,11 +14,11 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #endif
 
 static void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0.5) {
-  lib.exec_unary_kernel(iter, "hardshrink", lambda, ScalarType::Float);
+  lib.exec_unary_kernel(iter, "hardshrink", lambda);
 }
 
 static void hardshrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0.5) {
-  lib.exec_binary_kernel(iter, "hardshrink_backward", lambda, ScalarType::Float);
+  lib.exec_binary_kernel(iter, "hardshrink_backward", lambda);
 }
 
 static void hardsigmoid_kernel(TensorIteratorBase& iter) {
