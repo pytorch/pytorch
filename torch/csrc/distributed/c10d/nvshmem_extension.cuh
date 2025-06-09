@@ -32,6 +32,7 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_out_splits,
-    std::string group_name);
+    std::string group_name,
+    std::optional<int64_t> major_align = std::nullopt);
 
 } // namespace c10d::nvshmem_extension
