@@ -740,6 +740,9 @@ def definitely_equal(
         if isinstance(rhs_item, torch.fx.Node):
             rhs_item = rhs_item.meta["val"]
 
+        assert isinstance(lhs_item, (int, torch.SymInt)), type(lhs_item)
+        assert isinstance(rhs_item, (int, torch.SymInt)), type(rhs_item)
+
         # It still makes sense to call guard_or_true/false since lhs_item
         # rhs_item are torch.SymInt rather than sympy expressions when
         # dynamic shape is enabled.
