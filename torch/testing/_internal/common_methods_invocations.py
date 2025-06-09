@@ -1605,7 +1605,7 @@ def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
         ((S,), {'dtype': dtype, 'device': device}),
         # Hard-code some dtypes/devices. We want to test cases where the
         # (dtype, device) is different from the input's (dtype, device)
-        ((S,), {'dtype': torch.double}),
+        ((S,), {'dtype': torch.double if device != 'mps:0' else torch.float}),
         ((S,), {'device': 'cpu'}),
         ((S,), {'dtype': torch.double, 'device': 'cpu'}),
     ]
@@ -1790,7 +1790,6 @@ def error_inputs_margin_ranking_loss(op, device, **kwargs):
                      error_regex='margin_ranking_loss : All input tensors should')
 
 def sample_inputs_new_fns(self, device, dtype, requires_grad, *, is_strided=False, **kwargs):
-    other_dtype = torch.half if torch.backends.mps.is_available() else torch.double
     # input_shape, output_shape, strides, kwargs
     # lengths of output_shape and strides must be equal
     inputs = [
@@ -1800,9 +1799,9 @@ def sample_inputs_new_fns(self, device, dtype, requires_grad, *, is_strided=Fals
         ((S,), (2, 3), (7, 8), {'dtype': dtype, 'device': device}),
         # Hard-code some dtypes/devices. We want to test cases where the
         # (dtype, device) is different from the input's (dtype, device)
-        ((S,), (10,), (S,), {'dtype': other_dtype}),
+        ((S,), (10,), (S,), {'dtype': torch.double if device != 'mps:0' else torch.float}),
         ((S,), (1, 1, 12), (S, L, M), {'device': 'cpu'}),
-        ((S,), (2, 2, 2), (L, M, S), {'dtype': other_dtype, 'device': 'cpu'}),
+        ((S,), (2, 2, 2), (L, M, S), {'dtype': torch.double, 'device': 'cpu'}),
     ]
     if torch.cuda.is_available():
         inputs.append(((S,), (7, 2), (3, 4), {'device': 'cuda'}))
