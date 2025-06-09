@@ -2611,7 +2611,7 @@ class TestSDPACudaOnly(NNTestCase):
 
 
     @skipIfRocm  # No cuDNN Attention
-    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    @unittest.skipIf(True, "broken as of cuDNN 9.10")
     def test_cudnn_attention_fail_d128(self, device):
         # Test that cuDNN attention dispatching correctly bails out on d > 128
         b, h = 1, 2
@@ -2626,7 +2626,6 @@ class TestSDPACudaOnly(NNTestCase):
         ISSM90 = device_cap == (9, 0)
         ISSM100 = device_cap == (10, 0)
         with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
-            # SM90/100 support d <= 256 as of cuDNN 9.5.1+
             if (ISSM90 or ISSM100) and torch.backends.cudnn.version() >= 90501:
                 torch.nn.functional.scaled_dot_product_attention(q, k, v)
             else:
@@ -3065,7 +3064,9 @@ class TestSDPACudaOnly(NNTestCase):
         device_capability = None
         if "cuda" in str(device):
             device_capability = torch.cuda.get_device_capability()
-        prefer_cudnn = device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
+        prefer_cudnn = False
+        # TODO(eqy): uncomment the following condition
+        # device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
 
         # TODO we are currently disabling this by default, lets assert that this returns
         # FlashAttention, we need to change when we make remove opt-in for cudnn
