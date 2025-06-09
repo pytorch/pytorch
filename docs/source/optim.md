@@ -518,7 +518,7 @@ normalization statistics at the end of training.
 
 SWA has been proposed in [Averaging Weights Leads to Wider Optima and Better Generalization](https://arxiv.org/abs/1803.05407).
 
-EMA is a widely known technique to reduce the training time by reducing the number of weight updates needed. 
+EMA is a widely known technique to reduce the training time by reducing the number of weight updates needed.
 It is a variation of [Polyak averaging](https://paperswithcode.com/method/polyak-averaging), but using exponential weights instead of equal weights across iterations.
 
 ### Constructing averaged models

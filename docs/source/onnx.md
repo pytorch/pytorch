@@ -91,7 +91,7 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
     onnx_torchscript
 ```
 
-<!-- This module needs to be documented. Adding here in the meantime 
+<!-- This module needs to be documented. Adding here in the meantime
 for tracking purposes -->
 ```{eval-rst}
 .. py:module:: torch.onnx.errors
