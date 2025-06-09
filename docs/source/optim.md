@@ -89,8 +89,7 @@ this group.
 All optimizers implement a {func}`~Optimizer.step` method, that updates the
 parameters. It can be used in two ways:
 
-`optimizer.step()`
-~~~~~~~~~~~~~~~~~~~~
+#### `optimizer.step()`
 
 This is a simplified version supported by most optimizers. The function can be
 called once the gradients are computed using e.g.
@@ -107,8 +106,7 @@ for input, target in dataset:
     optimizer.step()
 ```
 
-`optimizer.step(closure)`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#### `optimizer.step(closure)`
 
 Some optimization algorithms such as Conjugate Gradient and LBFGS need to
 reevaluate the function multiple times, so you have to pass in a closure that
