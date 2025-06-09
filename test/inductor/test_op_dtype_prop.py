@@ -84,7 +84,7 @@ class TestCase(InductorTestCase):
             #   both lhs/rhs are int32 tensor, there is also a integer alpha argument.
             #   In dynamic shape case, alpha is passed in as an ks0 argument. To be safe,
             #   we use tl.int64 for ks0's dtype.
-            #   But the dtype for alpha is also decided as tl.int32 during loading when
+            #   But the dtype for alpha is also decided as tl.int32 during lowering when
             #   we promote alpha to a ir.Constant.
             #   Ideally to resolve this problem, we should track assignment like
             #     alpha = ks0
