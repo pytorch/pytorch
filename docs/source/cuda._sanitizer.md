@@ -1,4 +1,6 @@
+```{eval-rst}
 .. currentmodule:: torch.cuda._sanitizer
+```
 
 # CUDA Stream Sanitizer
 

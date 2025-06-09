@@ -4,7 +4,9 @@
 
 # CUDA Environment Variables
 
+```{eval-rst}
 For more information on CUDA runtime environment variables, see `CUDA Environment Variables <https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#env-vars>`_.
+```
 
 **PyTorch Environment Variables**
 
