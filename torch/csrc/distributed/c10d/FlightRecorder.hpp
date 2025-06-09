@@ -53,6 +53,8 @@ DEFINE_CONSTANT(time_discovered_completed_key, "time_discovered_completed_ns")
 DEFINE_CONSTANT(completed_state, "completed")
 DEFINE_CONSTANT(scheduled_state, "scheduled")
 DEFINE_CONSTANT(started_state, "started")
+DEFINE_CONSTANT(thread_id_key, "thread_id")
+DEFINE_CONSTANT(thread_name_key, "thread_name")
 #undef DEFINE_CONSTANT
 
 // Write NCCL debug info to local disk or any storage users define.
@@ -154,6 +156,8 @@ struct FlightRecorder {
     c10::SmallVector<int64_t, 4> output_dims_;
     std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
+    std::thread::id thread_id_;
+    std::string thread_name_;
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
 
@@ -162,7 +166,7 @@ struct FlightRecorder {
     // acquire the GIL. If you don't want to block the current thread or take
     // the risk of a GIL deadlock, you can use an asynchronous calling mechanism
     // like std::async.
-    std::string getTraceback();
+    TORCH_API std::string getTraceback();
   };
 
   bool enabled_ = false;
@@ -192,7 +196,7 @@ struct FlightRecorder {
       std::shared_ptr<ProcessGroupStatus> pg_status,
       bool isP2P);
 
-  void record_pg_ranks(
+  TORCH_API void record_pg_ranks(
       const std::tuple<std::string, std::string>& pg_name,
       std::vector<uint64_t> ranks);
 
@@ -204,7 +208,7 @@ struct FlightRecorder {
 
   // Returns the entry with the given id, if it exists. Otherwise, returns
   // std::nullopt.
-  std::optional<Entry> getEntry(std::optional<size_t> id);
+  TORCH_API std::optional<Entry> getEntry(std::optional<size_t> id);
 
   /*
   Mark an Event as completed and free its events.
@@ -216,7 +220,9 @@ struct FlightRecorder {
   never hang. (timing must also be enabled for compute_duration - see
   TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(std::optional<size_t> id, bool compute_duration = true);
+  TORCH_API void retire_id(
+      std::optional<size_t> id,
+      bool compute_duration = true);
 
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
