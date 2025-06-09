@@ -1,14 +1,13 @@
-.. currentmodule:: torch.compiler
-
-.. automodule:: torch.compiler
-
-.. _torch.compiler_api:
 ```{eval-rst}
-torch.compiler API reference
-============================
-
-For a quick overview of ``torch.compiler``, see :ref:`torch.compiler_overview`.
+.. currentmodule:: torch.compiler
+.. automodule:: torch.compiler
 ```
+
+(torch.compiler_api)=
+# torch.compiler API reference
+
+For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
+
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
