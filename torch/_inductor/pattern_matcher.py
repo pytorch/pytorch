@@ -62,7 +62,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
-from torch._subclasses.functional_tensor import FunctionalTensorMode, FunctionalTensor
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.graph_module import _get_attr
@@ -2088,31 +2087,11 @@ def fwd_only(
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
-
-    # add functionalization to align with aot autograd
-    def f_functionalized(*args):
-        maybe_disable = torch._C._ExcludeDispatchKeyGuard(
-            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
-        )
-        def unwrapp_fn(x):
-            if isinstance(x, FunctionalTensor):
-                torch._sync(x.elem)
-                return torch._from_functional_tensor(x.elem)
-            return x
-
-        with maybe_disable, FunctionalTensorMode():
-            f_args = pytree.tree_map_only(torch.Tensor, lambda x: FunctionalTensor.to_functional(x), args)
-            out_wrappeds = fn(*f_args)
-
-        outs = pytree.tree_map_only(FunctionalTensor, unwrapp_fn, out_wrappeds)
-        return outs
-
-
-    with enable_python_dispatcher(), FunctionalTensorMode():
+    with enable_python_dispatcher():
         decompositions = (
             get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
         )
-        gm = make_fx(f_functionalized, decompositions, tracing_mode="real")(*args)
+        gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
 
     from .fx_passes.post_grad import remove_noop_ops
 

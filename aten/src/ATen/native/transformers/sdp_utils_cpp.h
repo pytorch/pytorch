@@ -517,6 +517,7 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
           params.value.sym_stride(-1),
           epilogue_message.str());
     }
+
     return false;
   }
   return true;
