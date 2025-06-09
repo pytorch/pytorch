@@ -9,19 +9,19 @@ import requests
 
 CONFIGS = {
     "dynamo39": {
-        "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
+        "linux-jammy-py3.9-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
+        "linux-jammy-py3.9-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
+        "linux-jammy-py3.9-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
     "dynamo311": {
-        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
+        "linux-jammy-py3.11-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
+        "linux-jammy-py3.11-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
+        "linux-jammy-py3.11-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
     "eager311": {
-        "linux-focal-py3.11-clang10 / test (default, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (default, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (default, 3, 3, linux.2xlarge)",
+        "linux-jammy-py3.11-clang10 / test (default, 1, 3, linux.2xlarge)",
+        "linux-jammy-py3.11-clang10 / test (default, 2, 3, linux.2xlarge)",
+        "linux-jammy-py3.11-clang10 / test (default, 3, 3, linux.2xlarge)",
     },
 }
 
