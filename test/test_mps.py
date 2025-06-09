@@ -8415,6 +8415,15 @@ class TestTopK(TestCase):
                 with self.subTest(shape=shape, largest_val=largest_val):
                     self._test_topk(shape, largest_val)
 
+    def test_topk_gt_4d(self):
+        a = torch.ones(5, 4, 3, 2, 1, dtype=torch.float).to('mps')
+        try:
+            t_mps = torch.ops.aten.topk(a, k=5, dim=0)
+        except Exception as e:
+            e_string = str(e)
+            self.assertEqual(e_string, "On-going issue on MPSGraph topk when ndims() - axis > 4, see issue #154890")
+
+
 class TestNNMPS(NNTestCase):
 
     def _create_basic_net(self):
@@ -12115,6 +12124,12 @@ class TestConsistency(TestCaseMPS):
             if op.name in ["_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"] and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
+
+            # torch.topk does not guarantee sort stability for tied elements and neither does MPS. So we can't know if the
+            # indices tensor will match the CPU if there are tied values. Only check value tensor match, not indices.
+            if op.name == "topk":
+                cpu_out = cpu_out[0]
+                mps_out = mps_out[0]
 
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 

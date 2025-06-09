@@ -609,15 +609,6 @@ if torch.backends.mps.is_available():
             )
 
         UNDEFINED_XFAILLIST = {
-            # Top 60 operators
-            # topk fails with duplicate indices
-            "topk": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
             # Failures due to random output that they generate using
             # Philox engine causing mismatch with CPU results
             "multinomial": [
@@ -888,8 +879,6 @@ if torch.backends.mps.is_available():
             "eye": [torch.float16, torch.float32],
             # round not working properly for float16
             "round": [torch.float16],
-            # topk fails with duplicate indices
-            "topk": [torch.float16],
         }
 
         MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
