@@ -5,7 +5,7 @@
 
 [Open Neural Network eXchange (ONNX)](https://onnx.ai/) is an open standard
 format for representing machine learning models. The `torch.onnx` module captures the computation graph from a
-native PyTorch {py:class}`torch.nn.Module` model and converts it into an
+native PyTorch {class}`torch.nn.Module` model and converts it into an
 [ONNX graph](https://github.com/onnx/onnx/blob/main/docs/IR.md).
 
 The exported model can be consumed by any of the many
@@ -13,7 +13,7 @@ The exported model can be consumed by any of the many
 Microsoft's [ONNX Runtime](https://www.onnxruntime.ai).
 
 **There are two flavors of ONNX exporter API that you can use, as listed below.**
-Both can be called through function {py:func}`torch.onnx.export`.
+Both can be called through function {func}`torch.onnx.export`.
 Next example shows how to export a simple model.
 
 ```python
@@ -59,7 +59,7 @@ bytecode analysis that preserves the dynamic nature of the model instead of usin
 
 *The TorchScript-based ONNX exporter is available since PyTorch 1.2.0*
 
-[TorchScript](https://pytorch.org/docs/stable/jit.html) is leveraged to trace (through {py:func}`torch.jit.trace`)
+[TorchScript](https://pytorch.org/docs/stable/jit.html) is leveraged to trace (through {func}`torch.jit.trace`)
 the model and capture a static computation graph.
 
 As a consequence, the resulting graph has a couple limitations:
@@ -69,7 +69,7 @@ As a consequence, the resulting graph has a couple limitations:
 * Does not truly handle dynamic inputs
 
 As an attempt to support the static tracing limitations, the exporter also supports TorchScript scripting
-(through {py:func}`torch.jit.script`), which adds support for data-dependent control-flow, for example. However, TorchScript
+(through {func}`torch.jit.script`), which adds support for data-dependent control-flow, for example. However, TorchScript
 itself is a subset of the Python language, so not all features in Python are supported, such as in-place operations.
 
 {doc}`Learn more about the TorchScript-based ONNX Exporter <onnx_torchscript>`

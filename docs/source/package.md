@@ -84,11 +84,11 @@ au BufReadCmd *.pt call zip#Browse(expand("<amatch>"))
 ```
 
 #### Use the `file_structure()` API
-{py:class}`PackageImporter` provides a `file_structure()` method, which will return a printable
-and queryable {py:class}`Directory` object. The {py:class}`Directory` object is a simple directory structure that you can use to explore the
+{class}`PackageImporter` provides a `file_structure()` method, which will return a printable
+and queryable {class}`Directory` object. The {class}`Directory` object is a simple directory structure that you can use to explore the
 current contents of a `torch.package`.
 
-The {py:class}`Directory` object itself is directly printable and will print out a file tree representation. To filter what is returned,
+The {class}`Directory` object itself is directly printable and will print out a file tree representation. To filter what is returned,
 use the glob-style `include` and `exclude` filtering arguments.
 
 ```python
@@ -128,7 +128,7 @@ Output:
             └── utils.py
 ```
 
-You can also query {py:class}`Directory` objects with the `has_file()` method.
+You can also query {class}`Directory` objects with the `has_file()` method.
 
 ```python
 importer_file_structure = importer.file_structure()
@@ -137,7 +137,7 @@ found: bool = importer_file_structure.has_file("package_a/subpackage.py")
 
 ### See why a given module was included as a dependency?
 
-Say there is a given module `foo`, and you want to know why your {py:class}`PackageExporter` is pulling in `foo` as a dependency.
+Say there is a given module `foo`, and you want to know why your {class}`PackageExporter` is pulling in `foo` as a dependency.
 
 :meth:`PackageExporter.get_rdeps` will return all modules that directly depend on `foo`.
 
@@ -148,7 +148,7 @@ If you would just like to see the whole dependency graph of your :class:`Package
 
 
 ### Include arbitrary resources with my package and access them later?
-{py:class}`PackageExporter` exposes three methods, `save_pickle`, `save_text` and `save_binary` that allow you to save
+{class}`PackageExporter` exposes three methods, `save_pickle`, `save_text` and `save_binary` that allow you to save
 Python objects, text, and binary data to a package.
 
 ```python
@@ -159,7 +159,7 @@ with torch.PackageExporter("package.pt") as exporter:
     exporter.save_binary("raw_data", "binary", my_bytes)
 
 ```
-{py:class}`PackageImporter` exposes complementary methods named `load_pickle`, `load_text` and `load_binary` that allow you to load
+{class}`PackageImporter` exposes complementary methods named `load_pickle`, `load_text` and `load_binary` that allow you to load
 Python objects, text and binary data from a package.
 
 ```python
@@ -277,7 +277,7 @@ foo_1 import time: 9857706.652698385
 
 ### Test in my source code whether or not it is executing inside a package?
 
-A {py:class}`PackageImporter` will add the attribute `__torch_package__` to every module that it initializes. Your code can check for the
+A {class}`PackageImporter` will add the attribute `__torch_package__` to every module that it initializes. Your code can check for the
 presence of this attribute to determine whether it is executing in a packaged context or not.
 
 ```python
@@ -313,7 +313,7 @@ your code so that it behaves the same way no matter how it was loaded.
 
 
 ### Patch code into a package?
-{py:class}`PackageExporter` offers a `save_source_string()` method that allows one to save arbitrary Python source code to a module of your choosing.
+{class}`PackageExporter` offers a `save_source_string()` method that allows one to save arbitrary Python source code to a module of your choosing.
 ```python
 with PackageExporter(f) as exporter:
     # Save the my_module.foo available in your current Python environment.
@@ -340,7 +340,7 @@ importer.import_module("my_module.foo").my_function()  # prints 'hello world'
 ```
 
 ### Access package contents from packaged code?
-{py:class}`PackageImporter` implements the
+{class}`PackageImporter` implements the
 [`importlib.resources`](https://docs.python.org/3/library/importlib.html#module-importlib.resources)
 API for accessing resources from inside a package.
 
@@ -404,8 +404,8 @@ assert not is_from_package(txt) # str is from stdlib, so this will return False
 ```
 
 ### Re-export an imported object?
-To re-export an object that was previously imported by a {py:class}`PackageImporter`, you must make the new {py:class}`PackageExporter`
-aware of the original {py:class}`PackageImporter` so that it can find source code for your object’s dependencies.
+To re-export an object that was previously imported by a {class}`PackageImporter`, you must make the new {class}`PackageExporter`
+aware of the original {class}`PackageImporter` so that it can find source code for your object’s dependencies.
 
 ```python
 importer = PackageImporter(f)
@@ -500,7 +500,7 @@ with the [Python reference documentation](https://docs.python.org/3/library/impo
 
 ### How `torch.package` finds your code's dependencies
 #### Analyzing an object's dependencies
-When you issue a `save_pickle(obj, ...)` call, {py:class}`PackageExporter` will pickle the object normally. Then, it uses the
+When you issue a `save_pickle(obj, ...)` call, {class}`PackageExporter` will pickle the object normally. Then, it uses the
 `pickletools` standard library module to parse the pickle bytecode.
 
 In a pickle, an object is saved along with a `GLOBAL` opcode that describes where to find the implementation of the object’s type, like:
@@ -541,7 +541,7 @@ This is by design. Python does not offer clean boundaries between objects define
 module, so that’s what `torch.package` uses.
 
 Actions are applied to modules using patterns. Patterns can either be module names (`"foo.bar"`) or globs (like `"foo.**"`). You associate a pattern
-with an action using methods on {py:class}`PackageExporter`, e.g.
+with an action using methods on {class}`PackageExporter`, e.g.
 
 ```python
 my_exporter.intern("torchvision.**")
@@ -559,8 +559,8 @@ This action is your model code, or any related code you want to package. For exa
 you will need to `intern` the module torchvision.models.resnet.
 
 On package import, when your packaged code tries to import an `intern`-ed module, PackageImporter will look inside your package for that module.
-If it can’t find that module, an error will be raised. This ensures that each {py:class}`PackageImporter` is isolated from the loading environment—even
-if you have `my_interned_module` available in both your package and the loading environment, {py:class}`PackageImporter` will only use the version in your
+If it can’t find that module, an error will be raised. This ensures that each {class}`PackageImporter` is isolated from the loading environment—even
+if you have `my_interned_module` available in both your package and the loading environment, {class}`PackageImporter` will only use the version in your
 package.
 
 **Note**: Only Python source modules can be `intern`-ed. Other kinds of modules, like C extension modules and bytecode modules, will raise an error if
@@ -571,7 +571,7 @@ you attempt to `intern` them. These kinds of modules need to be `mock`-ed or `ex
 If a module is `extern`-ed, it will not be packaged. Instead, it will be added to a list of external dependencies for this package. You can find this
 list on `package_exporter.extern_modules`.
 
-On package import, when the packaged code tries to import an `extern`-ed module, {py:class}`PackageImporter` will use the default Python importer to find
+On package import, when the packaged code tries to import an `extern`-ed module, {class}`PackageImporter` will use the default Python importer to find
 that module, as if you did `importlib.import_module("my_externed_module")`. If it can’t find that module, an error will be raised.
 
 In this way, you can depend on third-party libraries like `numpy` and `scipy` from within your package without having to package them too.
@@ -655,12 +655,12 @@ global state.
 Mutable global state is quite useful—it can reduce boilerplate, allow for open registration into tables, etc. But unless employed very carefully, it can
 cause complications when used with `torch.package`.
 
-Every {py:class}`PackageImporter` creates an independent environment for its contents. This is nice because it means we load multiple packages and ensure
+Every {class}`PackageImporter` creates an independent environment for its contents. This is nice because it means we load multiple packages and ensure
 they are isolated from each other, but when modules are written in a way that assumes shared mutable global state, this behavior can create hard-to-debug
 errors.
 
 #### Types are not shared between packages and the loading environment
-Any class that you import from a {py:class}`PackageImporter` will be a version of the class specific to that importer. For example:
+Any class that you import from a {class}`PackageImporter` will be a version of the class specific to that importer. For example:
 
 
 ```python
@@ -697,19 +697,19 @@ functionality, consider the following options:
 
 
 ### How `torch.package` keeps packages isolated from each other
-Each {py:class}`PackageImporter` instance creates an independent, isolated environment for its modules and objects. Modules in a package can only import
-other packaged modules, or modules marked `extern`. If you use multiple {py:class}`PackageImporter` instances to load a single package, you will get
+Each {class}`PackageImporter` instance creates an independent, isolated environment for its modules and objects. Modules in a package can only import
+other packaged modules, or modules marked `extern`. If you use multiple {class}`PackageImporter` instances to load a single package, you will get
 multiple independent environments that do not interact.
 
-This is achieved by extending Python’s import infrastructure with a custom importer. {py:class}`PackageImporter` provides the same core API as the
+This is achieved by extending Python’s import infrastructure with a custom importer. {class}`PackageImporter` provides the same core API as the
 `importlib` importer; namely, it implements the `import_module` and `__import__` methods.
 
-When you invoke :meth:`PackageImporter.import_module`, {py:class}`PackageImporter` will construct and return a new module, much as the system importer does.
-However, {py:class}`PackageImporter` patches the returned module to use `self` (i.e. that {py:class}`PackageImporter` instance) to fulfill future import
+When you invoke :meth:`PackageImporter.import_module`, {class}`PackageImporter` will construct and return a new module, much as the system importer does.
+However, {class}`PackageImporter` patches the returned module to use `self` (i.e. that {class}`PackageImporter` instance) to fulfill future import
 requests by looking in the package rather than searching the user’s Python environment.
 
 #### Mangling
-To avoid confusion (“is this `foo.bar` object the one from my package, or the one from my Python environment?”), {py:class}`PackageImporter` mangles the
+To avoid confusion (“is this `foo.bar` object the one from my package, or the one from my Python environment?”), {class}`PackageImporter` mangles the
 `__name__` and `__file__` of all imported modules, by adding a *mangle prefix* to them.
 
 For `__name__`, a name like `torchvision.models.resnet18` becomes `<torch_package_0>.torchvision.models.resnet18`.

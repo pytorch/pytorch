@@ -6,14 +6,14 @@
 
 ## How to use an optimizer
 
-To use {py:mod}`torch.optim` you have to construct an optimizer object that will hold
+To use {mod}`torch.optim` you have to construct an optimizer object that will hold
 the current state and will update the parameters based on the computed gradients.
 
 ### Constructing it
 
-To construct an {py:class}`Optimizer` you have to give it an iterable containing the
-parameters (all should be {py:class}`~torch.nn.Parameter` s) or named parameters
-(tuples of (str, {py:class}`~torch.nn.Parameter`)) to optimize. Then,
+To construct an {class}`Optimizer` you have to give it an iterable containing the
+parameters (all should be {class}`~torch.nn.Parameter` s) or named parameters
+(tuples of (str, {class}`~torch.nn.Parameter`)) to optimize. Then,
 you can specify optimizer-specific options such as the learning rate, weight decay, etc.
 
 Example::
@@ -31,9 +31,9 @@ optimizer = optim.Adam([('layer0', var1), ('layer1', var2)], lr=0.0001)
 
 ### Per-parameter options
 
-{py:class}`Optimizer` s also support specifying per-parameter options. To do this, instead
-of passing an iterable of {py:class}`~torch.autograd.Variable` s, pass in an iterable of
-{py:class}`dict` s. Each of them will define a separate parameter group, and should contain
+{class}`Optimizer` s also support specifying per-parameter options. To do this, instead
+of passing an iterable of {class}`~torch.autograd.Variable` s, pass in an iterable of
+{class}`dict` s. Each of them will define a separate parameter group, and should contain
 a `params` key, containing a list of parameters belonging to it. Other keys
 should match the keyword arguments accepted by the optimizers, and will be used
 as optimization options for this group.
@@ -64,7 +64,7 @@ between parameter groups.
 ```
 
 Also consider the following example related to the distinct penalization of parameters.
-Remember that {py:func}`~torch.nn.Module.parameters` returns an iterable that
+Remember that {func}`~torch.nn.Module.parameters` returns an iterable that
 contains all learnable parameters, including biases and other
 parameters that may prefer distinct penalization. To address this, one can specify
 individual penalization weights for each parameter group::
@@ -86,7 +86,7 @@ this group.
 
 ### Taking an optimization step
 
-All optimizers implement a {py:func}`~Optimizer.step` method, that updates the
+All optimizers implement a {func}`~Optimizer.step` method, that updates the
 parameters. It can be used in two ways:
 
 ``optimizer.step()``
@@ -94,9 +94,9 @@ parameters. It can be used in two ways:
 
 This is a simplified version supported by most optimizers. The function can be
 called once the gradients are computed using e.g.
-{py:func}`~torch.autograd.Variable.backward`.
+{func}`~torch.autograd.Variable.backward`.
 
-Example::
+Example:
 
 ```python
 for input, target in dataset:
@@ -243,8 +243,8 @@ Below table is showing the stability status for fused implementations:
 
 ## How to adjust learning rate
 
-{py:class}`torch.optim.lr_scheduler.LRScheduler` provides several methods to adjust the learning
-rate based on the number of epochs. {py:class}`torch.optim.lr_scheduler.ReduceLROnPlateau`
+{class}`torch.optim.lr_scheduler.LRScheduler` provides several methods to adjust the learning
+rate based on the number of epochs. {class}`torch.optim.lr_scheduler.ReduceLROnPlateau`
 allows dynamic learning rate reducing based on some validation measurements.
 
 Learning rate scheduling should be applied after optimizer's update; e.g., you
@@ -329,7 +329,7 @@ algorithms.
 
 ## How to utilize named parameters to load optimizer state dict
 
-The function {py:func}`~Optimizer.load_state_dict` stores the optional `param_names` content from the
+The function {func}`~Optimizer.load_state_dict` stores the optional `param_names` content from the
 loaded state dict if present. However, the process of loading the optimizer state is not affected,
 as the order of the parameters matters to maintain compatibility (in case of different ordering).
 To utilize the loaded parameters names from the loaded state dict, a custom `register_load_state_dict_pre_hook`
@@ -511,9 +511,9 @@ def names_matching(optimizer, state_dict):
 
 ## Weight Averaging (SWA and EMA)
 
-{py:class}`torch.optim.swa_utils.AveragedModel` implements Stochastic Weight Averaging (SWA) and Exponential Moving Average (EMA),
-{py:class}`torch.optim.swa_utils.SWALR` implements the SWA learning rate scheduler and
-{py:func}`torch.optim.swa_utils.update_bn` is a utility function used to update SWA/EMA batch
+{class}`torch.optim.swa_utils.AveragedModel` implements Stochastic Weight Averaging (SWA) and Exponential Moving Average (EMA),
+{class}`torch.optim.swa_utils.SWALR` implements the SWA learning rate scheduler and
+{func}`torch.optim.swa_utils.update_bn` is a utility function used to update SWA/EMA batch
 normalization statistics at the end of training.
 
 SWA has been proposed in [Averaging Weights Leads to Wider Optima and Better Generalization](https://arxiv.org/abs/1803.05407).
@@ -538,17 +538,17 @@ EMA models are constructed by specifying the `multi_avg_fn` argument as follows:
 >>> averaged_model = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 ```
 
-Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to {py:func}`torch.optim.swa_utils.get_ema_multi_avg_fn`, the default is 0.999. Decay value should be close to 1.0, as smaller values can cause optimization convergence issues.
+Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to {func}`torch.optim.swa_utils.get_ema_multi_avg_fn`, the default is 0.999. Decay value should be close to 1.0, as smaller values can cause optimization convergence issues.
 
-{py:func}`torch.optim.swa_utils.get_ema_multi_avg_fn` returns a function that applies the following EMA equation to the weights:
+{func}`torch.optim.swa_utils.get_ema_multi_avg_fn` returns a function that applies the following EMA equation to the weights:
 
 $$W^\textrm{EMA}_{t+1} = \alpha W^\textrm{EMA}_{t} + (1 - \alpha) W^\textrm{model}_t$$
 
 where alpha is the EMA decay.
 
-Here the model `model` can be an arbitrary {py:class}`torch.nn.Module` object. `averaged_model`
+Here the model `model` can be an arbitrary {class}`torch.nn.Module` object. `averaged_model`
 will keep track of the running averages of the parameters of the `model`. To update these
-averages, you should use the {py:func}`update_parameters` function after the `optimizer.step()`:
+averages, you should use the {func}`update_parameters` function after the `optimizer.step()`:
 
 ```python
 >>> averaged_model.update_parameters(model)
@@ -558,7 +558,7 @@ For SWA and EMA, this call is usually done right after the optimizer `step()`. I
 
 ### Custom averaging strategies
 
-By default, {py:class}`torch.optim.swa_utils.AveragedModel` computes a running equal average of
+By default, {class}`torch.optim.swa_utils.AveragedModel` computes a running equal average of
 the parameters that you provide, but you can also use custom averaging functions with the
 `avg_fn` or `multi_avg_fn` parameters:
 
@@ -581,7 +581,7 @@ In the following example `ema_model` computes an exponential moving average usin
 
 ### SWA learning rate schedules
 
-Typically, in SWA the learning rate is set to a high constant value. {py:class}`SWALR` is a
+Typically, in SWA the learning rate is set to a high constant value. {class}`SWALR` is a
 learning rate scheduler that anneals the learning rate to a fixed value, and then keeps it
 constant. For example, the following code creates a scheduler that linearly anneals the
 learning rate from its initial value to 0.05 in 5 epochs within each parameter group:
@@ -597,18 +597,18 @@ You can also use cosine annealing to a fixed value instead of linear annealing b
 
 ### Taking care of batch normalization
 
-{py:func}`update_bn` is a utility function that allows to compute the batchnorm statistics for the SWA model
+{func}`update_bn` is a utility function that allows to compute the batchnorm statistics for the SWA model
 on a given dataloader `loader` at the end of training:
 
 ```python
 >>> torch.optim.swa_utils.update_bn(loader, swa_model)
 ```
 
-{py:func}`update_bn` applies the `swa_model` to every element in the dataloader and computes the activation
+{func}`update_bn` applies the `swa_model` to every element in the dataloader and computes the activation
 statistics for each batch normalization layer in the model.
 
 ```{warning}
-    {py:func}`update_bn` assumes that each batch in the dataloader `loader` is either a tensors or a list of
+    {func}`update_bn` assumes that each batch in the dataloader `loader` is either a tensors or a list of
     tensors where the first element is the tensor that the network `swa_model` should be applied to.
     If your dataloader has a different structure, you can update the batch normalization statistics of the
     `swa_model` by doing a forward pass with the `swa_model` on each element of the dataset.
