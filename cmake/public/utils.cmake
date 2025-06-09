@@ -324,6 +324,10 @@ endmacro()
 #
 macro(torch_cuda_get_nvcc_gencode_flag store_var)
   # setting nvcc arch flags
+  # We need to support the explicitly and conveniently defined TORCH_CUDA_ARCH_LIST
+  if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
+    set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
+  endif()
   if(DEFINED CUDA_ARCH_NAME)
     message(WARNING
         "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
@@ -353,8 +357,6 @@ function(torch_compile_options libname)
       set(MSVC_DEBINFO_OPTION "/Zi")
     endif()
 
-    set(MSVC_APPEND_OPTION)
-
     if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 142)
       # Add /permissive- flag for conformance mode to the compiler.
       # This will force more strict check to the code standard.
@@ -364,6 +366,10 @@ function(torch_compile_options libname)
       # 2. For MSVC VERSION: https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html
       target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
     endif()
+    # This option enables a token-based preprocessor that conforms to C99 and C++11 and later standards.
+    # This option is available since VS 2017.
+    # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor" PARENT_SCOPE)
 
     if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 143)
       # Add /d2implyavx512upperregs- to disable compiler over-aggressive optimization, which caused involeved AVX512 register on AVX2 machine.
