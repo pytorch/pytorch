@@ -151,7 +151,6 @@ ENV INSTALLED_ACL ${ACL}
 ARG SKIP_SCCACHE_INSTALL
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
-ENV CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
 RUN if [ -z "${SKIP_SCCACHE_INSTALL}" ]; then bash ./install_cache.sh; fi
 RUN rm install_cache.sh
 
