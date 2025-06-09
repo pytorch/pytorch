@@ -405,6 +405,7 @@ def _register_lowering(
     broadcast,
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool,
+    lowering_dict,
 ):
     """
     Add a lowering to lowerings dict
@@ -449,7 +450,7 @@ def _register_lowering(
 
     aten_fn = get_overloads(aten_fn)
 
-    lowerings.update(dict.fromkeys(aten_fn, wrapped))
+    lowering_dict.update(dict.fromkeys(aten_fn, wrapped))
     return wrapped
 
 
@@ -460,6 +461,7 @@ def register_lowering(
         ELEMENTWISE_TYPE_PROMOTION_KIND
     ] = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
+    lowering_dict=lowerings,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Shim to support decorator syntax.
@@ -470,6 +472,7 @@ def register_lowering(
         broadcast=broadcast,
         type_promotion_kind=type_promotion_kind,
         convert_input_to_bool=convert_input_to_bool,
+        lowering_dict=lowering_dict,
     )
 
 
@@ -1885,15 +1888,10 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
+def unsupported_input_tensor(t: torch.Tensor, node=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         # Complex views are supported with IR ComplexView
-        if parent and parent.target in (
-            torch.ops.aten.view.dtype,
-            torch.ops.prims.convert_element_type.default,
-        ):
-            return False
         _warn_complex_not_supported()
         return True
 
@@ -1907,11 +1905,12 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
         # allow bitcast, views, memory movement, but not arithmetic
         # TODO: delete once triton adds native support
         return not (
-            isinstance(parent.target, torch._ops.OpOverload)
-            and parent.target
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target
             in (
                 aten.view.dtype,
                 aten.cat.default,
+                aten.clone.default,
                 aten._scaled_mm.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
@@ -1920,9 +1919,15 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
     return False
 
 
-def unsupported_output_tensor(t: torch.Tensor, parent=None, node=None):
+def unsupported_output_tensor(t: torch.Tensor, node=None):
     "Do not support writing tensor but can read from it"
-    if unsupported_input_tensor(t, parent):
+    supported_complex_views = (
+        aten.view.dtype,
+        torch.ops.prims.convert_element_type.default,
+    )
+    if node is not None and node.target in supported_complex_views and t.is_complex():
+        return False
+    if unsupported_input_tensor(t, node):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
@@ -1932,36 +1937,39 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target is aten.view_as_complex.default:
         return False
 
+    if node.op == "placeholder":
+        return False
+
     # We should be able to remove this special case once `disable_cpp_codegen` is killed.
     if node.target is aten.lift_fresh_copy.default:
         return False
 
-    def check_skip_condition(node, parent, is_output):
-        if not isinstance(node, torch.fx.Node):
+    def check_skip_condition(inp_out_node, is_output):
+        if not isinstance(inp_out_node, torch.fx.Node):
             return False
 
-        if "val" not in node.meta:
+        if "val" not in inp_out_node.meta:
             return False
 
-        for meta in pytree.tree_leaves(node.meta["val"]):
+        for meta in pytree.tree_leaves(inp_out_node.meta["val"]):
             if not isinstance(meta, torch._subclasses.FakeTensor):
                 continue
 
             if is_output:
-                if unsupported_output_tensor(meta, parent, node):
+                if unsupported_output_tensor(meta, node):
                     return True
             else:
-                if unsupported_input_tensor(meta, parent, node):
+                if unsupported_input_tensor(meta, node):
                     return True
 
         return False
 
     # only skip codegen if there is a cpu output, not input
     for arg in pytree.arg_tree_leaves(*node.args, **node.kwargs):
-        if check_skip_condition(arg, node, is_output=False):
+        if check_skip_condition(arg, is_output=False):
             return True
 
-    return check_skip_condition(node, node, is_output=True)
+    return check_skip_condition(node, is_output=True)
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
@@ -2611,7 +2619,6 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 # WIP
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
-make_fallback(aten.fractional_max_pool3d)  # @isuruf
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 
 
@@ -2621,6 +2628,10 @@ make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_t
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
 make_fallback(aten._fused_rms_norm, warn=False)  # (MPS-only and faster than decomp)
+if torch.xpu.is_available():
+    make_fallback(
+        aten.embedding_dense_backward, warn=False
+    )  # (XPU-only and faster than decomp)
 
 
 # 1.5) Easy or Impossible
@@ -4484,34 +4495,27 @@ def _low_memory_max_pool_with_offsets(
         return result, to_dtype(offsets, torch.int8)
 
 
-@register_lowering(
-    prims._low_memory_max_pool_offsets_to_indices, type_promotion_kind=None
-)
-def _low_memory_max_pool_offsets_to_indices(
-    offsets, kernel_size, input_size, stride, padding, dilation
-):
-    # TODO: Generalize to other max pooling flavors
+def _pool_offsets_to_indices(
+    offsets: TensorBox,
+    kernel_size: Sequence[Union[int, torch.SymInt]],
+    input_size: Sequence[Union[int, torch.SymInt]],
+    increments_to_index: Callable[
+        [Sequence[Union[int, torch.SymInt]], Sequence[Union[int, torch.SymInt]]],
+        torch._inductor.virtualized.OpsValue,
+    ],
+) -> TensorBox:
     n_dim = len(kernel_size)
     offsets_loader = offsets.make_loader()
-
-    def increments_to_index(dhw_inc, bh):
-        w_in = [ops.index_expr(input_size[d], torch.int64) for d in range(n_dim)]
-        hbase = [
-            ops.index_expr(bh[d] * stride[d] - padding[d], torch.int64)
-            for d in range(n_dim)
-        ]
-        idhw = [
-            hbase[d] + dhw_inc[d] * ops.constant(dilation[d], torch.int64)
-            for d in range(n_dim)
-        ]
-        return inductor_prims._flatten_index(idhw, w_in)
+    window_size = sympy.sympify(functools.reduce(operator.mul, kernel_size))
 
     def offsets_to_indices(idx):
-        bh = idx[-n_dim:]
         offset = offsets_loader(idx)
-        k_const = [ops.constant(kernel_size[d], torch.int32) for d in range(n_dim)]
-        dhw_inc = inductor_prims._flattened_index_to_nd(offset, k_const)
-        return increments_to_index(dhw_inc, bh)
+        offset_sympy = ops.indirect_indexing(offset, window_size)
+        reduction_idx = inductor_prims._flattened_index_to_nd(offset_sympy, kernel_size)
+        idhw = increments_to_index(idx, reduction_idx)
+        return ops.index_expr(
+            inductor_prims._flatten_index(idhw, input_size[-n_dim:]), torch.int64
+        )
 
     indices = Pointwise.create(
         device=offsets.get_device(),
@@ -4520,6 +4524,27 @@ def _low_memory_max_pool_offsets_to_indices(
         ranges=offsets.get_size(),
     )
     return indices
+
+
+@register_lowering(
+    prims._low_memory_max_pool_offsets_to_indices, type_promotion_kind=None
+)
+def _low_memory_max_pool_offsets_to_indices(
+    offsets, kernel_size, input_size, stride, padding, dilation
+):
+    # TODO: Generalize to other max pooling flavors
+    n_dim = len(kernel_size)
+
+    def increments_to_index(idx, reduction_idx):
+        bh = idx[-n_dim:]
+        return [
+            (bh[i] * stride[i]) + (reduction_idx[i] * dilation[i]) - padding[i]
+            for i in range(n_dim)
+        ]
+
+    return _pool_offsets_to_indices(
+        offsets, kernel_size, input_size, increments_to_index
+    )
 
 
 def _max_pool_with_indices(
@@ -5025,11 +5050,6 @@ def adaptive_max_pool2d(x, output_size):
     return rv, ri
 
 
-fallback_fractional_max_pool2d = fallback_handler(
-    aten.fractional_max_pool2d.default, add_to_fallback_set=False
-)
-
-
 def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
@@ -5048,80 +5068,85 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
         seq_i = ops.trunc((i_expr + sample) * alpha) - ops.trunc(sample * alpha)
         seq_i = ops.to_dtype(seq_i, torch.int64)
         mask = ops.lt(i_expr, out_sz_expr)
-        return ops.where(mask, seq_i, diff)
+        return ops.indirect_indexing(ops.where(mask, seq_i, diff), sympy.sympify(in_sz))
 
     return load
 
 
 @register_lowering(aten.fractional_max_pool2d)
 def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
+    return _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim=2)
+
+
+@register_lowering(aten.fractional_max_pool3d)
+def fractional_max_pool3d(x, kernel_size, output_size, random_samples):
+    return _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim=3)
+
+
+def _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim):
     x.realize_hint()
-    *batch, inp_h, inp_w = x.get_size()
-    kernel_h, kernel_w = kernel_size
-    h_out, w_out = output_size
+    batch, inp_dhw = x.shape[:-n_dim], x.shape[-n_dim:]
 
-    if kernel_h * kernel_w >= 25:
-        return fallback_fractional_max_pool2d(
-            x, kernel_size, output_size, random_samples
+    with config.patch(unroll_reductions_threshold=25):
+        dhw_index_fn = [
+            _fractional_pooling_offsets(
+                samples=random_samples,
+                in_sz=inp_dhw,
+                out_sz=output_size,
+                kernel_sz=kernel_size,
+                ndims=n_dim,
+                dim=d,
+            )
+            for d in range(n_dim)
+        ]
+
+        x_loader = x.make_loader()
+
+        def fn_inner(idx, reduction_idx):
+            prefix = idx[:-n_dim]
+            return x_loader([*prefix, *increments_to_index(idx, reduction_idx)])
+
+        def increments_to_index(idx, reduction_idx):
+            prefix = idx[:-n_dim]
+            bdhw = idx[-n_dim:]
+            return [
+                dhw_index_fn[d](prefix, bdhw[d]) + reduction_idx[d]
+                for d in range(n_dim)
+            ]
+
+        new_size = list(batch) + list(output_size)
+        dtype = x.get_dtype()
+        result = Reduction.create(
+            reduction_type="max",
+            input_node=x,
+            device=x.get_device(),
+            dst_dtype=dtype,
+            src_dtype=dtype,
+            inner_fn=fn_inner,
+            ranges=new_size,
+            reduction_ranges=kernel_size,
         )
+        offsets = Reduction.create(
+            reduction_type="argmax",
+            input_node=x,
+            device=x.get_device(),
+            dst_dtype=torch.int64,
+            src_dtype=dtype,
+            inner_fn=fn_inner,
+            ranges=new_size,
+            reduction_ranges=kernel_size,
+        )
+        if isinstance(result.data.data, Reduction):  # type: ignore[attr-defined]
+            # Only realize if reduction isn't unrolled
+            result.realize()
+        if isinstance(offsets.data.data, Reduction):  # type: ignore[attr-defined]
+            # Only realize if reduction isn't unrolled
+            offsets.realize()
 
-    gen_offsets_for_dim = functools.partial(
-        _fractional_pooling_offsets,
-        samples=random_samples,
-        in_sz=[inp_h, inp_w],
-        out_sz=output_size,
-        kernel_sz=kernel_size,
-        ndims=2,
-    )
-
-    h_index_fn = gen_offsets_for_dim(dim=0)
-    w_index_fn = gen_offsets_for_dim(dim=1)
-    x_loader = x.make_loader()
-
-    def fn(idx, return_index):
-        *prefix, bh, bw = idx
-
-        h_start_index = ops.indirect_indexing(h_index_fn(prefix, bh), inp_h)
-        w_start_index = ops.indirect_indexing(w_index_fn(prefix, bw), inp_w)
-
-        maxval = None
-        maxindex = None
-        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
-            val = x_loader([*prefix, h_start_index + ih, w_start_index + iw])
-            if return_index:
-                index = ops.index_expr(
-                    (h_start_index + ih) * inp_w + w_start_index + iw, torch.int64
-                )
-                if maxindex is None:
-                    maxindex = index
-                else:
-                    maxindex = ops.where(
-                        ops.or_(ops.gt(val, maxval), ops.isnan(val)), index, maxindex
-                    )
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = ops.maximum(val, maxval)
-        if return_index:
-            return maxindex
-        else:
-            return maxval
-
-    new_size = list(batch) + [h_out, w_out]
-    rv = Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=functools.partial(fn, return_index=False),
-        ranges=new_size,
-    )
-
-    ri = Pointwise.create(
-        device=x.get_device(),
-        dtype=torch.int64,
-        inner_fn=functools.partial(fn, return_index=True),
-        ranges=new_size,
-    )
-    return rv, ri
+        indices = _pool_offsets_to_indices(
+            offsets, kernel_size, x.shape, increments_to_index
+        )
+        return result, indices
 
 
 @register_lowering(aten.upsample_nearest2d_backward.default)

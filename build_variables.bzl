@@ -101,6 +101,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/collection.cpp",
     "torch/csrc/profiler/data_flow.cpp",
     "torch/csrc/profiler/kineto_shim.cpp",
+    "torch/csrc/mtia/profiler/MTIAMemoryProfiler.cpp",
     "torch/csrc/profiler/kineto_client_interface.cpp",
     "torch/csrc/profiler/orchestration/observer.cpp",
     "torch/csrc/profiler/orchestration/python_tracer.cpp",
@@ -496,6 +497,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Backoff.cpp",
     "torch/csrc/distributed/c10d/DMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/control_collectives/StoreCollectives.cpp",
+    "torch/csrc/distributed/c10d/FlightRecorder.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
@@ -589,7 +591,13 @@ libtorch_core_jit_sources = sorted(jit_sources_full)
 
 
 libtorch_nativert_sources = [
+    "torch/nativert/graph/Graph.cpp",
+    "torch/nativert/graph/GraphSignature.cpp",
     "torch/nativert/graph/TensorMeta.cpp",
+    "torch/nativert/executor/Placement.cpp",
+    "torch/nativert/executor/PlacementUtils.cpp",
+    "torch/nativert/executor/memory/FunctionSchema.cpp",
+    "torch/nativert/common/FileUtil.cpp",
 ]
 
 torch_mobile_tracer_sources = [
@@ -691,8 +699,9 @@ libtorch_cuda_distributed_base_sources = [
 libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/CudaDMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
-    "torch/csrc/distributed/c10d/FlightRecorder.cpp",
+    "torch/csrc/distributed/c10d/FlightRecorderCuda.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroupGlooCuda.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
     "torch/csrc/distributed/c10d/UCCTracing.cpp",
     "torch/csrc/distributed/c10d/UCCUtils.cpp",

@@ -1,5 +1,26 @@
 # mypy: allow-untyped-defs
 
+"""
+Built-in function and type variable tracking for TorchDynamo's symbolic execution.
+
+This module contains variable tracker classes for Python built-in functions, types,
+and operations during graph compilation. It handles symbolic execution of:
+
+- Built-in functions (len, getattr, isinstance, etc.)
+- Type constructors (int, float, str, list, dict, etc.)
+- Built-in operators and methods
+- Special Python constructs (super, hasattr, etc.)
+
+Key classes:
+- BuiltinVariable: Tracks built-in functions and handles their execution
+- TypeVariable: Manages type constructor calls and type checking
+- SuperVariable: Handles super() calls in class hierarchies
+
+These variable trackers ensure that built-in Python operations are correctly
+handled during symbolic execution, either by executing them directly when safe
+or by creating appropriate graph nodes when needed.
+"""
+
 import contextlib
 import functools
 import inspect
@@ -57,7 +78,7 @@ from ..utils import (
     str_methods,
     tensortype_to_dtype,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
@@ -437,6 +458,14 @@ class BuiltinVariable(VariableTracker):
             # drops the subclass type (e.g. SizeVariable) and returns TupleVariables.
             (
                 (SizeVariable, SizeVariable),
+                size_add_handler,
+            ),
+            (
+                (SizeVariable, TupleVariable),
+                size_add_handler,
+            ),
+            (
+                (TupleVariable, SizeVariable),
                 size_add_handler,
             ),
             (
@@ -901,6 +930,12 @@ class BuiltinVariable(VariableTracker):
                             *[x.as_python_constant() for x in args],
                         )
                     except Exception as exc:
+                        raise_observed_exception(
+                            type(exc),
+                            tx,
+                            args=list(map(ConstantVariable.create, exc.args)),
+                        )
+                    except AsPythonConstantNotImplementedError as exc:
                         unimplemented_v2(
                             gb_type="constant fold exception",
                             context=f"attempted to run function {fn} with arguments {args}",
@@ -922,13 +957,19 @@ class BuiltinVariable(VariableTracker):
                                     k: v.as_python_constant() for k, v in kwargs.items()
                                 },
                             )
-                        except Exception as exc:
+                        except AsPythonConstantNotImplementedError as exc:
                             unimplemented_v2(
                                 gb_type="constant fold exception",
-                                context=f"attempted to run function {fn} with arguments {args} {kwargs}",
+                                context=f"attempted to run function {fn} with arguments {args}",
                                 explanation="Encountered exception when attempting to constant fold.",
                                 hints=[*graph_break_hints.DYNAMO_BUG],
                                 from_exc=exc,
+                            )
+                        except Exception as exc:
+                            raise_observed_exception(
+                                type(exc),
+                                tx,
+                                args=list(map(ConstantVariable.create, exc.args)),
                             )
                         return VariableTracker.build(tx, res)
 
@@ -1193,20 +1234,17 @@ class BuiltinVariable(VariableTracker):
                 and args[1].has_unpack_var_sequence(tx)
                 and not kwargs
             ):
-                init_args = args[1].unpack_var_sequence(tx)
-                tuple_vt = variables.TupleVariable(
-                    init_args, mutation_type=ValueMutationNew()
-                )
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    return tuple_vt
+                    init_args = args[1].unpack_var_sequence(tx)
+                    return variables.TupleVariable(
+                        init_args, mutation_type=ValueMutationNew()
+                    )
 
-                result = tx.output.side_effects.track_new_user_defined_object(
+                return tx.output.side_effects.track_new_user_defined_object(
                     self,
                     args[0],
                     args[1:],
                 )
-                result.set_underlying_tuple_vt(tuple_vt)
-                return result
 
             if self.fn is list:
                 list_vt = ListVariable([], mutation_type=ValueMutationNew())
@@ -1530,7 +1568,12 @@ class BuiltinVariable(VariableTracker):
                     ):
                         tx.output.guard_on_key_order.add(obj.source)
 
-                    install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+                    if not isinstance(obj, variables.UnspecializedNNModuleVariable):
+                        # Prevent calling __len__ method for guards, the tracing
+                        # of __iter__ will insert the right guards later.
+                        install_guard(
+                            obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH)
+                        )
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),
@@ -1675,7 +1718,16 @@ class BuiltinVariable(VariableTracker):
         assert not kwargs
         if not args:
             return SetVariable([], mutation_type=ValueMutationNew())
-        assert len(args) == 1
+        if len(args) != 1:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"set() takes 1 positional argument but {len(args)} were given"
+                    )
+                ],
+            )
         arg = args[0]
         if isinstance(arg, variables.SetVariable):
             return arg.clone(mutation_type=ValueMutationNew())
@@ -1691,35 +1743,36 @@ class BuiltinVariable(VariableTracker):
                 if isinstance(out, SetVariable):
                     return out
                 return BuiltinVariable(set).call_set(tx, out)
-        unimplemented_v2(
-            gb_type="failed to construct builtin set()",
-            context=f"set(): {args} {kwargs}",
-            explanation="Unable to call builtin set() with provided arguments.",
-            hints=[
-                *graph_break_hints.USER_ERROR,
-                *graph_break_hints.SUPPORTABLE,
-            ],
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[ConstantVariable.create("failed to construct builtin set()")],
         )
 
     def call_frozenset(self, tx: "InstructionTranslator", *args, **kwargs):
         assert not kwargs
         if not args:
             return FrozensetVariable([])
-        assert len(args) == 1
+        if len(args) != 1:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"frozenset() takes 1 positional argument but {len(args)} were given"
+                    )
+                ],
+            )
         arg = args[0]
         if isinstance(arg, variables.FrozensetVariable):
             return FrozensetVariable([x.vt for x in arg.set_items])
         elif arg.has_unpack_var_sequence(tx):
             items = arg.unpack_var_sequence(tx)
             return FrozensetVariable(items)
-        unimplemented_v2(
-            gb_type="failed to construct builtin frozenset()",
-            context=f"frozenset(): {args} {kwargs}",
-            explanation="Unable to call builtin frozenset() with provided arguments.",
-            hints=[
-                *graph_break_hints.USER_ERROR,
-                *graph_break_hints.SUPPORTABLE,
-            ],
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[ConstantVariable.create("failed to construct builtin frozenset()")],
         )
 
     def call_zip(self, tx: "InstructionTranslator", *args, **kwargs):
@@ -2202,7 +2255,7 @@ class BuiltinVariable(VariableTracker):
         obj: VariableTracker,
         name_var: VariableTracker,
     ):
-        return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
+        return obj.call_method(tx, "__delattr__", [name_var], {})
 
     def call_type(self, tx: "InstructionTranslator", obj: VariableTracker):
         try:

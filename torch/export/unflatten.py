@@ -1583,7 +1583,7 @@ def _sink_params(
     # explicitly want duplicate modules to show up in the traversal.
     for name, submodule in module._modules.items():
         submod_id_to_inputs_removed = _sink_params(
-            cast(torch.nn.Module, submodule),
+            cast("torch.nn.Module", submodule),
             inputs_to_state,
             scope + [name],
             module_id_to_inputs_removed,
@@ -1599,7 +1599,7 @@ def _sink_params(
     assert isinstance(graph, torch.fx.Graph)
 
     inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))
-    the_last_input = inputs[-1]
+    the_last_input = None if len(inputs) == 0 else inputs[-1]
 
     # Also remove from call_module nodes
     call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)

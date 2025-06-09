@@ -820,6 +820,9 @@ static inline Vectorized<T> binary_op_as_fp32(
 }
 
 template <>
+struct is_vec_specialized_for<BFloat16> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<BFloat16> : public Vectorized16<BFloat16> {
  public:
   using Vectorized16::Vectorized16;
@@ -1574,6 +1577,9 @@ inline void transpose_mxn(
     int64_t ld_dst) {
   transpose_mxn<Half>(src, ld_src, dst, ld_dst, M, N);
 }
+
+template <>
+struct is_vec_specialized_for<Half> : std::bool_constant<true> {};
 
 template <>
 class Vectorized<Half> : public Vectorized16<Half> {
