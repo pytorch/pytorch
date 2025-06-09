@@ -70,8 +70,8 @@ using CaptureId_t = unsigned long long;
 using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
 
 struct C10_API DeviceAllocator : public c10::Allocator {
-  // DeviceAllocator();
-  // ~DeviceAllocator() override;
+  DeviceAllocator();
+  ~DeviceAllocator() override;
 
   // Returns true if the allocator has been properly initialized and is ready
   // for use
