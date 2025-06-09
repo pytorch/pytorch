@@ -29,7 +29,10 @@ __all__ = [
 # FB-internal note: you do NOT have to specify this explicitly specify this if
 # you run on MAST, we will automatically default this to
 # mast:MAST_JOB_NAME:MAST_JOB_VERSION.
-job_id: Optional[str] = Config(env_name_default="TORCH_COMPILE_JOB_ID", default=None)
+job_id: Optional[str] = Config(
+    env_name_default=["TORCH_COMPILE_JOB_ID", "TORCH_COMPILE_STICKY_PGO_KEY"],
+    default=None,
+)
 """
 Semantically, this should be an identifier that uniquely identifies, e.g., a
 training job.  You might have multiple attempts of the same job, e.g., if it was
@@ -74,14 +77,15 @@ This whitelist is dominant over all other flags dynamic=False, force_nn_module_p
 and force_parameter_static_shapes.
 """
 
-sticky_pgo_key: str = Config(
-    env_name_default="TORCH_COMPILE_STICKY_PGO_KEY", default=""
+unbacked_sources: str = Config(
+    env_name_default="TORCH_COMPILE_UNBACKED_SOURCES", default=""
 )
 """
-If you want to share PGO profiles across different jobs (and not just attempts), you can set
-this to a string that identifies the shared profile. This is useful if you want to share PGO profiles
-for models that are not identical, but are similar enough to share PGO profiles.
-"""
+Comma delimited list of sources that should be marked as unbacked. Primarily useful for large
+models with graph breaks where you need intermediate tensors marked unbacked.
 
+This whitelist is dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
+and force_parameter_static_shapes.
+"""
 
 install_config_module(sys.modules[__name__])
