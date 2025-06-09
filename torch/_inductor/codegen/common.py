@@ -1688,7 +1688,7 @@ class KernelArgs:
     # after you do a call into this kernel, which buffers actually contain
     # updated data?  Modeled off of python_argdefs.
     def live_output_buffers(self) -> OrderedSet[str]:
-        live_outs = OrderedSet[str]()
+        live_outs: OrderedSet[str] = OrderedSet()
         for inplaced in unique(self.inplace_buffers.values()):
             if isinstance(inplaced, RemovedArg):
                 continue
@@ -1948,16 +1948,16 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.num_reduction = 0
 
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
-        self.must_keep_buffers = OrderedSet[str]()
-        self.store_buffer_names = OrderedSet[str]()
+        self.must_keep_buffers: OrderedSet[str] = OrderedSet()
+        self.store_buffer_names: OrderedSet[str] = OrderedSet()
         self._load_mask: Optional[str] = None
         self._load_other: Union[None, int, float] = None
         # OrderedSet in set_current_node
         self.current_node: Optional[SchedulerNode] = None
         self.node_to_bounds: Optional[dict[torch.fx.Node, ValueRanges[Any]]] = None
 
-        self.removed_buffers = OrderedSet[str]()
-        self.inplaced_to_remove = OrderedSet[str]()
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
+        self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
 
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
@@ -2144,7 +2144,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             for buf in self.store_buffer_names
             if buf in scheduler.name_to_buf
         )
-        names_to_remove = OrderedSet[str]()
+        names_to_remove: OrderedSet[str] = OrderedSet()
         for name in self.store_buffer_names:
             if (
                 name not in self.must_keep_buffers
