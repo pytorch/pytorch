@@ -1,5 +1,6 @@
-.. role:: hidden
-    :class: hidden-section
+```{role} hidden
+:class: hidden-section
+```
 
 # torch.special
 
