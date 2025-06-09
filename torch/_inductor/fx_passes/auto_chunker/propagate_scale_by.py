@@ -50,7 +50,7 @@ def propagate_scale_by(nodes_with_chunking_meta):
             print("Propagate scale_by:")
             format_node_with_chunking_meta(node, True)
 
-        assert all(arg_meta is not None for arg_meta in arg_metas)
+        assert all(arg_meta is not None for arg_meta in arg_metas), node.format_node()
 
         # None of the input has scale_by set
         if all(arg_meta.scale_by is None for arg_meta in arg_metas):

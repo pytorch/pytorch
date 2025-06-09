@@ -50,6 +50,9 @@ def chunk(gm: GraphModule) -> GraphModule:
     if amplifier_node is None:
         raise CantChunk("Skip chunking due to no amplifier node found")
 
+    if not all(isinstance(s, int) for s in amplifier_node.meta["val"].shape):
+        raise CantChunk("Can ot chunk due to dynamic shape")
+
     propagate(amplifier_node)
     if not tangent_has_chunking_meta(gm):
         raise CantChunk(

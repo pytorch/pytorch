@@ -20,7 +20,7 @@ class AutoChunkerTest(TestCase):
         super().setUp()
         metrics.reset()
 
-    def common_matmul_test(self, has_softmax, use_bias=False):
+    def common_matmul_test(self, has_softmax, use_bias=False, dynamic_shape=None):
         M, K, N = 1024, 16, 1024
 
         if USE_LARGE_INPUT:
@@ -55,7 +55,7 @@ class AutoChunkerTest(TestCase):
         bias.grad = None
 
         torch.cuda.reset_peak_memory_stats()
-        opt_f = torch.compile(f)
+        opt_f = torch.compile(f, dynamic=dynamic_shape)
         actual = (
             opt_f(_input, weight, bias),
             _input.grad,
@@ -71,12 +71,12 @@ class AutoChunkerTest(TestCase):
         # When the model is too trivial without softmax, no chunking happens because chunking
         # metadata propagation can not reach the backward.
         # Check this joint graph for example: https://gist.github.com/shunting314/5b684d7179680e337d178dcc77ff1b91
-        self.assertEqual(metrics.num_auto_chunking, has_softmax)
+        self.assertEqual(metrics.num_auto_chunking, has_softmax and not dynamic_shape)
 
         # Only assert peak memory saving for large input. For small input, the saving can
         # be largely distorted by other memory allocation such as the tensor used to clear L2
         # cache by triton perf benchmarking API.
-        if USE_LARGE_INPUT and has_softmax:
+        if USE_LARGE_INPUT and metrics.num_auto_chunking > 0:
             expected_bound = M * N * dtype.itemsize
             self.assertTrue(
                 peak_memory < expected_bound,
@@ -95,6 +95,9 @@ class AutoChunkerTest(TestCase):
     @config.patch("AutoChunker.num_chunk", config.AutoChunker.num_chunk or 4)
     def test_matmul_softmax(self):
         self.common_matmul_test(has_softmax=True)
+
+    def test_matmul_softmax_dynamic_shape(self):
+        self.common_matmul_test(has_softmax=True, dynamic_shape=True)
 
     @config.patch("AutoChunker.num_chunk", 4)
     def test_linear_softmax(self):
