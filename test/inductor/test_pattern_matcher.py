@@ -794,8 +794,12 @@ class TestPatternMatcher(TestCase):
             return x
 
         x = torch.randn(15, 7, device=GPU_TYPE)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
         out = torch.compile(f, dynamic=True)(x)
         self.assertTrue(torch.equal(x, out))
+
+        self.assertEqual(counters["inductor"]["removed_pointless_view_pair"], 1)
 
     def test_pointless_permute_pair(self):
         def f(x):
