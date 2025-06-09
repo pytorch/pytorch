@@ -84,6 +84,7 @@ from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
+    DictKeysVariable,
     DictViewVariable,
     FrozensetVariable,
     is_hashable,
@@ -104,7 +105,11 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .user_defined import (
+    UserDefinedDictVariable,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -2040,7 +2045,6 @@ class BuiltinVariable(VariableTracker):
                     "assertNotWarns",
                     "assertWarnsRegex",
                     "assertDictEqual",
-                    "assertSequenceEqual",
                     "assertWarns",
                 )
             ):
@@ -2480,12 +2484,40 @@ class BuiltinVariable(VariableTracker):
         if hasattr(a, "set_items") and hasattr(b, "set_items"):
             return SetVariable(list(a.set_items | b.set_items))
         # This call looks like `{"one": torch.ones(1)} | {"two": torch.ones(2)}`.
-        if isinstance(a, ConstDictVariable):
+        if isinstance(a, (ConstDictVariable, UserDefinedDictVariable)):
             return a.call_method(tx, "__or__", args=[b], kwargs={})
         # None no-ops this handler and lets the driving function proceed
         return None
 
-    call_ior = call_or_
+    def call_ior(self, tx: "InstructionTranslator", a, b):
+        # Rely on constant_handler
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            return None
+
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
+            return SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", operator.ior, *proxy_args_kwargs([a, b], {})
+                ),
+                sym_num=None,
+            )
+
+        # This call looks like `{"one": torch.ones(1)} |= {"two": torch.ones(2)}`.
+        if isinstance(
+            a,
+            (
+                ConstDictVariable,
+                DictKeysVariable,
+                SetVariable,
+            ),
+        ):
+            return a.call_method(tx, "__ior__", [b], {})
+
+        # None no-ops this handler and lets the driving function proceed
+        return None
 
     def call_not_(self, tx: "InstructionTranslator", a):
         if isinstance(a, SymNodeVariable):
