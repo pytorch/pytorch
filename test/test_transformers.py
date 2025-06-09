@@ -3582,13 +3582,10 @@ class TestSDPACudaOnly(NNTestCase):
         "Does not support SDPA or pre-SM80 hardware",
     )
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
-    @parametrize("batch_size", [1])
-    #@parametrize("seq_len_q", [1])
-    #@parametrize("seq_len_k", [1])
-    #@parametrize("head_dim", [16])
-    @parametrize("seq_len_q", [8])
-    @parametrize("seq_len_k", [8])
-    @parametrize("head_dim", [8])
+    @parametrize("batch_size", [1, 8])
+    @parametrize("seq_len_q", [1, 143])
+    @parametrize("seq_len_k", [1])
+    @parametrize("head_dim", [16])
     @parametrize("is_causal", [False])
     @parametrize("dropout_p", [0.22])
     @parametrize("dtype", [torch.bfloat16])
@@ -3629,12 +3626,12 @@ class TestSDPACudaOnly(NNTestCase):
         value = torch.rand(batch_size, num_heads_kv, seq_len_k, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
         
-        ck_dropout = _get_ck_dropout_mask(batch_size, num_heads_q, seq_len_q, seq_len_k, dropout_p, device)
-        print("q size: ", query.size())
-        print("k size: ", key.size())
-        print("v size: ", value.size())
-        print("OUTERMOST ck_dropout: ")
-        print(ck_dropout)
+        #ck_dropout = _get_ck_dropout_mask(batch_size, num_heads_q, seq_len_q, seq_len_k, dropout_p, device)
+        #print("q size: ", query.size())
+        #print("k size: ", key.size())
+        #print("v size: ", value.size())
+        #print("OUTERMOST ck_dropout: ")
+        #print(ck_dropout)
 
         higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
         query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
@@ -3675,17 +3672,17 @@ class TestSDPACudaOnly(NNTestCase):
             softmax_mask = self.convert_flash_attn_S_to_softmax(
                 dbug_mask, seq_len_q, seq_len_k, query_padding_mask, key_padding_mask,
                 causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
-            print("MATH RETURNED DROPOUT_MASK")
-            print(softmax_mask)
+            #print("MATH RETURNED DROPOUT_MASK")
+            #print(softmax_mask)
 
             #dropout_mask = softmax_mask >= 0
             #dropout_mask = ck_dropout >= 0
 
             dropout_mask = (softmax_mask <=int((1.0 - dropout_p) * 255.0)).to(torch.float32)
             #dropout_mask = dropout_mask.reshape(batch_size, seq_len_q, seq_len_k)
-            print("PYTHON SIDE DROPOUT_MASK")
-            print("dropout_mask size: ", dropout_mask.size())
-            print(dropout_mask)
+            #print("PYTHON SIDE DROPOUT_MASK")
+            #print("dropout_mask size: ", dropout_mask.size())
+            #print(dropout_mask)
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal,
@@ -3727,12 +3724,12 @@ class TestSDPACudaOnly(NNTestCase):
             if dtype == torch.float32:
                 fudge_factors['grad_key'] = 90.0
         torch.set_printoptions(profile="full")
-        print("REFERENCE OUT")
-        print(out_ref)
-        print("REFERENCE LP OUT" )
-        print(out_lp_ref)
-        print("ACTUAL CK OUT")
-        print(out)
+        #print("REFERENCE OUT")
+        #print(out_ref)
+        #print("REFERENCE LP OUT" )
+        #print(out_lp_ref)
+        #print("ACTUAL CK OUT")
+        #print(out)
         """
         print("bwd REFERENCE OUT")
         print(grads_ref)

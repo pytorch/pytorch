@@ -261,10 +261,12 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     if (is_causal) { window_size_right = 0; }
 
     bool is_dropout = p_dropout > 0.0;
+    /*
     std::cout << "bwd Seed device  :" << philox_seed.device() << std::endl;
     std::cout << "bwd Offset device:" << philox_offset.device() << std::endl;
     std::cout << "bwd seed dtype   :" << philox_seed.dtype() << std::endl;
     std::cout << "bwd offset dtype :" << philox_offset.dtype() << std::endl;
+    */
     auto stream = at::cuda::getCurrentHIPStream().stream();
 
     auto q_dtype = q.dtype();
@@ -419,6 +421,7 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     }
     
     //auto drop_seed_offset = std::make_pair(&drop_seed, &drop_offset);
+    /*
     std::cout << "drop_seed address  : " << static_cast<const void*>(drop_seed_offset.first) << std::endl;
     std::cout << "drop_ofst address  : " << static_cast<const void*>(drop_seed_offset.second) << std::endl;
     std::cout << "philox_seed address: " << static_cast<const void*>(philox_seed.data_ptr()) << std::endl;
@@ -427,6 +430,7 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     std::cout << "PT_MHA_BWD_CK PHILOX_OFST device: " << philox_offset.device() << std::endl;
     std::cout << "PT_MHA_BWD_CK PHILOX_SEED dtype : " << philox_seed.dtype() << std::endl;
     std::cout << "PT_MHA_BWD_CK PHILOX_OFST dtype : " << philox_offset.dtype() << std::endl;
+    */
 // ===========================================================================
 
     if (seqlen_q > 0) {
