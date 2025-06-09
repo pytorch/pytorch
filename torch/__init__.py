@@ -155,6 +155,21 @@ assert __all__ == sorted(__all__)
 # Load the extension module
 ################################################################################
 
+# If PyTorch was built against the ROCm runtime wheels, then there will be
+# a _rocm_init module and it will define an initialize() function which can
+# prepare ROCm for use. See general documentation on ROCm runtime wheels:
+# https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md
+# Since this module is only ever added to the wheel if built for such a
+# deployment, it is always safe to attempt.
+try:
+    from . import _rocm_init  # type: ignore[attr-defined]
+except ImportError:
+    pass
+else:
+    _rocm_init.initialize()
+    del _rocm_init
+
+
 if sys.platform == "win32":
 
     def _load_dll_libraries() -> None:
@@ -1144,14 +1159,32 @@ def get_default_device() -> "torch.device":
     r"""Gets the default ``torch.Tensor`` to be allocated on ``device``"""
     global _GLOBAL_DEVICE_CONTEXT
 
-    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
-        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
+    from torch.overrides import _get_current_function_mode_stack
+    from torch.utils._device import DeviceContext
+
+    def _get_device_with_index(device):
         if device.index is not None:
             return device
         else:
             # TODO: Call like get_device_index() method corresponding to
             # each device type
             return torch.tensor([]).device
+
+    # Get device from any active DeviceContext.
+    device_mode = next(
+        filter(
+            lambda mode: isinstance(mode, DeviceContext),
+            reversed(_get_current_function_mode_stack()),
+        ),
+        None,
+    )
+    if device_mode:
+        device = device_mode.device
+        return _get_device_with_index(device)
+
+    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
+        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
+        return _get_device_with_index(device)
     else:
         return torch.device("cpu")
 

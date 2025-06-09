@@ -648,7 +648,7 @@ class TestAOTAutograd(AOTTestCase):
             for p in model.parameters():
                 p.grad.data.zero_()
 
-            model = torch.compile(model)
+            model = torch.compile(model, fullgraph=True, backend="aot_eager")
             with torch.amp.autocast(device_type=device, enabled=True):
                 y = model(x)
             loss = (y * 16384).sum()
