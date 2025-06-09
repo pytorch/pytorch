@@ -406,27 +406,21 @@ compute_flex_attention = r"""
         desc_q = triton_helpers.make_tensor_descriptor(
             base_ptr=Q,
             global_shape=[Q_LEN*HQ*ZQ, QK_HEAD_DIM],
-            strides=[QK_HEAD_DIM, 1],
             block_shape=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
             desc_ptr=desc_q_ptr,
-            element_ty=Q.dtype.element_ty,
         )
         desc_v = triton_helpers.make_tensor_descriptor(
             base_ptr=V,
             global_shape=[KV_LEN*ZKV*HQ, V_HEAD_DIM],
-            strides=[V_HEAD_DIM, 1],
             block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
             desc_ptr=desc_v_ptr,
-            element_ty=K.dtype.element_ty,
         )
 
         desc_k = triton_helpers.make_tensor_descriptor(
             base_ptr=K,
             global_shape=[KV_LEN*ZKV*HQ, QK_HEAD_DIM],
-            strides=[QK_HEAD_DIM, 1],
             block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
             desc_ptr=desc_k_ptr,
-            element_ty=K.dtype.element_ty,
         )
 
 
