@@ -244,7 +244,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         id_tuple = get_id_tuple()
         x = torch.randn(3, device=device)
         ret = id_tuple(x)
-        # Check if ret is a tuple and has exactly one element
+        # Check if ret is a tuple and has exactly one and the same element
         self.assertIsInstance(ret, tuple)
         self.assertEqual(len(ret), 1)
         self.assertEqual(x, ret[0])
