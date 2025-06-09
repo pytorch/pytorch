@@ -40,7 +40,7 @@ torch.onnx.export(
 )
 ```
 
-Next sections introduces the two versions of the exporter.
+Next sections introduce the two versions of the exporter.
 
 ## TorchDynamo-based ONNX Exporter
 
