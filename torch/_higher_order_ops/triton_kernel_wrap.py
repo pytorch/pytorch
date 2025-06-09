@@ -621,7 +621,7 @@ def ttir_to_functions(
 
 class MemoizeWithCycleCheck:
     fn: Callable[..., Any]
-    cache: dict[tuple[str, int], Any]
+    cache: dict[tuple[Any], Any]
 
     def __init__(self, fn: Callable[..., Any]) -> None:
         self.fn = fn
@@ -631,9 +631,9 @@ class MemoizeWithCycleCheck:
         self,
         functions: dict[str, dict[Intermediate, list[Op]]],
         fn_name: str,
-        *args: Sequence[Any],
+        *args: Any,
     ) -> list[bool]:
-        key = (fn_name, *args)
+        key: tuple[Any, ...] = (fn_name, *args)
         if key not in self.cache:
             self.cache[key] = None
             self.cache[key] = self.fn(functions, fn_name, *args)
@@ -689,7 +689,6 @@ def get_tma_stores(
                 result.add(op.args[0])
 
     for val in list(result):
-        print(f"   !! {val}")
         if val in ops:
             if not isinstance(val, Intermediate):
                 continue
@@ -754,9 +753,7 @@ def analyze_kernel_mutations(
                 # analysis we wait to find the corresponding experimental_tensormap_create (if it
                 # exists), at which point we will mark the global_ptr as mutated (as done below).
                 assert len(op.args) >= 2
-                print(f"  on device TMA: looking for {op.args[0]} in {tma_stores}")
                 if op.args[0] in tma_stores:
-                    print(f"   found it, add {op.args[1]} as mutated")
                     stack.append(op.args[1])
 
             if op.name == "tt.call":
