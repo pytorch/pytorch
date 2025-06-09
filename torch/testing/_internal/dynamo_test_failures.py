@@ -98,7 +98,9 @@ else:
     inductor_expected_failures = set(os.listdir(inductor_failures_directory))
     inductor_skips = set(os.listdir(inductor_skips_directory))
 
-    compiled_autograd_skips_directory = os.path.join(test_dir, "compiled_autograd_skips")
+    compiled_autograd_skips_directory = os.path.join(
+        test_dir, "compiled_autograd_skips"
+    )
     compiled_autograd_skips = set(os.listdir(compiled_autograd_skips_directory))
 
 # TODO: due to case sensitivity problems, for now list these files by hand
