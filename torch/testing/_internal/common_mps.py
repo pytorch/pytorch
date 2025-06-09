@@ -497,9 +497,6 @@ if torch.backends.mps.is_available():
             # MPS: input sizes must be divisible by output sizes
             "nn.functional.adaptive_avg_pool1d": None,
             "nn.functional.adaptive_avg_pool2d": None,
-            # Unsupported dtypes
-            "ones_like": None,
-            "zeros_like": None,
             # Convolution for integral types is not supported on MPS
             "nn.functional.conv1d": [torch.int64],
             "nn.functional.conv2d": [torch.int64],
