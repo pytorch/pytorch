@@ -534,12 +534,14 @@ uncoalesced tensors, and some on coalesced tensors.
 For instance, addition of sparse COO tensors is implemented by
 simply concatenating the indices and values tensors:
 
+```{code-block} python
   >>> a = torch.sparse_coo_tensor([[1, 1]], [5, 6], (2,))
   >>> b = torch.sparse_coo_tensor([[0, 0]], [7, 8], (2,))
   >>> a + b
   tensor(indices=tensor([[0, 0, 1, 1]]),
           values=tensor([7, 8, 5, 6]),
           size=(2,), nnz=4, layout=torch.sparse_coo)
+```
 
 If you repeatedly perform an operation that can produce duplicate
 entries (e.g., {func}`torch.Tensor.add`), you should occasionally
