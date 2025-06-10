@@ -100,6 +100,13 @@ on:
         type: boolean
         default: false
 
+      allow-reuse-old-whl:
+        description: |
+          Unused, but kept for backwards compatibility just in case.  Remove after two weeks
+        required: false
+        type: boolean
+        default: false
+
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
