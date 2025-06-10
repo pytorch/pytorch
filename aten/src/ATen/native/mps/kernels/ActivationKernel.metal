@@ -114,15 +114,18 @@ struct leaky_relu_functor {
   template <typename T>
   inline T operator()(const T x, const T negative_slope) {
     T zero(0);
-    return x > zero ? x : x * negative_slope;
+    return x >= zero ? x : x * negative_slope;
   }
 };
 
 struct leaky_relu_backward_functor {
   template <typename T>
-  inline T operator()(const T grad_output, const T self, const T negative_slope) {
+  inline T operator()(
+      const T grad_output,
+      const T self,
+      const T negative_slope) {
     T zero(0);
-    return self > zero ? grad_output : grad_output * negative_slope;
+    return self >= zero ? grad_output : grad_output * negative_slope;
   }
 };
 

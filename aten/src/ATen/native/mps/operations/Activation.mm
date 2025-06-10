@@ -119,7 +119,6 @@ Tensor& relu_mps_(Tensor& self) {
   return output;
 }
 
-
 TORCH_IMPL_FUNC(log_softmax_mps_out)
 (const Tensor& self, const int64_t dim, const bool half_to_float, const Tensor& out) {
   using namespace mps;
