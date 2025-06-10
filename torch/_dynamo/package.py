@@ -2,7 +2,7 @@
 This module provides the infrastructure for creating and managing compile package
 for torch.compile. We mainly have two abstractions here:
   - CompilePackage: Overarching data structure for store and lookup a list of compiled codes.
-  - CodeCacheArtifact: Data structure for a single code being compiled by torch.compile.
+  - CodeCacheEntry: Data structure for a single code being compiled by torch.compile.
 The caching behavior is always under user control explicitly so that a stronger guarantee can
 be provided about cache hit for a specific compiled model. Users can load the compile package
 from a different process or host.
@@ -51,6 +51,7 @@ class SerializedCode:
     co_freevars: tuple[str, ...]
     co_qualname: Optional[str] = None
     co_exceptiontable: Optional[bytes] = None
+    co_lnotab: Optional[str] = None
 
     @classmethod
     @functools.cache
@@ -168,6 +169,10 @@ class _DynamoCacheEntry:
                 merged_codes[py_code] = code
         return _DynamoCacheEntry(codes=list(merged_codes.values()))
 
+    @property
+    def backend_ids(self) -> set[_BackendId]:
+        return {backend_id for code in self.codes for backend_id in code.backend_ids}
+
 
 class _CompilePackage:
     """
@@ -177,9 +182,8 @@ class _CompilePackage:
     1. `CompilePackage.__init__()` which optionally takes previously serialized dynamo states.
         a. when `dynamo` argument is None, it will contruct a brand new CompilePackage object.
         b. when `dynamo` argument is not None, it will load a pre-compiled dynamo state.
-    2. `package.save(storage_context)` which dumps the dynamo and backend states to a given
-       "storage_context" (can be disk, memory or remote storage).
-    3. `package.install(storage_context)` which will handle all the side-effectful global scope
+    2. `package.save()` which dumps the dynamo and backend states to a DynamoCacheEntry object.
+    3. `package.install(backends) which will handle all the side-effectful global scope
         updates with compiled functions and resume functions.
     """
 
@@ -205,6 +209,10 @@ class _CompilePackage:
             if dynamo.python_version != platform.python_version():
                 raise RuntimeError(
                     f"Compile package was created with a different Python version: {dynamo.python_version}"
+                )
+            if dynamo.torch_version != torch.__version__:
+                raise RuntimeError(
+                    f"Compile package was created with a different PyTorch version: {dynamo.torch_version}"
                 )
 
             main, *codes = dynamo.codes
@@ -242,14 +250,6 @@ class _CompilePackage:
     @property
     def cached_backends(self):
         return self._cached_backends
-
-    @property
-    def backend_ids(self) -> set[_BackendId]:
-        return {
-            backend_id
-            for code in self._codes.values()
-            for backend_id in code.backend_ids
-        }
 
     @functools.cached_property
     def source_id(self) -> str:
@@ -320,7 +320,7 @@ class _CompilePackage:
 
         _reset_precompile_entries(self._innermost_fn.__code__)
 
-    def install(self, storage_context) -> None:
+    def install(self, backends: dict[_BackendId, Any]) -> None:
         """
         Sync the package states to the compiled function. This includes the following actions:
           1. Clean up the previously installed states.
@@ -328,8 +328,6 @@ class _CompilePackage:
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
-
-        from .eval_frame import innermost_fn
 
         self.uninstall()
 
@@ -343,14 +341,11 @@ class _CompilePackage:
                 fn = types.FunctionType(code, module.__dict__, function_name)
                 self._install_global(module, function_name, fn)
             for backend_id in entry.backend_ids:
-                backend = storage_context.read_backend(backend_id)
-                torch._dynamo.eval_frame.skip_code(
-                    innermost_fn(backend).__code__, recursive=True
-                )
+                backend = backends[backend_id]
                 self._install_global(
                     module,
                     backend_id,
-                    backend,
+                    torch._dynamo.disable(backend),
                 )
 
         for code, entry in self._codes.items():
@@ -369,10 +364,6 @@ class _CompilePackage:
                     SerializedCode.to_code_object(guarded_code.dynamo_code),
                 )
 
-    def save(self, storage_context) -> None:
+    def save(self) -> _DynamoCacheEntry:
         self.validate()
-        for backend_id in self.backend_ids:
-            storage_context.write_backend(backend_id)
-        storage_context.write_dynamo(
-            _DynamoCacheEntry(codes=list(self._codes.values()))
-        )
+        return _DynamoCacheEntry(codes=list(self._codes.values()))
