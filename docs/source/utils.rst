@@ -3,6 +3,8 @@ torch.utils
 .. automodule:: torch.utils
 .. currentmodule:: torch.utils
 
+The `torch.utils` module provides essential utility functions and classes that can be utilized for several aplications such as
+data loading, model monitoring and memory extension.
 .. autosummary::
     :toctree: generated
     :nosignatures:
