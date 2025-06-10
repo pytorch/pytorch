@@ -1,7 +1,6 @@
-#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
-
 #include <c10/cuda/CUDAGuard.h>
 
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
