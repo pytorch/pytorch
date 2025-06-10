@@ -57,6 +57,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
+DDP_RANK_DEVICES = ["cuda", "xpu"]
 
 
 class TestSkip(NamedTuple):
@@ -110,6 +111,10 @@ class DistTestCases:
         backend_feature["hpu"] = {"hccl"}
     if TEST_XPU:
         backend_feature["xpu"] = {"xccl"}
+
+
+def requires_ddp_rank(device):
+    return device in DDP_RANK_DEVICES
 
 
 def skip_if_no_gpu(func):
@@ -380,9 +385,9 @@ def requires_accelerator_dist_backend(backends=None):
 
     backend_available = any(
         {
-        "nccl": c10d.is_nccl_available,
-        "xccl": c10d.is_xccl_available,
-        "hccl": lambda: TEST_HPU,
+            "nccl": c10d.is_nccl_available,
+            "xccl": c10d.is_xccl_available,
+            "hccl": lambda: TEST_HPU,
         }.get(backend, lambda: False)()
         for backend in backends
     )
@@ -1525,7 +1530,7 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
 
     @property
     def world_size(self) -> int:
-        return torch.cuda.device_count()
+        return torch.accelerator.device_count()
 
     @classmethod
     def _run(

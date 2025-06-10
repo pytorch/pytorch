@@ -19,7 +19,6 @@ import torch.distributed as dist
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
-from torch._inductor.utils import is_gpu
 from torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook import (
     hook_with_zero_step,
     hook_with_zero_step_interleaved,
@@ -30,7 +29,17 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW, SGD
-from torch.testing._internal import common_distributed
+from torch.testing._internal.common_distributed import (
+    DistributedTestBase,
+    logger,
+    requires_accelerator_dist_backend,
+    requires_ddp_rank,
+    requires_gloo,
+    skip_if_lt_x_gpu,
+    skip_if_no_gpu,
+    skip_if_rocm_multiprocess,
+    skip_if_win32,
+)
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -51,7 +60,7 @@ except ImportError:
 device_type = str(get_devtype())
 
 
-class TestZeroRedundancyOptimizer(common_distributed.DistributedTestBase):
+class TestZeroRedundancyOptimizer(DistributedTestBase):
     @property
     def device(self):
         return device_type
@@ -321,7 +330,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
     @property
     def context(self):
-        if is_gpu(self.device):
+        if requires_ddp_rank(self.device):
             return torch.get_device_module(self.device).device(self.rank)
         else:
             return nullcontext()
@@ -349,8 +358,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 msg=f"Model buffers differ:\n{b_a} {b_b}\n" + message,
             )
 
-    @common_distributed.skip_if_no_gpu
-    @common_distributed.skip_if_rocm_multiprocess
+    @skip_if_no_gpu
+    @skip_if_rocm_multiprocess
     def test_step(self):
         """Check that ZeroRedundancyOptimizer properly exposes the ``step()``
         interface."""
@@ -389,8 +398,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             self.assertEqual(m.weight, m_zero.weight)
             self.assertEqual(m.bias, m_zero.bias)
 
-    @common_distributed.skip_if_no_gpu
-    @common_distributed.skip_if_rocm_multiprocess
+    @skip_if_no_gpu
+    @skip_if_rocm_multiprocess
     def test_step_with_closure(self):
         """Check that ZeroRedundancyOptimizer properly exposes the
         ``step(closure)`` interface."""
@@ -439,7 +448,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 self.assertEqual(m.weight, torch.tensor([[1.1]]))
                 self.assertEqual(m.bias, torch.tensor([2.1]))
 
-    @common_distributed.skip_if_no_gpu
+    @skip_if_no_gpu
     def test_lr_scheduler(self):
         """Check that a normal PyTorch ``lr_scheduler`` is usable with
         ZeroRedundancyOptimizer."""
@@ -541,7 +550,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         all_trainable()
         some_trainable()
 
-    @common_distributed.skip_if_no_gpu
+    @skip_if_no_gpu
     def test_multiple_param_groups(self):
         """
         Check parity between constructing ZeRO with multiple parameter groups
@@ -608,8 +617,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 torch.testing.assert_close(layer1.bias, layer2.bias)
                 torch.testing.assert_close(layer1.bias, layer3.bias)
 
-    @common_distributed.skip_if_no_gpu
-    @common_distributed.skip_if_rocm_multiprocess
+    @skip_if_no_gpu
+    @skip_if_rocm_multiprocess
     def test_collect_shards(self):
         """Check the state consolidation mechanism and the state dict exposed
         by ZeroRedundancyOptimizer."""
@@ -671,7 +680,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         # trivial
         MIN_WORLD_SIZE = 4
         if self.world_size < MIN_WORLD_SIZE:
-            common_distributed.logger.info(
+            logger.info(
                 "Skipping `test_nondefault_process_group()` since world size "
                 "of %s is less than %s",
                 self.world_size,
@@ -761,7 +770,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         )
         check(optimizer)
 
-    @common_distributed.skip_if_no_gpu
+    @skip_if_no_gpu
     @parametrize(
         "optimizer_class_str",
         ["Adam", "AdamW", "SGD"],
@@ -817,7 +826,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             )
             sharded_ddp_model = DDP(
                 module=model,
-                device_ids=[self.rank] if is_gpu(self.device) else None,
+                device_ids=[self.rank] if requires_ddp_rank(self.device) else None,
                 broadcast_buffers=True,
                 find_unused_parameters=True,
             )
@@ -829,7 +838,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             )
             ddp_model = DDP(
                 local_model,
-                device_ids=[self.rank] if is_gpu(self.device) else None,
+                device_ids=[self.rank] if requires_ddp_rank(self.device) else None,
                 broadcast_buffers=True,
                 find_unused_parameters=True,
             )
@@ -937,7 +946,9 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         # DDP ensures correct gradients in data parallel training, so DDP with
         # local optimizers on uneven inputs should be equivalent to ZeRO on
         # uneven inputs with gradients being manually set
-        ddp_model = DDP(model, device_ids=[rank]) if is_gpu(device) else DDP(model)
+        ddp_model = (
+            DDP(model, device_ids=[rank]) if requires_ddp_rank(device) else DDP(model)
+        )
         local_optim = torch.optim.Adam(ddp_model.parameters(), lr=LR)
         zero_model = copy.deepcopy(model)
         zero_model.to(device)
@@ -1060,14 +1071,14 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                         )
                     iter += 1
 
-    @common_distributed.requires_accelerator_dist_backend()
-    @common_distributed.skip_if_no_gpu
+    @requires_accelerator_dist_backend()
+    @skip_if_no_gpu
     def test_zero_join_gpu(self):
         """Check that the ZeRO join hook allows training with uneven inputs
         on GPU."""
         self._test_zero_join(self.device)
 
-    @common_distributed.requires_gloo()
+    @requires_gloo()
     def test_zero_join_cpu(self):
         """Check that the ZeRO join hook allows training with uneven inputs
         on CPU."""
@@ -1172,7 +1183,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     ), "Models differ after a step"
 
     @skipIfHpu
-    @common_distributed.skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(4)
     @parametrize(
         "parameters_as_bucket_view",
         [False, True],
@@ -1231,7 +1242,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 else torch.use_deterministic_algorithms(True)
             )
             with det_ctx:
-                device_ids = [rank] if is_gpu(device) else None
+                device_ids = [rank] if requires_ddp_rank(device) else None
                 # Set up the DDP model overlapping with ZeRO
                 ddp_model_overlap = DDP(
                     copy.deepcopy(model).to(device),
@@ -1328,10 +1339,10 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
     # NOTE: The test is skipped if using Windows since functional optimizers
     # are not currently supported.
-    @common_distributed.skip_if_win32()
-    @common_distributed.requires_accelerator_dist_backend()
-    @common_distributed.skip_if_no_gpu
-    @common_distributed.skip_if_rocm_multiprocess
+    @skip_if_win32()
+    @requires_accelerator_dist_backend()
+    @skip_if_no_gpu
+    @skip_if_rocm_multiprocess
     @parametrize(
         "use_gpu",
         [True],
