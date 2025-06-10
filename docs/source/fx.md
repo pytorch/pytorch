@@ -727,7 +727,7 @@ execution is not real data, but rather symbols ({class}`Proxy` in FX parlance).
 Although symbolic tracing works for most neural net code, it has some
 limitations.
 
-#### Dynamic Control Flow
+### Dynamic Control Flow
 
 The main limitation of symbolic tracing is it does not currently support
 *dynamic control flow*. That is, loops or `if` statements where the
