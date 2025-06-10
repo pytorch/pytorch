@@ -208,7 +208,7 @@ struct TORCH_API AccumulateGrad : public Node {
       } else {
         if (new_grad.is_sparse() || new_grad.is_sparse_csr() ||
             new_grad.is_nested()) {
-          // Scenario 1.3: Cloning sparse/nested new_grad
+          // Case 1.3: Cloning sparse/nested new_grad
           update_grad(new_grad.clone());
         } else {
           if (new_grad.is_mkldnn()) {
