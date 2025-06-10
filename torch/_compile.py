@@ -45,9 +45,7 @@ def _disable_dynamo(
             if disable_fn is None:
                 import torch._dynamo
 
-                # We can safely turn off functools.wraps here because the inner
-                # already wraps fn in the outer scope.
-                disable_fn = torch._dynamo.disable(fn, recursive, wrapping=False)
+                disable_fn = torch._dynamo.disable(fn, recursive)
                 fn.__dynamo_disable = disable_fn  # type: ignore[attr-defined]
 
             return disable_fn(*args, **kwargs)
