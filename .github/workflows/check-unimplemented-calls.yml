@@ -1,5 +1,6 @@
 name: Check unimplemented_v2 calls
 
+
 on:
   pull_request:
     paths:
@@ -7,15 +8,16 @@ on:
 
 jobs:
   check-unimplemented-calls:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
@@ -27,7 +29,7 @@ jobs:
       - name: Get changed files
         id: changed-files
         run: |
-          echo "files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep '\.py$' | tr '\n' ' ')" >> $GITHUB_OUTPUT
+          echo "files=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" | grep '\.py$' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
 
       - name: Check unimplemented_v2 calls
         run: |
@@ -45,3 +47,6 @@ jobs:
           echo "::error::- Recreate registry: python tools/dynamo/gb_id_mapping.py create"
           echo "::error::Note: If you've reset the entire registry file, you can force push to bypass this check."
           exit 1
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
