@@ -78,6 +78,8 @@ if HAS_GPU:
         add_kernel_with_scaling,
         add_kernel_with_tma_1d_new_api,
         add_kernel_with_tma_1d_old_api,
+        add_kernel_with_tma_2d_new_api,
+        add_kernel_with_tma_2d_old_api,
         mul2_inplace_kernel,
         strange_config_matmul_kernel,
         sub_kernel_autotuned,
@@ -3105,9 +3107,9 @@ class AOTInductorTestsTemplate:
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
 
         kernel = (
-            add_kernel_with_tma_1d_new_api
+            add_kernel_with_tma_2d_new_api
             if tma_version == "new"
-            else add_kernel_with_tma_1d_old_api
+            else add_kernel_with_tma_2d_old_api
         )
 
         class Model(torch.nn.Module):
