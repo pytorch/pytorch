@@ -424,7 +424,7 @@ If you’re not familiar with debuggers, please see the auxiliary section
 {ref}`Available-Debuggers`.
 
 
-#### Common Pitfalls in Transform Authoring
+### Common Pitfalls in Transform Authoring
 
 * Nondeterministic `set` iteration order. In Python, the `set` datatype is
   unordered. Using `set` to contain collections of objects like `Node`\ s,
