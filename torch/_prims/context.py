@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 from collections.abc import Sequence
 from contextlib import nullcontext
@@ -16,7 +15,7 @@ from torch._prims_common import torch_function_passthrough
 
 
 @functools.lru_cache(None)
-def torch_to_refs_map():
+def torch_to_refs_map() -> dict[Any, Any]:
     """
     Mapping of torch API functions to torch._refs functions.
     E.g. torch_to_refs_map()[torch.add] == torch._refs.add
@@ -71,7 +70,7 @@ def torch_to_refs_map():
 
 
 @functools.lru_cache(None)
-def all_prims():
+def all_prims() -> set[Any]:
     """
     Set of all prim functions, e.g., torch._prims.add in all_prims()
     """
@@ -95,10 +94,10 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
 
     def __init__(
         self,
-        strict=False,
-        should_fallback_fn=lambda *_: False,
-        prims_mode_cls=nullcontext,
-    ):
+        strict: bool = False,
+        should_fallback_fn: Callable = lambda *_: False,
+        prims_mode_cls: Any = nullcontext,
+    ) -> None:
         self.strict = strict
         self.should_fallback_fn = should_fallback_fn
         self.prims_mode_cls = prims_mode_cls
@@ -109,7 +108,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         types: Sequence,
         args: Sequence[Any] = (),
         kwargs: Optional[dict] = None,
-    ):
+    ) -> Any:
         if kwargs is None:
             kwargs = {}
         # For primitive operations, run them as is without interception

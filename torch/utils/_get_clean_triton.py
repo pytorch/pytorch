@@ -1,8 +1,8 @@
-# mypy: allow-untyped-defs
 import argparse
 import os
 import re
 from pathlib import Path
+from re import Match
 
 
 def remove_triton_function_declaration(source_code: str) -> str:
@@ -57,7 +57,7 @@ def add_launch_params(
     # Regex to match the function call in the original string
     pattern = r"(\w+)\.run\((.*)\)"
 
-    def replace(match) -> str:
+    def replace(match: Match[str]) -> str:
         # Extract parts from the regex match
         func_name = match.group(1)
         params = match.group(2)
@@ -113,7 +113,7 @@ def process_file(input_filename: str, output_filename: str) -> str:
 
 def get_clean_triton(
     input_path: Path, output_path: Path = Path("triton_only_repro.py")
-):
+) -> str:
     """Run experiments and output results to file
 
     Args:
