@@ -20,18 +20,6 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
   }                                                         \
   REGISTER_DISPATCH(NAME##_stub, NAME##_kernel_mps)
 
-static void asin_kernel(TensorIteratorBase& iter) {
-  lib.exec_unary_kernel(iter, "asin");
-}
-
-static void acos_kernel(TensorIteratorBase& iter) {
-  lib.exec_unary_kernel(iter, "acos");
-}
-
-static void atan_kernel(TensorIteratorBase& iter) {
-  lib.exec_unary_kernel(iter, "atan");
-}
-
 static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
   lib.exec_unary_kernel(iter, "round_decimals", Scalar(decimals), ScalarType::Long);
 }
