@@ -192,7 +192,7 @@ specifying the {class}`DeviceMesh` and {class}`Placement` for the {class}`DTenso
 ### Logging
 
 When launching the program, you can turn on additional logging using the `TORCH_LOGS` environment variable from
-[torch.\_logging](https://pytorch.org/docs/main/logging.html#module-torch._logging) :
+[torch._logging](https://pytorch.org/docs/main/logging.html#module-torch._logging) :
 
 - `TORCH_LOGS=+dtensor` will display `logging.DEBUG` messages and all levels above it.
 - `TORCH_LOGS=dtensor` will display `logging.INFO` messages and above.

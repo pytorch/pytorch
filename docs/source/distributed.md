@@ -751,9 +751,9 @@ It is extremely convenient to use python's debugger in a distributed environment
 PyTorch offers a customized wrapper around pdb that streamlines the process.
 
 `torch.distributed.breakpoint` makes this process easy. Internally, it customizes `pdb`'s breakpoint behavior in two ways but otherwise behaves as normal `pdb`.
-1\. Attaches the debugger only on one rank (specified by the user).
-2\. Ensures all other ranks stop, by using a `torch.distributed.barrier()` that will release once the debugged rank issues a `continue`
-3\. Reroutes stdin from the child process such that it connects to your terminal.
+1. Attaches the debugger only on one rank (specified by the user).
+2. Ensures all other ranks stop, by using a `torch.distributed.barrier()` that will release once the debugged rank issues a `continue`
+3. Reroutes stdin from the child process such that it connects to your terminal.
 
 To use it, simply issue `torch.distributed.breakpoint(rank)` on all ranks, using the same value for `rank` in each case.
 
