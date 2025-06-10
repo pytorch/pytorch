@@ -1922,7 +1922,7 @@ def create_micro_gemm(
             alpha,
         )
 
-    def skip_amx_kernel_for_woq(m, block_m, dynamic_M, input_dtype, input2_dtype):
+    def skip_amx_kernel_for_woq(config, dynamic_M, micro_gemm_cls):
         # For WoQ GEMM, AMX micro-kernel may not perform well if m is small.
         # Exception: for dynamic shapes, we consider using the AMX micro-kernel.
         if (
@@ -1933,8 +1933,10 @@ def create_micro_gemm(
             return False
         # For WOQ INT8, use AMX for m >= block_m
         # For WOQ INT4, use AMX for m >= 5
-        m_threashold = block_m if input2_dtype == torch.int8 else 5
-        return m < m_threashold
+        block_m, *_ = config.register_blocking
+        is_woq_int4 = micro_gemm_cls == CppMicroGemmWoQInt4Amx
+        m_threshold = 5 if is_woq_int4 else block_m
+        return m < m_threshold
 
     assert isinstance(n, int) or n.is_number, n
     assert isinstance(k, int) or k.is_number, k
@@ -1979,7 +1981,7 @@ def create_micro_gemm(
                     continue
                 block_m, block_n, block_k = config.register_blocking
                 if config.vec_isa_cls == VecAMX and skip_amx_kernel_for_woq(
-                    m, block_m, dynamic_M, input_dtype, input2_dtype
+                    config, dynamic_M, cls
                 ):
                     continue
                 # Criteria on the ranking of configurations
