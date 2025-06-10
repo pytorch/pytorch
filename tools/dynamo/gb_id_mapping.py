@@ -346,6 +346,12 @@ def main():
         default=default_dynamo_dir,
         help="Directory to search for unimplemented_v2 calls.",
     )
+    create_parser.add_argument(
+        "--registry-path",
+        type=str,
+        default=str(registry_path),
+        help="Path to save the registry JSON file",
+    )
 
     add_parser = subparsers.add_parser("add", help="Add a gb_type to registry")
     add_parser.add_argument("gb_type", help="The gb_type to add")
@@ -354,6 +360,12 @@ def main():
     )
     add_parser.add_argument(
         "--additional-info", help="Optional additional information to include"
+    )
+    add_parser.add_argument(
+        "--registry-path",
+        type=str,
+        default=str(registry_path),
+        help="Path to save the registry JSON file",
     )
 
     update_parser = subparsers.add_parser(
@@ -370,6 +382,12 @@ def main():
     update_parser.add_argument(
         "--additional-info", help="Optional additional information to include"
     )
+    update_parser.add_argument(
+        "--registry-path",
+        type=str,
+        default=str(registry_path),
+        help="Path to save the registry JSON file",
+    )
 
     check_parser = subparsers.add_parser(
         "check", help="Check if unimplemented_v2 calls match registry entries"
@@ -377,8 +395,7 @@ def main():
     check_parser.add_argument(
         "--files", type=str, help="Space-separated list of files to check"
     )
-
-    parser.add_argument(
+    check_parser.add_argument(
         "--registry-path",
         type=str,
         default=str(registry_path),
@@ -413,6 +430,6 @@ def main():
     else:
         parser.print_help()
 
-
 if __name__ == "__main__":
     main()
+
