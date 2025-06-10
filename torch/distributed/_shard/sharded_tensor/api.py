@@ -104,7 +104,7 @@ class ShardedTensorBase(torch.Tensor):
             sizes, tensor_properties=tensor_properties
         )
 
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             sizes,
             dtype=dtype,
@@ -470,7 +470,7 @@ class ShardedTensor(ShardedTensorBase):
                     warnings.warn(
                         "Gathering a tensor with zero elements on rank " + str(rank)
                     )
-                    return
+                    continue
                 shard_offset = shard_placement[shard.metadata][1]
                 data[shard_offset : shard_offset + src.numel()].copy_(src)
 

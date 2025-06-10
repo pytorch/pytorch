@@ -1546,7 +1546,7 @@ class HalideKernel(SIMDKernel):
         code.splice(self.indexing_code)
 
         def update_index(m):
-            var = cast("HalideCSEVariable", self.cse.varname_map[m.group(1)])
+            var = cast(HalideCSEVariable, self.cse.varname_map[m.group(1)])
             assert var.used_dims is not None, var
             return str(var)
 

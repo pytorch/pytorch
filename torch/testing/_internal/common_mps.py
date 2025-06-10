@@ -22,6 +22,7 @@ if torch.backends.mps.is_available():
         SUPPORTED_COMPLEX_OPS = {
             "__radd__",
             "__rmul__",
+            "__rsub__",
             "__getitem__",
             "_unsafe_masked_index",
             "abs",
@@ -43,6 +44,7 @@ if torch.backends.mps.is_available():
             "conj",
             "conj_physical",
             "contiguous",
+            "cos",
             "diag",
             "diag_embed",
             "diagflat",
@@ -55,6 +57,7 @@ if torch.backends.mps.is_available():
             "empty_permuted",
             "empty_strided",
             "exp",
+            "exp2",
             "expand",
             "expand_as",
             "expand_copy",
@@ -64,6 +67,7 @@ if torch.backends.mps.is_available():
             "H",
             "hsplit",
             "imag",
+            "index_copy",
             "index_select",
             "isfinite",
             "isinf",
@@ -72,6 +76,10 @@ if torch.backends.mps.is_available():
             "kron",
             "linalg.diagonal",
             "linalg.svd",
+            "log10",
+            "log1p",
+            "log2",
+            "log",
             "mH",
             "mT",
             "masked_fill",
@@ -83,6 +91,7 @@ if torch.backends.mps.is_available():
             "mul",
             "narrow",
             "narrow_copy",
+            "neg",
             "new_full",
             "new_ones",
             "new_zeros",
@@ -90,6 +99,7 @@ if torch.backends.mps.is_available():
             "nn.functional.conv2d",
             "nn.functional.conv_transpose1d",
             "nn.functional.conv_transpose2d",
+            "nn.functional.conv_transpose3d",
             "nn.functional.feature_alpha_dropoutwithout_train",
             "nn.functional.padcircular",
             "nn.functional.softsign",
@@ -97,6 +107,7 @@ if torch.backends.mps.is_available():
             "nn.functional.unfold",
             "nonzero",
             "ones",
+            "ones_like",
             "outer",
             "permute",
             "permute_copy",
@@ -109,9 +120,13 @@ if torch.backends.mps.is_available():
             "reshape",
             "resolve_conj",
             "resolve_neg",
+            "rsqrt",
+            "rsub",
             "scalar_tensor",
             "select",
             "sgn",
+            "sigmoid",
+            "sin",
             "sinc",
             "slice",
             "special.spherical_bessel_j0",
@@ -131,6 +146,7 @@ if torch.backends.mps.is_available():
             "t",
             "t_copy",
             "tanh",
+            "tan",
             "tensor_split",
             "transpose",
             "transpose_copy",
@@ -152,6 +168,7 @@ if torch.backends.mps.is_available():
             "vsplit",
             "zero_",
             "zeros",
+            "zeros_like",
         }
 
         AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
@@ -181,7 +198,6 @@ if torch.backends.mps.is_available():
             "combinations",
             "corrcoef",
             "constant_pad_nd",
-            "cos",
             "cosh",
             "cov",
             "count_nonzero",
@@ -192,7 +208,6 @@ if torch.backends.mps.is_available():
             "einsum",
             "eq",
             "equal",
-            "exp2",
             "expm1",
             "eye",
             "fft.fft",
@@ -226,10 +241,6 @@ if torch.backends.mps.is_available():
             "linalg.pinv",
             "linspace",
             "linspacetensor_overload",
-            "log10",
-            "log1p",
-            "log2",
-            "log",
             "logical_and",
             "logical_not",
             "logical_or",
@@ -247,7 +258,6 @@ if torch.backends.mps.is_available():
             "mm",
             "mv",
             "ne",
-            "neg",
             "nn.functional.padconstant",
             "nn.functional.padreflect",
             "nn.functional.padreplicate",
@@ -259,10 +269,7 @@ if torch.backends.mps.is_available():
             "reciprocal",
             "roll",
             "rot90",
-            "rsqrt",
             "short",
-            "sigmoid",
-            "sin",
             "sinh",
             "sqrt",
             "square",
@@ -270,7 +277,6 @@ if torch.backends.mps.is_available():
             "stft",
             "sum",
             "sum_to_size",
-            "tan",
             "tensordot",
             "trace",
             "trapz",
@@ -284,7 +290,6 @@ if torch.backends.mps.is_available():
         # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
         MACOS_BEFORE_13_3_XFAILLIST = {
             # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
-            "tan": [torch.float32],
             "cdist": [torch.float32],
             # CPU Error: cpu not giving nan for x/0.0
             "atan2": [
@@ -376,15 +381,12 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            "nn.functional.conv_transpose3d": None,
-            "__rsub__": None,
             "cauchy_": None,
             "cauchy": None,
             "cholesky_inverse": None,
             "cholesky_solve": None,
             "cummax": None,
             "cummin": None,
-            "erfc": None,
             "frexp": None,
             "gcd": None,
             "geqrf": None,
@@ -392,7 +394,6 @@ if torch.backends.mps.is_available():
             "heaviside": None,
             "igamma": None,
             "igammac": None,
-            "index_copy": None,
             "index_reduceprod": None,
             "index_reducemean": None,
             "index_reduceamax": None,
@@ -449,7 +450,6 @@ if torch.backends.mps.is_available():
             "ormqr": None,
             "pca_lowrank": None,
             "qr": None,
-            "rsub": None,
             "scatter_reduceamax": [torch.int32, torch.int64]
             if MACOS_VERSION < 15.0
             else [torch.int64],
@@ -499,68 +499,21 @@ if torch.backends.mps.is_available():
             # MPS: input sizes must be divisible by output sizes
             "nn.functional.adaptive_avg_pool1d": None,
             "nn.functional.adaptive_avg_pool2d": None,
-            # Unsupported dtypes
-            "ones_like": None,
-            "zeros_like": None,
             # Convolution for integral types is not supported on MPS
             "nn.functional.conv1d": [torch.int64],
             "nn.functional.conv2d": [torch.int64],
             "nn.functional.conv3d": [torch.int64],
             "nn.functional.conv_transpose1d": [torch.int64],
             "nn.functional.conv_transpose2d": [torch.int64, torch.bfloat16],
+            "nn.functional.conv_transpose3d": [
+                torch.int64,
+                torch.bfloat16,
+                torch.float16,
+            ],
             # Unsupported dtypes
             "dot": [torch.int64] if MACOS_VERSION < 14.0 else [],
             "histc": [torch.float16, torch.bfloat16],
             "index_add": [torch.int64],
-            # Operations not supported for integral types
-            "special.xlog1py": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.zeta": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.chebyshev_polynomial_t": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.chebyshev_polynomial_u": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.hermite_polynomial_h": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.hermite_polynomial_he": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
             # GEMM on MPS is not supported for integral types
             "nn.functional.linear": [
                 torch.int16,
@@ -582,7 +535,6 @@ if torch.backends.mps.is_available():
             "mat": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             "matmul": [torch.int64] if MACOS_VERSION < 14.0 else [],
             "__rmatmul__": [torch.int64] if MACOS_VERSION < 14.0 else [],
-            "unravel_index": [torch.int32, torch.int64],
             # returned output on CPU is float64
             "bincount": [
                 torch.int16,
@@ -591,8 +543,6 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int8,
             ],
-            # trunc_tensor not working properly for float16 and bfloat16
-            "fmod": [torch.float16],
             # round not working properly for float16 and bfloat16
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
@@ -929,8 +879,6 @@ if torch.backends.mps.is_available():
             "signal.windows.kaiser": [torch.float32],
             "signal.windows.nuttall": [torch.float32],
             "eye": [torch.float16, torch.float32],
-            # trunc_tensor not working properly for float16
-            "fmod": [torch.float16],
             # round not working properly for float16
             "round": [torch.float16],
             # topk fails with duplicate indices
@@ -943,7 +891,6 @@ if torch.backends.mps.is_available():
             "masked.softmax": [torch.float32, torch.float16],
             "masked.log_softmax": [torch.float32, torch.float16],
             "atanh": [torch.float16],
-            "__rmod__": [torch.float16],
             "triangular_solve": [torch.float32],
             # Unsupported Border padding mode, forward pass success as fallback to cpu
             "grid_sampler_2d": [torch.float32, torch.float16, torch.bfloat16],

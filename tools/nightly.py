@@ -9,6 +9,11 @@ You can use this script to check out a new nightly branch with the following::
     $ ./tools/nightly.py checkout -b my-nightly-branch
     $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
+Or if you would like to check out the nightly commit in detached HEAD mode::
+
+    $ ./tools/nightly.py checkout
+    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+
 Or if you would like to re-use an existing virtual environment, you can pass in
 the prefix argument (--prefix)::
 
@@ -595,7 +600,7 @@ def logging_manager(*, debug: bool = False) -> Generator[logging.Logger, None, N
         print(f"log file: {log_file}")
         yield root_logger
     except Exception as e:
-        logging.exception("Fatal exception")
+        logging.exception("Fatal exception")  # noqa: LOG015
         logging_record_exception(e)
         print(f"log file: {log_file}")
         sys.exit(1)
@@ -603,7 +608,7 @@ def logging_manager(*, debug: bool = False) -> Generator[logging.Logger, None, N
         # You could logging.debug here to suppress the backtrace
         # entirely, but there is no reason to hide it from technically
         # savvy users.
-        logging.info("", exc_info=True)
+        logging.info("", exc_info=True)  # noqa: LOG015
         logging_record_exception(e)
         print(f"log file: {log_file}")
         sys.exit(1)
@@ -613,19 +618,17 @@ def check_branch(subcommand: str, branch: str | None) -> str | None:
     """Checks that the branch name can be checked out."""
     if subcommand != "checkout":
         return None
-    # first make sure actual branch name was given
-    if branch is None:
-        return "Branch name to checkout must be supplied with '-b' option"
     # next check that the local repo is clean
     cmd = git("status", "--untracked-files=no", "--porcelain")
     stdout = subprocess.check_output(cmd, text=True, encoding="utf-8")
     if stdout.strip():
         return "Need to have clean working tree to checkout!\n\n" + stdout
-    # next check that the branch name doesn't already exist
-    cmd = git("show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
-    p = subprocess.run(cmd, capture_output=True, check=False)  # type: ignore[assignment]
-    if not p.returncode:
-        return f"Branch {branch!r} already exists"
+    # next check that the branch name doesn't already exist (if a branch name is provided)
+    if branch is not None:
+        cmd = git("show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
+        p = subprocess.run(cmd, capture_output=True, check=False)  # type: ignore[assignment]
+        if not p.returncode:
+            return f"Branch {branch!r} already exists"
     return None
 
 
@@ -680,10 +683,15 @@ def _nightly_version(site_dir: Path) -> str:
 
 
 @timed("Checking out nightly PyTorch")
-def checkout_nightly_version(branch: str, site_dir: Path) -> None:
+def checkout_nightly_version(branch: str | None, site_dir: Path) -> None:
     """Get's the nightly version and then checks it out."""
     nightly_version = _nightly_version(site_dir)
-    cmd = git("checkout", "-b", branch, nightly_version)
+    if branch is None:
+        # Detached mode - explicitly use --detach flag
+        cmd = git("checkout", "--detach", nightly_version)
+    else:
+        # Branch mode
+        cmd = git("checkout", "-b", branch, nightly_version)
     subprocess.check_call(cmd)
 
 
@@ -860,7 +868,7 @@ def install(
 
     with venv.extracted_wheel(torch_wheel) as wheel_site_dir:
         if subcommand == "checkout":
-            checkout_nightly_version(cast(str, branch), wheel_site_dir)
+            checkout_nightly_version(branch, wheel_site_dir)
         elif subcommand == "pull":
             pull_nightly_version(wheel_site_dir)
         else:
@@ -893,7 +901,7 @@ def make_parser() -> argparse.ArgumentParser:
     checkout.add_argument(
         "-b",
         "--branch",
-        help="Branch name to checkout",
+        help="Branch name to checkout (if omitted, checks out in detached HEAD mode)",
         dest="branch",
         default=None,
         metavar="NAME",

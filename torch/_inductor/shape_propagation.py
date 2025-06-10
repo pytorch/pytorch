@@ -28,10 +28,10 @@ def get_broadcasted_shape(a: ShapeType, b: ShapeType) -> ShapeType:
     assert isinstance(a, Sequence)
     assert isinstance(b, Sequence)
     if len(a) > len(b):
-        return get_broadcasted_shape(a, (*b, *a[len(b) :]))
+        return get_broadcasted_shape(a, (*[1] * (len(a) - len(b)), *b))
     elif len(a) < len(b):
         b, a = a, b
-        return get_broadcasted_shape(a, (*b, *a[len(b) :]))
+        return get_broadcasted_shape(a, (*[1] * (len(a) - len(b)), *b))
     else:
 
         def _get_broadcasted_dim(

@@ -280,7 +280,7 @@ static bool isSupportedHipLtROCmArch(int index) {
 #endif
 
 template <typename scalar_t>
-static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
+static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const Scalar& beta, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation, bool bias2d) {
   bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
   bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
   at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
@@ -298,6 +298,7 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
   params.ldc = args.result_ld;
   params.bias = bias;
   params.activation = activation;
+  params.bias2d = bias2d;
   if (transa_ && transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
     gemm(&params);
@@ -346,12 +347,20 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
 #endif
   // if lt path fails, we recurse back into this function here and force the lt path to off
-  disable_addmm_cuda_lt |= disable_addmm_cuda_lt_override;
+  // we cannot update varible disable_addmm_cuda_lt from above since it is static and would be permanent
+  bool disable_addmm_cuda_lt_final = disable_addmm_cuda_lt || disable_addmm_cuda_lt_override;
+#if defined(USE_ROCM) && ROCM_VERSION == 60400
+  // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
+  cublasCommonArgs _args(mat1, mat2, result);
+  if (_args.transa == 't' && _args.transb == 't') {
+    disable_addmm_cuda_lt_final = true;
+  }
+#endif
   at::ScalarType scalar_type = mat1.scalar_type();
   bool is_float_output_with_half_input = (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
-#if (defined(CUDA_VERSION) && (CUDA_VERSION >= 11040)) || defined(USE_ROCM)
+#if defined(CUDA_VERSION) || defined(USE_ROCM)
     // Strangely, if mat2 has only 1 row or column, we get
     // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
     // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
@@ -360,10 +369,13 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // the last two conditions is to skip 16b transA and non-trans-B having
     // leading dim >> rows when they are sliced from a large tensor
     // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
-    if (!disable_addmm_cuda_lt) {
-      useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
-          result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
+    if (!disable_addmm_cuda_lt_final) {
+      useLtInterface = ((self.dim() == 1 && // row broadcast case
+          result.dim() == 2 && self.size(0) == mat2_sizes[1]) ||
+          (self.dim() == 2 && self.size(0) == mat1_sizes[0] &&  // 2d case
+           self.size(1) == mat2_sizes[1])) &&
           self.is_contiguous() && result.is_contiguous() &&
+          self.scalar_type() == result.scalar_type() &&
 #ifdef USE_ROCM
           (scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
@@ -418,6 +430,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   }
 
   cublasCommonArgs args(mat1, mat2, result);
+  bool bias2d = self.dim() == 2;
 
   if (mat1.numel() == 0) {
     // By definition, when beta==0, values in self should be ignored. nans and infs
@@ -457,17 +470,19 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           launchTunableGemmAndBias<scalar_t>(
               args,
               alpha,
+              beta,
               (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
-              activation_to_gemm_and_blas_arg(activation));
-        }
-
-        okay = at::cuda::blas::gemm_and_bias<scalar_t>(
+              activation_to_gemm_and_blas_arg(activation),
+              bias2d);
+        } else {
+          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
             args.transa == 't',
             args.transb == 't',
             args.m,
             args.n,
             args.k,
             alpha.to<at::opmath_type<scalar_t>>(),
+            beta.to<at::opmath_type<scalar_t>>(),
             args.mata->const_data_ptr<scalar_t>(),
             args.lda,
             args.matb->const_data_ptr<scalar_t>(),
@@ -477,8 +492,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
             (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
             args.result->data_ptr<scalar_t>(),
             args.result_ld,
-            activation_to_gemm_and_blas_arg(activation)
-        );
+            activation_to_gemm_and_blas_arg(activation),
+            bias2d
+          );
+        }
       });
     }
     if (!okay) {
@@ -487,15 +504,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     }
 #else
     auto activation_epilogue = activation_to_gemm_and_blas_arg(activation);
-#if (defined(CUDA_VERSION) && (CUDA_VERSION < 11080))
-    // GELU is not supported (and does not compile!) prior
-    // to CUDA 11.4. Have observed accuracy issues with
-    // GELU epilogue in 11.4; disabling the GELU epilogue
-    // path for CUDA version < 11.8.
-    if (activation == Activation::GELU)
-      activation_epilogue = cuda::blas::GEMMAndBiasActivationEpilogue::None;
-#endif
-
     bool okay = true;
     if (is_float_output_with_half_input) {
       AT_DISPATCH_REDUCED_FLOATING_TYPES(
@@ -514,6 +522,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.n,
               args.k,
               alpha.to<at::opmath_type<scalar_t>>(),
+              beta.to<at::opmath_type<scalar_t>>(),
               args.mata->const_data_ptr<scalar_t>(),
               args.lda,
               args.matb->const_data_ptr<scalar_t>(),
@@ -521,7 +530,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               self.const_data_ptr<scalar_t>(),
               args.result->data_ptr<float>(),
               args.result_ld,
-              activation_epilogue
+              activation_epilogue,
+              bias2d
           );
         }});
     } else {
@@ -536,8 +546,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           launchTunableGemmAndBias<scalar_t>(
               args,
               alpha,
+              beta,
               self.const_data_ptr<scalar_t>(),
-              activation_epilogue);
+              activation_epilogue,
+              bias2d);
         }
         else {
           okay = at::cuda::blas::gemm_and_bias<scalar_t>(
@@ -547,6 +559,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.n,
               args.k,
               alpha.to<at::opmath_type<scalar_t>>(),
+              beta.to<at::opmath_type<scalar_t>>(),
               args.mata->const_data_ptr<scalar_t>(),
               args.lda,
               args.matb->const_data_ptr<scalar_t>(),
@@ -554,7 +567,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               self.const_data_ptr<scalar_t>(),
               args.result->data_ptr<scalar_t>(),
               args.result_ld,
-              activation_epilogue
+              activation_epilogue,
+              bias2d
           );
       }});
     }
@@ -638,7 +652,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 // gating activation_to_gemm_and_blas_arg above; here we are manually
 // performing a post-GELU because we weren't able to use the GELU
 // epilogue above.
-#if !(defined(CUDA_VERSION) && CUDA_VERSION >= 11080) && !defined(USE_ROCM)
+#if !defined(CUDA_VERSION) && !defined(USE_ROCM)
   if (useLtInterface && activation == Activation::GELU) {
     at::gelu_(const_cast<Tensor&>(*args.result), "tanh");
   }
@@ -1009,7 +1023,7 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
 
   TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
 
-#if (defined(CUDA_VERSION) && (CUDA_VERSION >= 11070)) || defined(USE_ROCM)
+#if defined(CUDA_VERSION) || defined(USE_ROCM)
   cublasCommonArgs args(self, mat2, result);
 
   at::cuda::blas::int8_gemm(

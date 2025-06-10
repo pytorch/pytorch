@@ -8,6 +8,7 @@ import functools
 import itertools
 import logging
 import math
+import operator
 import os
 import textwrap
 from collections.abc import Iterable, Sequence
@@ -756,7 +757,7 @@ class TritonCSEVariable(CSEVariable):
     ) -> None:
         super().__init__(name, bounds, dtype, shape=shape)
         # We'll use this to track which masks the variable needs when used for indirect indexing
-        self.mask_vars = OrderedSet[str]()
+        self.mask_vars: OrderedSet[str] = OrderedSet()
         assert dtype is not None, "TritonCSEVariable must have dtype"
 
     def update_on_args(self, name, args, kwargs):
@@ -1781,8 +1782,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         index_vars = index.free_symbols
         has_rindex = False
 
-        mask_vars = OrderedSet[str]()
-        for var in index_vars:
+        mask_vars: OrderedSet[str] = OrderedSet()
+        for var in sorted(index_vars, key=operator.attrgetter("name")):
             assert isinstance(var, sympy.Symbol)
             has_rindex = has_rindex or symbol_is_type(
                 var, TritonSymbols.reduction_types
@@ -1823,7 +1824,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         have_dense = True
         have_loop_vars = False
-        dense_mask_vars = OrderedSet[str]()
+        dense_mask_vars: OrderedSet[str] = OrderedSet()
 
         for tree in self.active_range_trees():
             if index_vars.intersection(tree.var_list):
@@ -2453,17 +2454,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         sizes = [":"] * (ndims - nreduce) + ["None"] * nreduce
         return f"{value}[{', '.join(sizes)}]"
 
-    def reduction_resize_and_shape(self, value: CSEVariable) -> tuple[str, ShapeType]:
+    def reduction_resize_and_shape(self, value, shape) -> tuple[str, ShapeType]:
         ndims = self.triton_tensor_ndim()
         if ndims == 1:
-            return f"triton_helpers.promote_to_tensor({value})", value.shape
+            return f"triton_helpers.promote_to_tensor({value})", shape
 
         nreduce = self.num_reduction_dims
         sizes = [":"] * (ndims - nreduce) + ["None"] * nreduce
         new_shape = (
-            (*value.shape[: (ndims - nreduce)], *[1] * nreduce)
-            if value.shape is not None
-            else None
+            (*shape[: (ndims - nreduce)], *[1] * nreduce) if shape is not None else None
         )
         return f"{value}[{', '.join(sizes)}]", new_shape
 
@@ -2556,12 +2555,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             value = self.reduction_collapse_dims(buffer, value, dtype)
             if reduction_type in ("max", "min"):
-                result = self.reduction_resize(
-                    f"{module}.{reduction_type}2({value}, {dim})"
+                result, shape = self.reduction_resize_and_shape(
+                    f"{module}.{reduction_type}2({value}, {dim})", value.shape
                 )
             else:
-                result = self.reduction_resize(
-                    f"{module}.{reduction_type}({value}, {dim})"
+                result, shape = self.reduction_resize_and_shape(
+                    f"{module}.{reduction_type}({value}, {dim})", value.shape
                 )
 
             if result_type is not None:
@@ -2569,9 +2568,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 result_type = value.dtype
 
-            return self.cse.generate(
-                buffer, result, dtype=result_type, shape=value.shape
-            )
+            return self.cse.generate(buffer, result, dtype=result_type, shape=shape)
 
         def final_reduction_define(
             buffer,
@@ -2928,7 +2925,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.writeline(f"{', '.join([str(r) for r in welford_results])} = {welford}")
 
         return tuple(
-            self.reduction_resize_and_shape(value) for value in welford_results
+            self.reduction_resize_and_shape(value, value.shape)
+            for value in welford_results
         )
 
     def welford_reduce(
@@ -3255,7 +3253,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         partial_scan_vars = cse_multiple(
             f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
-            values,
+            broadcasted_values,
             masks,
             dtypes,
         )
@@ -3685,13 +3683,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if isinstance(arg, SizeArg):
                 # mypy is unhappy about the sympy.Expr
                 # type for the key of the dict below
-                symbol = cast("sympy.Symbol", arg.expr)
+                symbol = cast(sympy.Symbol, arg.expr)
                 if symbol in V.graph.sizevars.inv_precomputed_replacements:
                     signature[i] = SizeArg(
                         arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
                     )
 
-        mutated_args = OrderedSet[str]()
+        mutated_args: OrderedSet[str] = OrderedSet()
         for mutation in self.mutations:
             if mutation in self.args.input_buffers:
                 mutated_args.add(self.args.input_buffers[mutation])
@@ -3701,9 +3699,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 and mutation not in self.removed_buffers
             ):
                 mutated_args.add(
-                    cast(
-                        "InplacedBuffer", self.args.inplace_buffers[mutation]
-                    ).inner_name
+                    cast(InplacedBuffer, self.args.inplace_buffers[mutation]).inner_name
                 )
             if mutation in self.args.output_buffers:
                 mutation_arg = self.args.output_buffers[mutation]
@@ -3785,13 +3781,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }
+        if self.tiling_scores:
+            inductor_meta["tiling_scores"] = self.tiling_scores
+
         if self.cooperative_reduction:
             inductor_meta["persistent_reduction"] = self.persistent_reduction
 
         num_gb = None
         if config.benchmark_kernel or config.profile_bandwidth:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
-            inductor_meta["kernel_num_gb"] = num_gb
+            if num_gb is not None:
+                inductor_meta["kernel_num_gb"] = num_gb
+        if config.benchmark_kernel:
+            flops = self.estimate_flops()
+            if flops is not None:
+                inductor_meta["kernel_flop"] = flops
 
         triton_meta["configs"] = [config_of(signature)]
 
