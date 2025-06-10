@@ -714,7 +714,7 @@ built-in debugger (usually a graphical wrapper around `pdb`).
 
 (Limitations of Symbolic Tracing)=
 
-### Limitations of Symbolic Tracing
+## Limitations of Symbolic Tracing
 
 FX uses a system of **symbolic tracing** (a.k.a [symbolic
 execution](https://en.wikipedia.org/wiki/Symbolic_execution)_)
