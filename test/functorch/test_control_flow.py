@@ -2,12 +2,17 @@
 import contextlib
 import functools
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
-from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    EagerAndRecordGraphs,
+    normalize_gm,
+)
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
@@ -8750,6 +8755,76 @@ class TestHopSchema(TestCase):
             str(schema),
             """cond(SymBool pred, Any true_fn, Any false_fn, Tensor operand0) -> ((Tensor))""",
         )
+
+
+class TestAutoFunctionalizeControlFlow(TestCase):
+    def check(self, fn, args) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+        with patch.object(
+            torch._dynamo.variables.higher_order_ops.CondHigherOrderVariable,
+            "supports_input_mutation",
+            True,
+        ):
+            # Only suuport input mutation in inference
+            with torch.no_grad():
+                exp = fn(*args)
+            backend = AotEagerAndRecordGraphs()
+            torch._dynamo.reset()
+            with torch.no_grad():
+                out = torch.compile(fn, backend=backend, fullgraph=True)(*args)
+        self.assertEqual(exp, out)
+        return backend.fw_graphs[0]
+
+    def test_cond_auto_functionalize_input_mutation(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                def true_fn(x):
+                    x.add_(1)
+                    return x.sin()
+
+                x = x.clone()
+                ret = torch.cond(x.sum() > 0, true_fn, true_fn, (x,))
+                return y + ret
+
+        m = M()
+        x, y = torch.randn(3, 4, requires_grad=True), torch.randn(
+            3, 4, requires_grad=True
+        )
+        fw_gm = self.check(m, (x, y))
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[3, 4]"):
+        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(clone)
+        gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = gt, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  gt = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem: "f32[3, 4]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
+
+        add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, getitem);  arg1_1 = getitem = None
+        return (add,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(add)
+            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (sin,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(add)
+            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (sin,)
+""",  # noqa: B950
+            )
 
 
 instantiate_parametrized_tests(TestHopSchema)
