@@ -81,6 +81,16 @@ class MyModelConv2d(torch.nn.Module):
         return x
 
 
+class TestPyCodeCache(TestCase):
+    def test_linemaps_empty(self):
+        src = """import torch"""
+        (key, path) = PyCodeCache.write(src, "")
+        # Load with an empty linemap
+        PyCodeCache.load_by_key_path(key, path, linemap=[])
+        stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
+        self.assertEqual(stack_frames, None)
+
+
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
     device_type = GPU_TYPE
