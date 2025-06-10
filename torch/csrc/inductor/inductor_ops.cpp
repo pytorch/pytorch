@@ -76,7 +76,7 @@ static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
     // into accumulateGrad with num_expected_refs set to 1 Here,
     // num_expected_refs is set to 2 to steal the gradient when this is called
     // from Python
-    torch::autograd::AccumulateGrad::accumulateGrad(
+    torch::autograd::accumulateGrad(
         variable,
         grad,
         new_grad,
