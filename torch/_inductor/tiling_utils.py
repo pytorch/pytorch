@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from torch._inductor.scheduler import FusedSchedulerNode, SchedulerNode
 
 
-def solve_for_zero(expr: sympy.Expr) -> Optional[sympy.Expr]:
+def solve_for_zero(expr: sympy.Expr, free_symbol) -> Optional[sympy.Expr]:
     """
     Given an expr with a single free symbol, solve for a constant relation that would make
     this expression 0.
@@ -46,18 +46,20 @@ def solve_for_zero(expr: sympy.Expr) -> Optional[sympy.Expr]:
     elif isinstance(expr, FloorDiv):
         return None
 
-    assert len(expr.free_symbols) == 1
-    free_symbol = next(iter(expr.free_symbols))
+    # assert len(expr.free_symbols) == 1
+    # free_symbol = next(iter(expr.free_symbols))
     if isinstance(expr, ModularIndexing):
         out = try_solve(sympy.Eq(expr.args[0], expr.args[2]), free_symbol)
     else:
         out = try_solve(sympy.Eq(expr, 0), free_symbol)
-    if not out or not out[1].is_constant():
+    if not out:  # or not out[1].is_constant():
         return None
     return out[1]
 
 
-def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
+def solve_for_tiling(
+    expr: sympy.Expr, free_symbol: sympy.Symbol
+) -> Optional[sympy.Expr]:
     """
     Giving an expr with a single free symbol, try to find a tiling that would
     make the expression coalesced with respect to that symbol.
@@ -72,15 +74,14 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
     if len(expr.free_symbols) == 0:
         return None
 
-    free_symbol = next(iter(expr.free_symbols))
+    additional_symbols = len(expr.free_symbols) != 1
 
     def _solve_simple_expr(expr: sympy.Expr) -> Optional[sympy.Expr]:
-        assert not expr.has(ModularIndexing) and not expr.has(FloorDiv)
-        if len(expr.free_symbols) != 1:
-            return None
+        if not additoinal_symbols:
+            assert not expr.has(ModularIndexing) and not expr.has(FloorDiv)
 
         out = try_solve(sympy.Eq(expr, 1), free_symbol)
-        if not out or not out[1].is_constant():
+        if not out:  # or not out[1].is_constant():
             return None
         return out[1]
 
@@ -102,11 +103,11 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
             # TODO - only need one of these to be solvable to zero
             #
             for mul_arg in arg.args:
-                out = solve_for_zero(mul_arg)
+                out = solve_for_zero(mul_arg, free_symbol)
                 if out is None:
                     continue
 
-                assert out.is_constant()
+                # assert out.is_constant()
                 seen = True
                 required_values.append(out)
 
@@ -135,7 +136,14 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
 
     out = _solve_simple_expr(eq_1_expr_simplified)
     # since we approximated FloorDiv/ModularIndexing, double check here
-    if not out or not (sympy_subs(eq_1_expr, {free_symbol: out})) == 1:
+    if (
+        not out
+        or not V.graph.sizevars.atomically_apply_size_hint(
+            sympy_subs(eq_1_expr, {free_symbol: out}),
+            fallback=config.unbacked_symint_fallback,
+        )
+        == 1
+    ):
         return None
 
     required_values.append(out)
@@ -317,8 +325,8 @@ class NodeSplitGetter:
         Get a compatible pointwise, reduction split of the node
         """
 
-        if len(self.all_node_sizes) == 1:
-            return next(iter(self.all_node_sizes))
+        # if len(self.all_node_sizes) == 1:
+        #     return next(iter(self.all_node_sizes))
 
         max_pw_split = max(self.pw_split_options.keys())
         for pw_split_len in range(max_pw_split, 0, -1):
@@ -479,11 +487,11 @@ def extract_normalized_read_writes(
     red_numel: sympy.Expr = node.group[1][1]
 
     # TODO - a few dynamic shapes issues to resolve
-    if any(
-        (isinstance(var, sympy.Expr) and not var.is_constant())
-        for var in (pointwise_numel, red_numel)
-    ):
-        return None
+    # if any(
+    #     (isinstance(var, sympy.Expr) and not var.is_constant())
+    #     for var in (pointwise_numel, red_numel)
+    # ):
+    #     return None
 
     pw_splits, red_splits = NodeSplitGetter(node).get_node_splits()
 
@@ -663,13 +671,8 @@ def analyze_memory_coalescing(
         ((True, item) for item in reads.items()),
         ((False, item) for item in writes.items()),
     ):
-        # skip memory deps with indirect vars - todo: better handling
-        indirect_expr = bool(
-            memory_expr.free_symbols - norm_read_writes.var_ranges.keys()
-        )
-
-        if indirect_expr:
-            continue
+        # TODO skip memory deps with indirect vars
+        # handled in extract_normalized_read_writes currently
 
         size = get_score(memory_expr, var_ranges)
         if size == 0:
@@ -699,8 +702,8 @@ def analyze_memory_coalescing(
     tiling_scores: dict[sympy.Expr, dict[int, int]] = defaultdict(Counter)
 
     for uncoalesced_expr, addr_score in uncoalesced_addrs.items():
-        expr_subs = dict.fromkeys(uncoalesced_expr.free_symbols, 0)
-        for v in uncoalesced_expr.free_symbols:
+        expr_subs = dict.fromkeys(var_ranges.keys(), 0)
+        for v in uncoalesced_expr.free_symbols & var_ranges.keys():
             # skip non iter/reduce var variables
             if v not in var_ranges:
                 continue
@@ -708,9 +711,12 @@ def analyze_memory_coalescing(
             if addr_score == 0:
                 continue
             del expr_subs[v]
+            # breakpoint()
             single_var_expr = sympy_subs(uncoalesced_expr, expr_subs)
             expr_subs[v] = 0
-            tiling_factor = solve_for_tiling(single_var_expr)
+            tiling_factor = solve_for_tiling(single_var_expr, v)
+            # breakpoint()
+
             if (
                 tiling_factor is None
                 or not tiling_factor.is_constant()
