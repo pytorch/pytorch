@@ -10,8 +10,8 @@
 
 #include <cstdint>
 #include <stdexcept>
-#include <utility>
 #include <string_view>
+#include <utility>
 
 namespace torch::autograd {
 
@@ -23,8 +23,7 @@ variable_list AccumulateGrad_apply_functional_no_hooks(
     variable_list&& grads,
     at::Tensor& variable,
     int64_t num_expected_refs,
-    std::mutex* mutex = nullptr
-  ) {
+    std::mutex* mutex = nullptr) {
   check_input_variables("AccumulateGrad", grads, 1, 0);
 
   if (!grads[0].defined())
@@ -74,13 +73,13 @@ variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
   auto variable = r.unpack<at::Tensor>();
   auto has_post_hooks = r.unpack<bool>();
   return AccumulateGrad_apply_functional_no_hooks(
-    variable_list(grads),
-    variable,
-    1 + has_post_hooks,
-    nullptr // no mutex needed since this is executed under a single thread
+      variable_list(grads),
+      variable,
+      1 + has_post_hooks,
+      nullptr // no mutex needed since this is executed under a single thread
   );
 }
-}
+} // namespace
 
 // AccumulateGrad sets sequence_nr to the max value so it's always called
 // ASAP during backwards.
@@ -95,8 +94,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       std::move(grads),
       variable,
       1 + !post_hooks().empty() /* num_expected_refs */,
-      &mutex_
-  );
+      &mutex_);
 
   auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {
@@ -132,8 +130,9 @@ variable_list AccumulateGrad::apply_with_saved(
   saved.before(grad_copy);
   variable_copy.mutable_grad() = grad_copy;
 
-  // name() includes namespace for historical reasons: torch::autograd::AcumulateGrad
-  // For Compiled Autograd, we just want the op name without the namespace
+  // name() includes namespace for historical reasons:
+  // torch::autograd::AcumulateGrad For Compiled Autograd, we just want the op
+  // name without the namespace
   std::string name = "AccumulateGrad";
 
   // proxy a call to torch.ops.inductor.accumulate_grad_.default
@@ -163,7 +162,7 @@ variable_list AccumulateGrad::apply_with_saved(
   auto result = interface->call_function(
       saved.get_py_compiler(),
       "apply_functional",
-      name, 
+      name,
       grads,
       std::move(packed_args).vec(),
       output_metadata);

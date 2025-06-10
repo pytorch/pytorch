@@ -110,9 +110,7 @@ class NaNChecker:
 
     def prep_with_graph(self, graph: torch.fx.Graph):
         inputs_node = next(iter(graph.nodes))
-        acc_grad_nodes = graph.find_nodes(
-            op="call_function", target=ops.AccumulateGrad
-        )
+        acc_grad_nodes = graph.find_nodes(op="call_function", target=ops.AccumulateGrad)
         output_nodes = graph.find_nodes(op="output")[0].args[0]
         assert self.accumulate_grad == bool(
             acc_grad_nodes
@@ -228,11 +226,7 @@ ops = OpNamespace()
 
 _graph_placeholders = ["inputs", "sizes", "scalars", "hooks", "packed_data"]
 _impure_targets = OrderedSet(
-    [
-        call_hook,
-        call_backward,
-        FakeCompiledAutogradEngine._exec_final_callbacks_stub
-    ]
+    [call_hook, call_backward, FakeCompiledAutogradEngine._exec_final_callbacks_stub]
 )
 
 COMPILE_COUNTER = itertools.count()
@@ -275,7 +269,7 @@ class AutogradCompilerInstance:
 
     def begin_capture(
         self,
-        real_inputs: list[torch.Tensor],
+        inputs: list[torch.Tensor],
         sizes: list[int],
         scalars: list[Union[int, float]],
         origins: list[list[tuple[int, str]]],
@@ -314,11 +308,10 @@ class AutogradCompilerInstance:
         inputs_origins, sizes_origins, scalars_origins = origins
 
         # tensor inputs to fake tensors
-        inputs = []
-        x = real_inputs[0]  # mypy will complain about unbound x
+        x = inputs[0]  # mypy will complain about unbound x
         try:
-            for idx, x in enumerate(real_inputs):
-                inputs.append(self.wrap_fake(x, self.source("inputs", idx)))
+            for idx, x in enumerate(inputs):
+                inputs[idx] = self.wrap_fake(x, self.source("inputs", idx))
         except Exception as e:
             raise NotImplementedError(
                 f"Found tensor of type {type(x)}, which is not supported by FakeTensorMode. {TURN_OFF_MSG}"
@@ -940,12 +933,14 @@ class AutogradCompilerInstance:
 
     def end_capture(self, outputs):
         global _impure_targets
-        _impure_targets = OrderedSet([
-            call_hook,
-            call_backward,
-            FakeCompiledAutogradEngine._exec_final_callbacks_stub,
-            ops.AccumulateGrad
-        ])
+        _impure_targets = OrderedSet(
+            [
+                call_hook,
+                call_backward,
+                FakeCompiledAutogradEngine._exec_final_callbacks_stub,
+                ops.AccumulateGrad,
+            ]
+        )
         self.fx_tracer.create_proxy(
             "call_function",
             FakeCompiledAutogradEngine._exec_final_callbacks_stub,
@@ -1229,10 +1224,7 @@ class AutogradCompilerInstance:
             # find the corresponding acc_grad node
             acc_grad_node = None
             for n in list(param_node.users.keys()):
-                if (
-                    n.op == "call_function"
-                    and n.target == ops.AccumulateGrad
-                ):
+                if n.op == "call_function" and n.target == ops.AccumulateGrad:
                     acc_grad_node = n
                     break
 
@@ -1281,10 +1273,7 @@ class AutogradCompilerInstance:
                 )
 
             arg = max(input_nodes_and_users)  # last input users
-            if (
-                arg.op == "call_function"
-                and arg.target == ops.AccumulateGrad
-            ):
+            if arg.op == "call_function" and arg.target == ops.AccumulateGrad:
                 param_node = arg.args[0][0]
                 post_acc_grad_hook_node = None
                 for n in list(param_node.users.keys()):
