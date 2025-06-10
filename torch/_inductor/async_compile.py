@@ -216,6 +216,35 @@ class CompiledTritonKernels:
             del CompiledTritonKernels._cache[key]
 
 
+_ASYNC_COMPILE_POOL_MANAGER: Optional[AsyncCompilePoolManager] = None
+
+
+class AsyncCompilePoolManager:
+    def __init__(self):
+        self._warmed_up = False
+
+    def __enter__(self):
+        global _ASYNC_COMPILE_POOL_MANAGER
+        _ASYNC_COMPILE_POOL_MANAGER = self
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        global _ASYNC_COMPILE_POOL_MANAGER
+        AsyncCompile.quiesce()
+        _ASYNC_COMPILE_POOL_MANAGER = None
+
+    def _warmup(self):
+        if not self._warmed_up:
+            torch._inductor.async_compile.AsyncCompile.warm_pool()
+            self._warmed_up = True
+
+    @staticmethod
+    def warmup():
+        global _ASYNC_COMPILE_POOL_MANAGER
+        if _ASYNC_COMPILE_POOL_MANAGER is not None:
+            _ASYNC_COMPILE_POOL_MANAGER._warmup()
+
+
 class AsyncCompile:
     def __init__(self) -> None:
         pass
@@ -272,9 +301,18 @@ class AsyncCompile:
         if get_compile_threads() <= 1:
             return
         _compile_start()
-        # Pool is initialized on first access
-        cls.process_pool()
+        pool = cls.process_pool()
+        if isinstance(pool, SubprocPool):
+            pool.warmup()
         _compile_end()
+
+    @classmethod
+    def quiesce(cls) -> None:
+        # Don't inadvertently create a process pool if it doesn't already exist:
+        if cls.process_pool.cache_info().currsize:
+            pool = cls.process_pool()
+            if isinstance(pool, SubprocPool):
+                pool.quiesce()
 
     @classmethod
     def submit(cls, task: Callable[..., Any]) -> Any:

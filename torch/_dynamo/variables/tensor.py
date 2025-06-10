@@ -201,6 +201,9 @@ class TensorVariable(VariableTracker):
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
+        # Initialize as early as possible
+        if device.type == "cuda":
+            torch._inductor.async_compile.AsyncCompilePoolManager.warmup()
 
     def debug_repr(self):
         # TODO: strip off fake tensor from repr here
