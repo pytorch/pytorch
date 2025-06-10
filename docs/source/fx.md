@@ -437,7 +437,7 @@ If you’re not familiar with debuggers, please see the auxiliary section
   as of Python 3.7 (and as of cPython 3.6). A `dict` can be used equivalently
   to a set by storing values to be deduplicated in the keys of the `dict`.
 
-#### Checking Correctness of Modules
+### Checking Correctness of Modules
 
 Because the output of most deep learning modules consists of floating
 point {class}`torch.Tensor` instances, checking for equivalence between
