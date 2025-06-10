@@ -470,6 +470,7 @@ example:
     """
     RuntimeError: Boolean value of Tensor with more than one value is ambiguous
     """
+```
 
 Here, we've tried to check equality of the values of two deep learning
 models with the `==` equality operator. However, this is not well-\
@@ -1061,52 +1062,52 @@ The set of leaf modules can be customized by overriding
 
 
 ## API Reference
-```{eval_rst}
+```{eval-rst}
 .. autofunction:: torch.fx.symbolic_trace
 ```
-```{eval_rst}
+```{eval-rst}
 .. autofunction:: torch.fx.wrap
 ```
-```{eval_rst}
+```{eval-rst}
 .. autoclass:: torch.fx.GraphModule
   :members:
 
-  .. automethod::
+  .. automethod:: __init__
 ```
-```{eval_rst}
+```{eval-rst}
 .. autoclass:: torch.fx.Graph
   :members:
 
-  .. automethod::
+  .. automethod:: __init__
 ```
-```{eval_rst}
+```{eval-rst}
 .. autoclass:: torch.fx.Node
   :members:
 ```
-```{eval_rst}
+```{eval-rst}
 .. autoclass:: torch.fx.Tracer
   :members:
   :inherited-members:
 ```
-```{eval_rst}
+```{eval-rst}
 .. autoclass:: torch.fx.Proxy
 ```
-```{eval_rst}
+```{eval-rst}
 .. autoclass:: torch.fx.Interpreter
   :members:
 ```
-```{eval_rst}
+```{eval-rst}
 .. autoclass:: torch.fx.Transformer
   :members:
 ```
-```{eval_rst}
+```{eval-rst}
 .. autofunction:: torch.fx.replace_pattern
 ```
 
 <!-- The experimental and passes submodules are missing docs. -->
 <!-- Adding it here for coverage but this doesn't add anything to the -->
 <!-- rendered doc. -->
-```{eval_rst}
+```{eval-rst}
 .. py:module:: torch.fx.passes
 .. py:module:: torch.fx.passes.infra
 .. py:module:: torch.fx.passes.backends
