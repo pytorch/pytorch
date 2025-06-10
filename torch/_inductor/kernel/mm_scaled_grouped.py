@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton_tma_device
 
@@ -190,8 +191,12 @@ triton_grouped_mm_source = r"""
     SCALE_B_STRIDE_G = {{stride("scale_b_ptr", 0)}}
 {%- endif %}
 
-    # fixme: a_desc = tl.make_tensor_descriptor(
+{%- if USE_TMA_LOAD %}
+{%- if USE_EXPERIMENTAL_MAKE_TENSOR_DESCRIPTOR %}
     a_desc = tl._experimental_make_tensor_descriptor(
+{%- else %}
+    a_desc = tl.make_tensor_descriptor(
+{%- endif %}
         a_ptr,
 {%- if A_IS_2D %}
         shape=[M, K],
@@ -206,8 +211,11 @@ triton_grouped_mm_source = r"""
 {%- endif %}
     )
 
-    # fixme: b_desc = tl.make_tensor_descriptor(
+{%- if USE_EXPERIMENTAL_MAKE_TENSOR_DESCRIPTOR %}
     b_desc = tl._experimental_make_tensor_descriptor(
+{%- else %}
+    b_desc = tl.make_tensor_descriptor(
+{%- endif %}
         b_ptr,
 {%- if B_IS_2D %}
         shape=[N, K],
@@ -221,6 +229,7 @@ triton_grouped_mm_source = r"""
         block_shape=[1, BLOCK_N, BLOCK_K],
 {%- endif %}
     )
+{%- endif %}
 
 {%- if M_IS_VARYING %}
     m_end_offset = 0
@@ -596,12 +605,22 @@ def _tuned_grouped_mm_common(
                 V.graph.sizevars.guard_equals(k1, k2)
                 a_is_2d, b_is_2d = False, False
 
+        triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
+        triton_has__experimental_make_tensor_descriptor = hasattr(
+            tl, "_experimental_make_tensor_descriptor"
+        )
+        use_tma_load = (
+            triton_has_make_tensor_descriptor
+            or triton_has__experimental_make_tensor_descriptor
+        )
+
         kwargs = {
             "A_IS_2D": a_is_2d,
             "B_IS_2D": b_is_2d,
             "USE_FAST_ACCUM": use_fast_accum,
             "NUM_SMS": get_num_sms(),
-            "USE_TMA_LOAD": True,
+            "USE_TMA_LOAD": use_tma_load,
+            "USE_EXPERIMENTAL_MAKE_TENSOR_DESCRIPTOR": triton_has__experimental_make_tensor_descriptor,
         }
 
         for config in early_config_prune(g, m, grouped_mm_configs(), kwargs):
