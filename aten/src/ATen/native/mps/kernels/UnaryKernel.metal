@@ -43,6 +43,17 @@ struct sigmoid_functor {
   }
 };
 
+struct abs_functor {
+  template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return static_cast<T>(precise::abs(x));
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return T(::precise::sqrt(dot(x, x)), 0);
+  }
+};
+
 struct sin_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -321,6 +332,14 @@ REGISTER_UNARY_OP(bitwise_not, char, char);
 REGISTER_UNARY_OP(bitwise_not, uchar, uchar);
 REGISTER_UNARY_OP(bitwise_not, bool, bool);
 
+REGISTER_UNARY_OP(abs, int, int);
+REGISTER_UNARY_OP(abs, long, long);
+REGISTER_UNARY_OP(abs, short, short);
+REGISTER_UNARY_OP(abs, char, char);
+REGISTER_UNARY_OP(abs, uchar, uchar);
+REGISTER_UNARY_OP(abs, float, float);
+REGISTER_UNARY_OP(abs, half, half);
+
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
   REGISTER_UNARY_OP(erf, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(erfc, DTYPE1, DTYPE0);         \
@@ -343,6 +362,7 @@ REGISTER_UNARY_OP(bitwise_not, bool, bool);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
 REGISTER_UNARY_OP(neg, bfloat, bfloat);
+REGISTER_UNARY_OP(abs, bfloat, bfloat);
 #endif
 INSTANTIATE_UNARY_KERNELS2(half, half);
 INSTANTIATE_UNARY_KERNELS2(float, float);
@@ -357,6 +377,7 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(sigmoid, DTYPE##2, DTYPE##2); \
+  REGISTER_UNARY_OP(abs, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(log, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2);   \
