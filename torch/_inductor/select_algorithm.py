@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import builtins
 import contextlib
 import dataclasses
 import functools
@@ -495,7 +494,10 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta: dict[str, Any] = {
             "signature": signature_to_meta(
-                signature, size_dtype=self.index_dtype, argdefs=argdefs
+                signature,
+                size_dtype=self.index_dtype,
+                argdefs=argdefs,
+                is_template=True,
             ),
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
@@ -2200,10 +2202,25 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def autotune(choices):
             log.debug("Starting autotuning")
+
             with dynamo_timed(
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
+                metadata={
+                    "autotune_strides": ", ".join(
+                        [str(n.get_stride()) for n in input_nodes]
+                    ),
+                    "autotune_dtypes": ", ".join(
+                        [str(n.get_dtype()) for n in input_nodes]
+                    ),
+                    "autotune_shape": ", ".join(
+                        ["x".join(map(str, n.get_size())) for n in input_nodes]
+                    ),
+                    "autotune_offset": ", ".join(
+                        [str(n.get_layout().offset) for n in input_nodes]
+                    ),
+                },
             ):
                 return make_benchmark_fn()(choices)
 
@@ -2334,13 +2351,34 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
         timings = do_autotuning(choices, precompile_fn)
-        if timings == {} or choices[0] not in timings:
-            return choices[0].output_node()
 
-        selected_key = builtins.min(timings, key=timings.__getitem__)
-        selected_choice = selected_key.output_node()
-        log.debug("selected choice: %s", str(selected_choice))
-        return selected_choice
+        # if timings is empty, we really have no choice but to return a semi-random
+        # choice. returning the first `ExternKernelCaller` is probably the safest bet
+        # in this case, since it will generally be the ATen kernel. if there are no
+        # `ExternKernelCaller`s to return, then returning the 0th kernel is our next
+        # best option (ideally we'd fail whenever there is no ATen kernel to fallback
+        # to, but that's not trivial to figure out)
+        if timings == {}:
+            for choice in choices:
+                if isinstance(choice, ExternKernelCaller):
+                    node = choice.output_node()
+                    log.debug(
+                        "Autotuning returned empty timings, falling back to first `ExternKernelCaller`: %s",
+                        node,
+                    )
+                    return node
+            node = choices[0].output_node()
+            log.debug(
+                "Autotuning returned empty timings, falling back to first choice: %s",
+                node,
+            )
+            return node
+
+        # if we got any timings at all, pick the best of those
+        choice = min(timings, key=timings.__getitem__)
+        node = choice.output_node()
+        log.debug("Autotuning selected choice: %s", node)
+        return node
 
     def make_precompile_fn(
         self,

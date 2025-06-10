@@ -571,6 +571,70 @@ class TestExport(TestCase):
 
         self.assertEqual(counter, 1)
 
+    def test_from_node_metadata_export(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv1d = torch.nn.Conv1d(3, 3, 3)
+                self.conv2d = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                x = self.conv2d(x)
+                x = x.squeeze(0)
+                x = self.conv1d(x)
+                return x
+
+            def example_inputs(self):
+                return
+
+        f = Foo()
+        inputs = (torch.randn(1, 3, 5, 5),)
+        gm = export(f, inputs).module()
+        from torch.fx.traceback import NodeSourceAction
+
+        for node in gm.graph.nodes:
+            if node.op in ("placeholder", "output"):
+                continue
+            if "weight" in node.name or "bias" in node.name:
+                self.assertTrue(
+                    node.meta["from_node"][-1].pass_name
+                    == "ExportedProgram.module().unlift()"
+                )
+                self.assertTrue(
+                    node.meta["from_node"][-1].action
+                    == [NodeSourceAction.CREATE, NodeSourceAction.REPLACE]
+                )
+            else:
+                self.assertTrue(
+                    node.meta["from_node"][-1].pass_name == "ExportedProgram.module()"
+                )
+                self.assertTrue(
+                    node.meta["from_node"][-1].action == [NodeSourceAction.CREATE]
+                )
+
+        ## re-export
+        gm2 = export(gm, inputs).module()
+
+        for node in gm2.graph.nodes:
+            if node.op in ("placeholder", "output"):
+                continue
+            if "weight" in node.name or "bias" in node.name:
+                self.assertTrue(
+                    node.meta["from_node"][-1].pass_name
+                    == "ExportedProgram.module().unlift()"
+                )
+                self.assertTrue(
+                    node.meta["from_node"][-1].action
+                    == [NodeSourceAction.CREATE, NodeSourceAction.REPLACE]
+                )
+            else:
+                self.assertTrue(
+                    node.meta["from_node"][-1].pass_name == "ExportedProgram.module()"
+                )
+                self.assertTrue(
+                    node.meta["from_node"][-1].action == [NodeSourceAction.CREATE]
+                )
+
     def test_bincount(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -615,6 +679,120 @@ graph():
     %y : [num_users=0] = placeholder[target=y]
     return (1,)""",
         )
+
+    def test_inline_script_function(self):
+        @torch.jit.script
+        def _forward(x: torch.Tensor):
+            if torch.jit.is_scripting():
+                return x.cos()
+            return x.sin()
+
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return _forward(x)
+
+        x = torch.randn(3, 4)
+        ep = torch.export.export(M(), (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
+        res = ep.module()(x)
+        # We're inlining the original _forward function
+        # instead of the scripted function, so we get x.sin()
+        self.assertEqual(res, x.sin())
+
+    def test_inline_script_class_method(self):
+        class M(torch.nn.Module):
+            @staticmethod
+            @torch.jit.script
+            def _forward(x: torch.Tensor):
+                if torch.jit.is_scripting():
+                    return x.cos()
+                return x.sin()
+
+            def forward(self, x: torch.Tensor):
+                return M._forward(x)
+
+        x = torch.randn(3, 4)
+        ep = torch.export.export(M(), (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
+        res = ep.module()(x)
+        # We're inlining the original _forward function
+        # instead of the scripted function, so we get x.sin()
+        self.assertEqual(res, x.sin())
+
+    def test_inline_script_class_method_recursive(self):
+        f = 0.4
+        i = 2
+        s = "foo"
+
+        @torch.jit.script
+        def _inner(x: torch.Tensor, y: torch.Tensor, f: float, i: int, s_len: int):
+            return x * y * f * i * s_len
+
+        class M(torch.nn.Module):
+            @staticmethod
+            @torch.jit.script
+            def _forward(x: torch.Tensor, y: torch.Tensor, f: float, i: int, s: str):
+                if torch.jit.is_scripting():
+                    return _inner(x.cos(), y.cos(), f, i, len(s))
+                return _inner(x.sin(), y.sin(), f, i, len(s))
+
+            def forward(self, x: torch.Tensor):
+                return M._forward(x, y=x, f=f, i=i, s=s)
+
+        x = torch.randn(3, 4)
+        ep = torch.export.export(M(), (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 2, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
+        res = ep.module()(x)
+        # We're inlining the original _forward function
+        # instead of the scripted function, so we get x.sin()
+        self.assertEqual(res, _inner(x.sin(), x.sin(), f, i, len(s)))
+
+    def test_inline_script_method(self):
+        class M(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def _forward(self, x: torch.Tensor):
+                if torch.jit.is_scripting():
+                    return x.cos()
+                return x.sin()
+
+            def forward(self, x):
+                return self._forward(x)
+
+        class Wrapped(torch.nn.Module):
+            def __init__(self, mod):
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        x = torch.randn(3, 4)
+        ep = torch.export.export(Wrapped(M()), (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
+        res = ep.module()(x)
+        # We're inlining the original _forward function
+        # instead of the scripted function, so we get x.sin()
+        self.assertEqual(res, x.sin())
 
     def test_no_tensor_computation_2(self):
         class Module(torch.nn.Module):
