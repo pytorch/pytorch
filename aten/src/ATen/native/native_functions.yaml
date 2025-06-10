@@ -357,8 +357,7 @@
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: abs_out
-    MPS: abs_out_mps
+    CPU, CUDA, MPS: abs_out
     SparseCPU, SparseCUDA: abs_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: abs_sparse_csr_out
   tags: pointwise
@@ -2548,8 +2547,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: erf_out
-    MPS: erf_out_mps
+    CPU, CUDA, MPS: erf_out
     SparseCPU, SparseCUDA: erf_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: erf_sparse_csr_out
   tags: pointwise
@@ -2571,7 +2569,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: erfc_out
+    CPU, CUDA, MPS: erfc_out
   tags: pointwise
 
 - func: exp(Tensor self) -> Tensor
@@ -3558,8 +3556,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: log1p_out
-    MPS: log1p_out_mps
+    CPU, CUDA, MPS: log1p_out
     SparseCPU, SparseCUDA: log1p_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: log1p_sparse_csr_out
   tags: pointwise
@@ -4782,6 +4779,14 @@
     CompositeExplicitAutograd: randint_like
   autogen: randint_like.out
 
+- func: randint_like.Tensor(Tensor self, Tensor high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
+  autogen: randint_like.Tensor_out
+
 - func: randint_like.low_dtype(Tensor self, SymInt low, SymInt high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
@@ -5166,7 +5171,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: hardshrink_out
+    CPU, CUDA, MPS: hardshrink_out
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   structured_delegate: hardshrink.out
@@ -5178,7 +5183,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: hardshrink_backward_out
+    CPU, CUDA, MPS: hardshrink_backward_out
 
 - func: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd) -> Tensor
   structured_delegate: hardshrink_backward.grad_input
@@ -5339,8 +5344,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: sigmoid_out
-    MPS: sigmoid_out_mps
+    CPU, CUDA, MPS: sigmoid_out
   tags: pointwise
 
 - func: logit(Tensor self, float? eps=None) -> Tensor
@@ -7270,13 +7274,13 @@
   dispatch:
     CompositeImplicitAutograd: _sparse_coo_tensor_unsafe_symint
 
-- func: _validate_sparse_coo_tensor_args(Tensor indices, Tensor values, int[] size, bool? is_coalesced=None) -> ()
+- func: _validate_sparse_coo_tensor_args(Tensor indices, Tensor values, int[] size, bool? is_coalesced=None, bool? check_pinning=None) -> ()
 
-- func: _validate_sparse_compressed_tensor_args(Tensor compressed_indices, Tensor plain_indices, Tensor values, int[] size, Layout layout) -> ()
-- func: _validate_sparse_csr_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size) -> ()
-- func: _validate_sparse_csc_tensor_args(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size) -> ()
-- func: _validate_sparse_bsr_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size) -> ()
-- func: _validate_sparse_bsc_tensor_args(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size) -> ()
+- func: _validate_sparse_compressed_tensor_args(Tensor compressed_indices, Tensor plain_indices, Tensor values, int[] size, Layout layout, bool? check_pinning=None) -> ()
+- func: _validate_sparse_csr_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, bool? check_pinning=None) -> ()
+- func: _validate_sparse_csc_tensor_args(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size, bool? check_pinning=None) -> ()
+- func: _validate_sparse_bsr_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, bool? check_pinning=None) -> ()
+- func: _validate_sparse_bsc_tensor_args(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size, bool? check_pinning=None) -> ()
 
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:

@@ -15,6 +15,9 @@ export INSTALL_TEST=0 # dont install test binaries into site-packages
 export USE_CUPTI_SO=0
 export USE_CUSPARSELT=${USE_CUSPARSELT:-1} # Enable if not disabled by libtorch build
 export USE_CUFILE=${USE_CUFILE:-1}
+export USE_SYSTEM_NCCL=1
+export NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
+export NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 
 # Keep an array of cmake variables to add to
 if [[ -z "$CMAKE_ARGS" ]]; then
@@ -162,8 +165,10 @@ if [[ $CUDA_VERSION == 12* ]]; then
             '$ORIGIN/../../nvidia/curand/lib'
             '$ORIGIN/../../nvidia/cusolver/lib'
             '$ORIGIN/../../nvidia/cusparse/lib'
+            '$ORIGIN/../../nvidia/cusparselt/lib'
             '$ORIGIN/../../cusparselt/lib'
             '$ORIGIN/../../nvidia/nccl/lib'
+            '$ORIGIN/../../nvidia/nvshmem/lib'
             '$ORIGIN/../../nvidia/nvtx/lib'
             '$ORIGIN/../../nvidia/cufile/lib'
         )
@@ -172,12 +177,9 @@ if [[ $CUDA_VERSION == 12* ]]; then
         export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
         export FORCE_RPATH="--force-rpath"
         export USE_STATIC_NCCL=0
-        export USE_SYSTEM_NCCL=1
         export ATEN_STATIC_CUDA=0
         export USE_CUDA_STATIC_LINK=0
         export USE_CUPTI_SO=1
-        export NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
-        export NCCL_LIB_DIR="/usr/local/cuda/lib64/"
     fi
 elif [[ $CUDA_VERSION == "11.8" ]]; then
     export USE_STATIC_CUDNN=0
@@ -254,12 +256,9 @@ elif [[ $CUDA_VERSION == "11.8" ]]; then
         export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
         export FORCE_RPATH="--force-rpath"
         export USE_STATIC_NCCL=0
-        export USE_SYSTEM_NCCL=1
         export ATEN_STATIC_CUDA=0
         export USE_CUDA_STATIC_LINK=0
         export USE_CUPTI_SO=1
-        export NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
-        export NCCL_LIB_DIR="/usr/local/cuda/lib64/"
     fi
 else
     echo "Unknown cuda version $CUDA_VERSION"
