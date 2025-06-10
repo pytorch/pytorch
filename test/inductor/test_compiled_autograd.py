@@ -4258,14 +4258,14 @@ class CompiledAutograd1(torch.nn.Module):
         finally:
             dist.destroy_process_group()
 
-    # Scenario 1.1: Stealable dense new_grad
+    # Case 1.1: Stealable dense new_grad
     # if (!GradMode::is_enabled() && !new_grad.is_sparse() &&
     #     !new_grad.is_sparse_csr() &&
     #     !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
     #     at::caching::adjusted_use_count(new_grad) <= num_expected_refs &&
     #     (new_grad.is_mkldnn() || utils::obeys_layout_contract(new_grad, variable))) {
     @unittest.expectedFailure
-    def test_accumulate_grad_polyfill_scenario_1_1(self):
+    def test_accumulate_grad_polyfill_case_1_1(self):
         def fn():
             class StealableDenseOp(BaseCustomOp):
                 @staticmethod
@@ -4302,14 +4302,14 @@ class CompiledAutograd1(torch.nn.Module):
             count=[1, 2],
         )
 
-    # Scenario 1.2: Stealable sparse new_grad
+    # Case 1.2: Stealable sparse new_grad
     # } else if (!GradMode::is_enabled() && new_grad.is_sparse() &&
     #            new_grad._indices().is_contiguous() &&
     #            new_grad._values().is_contiguous() &&
     #            new_grad._indices().use_count() <= 1 &&
     #            new_grad._values().use_count() <= 1 &&
     #            new_grad.use_count() <= num_expected_refs) {
-    def test_accumulate_grad_polyfill_scenario_1_2(self):
+    def test_accumulate_grad_polyfill_case_1_2(self):
         def fn():
             class StealableSparseOp(BaseCustomOp):
                 @staticmethod
@@ -4359,11 +4359,11 @@ class CompiledAutograd1(torch.nn.Module):
             count=[1, 2],
         )
 
-    # Scenario 1.3: Cloning sparse/nested new_grad
+    # Case 1.3: Cloning sparse/nested new_grad
     # else {
     #   if (new_grad.is_sparse() || new_grad.is_sparse_csr() ||
     #       new_grad.is_nested()) {
-    def test_accumulate_grad_polyfill_scenario_1_3(self):
+    def test_accumulate_grad_polyfill_case_1_3(self):
         def fn():
             class CloneSparseGradOp(BaseCustomOp):
                 @staticmethod
@@ -4417,7 +4417,7 @@ class CompiledAutograd1(torch.nn.Module):
             count=[1, 2],
         )
 
-    # Scenario 1.5.1: Dense variable gradient layout contract
+    # Case 1.5.1: Dense variable gradient layout contract
     # else { // Covers various deep copy scenarios not covered by specific stealable paths
     #   ...
     #   if (new_grad.is_mkldnn()) {
@@ -4427,7 +4427,7 @@ class CompiledAutograd1(torch.nn.Module):
     #       update_grad(utils::clone_obey_contract(new_grad, variable));
     #   }
     # }
-    def test_accumulate_grad_polyfill_scenario_1_5_1(self):
+    def test_accumulate_grad_polyfill_case_1_5_1(self):
         def fn():
             class NotStealableRefsOp(BaseCustomOp):
                 @staticmethod
@@ -4457,7 +4457,7 @@ class CompiledAutograd1(torch.nn.Module):
 
         self.check_output_and_recompiles(fn)
 
-    # Scenario 1.5.2: Non-dense variable gradient layout contract
+    # Case 1.5.2: Non-dense variable gradient layout contract
     # else { // Covers various deep copy scenarios not covered by specific stealable paths
     #   ...
     #   if (new_grad.is_mkldnn()) {
@@ -4467,7 +4467,7 @@ class CompiledAutograd1(torch.nn.Module):
     #       update_grad(utils::clone_obey_contract(new_grad, variable));
     #   }
     # }
-    def test_accumulate_grad_polyfill_scenario_1_5_2(self):
+    def test_accumulate_grad_polyfill_case_1_5_2(self):
         def fn():
             class SimpleDenseGradOp(BaseCustomOp):
                 @staticmethod
@@ -4511,11 +4511,11 @@ class CompiledAutograd1(torch.nn.Module):
             fn,
         )
 
-    # Scenario 2.1: Sparse variable_grad + Dense new_grad
+    # Case 2.1: Sparse variable_grad + Dense new_grad
     # } else if (!GradMode::is_enabled()) {
     #   if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
     #       auto result = new_grad + variable_grad;
-    def test_accumulate_grad_polyfill_scenario_2_1(self):
+    def test_accumulate_grad_polyfill_case_2_1(self):
         def fn():
             class SparseVarGradDenseNewGradOp(BaseCustomOp):
                 @staticmethod
@@ -4548,12 +4548,12 @@ class CompiledAutograd1(torch.nn.Module):
             count=[1, 0],
         )
 
-    # Scenario 2.3.1: Dense/Dense in-place addition
+    # Case 2.3.1: Dense/Dense in-place addition
     # } else if (!GradMode::is_enabled()) {
     #   ...
     # } else {
     #   variable_grad += new_grad;
-    def test_accumulate_grad_polyfill_scenario_2_3_1(self):
+    def test_accumulate_grad_polyfill_case_2_3_1(self):
         def fn():
             class DenseVarGradDenseNewGradOp(BaseCustomOp):
                 @staticmethod
@@ -4577,12 +4577,12 @@ class CompiledAutograd1(torch.nn.Module):
 
         self.check_output_and_recompiles(fn)
 
-    # Scenario 2.3.2: Sparse/Sparse in-place addition
+    # Case 2.3.2: Sparse/Sparse in-place addition
     # } else if (!GradMode::is_enabled()) {
     #   ...
     # } else {
     #   variable_grad += new_grad;
-    def test_accumulate_grad_polyfill_scenario_2_3_2(self):
+    def test_accumulate_grad_polyfill_case_2_3_2(self):
         def fn():
             class SparseVarGradSparseNewGradOp(BaseCustomOp):
                 @staticmethod
@@ -4631,12 +4631,12 @@ class CompiledAutograd1(torch.nn.Module):
             count=[1, 0],
         )
 
-    # Scenario 2.3.3: Dense/Sparse in-place addition
+    # Case 2.3.3: Dense/Sparse in-place addition
     # } else if (!GradMode::is_enabled()) {
     #   ...
     # } else {
     #   variable_grad += new_grad;
-    def test_accumulate_grad_polyfill_scenario_2_3_3(self):
+    def test_accumulate_grad_polyfill_case_2_3_3(self):
         def fn():
             class DenseVarGradSparseNewGradOp(BaseCustomOp):
                 @staticmethod
@@ -4676,14 +4676,14 @@ class CompiledAutograd1(torch.nn.Module):
             count=[1, 2],
         )
 
-    # Scenario 3.1: Sparse variable_grad + Dense new_grad (reorder into Dense + Sparse)
+    # Case 3.1: Sparse variable_grad + Dense new_grad (reorder into Dense + Sparse)
     # } else { // if GradMode::is_enabled()
     #   at::Tensor result;
     #   if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
     #     result = new_grad + variable_grad;
     #   }
     # }
-    def test_accumulate_grad_polyfill_scenario_3_1(self):
+    def test_accumulate_grad_polyfill_case_3_1(self):
         def fn():
             class SparseVarGradDenseNewGradDoubleBackwardOp(BaseCustomOp):
                 @staticmethod
@@ -4723,7 +4723,7 @@ class CompiledAutograd1(torch.nn.Module):
             count=[1, 0],
         )
 
-    # Scenario 3.2: variable_grad.defined() & GradMode::is_enabled() - Double backward (dense variable_grad + dense new_grad)
+    # Case 3.2: variable_grad.defined() & GradMode::is_enabled() - Double backward (dense variable_grad + dense new_grad)
     # } else { // if GradMode::is_enabled()
     #   at::Tensor result;
     #   ...
@@ -4731,7 +4731,7 @@ class CompiledAutograd1(torch.nn.Module):
     #     result = variable_grad + new_grad;
     #   }
     # }
-    def test_accumulate_grad_polyfill_scenario_3_2(self):
+    def test_accumulate_grad_polyfill_case_3_2(self):
         def fn():
             class DenseVarGradDenseNewGradDoubleBackwardOp(BaseCustomOp):
                 @staticmethod
