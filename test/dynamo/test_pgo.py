@@ -55,6 +55,49 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         f(torch.randn(2, 6))
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_optimizer_whitelist(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+                self.attr = torch.randn(4)
+
+            def forward(self, x):
+                return self.lin(x) + self.attr
+
+        f = Foo()
+        opt = torch.optim.Adam(f.parameters(), lr=1e-3)
+
+        class Trainer:
+            def __init__(self, mod, opt):
+                self.mod = mod
+                self.opt = opt
+
+            @torch.compile(fullgraph=False)
+            def loop(self, x):
+                self.opt.zero_grad()
+                out = self.mod(x)
+                loss = out.sum()
+                loss.backward()
+                self.opt.step()
+                return out
+
+        trainer = Trainer(f, opt)
+        trainer.loop(torch.randn(2, 4))
+        trainer.loop(torch.randn(4, 4))
+        f.lin = torch.nn.Linear(8, 8)
+        f.attr = torch.randn(8)
+        trainer.opt = torch.optim.Adam(f.parameters(), lr=1e-3)
+        trainer.loop(torch.randn(8, 8))
+
+        # check optimizer tensors not in whitelist
+        state = torch._dynamo.pgo.render_code_state(
+            torch._dynamo.pgo.get_code_state()
+        )
+        whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(1)
+        for name in whitelist.split(","):
+            self.assertFalse("param_groups" in name)
+
     def test_whitelist_suggestion(self):
         cnts = CompileCounter()
 

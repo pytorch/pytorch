@@ -23,7 +23,7 @@ import re
 import zlib
 from collections import defaultdict
 from typing import Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import override, Self
+from typing_extensions import is_protocol, override, Self
 
 import torch._dynamo.config
 import torch._utils_internal
@@ -234,6 +234,7 @@ class FrameStateSizeEntry:
     stride: Union[
         AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic, InferStride], ...]
     ] = dataclasses.field(default=auto_unset)
+    is_optimizer: bool = False
 
     def render(self) -> str:
         # Special cases
@@ -311,25 +312,27 @@ class FrameStateSizeEntry:
         return tuple(auto_dynamic if isinstance(x, torch.SymInt) else x for x in xs)
 
     @classmethod
-    def make_scalar(cls, x: int) -> FrameStateSizeEntry:
-        return FrameStateSizeEntry(scalar=x, size=auto_dynamic, stride=auto_dynamic)
+    def make_scalar(cls, x: int, is_optimizer: bool = False) -> FrameStateSizeEntry:
+        return FrameStateSizeEntry(scalar=x, size=auto_dynamic, stride=auto_dynamic, is_optimizer=is_optimizer)
 
     @classmethod
     def make_tensor(
-        cls, size: tuple[int, ...], stride: tuple[int, ...]
+        cls, size: tuple[int, ...], stride: tuple[int, ...], is_optimizer: bool = False
     ) -> FrameStateSizeEntry:
         return FrameStateSizeEntry(
             scalar=auto_dynamic,
             size=cls._munge_symint(size),
             stride=cls._munge_symint(stride),
+            is_optimizer=is_optimizer,
         )
 
     @classmethod
-    def make_size(cls, size: tuple[int, ...]) -> FrameStateSizeEntry:
+    def make_size(cls, size: tuple[int, ...], is_optimizer: bool = False) -> FrameStateSizeEntry:
         return FrameStateSizeEntry(
             scalar=auto_unset,
             size=cls._munge_symint(size),
             stride=auto_unset,
+            is_optimizer=is_optimizer,
         )
 
     @staticmethod
@@ -362,6 +365,7 @@ class FrameStateSizeEntry:
         self.scalar = self._merge_atom(self.scalar, other.scalar)
         self.size = self._merge_atom_tup(self.size, other.size)
         self.stride = self._merge_atom_tup(self.stride, other.stride)
+        self.is_optimizer |= other.is_optimizer
         return self
 
 
@@ -597,6 +601,8 @@ def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
     for k, v in cs.items():
         cs_terms: list[str] = []
         for src, fs in v.automatic_dynamic.items():
+            if fs.is_optimizer:
+                continue
             cs_terms.append(f"  {src}: {fs.render()}")
             if isinstance(fs.size, tuple) and auto_dynamic in fs.size:  # type: ignore[operator]
                 dynamic_sources.add(src)
@@ -604,8 +610,8 @@ def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
     code_state_str = "\n".join(terms)
     if dynamic_sources:
         code_state_str += (
-            "\n\nPGO detected changes a recompilation due to tensor sizes. "
-            "To potentially avoid thisTo reduce shape recompilations by compiling dynamically to start, "
+            "\n\nPGO detected a recompilation due to tensor sizes. "
+            "To reduce shape recompilations by compiling dynamically to start, "
             f'set environment variable TORCH_COMPILE_DYNAMIC_SOURCES="{",".join(dynamic_sources)}"'
         )
         with dynamo_timed(name := "pgo.dynamic_whitelist", log_pt2_compile_event=True):
