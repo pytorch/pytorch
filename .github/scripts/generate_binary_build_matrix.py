@@ -15,21 +15,19 @@ import os
 from typing import Optional
 
 
-# NOTE: Also update the CUDA sources in `PIP_SOURCES` in tools/nightly.py when changing this list
-CUDA_ARCHES = ["11.8", "12.6", "12.8"]
+# NOTE: Please also update the CUDA sources in `PIP_SOURCES` in tools/nightly.py when changing this
+CUDA_ARCHES = ["12.6", "12.8"]
 CUDA_STABLE = "12.6"
 CUDA_ARCHES_FULL_VERSION = {
-    "11.8": "11.8.0",
     "12.6": "12.6.3",
     "12.8": "12.8.1",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
-    "11.8": "9",
     "12.6": "9",
     "12.8": "9",
 }
 
-# NOTE: Also update the ROCm sources in `PIP_SOURCES` in tools/nightly.py when changing this list
+# NOTE: Please also update the ROCm sources in `PIP_SOURCES` in tools/nightly.py when changing this
 ROCM_ARCHES = ["6.3", "6.4"]
 
 XPU_ARCHES = ["xpu"]
@@ -65,7 +63,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.26.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvshmem-cu12==3.2.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -82,7 +80,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-curand-cu12==10.3.9.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusolver-cu12==11.7.3.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparse-cu12==12.5.8.93; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.26.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvshmem-cu12==3.2.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.8.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
