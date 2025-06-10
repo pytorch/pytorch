@@ -182,6 +182,14 @@ class MPSBasicTests(TestCase):
 
 
 class MPSBasicTestsAOTI(TestCase):
+    def check_model(self, m, inp, dynamic_shapes=None):
+        res2 = m(*inp)
+        ep = torch.export.export(m, inp, dynamic_shapes=dynamic_shapes)
+        path = torch._inductor.aoti_compile_and_package(ep)
+        m = torch._inductor.aoti_load_package(path)
+        res = m(*inp)
+        assert torch.allclose(res, res2)
+
     def test_add_mps(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -189,12 +197,7 @@ class MPSBasicTestsAOTI(TestCase):
 
         inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
         m = M().to("mps")
-        res2 = m(*inp)
-        ep = torch.export.export(m, inp)
-        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
-        m = torch._inductor.aoti_load_package(path)
-        res = m(*inp)
-        assert torch.allclose(res, res2)
+        self.check_model(m, inp)
 
     def test_fallback_mps(self):
         class M(torch.nn.Module):
@@ -206,12 +209,7 @@ class MPSBasicTestsAOTI(TestCase):
             torch.randn(10, 10, device="mps"),
         )
         m = M().to("mps")
-        res2 = m(*inp)
-        ep = torch.export.export(m, inp)
-        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
-        m = torch._inductor.aoti_load_package(path)
-        res = m(*inp)
-        self.assertTrue(torch.allclose(res, res2))
+        self.check_model(m, inp)
 
     def test_c10(self):
         class M(torch.nn.Module):
@@ -223,12 +221,7 @@ class MPSBasicTestsAOTI(TestCase):
 
         inp = (torch.randn(2, 8, device="mps"),)
         m = M().to("mps")
-        res2 = m(*inp)
-        ep = torch.export.export(m, inp)
-        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
-        m = torch._inductor.aoti_load_package(path)
-        res = m(*inp)
-        self.assertTrue(torch.allclose(res, res2))
+        self.check_model(m, inp)
 
     def test_const(self):
         class M(torch.nn.Module):
@@ -241,12 +234,7 @@ class MPSBasicTestsAOTI(TestCase):
 
         inp = (torch.randn(10, 10, device="mps"),)
         m = M().to("mps")
-        res2 = m(*inp)
-        ep = torch.export.export(m, inp)
-        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
-        m = torch._inductor.aoti_load_package(path)
-        res = m(*inp)
-        self.assertTrue(torch.allclose(res, res2))
+        self.check_model(m, inp)
 
     def test_two_const(self):
         class Model(torch.nn.Module):
@@ -260,12 +248,7 @@ class MPSBasicTestsAOTI(TestCase):
 
         inp = (torch.ones(3, 3, device="mps", dtype=torch.int32),)
         m = Model().to(device="mps")
-        res2 = m(*inp)
-        ep = torch.export.export(m, inp)
-        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
-        m = torch._inductor.aoti_load_package(path)
-        res = m(*inp)
-        self.assertTrue(torch.allclose(res, res2))
+        self.check_model(m, inp)
 
     def test_simple_dynamic(self):
         class Model(torch.nn.Module):
@@ -281,15 +264,10 @@ class MPSBasicTestsAOTI(TestCase):
         inp = (x, y)
 
         m = Model().to(device="mps")
-        res2 = m(*inp)
-
         dim0_x = torch.export.Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_x}}
-        ep = torch.export.export(m, inp, dynamic_shapes=dynamic_shapes)
-        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
-        m = torch._inductor.aoti_load_package(path)
-        res = m(*inp)
-        self.assertTrue(torch.allclose(res, res2))
+
+        self.check_model(m, inp, dynamic_shapes)
 
     def test_dynamic_cat(self):
         class Model(torch.nn.Module):
@@ -303,16 +281,11 @@ class MPSBasicTestsAOTI(TestCase):
         b = torch.randn(3, 4, device="mps")
         inp = (a, b)
         m = Model().to(device="mps")
-        res2 = m(*inp)
 
         dim0_a = torch.export.Dim("dim0_a", min=1, max=10)
         dim0_b = torch.export.Dim("dim0_b", min=1, max=20)
         dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_b}}
-        ep = torch.export.export(m, inp, dynamic_shapes=dynamic_shapes)
-        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
-        m = torch._inductor.aoti_load_package(path)
-        res = m(*inp)
-        self.assertTrue(torch.allclose(res, res2))
+        self.check_model(m, inp, dynamic_shapes)
 
 
 if __name__ == "__main__":

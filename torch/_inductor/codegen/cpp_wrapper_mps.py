@@ -1,7 +1,9 @@
 from typing import Any, Optional
 
 import sympy
+
 import torch
+
 from ..ir import GraphPartitionSignature
 from ..virtualized import V
 from .cpp_wrapper_gpu import CppWrapperGpu
@@ -22,7 +24,7 @@ class CppWrapperMps(CppWrapperGpu):
         self,
         kernel_name: str,
         call_args: list[str],
-        arg_types=None,
+        arg_types: Optional[list[type]] = None,
         **kwargs: dict[str, Any],
     ) -> None:
         """
@@ -39,11 +41,13 @@ class CppWrapperMps(CppWrapperGpu):
         });
         ```
         """
+        assert arg_types is not None
+
         new_args = []
         for idx, (arg, arg_type) in enumerate(zip(call_args[:-2], arg_types[:-2])):
             if isinstance(arg_type, torch.dtype):
                 new_args.append(
-                    f"aoti_torch_mps_set_arg({kernel_name}_handle, {idx}, {arg});\n"
+                    f"aoti_torch_mps_set_arg_tensor({kernel_name}_handle, {idx}, {arg});\n"
                 )
             elif arg_type in (int, sympy.core.symbol.Symbol):
                 new_args.append(

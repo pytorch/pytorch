@@ -868,7 +868,9 @@ class MetalKernel(SIMDKernel):
             wrapper.ensure_size_computed(v)
 
         _, call_args, _, arg_types = self.args.python_argdefs()
-        arg_name_to_type = {str(call_arg): arg_type for call_arg, arg_type in zip(call_args, arg_types)}
+        arg_name_to_type = {
+            str(call_arg): arg_type for call_arg, arg_type in zip(call_args, arg_types)
+        }
 
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]

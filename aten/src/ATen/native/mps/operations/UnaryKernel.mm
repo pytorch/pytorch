@@ -21,7 +21,7 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
   REGISTER_DISPATCH(NAME##_stub, NAME##_kernel_mps)
 
 static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
-  lib.exec_unary_kernel(iter, "round_decimals", decimals);
+  lib.exec_unary_kernel(iter, "round_decimals", Scalar(decimals), ScalarType::Long);
 }
 
 REGISTER_UNARY_TI_DISPATCH(exp);
@@ -30,6 +30,7 @@ REGISTER_UNARY_TI_DISPATCH(erfc);
 REGISTER_UNARY_TI_DISPATCH(erfinv);
 REGISTER_UNARY_TI_DISPATCH(sinc);
 REGISTER_UNARY_TI_DISPATCH(tanh);
+REGISTER_UNARY_TI_DISPATCH(abs);
 REGISTER_UNARY_TI_DISPATCH(sin);
 REGISTER_UNARY_TI_DISPATCH(cos);
 REGISTER_UNARY_TI_DISPATCH(tan);
