@@ -168,7 +168,7 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
-    from .package import _CompilePackage
+    from .package import CompilePackage
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
@@ -1097,7 +1097,7 @@ class InstructionTranslatorBase(
     is_leaf_tracer: bool
     parent: Optional["InstructionTranslatorBase"]
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
-    package: Optional["_CompilePackage"]
+    package: Optional["CompilePackage"]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -3194,7 +3194,7 @@ class InstructionTranslatorBase(
         distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
         closure: Optional[tuple[types.CellType]] = None,
-        package: Optional["_CompilePackage"] = None,
+        package: Optional["CompilePackage"] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -3315,7 +3315,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         speculation_log: SpeculationLog,
         exn_vt_stack: ExceptionStack,
         distributed_state: Optional[DistributedState],
-        package: Optional["_CompilePackage"],
+        package: Optional["CompilePackage"],
     ) -> None:
         _step_logger()(
             logging.INFO,

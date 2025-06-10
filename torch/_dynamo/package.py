@@ -128,7 +128,7 @@ class _DynamoCacheEntry:
         return {backend_id for code in self.codes for backend_id in code.backend_ids}
 
 
-class _CompilePackage:
+class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
     end users. It has the following interface:
@@ -271,6 +271,7 @@ class _CompilePackage:
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
+        assert self._innermost_fn is not None
         for module, names in self._installed_globals.items():
             for name in names:
                 module.__dict__.pop(name)

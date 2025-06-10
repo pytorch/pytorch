@@ -161,7 +161,7 @@ except ModuleNotFoundError:
 
 if typing.TYPE_CHECKING:
     from .backends.registry import CompilerFn
-    from .package import _CompilePackage
+    from .package import CompilePackage
     from .repro.after_dynamo import WrapBackendDebug
     from .types import BytecodeHook, CacheEntry, DynamoFrameType
     from .variables.builder import FrameStateSizeEntry
@@ -479,7 +479,7 @@ class ConvertFrameAssert:
         one_graph: bool = True,
         export: bool = False,
         export_constraints: Optional[typing.Never] = None,
-        package: Optional[_CompilePackage] = None,
+        package: Optional[CompilePackage] = None,
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
@@ -652,7 +652,7 @@ def convert_frame_assert(
     one_graph: bool = True,
     export: bool = False,
     export_constraints: Optional[typing.Never] = None,
-    package: Optional[_CompilePackage] = None,
+    package: Optional[CompilePackage] = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph"""
     return ConvertFrameAssert(
@@ -700,7 +700,7 @@ def _compile(
     *,
     compile_id: CompileId,
     skip: int = 0,
-    package: Optional[_CompilePackage] = None,
+    package: Optional[CompilePackage] = None,
 ) -> ConvertFrameReturn:
     from torch.fx.experimental.validator import (
         bisect,
@@ -949,6 +949,7 @@ def _compile(
             )
 
         if package is not None:
+            assert check_fn.guards_state is not None
             package.add_guarded_code(check_fn.guards_state, out_code)
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
@@ -1247,7 +1248,7 @@ class ConvertFrame:
         self,
         compiler_fn: CompilerFn,
         hooks: Hooks,
-        package: Optional[_CompilePackage] = None,
+        package: Optional[CompilePackage] = None,
     ) -> None:
         self._torchdynamo_orig_callable = compiler_fn
         self._inner_convert = convert_frame_assert(
@@ -1356,7 +1357,7 @@ class ConvertFrame:
 
 
 def convert_frame(
-    compiler_fn: CompilerFn, hooks: Hooks, package: Optional[_CompilePackage] = None
+    compiler_fn: CompilerFn, hooks: Hooks, package: Optional[CompilePackage] = None
 ) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     return ConvertFrame(compiler_fn, hooks, package=package)

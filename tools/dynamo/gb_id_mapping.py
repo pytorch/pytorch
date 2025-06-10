@@ -152,7 +152,7 @@ def find_unimplemented_v2_calls(path):
     return results
 
 
-def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None):
+def cmd_add_new_gb_type(gb_type, file_path, registry_path):
     """
     Add a new graph break type to the registry.
 
@@ -187,7 +187,6 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None)
             "Context": matching_call["context"],
             "Explanation": matching_call["explanation"],
             "Hints": matching_call["hints"] or [],
-            **({"Additional_Info": [additional_info]} if additional_info else {}),
         }
     ]
 
@@ -196,9 +195,7 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None)
     return True
 
 
-def cmd_update_gb_type(
-    old_gb_type, file_path, registry_path, new_gb_type=None, additional_info=None
-):
+def cmd_update_gb_type(old_gb_type, file_path, registry_path, new_gb_type=None):
     """
     Update an existing graph break type in the registry by adding a new version
     to the version history list.
@@ -246,16 +243,6 @@ def cmd_update_gb_type(
         "Explanation": matching_call["explanation"],
         "Hints": matching_call["hints"] or [],
     }
-
-    if additional_info:
-        additional_info_list = reg[gb_id][0].get("Additional_Info", [])
-        new_entry["Additional_Info"] = (
-            additional_info_list + [additional_info]
-            if additional_info_list
-            else [additional_info]
-        )
-    elif "Additional_Info" in reg[gb_id][0]:
-        new_entry["Additional_Info"] = reg[gb_id][0]["Additional_Info"]
 
     reg[gb_id].insert(0, new_entry)
 
@@ -320,9 +307,6 @@ def main():
     add_parser.add_argument(
         "file_path", help="Path to the file containing the unimplemented_v2 call"
     )
-    add_parser.add_argument(
-        "--additional-info", help="Optional additional information to include"
-    )
 
     update_parser = subparsers.add_parser(
         "update", help="Update an existing gb_type in registry"
@@ -334,9 +318,6 @@ def main():
     )
     update_parser.add_argument(
         "--new_gb_type", help="New gb_type name if it has changed", default=None
-    )
-    update_parser.add_argument(
-        "--additional-info", help="Optional additional information to include"
     )
 
     parser.add_argument(
@@ -351,18 +332,12 @@ def main():
     if args.command == "create":
         create_registry(args.dynamo_dir, args.registry_path)
     elif args.command == "add":
-        success = cmd_add_new_gb_type(
-            args.gb_type, args.file_path, args.registry_path, args.additional_info
-        )
+        success = cmd_add_new_gb_type(args.gb_type, args.file_path, args.registry_path)
         if not success:
             sys.exit(1)
     elif args.command == "update":
         success = cmd_update_gb_type(
-            args.gb_type,
-            args.file_path,
-            args.registry_path,
-            args.new_gb_type,
-            args.additional_info,
+            args.gb_type, args.file_path, args.registry_path, args.new_gb_type
         )
         if not success:
             sys.exit(1)
