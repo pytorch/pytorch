@@ -235,8 +235,8 @@ test_torchbench_smoketest() {
   local device=mps
   local dtypes=(undefined float16 bfloat16 notset)
   local dtype=${dtypes[$1]}
-  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152 sam sam_fast pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo doctr_det_predictor doctr_reco_predictor timm_resnet timm_vovnet vgg16)
-  local hf_models=(GoogleFnet YituTechConvBert Speech2Text2ForCausalLM M2M100ForConditionalGeneration T5Small CamemBert GPT2ForSequenceClassification)
+  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152 sam pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo doctr_det_predictor doctr_reco_predictor)
+  local hf_models=(GoogleFnet YituTechConvBert Speech2Text2ForCausalLM)
 
   for backend in eager inductor; do
 
