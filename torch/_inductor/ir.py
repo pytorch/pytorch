@@ -3004,9 +3004,7 @@ class View(GenericView):
                 # TODO: unbacked should not diverge from backed in determining striding
                 # Need to require contiguous here instead of realize, see:
                 # https://github.com/pytorch/pytorch/issues/145561
-                x = ExternKernel.require_exact_strides(
-                    x, FlexibleLayout.contiguous_strides(x.get_size())
-                )
+                x = ExternKernel.require_contiguous(x)
 
             storage, old_layout = as_storage_and_layout(x, want_contiguous=True)
             new_layout = FixedLayout(
@@ -5669,7 +5667,25 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_contiguous(cls, x):  # type: ignore[no-untyped-def]
-        return cls.require_stride_order(x, list(reversed(range(len(x.get_size())))))
+        def is_mkldnn_tensor(x):  # type: ignore[no-untyped-def]
+            def safe_get_name(x):  # type: ignore[no-untyped-def]
+                try:
+                    return x.get_name()
+                except (AttributeError, NotImplementedError):
+                    return None
+
+            return (
+                safe_get_name(x) in V.graph.constants
+                and V.graph.constants[safe_get_name(x)].is_mkldnn
+            )
+
+        # TODO move this to the more proper places
+        if is_mkldnn_tensor(x):
+            return x
+        else:
+            return cls.require_exact_strides(
+                x, FlexibleLayout.contiguous_strides(x.get_size())
+            )
 
     @classmethod
     def require_contiguous_strides(cls, x):  # type: ignore[no-untyped-def]
@@ -6753,6 +6769,12 @@ class ExternKernelNode:
 
 
 class FallbackKernel(ExternKernelAlloc):
+    """
+    A class that represents a fallback kernel for handling operators that are not
+    directly support by inductor. It currently supports functional ops, view ops,
+    implace aten ops, and mutating ops that are auto-functionalizable.
+    """
+
     def __init__(  # type: ignore[no-untyped-def]
         self,
         layout,
@@ -7023,6 +7045,8 @@ class FallbackKernel(ExternKernelAlloc):
                             )
                         )
                     )
+            elif isinstance(return_type, torch.IntType):
+                return export_schema.Argument.create(as_int=output)
             else:
                 raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
