@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import atexit
-import contextlib
 import functools
 import json
 import logging
@@ -51,8 +50,6 @@ from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     from torch._inductor.runtime.hints import HalideMeta
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -219,13 +216,33 @@ class CompiledTritonKernels:
             del CompiledTritonKernels._cache[key]
 
 
-@contextlib.contextmanager
-def warm_async_compile_pool() -> Generator[None, None, None]:
-    try:
-        torch._inductor.async_compile.AsyncCompile.warm_pool()
-        yield
-    finally:
-        torch._inductor.async_compile.AsyncCompile.quiesce()
+_ASYNC_COMPILE_POOL_MANAGER: Optional[AsyncCompilePoolManager] = None
+
+
+class AsyncCompilePoolManager:
+    def __init__(self):
+        self._warmed_up = False
+
+    def __enter__(self):
+        global _ASYNC_COMPILE_POOL_MANAGER
+        _ASYNC_COMPILE_POOL_MANAGER = self
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        global _ASYNC_COMPILE_POOL_MANAGER
+        AsyncCompile.quiesce()
+        _ASYNC_COMPILE_POOL_MANAGER = None
+
+    def _warmup(self):
+        if not self._warmed_up:
+            torch._inductor.async_compile.AsyncCompile.warm_pool()
+            self._warmed_up = True
+
+    @staticmethod
+    def warmup():
+        global _ASYNC_COMPILE_POOL_MANAGER
+        if _ASYNC_COMPILE_POOL_MANAGER is not None:
+            _ASYNC_COMPILE_POOL_MANAGER._warmup()
 
 
 class AsyncCompile:
@@ -367,6 +384,7 @@ class AsyncCompile:
             else:
                 return future.result()
 
+        # Cache miss
         if is_parallel:
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.

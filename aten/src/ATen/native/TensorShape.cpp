@@ -431,7 +431,7 @@ Tensor& set_storage_meta__symint(
       size, stride, storage_offset);
 
   // Matches maybe_resize_storage_cpu no-numel behavior
-  if (TORCH_GUARD_SIZE_OBLIVIOUS(result.sym_numel().sym_ne(0))) {
+  if (TORCH_GUARD_OR_TRUE(result.sym_numel().sym_ne(0))) {
     // maybe_resize_storage_cpu can handle no storage exists at all but
     // that should never be the case here
     TORCH_INTERNAL_ASSERT(storage);
@@ -440,12 +440,7 @@ Tensor& set_storage_meta__symint(
     // All meta data pointers are the same, so we don't have to "re" allocate
     // it.  TODO: Actually this might not quite be correct if we use special
     // pointers to track whether or not fake cuda tensors are pinned or not
-    const auto itemsize = result.dtype().itemsize();
-    c10::SymInt new_size_bytes = result.is_contiguous()
-        ? at::detail::computeStorageNbytesContiguous(
-              size, itemsize, std::move(storage_offset))
-        : at::detail::computeStorageNbytes(
-              size, stride, itemsize, std::move(storage_offset));
+
     // TODO: When there are unbacked SymInts, we unconditionally skip the
     // setter.  This is technically wrong, but we cannot conveniently test
     // the real condition in many cases, because a lot of people are using
@@ -454,10 +449,20 @@ Tensor& set_storage_meta__symint(
     //
     // The old behavior was to unconditionally set_nbytes, but I think not
     // setting it is more safe.
-    if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() &&
-        TORCH_GUARD_SIZE_OBLIVIOUS(
-            new_size_bytes.sym_gt(storage.sym_nbytes()))) {
-      storage.set_nbytes(std::move(new_size_bytes));
+    if (result.sym_numel().has_hint()) {
+      const auto itemsize = result.dtype().itemsize();
+
+      c10::SymInt new_size_bytes = result.is_contiguous()
+          ? at::detail::computeStorageNbytesContiguous(
+                size, itemsize, std::move(storage_offset))
+          : at::detail::computeStorageNbytes(
+                size, stride, itemsize, std::move(storage_offset));
+
+      if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() &&
+          TORCH_GUARD_SIZE_OBLIVIOUS(
+              new_size_bytes.sym_gt(storage.sym_nbytes()))) {
+        storage.set_nbytes(std::move(new_size_bytes));
+      }
     }
   }
   return result;
