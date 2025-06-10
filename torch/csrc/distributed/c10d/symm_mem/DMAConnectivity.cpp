@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/DMAConnectivity.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <utility>
 
 namespace {

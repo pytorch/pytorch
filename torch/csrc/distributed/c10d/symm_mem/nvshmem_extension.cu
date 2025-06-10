@@ -1,10 +1,9 @@
-#include <torch/csrc/distributed/c10d/nvshmem_extension.cuh>
-
 #include <c10/cuda/CUDAGuard.h>
 
-#include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
-#include <torch/csrc/distributed/c10d/CUDASymmetricMemoryUtils.hpp>
-#include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 #include <cuda_awbarrier_primitives.h>
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
