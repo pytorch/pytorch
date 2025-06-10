@@ -1,4 +1,4 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from itertools import chain
 from typing import Any, Generic, Optional, TypeVar
@@ -21,6 +21,7 @@ Classes and implementations related to precompile
 """
 
 T = TypeVar("T")
+
 
 
 class PrecompileCacheArtifact(CacheArtifact, Generic[T]):
@@ -78,7 +79,7 @@ class PrecompileContext(CacheArtifactManager):
     # This allows us to implement serialize_by_key easily.
     # On call to `serialize()`, all cache artifacts in _new_cache_artifacts_by_key
     # are transferred to _new_cache_artifacts before serialization.
-    _new_cache_artifacts_by_key: dict[str, list[CacheArtifact]] = defaultdict(list)
+    _new_cache_artifacts_by_key: dict[str, CacheArtifact] = {}
     _new_cache_artifacts: CacheArtifactsResult = defaultdict(list)
     # Keep a seperate seen artifacts list to make avoid unnecessary duplicates
     # This list will not be cleared between serialize() calls
@@ -111,7 +112,7 @@ class PrecompileContext(CacheArtifactManager):
         artifact = CacheArtifactFactory.encode_create(artifact_type, key, content)
         if artifact in cls._seen_artifacts:
             return
-        cls._new_cache_artifacts_by_key[key].append(artifact)
+        cls._new_cache_artifacts_by_key[key] = artifact
         cls._seen_artifacts.add(artifact)
 
     @classmethod
@@ -120,16 +121,16 @@ class PrecompileContext(CacheArtifactManager):
         We normally record artifacts by key, but serialization expects them to be organized
         by artifact type. This function transfers artifacts from _new_cache_artifacts_by_key to _new_cache_artifacts
         """
-        for artifact in chain(*cls._new_cache_artifacts_by_key.values()):
+        for artifact in cls._new_cache_artifacts_by_key.values():
             cls._new_cache_artifacts[artifact.__class__.type()].append(artifact)
         cls._new_cache_artifacts_by_key.clear()
 
     @classmethod
-    def serialize_artifacts_by_key(cls, key: str) -> list[CacheArtifact]:
+    def serialize_artifact_by_key(cls, key: str) -> Optional[CacheArtifact]:
         """
         Serialize all artifacts with the given key returned in a list.
         """
-        return cls._new_cache_artifacts_by_key.get(key, [])
+        return cls._new_cache_artifacts_by_key.get(key, None)
 
     @classmethod
     def serialize(cls) -> Optional[tuple[bytes, CacheInfo]]:
