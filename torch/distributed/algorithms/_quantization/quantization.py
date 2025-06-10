@@ -1,6 +1,6 @@
-# mypy: allow-untyped-defs
 import functools
 from enum import Enum
+from typing import Any, Callable, Optional
 
 import torch
 import torch.distributed as dist
@@ -28,7 +28,7 @@ def _fp32_to_fp16_with_clamp(tensor: torch.Tensor) -> torch.Tensor:
     return torch.clamp(tensor, TORCH_HALF_MIN, TORCH_HALF_MAX).half()
 
 
-def _quantize_tensor(tensor, qtype):
+def _quantize_tensor(tensor: Any, qtype: DQuantType) -> Any:
     if not isinstance(tensor, torch.Tensor):
         raise RuntimeError(
             f"_quantize_tensor expecting torch.Tensor as input but found {type(tensor)}"
@@ -41,7 +41,7 @@ def _quantize_tensor(tensor, qtype):
         raise RuntimeError(f"Quantization type {qtype} is not supported")
 
 
-def _quantize_tensor_list(tensor_list, qtype):
+def _quantize_tensor_list(tensor_list: Any, qtype: DQuantType) -> Any:
     if not isinstance(tensor_list, list) or not all(
         isinstance(p, torch.Tensor) for p in tensor_list
     ):
@@ -52,7 +52,9 @@ def _quantize_tensor_list(tensor_list, qtype):
     return quantized_tensor_list
 
 
-def _dequantize_tensor(tensor, qtype, quant_loss=None):
+def _dequantize_tensor(
+    tensor: Any, qtype: DQuantType, quant_loss: Optional[float] = None
+) -> Any:
     if not isinstance(tensor, torch.Tensor):
         raise RuntimeError(
             f"_dequantize_tensor expecting torch.Tensor as input but found {type(tensor)}"
@@ -65,6 +67,7 @@ def _dequantize_tensor(tensor, qtype, quant_loss=None):
         elif tensor.dtype == torch.float16 and quant_loss is None:
             return tensor.float()
         else:
+            assert quant_loss is not None
             return tensor.float() / quant_loss
     elif qtype == DQuantType.BFP16:
         if tensor.dtype != torch.float16:
@@ -77,7 +80,9 @@ def _dequantize_tensor(tensor, qtype, quant_loss=None):
         raise RuntimeError(f"Quantization type {qtype} is not supported")
 
 
-def _dequantize_tensor_list(tensor_list, qtype, quant_loss=None):
+def _dequantize_tensor_list(
+    tensor_list: Any, qtype: DQuantType, quant_loss: Optional[float] = None
+) -> Any:
     if not isinstance(tensor_list, list) or not all(
         isinstance(p, torch.Tensor) for p in tensor_list
     ):
@@ -88,7 +93,9 @@ def _dequantize_tensor_list(tensor_list, qtype, quant_loss=None):
     return dequantized_tensor_list
 
 
-def auto_quantize(func, qtype, quant_loss=None):
+def auto_quantize(
+    func: Callable, qtype: DQuantType, quant_loss: Optional[float] = None
+) -> Callable:
     """
     Quantize the input tensors, choose the precision types, and pass other necessary arguments and then dequantizes the output.
 
@@ -105,7 +112,7 @@ def auto_quantize(func, qtype, quant_loss=None):
     """
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> None:
         group = kwargs.get("group", None)
         async_op = kwargs.get("async_op", False)
         if async_op is True:
