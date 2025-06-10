@@ -382,3 +382,6 @@ android/pytorch_android_torchvision/.cxx
 .arcconfig
 .stable_pyre_client
 .pyre_client
+
+# Claude Code local configuration
+CLAUDE.local.md
