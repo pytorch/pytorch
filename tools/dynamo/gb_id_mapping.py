@@ -187,7 +187,7 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None)
             "Context": matching_call["context"],
             "Explanation": matching_call["explanation"],
             "Hints": matching_call["hints"] or [],
-            **({"Additional_Info": additional_info} if additional_info else {}),
+            **({"Additional_Info": [additional_info]} if additional_info else {}),
         }
     ]
 
@@ -245,8 +245,17 @@ def cmd_update_gb_type(
         "Context": matching_call["context"],
         "Explanation": matching_call["explanation"],
         "Hints": matching_call["hints"] or [],
-        **({"Additional_Info": additional_info} if additional_info else {}),
     }
+
+    if additional_info:
+        additional_info_list = reg[gb_id][0].get("Additional_Info", [])
+        new_entry["Additional_Info"] = (
+            additional_info_list + [additional_info]
+            if additional_info_list
+            else [additional_info]
+        )
+    elif "Additional_Info" in reg[gb_id][0]:
+        new_entry["Additional_Info"] = reg[gb_id][0]["Additional_Info"]
 
     reg[gb_id].insert(0, new_entry)
 
