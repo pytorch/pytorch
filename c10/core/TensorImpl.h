@@ -827,14 +827,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_default(memory_format);
   }
 
-  bool definitely_contiguous(
-      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
-      return is_contiguous_custom(memory_format);
-    }
-    return is_contiguous_default(memory_format);
-  }
-
   // These are factored into separate functions in case subclasses
   // want to use them
   bool is_contiguous_default(at::MemoryFormat memory_format) const {
