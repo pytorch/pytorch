@@ -272,7 +272,6 @@ if torch.backends.mps.is_available():
             "rot90",
             "short",
             "sinh",
-            "sigmoid",
             "sqrt",
             "square",
             "stack",
