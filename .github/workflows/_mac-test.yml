@@ -123,8 +123,8 @@ jobs:
           MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          ${CONDA_RUN} python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
-          ${CONDA_RUN} python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
+          python -m pip install psutil==5.9.1 dataclasses_json==0.6.7
+          python -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
@@ -197,35 +197,28 @@ jobs:
 
           arch
 
-          if [[ -n "$CONDA_ENV" ]]; then
-            # Use binaries under conda environment
-            export PATH="$CONDA_ENV/bin":$PATH
-          fi
-
           # Print out some information about the test environment
-          which conda
-          conda --version
-          ${CONDA_RUN} which python3
-          ${CONDA_RUN} python3 --version
-          ${CONDA_RUN} which python
-          ${CONDA_RUN} python --version
+          which python3
+          python3 --version
+          which python
+          python --version
 
-          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+          python -mpip install --no-index --no-deps dist/*.whl
 
           set +e
           pushd "${RUNNER_TEMP}"
           # Install pip dependencies if they are not found. This is to mitigate a peculiar
           # flaky missing dependencies on MacOS
-          ${CONDA_RUN} python3 -c "import torch"
+          python -c "import torch"
           RC=$?
           popd
 
           if [ "${RC}" -ne 0 ]; then
-            ${CONDA_RUN} python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
+            python -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
           fi
           set -e
 
-          ${CONDA_RUN} .ci/pytorch/macos-test.sh
+          .ci/pytorch/macos-test.sh
 
       - name: Print remaining test logs
         shell: bash
@@ -241,7 +234,7 @@ jobs:
             # Use binaries under conda environment
             export PATH="$CONDA_ENV/bin":$PATH
           fi
-          ${CONDA_RUN} python3 test/bench_mps_ops.py
+          python test/bench_mps_ops.py
 
 
       - name: Stop monitoring script
