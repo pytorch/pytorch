@@ -266,6 +266,39 @@ def cmd_update_gb_type(
     return True
 
 
+def check_unimplemented_calls(files, registry_path):
+    registry_path = Path(registry_path)
+    reg = load_registry(registry_path)
+
+    gb_type_to_entry = {entries[0]["Gb_type"]: entries[0] for _, entries in reg.items()}
+
+    mismatches = []
+    for file in files:
+        calls = find_unimplemented_v2_calls(Path(file))
+        for call in calls:
+            gb_type = call["gb_type"]
+            if gb_type not in gb_type_to_entry:
+                mismatches.append((gb_type, file, "Not found in registry"))
+                continue
+
+            entry = gb_type_to_entry[gb_type]
+            if call["context"] != entry["Context"]:
+                mismatches.append((gb_type, file, "Context mismatch"))
+            elif call["explanation"] != entry["Explanation"]:
+                mismatches.append((gb_type, file, "Explanation mismatch"))
+            elif sorted(call["hints"]) != sorted(entry["Hints"]):
+                mismatches.append((gb_type, file, "Hints mismatch"))
+
+    if mismatches:
+        print("Found unimplemented_v2 calls that don't match the registry:")
+        for gb_type, file, reason in mismatches:
+            print(f"  - {gb_type} in {file}: {reason}")
+        return False
+
+    print("All unimplemented_v2 calls match the registry.")
+    return True
+
+
 def create_registry(dynamo_dir, registry_path):
     calls = find_unimplemented_v2_calls(dynamo_dir)
     registry = {}
@@ -339,6 +372,13 @@ def main():
         "--additional-info", help="Optional additional information to include"
     )
 
+    check_parser = subparsers.add_parser(
+        "check", help="Check if unimplemented_v2 calls match registry entries"
+    )
+    check_parser.add_argument(
+        "--files", type=str, help="Space-separated list of files to check"
+    )
+
     parser.add_argument(
         "--registry-path",
         type=str,
@@ -366,9 +406,15 @@ def main():
         )
         if not success:
             sys.exit(1)
+    elif args.command == "check":
+        files = args.files.split()
+        success = check_unimplemented_calls(files, args.registry_path)
+        if not success:
+            sys.exit(1)
     else:
         parser.print_help()
 
 
 if __name__ == "__main__":
     main()
+
