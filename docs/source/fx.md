@@ -421,7 +421,7 @@ disprove correctness. Then, inspect and debug the generated code. Then, debug th
 process of transformations that led to the generated code.
 
 If you’re not familiar with debuggers, please see the auxiliary section
-{ref}`Available Debuggers`.
+{ref}`Available-Debuggers`.
 
 
 #### Common Pitfalls in Transform Authoring
