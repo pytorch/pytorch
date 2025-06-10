@@ -385,12 +385,18 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // leading dim >> rows when they are sliced from a large tensor
     // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
     if (!disable_addmm_cuda_lt_final) {
+#ifndef USE_ROCM
       useLtInterface = ((self.dim() == 1 && // row broadcast case
           result.dim() == 2 && self.size(0) == mat2_sizes[1]) ||
           (self.dim() == 2 && self.size(0) == mat1_sizes[0] &&  // 2d case
            self.size(1) == mat2_sizes[1])) &&
           self.is_contiguous() && result.is_contiguous() &&
           self.scalar_type() == result.scalar_type() &&
+#else
+      useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
+          result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
+          self.is_contiguous() && result.is_contiguous() &&
+#endif
 #ifdef USE_ROCM
           (scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
