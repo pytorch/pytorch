@@ -304,6 +304,7 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
   params.n = args.n;
   params.k = args.k;
   params.alpha = alpha.to<at::opmath_type<scalar_t>>();
+  params.beta = beta.to<at::opmath_type<scalar_t>>();
   params.a = args.mata->const_data_ptr<scalar_t>();
   params.lda = args.lda;
   params.b = args.matb->const_data_ptr<scalar_t>();
