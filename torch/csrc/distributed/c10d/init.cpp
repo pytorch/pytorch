@@ -1007,10 +1007,12 @@ This class does not support ``__members__`` property.)");
 
   // Intializes the device state in CUmodule so that it’s able to perform
   // NVSHMEM operations.
+#ifdef USE_NVSHMEM
   module.def(
       "_nvshmemx_cumodule_init",
       ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
       py::arg("module"));
+#endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())

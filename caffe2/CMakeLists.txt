@@ -993,7 +993,13 @@ elseif(USE_CUDA)
     set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
   endif()
 
-  if(USE_NVSHMEM AND DEFINED NVSHMEM_HOME)
+  if(NOT DEFINED NVSHMEM_HOME)
+    message(WARNING "NVSHMEM_HOME not found. Please run `pip install nvidia-nvshmem-<version>`, or set NVSHMEM_HOME to its location.")
+    # Disable nvshmem if NVSHMEM_HOME is not found
+    set(USE_NVSHMEM FALSE CACHE BOOL "Whether to build with NVSHMEM support")
+  endif()
+
+  if(USE_NVSHMEM)
     message(STATUS "Building with NVSHMEM support:  '${NVSHMEM_HOME}'")
     set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/include")
     set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/lib")
@@ -1489,6 +1495,9 @@ if(USE_DISTRIBUTED)
   # can only be compiled with USE_TENSORPIPE is set.
   if(USE_TENSORPIPE)
     target_compile_definitions(torch_cpu PUBLIC USE_TENSORPIPE)
+  endif()
+  if(USE_NVSHMEM AND USE_CUDA)
+      target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
   endif()
 endif()
 
