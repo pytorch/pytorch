@@ -378,10 +378,20 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 
 template <typename Dtype, typename C_Dtype = Dtype>
 static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
+#if defined(USE_ROCM) && ROCM_VERSION == 60400
+  // regression in ROCm 6.4, planned fixed in 6.4.1, hipblaslt TT fp32 calculation errors
+  // best to disallow hipblaslt for this specific case
+  if constexpr (std::is_same_v<Dtype, float>) {
+    if (_cublasOpFromChar(transa) == CUBLAS_OP_T && _cublasOpFromChar(transb) == CUBLAS_OP_T) {
+        return false;
+    }
+  }
+#endif
   cudaDataType_t abType = CUDA_R_32F;
   cudaDataType_t cType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
+  CuBlasLtMatmulPreference preference;
 #ifndef USE_ROCM
   at::Half halpha;
   at::Half hbeta;
@@ -411,6 +421,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
       computeType = CUBLAS_COMPUTE_16F;
+      scaleType = CUDA_R_16F;
       halpha = alpha;
       hbeta = beta;
       alpha_ptr = &halpha;
@@ -419,9 +430,21 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #endif
     abType = CUDA_R_16F;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
+#ifndef USE_ROCM
+    if (!at::globalContext().allowFP16ReductionCuBLAS()) {
+      preference.setAttribute(CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK,
+        CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE | CUBLASLT_REDUCTION_SCHEME_NONE);
+    }
+#endif
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abType = CUDA_R_16BF;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16BF;
+#ifndef USE_ROCM
+    if (!at::globalContext().allowBF16ReductionCuBLAS()) {
+      preference.setAttribute(CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK,
+        CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE | CUBLASLT_REDUCTION_SCHEME_NONE);
+    }
+#endif
   } else {
     static_assert(false && sizeof(Dtype), "at::cuda::blas::bgemm_internal_cublaslt: not implemented");
   }
@@ -456,8 +479,6 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     Bdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, strideb);
     Cdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stridec);
   }
-
-  CuBlasLtMatmulPreference preference;
 
 #ifndef USE_ROCM
   uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(a));
@@ -1524,6 +1545,7 @@ bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<Dtype> alpha_val,
+    at::opmath_type<Dtype> beta_val,
     const Dtype* mat1_ptr,
     int64_t mat1_ld,
     const Dtype* mat2_ptr,
@@ -1531,7 +1553,8 @@ bool gemm_and_bias(
     const Dtype* bias,
     C_Dtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation) {
+    GEMMAndBiasActivationEpilogue activation,
+    bool bias2d) {
 
   if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::BFloat16>) {
     #ifdef USE_ROCM
@@ -1545,13 +1568,11 @@ bool gemm_and_bias(
       TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
-  using opmath_t = at::opmath_type<Dtype>;
-  opmath_t beta_val = 0; // bias is added in epilogue
-
   cudaDataType_t abType = CUDA_R_32F;
   cudaDataType_t cType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
+  CuBlasLtMatmulPreference preference;
   void * alpha_ptr = &alpha_val;
   void * beta_ptr = &beta_val;
 #ifndef USE_ROCM
@@ -1581,9 +1602,21 @@ bool gemm_and_bias(
 #endif
     abType = CUDA_R_16F;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
+#ifndef USE_ROCM
+    if (!at::globalContext().allowFP16ReductionCuBLAS()) {
+      preference.setAttribute(CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK,
+        CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE | CUBLASLT_REDUCTION_SCHEME_NONE);
+    }
+#endif
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abType = CUDA_R_16BF;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16BF;
+#ifndef USE_ROCM
+    if (!at::globalContext().allowBF16ReductionCuBLAS()) {
+      preference.setAttribute(CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK,
+        CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE | CUBLASLT_REDUCTION_SCHEME_NONE);
+    }
+#endif
   }
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
@@ -1599,33 +1632,32 @@ bool gemm_and_bias(
             at::globalContext()._SMCarveout_EXPERIMENTAL().value());
   }
 #endif
-  cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
+
+  cublasLtEpilogue_t epilogue;
   if (activation == GEMMAndBiasActivationEpilogue::RELU) {
-    epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
+    epilogue = CUBLASLT_EPILOGUE_RELU;
   } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
 #if CUDA_VERSION >= 11040 || defined(USE_ROCM)
-    epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
+    epilogue = CUBLASLT_EPILOGUE_GELU;
 #endif
   }
-
-  if (bias != nullptr) {
+  if (activation != GEMMAndBiasActivationEpilogue::None) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
   }
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
-  CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
+  CuBlasLtMatrixLayout Cdesc(cType, m, n, bias2d ? result_ld : 0);
+  CuBlasLtMatrixLayout Ddesc(cType, m, n, result_ld);
 
-  CuBlasLtMatmulPreference preference;
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
 
 #ifndef USE_ROCM
   uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
   uint32_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
-  uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
-  uint32_t d_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias));
+  uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias));
+  uint32_t d_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
@@ -1641,7 +1673,7 @@ bool gemm_and_bias(
       Adesc.descriptor(),
       Bdesc.descriptor(),
       Cdesc.descriptor(),
-      Cdesc.descriptor(),
+      Ddesc.descriptor(),
       preference.descriptor(),
       1,
       &heuristicResult,
@@ -1660,10 +1692,10 @@ bool gemm_and_bias(
       mat2_ptr,
       Bdesc.descriptor(),
       beta_ptr,
-      result_ptr,
+      bias,
       Cdesc.descriptor(),
       result_ptr,
-      Cdesc.descriptor(),
+      Ddesc.descriptor(),
       &heuristicResult.algo,
       ltworkspace.ptr,
       ltworkspace.size,
@@ -1710,6 +1742,7 @@ template bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<double> alpha_val,
+    at::opmath_type<double> beta_val,
     const double* mat1_ptr,
     int64_t mat1_ld,
     const double* mat2_ptr,
@@ -1717,7 +1750,8 @@ template bool gemm_and_bias(
     const double* bias,
     double* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    bool bias2d);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1726,6 +1760,7 @@ template bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<float> alpha_val,
+    at::opmath_type<float> beta_val,
     const float* mat1_ptr,
     int64_t mat1_ld,
     const float* mat2_ptr,
@@ -1733,7 +1768,8 @@ template bool gemm_and_bias(
     const float* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    bool bias2d);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1742,6 +1778,7 @@ template bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<at::Half> alpha_val,
+    at::opmath_type<at::Half> beta_val,
     const at::Half* mat1_ptr,
     int64_t mat1_ld,
     const at::Half* mat2_ptr,
@@ -1749,7 +1786,8 @@ template bool gemm_and_bias(
     const at::Half* bias,
     at::Half* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    bool bias2d);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1758,6 +1796,7 @@ template bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<at::Half> alpha_val,
+    at::opmath_type<at::Half> beta_val,
     const at::Half* mat1_ptr,
     int64_t mat1_ld,
     const at::Half* mat2_ptr,
@@ -1765,7 +1804,8 @@ template bool gemm_and_bias(
     const at::Half* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    bool bias2d);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1774,6 +1814,7 @@ template bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<at::BFloat16> alpha_val,
+    at::opmath_type<at::BFloat16> beta_val,
     const at::BFloat16* mat1_ptr,
     int64_t mat1_ld,
     const at::BFloat16* mat2_ptr,
@@ -1781,7 +1822,8 @@ template bool gemm_and_bias(
     const at::BFloat16* bias,
     at::BFloat16* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    bool bias2d);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1790,6 +1832,7 @@ template bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<at::BFloat16> alpha_val,
+    at::opmath_type<at::BFloat16> beta_val,
     const at::BFloat16* mat1_ptr,
     int64_t mat1_ld,
     const at::BFloat16* mat2_ptr,
@@ -1797,7 +1840,8 @@ template bool gemm_and_bias(
     const at::BFloat16* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    bool bias2d);
 
 void scaled_gemm(
     char transa,

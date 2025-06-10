@@ -168,7 +168,7 @@ at::Tensor CUDASymmetricMemory::get_signal_pad(
   // If the shape is unspecified, treat the signal pad as a 1d tensor.
   const auto element_size = c10::elementSize(*dtype);
   std::vector<int64_t> shape;
-  if (sizes.size() != 0) {
+  if (!sizes.empty()) {
     shape = sizes.vec();
   } else {
     shape.push_back(signal_pad_size / element_size);

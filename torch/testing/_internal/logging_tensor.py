@@ -42,7 +42,7 @@ class LoggingTensor(torch.Tensor):
         # The wrapping tensor (LoggingTensor) shouldn't hold any
         # memory for the class in question, but it should still
         # advertise the same device as before
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls, elem.size(),
             strides=elem.stride(), storage_offset=elem.storage_offset(),
             # TODO: clone storage aliasing

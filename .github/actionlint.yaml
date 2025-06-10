@@ -45,6 +45,7 @@ self-hosted-runner:
     - windows.g5.4xlarge.nvidia.gpu
     # Windows ARM64 runners
     - windows-11-arm64
+    - windows-11-arm64-preview
     # Organization-wide AMD-hosted runners
     # MI2xx runners
     - linux.rocm.gpu
