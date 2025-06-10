@@ -7,7 +7,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config, metrics
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import largeTensorTest
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
 
 
 USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT", "1") == "1"
@@ -29,9 +29,9 @@ class AutoChunkerTest(TestCase):
             N = 1024 * 32
 
         dtype = torch.float32
-        _input = torch.randn(M, K, dtype=dtype, requires_grad=True, device="cuda")
-        weight = torch.randn(K, N, dtype=dtype, requires_grad=True, device="cuda")
-        bias = torch.randn(N, dtype=dtype, requires_grad=True, device="cuda")
+        _input = torch.randn(M, K, dtype=dtype, requires_grad=True, device=GPU_TYPE)
+        weight = torch.randn(K, N, dtype=dtype, requires_grad=True, device=GPU_TYPE)
+        bias = torch.randn(N, dtype=dtype, requires_grad=True, device=GPU_TYPE)
 
         def f(_input, weight, bias):
             out = (_input * 2) @ weight
@@ -166,5 +166,5 @@ class AutoChunkerTest(TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU:
+    if HAS_CUDA:
         run_tests()
