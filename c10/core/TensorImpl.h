@@ -827,6 +827,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_default(memory_format);
   }
 
+  // TODO do this
+  bool definitely_contiguous_fast(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
+    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+      return definitely_contiguous_fast_custom(memory_format);
+    }
+    return definitely_contiguous_fast_default(memory_format);
+  }
+
   // These are factored into separate functions in case subclasses
   // want to use them
   bool is_contiguous_default(at::MemoryFormat memory_format) const {
@@ -840,6 +849,30 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             .guard_bool(__FILE__, __LINE__);
       }
       return symbolic_shape_meta().is_contiguous().guard_bool(
+          __FILE__, __LINE__);
+    }
+
+    if (memory_format == at::MemoryFormat::ChannelsLast) {
+      return is_channels_last_contiguous_;
+    } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+      return is_channels_last_3d_contiguous_;
+    }
+    return is_contiguous_;
+  }
+
+  bool definitely_contiguous_fast_default(
+      at::MemoryFormat memory_format) const {
+    if (has_symbolic_sizes_strides_) {
+      if (memory_format == at::MemoryFormat::ChannelsLast) {
+        return symbolic_shape_meta()
+            .definitely_channels_last_contiguous_fast()
+            .guard_bool(__FILE__, __LINE__);
+      } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+        return symbolic_shape_meta()
+            .definitely_channels_last_3d_contiguous_fast()
+            .guard_bool(__FILE__, __LINE__);
+      }
+      return symbolic_shape_meta().definitely_contiguous_fast().guard_bool(
           __FILE__, __LINE__);
     }
 
@@ -969,6 +1002,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   // sizes_strides_policy_ >= CustomStrides
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
+  virtual bool definitely_contiguous_fast_custom(
+      at::MemoryFormat memory_format) const;
   virtual bool is_strides_like_custom(at::MemoryFormat memory_format) const;
   virtual bool is_non_overlapping_and_dense_custom() const;
   // sizes_strides_policy_ >= CustomSizes
@@ -2573,6 +2608,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool compute_channels_last_contiguous_3d() const;
 
+  bool compute_def_channels_last_contiguous_3d() const;
+
   bool compute_strides_like_channels_last_2d() const;
 
   bool compute_strides_like_channels_last_3d() const;
@@ -2655,6 +2692,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool compute_channels_last_contiguous_3d_dim5() {
     return !is_channels_last_contiguous_ &&
         compute_channels_last_contiguous_3d();
+  }
+
+  bool compute_def_channels_last_contiguous_3d_dim5() {
+    return !is_channels_last_contiguous_ &&
+        compute_def_channels_last_contiguous_3d();
   }
 
   bool compute_channels_last_2d_dim5() {

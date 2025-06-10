@@ -43,20 +43,15 @@ class C10_API SymbolicShapeMeta {
     is_channels_last_ = false;
     is_channels_last_3d_ = false;
     is_non_overlapping_and_dense_ = false;
-    
-    def_contiguous_fast_ = false;
-    def_channels_last_contiguous_fast_ = false;
-    def_channels_last_3d_contiguous_fast_ = false;
-    def_channels_last_fast_ = false;
-    def_channels_last_3d_fast_ = false;
-    def_non_overlapping_and_dense_fast_ = false;
+
+    def_contiguous_ = false;
+    def_channels_last_contiguous_ = false;
+    def_channels_last_3d_contiguous_ = false;
   }
 
   int64_t dim() const {
     return static_cast<int64_t>(sizes_.size());
   }
-
-  // Accessors for derived quantities, computed lazily on first access
 
   bool has_numel() const {
     return available_.load() & numel_avail;
@@ -80,23 +75,14 @@ class C10_API SymbolicShapeMeta {
     return available_.load() & is_non_overlapping_and_dense_avail;
   }
 
-  bool has_is_contiguous() const {
-    return available_.load() & is_contiguous_avail;
+  bool has_def_contiguous() const {
+    return available_.load() & def_contiguous_avail;
   }
-  bool has_is_channels_last_contiguous() const {
-    return available_.load() & is_channels_last_contiguous_avail;
+  bool has_def_channels_last_contiguous() const {
+    return available_.load() & def_channels_last_contiguous_avail;
   }
-  bool has_is_channels_last_3d_contiguous() const {
-    return available_.load() & is_channels_last_3d_contiguous_avail;
-  }
-  bool has_is_channels_last() const {
-    return available_.load() & is_channels_last_avail;
-  }
-  bool has_is_channels_last_3d() const {
-    return available_.load() & is_channels_last_3d_avail;
-  }
-  bool has_is_non_overlapping_and_dense() const {
-    return available_.load() & is_non_overlapping_and_dense_avail;
+  bool has_def_channels_last_3d_contiguous() const {
+    return available_.load() & def_channels_last_3d_contiguous_avail;
   }
 
   // Accessors to cached derived properties
@@ -151,45 +137,24 @@ class C10_API SymbolicShapeMeta {
   }
 
   const SymBool& definitely_contiguous_fast() const {
-    if (C10_UNLIKELY(!has_is_contiguous())) {
-      init_is_contiguous();
+    if (C10_UNLIKELY(!has_def_contiguous())) {
+      init_def_contiguous();
     }
-    return is_contiguous_;
+    return def_contiguous_;
   }
 
-  const SymBool& is_channels_last_contiguous() const {
-    if (C10_UNLIKELY(!has_is_channels_last_contiguous())) {
-      init_is_channels_last_contiguous();
+  const SymBool& definitely_channels_last_contiguous_fast() const {
+    if (C10_UNLIKELY(!has_def_channels_last_contiguous())) {
+      init_def_channels_last_contiguous();
     }
-    return is_channels_last_contiguous_;
+    return def_channels_last_contiguous_;
   }
 
-  const SymBool& is_channels_last_3d_contiguous() const {
-    if (C10_UNLIKELY(!has_is_channels_last_3d_contiguous())) {
-      init_is_channels_last_3d_contiguous();
+  const SymBool& definitely_channels_last_3d_contiguous_fast() const {
+    if (C10_UNLIKELY(!(has_def_channels_last_3d_contiguous()))) {
+      init_def_channels_last_3d_contiguous();
     }
-    return is_channels_last_3d_contiguous_;
-  }
-
-  const SymBool& is_channels_last() const {
-    if (C10_UNLIKELY(!has_is_channels_last())) {
-      init_is_channels_last();
-    }
-    return is_channels_last_;
-  }
-
-  const SymBool& is_channels_last_3d() const {
-    if (C10_UNLIKELY(!has_is_channels_last_3d())) {
-      init_is_channels_last_3d();
-    }
-    return is_channels_last_3d_;
-  }
-
-  const SymBool& is_non_overlapping_and_dense() const {
-    if (C10_UNLIKELY(!has_is_non_overlapping_and_dense())) {
-      init_is_non_overlapping_and_dense();
-    }
-    return is_non_overlapping_and_dense_;
+    return def_channels_last_3d_contiguous_;
   }
 
   // Assumptions so we can short-circuit computation
@@ -227,6 +192,10 @@ class C10_API SymbolicShapeMeta {
   SymBool compute_strides_like_channels_last_3d() const;
   SymBool compute_non_overlapping_and_dense() const;
 
+  SymBool compute_def_contiguous() const;
+  SymBool compute_def_channels_last_contiguous_2d() const;
+  SymBool compute_def_channels_last_contiguous_3d() const;
+
   // These are little wrappers over the real compute_ functions that
   // can make use of other contiguity fields to short circuit.
   // They need to be implemented separately for SymBool, as SymBool does
@@ -242,6 +211,8 @@ class C10_API SymbolicShapeMeta {
   SymBool compute_is_non_overlapping_and_dense_dim5() const;
   SymBool compute_is_non_overlapping_and_dense_anydim() const;
 
+  SymBool compute_def_channels_last_contiguous_3d_dim5() const;
+
   void init_numel() const;
   void init_is_contiguous() const;
   void init_is_channels_last_contiguous() const;
@@ -250,12 +221,9 @@ class C10_API SymbolicShapeMeta {
   void init_is_channels_last_3d() const;
   void init_is_non_overlapping_and_dense() const;
 
-  void init_def_contiguous_fast() const;
-  void init_def_channels_last_contiguous_fast() const;
-  void init_def_channels_last_3d_contiguous_fast() const;
-  void init_def_channels_last_fast() const;
-  void init_def_channels_last_3d_fast() const;
-  void init_def_non_overlapping_and_dense_fast() const;
+  void init_def_contiguous() const;
+  void init_def_channels_last_contiguous() const;
+  void init_def_channels_last_3d_contiguous() const;
 
   // NOTE: These only set if !has_foo()
   void set_numel(SymInt val) const;
@@ -266,16 +234,15 @@ class C10_API SymbolicShapeMeta {
   void set_is_channels_last_3d(SymBool val) const;
   void set_is_non_overlapping_and_dense(SymBool val) const;
 
-  void set_def_contiguous_fast(SymBool val) const;
-  void set_def_channels_last_contiguous_fast(SymBool val) const;
-  void set_def_channels_last_3d_contiguous_fast(SymBool val) const;
-  void set_def_channels_last_fast(SymBool val) const;
-  void set_def_channels_last_3d_fast(SymBool val) const;
-  void set_def_non_overlapping_and_dense_fast(SymBool val) const;
+  void set_def_contiguous(SymBool val) const;
+  void set_def_channels_last_contiguous(SymBool val) const;
+  void set_def_channels_last_3d_contiguous(SymBool val) const;
 
   // Lazily initialized variables, with the corresponding available_ flag
   // indicating whether the value has been initialized
   mutable std::atomic<int> available_{0};
+
+  // Accessors for derived quantities, computed lazily on first access
   enum avail {
     numel_avail = 1 << 0,
     is_contiguous_avail = 1 << 1,
@@ -285,12 +252,9 @@ class C10_API SymbolicShapeMeta {
     is_channels_last_3d_avail = 1 << 5,
     is_non_overlapping_and_dense_avail = 1 << 6,
 
-    def_contiguous_fast_avail = 1<<7;
-    def_channels_last_contiguous_fast_avail = 1<<8;
-    def_channels_last_3d_contiguous_fast_avail = 1<<9;
-    def_channels_last_fast_avail = 1<<10;
-    def_channels_last_3d_fast_avail = 1<<11;
-    def_non_overlapping_and_dense_fast_avail = 1<<12;
+    def_contiguous_avail = 1 << 7,
+    def_channels_last_contiguous_avail = 1 << 8,
+    def_channels_last_3d_contiguous_avail = 1 << 9,
   };
 
   // Mutex to prevent races when initializing the variable from const accessors
@@ -302,13 +266,10 @@ class C10_API SymbolicShapeMeta {
   mutable SymBool is_channels_last_{false};
   mutable SymBool is_channels_last_3d_{false};
   mutable SymBool is_non_overlapping_and_dense_{false};
-  
-  mutable SymBool def_contiguous_fast_{false};
-  mutable SymBool def_channels_last_contiguous_fast_{false};
-  mutable SymBool def_channels_last_3d_contiguous_fast_{false};
-  mutable SymBool def_channels_last_fast_{false};
-  mutable SymBool def_channels_last_3d_fast_{false};
-  mutable SymBool def_non_overlapping_and_dense_fast_{false};
+
+  mutable SymBool def_contiguous_{false};
+  mutable SymBool def_channels_last_contiguous_{false};
+  mutable SymBool def_channels_last_3d_contiguous_{false};
 };
 
 } // namespace c10
