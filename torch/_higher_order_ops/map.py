@@ -18,7 +18,6 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 from .utils import (
-    _from_fun,
     _stack_pytree,
     _unstack_pytree,
     create_bw_fn,
@@ -168,15 +167,9 @@ class MapAutogradOp(torch.autograd.Function):
             return bw_f(*bw_f_primals, *bw_f_tangents)
 
         def construct_args_single_step_bw():
-            unwrapped_mapped_xs = pytree.tree_map(_from_fun, fw_mapped_args)
-            example_xs = _unstack_pytree(unwrapped_mapped_xs)[0]
-            unwrapped_grads = pytree.tree_map(_from_fun, flat_grads)
-            example_grads = _unstack_pytree(unwrapped_grads)[0]
-            example_pos_args = [
-                _from_fun(arg) if isinstance(arg, torch.Tensor) else arg
-                for arg in pos_args
-            ]
-            return *example_xs, *example_grads, *example_pos_args
+            example_xs = _unstack_pytree(fw_mapped_args)[0]
+            example_grads = _unstack_pytree(flat_grads)[0]
+            return *example_xs, *example_grads, *pos_args
 
         with suspend_functionalization(), disable_functional_mode():
             with disable_proxy_modes_tracing():
