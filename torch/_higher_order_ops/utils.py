@@ -10,6 +10,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
+from torch._higher_order_ops.schema import HopSchema
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import (
@@ -981,7 +982,7 @@ class FunctionalizeCtxWrapper:
 
 # A wrapper over HigherOrderOperator that also carries its schema
 class HopInstance:
-    def __init__(self, op: HigherOrderOperator, schema: torch.FunctionSchema):
+    def __init__(self, op: HigherOrderOperator, schema: HopSchema):
         assert isinstance(op, HigherOrderOperator), op
         self._op = op
         # Using "_" to be consistent with how we access _schema of OpOverload
@@ -991,6 +992,9 @@ class HopInstance:
         return self._op(*args, **kwargs)
 
 
+# This call_op can be used to call a HopInstance with
+# flat args and kwargs. We need to make use of the hop's schema's tree_spec
+# to unflatten the args and kwargs before calling the hop.
 def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
     if isinstance(op, OpOverload):
         return op(*args, **kwargs)
@@ -1006,7 +1010,14 @@ def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
             bound_args.append(val)
         else:
             bound_kwargs[arg.name] = val
-    return op(*bound_args, **bound_kwargs)
+
+    if schema.tree_spec is not None:
+        assert len(bound_args) == len(schema.arguments) and len(bound_kwargs) == 0
+        args, kwargs = pytree.tree_unflatten(bound_args, schema.tree_spec)
+        return op(*args, **kwargs)
+    else:
+        assert len(bound_args) + len(bound_kwargs) == len(schema.arguments)
+        return op(*bound_args, **bound_kwargs)
 
 
 def materialize_as_graph(
