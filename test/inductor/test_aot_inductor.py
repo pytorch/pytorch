@@ -79,7 +79,7 @@ if HAS_GPU:
         add_kernel_with_tma_1d_old_api,
         add_kernel_with_tma_2d_new_api,
         add_kernel_with_tma_2d_old_api,
-        create_tensor_descriptor_shim
+        create_tensor_descriptor_shim,
         mul2_inplace_kernel,
         strange_config_matmul_kernel,
         sub_kernel_autotuned,
