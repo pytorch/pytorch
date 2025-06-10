@@ -218,13 +218,14 @@ class autocast:
 
     def __init__(
         self,
-        device_type: Union[str, torch.device],
+        device_type: str,
         dtype: Optional[_dtype] = None,
         enabled: bool = True,
         cache_enabled: Optional[bool] = None,
     ):
-        if isinstance(device_type, torch.device):
-            device_type = device_type.type
+        if not torch._jit_internal.is_scripting():
+            if isinstance(device_type, torch.device):
+                device_type = device_type.type
 
         if not isinstance(device_type, str):
             raise ValueError(
