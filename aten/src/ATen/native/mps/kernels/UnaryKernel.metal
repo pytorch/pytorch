@@ -1,5 +1,6 @@
 #include <c10/metal/indexing.h>
 #include <c10/metal/special_math.h>
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 using namespace metal;
 using namespace c10::metal;
@@ -112,6 +113,50 @@ struct tan_functor {
   }
 };
 
+struct sinh_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::sinh(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::sinh(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // sinh(x) = (e^x - e^(-x)) / 2
+    auto exp_1 =
+        T(precise::exp(x.x) * precise::cos(x.y),
+          precise::exp(x.x) * precise::sin(x.y));
+    auto exp_2 =
+        T(precise::exp(-x.x) * precise::cos(-x.y),
+          precise::exp(-x.x) * precise::sin(-x.y));
+    return div(exp_1 - exp_2, T(2, 0));
+  }
+};
+
+struct cosh_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::cosh(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::cosh(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // cosh(x+iy)=(e^x + e^(-x)) / 2
+    auto exp_1 =
+        T(precise::exp(x.x) * precise::cos(x.y),
+          precise::exp(x.x) * precise::sin(x.y));
+    auto exp_2 =
+        T(precise::exp(-x.x) * precise::cos(-x.y),
+          precise::exp(-x.x) * precise::sin(-x.y));
+    return div(exp_1 + exp_2, T(2, 0));
+  }
+};
+
 struct tanh_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -127,6 +172,119 @@ struct tanh_functor {
     auto tanh_x = precise::tanh(x.x);
     auto tan_y = precise::tan(x.y);
     return div(T(tanh_x, tan_y), T(1.0, tanh_x * tan_y));
+  }
+};
+
+struct asin_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::asin(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::asin(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // asin(z) = atan(z/sqrt(1-z^2)) if z != ±1
+    if (x.x == 1 && x.y == 0)
+      return T(M_PI_F / 2, 0);
+    else if (x.x == -1 && x.y == 0)
+      return T(M_PI_F / -2, 0);
+    auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
+    // calculate sqrt
+    // modulus
+    auto m = precise::sqrt(sqrt_val.x * sqrt_val.x + sqrt_val.y * sqrt_val.y);
+    // real part: sqrt((m + a)/2)
+    auto real_part = precise::sqrt((m + sqrt_val.x) * .5);
+    // imaginary part: sign(b) * sqrt((m - a)/2)
+    auto imag_part = copysign(
+        static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
+        sqrt_val.y);
+    auto atan_val = div(x, T(real_part, imag_part));
+    // calculate atan (see atan_functor)
+    auto coef = div(T(1, 0), T(0, 2));
+    auto log_arg =
+        div(T(-1 * atan_val.x, 1 - atan_val.y), T(atan_val.x, 1 + atan_val.y));
+    // Calculate log using method from log_functor
+    auto magnitude =
+        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (log_arg.x == 0 && log_arg.y == 0)
+        ? 0
+        : ::precise::atan2(log_arg.y, log_arg.x);
+    // return coefficient * log value
+    return c10::metal::mul(coef, T(real, imag));
+  }
+};
+
+struct acos_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::acos(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::acos(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // acos(z) = pi/2 - asin(z) if z != ±1
+    // calculate asin
+    if (x.x == 1 && x.y == 0)
+      return T(M_PI_F, 0);
+    else if (x.x == -1 && x.y == 0)
+      return T(-M_PI_F, 0);
+    auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
+    // calculate sqrt
+    // modulus
+    auto m = precise::sqrt(sqrt_val.x * sqrt_val.x + sqrt_val.y * sqrt_val.y);
+    // real part: sqrt((m + a)/2)
+    auto real_part = precise::sqrt((m + sqrt_val.x) * .5);
+    // imaginary part: sign(b) * sqrt((m - a)/2)
+    auto imag_part = copysign(
+        static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
+        sqrt_val.y);
+    auto atan_val = div(x, T(real_part, imag_part));
+    // calculate atan (see atan_functor)
+    auto coef = div(T(1, 0), T(0, 2));
+    auto log_arg =
+        div(T(-1 * atan_val.x, 1 - atan_val.y), T(atan_val.x, 1 + atan_val.y));
+    // Calculate log using method from log_functor
+    auto magnitude =
+        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (log_arg.x == 0 && log_arg.y == 0)
+        ? 0
+        : ::precise::atan2(log_arg.y, log_arg.x);
+    // return coefficient * log value
+    return T(M_PI_F / 2, 0) - c10::metal::mul(coef, T(real, imag));
+  }
+};
+
+struct atan_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::atan(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::atan(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // atan(z) = (1/2i)ln((i-z)/(i+z))
+    auto coef = div(T(1, 0), T(0, 2));
+    auto log_arg = div(T(-1 * x.x, 1 - x.y), T(x.x, 1 + x.y));
+    // Calculate log using method from log_functor
+    auto magnitude =
+        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (log_arg.x == 0 && log_arg.y == 0)
+        ? 0
+        : ::precise::atan2(log_arg.y, log_arg.x);
+    // return coefficient * log value
+    return c10::metal::mul(coef, T(real, imag));
   }
 };
 
@@ -362,10 +520,15 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(rsqrt, DTYPE1, DTYPE0);        \
+  REGISTER_UNARY_OP(sinh, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(cosh, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(tanh, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sin, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(cos, DTYPE1, DTYPE0);          \
-  REGISTER_UNARY_OP(tan, DTYPE1, DTYPE0)
+  REGISTER_UNARY_OP(tan, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(asin, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(acos, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(atan, DTYPE1, DTYPE0)
 
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
@@ -391,6 +554,8 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(log1p, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(log2, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(sinh, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(cosh, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(rsqrt, DTYPE##2, DTYPE##2);   \
@@ -398,7 +563,10 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2)
+  REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2);     \
+  REGISTER_UNARY_OP(asin, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(acos, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(atan, DTYPE##2, DTYPE##2)
 
 INSTANTIATE_UNARY_KERNELS_VEC2(half);
 INSTANTIATE_UNARY_KERNELS_VEC2(float);
