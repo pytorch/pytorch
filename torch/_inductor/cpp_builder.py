@@ -183,7 +183,6 @@ def convert_cubin_to_obj(
     # Convert .cubin to .o
     cmd = f"{ld} -r -b binary -z noexecstack -o {obj_file} {cubin_file}"
     subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
-    os.remove(cubin_file)
     # Rename .data to .rodata
     cmd = f"{objcopy} --rename-section .data=.rodata,alloc,load,readonly,data,contents {obj_file}"
     subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
