@@ -628,11 +628,19 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
 }
 
 static PyObject* set_guard_complete_hook(PyObject* dummy, PyObject* obj) {
+  PyObject* old_hook = guard_complete_hook;
+
   if (obj == Py_None) {
     obj = NULL;
   }
-  Py_XSETREF(guard_complete_hook, Py_XNewRef(obj));
-  Py_RETURN_NONE;
+
+  guard_complete_hook = Py_XNewRef(obj);
+
+  if (old_hook == NULL) {
+    Py_RETURN_NONE;
+  } else {
+    return old_hook;
+  }
 }
 
 // Debugging function for GNU C only.
