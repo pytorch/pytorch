@@ -481,8 +481,12 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
   // fix mkl issue
   // https://github.com/pytorch/pytorch/issues/154477
-  if (signal_size[0] > 1 && input.strides()[0] == 0) {
-    input = input.clone(MemoryFormat::Contiguous);
+  auto istrides = input.strides();
+  for (const auto& stride : istrides) {
+    if (stride == 0) {
+      input = input.clone(MemoryFormat::Contiguous);
+      break;
+    }
   }
 
   auto descriptor = _plan_mkl_fft(
