@@ -1138,6 +1138,8 @@ def _should_save_eager_input_vals(
     target: Any,
     args_kwargs: Optional[tuple[tuple[Argument, ...], dict[str, Argument]]] = None,
 ) -> bool:
+    from torch._higher_order_ops.invoke_subgraph import InvokeSubgraphHOP
+
     if not callable(target):
         return False
     if isinstance(
@@ -1145,6 +1147,7 @@ def _should_save_eager_input_vals(
         (
             torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
             torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+            InvokeSubgraphHOP,
         ),
     ):
         return True
@@ -1969,7 +1972,7 @@ class _MakefxTracer:
 
         # All context managers and their states should be initialized before tracing based on the inputs
         # and configurations. After tracing, their states should be cleaned except for shape_env.
-        # Remember to specify how to intialize it from user inputs and from parent tracer whenever
+        # Remember to specify how to initialize it from user inputs and from parent tracer whenever
         # adding new modes in _MakefxTracer.
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self.proxy_mode: Union[nullcontext, ProxyTorchDispatchMode] = nullcontext()

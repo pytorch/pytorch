@@ -143,7 +143,10 @@ class TestUtils(TestCase):
             self.assertEqual(compilation_events[-1].num_graph_breaks, 2)
 
     def test_frame_traced_hook(self):
-        from utils import add, break_it
+        try:
+            from .utils import add, break_it
+        except ImportError:
+            from utils import add, break_it
 
         traced_code_lists = []
 
