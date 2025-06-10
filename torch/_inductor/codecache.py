@@ -51,7 +51,6 @@ from torch import SymInt, Tensor
 from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
-from torch._inductor.codegen.common import custom_backend_passes
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
@@ -73,11 +72,7 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
-from torch._inductor.custom_graph_pass import (
-    CustomGraphModulePass,
-    CustomGraphPass,
-    CustomGraphPassType,
-)
+from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
@@ -896,16 +891,12 @@ class FxGraphHashDetails:
             config.post_grad_custom_post_pass
         )
 
-        self.custom_backend_passes = tuple(
-            map(self._get_custom_pass_detail, custom_backend_passes.values())
-        )
-
     def _get_custom_pass_detail(
-        self, custom_pass: Union[CustomGraphPassType, CustomGraphModulePass]
+        self, custom_pass: CustomGraphPassType
     ) -> Optional[Any]:
         if not custom_pass:
             return None
-        assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
+        assert isinstance(custom_pass, CustomGraphPass)
         return custom_pass.uuid()
 
 
