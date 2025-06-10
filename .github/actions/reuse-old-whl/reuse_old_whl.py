@@ -319,16 +319,16 @@ def can_reuse_whl(args: argparse.Namespace) -> bool:
         print("Release branch, rebuild whl")
         return False
 
+    if not check_changed_files(get_merge_base()):
+        print("Cannot use old whl due to the changed files, rebuild whl")
+        return False
+
     if check_labels_for_pr():
         print(f"Found {FORCE_REBUILD_LABEL} label on PR, rebuild whl")
         return False
 
     if check_issue_open():
         print("Issue #153759 is open, rebuild whl")
-        return False
-
-    if not check_changed_files(get_merge_base()):
-        print("Cannot use old whl due to the changed files, rebuild whl")
         return False
 
     workflow_id = get_workflow_id(args.run_id)
