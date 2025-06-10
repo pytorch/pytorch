@@ -290,7 +290,6 @@ def check_unimplemented_calls(files, registry_path):
                 mismatches.append((gb_type, file, "Hints mismatch"))
 
     if mismatches:
-        print("Found unimplemented_v2 calls that don't match the registry:")
         for gb_type, file, reason in mismatches:
             print(f"  - {gb_type} in {file}: {reason}")
         return False
