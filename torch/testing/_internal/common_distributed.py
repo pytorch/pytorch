@@ -85,6 +85,8 @@ TEST_SKIPS = {
     "importerror": TestSkip(88, "Test skipped due to missing import"),
     "no_accelerator": TestSkip(89, "accelerator is not available."),
     "not-support-multithread": TestSkip(90, "backend not support multithread."),
+    "power-of-two": TestSkip(91, "world size needs to be power of two on xpu."),
+    "worldsize-not-set": TestSkip(92, "world size not set"),
 }
 
 
@@ -204,6 +206,25 @@ def skip_if_lt_x_gpu(x):
             if TEST_XPU and torch.xpu.device_count() >= x:
                 return func(*args, **kwargs)
             sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+
+        return wrapper
+
+    return decorator
+
+
+def skip_if_not_powerof2_worldsize_xpu():
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if TEST_XPU:
+                if os.getenv("WORLD_SIZE") is not None:
+                    x = int(os.getenv("WORLD_SIZE"))
+                    print(f"skip_if_not_powerof2_worldsize_xpu x: {x}")
+                    if TEST_XPU and ((x & (x - 1)) == 0):
+                        return func(*args, **kwargs)
+                    sys.exit(TEST_SKIPS[f"power-of-two"].exit_code)
+                sys.exit(TEST_SKIPS[f"worldsize-not-set"].exit_code)
+            return func(*args, **kwargs)
 
         return wrapper
 

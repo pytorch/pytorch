@@ -25,7 +25,11 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+    skip_if_not_powerof2_worldsize_xpu,
+
+)
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -230,6 +234,7 @@ class TestTPFSDPIntegration(FSDPTest):
         return torch.cat(all_grads_per_param).contiguous()
 
     @skip_if_lt_x_gpu(4)
+    @skip_if_not_powerof2_worldsize_xpu()
     def test_fsdp_tp_integration(self):
         self.run_subtests(
             {
