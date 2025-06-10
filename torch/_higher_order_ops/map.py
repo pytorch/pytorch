@@ -147,7 +147,7 @@ class MapAutogradOp(torch.autograd.Function):
 
         # Prepare the backward graph:
         # The fw_mapped_args need to be sliced along the first dimension
-        fw_args_prepared = (*_unstack_pytree(fw_mapped_args)[0], *pos_args)
+        fw_args_prepared = (*[first_slice_copy(x) for x in fw_mapped_args], *pos_args)
         bw_f = create_bw_fn(ctx._f, fw_args_prepared)
 
         # Create a wrapper around thefor the bw_f
@@ -186,7 +186,7 @@ class MapAutogradOp(torch.autograd.Function):
 
 
 def trace_map(proxy_mode, func_overload, f, xs, pos_args):
-    example_input = _unstack_pytree(xs)[0]
+    example_input = [first_slice_copy(x) for x in xs]
     body_graph = f
 
     body_graph = reenter_make_fx(body_graph)(*example_input, *pos_args)
@@ -240,7 +240,7 @@ def map_functionalize(ctx, f, xs, pos_args):
     wrapped_fn = ctx.functionalize(_maybe_run_with_interpreter(f))
 
     with ctx.redispatch_to_next():
-        example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
+        example_inputs = (*[first_slice_copy(x) for x in unwrapped_xs], *unwrapped_args)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         _check_alias_and_mutation(f, example_inputs, "map", pre_dispatch)
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)
@@ -248,8 +248,6 @@ def map_functionalize(ctx, f, xs, pos_args):
 
 
 def _fake_map(f, x, *args):
-    from functorch.experimental.control_flow import _stack_pytree, _unstack_pytree
-
     x_pytrees = _unstack_pytree(x)
     zs = []
     for xp in x_pytrees:
