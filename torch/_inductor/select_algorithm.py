@@ -2233,6 +2233,7 @@ class AlgorithmSelectorCache(PersistentCache):
             log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
 
             candidates = self.prescreen_choices(choices)
+            prescreening_elapse: Optional[float] = 0.0
             if candidates:
                 prescreening_start_ts = time.time()
                 timings = self.lookup(
@@ -2270,7 +2271,12 @@ class AlgorithmSelectorCache(PersistentCache):
                 or config.trace.log_autotuning_results
             ):
                 self.log_results(
-                    name, input_nodes, timings, autotune_elapse, precompile_elapse
+                    name,
+                    input_nodes,
+                    timings,
+                    autotune_elapse,
+                    precompile_elapse,
+                    prescreening_elapse,
                 )
 
             def profiler_bench_function():
@@ -2820,6 +2826,7 @@ class AlgorithmSelectorCache(PersistentCache):
         timings: dict[ChoiceCaller, float],
         elapse: float,
         precompile_elapse: float,
+        prescreening_elapse: Optional[float] = None,
     ):
         V.debug.log_autotuning_results(
             name, input_nodes, timings, elapse, precompile_elapse
@@ -2908,9 +2915,16 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
+        prescreening_msg = (
+            f" and {prescreening_elapse:.4f} seconds prescreening"
+            if prescreening_elapse is not None
+            else ""
+        )
         sys.stderr.write(
             f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f}"
-            f" seconds precompiling for {len(timings)} choices\n"
+            f" seconds precompiling for {len(timings)} choices"
+            + prescreening_msg
+            + "\n"
         )
 
     @staticmethod
