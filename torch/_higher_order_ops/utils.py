@@ -819,7 +819,8 @@ def check_input_alias_and_mutation_return_outputs(
 
         def _tensor_version(t) -> Optional[int]:
             if isinstance(t, torch.Tensor):
-                assert isinstance(t, FakeTensor), "Only fake tensor is allowed"
+                if not isinstance(t, FakeTensor):
+                    raise RuntimeError("Only fake tensor is allowed")
                 return t._version
             return None
 
@@ -1069,3 +1070,13 @@ def materialize_callable_in_args(op: HopInstance, args, kwargs):
             materialized_args.append(flat_args[i])
 
     return pytree.tree_unflatten(materialized_args, flat_spec)
+
+
+def _has_gen_schema(op: HigherOrderOperator):
+    # There is an InvokeQuant argument we cannot gen_schema.
+    if op is torch.ops.higher_order.invoke_quant_packed:
+        return False
+    method = "gen_schema"
+    return hasattr(type(op), method) and getattr(type(op), method) is not getattr(
+        HigherOrderOperator, method
+    )
