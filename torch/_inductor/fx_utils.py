@@ -255,7 +255,7 @@ def is_node_realized(node: torch.fx.Node) -> bool:
 
 
 def count_flops_fx(node: torch.fx.Node) -> Optional[int]:
-    if isinstance(node.target, str):
+    if not countable_fx(node) or isinstance(node.target, str):
         return None
     with FakeTensorMode(allow_non_fake_inputs=True):
         success, args, kwargs = get_fake_args_kwargs(node)
