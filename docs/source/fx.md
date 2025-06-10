@@ -495,7 +495,7 @@ traditional debugging techniques like `print` statements or `pdb` is
 not as straightforward. Luckily, we have several techniques we can use
 for debugging the generated code.
 
-## Use `pdb`
+#### Use `pdb`
 Invoke `pdb` to step into the running program. Although the code that
 represents the {class}`Graph` is not in any source file, we can still step
 into it manually using `pdb` when the forward pass is invoked.
