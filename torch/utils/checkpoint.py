@@ -909,7 +909,7 @@ class _CheckpointFrame:
 
 
 _debug_tip_msg = """
-Tip: Enable detailed checkpoint debugging, either pass `debug=True` to
+Tip: To see a more detailed error message, either pass `debug=True` to
 `torch.utils.checkpoint.checkpoint(...)` or wrap the code block
 with `with torch.utils.checkpoint.set_checkpoint_debug_enabled(True):` to
 enable checkpoint‑debug mode globally.
