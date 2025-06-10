@@ -1885,6 +1885,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         output_args: Optional[list[str]] = None,
         raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
+        """
+        Generates declarations for external kernel arguments if needed, based on the provided
+        operator and its arguments. It processes both input and output arguments, categorizing
+        them into tensor and integer arguments for further code generation.
+        """
         schema = None
         if isinstance(op_overload, torch._higher_order_ops.torchbind.CallTorchBind):
             obj = raw_args[0]
@@ -2006,7 +2011,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         # TODO: Only support None and tensor(s) returns for now, SymInt is not implemented yet
         for return_type in return_types:
-            if isinstance(return_type, (torch.TensorType, torch.NoneType)):
+            if isinstance(
+                return_type, (torch.TensorType, torch.NoneType, torch.IntType)
+            ):
                 pass
             elif isinstance(return_type, torch.OptionalType):
                 assert isinstance(return_type.getElementType(), torch.TensorType)
@@ -2021,6 +2028,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # None output is supported, but Optional return types are not yet supported
             if output_arg is None:
                 continue
+            elif isinstance(raw_output_arg, int):
+                new_int_args.append(str(raw_output_arg))
             elif isinstance(output_arg, (list, tuple)):
                 for out in output_arg:
                     fill_output_arg(
@@ -2060,6 +2069,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return mutated_buf_names[0]
             elif isinstance(out, (list, tuple)):
                 return type(out)(extract_output_name(o) for o in out)
+            elif isinstance(out, int):
+                return str(out)
             else:
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
