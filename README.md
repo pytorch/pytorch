@@ -191,8 +191,8 @@ $ call "C:\Program Files\Microsoft Visual Studio\<VERSION>\Community\VC\Auxiliar
 
 A conda environment is not required.  You can also do a PyTorch build in a
 standard virtual environment, e.g., created with tools like `uv`, provided
-your system has all the necessary dependencies (e.g., cmake, ninja, MKL)
-installed.
+your system has installed all the necessary dependencies unavailable as pip
+packages (e.g., CUDA, MKL.)
 
 ##### NVIDIA CUDA Support
 If you want to compile with CUDA support, [select a supported version of CUDA from our support matrix](https://pytorch.org/get-started/locally/), then install the following:
