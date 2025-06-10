@@ -15,7 +15,7 @@ import os
 from typing import Optional
 
 
-# NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
+# NOTE: Please also update the CUDA sources in `PIP_SOURCES` in tools/nightly.py when changing this
 CUDA_ARCHES = ["12.6", "12.8"]
 CUDA_STABLE = "12.6"
 CUDA_ARCHES_FULL_VERSION = {
@@ -27,7 +27,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "12.8": "9",
 }
 
-# NOTE: Also update the ROCm sources in tools/nightly.py when changing this list
+# NOTE: Please also update the ROCm sources in `PIP_SOURCES` in tools/nightly.py when changing this
 ROCM_ARCHES = ["6.3", "6.4"]
 
 XPU_ARCHES = ["xpu"]
