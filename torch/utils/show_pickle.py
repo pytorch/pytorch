@@ -1,32 +1,31 @@
 #!/usr/bin/env python3
-# mypy: allow-untyped-defs
 import sys
 import pickle
 import struct
 import pprint
 import zipfile
 import fnmatch
-from typing import Any, IO
+from typing import Any, IO, Optional
 
 __all__ = ["FakeObject", "FakeClass", "DumpUnpickler", "main"]
 
 class FakeObject:
-    def __init__(self, module, name, args):
+    def __init__(self, module: str, name: str, args: Any) -> None:
         self.module = module
         self.name = name
         self.args = args
         # NOTE: We don't distinguish between state never set and state set to None.
         self.state = None
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         state_str = "" if self.state is None else f"(state={self.state!r})"
         return f"{self.module}.{self.name}{self.args!r}{state_str}"
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: Any) -> None:
         self.state = state
 
     @staticmethod
-    def pp_format(printer, obj, stream, indent, allowance, context, level):
+    def pp_format(printer: Any, obj: "FakeObject", stream: Any, indent: int, allowance: int, context: Any, level: int) -> None:
         if not obj.args and obj.state is None:
             stream.write(repr(obj))
             return
@@ -45,35 +44,35 @@ class FakeObject:
 
 
 class FakeClass:
-    def __init__(self, module, name):
+    def __init__(self, module: str, name: str) -> None:
         self.module = module
         self.name = name
         self.__new__ = self.fake_new  # type: ignore[assignment]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.module}.{self.name}"
 
-    def __call__(self, *args):
+    def __call__(self, *args: Any) -> FakeObject:
         return FakeObject(self.module, self.name, args)
 
-    def fake_new(self, *args):
+    def fake_new(self, *args: Any) -> FakeObject:
         return FakeObject(self.module, self.name, args[1:])
 
 
 class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
     def __init__(
             self,
-            file,
+            file: Any,
             *,
-            catch_invalid_utf8=False,
-            **kwargs):
+            catch_invalid_utf8: bool = False,
+            **kwargs: Any) -> None:
         super().__init__(file, **kwargs)
         self.catch_invalid_utf8 = catch_invalid_utf8
 
-    def find_class(self, module, name):
+    def find_class(self, module: str, name: str) -> FakeClass:
         return FakeClass(module, name)
 
-    def persistent_load(self, pid):
+    def persistent_load(self, pid: Any) -> FakeObject:
         return FakeObject("pers", "obj", (pid,))
 
     dispatch = dict(pickle._Unpickler.dispatch)  # type: ignore[attr-defined]
@@ -82,7 +81,7 @@ class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
     # from their pickle (__getstate__) functions.  Install a custom loader
     # for strings that catches the decode exception and replaces it with
     # a sentinel object.
-    def load_binunicode(self):
+    def load_binunicode(self) -> None:
         strlen, = struct.unpack("<I", self.read(4))  # type: ignore[attr-defined]
         if strlen > sys.maxsize:
             raise Exception("String too long.")  # noqa: TRY002
@@ -98,13 +97,13 @@ class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
     dispatch[pickle.BINUNICODE[0]] = load_binunicode  # type: ignore[assignment]
 
     @classmethod
-    def dump(cls, in_stream, out_stream):
+    def dump(cls, in_stream: Any, out_stream: Any) -> Any:
         value = cls(in_stream).load()
         pprint.pprint(value, stream=out_stream)
         return value
 
 
-def main(argv, output_stream=None):
+def main(argv: list[str], output_stream: Optional[Any] = None) -> int:
     if len(argv) != 2:
         # Don't spam stderr if not using stdout.
         if output_stream is not None:
@@ -139,6 +138,7 @@ def main(argv, output_stream=None):
                         break
                 if not found:
                     raise Exception(f"Could not find member matching {mname} in {zfname}")  # noqa: TRY002
+    return 0
 
 
 if __name__ == "__main__":
