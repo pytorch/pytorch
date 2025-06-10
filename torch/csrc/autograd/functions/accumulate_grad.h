@@ -97,7 +97,6 @@ struct TORCH_API AccumulateGrad : public Node {
   // degraded performance in Reducer.cpp or optimizer kernels, not death by
   // assert or silently bad numerics.
 
-
   // Gradient Accumulation
   // Given a variable with its current grad as variable_grad, accumulates
   // new_grad into variable_grad if in place accumulation is possible.
@@ -119,10 +118,12 @@ struct TORCH_API AccumulateGrad : public Node {
   //     . We only skip clone if indices and values themselves are contiguous
   //       for backward compatibility reasons. Since without this optimization,
   //       earlier we would clone the entire SparseTensor which cloned indices
-  //       and values. For details see https://github.com/pytorch/pytorch/issues/34375.
+  //       and values. For details see
+  //       https://github.com/pytorch/pytorch/issues/34375.
   //   - Case 1.3: Cloning sparse/nested new_grad
   //   - Case 1.4: Cloning MKLDNN new_grad
-  //   - Case 1.5: Deep copies new_grad according to the Gradient Layout Contract.
+  //   - Case 1.5: Deep copies new_grad according to the Gradient Layout
+  //   Contract.
   // - Case 2: Param has existing grad and grad mode is not enabled
   //   - This case is not strictly necessary, but it makes the first-order only
   //     case slightly more efficient.
@@ -135,8 +136,8 @@ struct TORCH_API AccumulateGrad : public Node {
   //   - Case 2.2: Vmap-incompatible
   //     . Ideally we'd perform an in-place operation to avoid changing
   //       the grad tensor. However, if that's impossible because the grads
-  //       are vmap-incompatible (See NOTE: [vmap-incompatible in-place operations]),
-  //       then we just add them out-of-place.
+  //       are vmap-incompatible (See NOTE: [vmap-incompatible in-place
+  //       operations]), then we just add them out-of-place.
   //   - Case 2.3: In-place addition
   //     . In this case we can avoid changing the grad tensor. There are three
   //       scenarios when we'll hit this case:
