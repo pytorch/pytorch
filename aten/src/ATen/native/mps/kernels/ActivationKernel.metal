@@ -140,3 +140,40 @@ REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, half, half, half);
 #if __METAL_VERSION__ >= 310
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, bfloat, bfloat, bfloat);
 #endif
+
+struct softshrink_functor {
+  template <typename T>
+  inline T operator()(const T x, const T lambda) {
+    T zero(0);
+    if (x > lambda) {
+      return x - lambda;
+    } else if (x < -lambda) {
+      return x + lambda;
+    } else {
+      return zero;
+    }
+  }
+};
+
+struct softshrink_backward_functor {
+  template <typename T>
+  inline T operator()(const T grad_output, const T self, const T lambda) {
+    if (self > lambda || self < -lambda) {
+      return grad_output;
+    } else {
+      return T(0);
+    }
+  }
+};
+
+REGISTER_UNARY_ALPHA_OP(softshrink, float, float, float);
+REGISTER_UNARY_ALPHA_OP(softshrink, half, half, half);
+#if __METAL_VERSION__ >= 310
+REGISTER_UNARY_ALPHA_OP(softshrink, bfloat, bfloat, bfloat);
+#endif
+
+REGISTER_BINARY_ALPHA_OP(softshrink_backward, float, float, float);
+REGISTER_BINARY_ALPHA_OP(softshrink_backward, half, half, half);
+#if __METAL_VERSION__ >= 310
+REGISTER_BINARY_ALPHA_OP(softshrink_backward, bfloat, bfloat, bfloat);
+#endif
