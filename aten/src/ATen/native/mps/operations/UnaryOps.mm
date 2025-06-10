@@ -12,7 +12,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
-#include <ATen/ops/abs_native.h>
 #include <ATen/ops/acos_native.h>
 #include <ATen/ops/acosh_native.h>
 #include <ATen/ops/angle_native.h>
@@ -40,7 +39,6 @@
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/rsqrt_native.h>
 #include <ATen/ops/sgn_native.h>
-#include <ATen/ops/sigmoid_native.h>
 #include <ATen/ops/sign_mps_dispatch.h>
 #include <ATen/ops/sign_native.h>
 #include <ATen/ops/signbit_native.h>
@@ -198,7 +196,6 @@ REGISTER_MPS_UNARY_STUB(trunc, truncate);
   }
 
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(reciprocal_out_mps, reciprocal)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(erf_out_mps, erf)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asin_out_mps, asin)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acos_out_mps, acos)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atan_out_mps, atan)
@@ -207,36 +204,6 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(cosh_out_mps, cosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
-
-Tensor& abs_out_mps(const Tensor& self, Tensor& output) {
-  using namespace mps;
-
-  if (!output.is_same_size(self)) {
-    output.resize_(self.sizes());
-  }
-
-  if (self.numel() == 0) {
-    return output;
-  }
-
-  if (supportsComplex() || !self.is_complex()) {
-    unary_op_noresize(self, output, "abs_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-      auto rc = [mpsGraph absoluteWithTensor:inputTensor name:nil];
-      if (self.is_complex()) {
-        rc = [mpsGraph realPartOfTensor:rc name:nil];
-      }
-      return rc;
-    });
-  } else {
-    Tensor realInput = at::view_as_real(self);
-    unary_op_noresize(
-        realInput, output, "abs_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-          auto rc = lengthOfComplexAsReal(mpsGraph, inputTensor);
-          return [mpsGraph reshapeTensor:rc withShape:getMPSShape(output) name:nil];
-        });
-  }
-  return output;
-}
 
 Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
   auto bool_self = self.to(ScalarType::Bool);
@@ -277,12 +244,6 @@ Tensor angle_mps(const Tensor& self) {
       : c10::toRealValueType(self.scalar_type());
   Tensor result = at::empty({0}, self.options().dtype(float_type));
   return angle_out_mps(self, result);
-}
-
-TORCH_IMPL_FUNC(sigmoid_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "sigmoid_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    return [mpsGraph sigmoidWithTensor:inputTensor name:nil];
-  });
 }
 
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
