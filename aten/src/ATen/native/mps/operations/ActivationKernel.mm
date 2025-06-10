@@ -29,11 +29,11 @@ static void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "hardsigmoid_backward");
 }
 
-static void hardswish_kernel(TensorIteratorBase& iter) {
+static void hardswish_kernel(at::TensorIterator& iter) {
   lib.exec_unary_kernel(iter, "hardswish");
 }
 
-static void hardswish_backward_kernel(TensorIteratorBase& iter) {
+static void hardswish_backward_kernel(at::TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "hardswish_backward");
 }
 
