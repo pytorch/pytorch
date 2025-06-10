@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Device.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
@@ -8,22 +9,37 @@
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
 
+constexpr const char* MAIA_HELP =
+    "Cannot initialize MAIA without ATen_maia library.";
+
 struct TORCH_API MAIAHooksInterface : AcceleratorHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   ~MAIAHooksInterface() override = default;
 
   void init() const override {
-    TORCH_CHECK(false, "Cannot initialize MAIA without ATen_maia library.");
+    TORCH_CHECK(false, MAIA_HELP);
   }
 
   bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
-    TORCH_CHECK(false, "Cannot initialize MAIA without ATen_maia library.");
+    TORCH_CHECK(false, MAIA_HELP);
     return false;
   }
 
   virtual std::string showConfig() const {
     TORCH_CHECK(false, "Cannot query detailed MAIA version information.");
+  }
+
+  virtual bool hasMAIA() const {
+    return false;
+  }
+
+  bool isPinnedPtr(const void* /*data*/) const override {
+    return false;
+  }
+
+  Allocator* getPinnedMemoryAllocator() const override {
+    TORCH_CHECK(false, "Pinned memory requires MAIA. ");
   }
 };
 

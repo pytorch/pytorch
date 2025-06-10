@@ -61,6 +61,8 @@ class TORCH_API Context {
       return at::detail::getCUDAHooks();
     } else if (opt_device_type == at::kXPU) {
       return at::detail::getXPUHooks();
+    } else if (opt_device_type == at::kMAIA) {
+      return at::detail::getMAIAHooks();
     } else if (opt_device_type == at::kMPS) {
       return at::detail::getMPSHooks();
     } else if (opt_device_type == at::kPrivateUse1) {
@@ -137,6 +139,9 @@ class TORCH_API Context {
   static bool hasCUDA() {
     return detail::getCUDAHooks().hasCUDA();
   }
+  static bool hasMAIA() {
+    return detail::getMAIAHooks().hasMAIA();
+  }
   static bool hasMTIA() {
     return detail::getMTIAHooks().hasMTIA();
   }
@@ -178,9 +183,6 @@ class TORCH_API Context {
   }
   static bool hasLazy() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::Lazy);
-  }
-  static bool hasMAIA() {
-    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::MAIA);
   }
   static bool hasHPU() {
     return detail::getHPUHooks().hasHPU();
