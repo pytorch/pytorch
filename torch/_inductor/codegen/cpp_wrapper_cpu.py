@@ -52,7 +52,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if not hasattr(self, "device"):
             self.device = "cpu"
         # must be initialized prior to calling super().__init__()
-        self.included_devices = OrderedSet[str]()
+        self.included_devices: OrderedSet[str] = OrderedSet()
         super().__init__()
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
@@ -62,14 +62,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.supports_intermediate_hooks = False
         self.kernel_callsite_id = count()
         self.int_array_id = count()  # for int array local variable declarations
-        self.declared_int_array_vars = OrderedSet[str]()
+        self.declared_int_array_vars: OrderedSet[str] = OrderedSet()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
-        self.used_cached_devices = OrderedSet[str]()
-        self.used_cached_dtypes = OrderedSet[str]()
-        self.used_cached_layouts = OrderedSet[str]()
-        self.used_cached_memory_formats = OrderedSet[str]()
-        self.used_cond_predicate = OrderedSet[str]()
+        self.used_cached_devices: OrderedSet[str] = OrderedSet()
+        self.used_cached_dtypes: OrderedSet[str] = OrderedSet()
+        self.used_cached_layouts: OrderedSet[str] = OrderedSet()
+        self.used_cached_memory_formats: OrderedSet[str] = OrderedSet()
+        self.used_cond_predicate: OrderedSet[str] = OrderedSet()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -686,7 +686,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace\n\n")
 
-        if config.aot_inductor.embed_cubin:
+        if config.aot_inductor.embed_kernel_binary:
             self.prefix.writeline('extern "C" {')
             for name in sorted(declare_kernel):
                 self.prefix.writeline(
@@ -729,8 +729,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
                                                const std::string& device_str,
-                                               std::optional<std::string> cubin_dir,
-                                               bool include_weights)
+                                               std::optional<std::string> cubin_dir)
                 : AOTInductorModelBase({num_inputs},
                                        {num_outputs},
                                        {num_constants},
@@ -1076,6 +1075,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 result.writeline("} // inductor_entry_impl")
 
     def generate_end(self, result):
+        """Generates the end of the code block, and any code needed to call it."""
         if V.graph.aot_mode:
             if V.graph.is_const_graph:
                 result.writeline("} // AOTInductorModel::_const_run_impl")
@@ -1083,19 +1083,29 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 result.writeline("} // namespace torch::aot_inductor\n\n\n")
             return
 
-        # Add any kernel definitions into the wrapped code.  We currently only build
-        # them in separate files in AOT mode.
-        result.splice(self.kernel_declarations.getvalue())
-        self.kernel_declarations.clear()
+        # Close the wrapper code block, then write any kernel definitions.
+        result.splice("'''\n)")
+        if self.kernel_declarations:
+            result.splice("\nkernel_src = (\nr'''")
+            result.splice(self.kernel_declarations.getvalue())
+            result.splice("'''\n)")
+        else:
+            result.splice(
+                """
+                kernel_src = ''
+                """
+            )
 
         # cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
-            '''
-            )
-
             inductor_entry = CppWrapperCodeCache.load_pybinding(
-                ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, "{self.device}", {len(V.graph.graph_outputs)})
+                argtypes=["std::vector<AtenTensorHandle>"],
+                main_code=cpp_wrapper_src,
+                device_type="{self.device}",
+                num_outputs={len(V.graph.graph_outputs)},
+                kernel_code=kernel_src,
+            )
             """
         )
 
@@ -1875,6 +1885,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         output_args: Optional[list[str]] = None,
         raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
+        """
+        Generates declarations for external kernel arguments if needed, based on the provided
+        operator and its arguments. It processes both input and output arguments, categorizing
+        them into tensor and integer arguments for further code generation.
+        """
         schema = None
         if isinstance(op_overload, torch._higher_order_ops.torchbind.CallTorchBind):
             obj = raw_args[0]
@@ -1996,7 +2011,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         # TODO: Only support None and tensor(s) returns for now, SymInt is not implemented yet
         for return_type in return_types:
-            if isinstance(return_type, (torch.TensorType, torch.NoneType)):
+            if isinstance(
+                return_type, (torch.TensorType, torch.NoneType, torch.IntType)
+            ):
                 pass
             elif isinstance(return_type, torch.OptionalType):
                 assert isinstance(return_type.getElementType(), torch.TensorType)
@@ -2011,6 +2028,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # None output is supported, but Optional return types are not yet supported
             if output_arg is None:
                 continue
+            elif isinstance(raw_output_arg, int):
+                new_int_args.append(str(raw_output_arg))
             elif isinstance(output_arg, (list, tuple)):
                 for out in output_arg:
                     fill_output_arg(
@@ -2050,6 +2069,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return mutated_buf_names[0]
             elif isinstance(out, (list, tuple)):
                 return type(out)(extract_output_name(o) for o in out)
+            elif isinstance(out, int):
+                return str(out)
             else:
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
