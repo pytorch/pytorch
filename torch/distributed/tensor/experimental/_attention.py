@@ -1200,11 +1200,41 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
 
             # hit
             if func == torch._higher_order_ops.flex_attention:
-                raise RuntimeError()
+                cp_q = args[0]
+                cp_k = args[1]
+                cp_v = args[2]
+                assert isinstance(cp_q, DTensor)
+                assert isinstance(cp_k, DTensor)
+                assert isinstance(cp_v, DTensor)
+                return func(
+                    cp_q.full_tensor(),
+                    cp_k.full_tensor(),
+                    cp_v.full_tensor(),
+                    *args[3:],
+                    **kwargs,
+                )
 
             # not hit
             if func == torch._higher_order_ops.flex_attention_backward:
                 raise RuntimeError()
+
+                grad = args[0]
+                cp_q = args[1]
+                cp_k = args[2]
+                cp_v = args[3]
+
+                assert isinstance(cp_q, DTensor)
+                assert isinstance(cp_k, DTensor)
+                assert isinstance(cp_v, DTensor)
+                assert isinstance(cp_q, DTensor)
+                return func(
+                    grad,
+                    cp_q.full_tensor(),
+                    cp_k.full_tensor(),
+                    cp_v.full_tensor(),
+                    *args[4:],
+                    **kwargs,
+                )
 
             if func != self._fn:
                 return func(*args, **kwargs)

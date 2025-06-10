@@ -535,11 +535,17 @@ class RingFlexAttentionTest(DTensorTestBase):
             cp_k.requires_grad = True
             cp_v.requires_grad = True
 
+            from torch.distributed.tensor import DTensor, Shard
+
+            cp_q_dist = DTensor.from_local(cp_q, device_mesh, [Shard(2)])
+            cp_k_dist = DTensor.from_local(cp_k, device_mesh, [Shard(2)])
+            cp_v_dist = DTensor.from_local(cp_v, device_mesh, [Shard(2)])
+
             cp_out, cp_lse = flex_attention(
-                cp_q,
-                cp_k,
-                cp_v,
-                block_mask=block_mask_post_sharding,
+                cp_q_dist,
+                cp_k_dist,
+                cp_v_dist,
+                block_mask=block_mask,
                 return_lse=True,
             )
             cp_out.sum().backward()
