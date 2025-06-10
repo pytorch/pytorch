@@ -1,12 +1,15 @@
-torch.func API Reference
-========================
+# torch.func API Reference
 
+```{eval-rst}
 .. currentmodule:: torch.func
+```
 
+```{eval-rst}
 .. automodule:: torch.func
+```
 
-Function Transforms
--------------------
+## Function Transforms
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -21,46 +24,40 @@ Function Transforms
      jacfwd
      hessian
      functionalize
+```
 
-Utilities for working with torch.nn.Modules
--------------------------------------------
+## Utilities for working with torch.nn.Modules
 
 In general, you can transform over a function that calls a ``torch.nn.Module``.
 For example, the following is an example of computing a jacobian of a function
 that takes three values and returns three values:
 
-.. code-block:: python
+```python
+model = torch.nn.Linear(3, 3)
 
-    model = torch.nn.Linear(3, 3)
+def f(x):
+    return model(x)
 
-    def f(x):
-        return model(x)
+x = torch.randn(3)
+jacobian = jacrev(f)(x)
+assert jacobian.shape == (3, 3)
+```
 
-    x = torch.randn(3)
-    jacobian = jacrev(f)(x)
-    assert jacobian.shape == (3, 3)
-
-However, if you want to do something like compute a jacobian over the parameters
-of the model, then there needs to be a way to construct a function where the
-parameters are the inputs to the function.
-That's what :func:`functional_call` is for:
-it accepts an nn.Module, the transformed ``parameters``, and the inputs to the
-Module's forward pass. It returns the value of running the Module's forward pass
-with the replaced parameters.
+However, if you want to do something like compute a jacobian over the parameters of the model, then there needs to be a way to construct a function where the parameters are the inputs to the function. That's what {func}`functional_call` is for: it accepts an nn.Module, the transformed `parameters`, and the inputs to the Module's forward pass. It returns the value of running the Module's forward pass with the replaced parameters.
 
 Here's how we would compute the Jacobian over the parameters
 
-.. code-block:: python
+```python
+model = torch.nn.Linear(3, 3)
 
-    model = torch.nn.Linear(3, 3)
+def f(params, x):
+    return torch.func.functional_call(model, params, x)
 
-    def f(params, x):
-        return torch.func.functional_call(model, params, x)
+x = torch.randn(3)
+jacobian = jacrev(f)(dict(model.named_parameters()), x)
+```
 
-    x = torch.randn(3)
-    jacobian = jacrev(f)(dict(model.named_parameters()), x)
-
-
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -68,20 +65,24 @@ Here's how we would compute the Jacobian over the parameters
     functional_call
     stack_module_state
     replace_all_batch_norm_modules_
+```
 
 If you're looking for information on fixing Batch Norm modules, please follow the
 guidance here
 
+```{eval-rst}
 .. toctree::
    :maxdepth: 1
 
    func.batch_norm
+```
 
-Debug utilities
----------------
+## Debug utilities
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
      debug_unwrap
+```
