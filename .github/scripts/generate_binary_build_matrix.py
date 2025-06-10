@@ -16,18 +16,14 @@ from typing import Optional
 
 
 # NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
-CUDA_ARCHES = ["11.8", "12.6", "12.8"]
+CUDA_ARCHES = ["12.6", "12.8"]
 # Please note: we are keeping 11.8 in CI for now, just deprecating 11.8 in CD
-CUDA_ARCHES_CD = CUDA_ARCHES.copy()
-CUDA_ARCHES_CD.remove("11.8")
 CUDA_STABLE = "12.6"
 CUDA_ARCHES_FULL_VERSION = {
-    "11.8": "11.8.0",
     "12.6": "12.6.3",
     "12.8": "12.8.1",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
-    "11.8": "9",
     "12.6": "9",
     "12.8": "9",
 }
@@ -220,10 +216,10 @@ def generate_libtorch_matrix(
     if arches is None:
         arches = ["cpu"]
         if os == "linux":
-            arches += CUDA_ARCHES_CD
+            arches += CUDA_ARCHES
             arches += ROCM_ARCHES
         elif os == "windows":
-            arches += CUDA_ARCHES_CD
+            arches += CUDA_ARCHES
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -286,9 +282,9 @@ def generate_wheels_matrix(
         # Define default compute archivectures
         arches = ["cpu"]
         if os == "linux":
-            arches += CUDA_ARCHES_CD + ROCM_ARCHES + XPU_ARCHES
+            arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
-            arches += CUDA_ARCHES_CD + XPU_ARCHES
+            arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
