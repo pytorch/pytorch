@@ -98,4 +98,6 @@ fi
 if [ -n "${NUMPY_VERSION}" ]; then
   pip_install "numpy==${NUMPY_VERSION}"
 fi
-pip_install "helion; python_version >= '3.10'"
+if [[ "$ANACONDA_PYTHON_VERSION" != 3.9* ]]; then
+  pip_install helion
+fi
