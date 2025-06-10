@@ -98,6 +98,33 @@ static void accumulateGrad(
     size_t num_expected_refs,
     const T& update_grad) {
   if (!variable_grad.defined()) {
+    bool cond1 = !GradMode::is_enabled();
+    std::cout << "1. !GradMode::is_enabled(): " << (cond1 ? "true" : "false") << std::endl;
+
+    bool cond2 = !new_grad.is_sparse();
+    std::cout << "2. !new_grad.is_sparse(): " << (cond2 ? "true" : "false") << std::endl;
+
+    bool cond3 = !new_grad.is_sparse_csr();
+    std::cout << "3. !new_grad.is_sparse_csr(): " << (cond3 ? "true" : "false") << std::endl;
+
+    bool cond4 = !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided);
+    std::cout << "4. !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided): " << (cond4 ? "true" : "false") << std::endl;
+
+    size_t new_grad_use_count = at::caching::adjusted_use_count(new_grad);
+    bool cond5 = new_grad_use_count <= num_expected_refs;
+    std::cout << "5. at::caching::adjusted_use_count(new_grad) <= num_expected_refs (" << new_grad_use_count << " <= " << num_expected_refs << "): " << (cond5 ? "true" : "false") << std::endl;
+
+    bool cond6_or_part1 = new_grad.is_mkldnn();
+    bool cond6_or_part2 = utils::obeys_layout_contract(new_grad, variable);
+    bool cond6_combined = cond6_or_part1 || cond6_or_part2;
+    std::cout << "6. (new_grad.is_mkldnn() || utils::obeys_layout_contract(new_grad, variable)): " << (cond6_combined ? "true" : "false") << std::endl;
+
+    bool final_condition = cond1 && cond2 && cond3 && cond4 && cond5 && cond6_combined;
+    std::cout << "\nOverall IF statement result: " << (final_condition ? "true" : "false") << std::endl;
+
+    std::cout << "variable addr:" << variable.unsafeGetTensorImpl() << std::endl;
+    std::cout << "grad addr:" << new_grad.unsafeGetTensorImpl() << std::endl;
+
     if (!GradMode::is_enabled() && !new_grad.is_sparse() &&
         !new_grad.is_sparse_csr() &&
         !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
@@ -111,7 +138,9 @@ static void accumulateGrad(
       // case, For MKLDNN tensor, which is a opaque tensor, assuming it obeys
       // layout_contract. Under these conditions, we can steal new_grad
       // without a deep copy.
+      std::cout << "case 1.1: steal grad" << std::endl;
       update_grad(new_grad.detach());
+      std::cout << "variable.grad_fn() is empty?=" << (variable.grad_fn() == nullptr) << std::endl;
     } else if (
         !GradMode::is_enabled() && new_grad.is_sparse() &&
         new_grad._indices().is_contiguous() &&
@@ -121,6 +150,7 @@ static void accumulateGrad(
         new_grad._indices().use_count() <= 1 &&
         new_grad._values().use_count() <= 1 &&
         new_grad.use_count() <= num_expected_refs) {
+      std::cout << "case 1.2" << std::endl;
       // Can't detach sparse tensor (since metadata changes are not allowed
       // after detach), so just create a new one for the grad which is a
       // shallow copy. We need a shallow copy so that modifying the original
@@ -145,13 +175,17 @@ static void accumulateGrad(
     } else {
       if (new_grad.is_sparse() || new_grad.is_sparse_csr() ||
           new_grad.is_nested()) {
+        std::cout << "case 1.3" << std::endl;
         update_grad(new_grad.clone());
       } else {
         if (new_grad.is_mkldnn()) {
+          std::cout << "case 1.4" << std::endl;
           update_grad(new_grad.clone());
         } else {
+          std::cout << "case 1.5" << std::endl;
           // Deep copies new_grad according to the "Gradient Layout Contract."
           update_grad(utils::clone_obey_contract(new_grad, variable));
+          std::cout << "variable.grad_fn() is empty?=" << (variable.grad_fn() == nullptr) << std::endl;
         }
       }
     }
@@ -167,6 +201,7 @@ static void accumulateGrad(
       auto result = new_grad + variable_grad;
       CHECK_RESULT(result, variable);
       update_grad(std::move(result));
+      std::cout << "case 2.1" << std::endl;
     } else if (!at::inplaceIsVmapCompatible(variable_grad, new_grad)) {
       // Ideally we'd perform an in-place operation to avoid changing
       // the grad tensor. However, if that's impossible because the grads
@@ -175,6 +210,7 @@ static void accumulateGrad(
       auto result = variable_grad + new_grad;
       CHECK_RESULT(result, variable);
       update_grad(std::move(result));
+      std::cout << "case 2.2" << std::endl;
     } else {
       // In this case we can avoid changing the grad tensor. There are three
       // scenarios when we'll hit this case:
@@ -195,6 +231,7 @@ static void accumulateGrad(
       // increase peak memory usage.
       variable_grad += new_grad;
       CHECK_RESULT(variable_grad, variable);
+      std::cout << "case 2.3: clone grad" << std::endl;
       // ^ We could enforce the contract more aggressively here by writing:
       // if (variable_grad.is_sparse() || new_grad.is_sparse()) {
       //   variable_grad += new_grad;
@@ -215,10 +252,12 @@ static void accumulateGrad(
       // CPU backend throws an error on sparse + dense, so prefer dense +
       // sparse here.
       result = new_grad + variable_grad;
+      std::cout << "case 3.1: clone grad" << std::endl;
     } else {
       // Assumes operator+ result typically matches strides of first arg,
       // and hopes variable_grad was originally created obeying layout
       // contract.
+      std::cout << "case 3.2: clone grad" << std::endl;
       result = variable_grad + new_grad;
     }
     CHECK_RESULT(result, variable);

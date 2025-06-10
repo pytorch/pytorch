@@ -24,13 +24,15 @@ variable_list AccumulateGrad_apply_functional_no_hooks(
     at::Tensor& variable,
     int64_t num_expected_refs,
     std::mutex* mutex = nullptr) {
+  std::cout << "\nAccumulateGrad_apply_functional_no_hooks\n";
+  std::cout << "0. variable = " << variable.unsafeGetTensorImpl() << std::endl;
   check_input_variables("AccumulateGrad", grads, 1, 0);
 
   if (!grads[0].defined())
     return {};
-  if (variable.grad_fn())
-    throw std::logic_error(
-        "leaf variable has been moved into the graph interior");
+  // if (variable.grad_fn())
+  //   throw std::logic_error(
+  //       "leaf variable has been moved into the graph interior");
   if (!variable.requires_grad())
     return {};
 
@@ -63,7 +65,7 @@ variable_list AccumulateGrad_apply_functional_no_hooks(
       num_expected_refs,
       [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
 
-  return {};
+  return {grad};
 }
 
 variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
@@ -149,23 +151,25 @@ variable_list AccumulateGrad::apply_with_saved(
     return true;
   }();
 
-  PackedArgs packed_args;
-  packed_args.pack<at::Tensor>(variable_copy);
-  packed_args.pack(!post_hooks().empty());
+  // PackedArgs packed_args;
+  // packed_args.pack<at::Tensor>(variable_copy);
+  // packed_args.pack(!post_hooks().empty());
 
   // same metadata before and after post acc grad hooks
-  auto output_metadata = torch::dynamo::autograd::
-      IValuePacker<std::vector<std::optional<InputMetadata>>>::pack(
-          torch::dynamo::autograd::get_input_metadata(next_edges()));
+  // auto output_metadata = torch::dynamo::autograd::
+  //     IValuePacker<std::vector<std::optional<InputMetadata>>>::pack(
+  //         torch::dynamo::autograd::get_input_metadata(next_edges()));
 
   const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
-  auto result = interface->call_function(
-      saved.get_py_compiler(),
-      "apply_functional",
-      name,
-      grads,
-      std::move(packed_args).vec(),
-      output_metadata);
+  // auto result = interface->call_function(
+  //     saved.get_py_compiler(),
+  //     "call_accumulate_grad",
+  //     name,
+  //     grads,
+  //     std::move(packed_args).vec(),
+  //     output_metadata);
+  auto result = interface->call_accumulate_grad(
+    saved.get_py_compiler(), variable_copy, grads[0], !post_hooks().empty());
 
   auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {

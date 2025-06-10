@@ -182,7 +182,9 @@ def aot_dispatch_base_graph(
     # As long as we opted to remove input mutations, then
     # there should be *NO* mutating ops in the graph at this point.
     copy_count = assert_functional_graph(fw_module.graph)
-    fw_module.graph.eliminate_dead_code()
+    fw_module.print_readable(colored=True)
+    # breakpoint()
+    # fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
 
     copy_count2 = assert_functional_graph(fw_module.graph)

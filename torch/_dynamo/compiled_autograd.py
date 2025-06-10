@@ -31,6 +31,7 @@ from torch._dynamo.external_utils import (
     call_hook,
     FakeCompiledAutogradEngine,
     unwrap_maybe_dynamic_int,
+    call_accumulate_grad,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import (
@@ -110,14 +111,14 @@ class NaNChecker:
 
     def prep_with_graph(self, graph: torch.fx.Graph):
         inputs_node = next(iter(graph.nodes))
-        acc_grad_nodes = graph.find_nodes(op="call_function", target=ops.AccumulateGrad)
+        acc_grad_nodes = graph.find_nodes(op="call_function", target=call_accumulate_grad)
         output_nodes = graph.find_nodes(op="output")[0].args[0]
         assert self.accumulate_grad == bool(
             acc_grad_nodes
         ) and self.accumulate_grad == (not output_nodes)
 
         for node in acc_grad_nodes:
-            param_node = node.args[0][0]
+            param_node = node.args[0]
             # AccumulateGrad always saves a reference to the param
             # so Compiled Autograd will always lift the param and
             # this should always be true
@@ -226,7 +227,7 @@ ops = OpNamespace()
 
 _graph_placeholders = ["inputs", "sizes", "scalars", "hooks", "packed_data"]
 _impure_targets = OrderedSet(
-    [call_hook, call_backward, FakeCompiledAutogradEngine._exec_final_callbacks_stub]
+    [call_hook, call_backward, FakeCompiledAutogradEngine._exec_final_callbacks_stub, call_accumulate_grad]
 )
 
 COMPILE_COUNTER = itertools.count()
@@ -720,6 +721,32 @@ class AutogradCompilerInstance:
         self.bind_objects_to_proxies([result], [proxy_out])
         return result
 
+    def accumulate_grad(self, variable, grad, has_post_hooks):
+        # proxy_out = self.fx_tracer.create_proxy(
+        #     "call_function",
+        #     ops.AccumulateGrad,  # should already be binded
+        #     args=(
+        #         [self.to_proxy(grad)],
+        #         self.to_proxy(variable),
+        #         has_post_hooks,
+        #     ),
+        #     kwargs={},
+        # )
+
+        proxy_out = self.fx_tracer.create_proxy(
+            "call_function",
+            call_accumulate_grad,
+            args=(
+                self.to_proxy(variable),
+                self.to_proxy(grad),
+                has_post_hooks,
+            ),
+            kwargs={},
+        )
+        result = self.allocate_dummy()
+        self.bind_objects_to_proxies([result], [proxy_out])
+        return result
+
     def proxy_call_hook(self, hook, *args, **kwargs):
         return self.fx_tracer.create_proxy(
             "call_function",
@@ -932,15 +959,6 @@ class AutogradCompilerInstance:
         return GraphModule(self.fx_tracer.root, self.fx_tracer.graph, id)
 
     def end_capture(self, outputs):
-        global _impure_targets
-        _impure_targets = OrderedSet(
-            [
-                call_hook,
-                call_backward,
-                FakeCompiledAutogradEngine._exec_final_callbacks_stub,
-                ops.AccumulateGrad,
-            ]
-        )
         self.fx_tracer.create_proxy(
             "call_function",
             FakeCompiledAutogradEngine._exec_final_callbacks_stub,
@@ -1082,9 +1100,9 @@ class AutogradCompilerInstance:
         pass attempts to reorder the graph to mimic eager behavior.
         """
         for node in self.fx_tracer.graph.find_nodes(
-            op="call_function", target=ops.AccumulateGrad
+            op="call_function", target=call_accumulate_grad
         ):
-            param_node, grad_node = node.args[0][0], node.args[1]
+            param_node, grad_node = node.args[0], node.args[1]
             getitem_node = None
             if grad_node.target == operator.getitem:
                 getitem_node = grad_node
@@ -1224,7 +1242,7 @@ class AutogradCompilerInstance:
             # find the corresponding acc_grad node
             acc_grad_node = None
             for n in list(param_node.users.keys()):
-                if n.op == "call_function" and n.target == ops.AccumulateGrad:
+                if n.op == "call_function" and n.target == call_accumulate_grad:
                     acc_grad_node = n
                     break
 
@@ -1273,8 +1291,8 @@ class AutogradCompilerInstance:
                 )
 
             arg = max(input_nodes_and_users)  # last input users
-            if arg.op == "call_function" and arg.target == ops.AccumulateGrad:
-                param_node = arg.args[0][0]
+            if arg.op == "call_function" and arg.target == call_accumulate_grad:
+                param_node = arg.args[0]
                 post_acc_grad_hook_node = None
                 for n in list(param_node.users.keys()):
                     if (

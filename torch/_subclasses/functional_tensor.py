@@ -227,6 +227,7 @@ class FunctionalTensor(torch.Tensor):
 
         with functional_mode:
             torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
+            # breakpoint()
             out = FunctionalTensor(x_functional, functional_mode)
             torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
         return out

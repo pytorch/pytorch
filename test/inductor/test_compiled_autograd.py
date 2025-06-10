@@ -218,7 +218,8 @@ main()
             yield model[2].weight.grad
             yield model[2].bias.grad
 
-        self.check_output_and_recompiles(fn)
+        # self.check_output_and_recompiles(fn, compiler_fn=make_compiler_fn(backend="eager"), count=[1, 0])
+        self.check_output_and_recompiles(fn, compiler_fn=make_compiler_fn(backend="aot_eager"), count=1)
 
     def test_cache_hit(self):
         def fn():
