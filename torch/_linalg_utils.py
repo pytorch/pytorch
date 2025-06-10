@@ -1,13 +1,12 @@
-# mypy: allow-untyped-defs
 """Various linear algebra utility methods for internal use."""
 
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 from torch import Tensor
 
 
-def is_sparse(A):
+def is_sparse(A: Any) -> bool:
     """Check if tensor A is a sparse tensor"""
     if isinstance(A, torch.Tensor):
         return A.layout == torch.sparse_coo
@@ -18,7 +17,7 @@ def is_sparse(A):
     raise TypeError(error_str)
 
 
-def get_floating_dtype(A):
+def get_floating_dtype(A: Tensor) -> torch.dtype:
     """Return the floating point dtype of tensor A.
 
     Integer types map to float32.
@@ -47,12 +46,12 @@ def bform(X: Tensor, A: Optional[Tensor], Y: Tensor) -> Tensor:
     return matmul(X.mT, matmul(A, Y))
 
 
-def qform(A: Optional[Tensor], S: Tensor):
+def qform(A: Optional[Tensor], S: Tensor) -> Tensor:
     """Return quadratic form :math:`S^T A S`."""
     return bform(S, A, S)
 
 
-def basis(A):
+def basis(A: Tensor) -> Tensor:
     """Return orthogonal basis of A columns."""
     return torch.linalg.qr(A).Q
 
@@ -71,7 +70,9 @@ def symeig(A: Tensor, largest: Optional[bool] = False) -> tuple[Tensor, Tensor]:
 
 # These functions were deprecated and removed
 # This nice error message can be removed in version 1.13+
-def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
+def matrix_rank(
+    input: Any, tol: Any = None, symmetric: bool = False, *, out: Any = None
+) -> Tensor:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed.\n"
         "Please use the `torch.linalg.matrix_rank` function instead. "
@@ -79,7 +80,7 @@ def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
     )
 
 
-def solve(input: Tensor, A: Tensor, *, out=None) -> tuple[Tensor, Tensor]:
+def solve(input: Tensor, A: Tensor, *, out: Any = None) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "`torch.solve` is deprecated in favor of `torch.linalg.solve`. "
@@ -91,7 +92,7 @@ def solve(input: Tensor, A: Tensor, *, out=None) -> tuple[Tensor, Tensor]:
     )
 
 
-def lstsq(input: Tensor, A: Tensor, *, out=None) -> tuple[Tensor, Tensor]:
+def lstsq(input: Tensor, A: Tensor, *, out: Any = None) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "`torch.lstsq` is deprecated in favor of `torch.linalg.lstsq`.\n"
@@ -109,11 +110,11 @@ def lstsq(input: Tensor, A: Tensor, *, out=None) -> tuple[Tensor, Tensor]:
 
 
 def _symeig(
-    input,
-    eigenvectors=False,
-    upper=True,
+    input: Any,
+    eigenvectors: bool = False,
+    upper: bool = True,
     *,
-    out=None,
+    out: Any = None,
 ) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
@@ -133,8 +134,8 @@ def eig(
     self: Tensor,
     eigenvectors: bool = False,
     *,
-    e=None,
-    v=None,
+    e: Any = None,
+    v: Any = None,
 ) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
