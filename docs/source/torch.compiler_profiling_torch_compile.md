@@ -1,25 +1,22 @@
-Profiling to understand torch.compile performance
-=================================================
+# Profiling to understand torch.compile performance
 
-What to use torch.profiler for:
--------------------------------
+## What to use torch.profiler for:
 
 torch.profiler is helpful for understanding the performance of your program at a kernel-level granularity - for example, it can show graph breaks and resources utilization at the level of the program. The data provided by the profiler can often help users understand where to investigate further to understand model performance.
 
-To understand kernel-level performance, other tools exist, such as `Nvidia Nsight compute tool <https://developer.nvidia.com/nsight-compute>`_, `AMD Omnitrace <https://rocm.docs.amd.com/projects/omnitrace/en/latest/>`_,  Intel® VTune™ Profiler or :ref:`inductor's profiling tools <torchinductor-gpu-profiling>` can be used.
+To understand kernel-level performance, other tools exist, such as [Nvidia Nsight compute tool](https://developer.nvidia.com/nsight-compute), [AMD Omnitrace](https://rocm.docs.amd.com/projects/omnitrace/en/latest/),  Intel® VTune™ Profiler or [inductor's profiling tools](https://docs.pytorch.org/docs/stable/torch.compiler_inductor_profiling.html#torchinductor-gpu-profiling) can be used.
 
-See also the `general pytorch profiler guide <https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html>`_.
+See also the [general pytorch profiler guide](https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html).
 
-Basics of using torch.profiler and viewing traces
--------------------------------------------------
+## Basics of using torch.profiler and viewing traces
 
 **Example program**: We'll use this example of profiling resnet18. Notice the following parts of this example program:
 
 * Include a warm-up run to wait for compilation to complete (this will warm up systems like the CUDA caching allocator)
-* Use :code:`torch.profiler.profile()` context for profiling the section we are interested in
-* Use :code:`prof.export_chrome_trace("trace.json")` to export the profiling artifact.
+* Use `torch.profiler.profile()` context for profiling the section we are interested in
+* Use `prof.export_chrome_trace("trace.json")` to export the profiling artifact.
 
-.. code-block:: python
+```python
 
     import torch
     from torchvision.models import resnet18
@@ -44,11 +41,13 @@ Basics of using torch.profiler and viewing traces
             prof.step()
 
     prof.export_chrome_trace("trace.json")
+```
 
 **Viewing chrome traces**: In the Chrome browser, open chrome://tracing and load the json file. Use the “w” and “s” keys to zoom in and out, and use “a” and “d” to scroll left and right. “?” will show a “help” screen with a list of shortcuts.
 
-.. figure:: _static/img/profiling_torch_compile/basic_chrome_trace.png
-    :alt: Example of a basic chrome trace, visualized in the chrome://tracing viewer
+```{figure}  _static/img/profiling_torch_compile/basic_chrome_trace.png
+:alt: Example of a basic chrome trace, visualized in the chrome://tracing viewer
+```
 
 Here, we observe:
 * CompiledFunction and CompiledFunctionBackward events, which correspond to the dynamo-compiled regions.
@@ -60,26 +59,26 @@ Every kernel on the accelerator occurs after being launched by code running on t
 
 To view a flow connection, click on a GPU kernel and click “ac2g”:
 
-.. figure:: _static/img/profiling_torch_compile/ac2g.png
-    :alt: Visualization in the chrome://trace viewer, showing an async flow between a kernel and its launching location.
+```{figure}  _static/img/profiling_torch_compile/ac2g.png
+:alt: Visualization in the chrome://trace viewer, showing an async flow between a kernel and its launching location.
+```
 
 Alternatively, turn on *all* flows with the “Flow events” dropdown at the top.
 
-Working around CUDA Graph profiling issues
-------------------------------------------
+## Working around CUDA Graph profiling issues
 
 When CUDA graphs are enabled, some CUDA configurations (driver version under 525.85.12 or CUDA < 12)  can encounter issues between the profiling tools and CUDA graphs. To fix these issues, add an empty profiling context at the top of your program:
 
-.. code-block:: python
+```python
 
     import torch
 
     torch.profiler._utils._init_for_cuda_graphs()
 
     # ... rest of program
+```
 
-Understanding compilation time
-------------------------------
+## Understanding compilation time
 
 To understand why compilation is taking a long time, you can profile the first invocation of a torch.compile-ed program. Keep in mind that profile traces of compilations can be distorted more than typical profiling, because compilation workloads can be quite different from typical PyTorch workloads. In some cases, trace files may also be quite large. Traces > 1GB can be difficult to open with the chrome tracing tool.
 
@@ -87,7 +86,7 @@ Note: roughly the same information can also be obtained in non-graphical format 
 
 See an example below:
 
-.. code-block:: python
+```python
 
     import torch
     from torchvision.models import resnet18
@@ -120,18 +119,18 @@ See an example below:
             fwd_bwd(inputs[0])
 
     prof.export_chrome_trace("trace_compile.json")
+```
 
-.. figure:: _static/img/profiling_torch_compile/compilation_profiling.png
-    :alt: A visualization in the chrome://trace viewer, showing dynamo and inductor compilation steps
-
+```{figure} _static/img/profiling_torch_compile/compilation_profiling.png
+:alt: A visualization in the chrome://trace viewer, showing dynamo and inductor compilation steps
+```
 
 Note a few things:
 
 * The first invocation should occur *during* profiling in order to capture compilation
 * Add a warm-up compilation in order to initialize any systems that need to be lazily initialized.
 
-Finding graph breaks: "Torch-Compiled Region" and "CompiledFunction"
---------------------------------------------------------------------
+# Finding graph breaks: "Torch-Compiled Region" and "CompiledFunction"
 
 Although there are logging tools for identifying graph breaks, the profiler provides a quick visual method of identifying :ref:`graph breaks <torch.compiler_graph_breaks>`. There are two profiler events to look for: **Torch-Compiled Region** and **CompiledFunction**.
 
@@ -147,7 +146,7 @@ If your use case includes a graph that doesn't require grad and doesn't include 
 
 See the synthetic example below for a demonstration:
 
-.. code-block:: python
+```python
 
     import torch
     import torch._dynamo
@@ -197,12 +196,13 @@ See the synthetic example below for a demonstration:
             prof.step()
 
     prof.export_chrome_trace("trace_break.json")
+```
 
-.. figure:: _static/img/profiling_torch_compile/graph_breaks_with_torch_compiled_region.png
-    :alt: Visualization in the chrome://trace viewer, showing nested Torch-Compiled Region events and multiple CompiledFunction events - indicating graph breaks.
+```{figure} _static/img/profiling_torch_compile/graph_breaks_with_torch_compiled_region.png
+:alt: Visualization in the chrome://trace viewer, showing nested Torch-Compiled Region events and multiple CompiledFunction events - indicating graph breaks.
+```
 
-Operator Kernels
-----------------
+## Operator Kernels
 
 When an operator is launched, we expect to see a few events:
 
@@ -210,15 +210,17 @@ When an operator is launched, we expect to see a few events:
 2. Kernel launch (if dealing with a GPU kernel)
 3. GPU-side event
 
-.. figure:: _static/img/profiling_torch_compile/kernel_launch_labeled.png
-    :alt: Visualization in the chrome://trace viewer, showing the three types of events: CPU-side event, kernel launch, and GPU-side event
+```{figure} _static/img/profiling_torch_compile/kernel_launch_labeled.png
+:alt: Visualization in the chrome://trace viewer, showing the three types of events - CPU-side event, kernel launch, and GPU-side event
+```
 
 **Inductor-generated Triton kernels:**
 1. The **CPU-side event** should appear as an event prefixed with "triton\_". The events currently have minimal information - the kernel name and a launch, but less information than typical aten kernel launches (which contain input shapes, types, etc.).
 2. The **kernel launch** should appear as cuLaunchKernel instead of cudaLaunchKernel (cudaLaunchKernel is typical for aten ops)
 3. The **GPU-side event** should appear, and how descriptive the name will be depends on the inductor config for unique_kernel_names
 
-.. figure:: _static/img/profiling_torch_compile/triton_kernel_launch.png
+```{figure} _static/img/profiling_torch_compile/triton_kernel_launch.png
+```
 
 **Non-Inductor generated Triton kernels:**
 
@@ -226,7 +228,8 @@ When an operator is launched, we expect to see a few events:
 2. The **kernel launch** should appear s cuLaunchKernel instead of cudaLaunchKernel (cudaLaunchKernel is typical for aten ops)
 3. The **GPU-side** event should appear, named similarly to the triton kernel that was authored.
 
-.. figure:: _static/img/profiling_torch_compile/noninductor_triton_kernel.png
+```{figure} _static/img/profiling_torch_compile/noninductor_triton_kernel.png
+```
 
 **Inductor-generated CPU kernels:**
 
@@ -236,13 +239,13 @@ When an operator is launched, we expect to see a few events:
 **Non-Triton kernels** (i.e. aten kernels or custom ops) should also be expected to sometimes appear in traces. Sometimes, Inductor will fall back to the original op implementation, in which case you will see a call to the aten op.
 
 
-Launch overhead
----------------
+## Launch overhead
 
 One common issue is bad GPU utilization. A quick way to identify this is if there are large gaps between kernels on the GPU:
 
-.. figure:: _static/img/profiling_torch_compile/cpu_bound.png
-    :alt: Visualization in the chrome://trace viewer, showing large gaps between GPU kernels. This indicates that the model is CPU bound, likely due to overhead during kernel launches.
+```{figure} _static/img/profiling_torch_compile/cpu_bound.png
+:alt: Visualization in the chrome://trace viewer, showing large gaps between GPU kernels. This indicates that the model is CPU bound, likely due to overhead during kernel launches.
+```
 
 This is often the result of CPU overhead, e.g. if the amount of time spent on the CPU between kernel launches is larger than the amount of time spent by the GPU to process the kernels. The issue is more common for small batch sizes.
 

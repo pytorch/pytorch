@@ -1,7 +1,4 @@
-.. _torchinductor-gpu-profiling:
-
-TorchInductor GPU Profiling
-===========================
+# TorchInductor GPU Profiling
 
 This section lists useful commands and workflows that can help
 you dive into a model’s performance in TorchInductor. When a model is not
@@ -11,8 +8,7 @@ GPU time are the most interesting ones. After that, you
 may also want to run individual kernels directly and inspect its perf.
 PyTorch provides tools to cover everything mentioned above.
 
-Relevant Environment Variables
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## Relevant Environment Variables
 
 You can use the following environment variables in your analysis:
 
@@ -37,29 +33,28 @@ You can use the following environment variables in your analysis:
       one with the best performance results. This will increase compilation
       time with the hope to improve performance.
 
-Breakdown Model GPU Time
-~~~~~~~~~~~~~~~~~~~~~~~~
+## Breakdown Model GPU Time
 
 Below are the steps to breakdown execution time of a model into
 individual kernels. We take ``mixnet_l`` as an example.
 
 1. Run the benchmark script for the model:
 
-   .. code-block:: bash
-
+   ```bash
       TORCHINDUCTOR_UNIQUE_KERNEL_NAMES=1 TORCHINDUCTOR_BENCHMARK_KERNEL=1
       python -u benchmarks/dynamo/timm_models.py –backend inductor –amp
       –performance –dashboard –only mixnet_l –disable-cudagraphs –training
-
-   .. note:: The tool relies on kernel name to decide its category. Enabling
+   ```
+   ```{note}
+   The tool relies on kernel name to decide its category. Enabling
       ``TORCHINDUCTOR_UNIQUE_KERNEL_NAMES`` is crucial for that.
-
+   ```
 2. In the output log, look for lines:
 
-   .. code-block:: bash
-
+   ```bash
       **Compiled module path:
       /tmp/torchinductor_shunting/qz/cqz7hvhood7y3psp7fy6msjxsxyli7qiwiybizdwtjw6ffyq5wwd.py**
+   ```
 
 We have one line for each compiled module. If there are no extra graph
 breaks, we would see 2 such lines in the log, one for the forward graph
@@ -68,34 +63,33 @@ and one for the backward graph.
 For our example command, we get the following compiled module for the
 forward and backward graphs respectively:
 
--  https://gist.github.com/shunting314/c2a4d8a28b00fcb5586d0e9d9bf77f9f
--  https://gist.github.com/shunting314/48efc83b12ec3ead950052e4a0220b10
+-  [Forward graph compiled module](https://gist.github.com/shunting314/c2a4d8a28b00fcb5586d0e9d9bf77f9f)
+-  [Backward graph compiled module](https://gist.github.com/shunting314/48efc83b12ec3ead950052e4a0220b10)
 
 3. Now we can dive into the perf for each individual compiled module.
    Let’s pick the one for the forward graph for illustration purposes.
    I’ll name it ``fwd.py`` for convenience. Run it directly with the
    ``-p`` argument:
 
-   .. code-block:: bash
-
+   ```bash
       **> python fwd.py -p**
+   ```
 
-See the full output log in this
-`example gist <https://gist.github.com/shunting314/8243734a38b5733ea78479209c0ae893>`__.
+See the full output log in this [example gist](https://gist.github.com/shunting314/8243734a38b5733ea78479209c0ae893)
 
 In the output, you can notice the following:
 
 * We write a chrome trace file for the profile so we can load the trace and interact with it. In the log, look for lines as follows to find the path of the trace file.
 
- **Chrome trace for the profile is written to
- /tmp/compiled_module_profile.json**
 
- Loading the trace into Chrome (visit chrome://tracing in the chrome
- browser and load the file as the UI suggested) will show UI as follows:
+  **Chrome trace for the profile is written to /tmp/compiled_module_profile.json**
 
- .. image:: _static/img/inductor_profiling/trace.png
+   Loading the trace into Chrome (visit chrome://tracing in the chrome browser and load the file as the UI suggested) will show UI as follows:
 
- You can zoom in and out to check the profile.
+   ```{image} _static/img/inductor_profiling/trace.png
+   ```
+
+   You can zoom in and out to check the profile.
 
 * We report the percent of GPU time regarding to the wall time by log line like:
 
@@ -109,9 +103,9 @@ In the output, you can notice the following:
   If we run the model like ``densenet121`` with a small batch size, we would see
   low percent of time when GPU is busy:
 
-  ::
-
+   ```bash
      (Forward graph) Percent of time when GPU is busy: 32.69%
+   ```
 
   This means the model has a lot of CPU overhead. This is consistent with
   the fact that enabling cudagraphs improve densenet121’s perf a lot.
@@ -130,7 +124,8 @@ In the output, you can notice the following:
 * We also call zoom into a certain category of kernels. For example,
   let’s check reduction kernels:
 
-  .. image:: _static/img/inductor_profiling/kernel_breakdown.png
+  ```{image} _static/img/inductor_profiling/kernel_breakdown.png
+  ```
 
   We can see an ordered table of execution time for each individual
   reduction kernel. We also see how many times a kernel is executed. This
@@ -142,8 +137,7 @@ In the output, you can notice the following:
   - Ff a kernel takes 2% of time, improving it by 2x will bring in 1%
     overall gain which justifies the effort.
 
-Benchmark Individual Triton Kernel
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## Benchmark Individual Triton Kernel
 
 Let’s say we want to take a closer look at
 ``triton_red_fused\__native_batch_norm_legit_functional_16`` which is the
@@ -155,23 +149,23 @@ We can lookup the kernel name in the ``fwd.py``, and find comment like:
 **# kernel path:
 /tmp/torchinductor_shunting/jk/cjk2vm3446xrk7rth7hr6pun7xxo3dnzubwcn6ydrpifal4eykrz.py**
 
-.. image:: _static/img/inductor_profiling/inductor_code.png
+```{image} _static/img/inductor_profiling/inductor_code.png
+```
 
-I’ll rename it k.py for convenience. Here is a paste for this
-`file <https://gist.github.com/shunting314/96a0afef9dce53d6357bf1633094f358>`__.
+I’ll rename it k.py for convenience. Here is a paste for this [file](https://gist.github.com/shunting314/96a0afef9dce53d6357bf1633094f358).
 
 ``k.py`` is a standalone Python module containing the kernel code and its
 benchmark.
 
 Run ``k.py`` directly will report its execution time and bandwidth:
 
-.. image:: _static/img/inductor_profiling/terminal_printout.png
+ ```{image} _static/img/inductor_profiling/terminal_printout.png
+ ```
 
 We can check if max-autotune helps this kernel, by running:
 
-.. code-block:: bash
-
+```bash
    **TORCHINDUCTOR_MAX_AUTOTUNE=1 python /tmp/k.py**
-
+```
 We may also temporarily add more reduction heuristics and run the script
 again to check how that helps with the kernel.
