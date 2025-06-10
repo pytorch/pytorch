@@ -1,5 +1,4 @@
-# mypy: allow-untyped-defs
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -9,7 +8,7 @@ from torch.ao.pruning.sparsifier.utils import fqn_to_module, module_to_fqn
 SUPPORTED_MODULES = {nn.Embedding, nn.EmbeddingBag}
 
 
-def _fetch_all_embeddings(model):
+def _fetch_all_embeddings(model: nn.Module) -> list[tuple[str, nn.Module]]:
     """Fetches Embedding and EmbeddingBag modules from the model"""
     embedding_modules = []
     stack = [model]
@@ -17,7 +16,7 @@ def _fetch_all_embeddings(model):
         module = stack.pop()
         for _, child in module.named_children():
             fqn_name = module_to_fqn(model, child)
-            if type(child) in SUPPORTED_MODULES:
+            if type(child) in SUPPORTED_MODULES and fqn_name is not None:
                 embedding_modules.append((fqn_name, child))
             else:
                 stack.append(child)
@@ -25,12 +24,12 @@ def _fetch_all_embeddings(model):
 
 
 def post_training_sparse_quantize(
-    model,
-    data_sparsifier_class,
-    sparsify_first=True,
+    model: nn.Module,
+    data_sparsifier_class: Any,
+    sparsify_first: bool = True,
     select_embeddings: Optional[list[nn.Module]] = None,
-    **sparse_config,
-):
+    **sparse_config: Any,
+) -> None:
     """Takes in a model and applies sparsification and quantization to only embeddings & embeddingbags.
     The quantization step can happen before or after sparsification depending on the `sparsify_first` argument.
 
@@ -90,7 +89,7 @@ def post_training_sparse_quantize(
 
         # quantize
         for _, emb_module in embedding_modules:
-            emb_module.qconfig = torch.ao.quantization.float_qparams_weight_only_qconfig
+            emb_module.qconfig = torch.ao.quantization.float_qparams_weight_only_qconfig  # type: ignore[assignment]
 
         torch.ao.quantization.prepare(model, inplace=True)
         torch.ao.quantization.convert(model, inplace=True)
@@ -98,7 +97,7 @@ def post_training_sparse_quantize(
     else:
         # quantize
         for _, emb_module in embedding_modules:
-            emb_module.qconfig = torch.ao.quantization.float_qparams_weight_only_qconfig
+            emb_module.qconfig = torch.ao.quantization.float_qparams_weight_only_qconfig  # type: ignore[assignment]
 
         torch.ao.quantization.prepare(model, inplace=True)
         torch.ao.quantization.convert(model, inplace=True)
