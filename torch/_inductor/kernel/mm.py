@@ -265,21 +265,23 @@ persistent_tma_mm_template = TritonTemplate(
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
-    a_desc = triton_helpers.make_tensor_descriptor(
+    triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=a_desc_ptr,
-        base_ptr=A,
-        block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
-        global_shape=[M, K] if A_ROW_MAJOR else [K, M],
+        global_address=A,
+        load_size=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
+        global_size=[M, K] if A_ROW_MAJOR else [K, M],
+        element_ty=A.dtype.element_ty,
     )
-    b_desc = triton_helpers.make_tensor_descriptor(
+    triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=b_desc_ptr,
-        base_ptr=B,
-        block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
-        global_shape=[K, N] if B_ROW_MAJOR else [N, K],
+        global_address=B,
+        load_size=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
+        global_size=[K, N] if B_ROW_MAJOR else [N, K],
+        element_ty=B.dtype.element_ty,
     )
 
-    triton_helpers.tensormap_fenceproxy_acquire(a_desc)
-    triton_helpers.tensormap_fenceproxy_acquire(b_desc)
+    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
+    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
     pid_m = 0
     pid_n = 0
@@ -301,14 +303,14 @@ persistent_tma_mm_template = TritonTemplate(
 
         rk = ki * BLOCK_K
 
-        a = triton_helpers.load_tensor_descriptor(
-            a_desc,
+        a = tl._experimental_descriptor_load(
+            a_desc_ptr,
             [rm, rk] if A_ROW_MAJOR else [rk, rm],
             [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
             A.dtype.element_ty,
         )
-        b = triton_helpers.load_tensor_descriptor(
-            b_desc,
+        b = tl._experimental_descriptor_load(
+            b_desc_ptr,
             [rk, rn] if B_ROW_MAJOR else [rn, rk],
             [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
             B.dtype.element_ty,
@@ -414,21 +416,23 @@ device_tma = r"""
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
-    a_desc = triton_helpers.make_tensor_descriptor(
+    triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=a_desc_ptr,
-        base_ptr=A,
-        block_shape=[BLOCK_M, BLOCK_K],
-        global_shape=[M, K],
+        global_address=A,
+        load_size=[BLOCK_M, BLOCK_K],
+        global_size=[M, K],
+        element_ty=A.dtype.element_ty,
     )
-    b_desc = triton_helpers.make_tensor_descriptor(
+    triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=b_desc_ptr,
-        base_ptr=B,
-        block_shape=[BLOCK_N, BLOCK_K],
-        global_shape=[N, K],
+        global_address=B,
+        load_size=[BLOCK_N, BLOCK_K],
+        global_size=[N, K],
+        element_ty=B.dtype.element_ty,
     )
 
-    triton_helpers.tensormap_fenceproxy_acquire(a_desc)
-    triton_helpers.tensormap_fenceproxy_acquire(b_desc)
+    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
+    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
     tiles_per_SM = num_tiles // NUM_SMS
     if start_pid < num_tiles % NUM_SMS:
@@ -461,11 +465,11 @@ device_tma = r"""
 
         offs_k = ki * BLOCK_K
 
-        a = triton_helpers.load_tensor_descriptor(
-            a_desc, [offs_am, offs_k], [BLOCK_M, BLOCK_K],  A.dtype.element_ty
+        a = tl._experimental_descriptor_load(
+            a_desc_ptr, [offs_am, offs_k], [BLOCK_M, BLOCK_K],  A.dtype.element_ty
         )
-        b = triton_helpers.load_tensor_descriptor(
-            b_desc, [offs_bn, offs_k], [BLOCK_N, BLOCK_K],  B.dtype.element_ty
+        b = tl._experimental_descriptor_load(
+            b_desc_ptr, [offs_bn, offs_k], [BLOCK_N, BLOCK_K],  B.dtype.element_ty
         )
         if USE_FAST_ACCUM:
             accumulator = tl.dot(a, b.T, accumulator)

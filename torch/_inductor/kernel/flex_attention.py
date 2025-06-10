@@ -399,28 +399,34 @@ compute_flex_attention = r"""
         workspace_base = ws_ptr + TMA_SIZE * 3 * (
             tl.program_id(1) + tl.program_id(0) * tl.num_programs(1)
         )
-        desc_q_ptr = workspace_base
-        desc_v_ptr = workspace_base + TMA_SIZE
-        desc_k_ptr = workspace_base + 2 * TMA_SIZE
+        desc_q = workspace_base
+        desc_v = workspace_base + TMA_SIZE
+        desc_k = workspace_base + 2 * TMA_SIZE
 
-        desc_q = triton_helpers.make_tensor_descriptor(
+        triton_helpers.make_tensor_descriptor(
             base_ptr=Q,
             global_shape=[Q_LEN*HQ*ZQ, QK_HEAD_DIM],
+            strides=[QK_HEAD_DIM, 1],
             block_shape=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
-            desc_ptr=desc_q_ptr,
+            desc_ptr=desc_q,
+            element_ty=Q.dtype.element_ty,
         )
-        desc_v = triton_helpers.make_tensor_descriptor(
+        triton_helpers.make_tensor_descriptor(
             base_ptr=V,
             global_shape=[KV_LEN*ZKV*HQ, V_HEAD_DIM],
+            strides=[V_HEAD_DIM, 1],
             block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
-            desc_ptr=desc_v_ptr,
+            desc_ptr=desc_v,
+            element_ty=K.dtype.element_ty,
         )
 
-        desc_k = triton_helpers.make_tensor_descriptor(
+        triton_helpers.make_tensor_descriptor(
             base_ptr=K,
             global_shape=[KV_LEN*ZKV*HQ, QK_HEAD_DIM],
+            strides=[QK_HEAD_DIM, 1],
             block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
-            desc_ptr=desc_k_ptr,
+            desc_ptr=desc_k,
+            element_ty=K.dtype.element_ty,
         )
 
 
