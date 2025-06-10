@@ -584,7 +584,7 @@ After running the above example, we can then look at the code within
 `foo/module.py` and modify it as desired (e.g. adding `print`
 statements or using `pdb`) to debug the generated code.
 
-#### Debugging the Transformation
+### Debugging the Transformation
 
 Now that we've identified that a transformation is creating incorrect
 code, it's time to debug the transformation itself. First, we'll check
