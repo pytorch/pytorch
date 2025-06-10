@@ -16,8 +16,7 @@ from torch.testing._internal.common_dtype import (
     floating_types, floating_and_complex_types_and, get_all_fp_dtypes)
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, expectedFailureMPS, toleranceOverride, tol,
-    skipCUDAIfRocm, precisionOverride, skipMeta, skipMPS,
-    skipCUDAVersionIn)
+    skipCUDAIfRocm, precisionOverride, skipMeta, skipMPS)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import (
     cosineembeddingloss_reference, cross_entropy_loss_reference, ctcloss_reference,
@@ -3172,14 +3171,6 @@ rnn_gru_lstm_module_info_decorators = (
     DecorateInfo(
         unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
         active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,), device_type='cuda'
-    ),
-    DecorateInfo(
-        skipCUDAVersionIn([(11, 7)]), "TestExpandedWeightModule", "test_module",
-        device_type='cuda'
-    ),
-    DecorateInfo(
-        skipCUDAVersionIn([(11, 7)]), "TestDecomp", "test_rnn_decomp_module",
-        device_type='cuda'
     )
 )
 
