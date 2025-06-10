@@ -436,7 +436,7 @@ Types produced by {func}`collections.namedtuple <collections.namedtuple>` can be
 
 ```
 
-(jit-iterables)=
+(jit_iterables)=
 
 ### Iterables
 
