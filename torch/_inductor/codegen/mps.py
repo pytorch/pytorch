@@ -883,7 +883,11 @@ class MetalKernel(SIMDKernel):
             ]
 
             if V.graph.cpp_wrapper:
-                args.append(f"{{{', '.join(threads)}}}")
+                threads = [f"static_cast<uint64_t>({t})" for t in threads]
+                if len(threads) == 1:
+                    args.append(threads[0])
+                else:
+                    args.append(f"{{{', '.join(threads)}}}")
             else:
                 args.append(f"threads=[{', '.join(threads)}]")
         else:
@@ -898,7 +902,11 @@ class MetalKernel(SIMDKernel):
                 for v in self.active_range_trees()
             ]
             if V.graph.cpp_wrapper:
-                args.append(f"{{{', '.join(threads)}}}")
+                threads = [f"static_cast<uint64_t>({t})" for t in threads]
+                if len(threads) == 1:
+                    args.append(threads[0])
+                else:
+                    args.append(f"{{{', '.join(threads)}}}")
             else:
                 args.append(f"group_size=[{', '.join(threads)}]")
         else:
