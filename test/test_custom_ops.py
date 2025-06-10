@@ -4171,6 +4171,7 @@ Please use `add.register_fake` to add an fake impl.""",
             )
         )
 
+    # https://github.com/pytorch/pytorch/issues/155385
     def test_annotation_propagation(self):
         # Define a function with specific annotations
         @torch.library.custom_op("test_ns::annotated_func", mutates_args=())
