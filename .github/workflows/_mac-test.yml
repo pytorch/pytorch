@@ -60,7 +60,6 @@ jobs:
   test:
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
-    # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
     # Also ensure that we always run with the right architecture
     defaults:
       run:
@@ -140,11 +139,10 @@ jobs:
         with:
           use-gha: true
 
-      - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+      - name: Setup Python
+        uses: pytorch/test-infra/.github/actions/setup-python@main
         with:
           python-version: ${{ inputs.python-version }}
-          environment-file: .github/requirements/conda-env-macOS-ARM64
           pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
           default-packages: ""
 

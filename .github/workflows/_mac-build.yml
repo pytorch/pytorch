@@ -82,7 +82,7 @@ jobs:
           fi
 
       - name: Setup Python
-        uses: pytorch/test-infra/.github/actions/setup-python@malfet/add-setup-python-action
+        uses: pytorch/test-infra/.github/actions/setup-python@main
         with:
           python-version: ${{ inputs.python-version }}
           pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
