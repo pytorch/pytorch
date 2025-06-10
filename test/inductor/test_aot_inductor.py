@@ -53,9 +53,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.triton_utils import (
-    requires_gpu,
-)
+from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils import _pytree as pytree
 from torch.utils._triton import (
     has_triton_experimental_host_tma,
