@@ -238,12 +238,12 @@ def record_original_output_strides(gm: GraphModule) -> None:
     output_node.meta["original_output_strides"] = output_strides
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _step_logger() -> Callable[..., None]:
     return dynamo_logging.get_step_logger(log)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _warn_tf32_disabled() -> None:
     if (
         torch.cuda.is_available()

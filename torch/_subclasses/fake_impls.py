@@ -113,7 +113,7 @@ def contains_tensor_types(type):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_tensor_constructor(func: OpOverload):
     assert isinstance(func, OpOverload)
     schema = func._schema
@@ -1070,7 +1070,7 @@ def fast_detach(fake_mode, x):
     return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_fast_op_impls():
     import torch._refs
 

@@ -2894,7 +2894,7 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 """
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
     d: dict[Any, type[VariableTracker]] = {}
     for m in torch_name_rule_map:
@@ -2943,7 +2943,7 @@ Get all torch.Tensor methods which are allowed to be in graph functions.
 """
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_tensor_method():
     disallowed_tensor_methods = {"__new__", "_make_wrapper_subclass", "_make_subclass"}
     s = set()
@@ -3465,7 +3465,7 @@ assert sorted(set(MOD_SKIPLIST)) == MOD_SKIPLIST
 MOD_SKIPLIST = set(MOD_SKIPLIST)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_legacy_mod_inlinelist():
     inlinelist = {
         _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
@@ -3474,7 +3474,7 @@ def get_legacy_mod_inlinelist():
     return inlinelist
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_mod_inlinelist():
     inlinelist = {
         _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
@@ -3483,7 +3483,7 @@ def get_mod_inlinelist():
     return inlinelist
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_mod_skiplist():
     skiplist = {
         _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
@@ -3737,7 +3737,7 @@ def is_torch_inline_allowed(filename):
     return any(filename.startswith(d) for d in get_mod_inlinelist())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def dynamo_dir():
     import torch._dynamo
 

@@ -3,7 +3,7 @@ import hashlib
 from typing import Any
 
 
-@functools.lru_cache(None)
+@functools.cache
 def has_triton_package() -> bool:
     try:
         from triton.compiler.compiler import triton_key
@@ -15,7 +15,7 @@ def has_triton_package() -> bool:
         return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def has_triton_tma() -> bool:
     if has_triton_package():
         import torch
@@ -38,7 +38,7 @@ def has_triton_tma() -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def has_triton_tma_device() -> bool:
     if has_triton_package():
         import torch
@@ -70,7 +70,7 @@ def has_triton_tma_device() -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def has_triton() -> bool:
     if not has_triton_package():
         return False
@@ -104,7 +104,7 @@ def has_triton() -> bool:
     return is_device_compatible_with_triton()
 
 
-@functools.lru_cache(None)
+@functools.cache
 def triton_backend() -> Any:
     from triton.compiler.compiler import make_backend
     from triton.runtime.driver import driver
@@ -113,7 +113,7 @@ def triton_backend() -> Any:
     return make_backend(target)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def triton_hash_with_backend() -> str:
     from triton.compiler.compiler import triton_key
 
