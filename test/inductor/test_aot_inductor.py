@@ -128,6 +128,9 @@ class AOTInductorTestsTemplate:
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])
     def test_simple(self, embed_kernel_binary, max_autotune):
+        if self.device == "cpu" and IS_MACOS and max_autotune:
+            raise unittest.SkipTest("max_autotune not supported on macos")
+
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
