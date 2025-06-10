@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 
+
 @instantiate_parametrized_tests
 class TestPackage(torch._inductor.test_case.TestCase):
     def path(self):

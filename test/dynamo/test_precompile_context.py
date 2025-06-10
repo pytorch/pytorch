@@ -88,10 +88,9 @@ class PrecompileContextTests(InductorTestCase):
         # we have torch._dynamo.package implemented
         self.assertEqual(len(PrecompileContext._new_cache_artifacts_by_key), 1)
         key = next(iter(PrecompileContext._new_cache_artifacts_by_key.keys()))
-        result = PrecompileContext.serialize_artifacts_by_key(key)
-        assert len(result) == 1
-        assert isinstance(result[0], BundledAOTAutogradCacheArtifact)
-        self.assertEqual(result[0].key, key)
+        result = PrecompileContext.serialize_artifact_by_key(key)
+        assert isinstance(result, BundledAOTAutogradCacheArtifact)
+        self.assertEqual(result.key, key)
 
         self.assertEqual(len(PrecompileContext._new_cache_artifacts), 0)
         result = PrecompileContext.serialize()
