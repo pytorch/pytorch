@@ -1600,10 +1600,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         min_elem_per_thread=0,
         optimize_mask=True,
         fixed_config: Optional[FixedTritonConfig] = None,
+        custom_size_hints: Optional[dict[str, int]] = None,
         **kwargs,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
+        self.custom_size_hints = custom_size_hints
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
@@ -3508,22 +3510,26 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if prefix_is_reduction(prefix) and not self.inside_reduction:
                 continue
 
-            numel_hint = V.graph.sizevars.symbolic_hint(numel)
-            if not isinstance(numel_hint, (int, sympy.Integer)):
-                # This default heuristic hint was picked carefully: it is
-                # large, to ensure that we don't shrink the block size (since
-                # if you don't have many elements, it'd be wasteful to pick a
-                # large block size).  Since we don't know how many elements we
-                # might have, we should be OK with some inefficiency to make
-                # sure we handle the large case well.  8192 is the largest
-                # block size we support, so we pick that.
-                #
-                # If we have a better hint for unbacked SymInts (e.g., because
-                # a user told us, or we are tracking upper bounds) we could
-                # use that here.
-                size_hint = 8192
+            # Check for custom size hints first
+            if self.custom_size_hints and prefix in self.custom_size_hints:
+                size_hint = self.custom_size_hints[prefix]
             else:
-                size_hint = next_power_of_2(int(numel_hint))
+                numel_hint = V.graph.sizevars.symbolic_hint(numel)
+                if not isinstance(numel_hint, (int, sympy.Integer)):
+                    # This default heuristic hint was picked carefully: it is
+                    # large, to ensure that we don't shrink the block size (since
+                    # if you don't have many elements, it'd be wasteful to pick a
+                    # large block size).  Since we don't know how many elements we
+                    # might have, we should be OK with some inefficiency to make
+                    # sure we handle the large case well.  8192 is the largest
+                    # block size we support, so we pick that.
+                    #
+                    # If we have a better hint for unbacked SymInts (e.g., because
+                    # a user told us, or we are tracking upper bounds) we could
+                    # use that here.
+                    size_hint = 8192
+                else:
+                    size_hint = next_power_of_2(int(numel_hint))
             size_hints[prefix] = size_hint
 
         if name is None:
@@ -4354,6 +4360,10 @@ class TritonScheduling(SIMDScheduling):
                         )
                     )
 
+        # Add size-hint based kernel variants
+        if config.triton.multi_kernel_hint_candidates:
+            self._add_size_hint_variants(kernels, kernel_args, kernel_kwargs)
+
         if len(kernels) > 1:
             for kernel2 in kernels[1:]:
                 # Keep buffers needed by the non-persistent reduction so both kernels have the same arguments
@@ -4361,6 +4371,75 @@ class TritonScheduling(SIMDScheduling):
             # persistent kernels must be generated last so must_keep_buffers works right
             kernels.sort(key=lambda k: k.persistent_reduction)
         return kernels
+
+    def _add_size_hint_variants(
+        self,
+        kernels: list[TritonKernel],
+        kernel_args: list[Any],
+        kernel_kwargs: dict[str, Any],
+    ) -> None:
+        """
+        Add kernel variants with different size hints for multi-kernel dispatch.
+        Creates specialized kernels optimized for different tensor shape patterns.
+        """
+        base_kernel = kernels[0]
+        
+        # Convert hint candidates to the format expected by TritonKernel
+        for i, hint_candidate in enumerate(config.triton.multi_kernel_hint_candidates):
+            try:
+                # Convert list of size hints to dictionary mapping prefixes to hints
+                custom_size_hints = self._convert_hint_candidate_to_dict(
+                    hint_candidate, base_kernel
+                )
+                
+                # Create new kernel with custom size hints
+                variant_kwargs = kernel_kwargs.copy()
+                variant_kwargs["custom_size_hints"] = custom_size_hints
+                
+                variant_kernel = self.kernel_type(*kernel_args, **variant_kwargs)
+                kernels.append(variant_kernel)
+                
+                log.debug(
+                    f"Added size-hint variant {i+1} with hints: {custom_size_hints}"
+                )
+                
+            except Exception as e:
+                log.warning(
+                    f"Failed to create size-hint variant {i+1} with hints {hint_candidate}: {e}"
+                )
+                
+    def _convert_hint_candidate_to_dict(
+        self, hint_candidate: list[int], base_kernel: TritonKernel
+    ) -> dict[str, int]:
+        """
+        Convert a list of size hints to a dictionary mapping dimension prefixes to hints.
+        
+        Args:
+            hint_candidate: List of size hints (e.g., [1024, 512])
+            base_kernel: Base kernel to extract dimension prefixes from
+            
+        Returns:
+            Dictionary mapping dimension prefixes to size hints
+        """
+        custom_size_hints = {}
+        
+        # Get the dimension prefixes from the base kernel
+        prefixes = sorted(base_kernel.numels.keys())
+        
+        # Map hint candidate values to prefixes
+        for i, hint_value in enumerate(hint_candidate):
+            if i < len(prefixes):
+                prefix = prefixes[i]
+                # Ensure hint is a power of 2 for optimal performance
+                custom_size_hints[prefix] = next_power_of_2(hint_value)
+            else:
+                log.warning(
+                    f"More hint values ({len(hint_candidate)}) than kernel dimensions "
+                    f"({len(prefixes)}). Ignoring extra values."
+                )
+                break
+                
+        return custom_size_hints
 
     def benchmark_combo_kernel(self, node_list):
         mod: ModuleType

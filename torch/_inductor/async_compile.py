@@ -411,10 +411,17 @@ class AsyncCompile:
                 return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
-        from torch._inductor.codegen.multi_kernel import MultiKernelCall
+        from torch._inductor.codegen.multi_kernel import MultiKernelCall, MultiDimKernelDispatcher
 
-        # no need to call this in parallel since the sub-kernels are already parallel tasks
-        return MultiKernelCall(*args, **kwargs)
+        # Use enhanced dispatcher if size hint candidates are configured
+        if config.triton.multi_kernel_hint_candidates:
+            # MultiDimKernelDispatcher provides enhanced shape-based dispatching
+            # for kernels generated with different size hint candidates
+            return MultiDimKernelDispatcher(*args, **kwargs)
+        else:
+            # Fall back to the standard multi-kernel implementation
+            # no need to call this in parallel since the sub-kernels are already parallel tasks
+            return MultiKernelCall(*args, **kwargs)
 
     def cpp(self, source_code: str):
         kernel_code_log.info("CPP Kernel:\n%s", source_code)

@@ -18,6 +18,188 @@ from .common import TensorArg, WorkspaceArg
 log = logging.getLogger(__name__)
 
 
+class MultiDimKernelDispatcher:
+    """
+    Enhanced multi-kernel dispatcher that accepts N kernels with different size hints
+    and evaluates all of them on the first encounter with a given input shape.
+    
+    It records the best-performing kernel for that shape and caches the result in a 
+    dispatch table, so future calls with the same shape will directly dispatch to the 
+    cached kernel without re-evaluating all N.
+    
+    This enables efficient runtime dispatch for dynamic shapes with varying input sizes.
+    """
+    
+    def __init__(self, multi_kernel_name: str, kernels: list, shape_extraction_fn=None):
+        """
+        Args:
+            multi_kernel_name: Name identifier for this multi-kernel dispatcher
+            kernels: List of kernel variants optimized for different size hints
+            shape_extraction_fn: Optional function to extract shape key from input args.
+                                If None, uses default tensor shape extraction.
+        """
+        assert len(kernels) >= 2, "MultiDimKernelDispatcher requires at least 2 kernel variants"
+        self.multi_kernel_name = multi_kernel_name
+        self._kernels = kernels
+        self.shape_extraction_fn = shape_extraction_fn or self._default_shape_extraction
+        
+        # Shape-based dispatch cache: shape_key -> kernel_index
+        self.shape_dispatch_cache = {}
+        
+        # Performance metrics for debugging
+        self.benchmark_cache = {}  # shape_key -> timing_results
+        self.dispatch_stats = {"cache_hits": 0, "cache_misses": 0, "benchmarks_run": 0}
+        
+        self.disable_cache = os.environ.get(
+            "TORCHINDUCTOR_DISABLE_MULTI_DIM_KERNEL_CACHE"
+        ) == "1"
+        
+    @staticmethod 
+    def _default_shape_extraction(*args, **kwargs):
+        """
+        Default shape extraction function that creates a shape key from tensor arguments.
+        Returns a tuple of tensor shapes that can be used as cache key.
+        """
+        shapes = []
+        for arg in args:
+            if hasattr(arg, 'shape'):
+                shapes.append(tuple(arg.shape))
+            elif hasattr(arg, 'size'):
+                shapes.append(tuple(arg.size()))
+        return tuple(shapes)
+    
+    def _get_shape_key(self, *args, **kwargs):
+        """Get the shape key for caching dispatch decisions."""
+        try:
+            return self.shape_extraction_fn(*args, **kwargs)
+        except Exception as e:
+            log.debug(f"Failed to extract shape key: {e}, using fallback")
+            # Fallback to a generic key if shape extraction fails
+            return ("unknown_shape",)
+    
+    @property
+    def kernels(self):
+        """Resolve kernel futures if needed."""
+        from ..codecache import CodeCacheFuture
+        for i, kernel in enumerate(self._kernels):
+            if isinstance(kernel, CodeCacheFuture):
+                self._kernels[i] = kernel.result()
+        return self._kernels
+    
+    def benchmark_kernels_for_shape(self, shape_key, *args, **kwargs):
+        """
+        Benchmark all kernel variants for a specific input shape and return timings.
+        Caches results for future reference.
+        """
+        if shape_key in self.benchmark_cache and not self.disable_cache:
+            return self.benchmark_cache[shape_key]
+        
+        def wrap_kernel_fn(kernel):
+            def inner():
+                # Clone args to avoid side effects during benchmarking
+                args_clone, kwargs_clone = kernel.clone_args(*args, **kwargs)
+                return kernel.run(*args_clone, **kwargs_clone)
+            return inner
+        
+        log.debug(f"Benchmarking {len(self.kernels)} kernel variants for shape {shape_key}")
+        timings = [
+            benchmarker.benchmark_gpu(wrap_kernel_fn(kernel), rep=40)
+            for kernel in self.kernels
+        ]
+        
+        self.benchmark_cache[shape_key] = timings
+        self.dispatch_stats["benchmarks_run"] += 1
+        
+        return timings
+    
+    def get_best_kernel_for_shape(self, shape_key, *args, **kwargs):
+        """
+        Determine the best kernel for a given shape by benchmarking if needed.
+        Returns the index of the best-performing kernel.
+        """
+        if shape_key in self.shape_dispatch_cache and not self.disable_cache:
+            self.dispatch_stats["cache_hits"] += 1
+            return self.shape_dispatch_cache[shape_key]
+        
+        self.dispatch_stats["cache_misses"] += 1
+        
+        # Benchmark all kernels for this shape
+        timings = self.benchmark_kernels_for_shape(shape_key, *args, **kwargs)
+        best_kernel_idx = timings.index(min(timings))
+        
+        log.debug(
+            f"Selected kernel {best_kernel_idx} for shape {shape_key}. "
+            f"Timings: {timings} (best: {min(timings):.4f}ms)"
+        )
+        
+        # Cache the result
+        if not self.disable_cache:
+            self.shape_dispatch_cache[shape_key] = best_kernel_idx
+            
+        return best_kernel_idx
+    
+    def run(self, *args, **kwargs):
+        """
+        Main entry point for kernel execution with shape-based dispatching.
+        """
+        shape_key = self._get_shape_key(*args, **kwargs)
+        best_kernel_idx = self.get_best_kernel_for_shape(shape_key, *args, **kwargs)
+        best_kernel = self.kernels[best_kernel_idx]
+        
+        return best_kernel.run(*args, **kwargs)
+    
+    def get_dispatch_stats(self):
+        """Return performance statistics for debugging and monitoring."""
+        total_requests = self.dispatch_stats["cache_hits"] + self.dispatch_stats["cache_misses"] 
+        cache_hit_rate = (
+            self.dispatch_stats["cache_hits"] / total_requests 
+            if total_requests > 0 else 0.0
+        )
+        
+        return {
+            "cache_hit_rate": cache_hit_rate,
+            "total_shapes_cached": len(self.shape_dispatch_cache),
+            "total_benchmarks_run": self.dispatch_stats["benchmarks_run"],
+            **self.dispatch_stats
+        }
+    
+    # Methods required for compatibility with MultiKernelCall interface
+    def cache_file_path(self):
+        """Generate cache file path for persistent storage of kernel choices."""
+        key = code_hash(
+            ",".join(
+                [
+                    f"{k.fn.cache_key}{k.size_hints!r}{k.triton_meta!r}"
+                    for k in self.kernels
+                ]
+            )
+        )
+        _, _, path = get_path(key, "picked_kernel")
+        return pathlib.Path(path)
+    
+    @staticmethod
+    def record_choice(multi_kernel_name: str, picked_kernel_name: str):
+        """Record the multi-kernel choice for cpp-wrapper after autotuning."""
+        from torch._inductor.graph import GraphLowering
+        
+        if not isinstance(V.graph, GraphLowering):
+            return
+        
+        if not V.graph.record_multi_kernel_choice:
+            return
+        
+        V.graph.multi_kernel_to_choice[multi_kernel_name] = picked_kernel_name
+    
+    @staticmethod
+    def lookup_choice(multi_kernel_name: str) -> str:
+        """Look up the recorded kernel choice for cpp-wrapper."""
+        assert (
+            V.graph.record_multi_kernel_choice
+            and multi_kernel_name in V.graph.multi_kernel_to_choice
+        )
+        return V.graph.multi_kernel_to_choice[multi_kernel_name]
+
+
 def get_kernel_argdefs(kernel):
     arg_defs, _, _, _ = kernel.args.python_argdefs()
     return [x.name for x in arg_defs]

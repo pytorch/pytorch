@@ -1186,6 +1186,13 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "0")
     )  # type: ignore[assignment]
 
+    # Additional size hints for multi-kernel dispatch. When enabled, kernel generation
+    # will use the user-provided hint along with these candidates to produce multiple
+    # specialized kernels, with runtime dispatch handled by MultiDimKernelDispatcher.
+    # Each hint should be a list of integers representing tensor sizes.
+    # Example: [[1024, 512], [2048, 1024]] to generate kernels optimized for these shapes
+    multi_kernel_hint_candidates: list[list[int]] = []
+
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = os.environ.get("TORCHINDUCTOR_DIVISIBLE_BY_16", "1") == "1"
 
