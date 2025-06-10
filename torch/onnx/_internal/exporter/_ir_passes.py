@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import logging
@@ -9,7 +10,7 @@ from torch.onnx._internal.exporter import _constants
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Sequence
 
 
 # The opset domain for ONNX operators
@@ -31,7 +32,7 @@ def rename_outputs(model: ir.Model, new_names: Sequence[str]) -> None:
         output.name = new_name
 
 
-def _all_values(model: ir.Model) -> Iterator[ir.Value]:
+def _all_values(model: ir.Model):
     """Yield all values in a model."""
     # Yield all values in the model
     yield from model.graph.inputs
