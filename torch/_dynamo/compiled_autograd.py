@@ -276,7 +276,7 @@ class AutogradCompilerInstance:
 
     def begin_capture(
         self,
-        real_inputs: list[torch.Tensor],
+        inputs: list[torch.Tensor],
         sizes: list[int],
         scalars: list[Union[int, float]],
         origins: list[list[tuple[int, str]]],
@@ -315,11 +315,10 @@ class AutogradCompilerInstance:
         inputs_origins, sizes_origins, scalars_origins = origins
 
         # tensor inputs to fake tensors
-        inputs = []
-        x = real_inputs[0]  # mypy will complain about unbound x
+        x = inputs[0]  # mypy will complain about unbound x
         try:
-            for idx, x in enumerate(real_inputs):
-                inputs.append(self.wrap_fake(x, self.source("inputs", idx)))
+            for idx, x in enumerate(inputs):
+                inputs[idx] = self.wrap_fake(x, self.source("inputs", idx))
         except Exception as e:
             raise NotImplementedError(
                 f"Found tensor of type {type(x)}, which is not supported by FakeTensorMode. {TURN_OFF_MSG}"
