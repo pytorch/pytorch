@@ -12,7 +12,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
-#include <ATen/ops/abs_native.h>
 #include <ATen/ops/acos_native.h>
 #include <ATen/ops/acosh_native.h>
 #include <ATen/ops/angle_native.h>
@@ -205,36 +204,6 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(cosh_out_mps, cosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
-
-Tensor& abs_out_mps(const Tensor& self, Tensor& output) {
-  using namespace mps;
-
-  if (!output.is_same_size(self)) {
-    output.resize_(self.sizes());
-  }
-
-  if (self.numel() == 0) {
-    return output;
-  }
-
-  if (supportsComplex() || !self.is_complex()) {
-    unary_op_noresize(self, output, "abs_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-      auto rc = [mpsGraph absoluteWithTensor:inputTensor name:nil];
-      if (self.is_complex()) {
-        rc = [mpsGraph realPartOfTensor:rc name:nil];
-      }
-      return rc;
-    });
-  } else {
-    Tensor realInput = at::view_as_real(self);
-    unary_op_noresize(
-        realInput, output, "abs_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-          auto rc = lengthOfComplexAsReal(mpsGraph, inputTensor);
-          return [mpsGraph reshapeTensor:rc withShape:getMPSShape(output) name:nil];
-        });
-  }
-  return output;
-}
 
 Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
   auto bool_self = self.to(ScalarType::Bool);
