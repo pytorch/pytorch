@@ -11997,8 +11997,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA: leaky_relu_out
-    MPS: leaky_relu_out_mps
+    CPU, CUDA, MPS: leaky_relu_out
     QuantizedCPU: leaky_relu_out_quantized_cpu
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
@@ -12014,8 +12013,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA: leaky_relu_backward_out
-    MPS: leaky_relu_backward_out_mps
+    CPU, CUDA, MPS: leaky_relu_backward_out
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result) -> Tensor
   structured_delegate: leaky_relu_backward.grad_input
