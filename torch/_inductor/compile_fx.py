@@ -992,60 +992,37 @@ def _compile_fx_inner(
     if log.isEnabledFor(logging.INFO):
         mm_table_data = []
         for key, value in counters["aten_mm_info"].items():
-            # Handle different key formats:
-            # 1. New format with batch: "aten.bmm_b{batch}_m{m}_n{n}_k{k}" or "aten.baddbmm_b{batch}_m{m}_n{n}_k{k}"
-            # 2. Old format without batch: "aten.mm_m{m}_n{n}_k{k}" or "aten.addmm_m{m}_n{n}_k{k}"
-            # 3. Legacy format: "aten.mm_{m}_{n}_{k}" (fallback for compatibility)
-            
             parts = key.split("_")
-            batch = None
-            m = n = k = None
-            name_parts = []
             
-            # Try to parse new format first (with prefixed values like b10, m1024, etc.)
-            for part in parts:
-                if part.startswith('b') and len(part) > 1 and part[1:].isdigit():
-                    batch = part[1:]
-                elif part.startswith('m') and len(part) > 1 and part[1:].isdigit():
-                    m = part[1:]
-                elif part.startswith('n') and len(part) > 1 and part[1:].isdigit():
-                    n = part[1:]
-                elif part.startswith('k') and len(part) > 1 and part[1:].isdigit():
-                    k = part[1:]
-                else:
-                    name_parts.append(part)
+            if len(parts) < 3:
+                # Unexpected format, show as-is
+                mm_table_data.append([key, "-", "?", "?", "?", value])
+                continue
             
-            # If we couldn't parse the new format, fall back to legacy format
-            if m is None or n is None or k is None:
-                if len(parts) >= 3:
-                    # Legacy format: last 3 parts are M, N, K
-                    m, n, k = parts[-3:]
-                    name_parts = parts[:-3]
-                    batch = None
-                else:
-                    # Unexpected format, show as-is
-                    mm_table_data.append([key, "?", "?", "?", "?", value])
-                    continue
+            # Determine if this is a batched operation by checking the operation name
+            name = "_".join(parts[:-4]) if len(parts) >= 4 else "_".join(parts[:-3])
+            is_batched = name.endswith(('bmm', 'baddbmm'))
             
-            name = "_".join(name_parts)
-            
-            # Format the display name to include batch size if present
-            if batch is not None:
-                display_name = f"{name} (B={batch})"
+            if is_batched and len(parts) >= 4:
+                # Batched operation: last 4 parts are batch, m, n, k
+                batch, m, n, k = parts[-4:]
+                name = "_".join(parts[:-4])
+                mm_table_data.append([name, batch, m, n, k, value])
             else:
-                display_name = name
+                # Non-batched operation: last 3 parts are m, n, k
+                m, n, k = parts[-3:]
+                name = "_".join(parts[:-3])
+                mm_table_data.append([name, "-", m, n, k, value])
                 
-            mm_table_data.append([display_name, m, n, k, value])
-        
         log.info("Overview info of inductor aten mms: ")
         log.info(
-            "{:<30} | {:<20} | {:<20} | {:<20} | {:<20}".format(  # noqa: G001
-                "Name", "M", "N", "K", "Count"
+            "{:<30} | {:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(  # noqa: G001
+                "Name", "B", "M", "N", "K", "Count"
             )
         )
         log.info("-" * 130)
         for row in mm_table_data:
-            log.info("{:<30} | {:<20} | {:<20} | {:<20} | {:<20}".format(*row))  # noqa: G001
+            log.info("{:<30} | {:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(*row))  # noqa: G001
             log.info("-" * 130)
 
     # Not strictly necessary, but good to clean up straggling futures
