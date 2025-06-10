@@ -479,7 +479,7 @@ class BuildOptionsBase:
         return self._include_dirs
 
     def get_cflags(self) -> list[str]:
-        return self._cflags
+        return self._cflags + ["g"]
 
     def get_ldflags(self) -> list[str]:
         return self._ldflags
@@ -1313,6 +1313,9 @@ def get_cpp_torch_device_options(
                 "Intel GPU driver is not properly installed, please follow the instruction "
                 "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
             )
+
+    if device_type == "mps":
+        definitions.append(" USE_MPS")
 
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
