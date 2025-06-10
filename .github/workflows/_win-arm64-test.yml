@@ -31,7 +31,7 @@ on:
         default: windows-11-arm64-preview
         description: |
           Label of the runner this job should run on.
-          
+      
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
   PYTHON_VERSION: "3.12"
@@ -39,7 +39,7 @@ env:
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
   PYTORCH_FINAL_PACKAGE_DIR: c:\${{ github.run_id }}\build-results
-  
+
 jobs:
   test:
     # Don't run on forked repos or empty test matrix
@@ -56,13 +56,13 @@ jobs:
         run: |
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
-          
+
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
           path: pytorch
           submodules: recursive
-      
+
       - name: Bootstrap Python
         shell: cmd
         run: |
@@ -81,7 +81,7 @@ jobs:
           python pytorch/.github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4.1.7
         with:
@@ -91,7 +91,6 @@ jobs:
       - name: Test
         id: test
         shell: cmd
-        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         env:
           USE_CUDA: '0'
           INSTALL_WINDOWS_SDK: 1

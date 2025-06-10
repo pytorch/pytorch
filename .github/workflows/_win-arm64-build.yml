@@ -157,7 +157,7 @@ jobs:
           cd pytorch
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
           powershell -ExecutionPolicy Bypass -File ".ci/pytorch/win-arm64-build.ps1"
-          
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4.4.0
         if: always()
