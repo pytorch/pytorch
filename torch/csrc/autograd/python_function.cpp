@@ -61,10 +61,12 @@ PyObject* THPGradientEdgeClass = nullptr;
 namespace {
 
 inline void check_legacy_fn_attr_access(
-    const std::shared_ptr<torch::autograd::Node>& cdata, const char* attr) {
+    const std::shared_ptr<torch::autograd::Node>& cdata,
+    const char* attr) {
   TORCH_CHECK(
       cdata,
-      "Attribute '", attr,
+      "Attribute '",
+      attr,
       "' is invalid for this instance of _C._FunctionBase. "
       "Accessing this attribute directly on an instance of autograd.Function "
       "is a legacy access pattern that is no longer supported. For examples "
