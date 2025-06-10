@@ -2,7 +2,7 @@
 This module provides the infrastructure for creating and managing compile package
 for torch.compile. We mainly have two abstractions here:
   - CompilePackage: Overarching data structure for store and lookup a list of compiled codes.
-  - CodeCacheArtifact: Data structure for a single code being compiled by torch.compile.
+  - CodeCacheEntry: Data structure for a single code being compiled by torch.compile.
 The caching behavior is always under user control explicitly so that a stronger guarantee can
 be provided about cache hit for a specific compiled model. Users can load the compile package
 from a different process or host.
@@ -56,6 +56,7 @@ class SerializedCode:
     co_freevars: tuple[str, ...]
     co_qualname: Optional[str] = None
     co_exceptiontable: Optional[bytes] = None
+    co_lnotab: Optional[str] = None
 
     @classmethod
     @functools.cache
@@ -173,6 +174,10 @@ class _DynamoCacheEntry:
                 merged_codes[py_code] = code
         return _DynamoCacheEntry(codes=list(merged_codes.values()))
 
+    @property
+    def backend_ids(self) -> set[_BackendId]:
+        return {backend_id for code in self.codes for backend_id in code.backend_ids}
+
 @CacheArtifactFactory.register
 class _DynamoCacheArtifact(PrecompileCacheArtifact[_DynamoCacheEntry]):
     @staticmethod
@@ -190,9 +195,8 @@ class _CompilePackage:
     1. `CompilePackage.__init__()` which optionally takes previously serialized dynamo states.
         a. when `dynamo` argument is None, it will contruct a brand new CompilePackage object.
         b. when `dynamo` argument is not None, it will load a pre-compiled dynamo state.
-    2. `package.save(storage_context)` which dumps the dynamo and backend states to a given
-       "storage_context" (can be disk, memory or remote storage).
-    3. `package.install(storage_context)` which will handle all the side-effectful global scope
+    2. `package.save()` which dumps the dynamo and backend states to a DynamoCacheEntry object.
+    3. `package.install(backends) which will handle all the side-effectful global scope
         updates with compiled functions and resume functions.
     """
 
@@ -218,6 +222,10 @@ class _CompilePackage:
             if dynamo.python_version != platform.python_version():
                 raise RuntimeError(
                     f"Compile package was created with a different Python version: {dynamo.python_version}"
+                )
+            if dynamo.torch_version != torch.__version__:
+                raise RuntimeError(
+                    f"Compile package was created with a different PyTorch version: {dynamo.torch_version}"
                 )
 
             main, *codes = dynamo.codes
@@ -255,14 +263,6 @@ class _CompilePackage:
     @property
     def cached_backends(self):
         return self._cached_backends
-
-    @property
-    def backend_ids(self) -> set[_BackendId]:
-        return {
-            backend_id
-            for code in self._codes.values()
-            for backend_id in code.backend_ids
-        }
 
     @functools.cached_property
     def source_id(self) -> str:
@@ -342,8 +342,6 @@ class _CompilePackage:
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
-        from .eval_frame import innermost_fn
-
         self.uninstall()
 
         for code, entry in self._codes.items():
@@ -361,13 +359,10 @@ class _CompilePackage:
                         f"Backend {backend_id} is not found in the given backends"
                     )
                 backend = backends[backend_id]
-                torch._dynamo.eval_frame.skip_code(
-                    innermost_fn(backend).__code__, recursive=True
-                )
                 self._install_global(
                     module,
                     backend_id,
-                    backend,
+                    torch._dynamo.disable(backend),
                 )
 
         for code, entry in self._codes.items():
@@ -386,14 +381,9 @@ class _CompilePackage:
                     SerializedCode.to_code_object(guarded_code.dynamo_code),
                 )
 
-    def save(self, storage_context) -> None:
+    def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
-        # # TODO: this shouldn't be needed
-        # for backend_id in self.backend_ids:
-        #     storage_context.write_backend(backend_id)
-        storage_context.write_dynamo(
-            _DynamoCacheEntry(codes=list(self._codes.values()))
-        )
+        return _DynamoCacheEntry(codes=list(self._codes.values()))
 
 
 @CacheArtifactFactory.register
@@ -411,7 +401,7 @@ class DynamoStore:
 
     def record_package(self, package: _CompilePackage) -> None:
         # records a package to PrecompileContext
-        cache_entry = _DynamoCacheEntry(codes=list(package._codes.values()))
+        cache_entry = package.cache_entry()
         pickled_result = pickle.dumps(cache_entry)
         PrecompileContext.record_artifact(_DynamoCacheArtifact.type(), key=package.source_id, content = pickled_result)
 
@@ -423,10 +413,9 @@ class DynamoStore:
     def save_package(self, package: _CompilePackage, path: str) -> None:
         # saves a package to a given path
         backend_content = {}
-        for code in package._codes.values():
-            for backend_id in code.backend_ids:
-                backend_content[backend_id] = PrecompileContext.serialize_artifact_by_key(backend_id)
-        cache_entry = _DynamoCacheEntry(codes=list(package._codes.values()))
+        cache_entry = package.cache_entry()
+        for backend_id in cache_entry.backend_ids:
+            backend_content[backend_id] = PrecompileContext.serialize_artifact_by_key(backend_id)
         try:
             with open(os.path.join(path, "dynamo"), "wb") as dynamo_path:
                 pickle.dump(cache_entry, dynamo_path)
@@ -436,7 +425,7 @@ class DynamoStore:
             raise RuntimeError(f"Failed to save package to {path}: {e}")
 
     def load_package(self, fn, path: str) -> tuple[_CompilePackage, dict[_BackendId, Any]]:
-        # loads a package from a given path and installs proper backends to it
+        # loads a package from a given path and returns it plus a list of deserialized backends
         try:
             with open(os.path.join(path, "dynamo"), "rb") as dynamo_path:
                 cache_entry = pickle.load(dynamo_path)
