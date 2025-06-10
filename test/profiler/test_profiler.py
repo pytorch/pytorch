@@ -66,11 +66,11 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
+    TEST_CUDA,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
-    TestCase,
-    TEST_CUDA,
     TEST_XPU,
+    TestCase,
 )
 
 
@@ -2051,7 +2051,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
         self.assertTrue(any("aten" in e.name for e in p.events()))
 
-        self.assertTrue(any(str(device) in e.name for e in p.events()))
+        self.assertTrue(any(device in e.name for e in p.events()))
 
         self.assertTrue(any("kernel" in e.name.lower() for e in p.events()))
 
@@ -2063,7 +2063,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
         self.assertTrue(any("aten" in e.name for e in p1.events()))
 
-        self.assertTrue(all(str(device) not in e.name for e in p1.events()))
+        self.assertTrue(all(device not in e.name for e in p1.events()))
 
         self.assertTrue(all("kernel" not in e.name.lower() for e in p1.events()))
 
