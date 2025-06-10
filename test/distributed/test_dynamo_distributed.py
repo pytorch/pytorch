@@ -1098,6 +1098,31 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 self.assertEqual(res[0], r)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @config.patch(enable_guard_collectives=True)
+    def test_guard_collective(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            @torch.compile()
+            def f(x):
+                return x.sum()
+
+            x = torch.randn(10, device=self.rank)
+            f(x)
+
+            if self.rank == 0:
+                x = torch.randn(10, device=self.rank)
+            else:
+                x = torch.randn(12, device=self.rank)  # recompile on one rank
+            f(x)
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_get_pg_attr(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             pg = dist.distributed_c10d._get_default_group()
