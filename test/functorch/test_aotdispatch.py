@@ -7839,17 +7839,29 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
             inplace_tensor = torch.zeros((2,), requires_grad=False)
             return dummy, inplace_tensor
 
-        dummy, inplace = inps()
-        y = fn(dummy, inplace)
-        ref0 = inplace.clone().detach()
-        y.sum().backward()
-        ref = inplace.clone().detach()
+        def sc_inps():
+            dummy = TwoTensor(
+                torch.randn((2,), requires_grad=True),
+                torch.randn((2,), requires_grad=True),
+            )
+            inplace_tensor = TwoTensor(
+                torch.zeros((2,), requires_grad=False),
+                torch.zeros((2,), requires_grad=False),
+            )
+            return dummy, inplace_tensor
 
-        dummy, inplace = inps()
-        y = torch.compile(fn, backend="aot_eager", fullgraph=True)(dummy, inplace)
-        self.assertEqual(ref0, inplace)
-        y.sum().backward()
-        self.assertEqual(ref, inplace)
+        for _inps in [inps, sc_inps]:
+            dummy, inplace = _inps()
+            y = fn(dummy, inplace)
+            ref0 = inplace.clone().detach()
+            y.sum().backward()
+            ref = inplace.clone().detach()
+
+            dummy, inplace = _inps()
+            y = torch.compile(fn, backend="aot_eager", fullgraph=True)(dummy, inplace)
+            self.assertEqual(ref0, inplace)
+            y.sum().backward()
+            self.assertEqual(ref, inplace)
 
 
 class MockFXGraphCache:

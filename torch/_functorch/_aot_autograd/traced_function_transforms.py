@@ -35,6 +35,7 @@ from torch.fx.experimental.symbolic_shapes import (
     sym_eq,
 )
 from torch.nn.utils import stateless
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
@@ -397,6 +398,26 @@ def set_partitioner_tag_must_be_in_forward():
     return set_partitioner_tag("must_be_in_forward")
 
 
+def _get_mutation_counter(t) -> int:
+    if not is_traceable_wrapper_subclass(t):
+        return torch._functionalize_mutation_counter(t.elem)  # type: ignore[attr-defined]
+
+    max_mc = -1
+
+    def visit(e):
+        if not is_traceable_wrapper_subclass(e):
+            mc = torch._functionalize_mutation_counter(e.elem)  # type: ignore[attr-defined]
+            nonlocal max_mc
+            max_mc = max(mc, max_mc)
+            return
+
+        for a in e.__tensor_flatten__()[0]:
+            visit(getattr(e, a))
+
+    visit(t)
+    return max_mc
+
+
 def apply_in_graph_mutations(input_info, inpt_old, inpt_new, f_inpt, input_idx):
     assert input_info.mutation_type == MutationType.MUTATED_IN_GRAPH
     # See Note [set_() Input Mutations in AOTAutograd]
@@ -538,12 +559,11 @@ def create_functionalized_fn(
                         nonlocal f_args_after_forward
                         f_args_after_forward = f_args[0]
                         nonlocal f_args_mutation_counter_after_forward
+
                         f_args_mutation_counter_after_forward = [
                             -1
                             if not inputs_mutated_in_graph[i]
-                            else torch._functionalize_mutation_counter(  # type: ignore[attr-defined]
-                                f_arg.elem
-                            )
+                            else _get_mutation_counter(f_arg)
                             for i, f_arg in enumerate(f_args_after_forward)
                         ]
 
@@ -701,7 +721,7 @@ def create_functionalized_fn(
 
                         assert f_args_mutation_counter_after_forward
                         post_fw_mc = f_args_mutation_counter_after_forward[idx]
-                        mc = torch._functionalize_mutation_counter(f_inpt.elem)  # type: ignore[attr-defined]
+                        mc = _get_mutation_counter(f_inpt)
 
                         if mc > 0:
                             # Mutation in forward.
@@ -736,7 +756,7 @@ def create_functionalized_fn(
                     if f_args_mutation_counter_after_forward is not None:
                         # This could happen for subclasses tracing
                         # Subclasses support for mutations in fw and bw is TBD.
-                        mc = torch._functionalize_mutation_counter(f_inpt.elem)  # type: ignore[attr-defined]
+                        mc = _get_mutation_counter(f_inpt)
                         if mc == inputs_mutated_in_graph_applied_mutation_counters[idx]:
                             # No mutation in backward; mutation was already applied.
                             continue
