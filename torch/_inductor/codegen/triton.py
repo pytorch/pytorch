@@ -8,6 +8,7 @@ import functools
 import itertools
 import logging
 import math
+import operator
 import os
 import textwrap
 from collections.abc import Iterable, Sequence
@@ -748,7 +749,7 @@ class TritonCSEVariable(CSEVariable):
     def __init__(self, name, bounds: ValueRanges[Any], dtype: torch.dtype) -> None:
         super().__init__(name, bounds, dtype)
         # We'll use this to track which masks the variable needs when used for indirect indexing
-        self.mask_vars = OrderedSet[str]()
+        self.mask_vars: OrderedSet[str] = OrderedSet()
         assert dtype is not None, "TritonCSEVariable must have dtype"
 
     def update_on_args(self, name, args, kwargs):
@@ -1768,8 +1769,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         index_vars = index.free_symbols
         has_rindex = False
 
-        mask_vars = OrderedSet[str]()
-        for var in index_vars:
+        mask_vars: OrderedSet[str] = OrderedSet()
+        for var in sorted(index_vars, key=operator.attrgetter("name")):
             assert isinstance(var, sympy.Symbol)
             has_rindex = has_rindex or symbol_is_type(
                 var, TritonSymbols.reduction_types
@@ -1810,7 +1811,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         have_dense = True
         have_loop_vars = False
-        dense_mask_vars = OrderedSet[str]()
+        dense_mask_vars: OrderedSet[str] = OrderedSet()
 
         for tree in self.active_range_trees():
             if index_vars.intersection(tree.var_list):
@@ -3549,7 +3550,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
                     )
 
-        mutated_args = OrderedSet[str]()
+        mutated_args: OrderedSet[str] = OrderedSet()
         for mutation in self.mutations:
             if mutation in self.args.input_buffers:
                 mutated_args.add(self.args.input_buffers[mutation])
@@ -3641,13 +3642,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }
+        if self.tiling_scores:
+            inductor_meta["tiling_scores"] = self.tiling_scores
+
         if self.cooperative_reduction:
             inductor_meta["persistent_reduction"] = self.persistent_reduction
 
         num_gb = None
         if config.benchmark_kernel or config.profile_bandwidth:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
-            inductor_meta["kernel_num_gb"] = num_gb
+            if num_gb is not None:
+                inductor_meta["kernel_num_gb"] = num_gb
+        if config.benchmark_kernel:
+            flops = self.estimate_flops()
+            if flops is not None:
+                inductor_meta["kernel_flop"] = flops
 
         triton_meta["configs"] = [config_of(signature)]
 
