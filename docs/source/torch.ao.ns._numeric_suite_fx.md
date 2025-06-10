@@ -23,7 +23,7 @@
 ```
 
 ```{eval-rst}
-.. module:: torch.ao.ns.fx.utils
+.. currentmodule:: torch.ao.ns.fx.utils
 ```
 
 ```{eval-rst}
