@@ -9466,7 +9466,7 @@ def ___make_guard_fn():
         # custom strides
         x2 = torch.randn(10000)
         x2 = x2.as_strided([4, 4, 4, 4], [1, 2, 4, 8])
-        assert f(x2) == (3, 2, 1, 0)
+        assert f(x2)[1] == (3, 2, 1, 0)
 
     # Compiling autograd.Function traces fwd function twice, but the same unbacked symints were not identified
     # as the same across the two tracings. This is an unlikely situation in real use cases, so we add another
