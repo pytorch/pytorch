@@ -98,4 +98,4 @@ fi
 if [ -n "${NUMPY_VERSION}" ]; then
   pip_install "numpy==${NUMPY_VERSION}"
 fi
-pip_install helion
+pip_install "helion; python_version >= '3.10'"
