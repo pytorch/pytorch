@@ -68,8 +68,13 @@ def local_map(
             If ``in_placements`` is ``None``, no placements examination will be performed.
             Default: None
         in_grad_placements (Tuple[`PlacementType`, ...], optional):
-            the required placements of the :class:`DTensor` s gradient during back backpropagation.
-            The argument only applies to input of type :class:`DTensor`. Default: None.
+            the placements hint of the :class:`DTensor` s gradient corresponds
+            to the flattened input DTensor. This argument is the hint that user
+            can give to :meth:`to_local` in case the gradient layout of the
+            local tensor input does not match its :class:`DTensor` input layout.
+            If not specified, we will assume the gradient layout of the local
+            tensor input remains the same as the original :class:`DTensor` input
+            and use that for gradient computation. Default: None.
         device_mesh (:class:`DeviceMesh`, optional):
             the device mesh that all the :class:`DTensor` s are placed on. If not
             specified, this will be inferred from the input :class:`DTensor` s' device
