@@ -28,6 +28,23 @@ struct exp_functor {
   }
 };
 
+struct expm1_functor {
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return static_cast<T>(c10::metal::expm1f(static_cast<float>(x)));
+  }
+  template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
+  inline float operator()(const T x) {
+    return c10::metal::expm1f(static_cast<float>(x));
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return T(
+        c10::metal::expm1f(x.x + ::precise::log(precise::cos(x.y))),
+        precise::exp(x.x) * precise::sin(x.y));
+  }
+};
+
 struct sigmoid_functor {
   template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
@@ -345,6 +362,7 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(erfc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
   REGISTER_UNARY_OP(exp, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(expm1, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(sigmoid, DTYPE1, DTYPE0);      \
   REGISTER_UNARY_OP(exp2, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(log, DTYPE1, DTYPE0);          \
@@ -376,6 +394,7 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
 #define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)     \
   REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);     \
+  REGISTER_UNARY_OP(expm1, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(sigmoid, DTYPE##2, DTYPE##2); \
   REGISTER_UNARY_OP(abs, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);    \
