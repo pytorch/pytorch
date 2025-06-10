@@ -38,7 +38,7 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 CPU_S390X_ARCH = ["cpu-s390x"]
 
-CUDA_AARCH64_ARCHES = ["12.9-aarch64"]
+CUDA_AARCH64_ARCHES = ["12.8-aarch64"]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
@@ -80,7 +80,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu12==9.10.1.4; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cublas-cu12==12.9.1.4; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufft-cu12==11.4.1.4; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-curand-cu12==10.3.10.19; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -222,6 +222,9 @@ def generate_libtorch_matrix(
         if os == "linux":
             arches += CUDA_ARCHES
             arches += ROCM_ARCHES
+            # will add in a separate PR for 12.9
+            if "12.9" in arches:
+                arches.remove("12.9")
         elif os == "windows":
             arches += CUDA_ARCHES
             if "12.9" in arches:
@@ -321,10 +324,10 @@ def generate_wheels_matrix(
                 continue
 
             if use_split_build and (
-                arch_version not in ["12.6", "12.8", "11.8", "cpu"] or os != "linux"
+                arch_version not in ["12.6", "12.8", "12.9", "cpu"] or os != "linux"
             ):
                 raise RuntimeError(
-                    "Split build is only supported on linux with cuda 12*, 11.8, and cpu.\n"
+                    "Split build is only supported on linux with cuda 12* and cpu.\n"
                     f"Currently attempting to build on arch version {arch_version} and os {os}.\n"
                     "Please modify the matrix generation to exclude this combination."
                 )
@@ -332,7 +335,7 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["12.9", "12.8", "12.6", "11.8"]
+                arch_version in ["12.9", "12.8", "12.6"]
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
