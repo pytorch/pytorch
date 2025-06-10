@@ -746,12 +746,10 @@ if has_triton():
         tensor, block_sizes: list[int], new_api: bool = True
     ):
         if new_api:
-            assert has_triton_tensor_descriptor_host_tma()
             return triton.tools.tensor_descriptor.TensorDescriptor.from_tensor(
                 tensor, block_sizes
             )
         else:
-            assert has_triton_experimental_host_tma()
             if len(block_sizes) == 1:
                 return triton.tools.experimental_descriptor.create_1d_tma_descriptor(
                     tensor.data_ptr(),
