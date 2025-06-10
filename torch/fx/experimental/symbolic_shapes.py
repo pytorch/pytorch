@@ -5429,10 +5429,16 @@ class ShapeEnv:
                         source, constraint
                     )
                     user_stack = self.specialization_stacks.get(source, None)
+                    cpp_stack = CapturedTraceback.extract(cpp=True)
                     msg = (
                         f"You marked {self._debug_name(source)} as dynamic but your code "
                         f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
                         f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        + (
+                            "\n\nFramework stack:\n" + "".join(cpp_stack.format())
+                            if cpp_stack
+                            else ""
+                        )
                         + (
                             "\n\nUser stack:\n" + "".join(user_stack.format())
                             if user_stack
