@@ -6,6 +6,7 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental._attention import (
@@ -435,6 +436,117 @@ class RingAttentionTest(DTensorTestBase):
                     c10d_functional.all_to_all_single: self.world_size * args.n_layers,
                 },
             )
+
+
+class RingFlexAttentionTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_ring_flex_attention(self) -> None:
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        # Compile the flex_attention function
+        flex_attention = torch.compile(flex_attention, dynamic=False, fullgraph=True)
+        Q_BLOCK_SIZE_DEFAULT = 128
+        KV_BLOCK_SIZE_DEFAULT = Q_BLOCK_SIZE_DEFAULT
+
+        torch.cuda.manual_seed(10)
+        dtype = torch.float32
+        bs = 8
+        query_tokens = Q_BLOCK_SIZE_DEFAULT * self.world_size
+        context_tokens = KV_BLOCK_SIZE_DEFAULT * self.world_size
+        dim = 32
+        nheads = 8
+
+        q = torch.rand(
+            (bs, nheads, query_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        k = torch.rand(
+            (bs, nheads, context_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        v = torch.rand(
+            (bs, nheads, context_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+
+        block_mask = create_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            Q_LEN=query_tokens,
+            KV_LEN=context_tokens,
+            device=self.device_type,
+        )
+
+        # test flex attention on DTensor
+        device_mesh = init_device_mesh(
+            device_type=self.device_type,
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("cp",),
+        )
+
+        q_local_size = list(q.shape)
+        q_local_size[2] //= self.world_size
+        k_local_size = list(k.shape)
+        k_local_size[2] //= self.world_size
+
+        # this is the block_mask created within the training step
+        # NOTE: flex_attention checks block_mask shape and input shape before
+        # calling into flex_attention_hop.
+        block_mask_post_sharding = create_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            Q_LEN=q_local_size[2],
+            KV_LEN=k_local_size[2],
+            device=self.device_type,
+        )
+
+        # set CP context dispatch mode to use TorchFunctionMode for flex_attention
+        torch.distributed.tensor.experimental._attention._dispatch_mode = (
+            _DispatchMode.TORCH_FUNCTION
+        )
+
+        # prepare input buffer
+        cp_q = q.detach().clone()
+        cp_k = k.detach().clone()
+        cp_v = v.detach().clone()
+
+        with context_parallel(
+            device_mesh,
+            buffers=[cp_q, cp_k, cp_v],
+            buffer_seq_dims=[2, 2, 2],
+        ):
+            cp_q.requires_grad = True
+            cp_k.requires_grad = True
+            cp_v.requires_grad = True
+
+            cp_out, cp_lse = flex_attention(
+                cp_q,
+                cp_k,
+                cp_v,
+                block_mask=block_mask_post_sharding,
+                return_lse=True,
+            )
+            cp_out.sum().backward()
+
+            cp_q.requires_grad = False
+            cp_k.requires_grad = False
+            cp_v.requires_grad = False
 
 
 if __name__ == "__main__":
