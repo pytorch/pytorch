@@ -582,6 +582,9 @@ max_epilogue_benchmarked_choices = 1
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
+# how many nodes to attempt pairwise fusion with in a buffer group
+max_fusion_buffer_group_pairwise_attempts = 64
+
 # max number of inputs to generate cat as a pointwise op with masked laods
 max_pointwise_cat_inputs = 8
 
