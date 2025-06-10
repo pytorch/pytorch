@@ -291,6 +291,7 @@ class MPSBasicTestsAOTI(TestCase):
         res = m(*inp)
         self.assertTrue(torch.allclose(res, res2))
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
