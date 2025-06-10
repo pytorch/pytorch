@@ -12,6 +12,7 @@ import torch._dynamo
 import torch._functorch
 import torch._inductor
 import torch._inductor.decomposition
+import torch.utils._pytree as pytree
 from functorch.compile import aot_function, nop
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -21,6 +22,11 @@ from torch._dynamo.testing import (
 )
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 from torch._higher_order_ops.schema import find_hop_schema
+from torch._inductor.pattern_matcher import (
+    CallFunctionVarArgs,
+    PatternMatcherPass,
+    register_graph_pattern,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -859,11 +865,18 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(8, requires_grad=False)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Encountered input mutation during higher order op tracing for HOP - invoke_subgraph",
-        ):
+            RuntimeError,
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
+        ) as cm:
             opt_fn(x, y)
+
+        cause = cm.exception.__cause__
+        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
+        self.assertTrue(
+            "Encountered input mutation during higher order op tracing" in str(cause)
+        )
 
     def test_input_mutation_inference_mode(self):
         @mark_compile_region
@@ -881,10 +894,16 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(8, requires_grad=False)
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Encountered input mutation during higher order op tracing",
-        ):
+            RuntimeError,
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
+        ) as cm:
             opt_fn(x, y)
+
+        cause = cm.exception.__cause__
+        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
+        self.assertTrue(
+            "Encountered input mutation during higher order op tracing" in str(cause)
+        )
 
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
@@ -942,11 +961,18 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(8, requires_grad=False)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Encountered aliasing during higher order op tracing",
-        ):
+            RuntimeError,
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
+        ) as cm:
             opt_fn(x, y)
+
+        cause = cm.exception.__cause__
+        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
+        self.assertTrue(
+            "Encountered aliasing during higher order op tracing" in str(cause)
+        )
 
     def test_input_input_aliasing(self):
         @mark_compile_region
@@ -959,11 +985,18 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8, requires_grad=False)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Encountered aliasing during higher order op tracing",
-        ):
+            RuntimeError,
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
+        ) as cm:
             opt_fn(x)
+
+        cause = cm.exception.__cause__
+        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
+        self.assertTrue(
+            "Encountered aliasing during higher order op tracing" in str(cause)
+        )
 
     def test_output_output_aliasing(self):
         @mark_compile_region
@@ -977,11 +1010,18 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8, requires_grad=False)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Encountered aliasing during higher order op tracing",
-        ):
+            RuntimeError,
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
+        ) as cm:
             opt_fn(x)
+
+        cause = cm.exception.__cause__
+        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
+        self.assertTrue(
+            "Encountered aliasing during higher order op tracing" in str(cause)
+        )
 
     def test_mod_attr_aliasing(self):
         class MutateParam(torch.nn.Module):
@@ -1007,11 +1047,18 @@ class GraphModule(torch.nn.Module):
         fn(x, y)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Encountered input mutation during higher order op tracing",
-        ):
+            RuntimeError,
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
+        ) as cm:
             opt_fn(x, y)
+
+        cause = cm.exception.__cause__
+        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
+        self.assertTrue(
+            "Encountered input mutation during higher order op tracing" in str(cause)
+        )
 
     def test_kwargs_only(self):
         @mark_compile_region
@@ -1925,12 +1972,11 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    @unittest.skip("Repro for an issue which is not fixed yet")
     def test_div(self):
         @mark_compile_region
         def gn(x):
             div = torch.div(1024, 256, rounding_mode="trunc")
-            return div * torch.ones(64, div)
+            return div * torch.ones(64, div) * x
 
         def fn(x):
             return gn(x)
@@ -1943,7 +1989,84 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @requires_gpu
+    def test_preserves_strides(self):
+        class _CustomPass(PatternMatcherPass):
+            def __init__(self) -> None:
+                super().__init__()
 
+            def __call__(self, g: torch.fx.Graph):
+                self.apply(g)
+
+        g = _CustomPass()
+        called = False
+
+        x = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
+        other = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
+
+        @register_graph_pattern(
+            CallFunctionVarArgs(torch.ops.aten.permute),
+            pass_dict=g,
+        )
+        def _(match, *args, **kwargs):
+            flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+            def decomp(*flat_args):
+                args, kwargs = pytree.tree_unflatten(flat_args, spec)
+                return torch.ops.mylib.force_channels_last(
+                    torch.ops.aten.permute(*args, **kwargs)
+                )
+
+            nonlocal called
+            called = True
+            match.replace_by_example(decomp, flat_args)
+
+        from torch._inductor import config
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "force_channels_last(Tensor x) -> Tensor",
+                tags=[torch._C.Tag.flexible_layout],
+            )
+
+            def impl2(x):
+                return x.clone(memory_format=torch.channels_last)
+
+            lib.impl("force_channels_last", impl2, "CompositeExplicitAutograd")
+
+            lib.define(
+                "add_op(Tensor x, Tensor y) -> Tensor",
+            )
+
+            def impl(x, y):
+                out = y.clone()  # contiguous with strides (16, 4, 2, 1)
+                out.add_(x.transpose(-1, -2))
+                return out
+
+            def meta(x, y):
+                return torch.empty_like(y, memory_format=torch.contiguous_format)
+
+            lib.impl("add_op", impl, "CompositeExplicitAutograd")
+            lib.impl("add_op", meta, "Meta")
+
+            @mark_compile_region
+            def gn(y, z):
+                return torch.ops.mylib.add_op.default(y, z)
+
+            def f(x, other):
+                y = x.transpose(2, 3).contiguous().transpose(2, 3)
+                z = y.sin().transpose(2, 3)
+                return gn(y, z)
+
+            with config.patch(
+                post_grad_custom_post_pass=g,
+            ):
+                f_compile = torch.compile(f, fullgraph=True)
+                self.assertEqual(f(x, other), f_compile(x, other))
+                self.assertTrue(called)
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
 @parameterized_class(
     [
         {"strict": False},
@@ -2093,6 +2216,25 @@ class GraphModule(torch.nn.Module):
         ep = torch.export.export(M(), (x, y), strict=self.strict)
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
+
+
+class NegativeTesting(TestCase):
+    def test_graph_break(self):
+        @mark_compile_region
+        def gn(x):
+            torch._dynamo.graph_break()
+            return torch.cos(x)
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(8, 8, requires_grad=True)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
+        ):
+            torch.compile(fn, backend="eager")(x)
 
 
 if __name__ == "__main__":
