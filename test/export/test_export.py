@@ -4226,6 +4226,34 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         vr = next(iter(ep.range_constraints.values()))
         self.assertEqual(vr.lower, 3)
 
+    def test_unbacked_linear_layer_norm_input(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(387, 128, bias=True)
+                self.layer_norm = torch.nn.LayerNorm(387)
+
+            def forward(self, x, mask):
+                masked_select = x.masked_select(mask)
+                view = masked_select.view(-1, 387)
+
+                linear = self.linear(view)
+                layer_norm = self.layer_norm(view)
+                return linear, layer_norm
+
+        inputs = (
+            torch.randn((256, 387), dtype=torch.float),
+            torch.randint(low=0, high=1, size=(256, 1), dtype=torch.bool),
+        )
+
+        model = MyModel()
+        ep = export(model, inputs)
+
+        ref = model(*inputs)
+        actual = ep.module()(*inputs)
+        self.assertTrue(torch.allclose(ref[0], actual[0]))
+        self.assertTrue(torch.allclose(ref[1], actual[1]))
+
     def test_dynamic_shapes_builder_basic(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
