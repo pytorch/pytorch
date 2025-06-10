@@ -16,6 +16,7 @@ from torch._inductor.compile_fx import shape_env_from_inputs
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
 from torch._inductor.utils import GPU_TYPES, get_gpu_type, is_gpu
+from torch.utils._helion import has_helion
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
@@ -47,6 +48,8 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
+
+HAS_HELION = has_helion()
 
 if HAS_TRITON:
     import triton
@@ -133,6 +136,7 @@ def skip_windows_ci(name: str, file: str) -> None:
 # TODO: Remove HAS_MPS condition  when `HAS_GPU` includes HAS_MPS
 requires_gpu = functools.partial(unittest.skipIf, not (HAS_GPU or HAS_MPS), "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
+requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
 
 def requires_cuda_with_enough_memory(min_mem_required):
     def inner(fn):
