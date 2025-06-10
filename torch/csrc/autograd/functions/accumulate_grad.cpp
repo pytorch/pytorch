@@ -10,19 +10,20 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 namespace torch::autograd {
 
-// AccumulateGrad sets sequence_nr to the max value so it's always called
-// ASAP during backwards.
-AccumulateGrad::AccumulateGrad(Variable variable_)
-    : Node(/*sequence_nr=*/UINT64_MAX), variable(std::move(variable_)) {
-  add_input_metadata(variable);
-}
+using torch::dynamo::autograd::IValuePacker;
 
-// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
-auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
+namespace {
+
+variable_list AccumulateGrad_apply_functional_no_hooks(
+    variable_list&& grads,
+    at::Tensor& variable,
+    int64_t num_expected_refs,
+    std::mutex* mutex = nullptr) {
   check_input_variables("AccumulateGrad", grads, 1, 0);
 
   if (!grads[0].defined())
@@ -41,7 +42,11 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   // when updating the gradients. We don't ensure thread safety on hooks
   // and rely on user to provide thread safe hooks
   // see Note [Thread Safety on Autograd Node]
-  std::lock_guard<std::mutex> lock(mutex_);
+  // need to still lock for eager here
+  std::optional<std::lock_guard<std::mutex>> lock;
+  if (mutex != nullptr) {
+    lock.emplace(*mutex);
+  }
 
   at::Tensor& grad = variable.mutable_grad();
 
@@ -55,8 +60,41 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       variable,
       grad,
       new_grad,
-      1 + !post_hooks().empty() /* num_expected_refs */,
+      num_expected_refs,
       [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
+
+  return {};
+}
+
+variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
+    const variable_list& grads,
+    const ivalue_list& args) {
+  PackedArgs r(args);
+  auto variable = r.unpack<at::Tensor>();
+  auto has_post_hooks = r.unpack<bool>();
+  return AccumulateGrad_apply_functional_no_hooks(
+      variable_list(grads),
+      variable,
+      1 + has_post_hooks,
+      nullptr // no mutex needed since this is executed under a single thread
+  );
+}
+} // namespace
+
+// AccumulateGrad sets sequence_nr to the max value so it's always called
+// ASAP during backwards.
+AccumulateGrad::AccumulateGrad(Variable variable_)
+    : Node(/*sequence_nr=*/UINT64_MAX), variable(std::move(variable_)) {
+  add_input_metadata(variable);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
+auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
+  AccumulateGrad_apply_functional_no_hooks(
+      std::move(grads),
+      variable,
+      1 + !post_hooks().empty() /* num_expected_refs */,
+      &mutex_);
 
   auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {
@@ -77,6 +115,7 @@ void AccumulateGrad::compiled_args(CompiledNodeArgs& args) const {
     hook->compiled_args(args);
   }
 }
+
 variable_list AccumulateGrad::apply_with_saved(
     const variable_list& grads,
     SwapSavedVariables& saved) {
@@ -91,10 +130,42 @@ variable_list AccumulateGrad::apply_with_saved(
   saved.before(grad_copy);
   variable_copy.mutable_grad() = grad_copy;
 
+  // name() includes namespace for historical reasons:
+  // torch::autograd::AcumulateGrad For Compiled Autograd, we just want the op
+  // name without the namespace
+  std::string name = "AccumulateGrad";
+
   // proxy a call to torch.ops.inductor.accumulate_grad_.default
-  const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
-  pyinterface->call_accumulate_grad(
-      saved.get_py_compiler(), variable_copy, grads[0]);
+  static bool flag [[maybe_unused]] = [&]() {
+    std::vector<at::TypePtr> schema = {
+        IValuePacker<at::Tensor>::packed_type(),
+        IValuePacker<bool>::packed_type()};
+    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+    interface->bind_function(
+        saved.get_py_compiler(),
+        name,
+        AccumulateGrad_apply_functional_no_hooks_ivalue,
+        schema);
+    return true;
+  }();
+
+  PackedArgs packed_args;
+  packed_args.pack<at::Tensor>(variable_copy);
+  packed_args.pack(!post_hooks().empty());
+
+  // same metadata before and after post acc grad hooks
+  auto output_metadata = torch::dynamo::autograd::
+      IValuePacker<std::vector<std::optional<InputMetadata>>>::pack(
+          torch::dynamo::autograd::get_input_metadata(next_edges()));
+
+  const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+  auto result = interface->call_function(
+      saved.get_py_compiler(),
+      "apply_functional",
+      name,
+      grads,
+      std::move(packed_args).vec(),
+      output_metadata);
 
   auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {

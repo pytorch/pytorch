@@ -99,6 +99,7 @@ def reset():
     torch._logging.set_logs(compiled_autograd_verbose=False)
     config.compiled_autograd = False
     compiled_autograd.reset()
+    torch._dynamo.utils.counters.clear()
 
 
 class TestCompiledAutograd(TestCase):
@@ -705,6 +706,44 @@ main()
         actual = compiled_fn(model, inputs)
         self.assertEqual(expected, actual)
         self.assertEqual(counters["compiled_autograd"]["captures"], 2)
+
+    @parametrize("api", ("compile", "optimize"))
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    def test_compile_api_disable(self, api, backend):
+        def wrap(fn, backend):
+            if api == "compile":
+                return torch.compile(fn, backend=backend)
+            elif api == "optimize":
+                return torch._dynamo.optimize(backend)(fn)
+
+        def fn(model, inputs):
+            res = []
+            for inp in inputs:
+                result = model(inp).sum()
+                result.backward()
+                res.append(model[0].weight.grad)
+                res.append(model[0].bias.grad)
+                model.zero_grad()
+            return res
+
+        torch.manual_seed(123)
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        inputs = [
+            torch.randn([1, 4]),
+            torch.randn([2, 4]),
+            torch.randn([3, 4]),
+        ]
+
+        expected = fn(model, inputs)
+        with config.patch(compiled_autograd=True):
+            compiled_fn = wrap(fn, backend)
+        with torch._dynamo.compiled_autograd._disable():
+            actual = compiled_fn(model, inputs)
+        self.assertEqual(expected, actual)
+        self.assertTrue("compiled_autograd" not in counters)
 
     @parametrize("backend", ("eager", "aot_eager", "inductor"))
     def test_optimize_assert(self, backend):
@@ -1863,7 +1902,9 @@ main()
             yield model[0].weight.grad
             yield model[1].weight.grad
 
-        self.check_output_and_recompiles(fn, 1)
+        self.check_output_and_recompiles(
+            fn, [1, 0], compiler_fn=make_compiler_fn(backend="eager")
+        )
 
     def test_trace_run_with_rng_state(self):
         def sdpa(xq, xk):

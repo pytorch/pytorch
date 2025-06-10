@@ -6,8 +6,6 @@
 
 namespace torch::distributed::autograd {
 
-using torch::autograd::AccumulateGrad;
-
 DistAutogradContext::DistAutogradContext(int64_t contextId)
     : contextId_(contextId),
       impl_(c10::impl::VirtualGuardImpl{
@@ -95,7 +93,7 @@ void DistAutogradContext::accumulateGrad(
   // TODO: Need to bump 'num_expected_refs' here when we support post_hooks for
   // distributed autograd as part of
   // https://github.com/pytorch/pytorch/issues/33482
-  AccumulateGrad::accumulateGrad(
+  torch::autograd::accumulateGrad(
       variable,
       old_grad,
       grad,
