@@ -1,5 +1,5 @@
 (_torch_nccl_environment_variables)=
-## PYTORCH ProcessGroupNCCL Environment Variables
+# PYTORCH ProcessGroupNCCL Environment Variables
 
 For more information on the environment variables, see [ProcessGroupNCCL Environment Variables](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp).
 

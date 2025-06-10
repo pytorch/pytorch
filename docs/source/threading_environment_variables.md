@@ -1,6 +1,6 @@
 (threading_environment_variables)=
 
-## Threading Environment Variables
+# Threading Environment Variables
 
 ```{list-table}
 :header-rows: 1

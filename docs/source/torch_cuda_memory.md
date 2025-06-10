@@ -1,6 +1,6 @@
 (torch_cuda_memory)=
 
-## Understanding CUDA Memory Usage
+# Understanding CUDA Memory Usage
 
 To debug CUDA memory use, PyTorch provides a way to generate memory snapshots that record the state of allocated CUDA memory
 at any point in time, and optionally record the history of allocation events that led up to that snapshot.
