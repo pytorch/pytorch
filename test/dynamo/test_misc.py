@@ -9435,26 +9435,33 @@ def ___make_guard_fn():
     def test_unbacked_dim_order(self):
         @torch.compile(dynamic=False, fullgraph=True, backend="eager")
         def f(x):
-            return x.dim_order()  # no permutation
+            x = x.permute(3, 0, 2, 1)
+            return x, x.dim_order()
 
         @torch.compile(dynamic=False, fullgraph=True, backend="eager")
         def g(x):
-            x = x.permute(2, 0, 1, 3)  # reverse: (1, 2, 0, 3)
-            return x.dim_order()
+            x = x.permute(2, 0, 1, 3)
+            return x, x.dim_order()
+
+        # check that for functions permuting contiguous input, the original stride is recovered with dim_order.
+        def test(x):
+            stride_inp = tuple(x.stride())
+            f_out, f_order = f(x)
+            self.assertEqual(stride_inp, tuple(f_out.stride(i) for i in f_order))
+            g_out, g_order = g(x)
+            self.assertEqual(stride_inp, tuple(g_out.stride(i) for i in g_order))
 
         # shape: [4, u0, 5, u1]
         x0 = torch.randn(4, 1, 5, 2)
         torch._dynamo.decorators.mark_unbacked(x0, 1)
         torch._dynamo.decorators.mark_unbacked(x0, 3)
-        assert f(x0) == (0, 1, 2, 3)
-        assert g(x0) == (1, 2, 0, 3)
+        test(x0)
 
         # shape: [u0, u1, u2, u3]
         x1 = torch.randn(4, 1, 5, 2)
         for i in range(x1.ndim):
             torch._dynamo.decorators.mark_unbacked(x1, i)
-        assert f(x1) == (0, 1, 2, 3)
-        assert g(x1) == (1, 2, 0, 3)
+        test(x1)
 
         # custom strides
         x2 = torch.randn(10000)

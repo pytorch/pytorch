@@ -568,10 +568,10 @@ def compute_elementwise_output_logical_to_physical_perm(
             """
             Returns true if a is symbolically greater than or equal to b, assuming a >= 0, b >= 0.
             """
-            if guard_or_false(a == 0):
-                return False
-            elif guard_or_false(b == 0):
+            if guard_or_false(b == 0):
                 return True
+            elif guard_or_false(a == 0):
+                return False
             return guard_or_false(a >= b) or guard_or_false(a % b == 0)
 
         for tensor in tensors:
