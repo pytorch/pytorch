@@ -3852,7 +3852,7 @@ module_db: list[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=operator.itemgetter('training'),
+                       active_if=operator.itemgetter('training') and not _macos15_or_newer,
                        device_type='mps',
                    ),)
                ),
@@ -4040,13 +4040,6 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Hardshrink,
                module_inputs_func=module_inputs_torch_nn_Hardshrink,
-               skips=(
-                   # not supported on MPS backend
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_if_train_and_eval_modes_differ', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_save_load', device_type='mps'),),
                ),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
