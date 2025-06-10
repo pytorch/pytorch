@@ -78,7 +78,7 @@ jobs:
     steps:
       - name: Print runner OS/HW info
         run: |
-          sysctl machdep.cpu.brand_string kern.osproductversion; env
+          sysctl machdep.cpu.brand_string kern.osproductversion
 
       - name: Clean up leftover processes on MacOS pet runner
         continue-on-error: true
@@ -147,7 +147,7 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: .github/scripts/parse_ref.py; env
 
       - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conviniently
