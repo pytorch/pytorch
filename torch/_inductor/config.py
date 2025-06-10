@@ -1289,6 +1289,13 @@ class aot_inductor:
         "AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0"
     )  # type: ignore[assignment]
 
+    # Base directory for debug dumping intermediate tensor values
+    # intermediate tensors will be saved to <base_dir>/tmp/aoti_torch/<kernel_name> if debug_intermediate_value_printer is set to 1
+    # if this is not set, the base directory will be set to the current working directory
+    debug_intermediate_value_printer_dir = os.environ.get(
+        "AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_DIR", None
+    )
+
     # filtered nodes to be printed for debug values. Specify this option when debug_intermediate_value_printer is set to 2
     filtered_kernel_names = os.environ.get(
         "AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", None
