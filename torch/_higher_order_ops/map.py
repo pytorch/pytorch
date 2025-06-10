@@ -6,21 +6,18 @@ from typing_extensions import TypeVarTuple
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import _maybe_run_with_interpreter, reenter_make_fx
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
-from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
-)
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 from .utils import (
     _stack_pytree,
     _unstack_pytree,
     create_bw_fn,
+    first_slice_copy,
+    first_slice_copy_with_grad,
     materialize_as_graph,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -167,23 +164,21 @@ class MapAutogradOp(torch.autograd.Function):
             return bw_f(*bw_f_primals, *bw_f_tangents)
 
         def construct_args_single_step_bw():
-            example_xs = _unstack_pytree(fw_mapped_args)[0]
-            example_grads = _unstack_pytree(flat_grads)[0]
+            example_xs = first_slice_copy_with_grad(fw_mapped_args)
+            example_grads = [first_slice_copy(x) for x in flat_grads]
             return *example_xs, *example_grads, *pos_args
 
-        with suspend_functionalization(), disable_functional_mode():
-            with disable_proxy_modes_tracing():
-                args_single_step_bw = construct_args_single_step_bw()
+        args_single_step_bw = construct_args_single_step_bw()
 
-            # TODO: we need to materialize the bw graphs because dynamo is unable to
-            # trace through the joint funcion when torch.compile torch.autograd.grad.
-            fn_bw_gm = materialize_as_graph(
-                bw_f_wrapper,
-                args_single_step_bw,
-                ctx._fw_include_key_set,
-                ctx._fw_exclude_key_set,
-                force_enable_grad=True,
-            )
+        # TODO: we need to materialize the bw graphs because dynamo is unable to
+        # trace through the joint funcion when torch.compile torch.autograd.grad.
+        fn_bw_gm = materialize_as_graph(
+            bw_f_wrapper,
+            args_single_step_bw,
+            ctx._fw_include_key_set,
+            ctx._fw_exclude_key_set,
+            force_enable_grad=True,
+        )
 
         grads = map_impl(fn_bw_gm, fw_mapped_args + flat_grads, pos_args)
 

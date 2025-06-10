@@ -789,6 +789,16 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
 
 
+def first_slice_copy_with_grad(li: list[Any]) -> list[Any]:
+    # First_slice_copy does not keep the original requires_grad flag,
+    # but we need it for materialize_as_graph
+    # in order to compute the correct gradients
+    # The reason why first_slice_copy doesn't keep requires_grad flag is
+    # because it's called in torch.autograd.Function.backward/forward.
+    slc = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in li]
+    return slc
+
+
 # Reports the difference between meta of two tensors in a string
 def diff_tensor_meta(
     meta1: TensorMetadata, meta2: TensorMetadata, check_grad=True

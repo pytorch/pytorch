@@ -12,6 +12,7 @@ from torch._higher_order_ops.utils import (
     check_meta_consistency,
     create_bw_fn,
     first_slice_copy,
+    first_slice_copy_with_grad,
     materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
@@ -83,16 +84,6 @@ def mask_list(
         return [i if m else o for m, i, o in zip(mask, inp, other)]
     else:
         return [i for m, i in zip(mask, inp) if m]
-
-
-def first_slice_copy_with_grad(li: list[Any]) -> list[Any]:
-    # First_slice_copy does not keep the original requires_grad flag,
-    # but we need it for materialize_as_graph
-    # in order to compute the correct gradients
-    # The reason why first_slice_copy doesn't keep requires_grad flag is
-    # because it's called in torch.autograd.Function.backward/forward.
-    slc = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in li]
-    return slc
 
 
 def call_operator(operator, *args):
