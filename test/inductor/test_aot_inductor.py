@@ -54,7 +54,6 @@ from torch.testing._internal.custom_tensor import CustomTensorPlainOut
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import (
-    create_tensor_descriptor_shim,
     requires_gpu,
 )
 from torch.utils import _pytree as pytree
@@ -80,6 +79,7 @@ if HAS_GPU:
         add_kernel_with_tma_1d_old_api,
         add_kernel_with_tma_2d_new_api,
         add_kernel_with_tma_2d_old_api,
+        create_tensor_descriptor_shim
         mul2_inplace_kernel,
         strange_config_matmul_kernel,
         sub_kernel_autotuned,
