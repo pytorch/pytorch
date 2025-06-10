@@ -246,6 +246,15 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
       sizes_and_strides_.strides_arrayref());
 }
 
+bool TensorImpl::compute_def_channels_last_contiguous_3d() const {
+  if (is_sparse()) {
+    return false;
+  }
+  return _compute_def_channels_last_contiguous_3d<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
+}
+
 bool TensorImpl::compute_strides_like_channels_last_2d() const {
   if (is_sparse()) {
     return false;
@@ -316,6 +325,16 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
         this, memory_format);
   }
   return is_contiguous_default(memory_format);
+}
+
+bool TensorImpl::definitely_contiguous_fast_custom(
+    at::MemoryFormat memory_format) const {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+    // Do we need to call definitely_contiguous here.
+    return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
+        this, memory_format);
+  }
+  return definitely_contiguous_fast_default(memory_format);
 }
 
 bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
