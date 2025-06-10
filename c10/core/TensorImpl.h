@@ -827,7 +827,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_default(memory_format);
   }
 
-  // TODO do this
   bool definitely_contiguous_fast(
       at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
@@ -2608,8 +2607,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool compute_channels_last_contiguous_3d() const;
 
-  bool compute_def_channels_last_contiguous_3d() const;
-
   bool compute_strides_like_channels_last_2d() const;
 
   bool compute_strides_like_channels_last_3d() const;
@@ -2692,11 +2689,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool compute_channels_last_contiguous_3d_dim5() {
     return !is_channels_last_contiguous_ &&
         compute_channels_last_contiguous_3d();
-  }
-
-  bool compute_def_channels_last_contiguous_3d_dim5() {
-    return !is_channels_last_contiguous_ &&
-        compute_def_channels_last_contiguous_3d();
   }
 
   bool compute_channels_last_2d_dim5() {

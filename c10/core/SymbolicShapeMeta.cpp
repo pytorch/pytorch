@@ -92,7 +92,6 @@ SymBool SymbolicShapeMeta::compute_def_contiguous() const {
   }
   c10::SymIntArrayRef sizes(sizes_);
   c10::SymIntArrayRef strides(strides_);
-  // definitely_contiguous from Contiguity.h
   return _compute_def_contiguous(sizes, strides, numel());
 }
 

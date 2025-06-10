@@ -246,15 +246,6 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_def_channels_last_contiguous_3d() const {
-  if (is_sparse()) {
-    return false;
-  }
-  return _compute_def_channels_last_contiguous_3d<int64_t>(
-      sizes_and_strides_.sizes_arrayref(),
-      sizes_and_strides_.strides_arrayref());
-}
-
 bool TensorImpl::compute_strides_like_channels_last_2d() const {
   if (is_sparse()) {
     return false;
