@@ -775,6 +775,10 @@ class OpOverload(OperatorBase):
                 is_write = a.alias_info.is_write or is_write
         self.is_view = is_write is not None and not is_write
 
+        # Propagate annotations if available
+        opdef = torch.library._maybe_get_opdef(self._name)
+        self.__call__.__func__.__annotations__ = opdef._init_fn.__annotations__ if opdef is not None else {}
+
     @property
     def _namespace(self):
         return self._schema.name.split("::")[0]

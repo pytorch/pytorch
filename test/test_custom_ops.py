@@ -4171,6 +4171,24 @@ Please use `add.register_fake` to add an fake impl.""",
             )
         )
 
+    def test_annotation_propagation(self):
+        # Define a function with specific annotations
+        @torch.library.custom_op("test_ns::annotated_func", mutates_args=())
+        def annotated_func(
+            x: Tensor,
+            y: int,
+        ) -> Tensor:
+            # Simple implementation that returns a tensor
+            return x + y
+
+        # Get the operator annotations
+        init_annotation = annotated_func._init_fn.__annotations__
+        default_annotation = torch.ops.test_ns.annotated_func.default.__call__.__annotations__
+
+        self.assertEqual(
+            init_annotation,
+            default_annotation
+        )
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"
