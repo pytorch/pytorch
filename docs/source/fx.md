@@ -682,7 +682,7 @@ We may also have good luck by editing the `print_tabular` method to print
 different attributes of the Nodes in the Graph. (For example, we might
 want to see the Node’s `input_nodes` and `users`.)
 
-(Available Debuggers)=
+(Available-Debuggers)=
 
 #### Available Debuggers
 
