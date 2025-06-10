@@ -15,6 +15,12 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_set_arg(
     unsigned idx,
     AtenTensorHandle tensor);
 
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_set_arg_int(
+    AOTIMetalKernelFunctionHandle func,
+    unsigned idx,
+    int64_t val);
+
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_mps_malloc(void** buffer, size_t num_bytes);
 

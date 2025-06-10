@@ -1,5 +1,7 @@
 from typing import Any, Optional
 
+import sympy
+import torch
 from ..ir import GraphPartitionSignature
 from ..virtualized import V
 from .cpp_wrapper_gpu import CppWrapperGpu
@@ -20,6 +22,7 @@ class CppWrapperMps(CppWrapperGpu):
         self,
         kernel_name: str,
         call_args: list[str],
+        arg_types=None,
         **kwargs: dict[str, Any],
     ) -> None:
         """
@@ -37,10 +40,19 @@ class CppWrapperMps(CppWrapperGpu):
         ```
         """
         new_args = []
-        for idx, arg in enumerate(call_args[:-2]):
-            new_args.append(
-                f"aoti_torch_mps_set_arg({kernel_name}_handle, {idx}, {arg});\n"
-            )
+        for idx, (arg, arg_type) in enumerate(zip(call_args[:-2], arg_types[:-2])):
+            if isinstance(arg_type, torch.dtype):
+                new_args.append(
+                    f"aoti_torch_mps_set_arg({kernel_name}_handle, {idx}, {arg});\n"
+                )
+            elif arg_type in (int, sympy.core.symbol.Symbol):
+                new_args.append(
+                    f"aoti_torch_mps_set_arg_int({kernel_name}_handle, {idx}, {arg});\n"
+                )
+            else:
+                raise NotImplementedError(
+                    f"Unsupported arg type {arg_type} for arg {arg} for kernel {kernel_name}"
+                )
 
         threads, group_size = call_args[-2], call_args[-1]
         if threads is None:
