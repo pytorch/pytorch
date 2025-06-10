@@ -35,3 +35,5 @@ Memory management
      memory_stats_as_nested_dict
      reset_accumulated_memory_stats
      reset_peak_memory_stats
+
+.. py:module:: torch.accelerator.memory
