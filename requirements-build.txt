@@ -2,7 +2,7 @@
 setuptools>=70.1.0
 cmake>=3.27
 ninja
-numpy
+numpy==2.1.2
 packaging
 pyyaml
 requests

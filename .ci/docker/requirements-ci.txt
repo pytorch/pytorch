@@ -117,10 +117,10 @@ ninja==1.11.1.4
 #Pinned versions: 1.11.1.4
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
-numba==0.55.2 ; python_version == "3.10" and platform_machine != "s390x"
-numba==0.60.0 ; python_version == "3.12" and platform_machine != "s390x"
+numba==0.60.0 ; python_version == "3.9"
+numba==0.61.2 ; python_version > "3.9"
 #Description: Just-In-Time Compiler for Numerical Functions
-#Pinned versions: 0.55.2, 0.60.0
+#Pinned versions: 0.61.2, 0.60.0
 #test that import: test_numba_integration.py
 #Need release > 0.61.2 for s390x due to https://github.com/numba/numba/pull/10073
 
@@ -136,12 +136,10 @@ numba==0.60.0 ; python_version == "3.12" and platform_machine != "s390x"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==1.22.4; python_version == "3.10"
-numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
-numpy==2.1.2; python_version >= "3.13"
+numpy==2.0.2; python_version == "3.9"
+numpy==2.1.2; python_version >= "3.9"
 
-pandas==2.0.3; python_version < "3.13"
-pandas==2.2.3; python_version >= "3.13"
+pandas==2.2.3
 
 #onnxruntime
 #Description: scoring engine for Open Neural Network Exchange (ONNX) models
