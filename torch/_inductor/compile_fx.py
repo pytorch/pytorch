@@ -993,16 +993,15 @@ def _compile_fx_inner(
         mm_table_data = []
         for key, value in counters["aten_mm_info"].items():
             parts = key.split("_")
-            
             if len(parts) < 3:
                 # Unexpected format, show as-is
                 mm_table_data.append([key, "-", "?", "?", "?", value])
                 continue
-            
+
             # Determine if this is a batched operation by checking the operation name
             name = "_".join(parts[:-4]) if len(parts) >= 4 else "_".join(parts[:-3])
-            is_batched = name.endswith(('bmm', 'baddbmm'))
-            
+            is_batched = name.endswith(("bmm", "baddbmm"))
+
             if is_batched and len(parts) >= 4:
                 # Batched operation: last 4 parts are batch, m, n, k
                 batch, m, n, k = parts[-4:]
@@ -1013,7 +1012,7 @@ def _compile_fx_inner(
                 m, n, k = parts[-3:]
                 name = "_".join(parts[:-3])
                 mm_table_data.append([name, "-", m, n, k, value])
-                
+
         log.info("Overview info of inductor aten mms: ")
         log.info(
             "{:<30} | {:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(  # noqa: G001
