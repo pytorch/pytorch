@@ -762,7 +762,7 @@ which relies on the value of `x`, a function input. Since
 function), this is *dynamic control flow*. The traceback walks back up
 through your code to show you where this situation happens.
 
-## Static Control Flow
+### Static Control Flow
 
 On the other hand, so-called *static control flow* is supported. Static
 control flow is loops or `if` statements whose value cannot change
