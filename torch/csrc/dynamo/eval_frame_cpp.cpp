@@ -202,7 +202,7 @@ PyObject* dynamo__custom_eval_frame(
     // False means force compilation (someone cache missed)
     py::object res = guard_complete_hook_handle(maybe_cached_code != nullptr);
     if (!py::cast<bool>(res)) {
-      maybe_cached_code = Py_None;  // NB: non-owning
+      maybe_cached_code = Py_None; // NB: non-owning
     }
   }
 
