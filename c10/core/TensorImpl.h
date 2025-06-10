@@ -832,32 +832,23 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
       return is_contiguous_custom(memory_format);
     }
-    return is_contiguous_default(memory_format, true);
+    return is_contiguous_default(memory_format);
   }
 
   // These are factored into separate functions in case subclasses
   // want to use them
-  bool is_contiguous_default(
-      at::MemoryFormat memory_format,
-      bool false_if_dde = false) const {
-    // if false_if_dde is true, return false at data dependent errors.
-    auto get_reults = [&](auto& expression) {
-      if (false_if_dde) {
-        return expression.guard_or_false(__FILE__, __LINE__);
-
-      } else {
-        return expression.guard_bool(__FILE__, __LINE__);
-      }
-    };
-
+  bool is_contiguous_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return get_reults(symbolic_shape_meta().is_channels_last_contiguous());
+        return symbolic_shape_meta().is_channels_last_contiguous().guard_bool(
+            __FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return get_reults(
-            symbolic_shape_meta().is_channels_last_3d_contiguous());
+        return symbolic_shape_meta()
+            .is_channels_last_3d_contiguous()
+            .guard_bool(__FILE__, __LINE__);
       }
-      return get_reults(symbolic_shape_meta().is_contiguous());
+      return symbolic_shape_meta().is_contiguous().guard_bool(
+          __FILE__, __LINE__);
     }
 
     if (memory_format == at::MemoryFormat::ChannelsLast) {
