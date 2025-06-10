@@ -611,7 +611,7 @@ WriteBpropResultsVectorized(
     if (threadIdx.x >= shift) {
       gradInput[offset] = epilogue(gradOutput[offset], output[offset]);
     }
-    size -= blockDim.x;
+    size -= blockDim.x > size ? size : blockDim.x;
     gradInput += blockDim.x;
     output += blockDim.x;
     gradOutput += blockDim.x;
