@@ -7,6 +7,10 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 
+extern "C" {
+extern PyObject* guard_complete_hook;
+}
+
 static constexpr const char* cache_lookup_profiler_str =
     "TorchDynamo Cache Lookup";
 
@@ -197,7 +201,18 @@ PyObject* dynamo__custom_eval_frame(
     // guard eval failed, keep propagating
     fail();
     return eval_result;
-  } else if (maybe_cached_code != Py_None) {
+  }
+
+  if (guard_complete_hook != nullptr) {
+    py::handle guard_complete_hook_handle(guard_complete_hook);
+    // False means force compilation (someone cache missed)
+    py::object res = guard_complete_hook_handle(maybe_cached_code != Py_None);
+    if (!py::cast<bool>(res)) {
+      maybe_cached_code = Py_None; // NB: non-owning
+    }
+  }
+
+  if (maybe_cached_code != Py_None) {
     cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
