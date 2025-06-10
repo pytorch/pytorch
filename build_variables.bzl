@@ -495,7 +495,7 @@ libtorch_core_sources = sorted(
 libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Backend.cpp",
     "torch/csrc/distributed/c10d/Backoff.cpp",
-    "torch/csrc/distributed/c10d/DMAConnectivity.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/control_collectives/StoreCollectives.cpp",
     "torch/csrc/distributed/c10d/FlightRecorder.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
@@ -510,7 +510,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/ProcessGroupMPI.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupWrapper.cpp",
     "torch/csrc/distributed/c10d/Store.cpp",
-    "torch/csrc/distributed/c10d/SymmetricMemory.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.cpp",
     "torch/csrc/distributed/c10d/TCPStore.cpp",
     "torch/csrc/distributed/c10d/TCPStoreBackend.cpp",
     "torch/csrc/distributed/c10d/TCPStoreLibUvBackend.cpp",
@@ -695,7 +695,7 @@ libtorch_cuda_distributed_base_sources = [
 
 # These files are only supported on Linux (and others) but not on Windows.
 libtorch_cuda_distributed_extra_sources = [
-    "torch/csrc/distributed/c10d/CudaDMAConnectivity.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/CudaDMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
     "torch/csrc/distributed/c10d/FlightRecorderCuda.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
@@ -703,11 +703,11 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
     "torch/csrc/distributed/c10d/UCCTracing.cpp",
     "torch/csrc/distributed/c10d/UCCUtils.cpp",
-    "torch/csrc/distributed/c10d/intra_node_comm.cpp",
-    "torch/csrc/distributed/c10d/intra_node_comm.cu",
-    "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
-    "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
-    "torch/csrc/distributed/c10d/CUDASymmetricMemoryUtils.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
+    "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu",
+    "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu",
+    "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
     "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
     "torch/csrc/distributed/c10d/cuda/utils.cpp",
     "torch/csrc/distributed/c10d/NanCheck.cu",

@@ -12,7 +12,7 @@
 #include <hip/hip_runtime_api.h>
 #endif
 
-#include <torch/csrc/distributed/c10d/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 

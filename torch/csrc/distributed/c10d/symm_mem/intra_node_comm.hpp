@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
-#include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
 namespace c10d::intra_node_comm {
