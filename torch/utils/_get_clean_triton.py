@@ -1,4 +1,5 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
 import argparse
 import os
 import re
@@ -113,7 +114,7 @@ def process_file(input_filename: str, output_filename: str) -> str:
 
 def get_clean_triton(
     input_path: Path, output_path: Path = Path("triton_only_repro.py")
-):
+) -> str:
     """Run experiments and output results to file
 
     Args:
