@@ -235,8 +235,7 @@ test_torchbench_smoketest() {
   local device=mps
   local dtypes=(undefined float16 bfloat16 notset)
   local dtype=${dtypes[$1]}
-  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152 sam pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo doctr_det_predictor doctr_reco_predictor)
-  local hf_models=(GoogleFnet YituTechConvBert Speech2Text2ForCausalLM)
+  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152 sam sam_fast pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo doctr_det_predictor doctr_reco_predictor timm_resnet timm_vovnet vgg16)
 
   for backend in eager inductor; do
 
@@ -256,16 +255,14 @@ test_torchbench_smoketest() {
           --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_accuracy.csv" || true
       fi
     done
-    for model in "${hf_models[@]}"; do
-      if [ "$backend" == "inductor" ]; then
-        PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
-          --performance --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
-          --output "$TEST_REPORTS_DIR/inductor_${backend}_huggingface_${dtype}_inference_${device}_performance.csv" || true
-        PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
-          --accuracy --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
-          --output "$TEST_REPORTS_DIR/inductor_${backend}_huggingface_${dtype}_inference_${device}_accuracy.csv" || true
-      fi
-    done
+    if [ "$backend" == "inductor" ]; then
+      PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
+        --performance --backend "$backend" --inference --devices "$device" "$dtype_arg" \
+        --output "$TEST_REPORTS_DIR/inductor_${backend}_huggingface_${dtype}_inference_${device}_performance.csv" || true
+      PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
+        --accuracy --backend "$backend" --inference --devices "$device" "$dtype_arg" \
+        --output "$TEST_REPORTS_DIR/inductor_${backend}_huggingface_${dtype}_inference_${device}_accuracy.csv" || true
+    fi
 
     if [ "$dtype" == notset ]; then
       for dtype_ in notset amp; do
