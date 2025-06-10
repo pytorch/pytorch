@@ -314,7 +314,7 @@ def can_reuse_whl(args: argparse.Namespace) -> bool:
         for x in [
             "refs/heads/release",
             "refs/tags/v",
-            "refs/heads/nightly"
+            "refs/heads/nightly",
         ]
     ):
         print("Release branch, rebuild whl")
