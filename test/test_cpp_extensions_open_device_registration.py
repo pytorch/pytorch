@@ -1,16 +1,15 @@
 # Owner(s): ["module: cpp-extensions"]
 
 import _codecs
-import importlib
 import io
 import os
 import sys
 import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import pytorch_openreg  # noqa: F401
 
 import torch
 import torch.testing._internal.common_utils as common
@@ -61,21 +60,18 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # load custom device extension
-        extension_root = Path(__file__).parent.parent
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
             sources=[
-                f"{extension_root}/custom_device/csrc/extension.cpp",
+                "cpp_extensions/open_registration_extension.cpp",
             ],
-            extra_include_paths=[],
+            extra_include_paths=["cpp_extensions"],
             extra_cflags=["-g"],
             verbose=True,
         )
 
-        # install / load pytorch_openreg extension
-        common.install_cpp_extension(extension_root=extension_root)
-        globals()["pytorch_openreg"] = importlib.import_module("pytorch_openreg")
         torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
 
     def test_base_device_registration(self):
