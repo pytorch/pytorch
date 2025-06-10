@@ -68,6 +68,22 @@ function install_126 {
   ldconfig
 }
 
+function install_129 {
+  CUDNN_VERSION=9.10.1.4
+  echo "Installing CUDA 12.9.1 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.7.1"
+  # install CUDA 12.9.1 in the same container
+  install_cuda 12.9.1 cuda_12.9.1_575.57.08_linux
+
+  # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
+  install_cudnn 12 $CUDNN_VERSION
+
+  CUDA_VERSION=12.9 bash install_nccl.sh
+
+  CUDA_VERSION=12.9 bash install_cusparselt.sh
+
+  ldconfig
+}
+
 function prune_118 {
     echo "Pruning CUDA 11.8 and cuDNN"
     #####################################################################################
@@ -158,6 +174,8 @@ do
     12.6|12.6.*) install_126; prune_126
         ;;
     12.8|12.8.*) install_128;
+        ;;
+    12.9|12.9.*) install_129;
         ;;
     *) echo "bad argument $1"; exit 1
         ;;
