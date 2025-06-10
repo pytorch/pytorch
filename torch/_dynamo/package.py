@@ -141,7 +141,7 @@ class _CompilePackage:
         updates with compiled functions and resume functions.
     """
 
-    def __init__(self, fn, dynamo: Optional[_DynamoCacheEntry] = None) -> None:
+    def __init__(self, fn: Any, dynamo: Optional[_DynamoCacheEntry] = None) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
@@ -154,7 +154,7 @@ class _CompilePackage:
         self._initialize(fn, dynamo)
         self.validate()
 
-    def _initialize(self, fn, dynamo: Optional[_DynamoCacheEntry] = None) -> None:
+    def _initialize(self, fn: Any, dynamo: Optional[_DynamoCacheEntry] = None) -> None:
         from .eval_frame import innermost_fn
 
         self._innermost_fn = innermost_fn(fn)
@@ -203,7 +203,7 @@ class _CompilePackage:
             code.function_names.append(name)
 
     @property
-    def cached_backends(self) -> list[Any]:
+    def cached_backends(self) -> dict[_BackendId, Any]:
         return self._cached_backends
 
     @functools.cached_property
@@ -248,6 +248,7 @@ class _CompilePackage:
         )
 
     def add_import_source(self, alias: str, module_name: str) -> None:
+        assert self._current_entry is not None
         self._current_entry.import_sources[alias] = module_name
 
     def add_backend_id(self, backend_id: str, backend: Optional[Any] = None) -> None:
