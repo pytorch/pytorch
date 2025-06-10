@@ -26,7 +26,6 @@ class TestPythonTracer(TestCase):
             sorted(names, key=get_key)
 
         with TemporaryFileName(mode="w+") as fname:
-            print(fname)
             prof.export_chrome_trace(fname)
             with open(fname) as f:
                 events = json.load(f)["traceEvents"]
@@ -35,7 +34,6 @@ class TestPythonTracer(TestCase):
                     for event in events:
                         if event.get("cat", "") == "python_function" and event.get("name", "") == "<built-in function sorted>":
                             duration = event.get("dur", 0)
-                            print(duration)
                             if (duration >= 2000000):
                                 found = True
                                 break
