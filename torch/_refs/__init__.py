@@ -2976,6 +2976,7 @@ def contiguous(
         lambda: "preserve memory format is unsupported by the contiguous operator",
     )
 
+    # TODO: make logic consistent with aten contiguous
     if definitely_contiguous_for_memory_format(a, memory_format=memory_format):
         return a
 
