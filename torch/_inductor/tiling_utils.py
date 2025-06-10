@@ -4,7 +4,7 @@ import itertools
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Iterator
-from typing import Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Callable, Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -13,6 +13,7 @@ from torch._inductor import config
 from torch._inductor.dependencies import index_vars_no_squeeze
 from torch._inductor.utils import sympy_product, sympy_subs
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Identity
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
@@ -24,6 +25,8 @@ U = TypeVar("U")
 
 
 Split = tuple[sympy.Expr, ...]
+VarsAndRanges = tuple[list[sympy.Symbol], list[sympy.Expr]]
+
 
 loop_tiling_log = torch._logging.getArtifactLogger(__name__, "loop_tiling")
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
@@ -171,7 +174,11 @@ def find_coalesced_var(
             loop_tiling_log.info("zero division error %s %s", index, variables)
             continue
         if new_val - zero_index == 1:
-            return v
+            variables[v] = 2
+            # in some more complex expressions, 0->1 will be coalesced,
+            # but not 1->2
+            if (sympy_subs(index, variables) - new_val) == 1:
+                return v
         variables[v] = 0
 
     return None
@@ -190,9 +197,30 @@ class FusedNormalizedReadsWrites:
     var_ranges: dict[sympy.Symbol, int]
 
 
+@overload
 def get_pw_red_splits(
-    n: "SchedulerNode", pointwise_numel: sympy.Expr, red_numel: sympy.Expr
-) -> tuple[tuple[list[sympy.Symbol], list[int]], tuple[list[sympy.Symbol], list[int]]]:
+    n: "SchedulerNode",
+    pointwise_numel: sympy.Expr,
+    red_numel: sympy.Expr,
+    none_if_not_divisible: Literal[True],
+) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]: ...
+
+
+@overload
+def get_pw_red_splits(
+    n: "SchedulerNode",
+    pointwise_numel: sympy.Expr,
+    red_numel: sympy.Expr,
+    none_if_not_divisible: Literal[False] = False,
+) -> tuple[VarsAndRanges, VarsAndRanges]: ...
+
+
+def get_pw_red_splits(
+    n: "SchedulerNode",
+    pointwise_numel: sympy.Expr,
+    red_numel: sympy.Expr,
+    none_if_not_divisible: bool = False,
+) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]:
     if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
         return (
             (n._body.iter_vars, n._body.sizes[0]),
@@ -206,6 +234,7 @@ def get_pw_red_splits(
         prod *= n._body.sizes[0][i]
         if prod == red_numel:
             break
+        i -= 1
 
     if i >= 0:
         pw_splits = n._body.sizes[0][0:i]
@@ -215,10 +244,13 @@ def get_pw_red_splits(
         red_vars = n._body.iter_vars[i:]
         return (iter_vars, pw_splits), (red_vars, red_splits)  # type: ignore[return-value]
 
-    # TODO - handle, not sure if possible
-    raise RuntimeError(
-        f"Unhandled node: size: {n._body.sizes}, pw: {pointwise_numel}, red: {red_numel}"
-    )
+    if none_if_not_divisible:
+        return None
+    else:
+        return (
+            (n._body.iter_vars, n._body.sizes[0]),
+            (n._body.reduce_vars, n._body.sizes[1]),
+        )  # type: ignore[return-value]
 
 
 class NodeSplitGetter:
@@ -244,9 +276,17 @@ class NodeSplitGetter:
             if not isinstance(n, torch._inductor.scheduler.SchedulerNode):
                 continue
 
-            (_, n_pw_splits), (_, n_red_splits) = get_pw_red_splits(
-                n, self.pointwise_numel, self.red_numel
+            # if we can't split the pw ranges into a (pw, red) split,
+            # dont add as a split option, but do make sure we check that this size
+            # is splittable
+            maybe_splits = get_pw_red_splits(
+                n, self.pointwise_numel, self.red_numel, none_if_not_divisible=True
             )
+            if maybe_splits is None:
+                self.all_node_sizes.add(n._body.sizes)
+                continue
+
+            (_, n_pw_splits), (_, n_red_splits) = maybe_splits
 
             # fill in reduction size
             n_pw_splits, n_red_splits = (
@@ -416,19 +456,34 @@ def apply_var_mapping(
 
 def extract_normalized_read_writes(
     node: Union["FusedSchedulerNode", "SchedulerNode"],
-) -> FusedNormalizedReadsWrites:
+) -> Optional[FusedNormalizedReadsWrites]:
     """Extracts index variables, reduce variables, read/write expressions, and variable ranges from a fused node."""
     reads: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
     writes: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
 
     all_output_names = node.get_buffer_names()
     op_names = node.get_operation_names()
-    outputs = OrderedSet(
-        buf
-        for buf in all_output_names
-        if not V.graph.scheduler.can_buffer_be_removed_through_fusion(buf, op_names)
+    outputs: OrderedSet[str] = OrderedSet()
+    removed_buffers: OrderedSet[str] = OrderedSet()
+    for buf_name in all_output_names:
+        if V.graph.scheduler.can_buffer_be_removed_through_fusion(buf_name, op_names):
+            removed_buffers.add(buf_name)
+        else:
+            outputs.add(buf_name)
+
+    inputs = OrderedSet(
+        dep.name for dep in node.read_writes.reads if dep.name not in removed_buffers
     )
-    inputs = OrderedSet(dep.name for dep in node.read_writes.reads)
+
+    pointwise_numel: sympy.Expr = node.group[1][0]
+    red_numel: sympy.Expr = node.group[1][1]
+
+    # TODO - a few dynamic shapes issues to resolve
+    if any(
+        (isinstance(var, sympy.Expr) and not var.is_constant())
+        for var in (pointwise_numel, red_numel)
+    ):
+        return None
 
     pw_splits, red_splits = NodeSplitGetter(node).get_node_splits()
 
@@ -437,20 +492,27 @@ def extract_normalized_read_writes(
         pw_splits, red_splits, prefix="n"
     )
     node = node
-    pointwise_numel: sympy.Expr = node.group[1][0]
-    red_numel: sympy.Expr = node.group[1][1]
 
     for n in list(node.get_nodes()):
         if not isinstance(n, torch._inductor.scheduler.SchedulerNode):
             continue
 
         body = n._body
+
+        # TODO - not handled well. indirect loads will not be coalesced,
+        # need to account for that in analysis.
+        if body.indirect_vars:
+            return None
+
         n_reads: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
         n_writes: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
 
+        # TODO - will the names for all the inputs/outputs accurately
+        # reflect mutation, or do I need to remap with mutation_real_name
         for inp in inputs:
             for expr in body.get_all_read_expr(inp):
                 n_reads[expr].add(inp)
+
         for out in outputs:
             for expr in body.get_all_write_expr(out):
                 n_writes[expr].add(out)
@@ -483,8 +545,18 @@ def extract_normalized_read_writes(
             return_getters_groups,
         )
 
-        n_reads_new = {sympy_subs(read, var_map): v for read, v in n_reads.items()}
-        n_writes_new = {sympy_subs(write, var_map): v for write, v in n_writes.items()}
+        # We create Identity sympy.Functions to prevent expansion to int64,
+        # unwrap for tiling analysis.
+        def remove_identity(expr: sympy.Expr) -> sympy.Expr:
+            return expr.replace(Identity, lambda x: x)
+
+        n_reads_new = {
+            sympy_subs(remove_identity(read), var_map): v for read, v in n_reads.items()
+        }
+        n_writes_new = {
+            sympy_subs(remove_identity(write), var_map): v
+            for write, v in n_writes.items()
+        }
 
         for expr, buf_names in n_reads_new.items():
             reads[expr] |= buf_names
@@ -549,6 +621,9 @@ class VarTiling:
 
 @dataclasses.dataclass(frozen=True)
 class CoalesceVarAnalysis:
+    # Var -> Memory Score - not strictly the amount of memory
+    # because we multiply writes x2
+    # TODO: separate into dataclass that olds mem, dtype, is_write
     coalesced_by_var: dict[sympy.Expr, int]
 
     norm_read_writes: FusedNormalizedReadsWrites
@@ -558,7 +633,7 @@ class CoalesceVarAnalysis:
 
 def analyze_memory_coalescing(
     fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
-) -> CoalesceVarAnalysis:
+) -> Optional[CoalesceVarAnalysis]:
     """
     Find variables that coalesce the reads and writes and score the total size.
 
@@ -574,6 +649,9 @@ def analyze_memory_coalescing(
 
     norm_read_writes = extract_normalized_read_writes(fused_node)
 
+    if norm_read_writes is None:
+        return None
+
     reads = norm_read_writes.reads
     writes = norm_read_writes.writes
     var_ranges = norm_read_writes.var_ranges
@@ -581,17 +659,31 @@ def analyze_memory_coalescing(
     coalesced_by_var: dict[sympy.Symbol, int] = Counter()
     uncoalesced_addrs: dict[sympy.Expr, int] = Counter()
 
-    for memory_expr, buf_names in itertools.chain(reads.items(), writes.items()):
+    for is_read, (memory_expr, buf_names) in itertools.chain(
+        ((True, item) for item in reads.items()),
+        ((False, item) for item in writes.items()),
+    ):
+        # skip memory deps with indirect vars - todo: better handling
+        indirect_expr = bool(
+            memory_expr.free_symbols - norm_read_writes.var_ranges.keys()
+        )
+
+        if indirect_expr:
+            continue
+
         size = get_score(memory_expr, var_ranges)
-        # TODO - handle indirect
         if size == 0:
             continue
 
         maybe_coalesced_var = find_coalesced_var(memory_expr, var_ranges)
+
         byte_multipler = 0
         for buf_name in buf_names:
             if buf := V.graph.try_get_buffer(buf_name):
                 byte_multipler += buf.dtype.itemsize
+
+        # coalesced writes more important
+        byte_multipler *= 1 if is_read else 2
 
         if maybe_coalesced_var:
             coalesced_by_var[maybe_coalesced_var] += size * byte_multipler
