@@ -402,25 +402,25 @@ kernel void round_decimals_strided(
       rint(exp10(float(ndigits)) * input[input_offs]) * exp10(float(-ndigits)));
 }
 
-#define INSTANTIATE_ROUND_DECIMALS(DTYPE)                                    \
-  template                                                                   \
-      [[host_name("round_decimals_dense_" #DTYPE "_" #DTYPE)]] kernel void   \
-      round_decimals_dense(                                                  \
-          device DTYPE* output [[buffer(0)]],                                \
-          constant DTYPE* input [[buffer(1)]],                               \
-          constant long& ndigits [[buffer(2)]],                              \
-          uint index [[thread_position_in_grid]]);                           \
-  template                                                                   \
-      [[host_name("round_decimals_strided_" #DTYPE "_" #DTYPE)]] kernel void \
-      round_decimals_strided(                                                \
-          device DTYPE* output [[buffer(0)]],                                \
-          constant DTYPE* input [[buffer(1)]],                               \
-          constant long* sizes,                                              \
-          constant long* input_strides,                                      \
-          constant long* output_strides,                                     \
-          constant uint& ndim,                                               \
-          constant long& ndigits [[buffer(6)]],                              \
-          uint index)
+#define INSTANTIATE_ROUND_DECIMALS(DTYPE)                          \
+  template [[host_name("round_decimals_dense_" #DTYPE "_" #DTYPE   \
+                       "_long")]] kernel void                      \
+  round_decimals_dense(                                            \
+      device DTYPE* output [[buffer(0)]],                          \
+      constant DTYPE* input [[buffer(1)]],                         \
+      constant long& ndigits [[buffer(2)]],                        \
+      uint index [[thread_position_in_grid]]);                     \
+  template [[host_name("round_decimals_strided_" #DTYPE "_" #DTYPE \
+                       "_long")]] kernel void                      \
+  round_decimals_strided(                                          \
+      device DTYPE* output [[buffer(0)]],                          \
+      constant DTYPE* input [[buffer(1)]],                         \
+      constant long* sizes,                                        \
+      constant long* input_strides,                                \
+      constant long* output_strides,                               \
+      constant uint& ndim,                                         \
+      constant long& ndigits [[buffer(6)]],                        \
+      uint index)
 
 INSTANTIATE_ROUND_DECIMALS(float);
 INSTANTIATE_ROUND_DECIMALS(half);
