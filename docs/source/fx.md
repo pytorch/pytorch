@@ -567,7 +567,7 @@ your code and examine it from there.
     pre_trace = M()
     post_trace = SubclassM()
 ```
-## Use the `to_folder` Function From `GraphModule`
+#### Use the `to_folder` Function From `GraphModule`
 {meth}`GraphModule.to_folder` is a method in `GraphModule` that allows
 you to dump out the generated FX code to a folder. Although copying the
 forward pass into the code often suffices as in {ref}`Print the Generated Code`,
