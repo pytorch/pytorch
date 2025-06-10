@@ -69,8 +69,6 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
-    outputs:
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
     defaults:
       run:
         shell: bash
@@ -98,7 +96,7 @@ jobs:
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"        
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
 
       - name: Parse ref
         id: parse-ref

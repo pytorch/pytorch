@@ -81,17 +81,9 @@ jobs:
           python pytorch/.github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set Test step time
-        id: test-timeout
-        shell: bash
-        env:
-          JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
-        run: |
-          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"       
       
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v4.1.7  
+        uses: actions/download-artifact@v4.1.7
         with:
           name: ${{ inputs.build-environment }}
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
