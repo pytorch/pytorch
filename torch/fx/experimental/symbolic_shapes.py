@@ -5431,7 +5431,9 @@ class ShapeEnv:
                         source, constraint
                     )
                     user_stack = self.user_specialization_stacks.get(source, None)
-                    framework_stack = self.framework_specialization_stacks.get(source, None)
+                    framework_stack = self.framework_specialization_stacks.get(
+                        source, None
+                    )
                     msg = (
                         f"You marked {self._debug_name(source)} as dynamic but your code "
                         f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
@@ -6664,7 +6666,9 @@ class ShapeEnv:
             for source in self.var_to_sources.get(a, []):
                 if user_tb:
                     self.user_specialization_stacks[source] = user_tb
-                self.framework_specialization_stacks[source] = CapturedTraceback.extract(cpp=True)
+                self.framework_specialization_stacks[
+                    source
+                ] = CapturedTraceback.extract(cpp=True)
 
             if config.print_specializations:
                 self.log.warning(
