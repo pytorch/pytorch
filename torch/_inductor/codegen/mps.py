@@ -867,9 +867,17 @@ class MetalKernel(SIMDKernel):
         for v in self.args.sizevars.keys():
             wrapper.ensure_size_computed(v)
 
+        _, call_args, _, arg_types = self.args.python_argdefs()
+        arg_name_to_type = {
+            str(call_arg): arg_type for call_arg, arg_type in zip(call_args, arg_types)
+        }
+
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
         args += [str(v) for v in self.args.sizevars.keys()]
+
+        arg_types = [arg_name_to_type[arg] for arg in args]
+
         # For reduction kernels, limit the maximum size over reduction dimentions to
         # a maximum threadgroup size
         if len(self.active_range_trees()) > 0:
@@ -883,7 +891,13 @@ class MetalKernel(SIMDKernel):
             ]
 
             if V.graph.cpp_wrapper:
-                args.append(f"{{{', '.join(threads)}}}")
+                threads = [f"static_cast<uint64_t>({t})" for t in threads]
+                if len(threads) == 1:
+                    args.append(threads[0])
+                    arg_types.append(int)
+                else:
+                    args.append(f"{{{', '.join(threads)}}}")
+                    arg_types.append(list)
             else:
                 args.append(f"threads=[{', '.join(threads)}]")
         else:
@@ -898,7 +912,13 @@ class MetalKernel(SIMDKernel):
                 for v in self.active_range_trees()
             ]
             if V.graph.cpp_wrapper:
-                args.append(f"{{{', '.join(threads)}}}")
+                threads = [f"static_cast<uint64_t>({t})" for t in threads]
+                if len(threads) == 1:
+                    args.append(threads[0])
+                    arg_types.append(int)
+                else:
+                    args.append(f"{{{', '.join(threads)}}}")
+                    arg_types.append(list)
             else:
                 args.append(f"group_size=[{', '.join(threads)}]")
         else:
@@ -906,12 +926,14 @@ class MetalKernel(SIMDKernel):
                 # Add a None so that we always have a group_size in the
                 # arguments. We won't use it if the value is None.
                 args += [None]  # type: ignore[list-item]
+                arg_types.append(None)
 
         wrapper.generate_kernel_call(
             name,
             args,
             device=torch.device("cpu"),  # TODO: Fix me, MPS does not expose streams now
             triton=False,
+            arg_types=arg_types,
         )
 
     def check_bounds(

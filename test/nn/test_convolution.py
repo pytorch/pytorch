@@ -1863,10 +1863,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, y.grad)
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(
-        torch.float, torch.cfloat
-    )  # Double, complex double not supported on MPS
-    @expectedFailureMPS  # https://github.com/pytorch/pytorch/issues/107214
+    @skipMPS  # https://github.com/pytorch/pytorch/issues/107214
     def test_conv3d_same_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != "xla"
 
