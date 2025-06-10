@@ -62,7 +62,7 @@ The address b7f064c000000_0 refers to the (b)lock at address 7f064c000000 which 
 This unique string can be looked up in the Active Memory Timeline and searched
 in the Active State History to examine the memory state when a tensor was allocated or freed.
 
-(_non_pytorch_alloc)=
+(non_pytorch_alloc)=
 ## Identifying Non-PyTorch allocations
 
 If you suspect CUDA memory is being allocated outside of PyTorch, you can collect the raw CUDA allocation info using
