@@ -312,6 +312,14 @@ float erfc(T x) {
   return 1.0 - erf(x);
 }
 
+struct round_decimals_functor {
+  template <typename T>
+  inline T operator()(const T x, const long ndigits) {
+    return static_cast<T>(
+        rint(exp10(float(ndigits)) * x) * exp10(float(-ndigits)));
+  }
+};
+
 DEFINE_UNARY_FLOATING_FUNCTOR(erf);
 DEFINE_UNARY_FLOATING_FUNCTOR(erfc);
 DEFINE_UNARY_FLOATING_FUNCTOR(erfinv);
@@ -395,56 +403,8 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
 INSTANTIATE_UNARY_KERNELS_VEC2(half);
 INSTANTIATE_UNARY_KERNELS_VEC2(float);
 
-template <typename T>
-kernel void round_decimals_dense(
-    device T* output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant long& ndigits [[buffer(2)]],
-    uint index [[thread_position_in_grid]]) {
-  output[index] = static_cast<T>(
-      rint(exp10(float(ndigits)) * input[index]) * exp10(float(-ndigits)));
-}
-
-template <typename T>
-kernel void round_decimals_strided(
-    device T* output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant long* sizes [[buffer(2)]],
-    constant long* input_strides [[buffer(3)]],
-    constant long* output_strides [[buffer(4)]],
-    constant uint& ndim [[buffer(5)]],
-    constant long& ndigits [[buffer(6)]],
-    uint index [[thread_position_in_grid]]) {
-  int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
-  output[output_offs] = static_cast<T>(
-      rint(exp10(float(ndigits)) * input[input_offs]) * exp10(float(-ndigits)));
-}
-
-#define INSTANTIATE_ROUND_DECIMALS(DTYPE)                          \
-  template [[host_name("round_decimals_dense_" #DTYPE "_" #DTYPE   \
-                       "_long")]] kernel void                      \
-  round_decimals_dense(                                            \
-      device DTYPE* output [[buffer(0)]],                          \
-      constant DTYPE* input [[buffer(1)]],                         \
-      constant long& ndigits [[buffer(2)]],                        \
-      uint index [[thread_position_in_grid]]);                     \
-  template [[host_name("round_decimals_strided_" #DTYPE "_" #DTYPE \
-                       "_long")]] kernel void                      \
-  round_decimals_strided(                                          \
-      device DTYPE* output [[buffer(0)]],                          \
-      constant DTYPE* input [[buffer(1)]],                         \
-      constant long* sizes,                                        \
-      constant long* input_strides,                                \
-      constant long* output_strides,                               \
-      constant uint& ndim,                                         \
-      constant long& ndigits [[buffer(6)]],                        \
-      uint index)
-
-INSTANTIATE_ROUND_DECIMALS(float);
-INSTANTIATE_ROUND_DECIMALS(half);
+REGISTER_UNARY_ALPHA_OP(round_decimals, float, long, float);
+REGISTER_UNARY_ALPHA_OP(round_decimals, half, long, half);
 #if __METAL_VERSION__ >= 310
-INSTANTIATE_ROUND_DECIMALS(bfloat);
+REGISTER_UNARY_ALPHA_OP(round_decimals, bfloat, long, bfloat);
 #endif
