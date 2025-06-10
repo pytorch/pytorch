@@ -147,7 +147,7 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   constexpr auto io_size = calc_io_size<func_t>();
 #if defined(USE_ROCM) && defined(__gfx942__)
   // Similar check in launch_vectorized_kernel() as well. Both should be in sync.
-  constexpr int tws = (io_size >= 2) ? 8 : 16;
+  constexpr int tws = 16;
 #else
   constexpr int tws = elems_per_thread<io_size>();
 #endif
@@ -220,7 +220,7 @@ static inline void launch_vectorized_kernel(
   // Similar check in vectorized_elementwise_kernel() as well. Both should be in sync.
   c10::DeviceIndex curDevice = -1;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&curDevice));
-  int tws = at::detail::getCUDAHooks().isGPUArch(curDevice, {"gfx942"}) ? ((io_size >= 2) ? 8 : 16) : elems_per_thread<io_size>();
+  int tws = at::detail::getCUDAHooks().isGPUArch(curDevice, {"gfx942"}) ? 16 : elems_per_thread<io_size>();
 #else
   int tws = elems_per_thread<io_size>();
 #endif
