@@ -605,7 +605,11 @@ class VariableBuilder:
 
     def _wrap(self, value):
         # import here to avoid circular dependencies
-        from torch.utils._triton import has_triton, has_triton_tma
+        from torch.utils._triton import (
+            has_triton,
+            has_triton_experimental_host_tma,
+            has_triton_tensor_descriptor_host_tma,
+        )
 
         from ..decorators import DynamoConfigPatchProxy
 
@@ -620,18 +624,26 @@ class VariableBuilder:
             class Autotuner:
                 pass
 
-        if has_triton_tma():
-            from triton.tools.experimental_descriptor import (
+        # default implementations, in case we don't have triton (or the wrong triton version)
+        def create_1d_tma_descriptor():
+            pass
+
+        def create_2d_tma_descriptor():
+            pass
+
+        class TensorDescriptor:
+            @staticmethod
+            def from_tensor():
+                pass
+
+        if has_triton_experimental_host_tma():
+            # TODO(triton) remove after triton 3.2 support is dropped
+            from triton.tools.experimental_descriptor import (  # noqa: F811
                 create_1d_tma_descriptor,
                 create_2d_tma_descriptor,
             )
-        else:
-
-            def create_1d_tma_descriptor():
-                pass
-
-            def create_2d_tma_descriptor():
-                pass
+        elif has_triton_tensor_descriptor_host_tma():
+            from triton.tools.tensor_descriptor import TensorDescriptor  # noqa: F811
 
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
@@ -1113,6 +1125,9 @@ class VariableBuilder:
             return CreateTMADescriptorVariable(rank=1)
         elif value is create_2d_tma_descriptor:
             return CreateTMADescriptorVariable(rank=2)
+        elif value is TensorDescriptor.from_tensor:
+            # TODO(Triton 3.4 / PyTorch 2.8): implement this
+            raise InternalTorchDynamoError("New TritonDescriptor API still WIP")
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(

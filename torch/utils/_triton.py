@@ -16,15 +16,20 @@ def has_triton_package() -> bool:
 
 
 @functools.lru_cache(None)
-def has_triton_tma():
-    if has_triton_package():
-        import torch
+def _device_supports_tma():
+    import torch
 
-        if (
-            torch.cuda.is_available()
-            and torch.cuda.get_device_capability() >= (9, 0)
-            and not torch.version.hip
-        ):
+    return (
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (9, 0)
+        and not torch.version.hip
+    )
+
+
+@functools.lru_cache(None)
+def has_triton_experimental_host_tma():
+    if has_triton_package():
+        if _device_supports_tma():
             try:
                 from triton.tools.experimental_descriptor import (  # noqa: F401
                     create_1d_tma_descriptor,
@@ -36,6 +41,27 @@ def has_triton_tma():
                 pass
 
     return False
+
+
+@functools.lru_cache(None)
+def has_triton_tensor_descriptor_host_tma():
+    if has_triton_package():
+        if _device_supports_tma():
+            try:
+                from triton.tools.tensor_descriptor import (  # noqa: F401
+                    TensorDescriptor,
+                )
+
+                return True
+            except ImportError:
+                pass
+
+    return False
+
+
+@functools.lru_cache(None)
+def has_triton_tma():
+    return has_triton_tensor_descriptor_host_tma() or has_triton_experimental_host_tma()
 
 
 @functools.lru_cache(None)
