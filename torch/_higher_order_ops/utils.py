@@ -281,21 +281,17 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
 
 
 def potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
-    if not isinstance(gm, torch.fx.GraphModule):
-        try:
-            gm = _maybe_fake_tracing(gm, inputs, pre_dispatch)
-        except UnsupportedAliasMutationException:
-            # this can happen when nested cond_op is
-            # functionalized
-            return True
-        except Exception as e:
-            raise e
+    try:
+        gm = _maybe_fake_tracing(gm, inputs, pre_dispatch)
+    except UnsupportedAliasMutationException:
+        # this can happen when nested cond_op is
+        # functionalized
+        return True
+    except Exception as e:
+        raise e
 
     example_inputs = [
-        ph.meta.get("val", None)
-        if "val" in ph.meta
-        else ph.meta.get("example_value", None)
-        for ph in gm.graph.find_nodes(op="placeholder")
+        ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
     ]
     (
         inp_inp_alias_map,
@@ -784,24 +780,6 @@ def check_input_alias_and_mutation(
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 
-def _maybe_unwrap_functional(arg: Any) -> Any:
-    if not isinstance(arg, torch.Tensor):
-        return arg
-
-    if isinstance(arg, FunctionalTensor):
-        from torch._functorch.aot_autograd import from_fun
-
-        torch._sync(arg)
-        return from_fun(arg)
-    elif torch._is_functional_tensor(arg):
-        torch._sync(arg)
-        return torch._from_functional_tensor(arg)
-    else:
-        if not isinstance(arg, FakeTensor):
-            raise RuntimeError(f"Unexpected tensor type {type(arg)}")
-        return arg
-
-
 def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
     fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
@@ -885,36 +863,26 @@ def check_input_alias_and_mutation_return_outputs(
                 )
 
             # create new fake tensors in new fake mode to avoid mutating original tensors
-            with suspend_functionalization(), disable_functional_mode():
-                cloned = [
-                    torch.empty_strided(
-                        arg.size(),
-                        arg.stride(),
-                        dtype=arg.dtype,
-                        device=arg.device,
-                        requires_grad=arg.requires_grad,
-                        layout=arg.layout,
-                    ).detach()
-                    if isinstance(arg, torch.Tensor)
-                    else arg
-                    for arg in fake_args
-                ]
-                cloned = pytree.tree_map(_maybe_unwrap_functional, cloned)
-                before = [
-                    _tensor_version(arg) if isinstance(arg, torch.Tensor) else -1
-                    for arg in cloned
-                ]
-                outputs = gm(*cloned)
-                outputs = (
-                    [outputs] if not isinstance(outputs, (list, tuple)) else outputs
+            cloned = [
+                torch.empty_strided(
+                    arg.size(),
+                    arg.stride(),
+                    dtype=arg.dtype,
+                    device=arg.device,
+                    requires_grad=arg.requires_grad,
+                    layout=arg.layout,
                 )
-                after = [
-                    _tensor_version(arg) if isinstance(arg, torch.Tensor) else -1
-                    for arg in cloned
-                ]
-                mutated_inputs = [
-                    i for i, (v1, v2) in enumerate(zip(before, after)) if v1 != v2
-                ]
+                if isinstance(arg, torch.Tensor)
+                else arg
+                for arg in fake_args
+            ]
+            before = [_tensor_version(arg) for arg in cloned]
+            outputs = gm(*cloned)
+            outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
+            after = [_tensor_version(arg) for arg in cloned]
+            mutated_inputs = [
+                i for i, (v1, v2) in enumerate(zip(before, after)) if v1 != v2
+            ]
         # We need to analyze the original fake_args to detect
         # inp-inp alias.
         inp_storage_map = {
