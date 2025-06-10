@@ -47,19 +47,14 @@ def get_broadcasted_shape(a: ShapeType, b: ShapeType) -> ShapeType:
         return tuple(_get_broadcasted_dim(d1, d2) for d1, d2 in zip(a, b))
 
 
-def broadcast_shapes_for_args(
-    args: Sequence[ShapeArg], assume_equal_shapes: bool = False
-) -> ShapeType:
+def broadcast_shapes_for_args(args: Sequence[ShapeArg]) -> ShapeType:
     result_shape: ShapeType = None
 
     for arg in args:
         if hasattr(arg, "shape"):
             shape = arg.shape
             if shape is None:
-                if assume_equal_shapes:
-                    continue
-                else:
-                    return None
+                return None
             elif result_shape is None:
                 result_shape = tuple(shape)
             else:
