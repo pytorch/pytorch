@@ -196,6 +196,40 @@ class MPSBasicTestsAOTI(TestCase):
         res = m(*inp)
         assert torch.allclose(res, res2)
 
+    def test_fallback_mps(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.nn.functional.linear(x, y)
+
+        inp = (
+            torch.randn(10, 10, device="mps"),
+            torch.randn(10, 10, device="mps"),
+        )
+        m = M().to("mps")
+        res2 = m(*inp)
+        ep = torch.export.export(m, inp)
+        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
+        m = torch._inductor.aoti_load_package(path)
+        res = m(*inp)
+        assert torch.allclose(res, res2)
+
+    def test_c10(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return torch.cat(tensors=torch.split(x, 4, dim=1), dim=-2)
+
+        inp = (torch.randn(2, 8, device="mps"),)
+        m = M().to("mps")
+        res2 = m(*inp)
+        ep = torch.export.export(m, inp)
+        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
+        m = torch._inductor.aoti_load_package(path)
+        res = m(*inp)
+        assert torch.allclose(res, res2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
