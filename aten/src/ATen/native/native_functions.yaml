@@ -5171,7 +5171,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: hardshrink_out
+    CPU, CUDA, MPS: hardshrink_out
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   structured_delegate: hardshrink.out
@@ -5183,7 +5183,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: hardshrink_backward_out
+    CPU, CUDA, MPS: hardshrink_backward_out
 
 - func: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd) -> Tensor
   structured_delegate: hardshrink_backward.grad_input
