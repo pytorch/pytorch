@@ -64,6 +64,12 @@ if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
 
 
+TURN_OFF_MSG = """Turn off compiled autograd by either:
+1. Moving the unsupported autograd calls outside of the torch.compile'd region.
+2. Wrapping the unsupported in the torch._dynamo.compiled_autograd._disable() context manager.
+3. Setting torch._dynamo.config.compiled_autograd to False for the torch.compile call containing the unsupported autograd call.
+4. Setting torch._dynamo.config.compiled_autograd to False at the start of the program."""
+
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
 
@@ -270,7 +276,7 @@ class AutogradCompilerInstance:
 
     def begin_capture(
         self,
-        inputs: list[torch.Tensor],
+        real_inputs: list[torch.Tensor],
         sizes: list[int],
         scalars: list[Union[int, float]],
         origins: list[list[tuple[int, str]]],
@@ -307,11 +313,17 @@ class AutogradCompilerInstance:
 
         self.stack.enter_context(preserve_node_meta())
         inputs_origins, sizes_origins, scalars_origins = origins
+
         # tensor inputs to fake tensors
-        inputs = [
-            self.wrap_fake(x, self.source("inputs", idx))
-            for idx, x in enumerate(inputs)
-        ]
+        inputs = []
+        x = real_inputs[0]  # mypy will complain about unbound x
+        try:
+            for idx, x in enumerate(real_inputs):
+                inputs.append(self.wrap_fake(x, self.source("inputs", idx)))
+        except Exception as e:
+            raise NotImplementedError(
+                f"Found tensor of type {type(x)}, which is not supported by FakeTensorMode. {TURN_OFF_MSG}"
+            ) from e
         self.bind_objects_to_proxies(inputs, args_proxy, inputs_origins)
 
         # size inputs to symints
