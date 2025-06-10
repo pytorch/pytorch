@@ -266,13 +266,11 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
     fmt = f"{','.join(p for p in dimchars)}->{out_dimchars}"
 
     enforce_sharding: dict[str, int] = {}
-    if op_schema.is_inplace_op():
-        # inplace op should keep the input sharding it writes to
-        for out_dimchar, mesh_dim in zip(out_dimchars, input_specs[0].dim_map):
-            enforce_sharding[out_dimchar] = mesh_dim
-    elif op_schema.is_out_variant_op():
-        out_spec = cast(DTensorSpec, op_schema.kwargs_schema["out"])
-        enforce_sharding.update(zip(out_dimchars, out_spec.dim_map))
+    follow_spec = cast(
+        DTensorSpec,
+        input_specs[0] if op_schema.is_inplace_op() else op_schema.kwargs_schema["out"],
+    )
+    enforce_sharding.update(zip(out_dimchars, follow_spec.dim_map))
 
     return einop_rule(
         fmt,
