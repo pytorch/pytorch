@@ -24,8 +24,15 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, IS_MACOS, IS_SANDCASTLE, IS_FBCODE, IS_ARM64
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    TestCase,
+    IS_PPC,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_FBCODE,
+    IS_ARM64
+)
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -8265,3 +8272,6 @@ class TestComparatorOps(TestCase):
             note(f"result 3: {result}")
             self.assertEqual(result_ref, result,
                              msg=f"'tensor.{op}(scalar)'' failed")
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")
