@@ -8,11 +8,12 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.cond import create_bw_fn, materialize_as_graph
+from torch._higher_order_ops.cond import create_bw_fn
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     check_meta_consistency,
     first_slice_copy,
+    materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -805,19 +806,6 @@ class ScanAutogradOp(torch.autograd.Function):
 
 @scan_op.py_autograd_impl
 def scan_autograd(combine_fn, init, xs, additional_inputs):
-    if not any(
-        el.requires_grad
-        for el in (tuple(init) + tuple(xs) + additional_inputs)
-        if isinstance(el, torch.Tensor)
-    ):
-        with torch._C._AutoDispatchBelowAutograd():
-            return scan_op(
-                combine_fn,
-                init,
-                xs,
-                additional_inputs,
-            )
-
     num_leaves_init = len(init)
     num_leaves_xs = len(xs)
     num_additional_inputs = len(additional_inputs)
