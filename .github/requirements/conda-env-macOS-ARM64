@@ -1,12 +1,6 @@
 # Not pinning certifi so that we can always get the latest certificates
 certifi
-cmake=3.22.*
-expecttest=0.3.0
-numpy=1.26.4
-pillow=10.0.1
 pip=23.2.1
 pkg-config=0.29.2
-pyyaml=6.0.2
 setuptools=72.1.0
-typing-extensions=4.11.0
 wheel=0.37.1
