@@ -412,7 +412,7 @@ you installed as overridden methods.
 
 ## Debugging
 
-#### Introduction
+### Introduction
 
 Often in the course of authoring transformations, our code will not be quite right.
 In this case, we may need to do some debugging. The key is to work
