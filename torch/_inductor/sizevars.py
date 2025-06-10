@@ -443,7 +443,10 @@ class SizeVarAllocator:
         Return the order of a sequence as a permutation of range(len(seq)) and guard on that order not changing.
         """
         seq = [*map(self.remove_precomputed_replacements, seq)]
-        seq = [(self.size_hint(var), orig_idx, var) for orig_idx, var in enumerate(seq)]
+        seq = [
+            (self.size_hint_or_throw(var), orig_idx, var)
+            for orig_idx, var in enumerate(seq)
+        ]
         seq.sort()
         order = [-1] * len(seq)
         last_var = None
@@ -488,8 +491,8 @@ class SizeVarAllocator:
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         try:
-            lv = self.size_hint(left)
-            rv = self.size_hint(right)
+            lv = self.size_hint_or_throw(left)
+            rv = self.size_hint_or_throw(right)
         except TypeError:  # unbacked symints
             if left == right or self.statically_known_leq(left, right):
                 return left
@@ -520,7 +523,7 @@ class SizeVarAllocator:
     def evaluate_static_shape(self, left: Union[Expr, int]) -> int:
         if isinstance(left, int):
             return left
-        right = self.size_hint(left)
+        right = self.size_hint_or_throw(left)
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
 
@@ -566,6 +569,14 @@ class SizeVarAllocator:
                     fallback = min(fallback, int(hint_vr.upper))
             return fallback
 
+        try:
+            return int(out)
+        except Exception:
+            log.debug("failed on: %s", out)
+            raise
+
+    def size_hint_or_throw(self, expr: Union[Expr, int]) -> int:
+        out = self.symbolic_hint(expr)
         try:
             return int(out)
         except Exception:
@@ -735,7 +746,7 @@ class SizeVarAllocator:
         result = []
         for s in self.stride_vars(index, vars, support_vars):
             try:
-                result.append(self.size_hint(s))
+                result.append(self.size_hint_or_throw(s))
             except TypeError:
                 result.append(0)
         return result
