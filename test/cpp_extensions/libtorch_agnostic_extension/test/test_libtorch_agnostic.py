@@ -25,7 +25,7 @@ if not IS_WINDOWS:
         @classmethod
         def setUpClass(cls):
             try:
-                pass
+                import libtorch_agnostic  # noqa: F401
             except Exception:
                 install_cpp_extension(extension_root=Path(__file__).parent.parent)
 
