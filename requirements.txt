@@ -9,9 +9,7 @@ jinja2
 lintrunner ; platform_machine != "s390x"
 networkx
 ninja
-numpy==1.22.4; python_version == "3.9" or python_version == "3.10"
-numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
-numpy==2.1.2; python_version >= "3.13"
+numpy==2.1.2
 optree>=0.13.0
 packaging
 psutil
