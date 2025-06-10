@@ -1,6 +1,6 @@
-# mypy: allow-untyped-defs
 import functools
 import hashlib
+from typing import Any
 
 
 @functools.lru_cache(None)
@@ -16,7 +16,7 @@ def has_triton_package() -> bool:
 
 
 @functools.lru_cache(None)
-def has_triton_tma():
+def has_triton_tma() -> bool:
     if has_triton_package():
         import torch
 
@@ -39,7 +39,7 @@ def has_triton_tma():
 
 
 @functools.lru_cache(None)
-def has_triton_tma_device():
+def has_triton_tma_device() -> bool:
     if has_triton_package():
         import torch
 
@@ -77,15 +77,15 @@ def has_triton() -> bool:
 
     from torch._dynamo.device_interface import get_interface_for_device
 
-    def cuda_extra_check(device_interface):
+    def cuda_extra_check(device_interface: Any) -> bool:
         return device_interface.Worker.get_device_properties().major >= 7
 
-    def cpu_extra_check(device_interface):
+    def cpu_extra_check(device_interface: Any) -> bool:
         import triton.backends
 
         return "cpu" in triton.backends.backends
 
-    def _return_true(device_interface):
+    def _return_true(device_interface: Any) -> bool:
         return True
 
     triton_supported_devices = {
@@ -94,7 +94,7 @@ def has_triton() -> bool:
         "cpu": cpu_extra_check,
     }
 
-    def is_device_compatible_with_triton():
+    def is_device_compatible_with_triton() -> bool:
         for device, extra_check in triton_supported_devices.items():
             device_interface = get_interface_for_device(device)
             if device_interface.is_available() and extra_check(device_interface):
@@ -105,7 +105,7 @@ def has_triton() -> bool:
 
 
 @functools.lru_cache(None)
-def triton_backend():
+def triton_backend() -> Any:
     from triton.compiler.compiler import make_backend
     from triton.runtime.driver import driver
 
@@ -114,7 +114,7 @@ def triton_backend():
 
 
 @functools.lru_cache(None)
-def triton_hash_with_backend():
+def triton_hash_with_backend() -> str:
     from triton.compiler.compiler import triton_key
 
     backend = triton_backend()
