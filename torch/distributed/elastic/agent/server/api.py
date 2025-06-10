@@ -71,7 +71,8 @@ class WorkerSpec:
         tee: tees the specified std stream(s) to console + file,
              selectively tee for a particular local rank by passing a map,
              takes precedence over ``redirects`` settings.
-
+        event_log_handler: name of the event logging handler as registered in
+          `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
     """
 
     role: str
@@ -86,6 +87,7 @@ class WorkerSpec:
     master_port: Optional[int] = None
     master_addr: Optional[str] = None
     local_addr: Optional[str] = None
+    event_log_handler: str = "null"
 
     def __post_init__(self):
         assert self.local_world_size > 0
