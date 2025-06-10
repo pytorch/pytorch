@@ -27,8 +27,9 @@ cmake --version
 echo "Environment variables:"
 env
 
-# sccache nvcc wrapper gets put in /opt/cache/lib since there are some issues if
-# it is always wrapped, so we need to add it to PATH during CI builds
+# The sccache wrapped version of nvcc gets put in /opt/cache/lib in docker since
+# there are some issues if it is always wrapped, so we need to add it to PATH
+# during CI builds
 export PATH="/opt/cache/lib:$PATH"
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
