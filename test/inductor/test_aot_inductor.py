@@ -46,9 +46,9 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
+    skipIfMPS,
     skipIfRocm,
     skipIfXpu,
-    skipIfMPS,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
@@ -3451,7 +3451,9 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), inputs)
 
-    @skipIfMPS(msg="Expected supportedFloatingType(scalar_type) || scalar_type == kInt || scalar_type == kBool")
+    @skipIfMPS(
+        msg="Expected supportedFloatingType(scalar_type) || scalar_type == kInt || scalar_type == kBool"
+    )
     def test_index_put_fallback(self):
         # index_put falls back in the deterministic mode
         with DeterministicGuard(True):
@@ -4406,7 +4408,9 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), (x, y))
 
-    @skipIfMPS(msg="The operator 'aten::_embedding_bag' is not currently implemented for the MPS device.")
+    @skipIfMPS(
+        msg="The operator 'aten::_embedding_bag' is not currently implemented for the MPS device."
+    )
     def test_embedding_bag(self):
         class Model(torch.nn.Module):
             def forward(self, w, i, o):
@@ -4503,7 +4507,9 @@ class AOTInductorTestsTemplate:
             )
             self.assertTrue(same(model(*example_input), actual))
 
-    @skipIfMPS(msg="The operator 'aten::_embedding_bag' is not currently implemented for the MPS device")
+    @skipIfMPS(
+        msg="The operator 'aten::_embedding_bag' is not currently implemented for the MPS device"
+    )
     @common_utils.parametrize("max_autotune", [True, False])
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
@@ -6126,9 +6132,7 @@ MPS_TEST_FAILURES = {
     "test_simple_embed_kernel_binary_False": fail_mps(),
     "test_while_loop_with_mixed_device_dynamic_False": fail_mps(),
     "test_while_loop_with_mixed_device_dynamic_True": fail_mps(),
-
     "test_simple_multi_arch_embed_kernel_binary_False_emit_current_arch_binary_False": fail_mps(),
-
     # Dynamism
     "test_runtime_checks": fail_mps(),
     "test_shifted_constraint_ranges": fail_mps(),
@@ -6142,30 +6146,26 @@ MPS_TEST_FAILURES = {
     "test_reuse_kernel_dynamic": fail_mps(is_skip=True),
     "test_while_loop_with_parameters": fail_mps(is_skip=True),
     "test_cond_with_parameters": fail_mps(is_skip=True),
-
     # torchvision (untested locally)
     "test_missing_cubin": fail_mps(),
-
     # setstorage bad
     "test_small_constant": fail_mps(is_skip=True),
     "test_extract_constants_map": fail_mps(is_skip=True),
     "test_linear_freezing": fail_mps(is_skip=True),
     "test_model_modified_weights": fail_mps(is_skip=True),
-
     # error device may not be nill
     "test_zero_size_weight": fail_mps(is_skip=True),
-
     # Constants update
     "test_update_inactive_constant_buffer": fail_mps(is_skip=True),
     "test_update_constant_buffer": fail_mps(is_skip=True),
     "test_so_without_weight": fail_mps(is_skip=True),  # segfault
     "test_constant_folding_with_update": fail_mps(is_skip=True),
-
     "test_nested_tensor_from_jagged": fail_mps(is_skip=True),
     "test_issue_140766": fail_mps(is_skip=True),
-
     "test_buffer_mutation_and_force_mmap_weights": fail_mps(is_skip=True),
-    "test_aoti_constant_tensor_name_collision": fail_mps(is_skip=True),  # weird device comparison
+    "test_aoti_constant_tensor_name_collision": fail_mps(
+        is_skip=True
+    ),  # weird device comparison
     "test_large_mmaped_weights": fail_mps(is_skip=True),
     "test_subclasses": fail_mps(is_skip=True),
     "test_autotune_with_constant_folding": fail_mps(is_skip=True),
