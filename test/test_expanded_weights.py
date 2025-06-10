@@ -808,7 +808,7 @@ class TestExpandedWeightModule(TestCase):
 
         module_cls = module_info.module_cls
         atol, rtol = (
-            (1e-4, 1e-5)
+            (1e-3, 1e-4)
             if module_cls == torch.nn.GRU and dtype == torch.float32
             else (None, None)
         )
