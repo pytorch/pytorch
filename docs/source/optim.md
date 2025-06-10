@@ -297,12 +297,12 @@ algorithms.
 ```
 
 ```{warning}
-  Prior to PyTorch 1.1.0, the learning rate scheduler was expected to be called before
-  the optimizer's update; 1.1.0 changed this behavior in a BC-breaking way.  If you use
-  the learning rate scheduler (calling `scheduler.step()`) before the optimizer's update
-  (calling `optimizer.step()`), this will skip the first value of the learning rate schedule.
-  If you are unable to reproduce results after upgrading to PyTorch 1.1.0, please check
-  if you are calling `scheduler.step()` at the wrong time.
+Prior to PyTorch 1.1.0, the learning rate scheduler was expected to be called before
+the optimizer's update; 1.1.0 changed this behavior in a BC-breaking way.  If you use
+the learning rate scheduler (calling `scheduler.step()`) before the optimizer's update
+(calling `optimizer.step()`), this will skip the first value of the learning rate schedule.
+If you are unable to reproduce results after upgrading to PyTorch 1.1.0, please check
+if you are calling `scheduler.step()` at the wrong time.
 ```
 
 ```{eval-rst}
@@ -611,10 +611,10 @@ on a given dataloader `loader` at the end of training:
 statistics for each batch normalization layer in the model.
 
 ```{warning}
-    {func}`update_bn` assumes that each batch in the dataloader `loader` is either a tensors or a list of
-    tensors where the first element is the tensor that the network `swa_model` should be applied to.
-    If your dataloader has a different structure, you can update the batch normalization statistics of the
-    `swa_model` by doing a forward pass with the `swa_model` on each element of the dataset.
+{func}`update_bn` assumes that each batch in the dataloader `loader` is either a tensors or a list of
+tensors where the first element is the tensor that the network `swa_model` should be applied to.
+If your dataloader has a different structure, you can update the batch normalization statistics of the
+`swa_model` by doing a forward pass with the `swa_model` on each element of the dataset.
 ```
 
 
