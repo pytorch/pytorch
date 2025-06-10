@@ -1,24 +1,16 @@
-from __future__ import annotations
-
-from typing import Any
-
+# mypy: allow-untyped-defs
 import torch
 import torch.distributed._shard.sharded_tensor as sharded_tensor
 from torch.distributed._shard.sharded_tensor import _sharded_op_impl
 
 
-def validate_param(param: Any, param_name: str) -> None:
+def validate_param(param, param_name):
     if param is None:
         raise ValueError(f"param: {param_name} shouldn't be None!")
 
 
 @_sharded_op_impl(torch.nn.init.uniform_)
-def uniform_(
-    types: Any,
-    args: tuple[Any, ...] = (),
-    kwargs: dict[str, Any] | None = None,
-    pg: Any = None,
-) -> Any:
+def uniform_(types, args=(), kwargs=None, pg=None):
     r"""
     Fills the Tensor in tensor.local_shards with values drawn from the uniform
     distribution :math:`\mathcal{U}(a, b)`.
@@ -28,7 +20,6 @@ def uniform_(
         b: the upper bound of the uniform distribution
     """
     validate_param(kwargs, "kwargs")
-    assert kwargs is not None  # validate_param ensures this
     sharded_tensor = kwargs["tensor"]
     validate_param(sharded_tensor, "tensor")
     a = kwargs["a"]
@@ -42,12 +33,7 @@ def uniform_(
 
 
 @_sharded_op_impl(torch.nn.init.normal_)
-def normal_(
-    types: Any,
-    args: tuple[Any, ...] = (),
-    kwargs: dict[str, Any] | None = None,
-    pg: Any = None,
-) -> Any:
+def normal_(types, args=(), kwargs=None, pg=None):
     r"""
     Fills the Tensors in tensor.local_shards with values drawn from the normal
     distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
@@ -57,7 +43,6 @@ def normal_(
         std: the standard deviation of the normal distribution
     """
     validate_param(kwargs, "kwargs")
-    assert kwargs is not None  # validate_param ensures this
     sharded_tensor = kwargs["tensor"]
     validate_param(sharded_tensor, "tensor")
     mean = kwargs["mean"]
@@ -71,12 +56,7 @@ def normal_(
 
 
 @_sharded_op_impl(torch.nn.init.kaiming_uniform_)
-def kaiming_uniform_(
-    types: Any,
-    args: tuple[Any, ...] = (),
-    kwargs: dict[str, Any] | None = None,
-    pg: Any = None,
-) -> Any:
+def kaiming_uniform_(types, args=(), kwargs=None, pg=None):
     r"""
     Fills the Tensors in tensor.local_shards with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
@@ -98,7 +78,6 @@ def kaiming_uniform_(
             recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
     """
     validate_param(kwargs, "kwargs")
-    assert kwargs is not None  # validate_param ensures this
     sharded_tensor = kwargs["tensor"]
     validate_param(sharded_tensor, "tensor")
     a = kwargs["a"]
@@ -116,12 +95,7 @@ def kaiming_uniform_(
 
 
 @_sharded_op_impl(torch.nn.init.constant_)
-def constant_(
-    types: Any,
-    args: tuple[Any, ...] = (),
-    kwargs: dict[str, Any] | None = None,
-    pg: Any = None,
-) -> Any:
+def constant_(types, args=(), kwargs=None, pg=None):
     r"""
     Fills the input ShardedTensor with the value \text{val}val.
     Args:
@@ -129,7 +103,6 @@ def constant_(
         val: the value to fill the tensor with
     """
     validate_param(kwargs, "kwargs")
-    assert kwargs is not None  # validate_param ensures this
     sharded_tensor = kwargs["tensor"]
     validate_param(sharded_tensor, "tensor")
     val = kwargs["val"]
@@ -150,14 +123,9 @@ tensor_like_creation_op_map = {
 
 
 # tensor ops that behave the same as the default tensor
-def register_tensor_creation_op(op: Any) -> None:
+def register_tensor_creation_op(op):
     @_sharded_op_impl(op)
-    def tensor_creation_op(
-        types: Any,
-        args: tuple[Any, ...] = (),
-        kwargs: dict[str, Any] | None = None,
-        pg: Any = None,
-    ) -> Any:
+    def tensor_creation_op(types, args=(), kwargs=None, pg=None):
         """
         Handles ``__torch_function__`` dispatch for tensor creation ops that
         takes a ShardedTensor as argument, such as ``torch.zeros_like`` or
