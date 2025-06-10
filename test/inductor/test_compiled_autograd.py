@@ -3490,6 +3490,10 @@ class CompiledAutograd0(torch.nn.Module):
             )
 
     # https://github.com/pytorch/pytorch/issues/138920
+    # Inductor has a joint graph pattern to remove pointless view pairs.
+    # That will remove the no-op view pairs this test is checking. Disable
+    # pattern matcher for this test.
+    @inductor_config.patch(pattern_matcher=False)
     def test_compiled_autograd_does_not_specialize_on_bw_symints(self):
         class Mod(torch.nn.Module):
             def __init__(self, a, b, c):
