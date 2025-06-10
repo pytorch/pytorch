@@ -1501,6 +1501,7 @@ class Reduction(Loops):
             and isinstance(reduction_numel, Integer)
             and reduction_numel > 1_000_000
             and reduction_numel % 2 == 0
+            and device.type == "cpu"
         ):
             split = 1024
             log.info(
