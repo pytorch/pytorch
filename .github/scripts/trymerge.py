@@ -675,9 +675,6 @@ def get_ghstack_prs(
     print(
         f"Found {len(entire_stack)} PRs in the stack for {pr.pr_num}: {[x[0].pr_num for x in entire_stack]}"
     )
-    assert entire_stack[-1][0].pr_num == pr.pr_num, (
-        f"Last PR in the stack {entire_stack[-1][0].pr_num} does not match the current PR {pr.pr_num}"
-    )
 
     for stacked_pr, rev in entire_stack:
         if stacked_pr.is_closed():
