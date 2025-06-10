@@ -256,16 +256,14 @@ test_torchbench_smoketest() {
           --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_accuracy.csv" || true
       fi
     done
-    for model in "${hf_models[@]}"; do
-      if [ "$backend" == "inductor" ]; then
-        PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
-          --performance --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
-          --output "$TEST_REPORTS_DIR/inductor_${backend}_huggingface_${dtype}_inference_${device}_performance.csv" || true
-        PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
-          --accuracy --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
-          --output "$TEST_REPORTS_DIR/inductor_${backend}_huggingface_${dtype}_inference_${device}_accuracy.csv" || true
-      fi
-    done
+    if [ "$backend" == "inductor" ]; then
+      PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
+        --performance --backend "$backend" --inference --devices "$device" "$dtype_arg" \
+        --output "$TEST_REPORTS_DIR/inductor_${backend}_huggingface_${dtype}_inference_${device}_performance.csv" || true
+      PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
+        --accuracy --backend "$backend" --inference --devices "$device" "$dtype_arg" \
+        --output "$TEST_REPORTS_DIR/inductor_${backend}_huggingface_${dtype}_inference_${device}_accuracy.csv" || true
+    fi
 
     if [ "$dtype" == notset ]; then
       for dtype_ in notset amp; do
