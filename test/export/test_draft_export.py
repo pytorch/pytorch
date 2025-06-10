@@ -668,7 +668,11 @@ class TestDraftExport(TestCase):
                 package_path=f.name,
             )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
+    @unittest.skipIf(
+        not torch.cuda.is_available()
+        or torch.cuda.get_device_properties(0).total_memory < 2**28,
+        "Requires 16 MB GPU memory to pass the test; setting it higher to catch violations",
+    )
     def test_cuda_memory_usage(self):
         # This used to OOM
         class Foo(torch.nn.Module):
@@ -683,7 +687,7 @@ class TestDraftExport(TestCase):
         base_usage = torch.cuda.memory_allocated(device)
 
         # usage with input tensor allocated
-        x = torch.randn(2**10, 2**10, 2**8).to(device)
+        x = torch.randn(2**10, 2**10).to(device)
         x_usage = torch.cuda.memory_allocated(device)
 
         # draft export peak memory usage
@@ -692,6 +696,7 @@ class TestDraftExport(TestCase):
 
         # right now it's actually exactly 4x;
         # I guess original tensor, 2 tensors per add op, 1 for clone stored in node.meta["val"]
+        print(x_usage, peak_mem_usage)
         self.assertTrue((peak_mem_usage - base_usage) <= (x_usage - base_usage) * 4.0)
 
 
