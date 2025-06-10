@@ -16,12 +16,10 @@ from typing import (
     Literal,
     NamedTuple,
     overload,
-    Protocol,
-    runtime_checkable,
     SupportsIndex,
     TypeVar,
 )
-from typing_extensions import ParamSpec, Self, TypeAlias
+from typing_extensions import ParamSpec, Protocol, runtime_checkable, Self, TypeAlias
 
 import numpy
 
@@ -1561,6 +1559,7 @@ class PyTorchFileReader:
     @overload
     def __init__(self, buffer: IO[bytes]) -> None: ...
     def get_record(self, name: str) -> bytes: ...
+    def get_all_records(self) -> list[str]: ...
     def serialization_id(self) -> str: ...
 
 class PyTorchFileWriter:
