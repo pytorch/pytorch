@@ -488,7 +488,7 @@ absolute tolerance threshold:
 This is the first tool in our toolbox to check if transformed modules are
 behaving as we expect compared to a reference implementation.
 
-#### Debugging the Generated Code
+### Debugging the Generated Code
 
 Because FX generates the `forward()` function on {class}`GraphModule`\s, using
 traditional debugging techniques like `print` statements or `pdb` is
