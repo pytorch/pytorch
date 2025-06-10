@@ -114,7 +114,7 @@ def ok_changed_file(file: str) -> bool:
         return True
     if file.startswith("test/") and file.endswith(".py"):
         return True
-    if file.startswith("docs/") and file.endswith(".md", ".rst"):
+    if file.startswith("docs/") and file.endswith((".md", ".rst")):
         return True
     return False
 
