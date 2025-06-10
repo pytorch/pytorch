@@ -279,7 +279,7 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 
 
 Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
-  TORCH_CHECK(self.is_floating_point());
+  TORCH_CHECK(self.is_floating_point(), "Only supports floating-point dtypes, but found: ", self.scalar_type());
   auto input_sizes = self.sizes();
   DimVector out_sizes(input_sizes.begin(), input_sizes.end());
   auto last_dim = dim.back();
@@ -307,7 +307,7 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 }
 
 Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
-  TORCH_CHECK(self.is_complex());
+  TORCH_CHECK(self.is_complex(), "Only supports complex dtypes, but found: ", self.scalar_type());
   if (dim.empty()) {
     return self.clone();
   }
@@ -481,12 +481,8 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
   // fix mkl issue
   // https://github.com/pytorch/pytorch/issues/154477
-  auto istrides = input.strides();
-  for (const auto& stride : istrides) {
-    if (stride == 0) {
-      input = input.clone(MemoryFormat::Contiguous);
-      break;
-    }
+  if (signal_size[0] > 1 && input.strides()[0] == 0) {
+    input = input.clone(MemoryFormat::Contiguous);
   }
 
   auto descriptor = _plan_mkl_fft(
@@ -526,7 +522,7 @@ static DimVector _sort_dims(const Tensor& self, IntArrayRef dim, bool exclude_la
 
 // n-dimensional complex to real IFFT
 Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
-  TORCH_CHECK(self.is_complex());
+  TORCH_CHECK(self.is_complex(), "Only supports complex dtypes, but found: ", self.scalar_type());
   // NOTE: Multi-dimensional C2R transforms don't agree with numpy in cases
   // where the input isn't strictly Hermitian-symmetric. Instead, we use a
   // multi-dim C2C transform followed by a 1D C2R transform.
@@ -549,7 +545,7 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 
 // n-dimensional real to complex FFT
 Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
-  TORCH_CHECK(self.is_floating_point());
+  TORCH_CHECK(self.is_floating_point(), "Only supports floating-point dtypes, but found: ", self.scalar_type());
   auto input_sizes = self.sizes();
   DimVector out_sizes(input_sizes.begin(), input_sizes.end());
   auto last_dim = dim.back();
@@ -570,7 +566,7 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 
 // n-dimensional complex to complex FFT/IFFT
 Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
-  TORCH_CHECK(self.is_complex());
+  TORCH_CHECK(self.is_complex(), "Only supports complex dtypes, but found: ", self.scalar_type());
   if (dim.empty()) {
     return self.clone();
   }
