@@ -60,7 +60,6 @@ jobs:
   test:
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
-    # Also ensure that we always run with the right architecture
     defaults:
       run:
         shell: bash -e -l {0}
@@ -79,7 +78,7 @@ jobs:
     steps:
       - name: Print runner OS/HW info
         run: |
-          sysctl machdep.cpu.brand_string kern.osproductversion
+          sysctl machdep.cpu.brand_string kern.osproductversion; env
 
       - name: Clean up leftover processes on MacOS pet runner
         continue-on-error: true
@@ -123,8 +122,8 @@ jobs:
           MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          python -m pip install psutil==5.9.1 dataclasses_json==0.6.7
-          python -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
+          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
+          python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
@@ -195,15 +194,13 @@ jobs:
           # shellcheck disable=SC1090
           set -ex
 
-          arch
-
           # Print out some information about the test environment
-          which python3
-          python3 --version
-          which python
-          python --version
+          for tool in python3 python; do
+            which $tool
+            $tool --version
+          done
 
-          python -mpip install --no-index --no-deps dist/*.whl
+          python3 -mpip install --no-index --no-deps dist/*.whl
 
           set +e
           pushd "${RUNNER_TEMP}"
@@ -230,10 +227,6 @@ jobs:
         shell: bash
         if: ${{ contains(steps.get-job-id.outputs.job-name, 'mps') }}
         run: |
-          if [[ -n "$CONDA_ENV" ]]; then
-            # Use binaries under conda environment
-            export PATH="$CONDA_ENV/bin":$PATH
-          fi
           python test/bench_mps_ops.py
 
 
