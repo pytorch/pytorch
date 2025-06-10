@@ -605,172 +605,86 @@
 
 ```{eval-rst}
 .. py:module:: torch.distributions.bernoulli
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.beta
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.binomial
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.categorical
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.cauchy
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.chi2
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.continuous_bernoulli
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.dirichlet
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.distribution
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.exp_family
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.exponential
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.fishersnedecor
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.gamma
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.generalized_pareto
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.geometric
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.gumbel
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.half_cauchy
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.half_normal
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.independent
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.inverse_gamma
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.kumaraswamy
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.laplace
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.lkj_cholesky
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.log_normal
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.logistic_normal
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.lowrank_multivariate_normal
-```
 
-```{eval-rst}
-.. py:module:: torch.distributions.mixture_same_family
-```
-
-```{eval-rst}
 .. py:module:: torch.distributions.multinomial
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.multivariate_normal
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.negative_binomial
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.normal
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.one_hot_categorical
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.pareto
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.poisson
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.relaxed_bernoulli
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.relaxed_categorical
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.studentT
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.transformed_distribution
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.uniform
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.utils
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.von_mises
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.weibull
-```
 
-```{eval-rst}
 .. py:module:: torch.distributions.wishart
 ```
