@@ -115,25 +115,16 @@ Here we define a module `MyModule` for demonstration purposes, instantiate it,
 symbolically trace it, then call the {meth}`Graph.print_tabular` method to print
 out a table showing the nodes of this {class}`Graph`:
 
-+---------------+---------------+----------------------------+--------------------+-------------+
-| opcode        | name          | target                     | args               | kwargs      |
-+===============+===============+============================+====================+=============+
-| placeholder   | x             | x                          | ()                 | {}          |
-+---------------+---------------+----------------------------+--------------------+-------------+
-| get_attr      | linear_weight | linear.weight              | ()                 | {}          |
-+---------------+---------------+----------------------------+--------------------+-------------+
-| call_function | add_1         | <built-in function add>    | (x, linear_weight) | {}          |
-+---------------+---------------+----------------------------+--------------------+-------------+
-| call_module   | linear_1      | linear                     | (add_1,)           | {}          |
-+---------------+---------------+----------------------------+--------------------+-------------+
-| call_method   | relu_1        | relu                       | (linear_1,)        | {}          |
-+---------------+---------------+----------------------------+--------------------+-------------+
-| call_function | sum_1         | <built-in method sum ...>  | (relu_1,)          | {'dim': -1} |
-+---------------+---------------+----------------------------+--------------------+-------------+
-| call_function | topk_1        | <built-in method topk ...> | (sum_1, 3)         | {}          |
-+---------------+---------------+----------------------------+--------------------+-------------+
-| output        | output        | output                     | (topk_1,)          | {}          |
-+---------------+---------------+----------------------------+--------------------+-------------+
+| opcode | name | target | args | kwargs |
+|--------|------|--------|------|--------|
+| placeholder | x | x | () | {} |
+| get_attr | linear_weight | linear.weight | () | {} |
+| call_function | add_1 | | (x, linear_weight) | {} |
+| call_module | linear_1 | linear | (add_1,) | {} |
+| call_method | relu_1 | relu | (linear_1,) | {} |
+| call_function | sum_1 | <built-in method sum ...> | (relu_1,) | {'dim': -1} |
+| call_function | topk_1 | <built-in method topk ...> | (sum_1, 3) | {} |
+| output | output | output | (topk_1,) | {} |
 
 We can use this information to answer the questions we posed above.
 
@@ -214,7 +205,7 @@ can be found below.
 ```
 
 For simple transformations that only consist of substitutions, you can also
-make use of the [subgraph rewriter.](https://github.com/pytorch/pytorch/blob/main/torch/fx/subgraph_rewriter.py)_
+make use of the [subgraph rewriter.](https://github.com/pytorch/pytorch/blob/main/torch/fx/subgraph_rewriter.py)
 
 #### Subgraph Rewriting With replace_pattern()
 
@@ -229,12 +220,12 @@ get unwieldy as the transformations get more complex.
 #### Graph Manipulation Examples
 
 -  [Replace one
-   op](https://github.com/pytorch/examples/blob/master/fx/replace_op.py)_
+   op](https://github.com/pytorch/examples/blob/master/fx/replace_op.py)
 -  [Conv/Batch Norm
-   fusion](https://github.com/pytorch/pytorch/blob/40cbf342d3c000712da92cfafeaca651b3e0bd3e/torch/fx/experimental/optimization.py#L50)_
--  [replace_pattern: Basic usage](https://github.com/pytorch/examples/blob/master/fx/subgraph_rewriter_basic_use.py)_
--  [Quantization](https://pytorch.org/docs/main/quantization.html#prototype-fx-graph-mode-quantization)_
--  [Invert Transformation](https://github.com/pytorch/examples/blob/master/fx/invert.py)_
+   fusion](https://github.com/pytorch/pytorch/blob/40cbf342d3c000712da92cfafeaca651b3e0bd3e/torch/fx/experimental/optimization.py#L50)
+-  [replace_pattern: Basic usage](https://github.com/pytorch/examples/blob/master/fx/subgraph_rewriter_basic_use.py)
+-  [Quantization](https://pytorch.org/docs/main/quantization.html#prototype-fx-graph-mode-quantization)
+-  [Invert Transformation](https://github.com/pytorch/examples/blob/master/fx/invert.py)
 
 ### Proxy/Retracing
 
@@ -311,7 +302,7 @@ safely assumed to be unary.
 
 A worked example of using {class}`Proxy`\s for {class}`Graph` manipulation
 can be found
-[here](https://github.com/pytorch/examples/blob/master/fx/proxy_based_graph_creation.py)_.
+[here](https://github.com/pytorch/examples/blob/master/fx/proxy_based_graph_creation.py).
 
 ### The Interpreter Pattern
 
@@ -478,7 +469,7 @@ defined both due to the issue of that operator returning a tensor
 and not a bool, but also because comparison of floating point values
 should use a margin of error (or epsilon) to account for the
 non-commutativity of floating point operations (see
-[here](https://floating-point-gui.de/errors/comparison/)_ for more
+[here](https://floating-point-gui.de/errors/comparison/) for more
 details). We can use {func}`torch.allclose` instead, which will give
 us an approximate comparison taking into account a relative and
 absolute tolerance threshold:
@@ -688,11 +679,11 @@ want to see the Node’s `input_nodes` and `users`.)
 ### Available Debuggers
 
 The most common Python debugger is
-[pdb](https://docs.python.org/3/library/pdb.html)_. You can start
+[pdb](https://docs.python.org/3/library/pdb.html). You can start
 your program in “debug mode” with `pdb` by typing
 `python -m pdb FILENAME.py` into the command line, where `FILENAME`
 is the name of the file you want to debug. After that, you can use the
-`pdb` [debugger commands](https://docs.python.org/3/library/pdb.html#debugger-commands)_
+`pdb` [debugger commands](https://docs.python.org/3/library/pdb.html#debugger-commands)
 to move through your running program stepwise. It’s common to set a
 breakpoint (`b LINE-NUMBER`) when you start `pdb`, then call `c` to
 run the program until that point. This prevents you from having to step
@@ -706,7 +697,7 @@ in debug mode when you run it. (In other words, you can just type
 debug mode, you can step through the code and examine your program's
 internal state using certain commands. There are many excellent
 tutorials on `pdb` online, including RealPython’s
-[“Python Debugging With Pdb”](https://realpython.com/python-debugging-pdb/)_.
+[“Python Debugging With Pdb”](https://realpython.com/python-debugging-pdb/).
 
 IDEs like PyCharm or VSCode usually have a debugger built in. In your
 IDE, you can choose to either a) use `pdb` by pulling up a terminal
@@ -718,7 +709,7 @@ built-in debugger (usually a graphical wrapper around `pdb`).
 ## Limitations of Symbolic Tracing
 
 FX uses a system of **symbolic tracing** (a.k.a [symbolic
-execution](https://en.wikipedia.org/wiki/Symbolic_execution)_)
+execution](https://en.wikipedia.org/wiki/Symbolic_execution))
 to capture the semantics of programs in a transformable/analyzable form.
 The system is **tracing** in that it executes the program (really a
 {class}`torch.nn.Module` or function) to record operations. It is
@@ -842,7 +833,7 @@ that contain this code can be traced as calls to the Method (see
 
 FX uses `__torch_function__` as the mechanism by which it intercepts
 calls (see the [technical
-overview](https://github.com/pytorch/pytorch/blob/main/torch/fx/README.md#technical-details)_
+overview](https://github.com/pytorch/pytorch/blob/main/torch/fx/README.md#technical-details)
 for more information about this). Some functions, such as builtin Python
 functions or those in the `math` module, are not covered by
 `__torch_function__`, but we would still like to capture them in
