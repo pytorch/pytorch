@@ -6,7 +6,7 @@ from torch.utils._triton import has_triton
 @functools.lru_cache(None)
 def has_helion_package() -> bool:
     try:
-        import helion  # type: ignore[import-untyped]  # noqa: F401
+        import helion  # type: ignore[import-untyped, import-not-found]  # noqa: F401
     except ImportError:
         return False
     return True
