@@ -528,7 +528,7 @@ into it manually using `pdb` when the forward pass is invoked.
 ```
 (Print the Generated Code)=
 
-## Print the Generated Code
+#### Print the Generated Code
 If you’d like to run the same code multiple times, then it can be
 a bit tedious to step to the right code with `pdb`. In that case, one
 approach is to simply copy-paste the generated `forward` pass into
