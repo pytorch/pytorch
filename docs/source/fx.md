@@ -1060,7 +1060,7 @@ The set of leaf modules can be customized by overriding
   - Because of this difference, consider marking modules that interact with the `training` flag dynamically as leaf modules.
 
 
-#### API Reference
+## API Reference
 ```{eval_rst}
 .. autofunction:: torch.fx.symbolic_trace
 ```
