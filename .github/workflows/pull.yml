@@ -203,7 +203,6 @@ jobs:
           { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
-      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-py3_9-clang12-test:

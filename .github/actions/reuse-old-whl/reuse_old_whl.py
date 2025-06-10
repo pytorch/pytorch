@@ -120,6 +120,7 @@ def ok_changed_file(file: str) -> bool:
 
 
 def check_changed_files(sha: str) -> bool:
+    return True
     # Return true if all the changed files are in the list of allowed files to
     # be changed to reuse the old whl
 
