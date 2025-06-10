@@ -4015,9 +4015,9 @@ class GraphModule(torch.nn.Module):
                 return output
 
         flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
-            "cuda", dtype=torch.bfloat16
+            device, dtype=torch.bfloat16
         )
-        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
+        x = torch.ones(8, 1024, 512, device=device, dtype=torch.bfloat16)
 
         # Run without compilation
         output_module = flex_module(x)
