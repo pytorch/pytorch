@@ -2599,7 +2599,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         acc_type = triton_acc_type(src_dtype)
         torch_acc_type = upcast_acc_dtype(src_dtype)
         result_shape = list(self.dense_size_list())
-        del result_shape[dim]
+        result_shape[dim] = "1"
         result_var: Any = self.cse.newvar(
             dtype=torch_acc_type, shape=tuple(result_shape)
         )

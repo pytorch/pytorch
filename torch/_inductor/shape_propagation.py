@@ -64,6 +64,9 @@ def broadcast_shapes_for_args(
                 result_shape = tuple(shape)
             else:
                 result_shape = get_broadcasted_shape(result_shape, tuple(shape))
+        elif isinstance(arg, (int, float)):
+            if result_shape is None:
+                result_shape = ()
         else:
             return None
 
