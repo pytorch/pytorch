@@ -1407,7 +1407,7 @@ PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
   HANDLE_TH_ERRORS
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
-  check_legacy_fn_attr_access(cdata, "_register_hook_dict");
+  check_legacy_fn_attr_access(cdata, "register_hook");
   return torch::autograd::registerFunctionHook(*cdata, hook);
   END_HANDLE_TH_ERRORS
 }
