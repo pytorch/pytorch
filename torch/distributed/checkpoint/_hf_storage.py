@@ -8,10 +8,9 @@ from typing import Any, Optional
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
-
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint._hf_planner import _HuggingFaceLoadPlanner
-from torch.distributed.checkpoint.filesystem import  _StorageInfo, SerializationFormat
+from torch.distributed.checkpoint.filesystem import _StorageInfo, SerializationFormat
 from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
     Metadata,
@@ -246,18 +245,16 @@ class _HuggingFaceStorageReader(FsspecReader):
                 # TODO: make this more efficient by doing offset reads instead of a
                 # full deserialization of the file
 
-                # type: ignore[valid-type]
                 deserialized: list[tuple(str, dict[str, Any])] = deserialize(
                     stream.read()
-                )
+                )  # type: ignore[valid-type]
                 deserialized_dict: dict[str, dict[str, Any]] = {
                     tensor_info[0]: tensor_info[1] for tensor_info in deserialized
                 }
 
                 for req in reqs:
                     tensor_bytes = deserialized_dict[req.dest_index.fqn]["data"]
-                    # type: ignore[attr-defined]
-                    planner_metadata = planner.metadata
+                    planner_metadata = planner.metadata  # type: ignore[attr-defined]
                     tensor = torch.frombuffer(
                         tensor_bytes,
                         dtype=planner_metadata.state_dict_metadata[

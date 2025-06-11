@@ -451,7 +451,10 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
 
 def create_default_local_load_plan(
-    state_dict: dict[str, Any], metadata: Metadata, strict: bool = True, check_md_size: bool = True
+    state_dict: dict[str, Any],
+    metadata: Metadata,
+    strict: bool = True,
+    check_md_size: bool = True,
 ) -> LoadPlan:
     requests = []
     """

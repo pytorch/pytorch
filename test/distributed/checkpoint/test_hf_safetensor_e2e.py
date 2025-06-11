@@ -5,10 +5,7 @@ import torch
 import torch.distributed.checkpoint as dist_cp
 from torch.distributed.checkpoint import _HuggingFaceLoadPlanner
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
