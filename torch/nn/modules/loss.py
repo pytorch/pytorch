@@ -1287,7 +1287,9 @@ class CrossEntropyLoss(_WeightedLoss):
           :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`. The
           target data type is required to be long when using class indices. If containing class probabilities, the
           target must be the same shape input, and each value should be between :math:`[0, 1]`. This means the target
-          data type is required to be float when using class probabilities.
+          data type is required to be float when using class probabilities. Note that PyTorch does not strictly enforce
+          probability constraints on the class probabilities and that it is the user's responsibility to ensure
+          `target` is a valid probability distribution (see below examples section for more details).
         - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
 
