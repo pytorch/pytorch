@@ -818,7 +818,7 @@ ncols, *densesize)`` where ``len(batchsize) == B`` and
    strided formats, respectively.
 ```
 
-### Construction of CSR tensors
+#### Construction of CSR tensors
 
 Sparse CSR tensors can be directly constructed by using the
 {func}`torch.sparse_csr_tensor` function. The user must supply the row
