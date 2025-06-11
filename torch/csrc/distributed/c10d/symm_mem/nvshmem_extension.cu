@@ -81,6 +81,15 @@ void* nvshmem_ptr(const void* dest, int pe) {
   return ::nvshmem_ptr(dest, pe);
 }
 
+// Intializes the device state in CUmodule so that it’s able to perform NVSHMEM
+// operations.
+void nvshmemx_cumodule_init(uintptr_t module) {
+  auto cumodule = reinterpret_cast<CUmodule>(module);
+  TORCH_CHECK(
+    ::nvshmemx_cumodule_init(cumodule) == 0,
+    "nvshmemx_cumodule_init failed");
+}
+
 std::unordered_map<std::string, nvshmem_team_t> group_name_to_team_;
 
 nvshmem_team_t group_to_team(

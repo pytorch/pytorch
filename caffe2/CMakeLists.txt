@@ -993,7 +993,13 @@ elseif(USE_CUDA)
     set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
   endif()
 
-  if(USE_NVSHMEM AND DEFINED NVSHMEM_HOME)
+  if(NOT DEFINED NVSHMEM_HOME)
+    message(WARNING "NVSHMEM_HOME not found. Please run `pip install nvidia-nvshmem-<version>`, or set NVSHMEM_HOME to its location.")
+    # Disable nvshmem if NVSHMEM_HOME is not found
+    set(USE_NVSHMEM FALSE)
+  endif()
+
+  if(USE_NVSHMEM)
     message(STATUS "Building with NVSHMEM support:  '${NVSHMEM_HOME}'")
     set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/include")
     set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/lib")
@@ -1019,6 +1025,7 @@ elseif(USE_CUDA)
         ${NVSHMEM_LIB_DIR}/libnvshmem_host.so.3
         nvshmem_device
     )
+    target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
   endif()

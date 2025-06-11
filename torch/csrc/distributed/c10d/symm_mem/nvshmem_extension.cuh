@@ -15,6 +15,10 @@ void* nvshmem_malloc(size_t size);
 
 void* nvshmem_ptr(const void* dest, int pe);
 
+// Intializes the device state in CUmodule so that it’s able to perform NVSHMEM
+// operations.
+TORCH_API void nvshmemx_cumodule_init(uintptr_t module);
+
 at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name);
 
 at::Tensor nvshmem_all_to_all(
