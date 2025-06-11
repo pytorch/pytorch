@@ -14,7 +14,6 @@
 #include <ATen/ops/atan2_native.h>
 #include <ATen/ops/div_native.h>
 #include <ATen/ops/eq_native.h>
-#include <ATen/ops/fmod_native.h>
 #include <ATen/ops/ge_native.h>
 #include <ATen/ops/gt_native.h>
 #include <ATen/ops/hypot_native.h>
@@ -30,7 +29,6 @@
 #include <ATen/ops/ne_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/pow_native.h>
-#include <ATen/ops/remainder_native.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/sub_native.h>
 #include <ATen/ops/view_as_real.h>
@@ -184,61 +182,6 @@ static void binaryOpScalar(const Tensor& self,
   binaryOpTensor(self, wrapped_scalar_tensor(other), output, op_name, binaryBlock);
 }
 
-static void div_mode_template(const Tensor& self,
-                              const Tensor& other,
-                              std::optional<std::string_view> rounding_mode,
-                              const Tensor& output,
-                              const std::string& op_name) {
-  if (rounding_mode.has_value() && *rounding_mode == "trunc") {
-    TORCH_CHECK(self.scalar_type() != ScalarType::Half, "MPS: does not support trunc_divide op with float16 input");
-  }
-  BinaryOpBlock div_mode_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    bool isFloatInput = ([primaryCastTensor dataType] & MPSDataTypeFloatBit) != 0;
-    if (!isFloatInput && rounding_mode.has_value() && (*rounding_mode == "floor" || *rounding_mode == "trunc")) {
-      primaryCastTensor = [mpsGraph castTensor:primaryCastTensor toType:MPSDataTypeFloat32 name:@"primaryCastTensor"];
-      secondaryCastTensor = [mpsGraph castTensor:secondaryCastTensor
-                                          toType:MPSDataTypeFloat32
-                                            name:@"secondaryCastTensor"];
-    }
-    MPSGraphTensor* divTensor = [mpsGraph divisionWithPrimaryTensor:primaryCastTensor
-                                                    secondaryTensor:secondaryCastTensor
-                                                               name:nil];
-    // Rounding is a no-op for integral types, and also a reasonable workaround
-    // For MPSGraph bug on Apple Silicon, that throws `Function floorOp_i64 was not found in the library`
-    // See https://github.com/pytorch/pytorch/issues/84995
-    bool isFloatOutput = ([divTensor dataType] & MPSDataTypeFloatBit) != 0;
-    if (!rounding_mode.has_value() || !isFloatOutput) {
-      return divTensor;
-    } else if (*rounding_mode == "trunc") {
-      auto truncTensor = [mpsGraph truncateWithTensor:divTensor name:nil];
-      if (op_name == "fmod_mps_out") {
-        auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:truncTensor
-                                                   secondaryTensor:secondaryCastTensor
-                                                              name:nil];
-        return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor secondaryTensor:mulTensor name:nil];
-      }
-      return truncTensor;
-    } else if (*rounding_mode == "floor") {
-      MPSGraphTensor* floorTensor = [mpsGraph floorWithTensor:divTensor name:nil];
-      if (op_name == "remainder_out_mps") {
-        auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:floorTensor
-                                                   secondaryTensor:secondaryCastTensor
-                                                              name:nil];
-        return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor secondaryTensor:mulTensor name:nil];
-      }
-      return floorTensor;
-    }
-    assert(0 && "Invalid rounding mode\n");
-    return nullptr;
-  };
-  binaryOpTensor(self,
-                 other,
-                 output,
-                 op_name + "_mps:" + (rounding_mode.has_value() ? c10::str(*rounding_mode) : ""),
-                 div_mode_op_block);
-}
-
 static void add_sub_lerp_template(const Tensor& self,
                                   const Tensor& other,
                                   const Scalar& alpha,
@@ -350,14 +293,6 @@ TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const
   } else {
     at::pow_out(const_cast<Tensor&>(out), mps::wrapped_scalar_tensor_mps(base, exp.device()), exp); // redispatch!
   }
-}
-
-TORCH_IMPL_FUNC(remainder_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::div_mode_template(self, other, "floor", output, "remainder_out_mps");
-}
-
-TORCH_IMPL_FUNC(fmod_mps_out)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::div_mode_template(self, other, "trunc", output, "fmod_mps_out");
 }
 
 TORCH_IMPL_FUNC(hypot_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {

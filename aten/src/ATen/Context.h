@@ -7,6 +7,7 @@
 #include <ATen/ROCmFABackend.h>
 #include <ATen/SDPBackend.h>
 #include <ATen/core/ATenGeneral.h>
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/Generator.h>
 #include <ATen/core/LegacyTypeDispatch.h>
@@ -120,6 +121,8 @@ class TORCH_API Context {
 
   void lazyInitDevice(c10::DeviceType device_type) {
     if (device_type != at::kCPU) {
+      // ensure host allocator is initialized
+      at::getHostAllocator(device_type)->init(); 
       c10::call_once(init_[static_cast<int8_t>(device_type)], [&] {
         getAcceleratorHooksInterface(device_type).init();
       });

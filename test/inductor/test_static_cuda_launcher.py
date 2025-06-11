@@ -2,6 +2,7 @@
 import os
 import random
 import tempfile
+from unittest import mock
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
@@ -54,6 +55,11 @@ class TestStaticCudaLauncher(TestCase):
         cubin_file = self.write_cubin_to_tmp(compiled_kernel)
         compiled_kernel._cubin_path = cubin_file
         result = StaticallyLaunchedCudaKernel(compiled_kernel)
+        # Test reload cubin from raw here
+        old_cubin_path = result.cubin_path
+        assert old_cubin_path is not None
+        result.cubin_path = None
+        result.reload_cubin_from_raw(old_cubin_path)
         device_interface = get_interface_for_device("cuda")
         result.load_kernel(device_interface.current_device())
         return result
@@ -460,6 +466,28 @@ class TestStaticTritonCompileResult(TestCase):
         )
 
     @skipIfRocm
+    # The error gets raised on a worker, so we want to not use a separate process
+    @torch._inductor.config.patch(
+        {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
+    )
+    def test_static_launch_user_defined_triton_kernels(self):
+        # User defined triton kernel
+        @triton.jit
+        def custom_kernel(arg_0, arg_1):
+            x = tl.load(arg_0)
+            y = arg_1
+            tl.store(arg_0, x + y)
+
+        @torch.compile
+        def foo(x):
+            custom_kernel[1,](x, 5)
+            return x
+
+        x = torch.randn(1, device="cuda")
+        x2 = x.clone().detach_()
+        self.assertEqual(foo(x), x2 + 5)
+
+    @skipIfRocm
     def test_empty_tensor(self):
         @torch.compile()
         def foo(x, y):
@@ -490,6 +518,24 @@ class TestStaticTritonCompileResult(TestCase):
         eager_result = fn(arg)
         compiled_result = compiled_fn(arg)
         self.assertEqual(eager_result, compiled_result)
+
+    @skipIfRocm
+    def test_disable_static_cuda_launcher(self):
+        @torch.compile
+        def fn(x, y):
+            return torch.cat(((x * 4), y + 10))
+
+        # Test that static cuda launcher is in fact disabled
+        with torch._inductor.config.patch("use_static_cuda_launcher", False):
+            x = torch.rand(20, device="cuda")
+            y = torch.rand(20, device="cuda")
+            with mock.patch(
+                "torch._inductor.runtime.triton_heuristics.StaticTritonCompileResult.make_launcher"
+            ) as mocked:
+                result = fn(x, y)
+                mocked.assert_not_called()
+
+            self.assertEqual(result, torch.cat(((x * 4), y + 10)))
 
 
 if __name__ == "__main__":

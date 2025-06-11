@@ -22,9 +22,7 @@ retry () {
 
 # TODO move this into the Docker images
 OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
-if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
-    retry yum install -q -y zip openssl
-elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
+if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
     retry dnf install -q -y zip openssl
@@ -35,6 +33,9 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
     retry apt-get update
     retry apt-get -y install zip openssl
+else
+    echo "Unknown OS: '$OS_NAME'"
+    exit 1
 fi
 
 # Version: setup.py uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if

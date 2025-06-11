@@ -178,7 +178,12 @@ template <
     typename E,
     typename B = HostBlock<S>>
 struct CachingHostAllocatorImpl {
-  virtual ~CachingHostAllocatorImpl() = default;
+  virtual ~CachingHostAllocatorImpl() {
+    active_ = false;
+    if (pinned_use_background_threads()) {
+      getBackgroundThreadPool()->waitWorkComplete();
+    }
+  }
 
  public:
   // return data_ptr and block pair.
@@ -215,7 +220,7 @@ struct CachingHostAllocatorImpl {
       // Launch the background thread and process events in a loop.
       static bool background_thread_flag [[maybe_unused]] = [this] {
         getBackgroundThreadPool()->run([&]() {
-          while (true) {
+          while (active_) {
             process_events();
             std::this_thread::sleep_for(std::chrono::microseconds(100));
           }
@@ -476,7 +481,7 @@ struct CachingHostAllocatorImpl {
   virtual B* get_free_block(size_t size) {
     auto index = size_index(size);
     std::lock_guard<std::mutex> g(free_list_[index].mutex_);
-    if (free_list_[index].list_.size() > 0) {
+    if (!free_list_[index].list_.empty()) {
       B* block = free_list_[index].list_.back();
       free_list_[index].list_.pop_back();
       block->allocated_ = true;
@@ -625,6 +630,10 @@ struct CachingHostAllocatorImpl {
 
   alignas(64) std::mutex events_mutex_;
   std::deque<std::pair<E, B*>> events_; // event queue paired with block
+
+  // Indicates whether the object is active.
+  // Set to false in the destructor to signal background threads to stop.
+  std::atomic<bool> active_{true};
 protected:
   alignas(64) HostStatsStaged stats_;
 };
@@ -651,6 +660,20 @@ struct TORCH_API HostAllocator : public at::Allocator {
 
   // Checks if the given pointer is a pinned memory allocation
   virtual bool is_pinned(const void* ptr) const = 0;
+
+  // Initializes the host allocator to avoid early runtime calls in is_pinned.
+  virtual void init() {
+    initialized_ = true;
+  }
+
+  // Return true if the host allocator has been initialized
+  bool is_initialized() const {
+    return initialized_;
+  }
+
+private:
+  // Indicates whether the allocator has been initialized
+  bool initialized_{false};
 };
 
 template <typename T, c10::DeleterFnPtr deleteFunc>
@@ -696,6 +719,11 @@ struct CachingHostAllocatorInterface : public HostAllocator {
   }
 
   bool is_pinned(const void* ptr) const override {
+    if (!is_initialized()) {
+      // If the host allocator is not initialized, we assume that the pointer
+      // isn't pinned to avoid early runtime call.
+      return false;
+    }
     return impl_->is_pinned(ptr);
   }
 
