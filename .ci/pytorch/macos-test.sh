@@ -317,8 +317,6 @@ test_timm_perf() {
   echo "timm benchmark on mps device completed"
 }
 
-install_tlparse
-
 if [[ $TEST_CONFIG == *"perf_all"* ]]; then
   test_torchbench_perf
   test_hf_perf

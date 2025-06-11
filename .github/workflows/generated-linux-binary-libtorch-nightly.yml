@@ -154,7 +154,7 @@ jobs:
       build_name: libtorch-cuda12_6-shared-with-deps-release
       build_environment: linux-binary-libtorch
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.4xlarge.nvidia.gpu # for other cuda versions, we use 4xlarge runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_6-shared-with-deps-release-upload:  # Uploading
@@ -222,7 +222,7 @@ jobs:
       build_name: libtorch-cuda12_8-shared-with-deps-release
       build_environment: linux-binary-libtorch
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 build needs sm_70+ runner
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_8-shared-with-deps-release-upload:  # Uploading
