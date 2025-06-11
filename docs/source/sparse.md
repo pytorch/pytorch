@@ -1101,7 +1101,7 @@ tensor(ccol_indices=tensor([0, 2, 4]),
         dtype=torch.float64, layout=torch.sparse_bsc)
 ```
 
-## Tools for working with sparse compressed tensors
+### Tools for working with sparse compressed tensors
 
 All sparse compressed tensors --- CSR, CSC, BSR, and BSC tensors ---
 are conceptionally very similar in that their indices data is split
