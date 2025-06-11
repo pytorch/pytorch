@@ -2,7 +2,7 @@ import os
 import sysconfig
 from typing import Optional
 
-from triton.language import core
+from torch.utils._triton import has_triton
 
 
 def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
@@ -51,20 +51,23 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
     return extern_libs
 
 
-@core.extern
-def putmem_block(dst, src, nelems, pe, _builder=None):  # type: ignore[no-untyped-def]
-    return core.extern_elementwise(
-        "",
-        "",
-        [dst, src, nelems, pe],
-        {
-            (
-                core.dtype("int64"),
-                core.dtype("int64"),
-                core.dtype("int64"),
-                core.dtype("int64"),
-            ): ("nvshmemx_putmem_block", core.dtype("int32"))
-        },
-        is_pure=False,
-        _builder=_builder,
-    )
+if has_triton():
+    from triton.language import core
+
+    @core.extern
+    def putmem_block(dst, src, nelems, pe, _builder=None):  # type: ignore[no-untyped-def]
+        return core.extern_elementwise(
+            "",
+            "",
+            [dst, src, nelems, pe],
+            {
+                (
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                ): ("nvshmemx_putmem_block", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
