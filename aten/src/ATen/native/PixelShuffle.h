@@ -12,6 +12,9 @@ inline void check_pixel_shuffle_shapes(const Tensor& self, int64_t upscale_facto
               upscale_factor);
   int64_t c = self.size(-3);
   int64_t upscale_factor_squared = upscale_factor * upscale_factor;
+  TORCH_CHECK(c > 0,
+              "pixel_shuffle expects its input's 'channel' dimension to be greater than 0, but input.size(-3)=",
+              c, " is not greater than 0");
   TORCH_CHECK(c % upscale_factor_squared == 0,
               "pixel_shuffle expects its input's 'channel' dimension to be divisible by the square of "
               "upscale_factor, but input.size(-3)=", c, " is not divisible by ", upscale_factor_squared);
