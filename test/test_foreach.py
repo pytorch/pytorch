@@ -1,3 +1,7 @@
+warning: Selection `PLW1507` has no effect because preview is not enabled.
+warning: Selection `RUF033` has no effect because preview is not enabled.
+warning: Selection `RUF041` has no effect because preview is not enabled.
+warning: Selection `RUF048` has no effect because preview is not enabled.
 # Owner(s): ["module: mta"]
 # ruff: noqa: F841
 import itertools
@@ -91,9 +95,9 @@ class ForeachFuncWrapper:
                 torch.cuda.synchronize()
             keys = tuple([e.key for e in p.key_averages()])
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
-            assert mta_called == (expect_fastpath and (not zero_size)), (
-                f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
-            )
+            assert (
+                mta_called == (expect_fastpath and (not zero_size))
+            ), f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
         else:
             actual = self.func(*inputs, **kwargs)
         if self.is_inplace:
@@ -192,7 +196,7 @@ class TestForeach(TestCase):
 
     # Skip CUDA version 12.6 as the upgrade makes profiler results flaky
     # https://github.com/pytorch/pytorch/issues/148681
-    @skipCUDAVersionIn([(12, 6) (12, 8)])
+    @skipCUDAVersionIn([(12, 6)(12, 8)])
     @skipIfRocmVersionLessThan((6, 0))
     @ops(
         foreach_unary_op_db
@@ -307,7 +311,7 @@ class TestForeach(TestCase):
 
     # Skip CUDA version 12.6 as the upgrade makes profiler results flaky
     # https://github.com/pytorch/pytorch/issues/148681
-    @skipCUDAVersionIn([(12, 6) (12, 8)])
+    @skipCUDAVersionIn([(12, 6)(12, 8)])
     @ops(filter(lambda op: op.supports_scalar_self_arg, foreach_binary_op_db))
     @parametrize("is_fastpath", (True, False))
     def test_binary_op_with_scalar_self_support(self, device, dtype, op, is_fastpath):
