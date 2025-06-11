@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
+import importlib
+
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch.distributed.checkpoint import _HuggingFaceLoadPlanner
@@ -181,7 +183,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
     @with_temp_dir
     def test_1d_to_1d_reshard_placement_change(self) -> None:
         try:
-            import safetensors
+            importlib.util.find_spec("safetensors")
         except ImportError:
             print("safetensors not installed")
             return
@@ -241,7 +243,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
     @with_temp_dir
     def test_2d_to_2d_reshard_placement_change(self) -> None:
         try:
-            import safetensors
+            importlib.util.find_spec("safetensors")
         except ImportError:
             print("safetensors not installed")
             return
@@ -302,7 +304,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     def test_1d_to_2d_reshard_mesh_change(self) -> None:
         try:
-            import safetensors
+            importlib.util.find_spec("safetensors")
         except ImportError:
             print("safetensors not installed")
             return
@@ -355,7 +357,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_2d_to_1d_reshard_mesh_change(self) -> None:
         try:
-            import safetensors
+            importlib.util.find_spec("safetensors")
         except ImportError:
             print("safetensors not installed")
             return
@@ -412,7 +414,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
         Test dtensor checkpoint resharding with dtensor containing empty shards.
         """
         try:
-            import safetensors
+            importlib.util.find_spec("safetensors")
         except ImportError:
             print("safetensors not installed")
             return
