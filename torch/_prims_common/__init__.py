@@ -396,12 +396,12 @@ def definitely_contiguous(a: TensorLikeType) -> bool:
 
 
 # similar to is_channels_last_contiguous_2d but return false on data dependency.
-def is_known_channels_last_contiguous_2d(a: Tensor) -> bool:
+def definitely_channels_last_contiguous_2d(a: Tensor) -> bool:
     return is_channels_last_contiguous_2d(a, false_if_dde=True)
 
 
 # similar to is_channels_last_contiguous_3d but return false on data dependency.
-def is_known_channels_last_contiguous_3d(a: Tensor) -> bool:
+def definitely_channels_last_contiguous_3d(a: Tensor) -> bool:
     return is_channels_last_contiguous_3d(a, false_if_dde=True)
 
 
@@ -432,10 +432,10 @@ def is_channels_last_contiguous(a: Tensor) -> bool:
 
 
 # similar to is_channels_last_contiguous but return false on data dependency.
-def is_known_channels_last_contiguous(a: Tensor) -> bool:
-    return is_known_channels_last_contiguous_2d(
+def definitely_channels_last_contiguous(a: Tensor) -> bool:
+    return definitely_channels_last_contiguous_2d(
         a
-    ) or is_known_channels_last_contiguous_3d(a)
+    ) or definitely_channels_last_contiguous_3d(a)
 
 
 def is_non_overlapping_and_dense(a: Tensor) -> bool:

@@ -40,19 +40,6 @@ CUDA_AARCH64_ARCHES = ["12.8-aarch64"]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
-    "11.8": (
-        "nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
-        "nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'"
-    ),
     "12.6": (
         "nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -92,8 +79,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "intel-cmplr-lib-ur==2025.1.1 | "
         "intel-cmplr-lic-rt==2025.1.1 | "
         "intel-sycl-rt==2025.1.1 | "
-        "oneccl-devel==2021.15.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2021.15.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl-devel==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "impi-rt==2021.15.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "onemkl-sycl-blas==2025.1.0 | "
         "onemkl-sycl-dft==2025.1.0 | "
@@ -107,7 +94,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "tbb==2022.1.0 | "
         "tcmlib==1.3.0 | "
         "umf==0.10.0 | "
-        "intel-pti==0.12.0"
+        "intel-pti==0.12.3"
     ),
 }
 
@@ -413,4 +400,3 @@ def generate_wheels_matrix(
 
 validate_nccl_dep_consistency("12.8")
 validate_nccl_dep_consistency("12.6")
-validate_nccl_dep_consistency("11.8")
