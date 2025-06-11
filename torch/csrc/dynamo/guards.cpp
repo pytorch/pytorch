@@ -151,9 +151,10 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_sizes,
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
-  if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
-      dtype_ != dtype || device_index_ != device.index() ||
-      requires_grad_ != requires_grad) {
+  if (requires_grad_ != requires_grad ||
+      (requires_grad_ &&
+       dispatch_key_ != state.apply(dispatch_key_set).raw_repr()) ||
+      dtype_ != dtype || device_index_ != device.index()) {
     return false;
   }
 
@@ -187,7 +188,14 @@ std::string TensorCheck::check_verbose(
     const std::string& tensor_name) {
   std::stringstream fail_reason;
   fail_reason << "tensor '" << tensor_name << "' ";
-  if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
+  if (requires_grad_ != v.requires_grad()) {
+    // return fmt::format("tensor requires_grad mismatch. expected {}",
+    // requires_grad_);
+    fail_reason << "requires_grad mismatch. expected requires_grad="
+                << requires_grad_;
+    return fail_reason.str();
+  } else if (
+      requires_grad_ && dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
     // return fmt::format("tensor dispatch key mismatch. expected {}, actual
     // {}", dispatch_key_, state.apply(v.key_set()).raw_repr());
     fail_reason << "dispatch key set mismatch. expected "
@@ -203,12 +211,6 @@ std::string TensorCheck::check_verbose(
   } else if (device_index_ != v.device().index()) {
     fail_reason << "Tensor device index mismatch. Expected device index to be "
                 << device_index_ << ", actual " << v.device().index();
-    return fail_reason.str();
-  } else if (requires_grad_ != v.requires_grad()) {
-    // return fmt::format("tensor requires_grad mismatch. expected {}",
-    // requires_grad_);
-    fail_reason << "requires_grad mismatch. expected requires_grad="
-                << requires_grad_;
     return fail_reason.str();
   }
   auto ndim = v.ndimension();

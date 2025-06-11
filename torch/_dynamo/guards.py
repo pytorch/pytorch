@@ -508,12 +508,18 @@ def convert_to_concrete_values(size_or_stride):
 
 
 def get_tensor_guard_code_part(value, name, sizes, strides, pytype, dispatch_keys):
-    dispatch_key = (
-        dispatch_keys | torch._C._dispatch_tls_local_include_set()
-    ) - torch._C._dispatch_tls_local_exclude_set()
+    requires_grad = value.requires_grad
+    if requires_grad:
+        dispatch_key = (
+            dispatch_keys | torch._C._dispatch_tls_local_include_set()
+        ) - torch._C._dispatch_tls_local_exclude_set()
+    else:
+        # Get an empty dispatch key set because with requires_grad we dont guard
+        # on it.
+        dispatch_key = dispatch_keys - dispatch_keys
+
     dtype = value.dtype
     device_index = value.device.index
-    requires_grad = value.requires_grad
     guard_str = (
         f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
         f"device={device_index}, requires_grad={requires_grad}, size={sizes}, stride={strides})"
