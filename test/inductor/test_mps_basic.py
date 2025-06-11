@@ -182,6 +182,14 @@ class MPSBasicTests(TestCase):
 
 
 class MPSBasicTestsAOTI(TestCase):
+    def check_model(self, m, inp, dynamic_shapes=None):
+        res2 = m(*inp)
+        ep = torch.export.export(m, inp, dynamic_shapes=dynamic_shapes)
+        path = torch._inductor.aoti_compile_and_package(ep)
+        m = torch._inductor.aoti_load_package(path)
+        res = m(*inp)
+        assert torch.allclose(res, res2)
+
     def test_add_mps(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -189,12 +197,7 @@ class MPSBasicTestsAOTI(TestCase):
 
         inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
         m = M().to("mps")
-        res2 = m(*inp)
-        ep = torch.export.export(m, inp)
-        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
-        m = torch._inductor.aoti_load_package(path)
-        res = m(*inp)
-        assert torch.allclose(res, res2)
+        self.check_model(m, inp)
 
     def test_fallback_mps(self):
         class M(torch.nn.Module):
@@ -206,12 +209,7 @@ class MPSBasicTestsAOTI(TestCase):
             torch.randn(10, 10, device="mps"),
         )
         m = M().to("mps")
-        res2 = m(*inp)
-        ep = torch.export.export(m, inp)
-        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
-        m = torch._inductor.aoti_load_package(path)
-        res = m(*inp)
-        assert torch.allclose(res, res2)
+        self.check_model(m, inp)
 
     def test_c10(self):
         class M(torch.nn.Module):
@@ -223,12 +221,7 @@ class MPSBasicTestsAOTI(TestCase):
 
         inp = (torch.randn(2, 8, device="mps"),)
         m = M().to("mps")
-        res2 = m(*inp)
-        ep = torch.export.export(m, inp)
-        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
-        m = torch._inductor.aoti_load_package(path)
-        res = m(*inp)
-        assert torch.allclose(res, res2)
+        self.check_model(m, inp)
 
 
 if __name__ == "__main__":
