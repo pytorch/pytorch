@@ -45,10 +45,12 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
+    MACOS_VERSION,
     parametrize,
     skipIfMPS,
     skipIfRocm,
     skipIfXpu,
+    TEST_MPS,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
@@ -166,7 +168,7 @@ class AOTInductorTestsTemplate:
     @common_utils.parametrize("embed_kernel_binary", [True, False])
     @common_utils.parametrize("emit_current_arch_binary", [True, False])
     def test_simple_multi_arch(self, embed_kernel_binary, emit_current_arch_binary):
-        if self.device != GPU_TYPE:
+        if HAS_GPU:
             raise unittest.SkipTest("requires GPU_TYPE")
 
         class Model(torch.nn.Module):
@@ -4077,20 +4079,10 @@ class AOTInductorTestsTemplate:
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks(self):
         class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
+            def forward(self, inputs):
+                return list(inputs.values())
 
-            if SM80OrLater:
-
-                def forward(self, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9):
-                    return (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9)
-
-            else:
-
-                def forward(self, x0, x1, x2, x4, x5, x6, x7, x8, x9):
-                    return (x0, x1, x2, x4, x5, x6, x7, x8, x9)
-
-        inputs = []
+        inputs = {}
         dtypes = [
             torch.float16,
             torch.float32,
@@ -4101,62 +4093,75 @@ class AOTInductorTestsTemplate:
             torch.int64,
             torch.uint8,
         ]
-        if sys.platform != "darwin":
+
+        if not TEST_MPS:
             dtypes.append(torch.float64)
         if SM80OrLater:
             dtypes.append(torch.bfloat16)
+
         for dtype in dtypes:
-            inputs.append(torch.ones(4, 8, 10, dtype=dtype, device=self.device))
+            inputs[f"x_{str(dtype)}"] = torch.ones(
+                4, 8, 10, dtype=dtype, device=self.device
+            )
 
         dim0 = Dim("s0", min=2, max=1024)
         dim1 = Dim("s1", min=2, max=512)
         dim2 = Dim("s2", min=2, max=128)
         dynamic_shapes = {
-            "x0": {0: dim0},
-            "x1": {0: dim0},
-            "x2": {0: dim0},
-            "x4": {1: dim1},
-            "x5": {1: dim1},
-            "x6": {},
-            "x7": {2: dim2},
-            "x8": {2: dim2},
-            "x9": {2: dim2},
+            "x_torch.float16": {0: dim0},
+            "x_torch.float32": {0: dim0},
+            "x_torch.bool": {1: dim1},
+            "x_torch.int8": {1: dim1},
+            "x_torch.int16": {},
+            "x_torch.int32": {2: dim2},
+            "x_torch.int64": {2: dim2},
+            "x_torch.uint8": {2: dim2},
         }
+        if not TEST_MPS:
+            dynamic_shapes["x_torch.float64"] = {0: dim0}
         if SM80OrLater:
-            dynamic_shapes["x3"] = {1: dim1}
+            dynamic_shapes["x_torch.bfloat16"] = {1: dim1}
 
         m = Model()
-        inputs = tuple(inputs)
+        inputs = (inputs,)
+        dynamic_shapes = (dynamic_shapes,)
         with torch.no_grad():
             so_path = AOTIRunnerUtil.legacy_compile(
                 m, inputs, dynamic_shapes=dynamic_shapes
             )
+
+        # Expected results for the following checks:
+        # ("unmatched dtype", "unmatched dim value at", "dim value is too", "unmatched stride value at")
+        if SM80OrLater:
+            # 10 dynamic dims
+            expected_results = (10, 21, 18, 21)
+        elif TEST_MPS:
+            # 8 dynamic dims
+            expected_results = (8, 17, 14, 16)
+        else:
+            # 9 dynamic dims
+            expected_results = (9, 19, 16, 19)
+
         with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
             src_code = cpp.read()
             FileCheck().check_count(
                 "unmatched dtype",
-                10 if SM80OrLater else 9,
+                expected_results[0],
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched dim value at",
-                21
-                if SM80OrLater
-                else 19,  # we have 9 dynamic dims for which we generate different checks
+                expected_results[1],
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "dim value is too",
-                18
-                if SM80OrLater
-                else 16,  # we have 9 dynamic dims for which we generate two checks
+                expected_results[2],
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched stride value at",
-                21
-                if SM80OrLater
-                else 19,  # we have 9 symbolic strides for which we don't generate checks
+                expected_results[3],
                 exactly=True,
             ).run(src_code)
 
@@ -4423,6 +4428,10 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(
+        TEST_MPS and MACOS_VERSION < 14.0,
+        "FFT operations are only supported on MacOS 14+",
+    )
     def test_fft_c2c(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -5691,13 +5700,17 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
+    @unittest.skipIf(
+        TEST_MPS and MACOS_VERSION < 14.0,
+        "FFT operations are only supported on MacOS 14+",
+    )
     def test_stft(self):
         N_FFT = 400
         HOP_LENGTH = 160
 
         class Model(torch.nn.Module):
             def forward(self, x):
-                window = torch.hann_window(N_FFT).to(x.device)
+                window = torch.hann_window(N_FFT, device=x.device)
                 stft = torch.stft(
                     x, N_FFT, HOP_LENGTH, window=window, return_complex=True
                 )
@@ -6127,20 +6140,16 @@ MPS_TEST_FAILURES = {
     # Compilation Error
     "test_while_loop_with_mixed_device": fail_mps(),
     "test_index_put_with_none_index": fail_mps(),
-    "test_aoti_runtime_asserts_backed_symint": fail_mps(),
     "test_size_from_multi_ouptut": fail_mps(),
     "test_simple_embed_kernel_binary_False": fail_mps(),
     "test_while_loop_with_mixed_device_dynamic_False": fail_mps(),
     "test_while_loop_with_mixed_device_dynamic_True": fail_mps(),
-    "test_simple_multi_arch_embed_kernel_binary_False_emit_current_arch_binary_False": fail_mps(),
     # Dynamism
-    "test_runtime_checks": fail_mps(),
     "test_shifted_constraint_ranges": fail_mps(),
     "test_while_loop_with_sym_expr_cond_dynamic_True": fail_mps(),
     "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_mps(),
     "test_cond_mismatched_branch_output_dynamic_True": fail_mps(),
     "test_cond_unbacked_symint_closure_dynamic_True": fail_mps(),
-    "test_cond_non_tensor_predicates_dynamic_False": fail_mps(),
     "test_cond_non_tensor_predicates_dynamic_True": fail_mps(),
     "test_zero_grid_with_unbacked_symbols": fail_mps(),
     "test_reuse_kernel_dynamic": fail_mps(is_skip=True),
