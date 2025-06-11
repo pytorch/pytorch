@@ -1810,9 +1810,9 @@ def use_cpp_gemm_template(
         use_4x2_dim=is_woq_int4,
     )
 
-    # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
+
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
 
