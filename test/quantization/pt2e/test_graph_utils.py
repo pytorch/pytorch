@@ -9,7 +9,11 @@ from torch.ao.quantization.pt2e.graph_utils import (
     get_equivalent_types,
     update_equivalent_types_dict,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class TestGraphUtils(TestCase):
@@ -121,3 +125,7 @@ class TestGraphUtils(TestCase):
             [torch.nn.Conv2d, torch.nn.ReLU6],
         )
         self.assertEqual(len(fused_partitions), 1)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")
