@@ -65,4 +65,7 @@ struct DriverAPI {
   static void* get_nvml_handle();
 };
 
+/*! \brief Get pointer corresponding to symbol in CUDA driver library */
+void *get_symbol(const char *symbol, int cuda_version = 11080);
+
 } // namespace c10::cuda
