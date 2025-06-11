@@ -22,7 +22,9 @@ from torch.testing._internal.logging_utils import logs_to_string
 # you assume static by default, put it in a regular test file and
 # test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
 
-device_type = torch.accelerator.current_accelerator().type
+
+device_type = torch.accelerator.current_accelerator().type if torch.accelerator.current_accelerator() \
+    is not None else 'cpu'
 
 @torch._dynamo.config.patch(assume_static_by_default=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):

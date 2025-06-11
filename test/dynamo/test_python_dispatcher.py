@@ -7,7 +7,8 @@ from torch._dynamo.testing import CompileCounter, EagerAndRecordGraphs, normaliz
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import TEST_XPU
 
-device_type = torch.accelerator.current_accelerator().type
+device_type = torch.accelerator.current_accelerator().type if torch.accelerator.current_accelerator() \
+    is not None else 'cpu'
 
 class PythonDispatcherTests(torch._dynamo.test_case.TestCase):
     def test_dispatch_key1(self):

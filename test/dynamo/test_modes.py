@@ -16,7 +16,9 @@ from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
 
-device_type = torch.accelerator.current_accelerator().type
+device_type = torch.accelerator.current_accelerator().type if torch.accelerator.current_accelerator() \
+    is not None else 'cpu'
+
 class TestMode(BaseTorchFunctionMode):
     def __torch_function__(self, func, types, args, kwargs=None):
         if not kwargs:

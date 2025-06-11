@@ -111,7 +111,8 @@ TPFLAGS_MAPPING = 1 << 6
 
 GLOBAL_INT = 1
 
-device_type = torch.accelerator.current_accelerator().type
+device_type = torch.accelerator.current_accelerator().type if torch.accelerator.current_accelerator() \
+    is not None else 'cpu'
 
 # Specializes a test to run only if translation validation is set.
 def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
