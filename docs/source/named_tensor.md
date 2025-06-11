@@ -18,7 +18,7 @@ also be used to rearrange dimensions, for example, to support
     The named tensor API is a prototype feature and subject to change.
 ```
 
-### Creating named tensors
+## Creating named tensors
 
 
 Factory functions now take a new {attr}`names` argument that associates a name
