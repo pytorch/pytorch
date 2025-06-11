@@ -31,6 +31,10 @@ constexpr int64_t kCommInitBusyWaitMillis = 2;
 #define NCCL_HAS_INIT_RANK_SCALABLE
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COLLNET_ENABLE
+#endif
+
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
 // ncclRemoteError only exists in NCCL versions 2.13+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 13, 0)
