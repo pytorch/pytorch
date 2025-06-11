@@ -267,7 +267,7 @@ class _HuggingFaceStorageReader(FsspecReader):
                     )
                     # TODO: update this to req.lengths once I get rid of allow_tensor_resize,
                     # shouldn't need to look at the deserialized
-                    # dict for metadat as we've already done that in read_metadata file
+                    # dict for metadata as we've already done that in read_metadata file
                     tensor = tensor.reshape(
                         deserialized_dict[req.dest_index.fqn][SHAPE_KEY]
                     )
@@ -375,7 +375,7 @@ class _HuggingFaceStorageReader(FsspecReader):
                     )
 
         metadata = Metadata(
-            state_dict_metadata=state_dict_metadata,
+            state_dict_metadata=state_dict_metadata,  # type: ignore[arg-type]
             storage_data=storage_data,
         )
 
