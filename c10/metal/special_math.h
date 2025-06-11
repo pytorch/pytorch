@@ -1,5 +1,6 @@
 // Implementation of specal math functions for Metal
 #pragma once
+#include <c10/metal/expm1f.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 

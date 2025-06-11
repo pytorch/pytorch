@@ -2628,8 +2628,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: expm1_out
-    MPS: expm1_out_mps
+    CPU, CUDA, MPS: expm1_out
     SparseCPU, SparseCUDA: expm1_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: expm1_sparse_csr_out
   tags: pointwise
