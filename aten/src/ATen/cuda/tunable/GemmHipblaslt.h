@@ -328,9 +328,9 @@ class HipblasltGemmOp : public Callable<ParamsT> {
     TuningStatus Call(const ParamsT* params) override {
       hipblasOperation_t transa_outer = MapLayoutToHipBlasLt(ALayout);
       hipblasOperation_t transb_outer = MapLayoutToHipBlasLt(BLayout);
-      auto a_datatype = HipBlasDataTypeFor<AT>();
-      auto b_datatype = HipBlasDataTypeFor<BT>();
-      auto in_out_datatype = HipBlasDataTypeFor<CT>();
+      auto a_datatype = HipDataTypeFor<AT>();
+      auto b_datatype = HipDataTypeFor<BT>();
+      auto in_out_datatype = HipDataTypeFor<CT>();
       auto opa = _hipblasOpFromChar(params->transa);
       auto opb = _hipblasOpFromChar(params->transb);
 
@@ -461,9 +461,9 @@ template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout,
 auto GetHipBlasLtTypeStringAndOps() {
   hipblasOperation_t transa_outer = MapLayoutToHipBlasLt(ALayout);
   hipblasOperation_t transb_outer = MapLayoutToHipBlasLt(BLayout);
-  auto a_datatype = HipBlasDataTypeFor<AT>();
-  auto b_datatype = HipBlasDataTypeFor<BT>();
-  auto in_out_datatype = HipBlasDataTypeFor<CT>();
+  auto a_datatype = HipDataTypeFor<AT>();
+  auto b_datatype = HipDataTypeFor<BT>();
+  auto in_out_datatype = HipDataTypeFor<CT>();
   std::vector<hipblasLtMatmulHeuristicResult_t> heuristic_result;
 
   hipblasLtHandle_t handle;
