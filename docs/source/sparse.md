@@ -737,7 +737,7 @@ sparse compressed tensors is always two, ``M == 2``.
 ```
 
 (sparse-csr-docs)=
-## Sparse CSR Tensor
+### Sparse CSR Tensor
 
 The primary advantage of the CSR format over the COO format is better
 use of storage and much faster computation operations such as sparse
