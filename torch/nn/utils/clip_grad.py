@@ -1,7 +1,9 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
+import types
 import typing
+import warnings
 from typing import cast, Optional, Union
 from typing_extensions import deprecated
 
@@ -14,11 +16,7 @@ from torch.utils._foreach_utils import (
 )
 
 
-__all__ = [
-    "clip_grad_norm_",
-    "clip_grad_norm",
-    "clip_grad_value_",
-]
+__all__: list[str] = []
 
 
 _tensor_or_tensors = Union[
@@ -213,8 +211,14 @@ def clip_grad_norm_(
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     else:
+        is_generator = isinstance(parameters, types.GeneratorType)
         # prevent generators from being exhausted
         parameters = list(parameters)
+        if is_generator and len(parameters) == 0:
+            warnings.warn(
+                "`parameters` is an empty generator, no gradient clipping will occur.",
+                stacklevel=3,
+            )
     grads = [p.grad for p in parameters if p.grad is not None]
     total_norm = _get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
     _clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
@@ -284,3 +288,8 @@ def clip_grad_value_(
         else:
             for grad in grads:
                 cast(Tensor, grad).clamp_(min=-clip_value, max=clip_value)
+
+
+clip_grad_norm.__module__ = "torch.nn.utils"
+clip_grad_norm_.__module__ = "torch.nn.utils"
+clip_grad_value_.__module__ = "torch.nn.utils"

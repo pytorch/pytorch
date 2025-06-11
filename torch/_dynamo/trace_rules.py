@@ -1,4 +1,26 @@
 # mypy: allow-untyped-defs
+
+"""
+Tracing rules and policies for TorchDynamo compilation decisions.
+
+This module defines the rules that govern what code TorchDynamo should trace and compile
+versus what should be executed eagerly. It contains functions and classes that determine:
+
+- Which modules, functions, and objects should be skipped during tracing
+- Which parts of the code should cause graph breaks
+- How to handle different Python libraries and third-party packages
+- Rules for determining when to inline functions vs calling them eagerly
+
+Key components:
+- Skip rules: Functions that return True if an object should be skipped during tracing
+- Inlining rules: Policies for when to inline function calls during compilation
+- Library-specific handling: Special cases for popular Python packages
+- Performance heuristics: Rules that balance compilation overhead vs runtime benefits
+
+These rules are critical for TorchDynamo's ability to automatically determine
+compilation boundaries and optimize PyTorch programs effectively.
+"""
+
 import abc
 import builtins
 import collections
@@ -315,6 +337,7 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_false": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.statically_known_true": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.statically_known_false": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.has_static_value": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
@@ -460,7 +483,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_cudaHostAllocator",
         "torch._C._cuda_customAllocator",
         "torch._C._cuda_emptyCache",
-        "torch._C._cuda_endAllocateCurrentStreamToPool",
+        "torch._C._cuda_endAllocateToPool",
         "torch._C._cuda_exchangeDevice",
         "torch._C._cuda_get_conv_benchmark_empty_cache",
         "torch._C._cuda_get_cudnn_benchmark_limit",
@@ -3298,6 +3321,7 @@ MOD_INLINELIST = [
     "torch._tensor",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
+    "torch.ao.quantization.fake_quantize",
     "torch.autograd.function",
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
@@ -3364,7 +3388,6 @@ MOD_SKIPLIST = [
     "torch._functorch",
     "torch._guards",
     "torch._higher_order_ops.effects",
-    "torch._higher_order_ops.map",
     "torch._higher_order_ops.torchbind",
     "torch._higher_order_ops.wrap",
     "torch._inductor",

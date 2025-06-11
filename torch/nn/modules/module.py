@@ -117,6 +117,18 @@ _global_forward_hooks: dict[int, Callable] = OrderedDict()
 _global_forward_hooks_always_called: dict[int, bool] = OrderedDict()
 _global_forward_hooks_with_kwargs: dict[int, bool] = OrderedDict()
 
+
+def _has_any_global_hook():
+    return (
+        _global_backward_pre_hooks
+        or _global_backward_hooks
+        or _global_forward_pre_hooks
+        or _global_forward_hooks
+        or _global_forward_hooks_always_called
+        or _global_forward_hooks_with_kwargs
+    )
+
+
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
 
 
@@ -513,7 +525,7 @@ class Module:
     ) -> None:
         r"""Add a buffer to the module.
 
-        This is typically used to register a buffer that should not to be
+        This is typically used to register a buffer that should not be
         considered a model parameter. For example, BatchNorm's ``running_mean``
         is not a parameter, but is part of the module's state. Buffers, by
         default, are persistent and will be saved alongside parameters. This
@@ -1005,7 +1017,7 @@ class Module:
 
         return self
 
-    def apply(self: T, fn: Callable[["Module"], None]) -> T:
+    def apply(self, fn: Callable[["Module"], None]) -> Self:
         r"""Apply ``fn`` recursively to every submodule (as returned by ``.children()``) as well as self.
 
         Typical use includes initializing the parameters of a model
@@ -1046,7 +1058,7 @@ class Module:
         fn(self)
         return self
 
-    def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:
+    def cuda(self, device: Optional[Union[int, device]] = None) -> Self:
         r"""Move all model parameters and buffers to the GPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -1065,7 +1077,7 @@ class Module:
         """
         return self._apply(lambda t: t.cuda(device))
 
-    def ipu(self: T, device: Optional[Union[int, device]] = None) -> T:
+    def ipu(self, device: Optional[Union[int, device]] = None) -> Self:
         r"""Move all model parameters and buffers to the IPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -1084,7 +1096,7 @@ class Module:
         """
         return self._apply(lambda t: t.ipu(device))
 
-    def xpu(self: T, device: Optional[Union[int, device]] = None) -> T:
+    def xpu(self, device: Optional[Union[int, device]] = None) -> Self:
         r"""Move all model parameters and buffers to the XPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -1103,7 +1115,7 @@ class Module:
         """
         return self._apply(lambda t: t.xpu(device))
 
-    def mtia(self: T, device: Optional[Union[int, device]] = None) -> T:
+    def mtia(self, device: Optional[Union[int, device]] = None) -> Self:
         r"""Move all model parameters and buffers to the MTIA.
 
         This also makes associated parameters and buffers different objects. So
@@ -1122,7 +1134,7 @@ class Module:
         """
         return self._apply(lambda t: t.mtia(device))
 
-    def cpu(self: T) -> T:
+    def cpu(self) -> Self:
         r"""Move all model parameters and buffers to the CPU.
 
         .. note::
@@ -1133,7 +1145,7 @@ class Module:
         """
         return self._apply(lambda t: t.cpu())
 
-    def type(self: T, dst_type: Union[dtype, str]) -> T:
+    def type(self, dst_type: Union[dtype, str]) -> Self:
         r"""Casts all parameters and buffers to :attr:`dst_type`.
 
         .. note::
@@ -1147,7 +1159,7 @@ class Module:
         """
         return self._apply(lambda t: t.type(dst_type))
 
-    def float(self: T) -> T:
+    def float(self) -> Self:
         r"""Casts all floating point parameters and buffers to ``float`` datatype.
 
         .. note::
@@ -1158,7 +1170,7 @@ class Module:
         """
         return self._apply(lambda t: t.float() if t.is_floating_point() else t)
 
-    def double(self: T) -> T:
+    def double(self) -> Self:
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
 
         .. note::
@@ -1169,7 +1181,7 @@ class Module:
         """
         return self._apply(lambda t: t.double() if t.is_floating_point() else t)
 
-    def half(self: T) -> T:
+    def half(self) -> Self:
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
 
         .. note::
@@ -1180,7 +1192,7 @@ class Module:
         """
         return self._apply(lambda t: t.half() if t.is_floating_point() else t)
 
-    def bfloat16(self: T) -> T:
+    def bfloat16(self) -> Self:
         r"""Casts all floating point parameters and buffers to ``bfloat16`` datatype.
 
         .. note::
@@ -1192,8 +1204,8 @@ class Module:
         return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
 
     def to_empty(
-        self: T, *, device: Optional[DeviceLikeType], recurse: bool = True
-    ) -> T:
+        self, *, device: Optional[DeviceLikeType], recurse: bool = True
+    ) -> Self:
         r"""Move the parameters and buffers to the specified device without copying storage.
 
         Args:
@@ -2510,15 +2522,14 @@ class Module:
             assign (bool, optional): When set to ``False``, the properties of the tensors
                 in the current module are preserved whereas setting it to ``True`` preserves
                 properties of the Tensors in the state dict. The only
-                exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`s
-                for which the value from the module is preserved.
-                Default: ``False``
+                exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`
+                for which the value from the module is preserved. Default: ``False``
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
-                * **missing_keys** is a list of str containing any keys that are expected
+                * ``missing_keys`` is a list of str containing any keys that are expected
                     by this module but missing from the provided ``state_dict``.
-                * **unexpected_keys** is a list of str containing the keys that are not
+                * ``unexpected_keys`` is a list of str containing the keys that are not
                     expected by this module but present in the provided ``state_dict``.
 
         Note:
@@ -2838,7 +2849,7 @@ class Module:
                     memo, submodule_prefix, remove_duplicate
                 )
 
-    def train(self: T, mode: bool = True) -> T:
+    def train(self, mode: bool = True) -> Self:
         r"""Set the module in training mode.
 
         This has an effect only on certain modules. See the documentation of
@@ -2860,7 +2871,7 @@ class Module:
             module.train(mode)
         return self
 
-    def eval(self: T) -> T:
+    def eval(self) -> Self:
         r"""Set the module in evaluation mode.
 
         This has an effect only on certain modules. See the documentation of
@@ -2878,7 +2889,7 @@ class Module:
         """
         return self.train(False)
 
-    def requires_grad_(self: T, requires_grad: bool = True) -> T:
+    def requires_grad_(self, requires_grad: bool = True) -> Self:
         r"""Change if autograd should record operations on parameters in this module.
 
         This method sets the parameters' :attr:`requires_grad` attributes
@@ -2929,7 +2940,7 @@ class Module:
                         p.grad.requires_grad_(False)
                     p.grad.zero_()
 
-    def share_memory(self: T) -> T:
+    def share_memory(self) -> Self:
         r"""See :meth:`torch.Tensor.share_memory_`."""
         return self._apply(lambda t: t.share_memory_())
 
