@@ -685,7 +685,7 @@ print(t.is_pinned())
             gcn_arch = str(
                 torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
             )
-            if "gfx94" in gcn_arch:
+            if "gfx94" in gcn_arch or "gfx95" in gcn_arch:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -1386,6 +1386,8 @@ except RuntimeError as e:
             errors = pool.map(method, [arg])
             for e in errors:
                 if "device-side assert triggered" not in str(e):
+                    self.fail(e)
+                if e.error_code != 710:  # cudaErrorAssert == 710
                     self.fail(e)
 
     @staticmethod
@@ -5112,6 +5114,47 @@ class TestMemPool(TestCase):
         )
         return allocator, dummy_allocator
 
+    def test_mempool_empty_cache(self):
+        torch.cuda.empty_cache()
+        pool = torch.cuda.MemPool()
+        x = torch.empty(1024, 1024, device="cuda")
+
+        with torch.cuda.use_mem_pool(pool):
+            y = torch.empty(1024, 1024, device="cuda")
+
+        del y
+        del x
+        del pool
+        segments = torch.cuda.memory._snapshot()["segments"]
+        self.assertTrue(len(segments) > 0, "expected more than one segment")
+
+    def test_mempool_empty_cache_inactive(self):
+        torch.cuda.empty_cache()
+        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
+        self.assertEqual(called_dummy_alloc.value, 0)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        def f():
+            pool = torch.cuda.MemPool(allocator.allocator())
+
+            # allocate memory with ncclMemAlloc
+            with torch.cuda.use_mem_pool(pool):
+                x = torch.arange(1024 * 1024 * 2, device="cuda")
+            # Note: pool will be destroyed upon function return, but x, which
+            # was allocated via the pool is still alive.
+            return x
+
+        x = f()
+        self.assertEqual(called_dummy_alloc.value, 123)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        del x
+        torch.cuda.empty_cache()
+        self.assertEqual(called_dummy_free.value, 321)
+
     def test_mempool_with_allocator(self):
         pool = torch.cuda.MemPool()
 
@@ -5172,8 +5215,7 @@ class TestMemPool(TestCase):
             # to make a new 2 MB buffer to accomodate out_2
             self.assertEqual(len(pool.snapshot()), 2)
 
-        all_segments = torch.cuda.memory._snapshot()["segments"]
-        self.assertEqual(len(all_segments), 3)
+        self.assertEqual(len(pool.snapshot()), 2)
 
         del out_0, out_1, out_2
 
