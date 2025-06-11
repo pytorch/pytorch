@@ -1147,7 +1147,7 @@ tensor(True)
 (sparse-ops-docs)=
 ### Supported operations
 
-## Linear Algebra operations
+### Linear Algebra operations
 
 The following table summarizes supported Linear Algebra operations on
 sparse matrices where the operands layouts may vary. Here
