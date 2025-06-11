@@ -347,8 +347,7 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
 
   auto stream = getCurrentMPSStream();
   @autoreleasepool {
-
-        // For output shape calculation, assume that keepdim is true
+    // For output shape calculation, assume that keepdim is true
     num_output_dims = num_input_dims;
     NSMutableArray<NSNumber*>* apparent_output_shape = nil;
     NSMutableArray<NSNumber*>* apparent_input_shape = nil;
@@ -357,13 +356,13 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
     NSMutableArray<NSNumber*>* axes;
     set_axes(axes, num_reduce_dims, dim, input_shape.size());
 
-    set_apparent_shapes(apparent_output_shape, apparent_input_shape, num_reduce_dims, num_output_dims, input_shape, axes);
+    set_apparent_shapes(
+        apparent_output_shape, apparent_input_shape, num_reduce_dims, num_output_dims, input_shape, axes);
 
     NSArray<NSNumber*>* wrappedAxes = getTensorAxes(input_shape, dim);
     if (cdist) {
       apparent_output_shape = [[getMPSShape(output_t.sizes()) mutableCopy] autorelease];
     }
-
 
     NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
     std::string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
