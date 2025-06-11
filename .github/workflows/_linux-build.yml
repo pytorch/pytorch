@@ -93,19 +93,13 @@ on:
         type: number
         default: 1
 
-      prevent-reuse-old-whl:
-        description: |
-          If set, the build will not reuse old wheel files, even if they are available.
-        required: false
-        type: boolean
-        default: false
-
       allow-reuse-old-whl:
         description: |
-          Unused, but kept for backwards compatibility just in case.  Remove after two weeks
+          If set, the build try to pull an old wheel from s3 that was built on a
+          commit with no cpp changes from this commit
         required: false
         type: boolean
-        default: false
+        default: true
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -167,7 +161,7 @@ jobs:
       - name: Check if can use old whl build
         id: use-old-whl
         uses: ./.github/actions/reuse-old-whl
-        if: ${{ !inputs.prevent-reuse-old-whl }}
+        if: ${{ inputs.allow-reuse-old-whl }}
         with:
           build-environment: ${{ inputs.build-environment }}
           run-id: ${{ github.run_id }}
