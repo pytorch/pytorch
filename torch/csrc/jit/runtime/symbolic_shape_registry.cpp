@@ -295,7 +295,8 @@ void registerBoundedSchema(
       schema_string, lower_bound_function_name, reused_functions, module);
   auto upper_graph = genShapeComputeFn(
       schema_string, upper_bound_function_name, reused_functions, module);
-  cached_bounded_schema_to_graph[schema_string] = {lower_graph, upper_graph};
+  cached_bounded_schema_to_graph.emplace(
+      schema_string, lower_graph, upper_graph);
 }
 
 void loadModule(const CompilationUnit& module) {
@@ -357,7 +358,6 @@ void loadFunctions() {
         GetSerializedShapeFunctions() + _xnnpack_shape_compute_functions;
 
     auto src = std::make_shared<Source>(shape_compute_functions);
-    std::stringstream ss;
     std::vector<at::IValue> constantTable;
     auto resolver = std::make_shared<SourceImporterImpl>(
         compilation_unit,
