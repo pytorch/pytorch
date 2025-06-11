@@ -116,6 +116,7 @@ void CUDAHooks::init() const {
   if (set_lazy_module_loading) {
     c10::utils::set_env("CUDA_MODULE_LOADING", "LAZY", false);
   }
+  at::getHostAllocator(at::kCUDA)->init();
   const auto num_devices = c10::cuda::device_count_ensure_non_zero();
   c10::cuda::CUDACachingAllocator::init(num_devices);
   at::cuda::detail::init_p2p_access_cache(num_devices);
