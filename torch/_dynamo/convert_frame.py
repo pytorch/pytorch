@@ -725,8 +725,7 @@ def _compile(
     ) -> None:
         nonlocal output
         nonlocal tracer
-        nonlocal speculation_log
-        speculation_log.restart()
+        speculation_log.restart()  # type: ignore[has-type]
         exn_vt_stack = ExceptionStack()
         tracer = InstructionTranslator(
             instructions,
@@ -742,9 +741,9 @@ def _compile(
             export,
             export_constraints,
             frame_state=frame_state,
-            speculation_log=speculation_log,
+            speculation_log=speculation_log,  # type: ignore[has-type]
             exn_vt_stack=exn_vt_stack,
-            distributed_state=distributed_state,
+            distributed_state=distributed_state,  # type: ignore[has-type]
             package=package,
         )
 
@@ -753,7 +752,7 @@ def _compile(
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
-            speculation_log.clear()
+            speculation_log.clear()  # type: ignore[has-type]
             raise
         except (
             exc.SpeculationRestartAnalysis,
@@ -805,7 +804,6 @@ def _compile(
         transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> ConvertFrameReturn:
         nonlocal dynamo_time_before_restart
-        nonlocal distributed_state
         last_attempt_start_time = start_time = time.time()
 
         def log_bytecode(
@@ -868,7 +866,7 @@ def _compile(
                     log.debug("No graph captured with one_graph=True")
                 return ConvertFrameReturn()
 
-        assert distributed_state is None or distributed_state.all_states is not None, (
+        assert distributed_state is None or distributed_state.all_states is not None, (  # type: ignore[has-type]
             "compiler collective wasn't run before compilation completed"
         )
 
