@@ -572,13 +572,13 @@ if(USE_CUDA)
     if(NOT WIN32)
       append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_GPU_SRCS)
       set_source_files_properties(
-        ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CudaDMAConnectivity.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
-        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu
-        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryUtils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupNCCL.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
     endif()
@@ -1004,10 +1004,10 @@ elseif(USE_CUDA)
     # which is not viable for libtorch_cuda. So we isolate the linking of
     # nvshmem in nvshmem_extension.
     add_library(nvshmem_extension SHARED
-        "${TORCH_SRC_DIR}/csrc/distributed/c10d/nvshmem_extension.cu"
-        "${TORCH_SRC_DIR}/csrc/distributed/c10d/NVSHMEMSymmetricMemory.cu"
-        "${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryUtils.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
     )
     set_target_properties(nvshmem_extension PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_compile_options(nvshmem_extension PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
@@ -1317,12 +1317,6 @@ install(FILES
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 if(BUILD_TEST)
-  if(BUILD_EXECUTORCH)
-    add_subdirectory(
-            ${TORCH_ROOT}/test/edge
-            ${CMAKE_BINARY_DIR}/test_edge_op_registration
-    )
-  endif()
   if(BUILD_LITE_INTERPRETER)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
@@ -1949,7 +1943,7 @@ if(BUILD_TEST)
         set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
         hip_add_executable(${test_name} "${test_src}")
         list(JOIN PYTORCH_ROCM_ARCH " " ROCM_PROPERTY_ARCH_LIST)
-        set_target_properties(${test_name} PROPERTIES HIP_ARCHITECTURES ROCM_PROPERTY_ARCH_LIST)
+        set_target_properties(${test_name} PROPERTIES HIP_ARCHITECTURES ${ROCM_PROPERTY_ARCH_LIST})
       else()
         add_executable(${test_name} "${test_src}")
       endif()
