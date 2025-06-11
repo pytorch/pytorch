@@ -1965,6 +1965,10 @@ class BuiltinVariable(VariableTracker):
 
         name = name_var.as_python_constant()
 
+        # See NOTE [Tensor "grad" and "_grad" attr]
+        if isinstance(obj, TensorVariable) and name == "_grad":
+            name = "grad"
+
         if tx.output.side_effects.is_attribute_mutation(obj):
             if isinstance(obj, variables.UnspecializedNNModuleVariable):
                 if (
@@ -2199,11 +2203,12 @@ class BuiltinVariable(VariableTracker):
                     # Step 4 - replace all reference to the current object with the new one
                     return out
                 elif name in ("_grad", "grad"):
+                    # NOTE: [Tensor "grad" and "_grad" attr]
                     # _grad and grad share the same setter/getter, see
                     # THPVariable_properties, and here we make sure setting one
-                    # enables reading `val` from the other.
-                    tx.output.side_effects.store_attr(obj, "grad", val)
-                    tx.output.side_effects.store_attr(obj, "_grad", val)
+                    # enables reading `val` from the other, by routing all
+                    # read/write to `grad`.
+                    name = "grad"
                 elif is_tensor_getset_descriptor(name):
                     # Attribute like `torch.Tensor.real` has special setters we
                     # don't yet support; it's not as simple adding an entry to
