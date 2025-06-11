@@ -217,15 +217,5 @@
       "Explanation": "Import result is not a Python module.",
       "Hints": []
     }
-  ],
-  "GB0023": [
-  {
-    "Gb_type": "Testing gb_type",
-    "Context": "Testing context",
-    "Explanation": "",
-    "Hints": [
-      "Testing purposes"
-    ]
-  }
-]
+  ]
 }
