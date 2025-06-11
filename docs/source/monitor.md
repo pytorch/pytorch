@@ -1,8 +1,8 @@
 # torch.monitor
 
 ```{warning}
-    This module is a prototype release, and its interfaces and functionality may
-    change without warning in future PyTorch releases.
+This module is a prototype release, and its interfaces and functionality may
+change without warning in future PyTorch releases.
 ```
 
 ``torch.monitor`` provides an interface for logging events and counters from
