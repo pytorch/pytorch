@@ -416,7 +416,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.code_hash: Optional[str] = None
 
         # define this in a closure to make cache local to object
-        @functools.lru_cache(None)
+        @functools.cache
         def simplify_indexing(index: sympy.Expr):
             index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
             for tree in self.range_trees:
@@ -947,13 +947,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         if isinstance(value, tuple):
             return tuple(map(fn, value))
         return fn(value)
-
-    def estimate_flops(self) -> Optional[int]:
-        flops = [
-            node.estimate_flops()
-            for node in NodeScheduleMarker.only_nodes(self.features.node_schedule)
-        ]
-        return sum(filter(None, flops))
 
     def estimate_kernel_num_bytes(self):
         """
@@ -1601,9 +1594,7 @@ class SIMDScheduling(BaseScheduling):
                             kernel.cse.invalidate(OrderedSet())
 
         if not isinstance(partial_code, str):
-            # This is used to calculate flops in TritonTemplateKernels
-            with ir.IRNode.current_origins(template_node.node.origins):
-                partial_code.finalize_hook("<DEF_KERNEL>")
+            partial_code.finalize_hook("<DEF_KERNEL>")
             partial_code.finalize_hook("<ARGDEFS>", strict=False)
         # finalize must be called after adding epilogue above
 

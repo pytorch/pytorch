@@ -253,7 +253,7 @@ class TestInvokeSubgraphCompile(TestCase):
         with mock.patch(
             "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
             True,
-        ):
+        ), torch.no_grad():
             res = torch.compile(fn, backend=backend, fullgraph=True)(
                 mod, x_clone, y_clone
             )
@@ -303,6 +303,191 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(res, ref)
         self.assertEqual(mod.buf, mod_ref.buf)
+
+    def test_auto_functionalize(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 5
+                self.register_buffer("buf", torch.ones(8, requires_grad=False))
+
+            @mark_compile_region
+            def forward(self, x, y):
+                return torch.mul(x, y).sin() * self.c * self.buf
+
+        mod_ref = Mod()
+        mod = Mod()
+
+        def fn(mod, x, y):
+            return mod(x, y) + mod(x, y)
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(mod_ref, x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        backend = AotEagerAndRecordGraphs()
+        with mock.patch(
+            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+            True,
+        ):
+            res = torch.compile(fn, backend=backend, fullgraph=True)(
+                mod, x_clone, y_clone
+            )
+            res.sum().backward()
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        self.assertEqual(ref, res)
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[8]", primals_2: "f32[8]", primals_3: "f32[8]"):
+        partitioned_fw_subgraph_0_0 = self.partitioned_fw_subgraph_0_0
+
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, 'partitioned_fw_subgraph_0_0', primals_1, primals_2, primals_3);  partitioned_fw_subgraph_0_0 = None
+        getitem_12: "f32[8]" = invoke_subgraph_4[3]
+        getitem_11: "f32[8]" = invoke_subgraph_4[2]
+        getitem_10: "f32[8]" = invoke_subgraph_4[1]
+        getitem: "f32[8]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
+
+        partitioned_fw_subgraph_0_1 = self.partitioned_fw_subgraph_0_0
+
+        invoke_subgraph_6 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_1, 'partitioned_fw_subgraph_0_0', primals_1, primals_2, primals_3);  partitioned_fw_subgraph_0_1 = primals_1 = primals_2 = primals_3 = None
+        getitem_15: "f32[8]" = invoke_subgraph_6[3]
+        getitem_14: "f32[8]" = invoke_subgraph_6[2]
+        getitem_13: "f32[8]" = invoke_subgraph_6[1]
+        getitem_1: "f32[8]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
+
+        add: "f32[8]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+        return (add, getitem_12, getitem_11, getitem_10, getitem_15, getitem_14, getitem_13)
+
+    class partitioned_fw_subgraph_0_0(torch.nn.Module):
+        def forward(self, primals_0: "f32[8]", primals_1: "f32[8]", primals_2: "f32[8]"):
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(primals_0, primals_1)
+            sin: "f32[8]" = torch.ops.aten.sin.default(mul);  mul = None
+            mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(sin, 5);  sin = None
+            mul_2: "f32[8]" = torch.ops.aten.mul.Tensor(mul_1, primals_2);  mul_1 = None
+            return (mul_2, primals_0, primals_1, primals_2)
+""",
+        )
+        self.assertExpectedInline(
+            normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, getitem_12: "f32[8]", getitem_11: "f32[8]", getitem_10: "f32[8]", getitem_15: "f32[8]", getitem_14: "f32[8]", getitem_13: "f32[8]", tangents_1: "f32[8]"):
+        partitioned_bw_subgraph_0_1 = self.partitioned_bw_subgraph_0_0
+
+        invoke_subgraph_7 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_1, 'partitioned_bw_subgraph_0_0', getitem_13, getitem_14, getitem_15, tangents_1);  partitioned_bw_subgraph_0_1 = getitem_13 = getitem_14 = getitem_15 = None
+        getitem_2: "f32[8]" = invoke_subgraph_7[0]
+        getitem_3: "f32[8]" = invoke_subgraph_7[1];  invoke_subgraph_7 = None
+
+        partitioned_bw_subgraph_0_0 = self.partitioned_bw_subgraph_0_0
+
+        invoke_subgraph_5 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', getitem_10, getitem_11, getitem_12, tangents_1);  partitioned_bw_subgraph_0_0 = getitem_10 = getitem_11 = getitem_12 = tangents_1 = None
+        getitem_6: "f32[8]" = invoke_subgraph_5[0]
+        getitem_7: "f32[8]" = invoke_subgraph_5[1];  invoke_subgraph_5 = None
+
+        add_1: "f32[8]" = torch.ops.aten.add.Tensor(getitem_2, getitem_6);  getitem_2 = getitem_6 = None
+        add_2: "f32[8]" = torch.ops.aten.add.Tensor(getitem_3, getitem_7);  getitem_3 = getitem_7 = None
+        return (add_1, add_2, None)
+
+    class partitioned_bw_subgraph_0_0(torch.nn.Module):
+        def forward(self, primals_0: "f32[8]", primals_1: "f32[8]", primals_2: "f32[8]", tangents_0: "f32[8]"):
+            mul_3: "f32[8]" = torch.ops.aten.mul.Tensor(tangents_0, primals_2);  tangents_0 = primals_2 = None
+            mul_4: "f32[8]" = torch.ops.aten.mul.Tensor(mul_3, 5);  mul_3 = None
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(primals_0, primals_1)
+            cos: "f32[8]" = torch.ops.aten.cos.default(mul);  mul = None
+            mul_5: "f32[8]" = torch.ops.aten.mul.Tensor(mul_4, cos);  mul_4 = cos = None
+            mul_6: "f32[8]" = torch.ops.aten.mul.Tensor(mul_5, primals_0);  primals_0 = None
+            mul_7: "f32[8]" = torch.ops.aten.mul.Tensor(mul_5, primals_1);  mul_5 = primals_1 = None
+            return (mul_7, mul_6, None)
+""",
+        )
+
+    def test_buffer_mutation_works_under_no_grad(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(8, requires_grad=False))
+
+            @mark_compile_region
+            def forward(self, x, y):
+                self.buf.add_(1)
+                return torch.mul(x, y).sin() * self.buf
+
+        mod_ref = Mod()
+        mod = Mod()
+
+        def fn(mod, x, y):
+            return mod(x, y) + mod(x, y)
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(mod_ref, x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        with mock.patch(
+            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+            True,
+        ):
+            with torch.no_grad():
+                res = torch.compile(fn, fullgraph=True)(mod, x_clone, y_clone)
+        self.assertEqual(ref, res)
+        self.assertEqual(mod_ref.buf, mod.buf)
+
+        mod = Mod()
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        with mock.patch(
+            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+            True,
+        ):
+            with torch.inference_mode():
+                res = torch.compile(fn, fullgraph=True)(mod, x_clone, y_clone)
+        self.assertEqual(ref, res)
+        self.assertEqual(mod_ref.buf, mod.buf)
+
+        mod = Mod()
+        x_clone = x.detach().clone().requires_grad_(False)
+        y_clone = y.detach().clone().requires_grad_(False)
+        with mock.patch(
+            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+            True,
+        ):
+            res = torch.compile(fn, fullgraph=True)(mod, x_clone, y_clone)
+        self.assertEqual(ref, res)
+        self.assertEqual(mod_ref.buf, mod.buf)
+
+    def test_buffer_mutation_errors_under_training(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(8, requires_grad=False))
+
+            @mark_compile_region
+            def forward(self, x, y):
+                self.buf.add_(1)
+                return torch.mul(x, y).sin() * self.buf
+
+        mod = Mod()
+
+        def fn(mod, x, y):
+            return mod(x, y) + mod(x, y)
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "does not currently support training with in-place input or buffer mutations",
+        ):
+            with mock.patch(
+                "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+                True,
+            ):
+                torch.compile(fn, backend="inductor", fullgraph=True)(mod, x, y)
 
     def test_list(self):
         @mark_compile_region
