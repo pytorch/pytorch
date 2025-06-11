@@ -103,7 +103,7 @@ REGISTER_BINARY_OP(hardswish_backward, bfloat, bfloat);
 struct leaky_relu_functor {
   template <typename T>
   inline T operator()(const T x, const T negative_slope) {
-    return x >= T(0) ? x : x * negative_slope;
+    return x > T(0) ? x : x * negative_slope;
   }
 };
 
@@ -113,7 +113,7 @@ struct leaky_relu_backward_functor {
       const T grad_output,
       const T self,
       const T negative_slope) {
-    return self >= T(0) ? grad_output : grad_output * negative_slope;
+    return self > T(0) ? grad_output : grad_output * negative_slope;
   }
 };
 
