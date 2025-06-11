@@ -54,10 +54,11 @@ jobs:
           tag_or_branch="${tag_or_branch#refs/heads/}"
           # replace directory separators with _ in branch name
           tag_or_branch="${tag_or_branch//\//_}"
+          torch_version="$(python -c 'from tools.generate_torch_version import get_torch_version; print(get_torch_version())')"
           {
             echo "PT_RELEASE_NAME=pytorch-$tag_or_branch";
             echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz";
-            echo "PT_PEP517_RELEASE_FILE=torch-$tag_or_branch.tar.gz";
+            echo "PT_PEP517_RELEASE_FILE=torch-${torch_version}.tar.gz";
           } >> "$GITHUB_ENV"
       - name: Create source distribution
         run: |
@@ -94,7 +95,7 @@ jobs:
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: ${{ env.PT_PEP517_RELEASE_FILE }}
-          path: ${{ env.PT_PEP517_RELEASE_FILE }}
+          path: dist/${{ env.PT_PEP517_RELEASE_FILE }}
       - name: Set output
         id: release_name
         run: |
