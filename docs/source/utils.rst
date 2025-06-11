@@ -5,6 +5,21 @@ torch.utils
 
 The `torch.utils` module provides essential utility functions and classes that can be utilized for several aplications such as
 data loading, model monitoring and memory extension.
+
+torch.utils.flop_counter
+========================
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    conv_flop_count
+    conv_backward_flop
+    sdpa_flop_count
+    _offsets_to_lengths
+    _unpack_flash_attention_nested_shapes
+    _unpack_efficient_attention_nested_shapes
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -75,7 +90,6 @@ data loading, model monitoring and memory extension.
 .. py:module:: torch.utils.data.sampler
 .. py:module:: torch.utils.dlpack
 .. py:module:: torch.utils.file_baton
-.. py:module:: torch.utils.flop_counter
 .. py:module:: torch.utils.hipify.constants
 .. py:module:: torch.utils.hipify.cuda_to_hip_mappings
 .. py:module:: torch.utils.hipify.hipify_python
