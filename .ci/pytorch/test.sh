@@ -220,11 +220,13 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
         export ASAN_OPTIONS="${ASAN_OPTIONS}:protect_shadow_gap=0"
     fi
+    # Disable ASLR
+    sudo sysctl -w kernel.randomize_va_space=0
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
-    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-15/bin/llvm-symbolizer
+    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-18/bin/llvm-symbolizer
     export TORCH_USE_RTLD_GLOBAL=1
     # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
     # default behavior.
