@@ -209,10 +209,10 @@ class CustomOpDef:
         self._autocast_cuda_dtype: Optional[_dtype] = None
         self._autocast_cpu_dtype: Optional[_dtype] = None
 
+        OPDEFS[self._qualname] = self
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher(self._tags)
         self._disabled_kernel: set = set()
-        OPDEFS[self._qualname] = self
 
     @property
     def _qualname(self) -> str:

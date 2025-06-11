@@ -4183,11 +4183,11 @@ Please use `add.register_fake` to add an fake impl.""",
 
         # Get the operator annotations
         init_annotation = annotated_func._init_fn.__annotations__
-        default_annotation = torch.ops.test_ns.annotated_func.default.__call__.__annotations__
+        func_annotation = torch.ops.test_ns.annotated_func.default.__call__.__annotations__
 
         self.assertEqual(
-            init_annotation,
-            default_annotation
+            func_annotation,
+            init_annotation
         )
 
 class MiniOpTestOther(CustomOpTestCaseBase):
