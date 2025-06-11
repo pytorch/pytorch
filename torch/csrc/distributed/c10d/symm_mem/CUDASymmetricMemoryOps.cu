@@ -1145,8 +1145,24 @@ at::Tensor stream_write_value32_(
   c10::cuda::CUDAGuard guard(input.device());
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  // Use the new get() API - much simpler than the old PFN approach
-  CUresult res = C10_CALL_CUDA_DRIVER_API(cuStreamWriteValue32,
+  // --- Begin dynamic loading of cuStreamWriteValue32 ---
+  typedef CUresult (CUDAAPI *PFN_cuStreamWriteValue32)(
+      CUstream hStream, CUdeviceptr addr, uint32_t value, unsigned int flags);
+  static PFN_cuStreamWriteValue32 pfn_cuStreamWriteValue32 = nullptr;
+  static std::once_flag load_cuStreamWriteValue32_flag;
+  auto load_cuStreamWriteValue32 = []() {
+    CUresult res = static_cast<CUresult>(cudaGetDriverEntryPoint(
+        "cuStreamWriteValue32",
+        reinterpret_cast<void**>(&pfn_cuStreamWriteValue32),
+        0 /* flags, use 0 for default */
+    ));
+    TORCH_CHECK(res == CUDA_SUCCESS && pfn_cuStreamWriteValue32 != nullptr,
+        "Failed to load cuStreamWriteValue32 via cudaGetDriverEntryPoint");
+  };
+  std::call_once(load_cuStreamWriteValue32_flag, load_cuStreamWriteValue32);
+  // --- End dynamic loading ---
+
+  CUresult res = pfn_cuStreamWriteValue32(
       at::cuda::getCurrentCUDAStream(),
       reinterpret_cast<CUdeviceptr>(addr),
       val,
