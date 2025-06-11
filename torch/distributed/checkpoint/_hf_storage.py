@@ -290,19 +290,8 @@ class _HuggingFaceStorageReader(FsspecReader):
 
         for safetensor_file in safetensors_files:
             with self.fs.create_stream(safetensor_file, "rb") as f:
-                metadata = _get_safetensors_file_metadata(f)
-
-                for key, val in metadata.items():
-                    state_dict_metadata[key] = TensorStorageMetadata(
-                        properties=TensorProperties(dtype=_get_dtype(val[DTYPE_KEY])),
-                        size=torch.Size(val[SHAPE_KEY]),
-                        chunks=[
-                            ChunkStorageMetadata(
-                                offsets=torch.Size([0] * len(val[SHAPE_KEY])),
-                                sizes=torch.Size(val[SHAPE_KEY]),
-                            )
-                        ],
-                    )
+                safetensors_metadata, _ = _get_safetensors_file_metadata(f)
+                custom_metadata = safetensors_metadata.get(DEFAULT_EXTRA_METADATA_KEY)
 
                 dcp_sharding_info = None
                 if custom_metadata and custom_metadata.get(CUSTOM_METADATA_KEY):
@@ -367,17 +356,18 @@ def _gen_file_name(index: int, largest_index: int, shard_index: Optional[int] = 
             )
 
 
-def _get_safetensors_file_metadata(file_bytes: io.IOBase) -> Any:
+def _get_safetensors_file_metadata(file_bytes: io.IOBase) -> tuple[Any, int]:
     # this uses the same logic that's done in HF code base
     # https://github.com/2404589803/huggingface_hub/blob/main/src/huggingface_hub/hf_api.py#L5308
     # and follows their documentation on how their files are serialized
     # https://huggingface.co/docs/safetensors/index#format
 
-    header_len_bytes = file_bytes.read(8)
+    num_bytes_for_header_len = 8
+    header_len_bytes = file_bytes.read(num_bytes_for_header_len)
     header_len = struct.unpack("<Q", header_len_bytes)[0]
     header_json = file_bytes.read(header_len)
     metadata = json.loads(header_json)
-    return metadata
+    return (metadata, header_len + num_bytes_for_header_len)
 
 
 def _get_dtype(dtype_str: str) -> torch.dtype:

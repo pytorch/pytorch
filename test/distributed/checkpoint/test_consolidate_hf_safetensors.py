@@ -112,7 +112,7 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
             
         if self.rank == 0:
             fqn_to_index_mapping = {"dtensor": 1, "dtensor_col": 2}
-            consolidate_safetensors_files(checkpoint_dir, output_dir, fqn_to_index_mapping)
+            consolidate_safetensors_files(checkpoint_dir, output_dir, fqn_to_index_mapping=fqn_to_index_mapping)
             
             file1_path = os.path.join(output_dir, "model-00001-of-00002.safetensors")
             file2_path = os.path.join(output_dir, "model-00002-of-00002.safetensors")
