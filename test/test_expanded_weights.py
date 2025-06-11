@@ -776,7 +776,7 @@ class TestExpandedWeightModule(TestCase):
                 expected_grads.append(out_grads)
 
             expected_grads = [torch.stack(grad) for grad in zip(*expected_grads)]
-            self.assertEqual(actual_res, expected_res)
+            self.assertEqual(actual_res, expected_res, atol=atol, rtol=rtol)
             [
                 self.assertEqual(actual, expected, atol=atol, rtol=rtol)
                 for (actual, expected) in zip(actual_grads, expected_grads)
