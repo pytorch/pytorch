@@ -528,10 +528,3 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
     def test_device_side_api(self):
         model = MyConvLinearModule()
         self._check_device_side_api(model)
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test is not currently used and should be "
-        "enabled in discover_tests.py if required."
-    )

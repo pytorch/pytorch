@@ -1,7 +1,5 @@
 # Owner(s): ["oncall: quantization"]
 
-from torch.testing._internal.common_utils import raise_on_run_directly
-
 from .common import AOMigrationTestCase
 
 
@@ -361,7 +359,3 @@ class TestAOMigrationNNIntrinsic(AOMigrationTestCase):
 
         _ = torch.ao.nn.intrinsic.quantized.dynamic
         _ = torch.nn.intrinsic.quantized.dynamic
-
-
-if __name__ == "__main__":
-    raise_on_run_directly("test/test_quantization.py")
