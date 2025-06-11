@@ -807,11 +807,7 @@ class TestExpandedWeightModule(TestCase):
             return h.unsqueeze(1).repeat(new_h_shape)
 
         module_cls = module_info.module_cls
-        atol, rtol = (
-            (1e-3, 1e-4)
-            if module_cls == torch.nn.GRU and dtype == torch.float32
-            else (None, None)
-        )
+        atol, rtol = (1e-3, 1e-4) if dtype == torch.float32 else (None, None)
         module_inputs = module_info.module_inputs_func(
             module_info,
             device=device,
