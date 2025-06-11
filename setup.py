@@ -225,7 +225,7 @@ import os
 import sys
 
 
-if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
+if sys.platform.startswith("win") and sys.maxsize.bit_length() == 31:
     print(
         "32-bit Windows Python runtime is not supported. Please switch to 64-bit Python."
     )
@@ -233,9 +233,6 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
 
 import platform
 
-
-BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
-BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
 
 # Also update `project.requires-python` in pyproject.toml when changing this
 python_min_version = (3, 9, 0)
@@ -266,6 +263,8 @@ from setuptools.dist import Distribution
 
 
 cwd = os.path.dirname(os.path.abspath(__file__))
+
+# Add the current directory to the Python path so that we can import `tools`
 sys.path.insert(0, cwd)
 os.environ["PYTHONPATH"] = os.pathsep.join(
     [
@@ -295,12 +294,14 @@ def _get_package_path(package_name):
     return None
 
 
+BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
+BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
+
 # set up appropriate env variables
 if BUILD_LIBTORCH_WHL:
     # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
     # functorch is not supported without python
     os.environ["BUILD_FUNCTORCH"] = "OFF"
-
 
 if BUILD_PYTHON_ONLY:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
@@ -425,7 +426,7 @@ def check_submodules():
             os.path.isdir(folder) and len(os.listdir(folder)) == 0
         )
 
-    if bool(os.getenv("USE_SYSTEM_LIBS", False)):
+    if os.getenv("USE_SYSTEM_LIBS"):
         return
     folders = get_submodule_folders()
     # If none of the submodule folders exists, try to initialize them
@@ -439,7 +440,7 @@ def check_submodules():
             end = time.time()
             report(f" --- Submodule initialization took {end - start:.2f} sec")
         except Exception:
-            report(" --- Submodule initalization failed")
+            report(" --- Submodule initialization failed")
             report("Please run:\n\tgit submodule update --init --recursive")
             sys.exit(1)
     for folder in folders:
