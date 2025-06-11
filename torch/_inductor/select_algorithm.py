@@ -60,7 +60,6 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
-from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
@@ -482,19 +481,11 @@ class TritonTemplateKernel(TritonKernel):
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
-            size = V.graph.sizevars.size_hints(inp.get_size(), fallback=0)
+            size = V.graph.sizevars.size_hints(inp.get_size())
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(num_bytes)
-
-    def estimate_flops(self) -> int:
-        for node in self.input_nodes:
-            for fx_node in node._current_origins:
-                f = count_flops_fx(fx_node)
-                if f is not None:
-                    return V.graph.sizevars.size_hint(f, fallback=0)
-        return 0
 
     def jit_lines(self):
         if self.use_jit:
@@ -503,7 +494,10 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta: dict[str, Any] = {
             "signature": signature_to_meta(
-                signature, size_dtype=self.index_dtype, argdefs=argdefs
+                signature,
+                size_dtype=self.index_dtype,
+                argdefs=argdefs,
+                is_template=True,
             ),
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
@@ -531,9 +525,6 @@ class TritonTemplateKernel(TritonKernel):
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
-        if config.benchmark_kernel:
-            flops = self.estimate_flops()
-            inductor_meta["kernel_flop"] = flops
 
         template_args = f"""
             num_stages={self.num_stages},
@@ -2212,20 +2203,24 @@ class AlgorithmSelectorCache(PersistentCache):
         def autotune(choices):
             log.debug("Starting autotuning")
 
-            autotuning_data = {
-                "shape": ", ".join(
-                    ["x".join(map(str, n.get_size())) for n in input_nodes]
-                ),
-                "strides": ", ".join([str(n.get_stride()) for n in input_nodes]),
-                "dtypes": ", ".join([str(n.get_dtype()) for n in input_nodes]),
-                "offset": ", ".join([str(n.get_layout().offset) for n in input_nodes]),
-            }
-
             with dynamo_timed(
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
-                metadata={"autotuning_data": autotuning_data},
+                metadata={
+                    "autotune_strides": ", ".join(
+                        [str(n.get_stride()) for n in input_nodes]
+                    ),
+                    "autotune_dtypes": ", ".join(
+                        [str(n.get_dtype()) for n in input_nodes]
+                    ),
+                    "autotune_shape": ", ".join(
+                        ["x".join(map(str, n.get_size())) for n in input_nodes]
+                    ),
+                    "autotune_offset": ", ".join(
+                        [str(n.get_layout().offset) for n in input_nodes]
+                    ),
+                },
             ):
                 return make_benchmark_fn()(choices)
 
