@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/macros/Macros.h>
 
+#include <cstddef>
 #include <cstdint>
 
 // GCC has __builtin_mul_overflow from before it supported __has_builtin
@@ -41,6 +42,20 @@ C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
       (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) < 64);
 #endif
 }
+
+#if SIZE_MAX != UINT64_MAX
+C10_ALWAYS_INLINE bool mul_overflows(size_t a, size_t b, size_t* out) {
+#if C10_HAS_BUILTIN_OVERFLOW()
+  return __builtin_mul_overflow(a, b, out);
+#else
+  *out = a * b;
+  // This test isnt exact, but avoids doing integer division
+  return (
+      (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) <
+      sizeof(size_t) * 8);
+#endif
+}
+#endif // SIZE_MAX != UINT64_MAX
 
 C10_ALWAYS_INLINE bool mul_overflows(int64_t a, int64_t b, int64_t* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
