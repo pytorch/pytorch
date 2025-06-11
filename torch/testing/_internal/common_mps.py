@@ -107,6 +107,7 @@ if torch.backends.mps.is_available():
             "nn.functional.unfold",
             "nonzero",
             "ones",
+            "ones_like",
             "outer",
             "permute",
             "permute_copy",
@@ -124,6 +125,7 @@ if torch.backends.mps.is_available():
             "scalar_tensor",
             "select",
             "sgn",
+            "sigmoid",
             "sin",
             "sinc",
             "slice",
@@ -166,6 +168,7 @@ if torch.backends.mps.is_available():
             "vsplit",
             "zero_",
             "zeros",
+            "zeros_like",
         }
 
         AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
@@ -267,7 +270,6 @@ if torch.backends.mps.is_available():
             "roll",
             "rot90",
             "short",
-            "sigmoid",
             "sinh",
             "sqrt",
             "square",
@@ -385,7 +387,6 @@ if torch.backends.mps.is_available():
             "cholesky_solve": None,
             "cummax": None,
             "cummin": None,
-            "erfc": None,
             "frexp": None,
             "gcd": None,
             "geqrf": None,
@@ -436,7 +437,13 @@ if torch.backends.mps.is_available():
             "nn.functional.avg_pool3d": None,
             "nn.functional.ctc_loss": None,
             "nn.functional.embedding_bag": None,
-            "nn.functional.hardshrink": None,
+            "nn.functional.hardshrink": [
+                torch.uint8,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+            ],
             "nn.functional.max_pool3d": None,
             "nn.functional.max_unpool1d": None,
             "nn.functional.max_unpool2d": None,
@@ -498,9 +505,6 @@ if torch.backends.mps.is_available():
             # MPS: input sizes must be divisible by output sizes
             "nn.functional.adaptive_avg_pool1d": None,
             "nn.functional.adaptive_avg_pool2d": None,
-            # Unsupported dtypes
-            "ones_like": None,
-            "zeros_like": None,
             # Convolution for integral types is not supported on MPS
             "nn.functional.conv1d": [torch.int64],
             "nn.functional.conv2d": [torch.int64],

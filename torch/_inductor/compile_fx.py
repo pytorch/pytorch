@@ -707,7 +707,6 @@ def compile_fx_inner(
                 dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
         )
-        stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
         CompileEventLogger.pt2_compile(
@@ -742,9 +741,17 @@ def _compile_fx_inner(
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         # trigger the real recompilation for _LazyGraphModule before returning
         # the forward method.
+        from torch._dynamo.utils import CompileEventLogLevel
         from torch.fx._lazy_graph_module import _LazyGraphModule
 
         _LazyGraphModule.force_recompile(gm)
+        compile_id = torch._guards.CompileContext.current_compile_id()
+        CompileEventLogger.log_instant_event(
+            "backward no-op",
+            metadata={"compile_id": compile_id},
+            log_level=CompileEventLogLevel.PT2_COMPILE,
+        )
+
         return make_boxed_func(gm.forward)
 
     static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())
