@@ -2,6 +2,9 @@
 #define C10_MACROS_MACROS_H_
 #include <cassert>
 
+#ifdef _AIX
+#include <stdlib.h>
+#endif // _AIX
 /* Main entry for c10/macros.
  *
  * In your code, include c10/macros/Macros.h directly, instead of individual
@@ -399,6 +402,18 @@ __host__ __device__
         const char* file,
         unsigned int line,
         const char* function) noexcept __attribute__((__noreturn__));
+
+#ifdef _AIX
+// In AIX we do not have __assert_fail, so declare it here.
+void
+__assert_fail(
+const char* assertion,
+const char* file,
+unsigned int line,
+const char* function) noexcept {
+  abort ();
+}
+#endif // _AIX
 
 #endif // __SYCL_DEVICE_ONLY__
 }
