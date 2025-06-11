@@ -34,6 +34,7 @@ void MPSGuardImpl::record(void** event,
     mps_event_id = at::mps::getMPSEventPool()->acquireEvent(flag == EventFlag::BACKEND_DEFAULT);
     *event = (__bridge void*)(intptr_t)(mps_event_id);
   }
+  MPSStream mps_stream{stream};
   at::mps::getMPSEventPool()->recordEvent(mps_event_id, true);
 }
 
