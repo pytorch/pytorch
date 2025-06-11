@@ -99,6 +99,7 @@ def reset():
     torch._logging.set_logs(compiled_autograd_verbose=False)
     config.compiled_autograd = False
     compiled_autograd.reset()
+    torch._dynamo.utils.counters.clear()
 
 
 class TestCompiledAutograd(TestCase):
@@ -705,6 +706,44 @@ main()
         actual = compiled_fn(model, inputs)
         self.assertEqual(expected, actual)
         self.assertEqual(counters["compiled_autograd"]["captures"], 2)
+
+    @parametrize("api", ("compile", "optimize"))
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    def test_compile_api_disable(self, api, backend):
+        def wrap(fn, backend):
+            if api == "compile":
+                return torch.compile(fn, backend=backend)
+            elif api == "optimize":
+                return torch._dynamo.optimize(backend)(fn)
+
+        def fn(model, inputs):
+            res = []
+            for inp in inputs:
+                result = model(inp).sum()
+                result.backward()
+                res.append(model[0].weight.grad)
+                res.append(model[0].bias.grad)
+                model.zero_grad()
+            return res
+
+        torch.manual_seed(123)
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        inputs = [
+            torch.randn([1, 4]),
+            torch.randn([2, 4]),
+            torch.randn([3, 4]),
+        ]
+
+        expected = fn(model, inputs)
+        with config.patch(compiled_autograd=True):
+            compiled_fn = wrap(fn, backend)
+        with torch._dynamo.compiled_autograd._disable():
+            actual = compiled_fn(model, inputs)
+        self.assertEqual(expected, actual)
+        self.assertTrue("compiled_autograd" not in counters)
 
     @parametrize("backend", ("eager", "aot_eager", "inductor"))
     def test_optimize_assert(self, backend):
@@ -3451,6 +3490,10 @@ class CompiledAutograd0(torch.nn.Module):
             )
 
     # https://github.com/pytorch/pytorch/issues/138920
+    # Inductor has a joint graph pattern to remove pointless view pairs.
+    # That will remove the no-op view pairs this test is checking. Disable
+    # pattern matcher for this test.
+    @inductor_config.patch(pattern_matcher=False)
     def test_compiled_autograd_does_not_specialize_on_bw_symints(self):
         class Mod(torch.nn.Module):
             def __init__(self, a, b, c):
