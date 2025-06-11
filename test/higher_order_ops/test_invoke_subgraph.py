@@ -12,6 +12,7 @@ import torch._dynamo
 import torch._functorch
 import torch._inductor
 import torch._inductor.decomposition
+import torch.utils._pytree as pytree
 from functorch.compile import aot_function, nop
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -21,6 +22,11 @@ from torch._dynamo.testing import (
 )
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 from torch._higher_order_ops.schema import find_hop_schema
+from torch._inductor.pattern_matcher import (
+    CallFunctionVarArgs,
+    PatternMatcherPass,
+    register_graph_pattern,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -1982,6 +1988,82 @@ class GraphModule(torch.nn.Module):
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @requires_gpu
+    def test_preserves_strides(self):
+        class _CustomPass(PatternMatcherPass):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def __call__(self, g: torch.fx.Graph):
+                self.apply(g)
+
+        g = _CustomPass()
+        called = False
+
+        x = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
+        other = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
+
+        @register_graph_pattern(
+            CallFunctionVarArgs(torch.ops.aten.permute),
+            pass_dict=g,
+        )
+        def _(match, *args, **kwargs):
+            flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+            def decomp(*flat_args):
+                args, kwargs = pytree.tree_unflatten(flat_args, spec)
+                return torch.ops.mylib.force_channels_last(
+                    torch.ops.aten.permute(*args, **kwargs)
+                )
+
+            nonlocal called
+            called = True
+            match.replace_by_example(decomp, flat_args)
+
+        from torch._inductor import config
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "force_channels_last(Tensor x) -> Tensor",
+                tags=[torch._C.Tag.flexible_layout],
+            )
+
+            def impl2(x):
+                return x.clone(memory_format=torch.channels_last)
+
+            lib.impl("force_channels_last", impl2, "CompositeExplicitAutograd")
+
+            lib.define(
+                "add_op(Tensor x, Tensor y) -> Tensor",
+            )
+
+            def impl(x, y):
+                out = y.clone()  # contiguous with strides (16, 4, 2, 1)
+                out.add_(x.transpose(-1, -2))
+                return out
+
+            def meta(x, y):
+                return torch.empty_like(y, memory_format=torch.contiguous_format)
+
+            lib.impl("add_op", impl, "CompositeExplicitAutograd")
+            lib.impl("add_op", meta, "Meta")
+
+            @mark_compile_region
+            def gn(y, z):
+                return torch.ops.mylib.add_op.default(y, z)
+
+            def f(x, other):
+                y = x.transpose(2, 3).contiguous().transpose(2, 3)
+                z = y.sin().transpose(2, 3)
+                return gn(y, z)
+
+            with config.patch(
+                post_grad_custom_post_pass=g,
+            ):
+                f_compile = torch.compile(f, fullgraph=True)
+                self.assertEqual(f(x, other), f_compile(x, other))
+                self.assertTrue(called)
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
