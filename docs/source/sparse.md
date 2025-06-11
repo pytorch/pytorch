@@ -47,7 +47,7 @@ of efficient kernels and wider performance optimizations.
 We make it easy to try different sparsity layouts, and convert between them,
 without being opinionated on what's best for your particular application.
 
-### Functionality overview
+## Functionality overview
 
 We want it to be straightforward to construct a sparse Tensor from a
 given dense Tensor by providing conversion routines for each layout.
