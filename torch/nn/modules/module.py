@@ -5,13 +5,13 @@ import inspect
 import itertools
 import warnings
 import weakref
-from collections import namedtuple, OrderedDict
+from collections import OrderedDict, namedtuple
 from collections.abc import Iterator, Mapping
-from typing import Any, Callable, Optional, overload, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union, overload
 from typing_extensions import Self
 
 import torch
-from torch import device, dtype, Tensor
+from torch import Tensor, device, dtype
 from torch._prims_common import DeviceLikeType
 from torch.nn.parameter import Buffer, Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -528,29 +528,41 @@ class Module:
 
         This is typically used to register a buffer that should not be
         considered a model parameter. For example, BatchNorm's ``running_mean``
-        is not a parameter, but is part of the module's state. Buffers, by
-        default, are persistent and will be saved alongside parameters. This
-        behavior can be changed by setting :attr:`persistent` to ``False``. The
-        only difference between a persistent buffer and a non-persistent buffer
-        is that the latter will not be a part of this module's
+        is not a parameter, but it is part of the module's state. Buffers are
+        persistent by default and will be saved alongside parameters. This behavior
+        can be changed by setting :attr:`persistent` to ``False``. The only
+        difference is that non-persistent buffers will not be part of this module’s
         :attr:`state_dict`.
 
-        Buffers can be accessed as attributes using given names.
+        Buffers can be accessed as attributes using the given name.
 
         Args:
-            name (str): name of the buffer. The buffer can be accessed
-                from this module using the given name
-            tensor (Tensor or None): buffer to be registered. If ``None``, then operations
-                that run on buffers, such as :attr:`cuda`, are ignored. If ``None``,
-                the buffer is **not** included in the module's :attr:`state_dict`.
-            persistent (bool): whether the buffer is part of this module's
-                :attr:`state_dict`.
+            name (str): Name of the buffer. It can be accessed from this module using the given name.
+            tensor (Tensor or None): Buffer to be registered. If ``None``, operations that run on
+                buffers, such as :meth:`cuda`, are ignored. Also, if ``None``, the buffer is not included
+                in the module’s :attr:`state_dict`.
+            persistent (bool): Whether the buffer is part of this module’s :attr:`state_dict`.
 
         Example::
 
             >>> # xdoctest: +SKIP("undefined vars")
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
+        .. note::
+            For static type checkers like mypy, it is recommended to use explicit type
+            annotations for buffers registered via this method.
+
+            For example::
+
+                class MyModule(nn.Module):
+                    sample_low: torch.Tensor  # Required for MyPy to type correctly
+
+                    def __init__(self):
+                        super().__init__()
+                        self.register_buffer("sample_low", torch.zeros(1))
+
+            Without this annotation, the type of ``self.sample_low`` may be
+            inferred as ``Any`` or a union of unrelated types.
         """
         if persistent is False and isinstance(self, torch.jit.ScriptModule):
             raise RuntimeError("ScriptModule does not support non-persistent buffers")
@@ -1226,16 +1238,13 @@ class Module:
         device: Optional[DeviceLikeType] = ...,
         dtype: Optional[dtype] = ...,
         non_blocking: bool = ...,
-    ) -> Self:
-        ...
+    ) -> Self: ...
 
     @overload
-    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self:
-        ...
+    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self: ...
 
     @overload
-    def to(self, tensor: Tensor, non_blocking: bool = ...) -> Self:
-        ...
+    def to(self, tensor: Tensor, non_blocking: bool = ...) -> Self: ...
 
     def to(self, *args, **kwargs):
         r"""Move and/or cast the parameters and buffers.
@@ -2158,12 +2167,12 @@ class Module:
     @overload
     def state_dict(
         self, *, destination: T_destination, prefix: str = ..., keep_vars: bool = ...
-    ) -> T_destination:
-        ...
+    ) -> T_destination: ...
 
     @overload
-    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> dict[str, Any]:
-        ...
+    def state_dict(
+        self, *, prefix: str = ..., keep_vars: bool = ...
+    ) -> dict[str, Any]: ...
 
     # TODO: Change `*args` to `*` and remove the corresponding warning in docs when BC allows.
     # Also remove the logic for arg parsing together.
