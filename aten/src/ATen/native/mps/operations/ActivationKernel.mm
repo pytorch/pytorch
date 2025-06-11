@@ -29,9 +29,19 @@ static void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "hardsigmoid_backward");
 }
 
+static void hardswish_kernel(at::TensorIterator& iter) {
+  lib.exec_unary_kernel(iter, "hardswish");
+}
+
+static void hardswish_backward_kernel(at::TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "hardswish_backward");
+}
+
 REGISTER_DISPATCH(hardshrink_stub, hardshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, hardshrink_backward_kernel);
 REGISTER_DISPATCH(hardsigmoid_stub, hardsigmoid_kernel);
 REGISTER_DISPATCH(hardsigmoid_backward_stub, hardsigmoid_backward_kernel);
+REGISTER_DISPATCH(hardswish_stub, hardswish_kernel);
+REGISTER_DISPATCH(hardswish_backward_stub, hardswish_backward_kernel);
 
 } // namespace at::native
