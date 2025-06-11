@@ -33,26 +33,21 @@ REGISTER_BINARY_ALPHA_OP(hardshrink_backward, bfloat, bfloat, bfloat);
 struct hardsigmoid_functor {
   template <typename T>
   inline T operator()(const T x) {
-    T zero(0);
-    T three(3);
-    T six(6);
-    T result = min(max(x + three, zero), six) / six;
-    return result;
+    return static_cast<T>(min(max(x + 3.0f, .0f), 6.f) / 6.f);
   }
 };
 
 struct hardsigmoid_backward_functor {
   template <typename T>
   inline T operator()(const T grad_output, const T self) {
-    T zero(0);
-    T one_sixth(T(1.0 / 6.0));
-    T neg_three(-3);
-    T three(3);
+    constexpr T zero(0);
+    constexpr T neg_three(-3);
+    constexpr T three(3);
 
     if (self < neg_three || self > three) {
       return zero;
     } else {
-      return grad_output * one_sixth;
+      return static_cast<T>(grad_output * (1.0f / 6.0f));
     }
   }
 };
