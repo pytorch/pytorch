@@ -342,7 +342,7 @@
 .. currentmodule:: torch.distributions.mixture_same_family
 ```
 
-```{eval-rss}
+```{eval-rst}
 .. autoclass:: MixtureSameFamily
     :members:
     :undoc-members:
