@@ -352,10 +352,9 @@ class DistributedDataParallel(Module, Joinable):
         >>> # xdoctest: +SKIP("undefined variables")
         >>> torch.cuda.set_device(i)
 
-    where i is from 0 to N-1. For XPU devices, you can use either of the following APIs
-    to map each process on a single GPU. ``local_rank`` refers to the rank id of the current process.
+    where i is from 0 to N-1. For XPU devices, you can use the following API
+    to map each process on a single XPU in order to use ``DistributedDataParallel``.
         >>> torch.xpu.set_device(i)
-        >>> torch.xpu.device(int(self._local_rank))
 
     In each process, you should refer the following
     to construct this module:
@@ -366,7 +365,7 @@ class DistributedDataParallel(Module, Joinable):
         >>> )
         >>> model = DistributedDataParallel(model, device_ids=[i], output_device=i)
 
-    For XPU devices, you need to set backend='xccl' for similar model initialization to use distributed backend.
+    You need to set backend='xccl' for similar model initialization to use distributed backend for XPU devices.
 
     In order to spawn up multiple processes per node, you can use either
     ``torch.distributed.launch`` or ``torch.multiprocessing.spawn``.
