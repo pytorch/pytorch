@@ -2,19 +2,22 @@
 import dataclasses
 import io
 import json
-import os
 import queue
 import struct
 from typing import Any, Optional
 
+import torch
+from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint._hf_planner import _HuggingFaceLoadPlanner
-from torch.distributed.checkpoint.filesystem import SerializationFormat
+from torch.distributed.checkpoint.filesystem import _StorageInfo, SerializationFormat
 from torch.distributed.checkpoint.metadata import (
-    BytesStorageMetadata,
+    ChunkStorageMetadata,
     Metadata,
     STORAGE_TYPES,
     StorageMeta,
+    TensorProperties,
+    TensorStorageMetadata,
 )
 from torch.distributed.checkpoint.planner import (
     LoadPlan,
@@ -35,6 +38,23 @@ _metadata_fn: str = "model.safetensors.index.json"
 FILE_NAME = "model-{cpt_idx}-of-{num_files}"
 SHARDED_FILE_NAME = "shard-{shard_idx}-model-{cpt_idx}-of-{num_files}"
 SUFFIX = ".safetensors"
+
+# metadata keys
+DEFAULT_EXTRA_METADATA_KEY = "__metadata__"
+SHAPE_KEY = "shape"
+DTYPE_KEY = "dtype"
+
+DTYPE_MAP = {
+    "F16": torch.float16,
+    "F32": torch.float32,
+    "F64": torch.float64,
+    "I8": torch.int8,
+    "U8": torch.uint8,
+    "I16": torch.int16,
+    "I32": torch.int32,
+    "I64": torch.int64,
+    "BF16": torch.bfloat16,
+}
 
 
 class _HuggingFaceStorageWriter(FsspecWriter):
@@ -210,35 +230,63 @@ class _HuggingFaceStorageReader(FsspecReader):
         else:
             super().__init__(path=path)
 
-        self.storage_data: dict[str, str] = {}
-
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
-        from safetensors.torch import load  # type: ignore[import-not-found]
+        from safetensors import deserialize  # type: ignore[import-not-found]
 
         per_file: dict[str, list[ReadItem]] = {}
 
         for read_item in plan.items:
-            file_name = self.storage_data[read_item.storage_index.fqn]
+            item_md: _StorageInfo = self.storage_data[read_item.storage_index.fqn]
+            file_name = item_md.relative_path
             per_file.setdefault(file_name, []).append(read_item)
 
         for file_name, reqs in per_file.items():
-            new_path = self.fs.concat_path(self.path, file_name)
-            with self.fs.create_stream(new_path, "rb") as stream:
-                loaded_tensors = load(stream.read())
-                for req in reqs:
-                    tensor = loaded_tensors[req.dest_index.fqn]
+            with self.fs.create_stream(file_name, "rb") as stream:
+                # TODO: make this more efficient by doing offset reads instead of a
+                # full deserialization of the file
 
-                    target_tensor = planner.resolve_tensor(req)
+                deserialized = deserialize(stream.read())
+                deserialized_dict: dict[str, dict[str, Any]] = {
+                    tensor_info[0]: tensor_info[1] for tensor_info in deserialized
+                }
+
+                for req in reqs:
+                    tensor_bytes = deserialized_dict[req.dest_index.fqn]["data"]
+                    planner_metadata = planner.metadata  # type: ignore[attr-defined]
+                    tensor = torch.frombuffer(
+                        tensor_bytes,
+                        dtype=planner_metadata.state_dict_metadata[
+                            req.dest_index.fqn
+                        ].properties.dtype,
+                    )
+                    # TODO: update this to req.lengths once I get rid of allow_tensor_resize,
+                    # shouldn't need to look at the deserialized
+                    # dict for metadata as we've already done that in read_metadata file
+                    tensor = tensor.reshape(
+                        deserialized_dict[req.dest_index.fqn]["shape"]
+                    )
+
                     if (
                         isinstance(planner, _HuggingFaceLoadPlanner)
                         and planner.allow_tensor_resize
                     ):
+                        # this is to support the case when users are calling load on
+                        # an empty state dict without specifying the correct size of the tensors
+                        # in the state dict. Resizing is a hacky way to support this use case.
+                        # But will migrate users to _load_state_dict_from_keys method and deprecate this.
+                        target_tensor = planner.resolve_tensor(req)
                         target_tensor.resize_(tensor.size())
+                        target_tensor = target_tensor.detach()
                     else:
-                        assert target_tensor.size() == tensor.size(), (
-                            f"Tensor size mismatch for {req.dest_index.fqn}: {target_tensor.size()} != {tensor.size()}"
+                        tensor = narrow_tensor_by_index(
+                            tensor, req.storage_offsets, req.lengths
                         )
-                    target_tensor = target_tensor.detach()
+                        target_tensor = planner.resolve_tensor(req).detach()
+
+                        assert target_tensor.size() == tensor.size(), (
+                            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+                        )
+
                     target_tensor.copy_(tensor)
                     planner.commit_tensor(req, target_tensor)
 
@@ -247,36 +295,39 @@ class _HuggingFaceStorageReader(FsspecReader):
         return fut
 
     def read_metadata(self) -> Metadata:
-        metadata_path = self.fs.concat_path(self.path, _metadata_fn)
-
         state_dict_metadata: dict[str, STORAGE_TYPES] = {}
-        storage_data: dict[str, str] = {}
+        storage_data: dict[str, _StorageInfo] = {}
 
-        if not self.fs.exists(metadata_path):
-            # if metadata file doesn't exist, create it from the safetensors file
-            safetensors_files = []
-            for file in self.fs.ls(self.path):
-                if file.endswith(SUFFIX):
-                    safetensors_files.append(file)
+        safetensors_files = []
+        for file in self.fs.ls(self.path):
+            if file.endswith(SUFFIX):
+                safetensors_files.append(file)
 
-            if len(safetensors_files) != 1:
-                raise ValueError(
-                    f"Need exactly one safetensors file to load without metadata, found {len(safetensors_files)} files"
-                )
-            storage_data = {}
-            with self.fs.create_stream(safetensors_files[0], "rb") as f:
-                keys = _get_safetensors_file_keys(f)
+        for safetensor_file in safetensors_files:
+            with self.fs.create_stream(safetensor_file, "rb") as f:
+                metadata = _get_safetensors_file_metadata(f)
 
-            for key in keys:
-                state_dict_metadata[key] = BytesStorageMetadata()
-                storage_data[key] = os.path.basename(safetensors_files[0])
-        else:
-            with self.fs.create_stream(metadata_path, "r") as metadata_file:
-                metadata = json.load(metadata_file)
+                for key, val in metadata.items():
+                    state_dict_metadata[key] = TensorStorageMetadata(
+                        properties=TensorProperties(dtype=_get_dtype(val[DTYPE_KEY])),
+                        size=torch.Size(val[SHAPE_KEY]),
+                        chunks=[
+                            ChunkStorageMetadata(
+                                offsets=torch.Size([0] * len(val[SHAPE_KEY])),
+                                sizes=torch.Size(val[SHAPE_KEY]),
+                            )
+                        ],
+                    )
 
-            for key in metadata["weight_map"].keys():
-                state_dict_metadata[key] = BytesStorageMetadata()
-            storage_data = metadata["weight_map"]
+                for key, val in metadata.items():
+                    if key == DEFAULT_EXTRA_METADATA_KEY:
+                        continue
+
+                    storage_data[key] = _StorageInfo(
+                        safetensor_file,
+                        val["data_offsets"][0],
+                        val["data_offsets"][1] - val["data_offsets"][0],
+                    )
 
         metadata = Metadata(
             state_dict_metadata=state_dict_metadata,
@@ -290,7 +341,7 @@ class _HuggingFaceStorageReader(FsspecReader):
         return metadata
 
 
-def _get_safetensors_file_keys(file_bytes: io.IOBase) -> list[str]:
+def _get_safetensors_file_metadata(file_bytes: io.IOBase) -> Any:
     # this uses the same logic that's done in HF code base
     # https://github.com/2404589803/huggingface_hub/blob/main/src/huggingface_hub/hf_api.py#L5308
     # and follows their documentation on how their files are serialized
@@ -300,4 +351,13 @@ def _get_safetensors_file_keys(file_bytes: io.IOBase) -> list[str]:
     header_len = struct.unpack("<Q", header_len_bytes)[0]
     header_json = file_bytes.read(header_len)
     metadata = json.loads(header_json)
-    return list(metadata.keys())
+    return metadata
+
+
+def _get_dtype(dtype_str: str) -> torch.dtype:
+    try:
+        dtype = DTYPE_MAP[dtype_str]
+    except KeyError:
+        dtype = torch.get_default_dtype()
+
+    return dtype
