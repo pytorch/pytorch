@@ -3507,20 +3507,42 @@ exit(2)
         # self.assertTrue(throws_on_cuda_event("global"))
 
     @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON,
+        not TEST_CUDA_GRAPH,
         "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-python must be installed",
     )
-    @parametrize("instantiate_eagerly", [False, True])
-    def test_cuda_graph_raw_graph(self, instantiate_eagerly):
-        import cuda.bindings.runtime as cudart
-
-        graph = torch.cuda.CUDAGraph(instantiate_eagerly=instantiate_eagerly)
+    def test_cuda_graph_raw_graph_keep_graph_false(self):
+        graph = torch.cuda.CUDAGraph(keep_graph=False)
         x = torch.zeros([2000], device="cuda")
         y = torch.ones([2000], device="cuda")
         with torch.cuda.graph(graph, capture_error_mode="relaxed"):
             z = x + y
 
-        cudart_cuda_graph = cudart.cudaGraph_t(init_value=graph.raw_cuda_graph())
+        with self.assertRaises(RuntimeError) as context:
+            raw_pointer = graph.instantiate()
+
+        self.assertTrue("instantiate() is intended to be called by the user only when keep_graph=true" in str(context.exception))
+
+        with self.assertRaises(RuntimeError) as context:
+            raw_pointer = graph.raw_cuda_graph()
+
+        self.assertTrue("You cannot access the raw cudaGraph_t instance unless CUDAGraph was initialized with keep_graph=true" in str(context.exception))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-python must be installed",
+    )
+    def test_cuda_graph_raw_graph(self):
+        import cuda.bindings.runtime as cudart
+
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.zeros([2000], device="cuda")
+        y = torch.ones([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            z = x + y
+
+        raw_pointer = graph.raw_cuda_graph()
+
+        cudart_cuda_graph = cudart.cudaGraph_t(init_value=raw_pointer)
         _, num_nodes = cuda_python_error_check(
             cudart.cudaGraphGetNodes(cudart_cuda_graph)
         )
@@ -3535,9 +3557,8 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
-    @parametrize("instantiate_eagerly", [False, True])
-    def test_cuda_graph_raw_graph_reset_and_recapture(self, instantiate_eagerly):
-        graph = torch.cuda.CUDAGraph(instantiate_eagerly=instantiate_eagerly)
+    def test_cuda_graph_raw_graph_reset_and_recapture(self):
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
         x = torch.zeros([2000], device="cuda")
         y = torch.ones([2000], device="cuda")
         with torch.cuda.graph(graph, capture_error_mode="relaxed"):
@@ -3583,7 +3604,10 @@ exit(2)
         s0.wait_stream(s1)
         with torch.cuda.stream(s0):
             g.capture_end()
+        print("BEFORE:", len(existing_pools))
         segments = torch.cuda.memory_snapshot()
+        print("AFTER:", len(existing_pools))
+        import ipdb; ipdb.set_trace()
         x = [
             s["segment_pool_id"]
             for s in segments

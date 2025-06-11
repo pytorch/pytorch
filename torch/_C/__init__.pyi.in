@@ -2276,7 +2276,7 @@ class _CudaEventBase:
 
 # Defined in torch/csrc/cuda/Graph.cpp
 class _CUDAGraph:
-    def __new__(cls, instantiate_eagerly: _bool = ...) -> Self: ...
+    def __new__(cls, keep_graph: _bool = ...) -> Self: ...
     def capture_begin(
         self,
         pool: tuple[_int, _int] | None = ...,

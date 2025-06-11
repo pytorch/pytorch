@@ -9,6 +9,8 @@
 
 namespace at::cuda {
 
+static bool _cuda_graphs_debug = false;
+
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
@@ -36,10 +38,10 @@ MempoolId_t graph_pool_handle() {
  * describes memory management for captures.
  */
 
-CUDAGraph::CUDAGraph(bool instantiate_eagerly)
+CUDAGraph::CUDAGraph(bool keep_graph)
   // CUDAStreams may not be default-constructed.
   : capture_stream_(at::cuda::getCurrentCUDAStream()),
-    instantiate_eagerly_(instantiate_eagerly) {
+    keep_graph_(keep_graph) {
 }
 
 void CUDAGraph::register_generator_state(
@@ -107,12 +109,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
-
-  cudaStreamCaptureStatus status{};
-  AT_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(stream, &status, &capture_id_, &graph_, nullptr, nullptr));
-  TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
-
-  has_graph_ = true;
 }
 
 void CUDAGraph::capture_end() {
@@ -140,9 +136,13 @@ void CUDAGraph::capture_end() {
   }
 
   capture_ended_ = true;
-
-  if (instantiate_eagerly_) {
+  has_graph_ = true;
+  if (!keep_graph_) {
     instantiate();
+    if (!_cuda_graphs_debug) {
+      AT_CUDA_CHECK(cudaGraphDestroy(graph_));
+    }
+    has_graph_ = false;
   }
 }
 
@@ -150,6 +150,7 @@ void CUDAGraph::instantiate() {
   TORCH_CHECK(capture_ended_, "capture_end() must have been called before calling instantiate");
 
   if (has_graph_exec_) {
+    TORCH_CHECK(keep_graph_, "instantiate() is intended to be called by the user only when keep_graph=true");
     AT_CUDA_CHECK(cudaGraphExecDestroy(graph_exec_));
   }
   // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not freed
@@ -189,10 +190,11 @@ void CUDAGraph::instantiate() {
 }
 
 void CUDAGraph::replay() {
-  TORCH_CHECK(has_graph_,
+  TORCH_CHECK(capture_ended_,
               "Called CUDAGraph::replay without a preceding successful capture.");
 
   if (!has_graph_exec_) {
+    TORCH_INTERNAL_ASSERT(keep_graph_);
     instantiate();
   }
 
@@ -217,11 +219,24 @@ void CUDAGraph::replay() {
 }
 
 void CUDAGraph::enable_debug_mode() {
-  TORCH_WARN("[graph].enable_debug_mode() is now a no-op and can be removed safely");
+  _cuda_graphs_debug = true;
 }
 
 void CUDAGraph::debug_dump(const std::string& debug_path) {
 #if defined(CUDA_VERSION) || defined(USE_ROCM)
+  if (_cuda_graphs_debug || keep_graph_) {
+    TORCH_WARN("DEBUG: calling debug_dump()");
+    if (has_graph_) {
+      TORCH_WARN("DEBUG: calling cudaGraphDebugDotPrint() with ", debug_path);
+      C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), cudaGraphDebugDotFlagsVerbose)); // most verbose output
+      if (!keep_graph_) {
+        AT_CUDA_CHECK(cudaGraphDestroy(graph_));
+        has_graph_ = false;
+      }
+    }
+  } else {
+    TORCH_WARN("CUDA Graphs debug not enabled, set with [graph].enable_debug_mode()");
+  }
   TORCH_WARN("DEBUG: calling debug_dump()");
   C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), cudaGraphDebugDotFlagsVerbose)); // most verbose output
 #else
@@ -230,7 +245,8 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
 }
 
 cudaGraph_t CUDAGraph::raw_cuda_graph() {
-  TORCH_CHECK(has_graph_, "You cannot access the raw cudaGraph_t instance until capture_begin() has been called");
+  TORCH_CHECK(keep_graph_, "You cannot access the raw cudaGraph_t instance unless CUDAGraph was initialized with keep_graph=true");
+  TORCH_CHECK(has_graph_, "You cannot access the raw cudaGraph_t instance until capture_end() has been called");
   return graph_;
 }
 

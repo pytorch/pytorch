@@ -47,7 +47,7 @@ class CUDAGraph(torch._C._CUDAGraph):
     r"""Wrapper around a CUDA graph.
 
     Arguments:
-        instantiate_eagerly (bool, optional): if True, a
+        keep_graph (bool, optional): if False, a
         cudaGraphExec_t will be created at the end of capture_end(),
         which is the default behavior.
 
@@ -59,7 +59,7 @@ class CUDAGraph(torch._C._CUDAGraph):
             cudaGraph_t so that it can be modified. If a user does
             modify a cudaGraph_t, we would like to allow them to opt
             out of having to instantiate twice. If
-            instantiate_eagerly=True, on the first call to replay(),
+            keep_graph=False, on the first call to replay(),
             instantiate() will be called if it hasn't been called
             already. Since replay() is expected to be run on
             performance-critical paths, we want to retain the prior
@@ -68,16 +68,17 @@ class CUDAGraph(torch._C._CUDAGraph):
             existing latency-sensitive code in the common case where
             the user is not modifying the cudaGraph_t. If a user knows
             that they will be modifying the cudaGraph_t after graph
-            capture is done, they should set instantiate_eagerly to
-            true to avoid the overhead of instantiating twice. They
+            capture is done, they should set keep_graph to
+            false to avoid the overhead of instantiating twice. They
             can call instantiate() manually before replay() to prevent
+            increased latency on the first call to replay()
 
     .. warning::
         This API is in beta and may change in future releases.
     """
 
-    def __new__(cls, instantiate_eagerly=True):
-        return super().__new__(cls, instantiate_eagerly)
+    def __new__(cls, keep_graph=False):
+        return super().__new__(cls, keep_graph)
 
     def capture_begin(self, pool=None, capture_error_mode="global"):
         r"""Begin capturing CUDA work on the current stream.
