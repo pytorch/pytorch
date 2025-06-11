@@ -2,6 +2,7 @@
 #include <c10/cuda/driver_api.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
+#include <cuda_runtime.h>
 #include <dlfcn.h>
 
 namespace c10::cuda {
@@ -45,6 +46,37 @@ void* DriverAPI::get_nvml_handle() {
 C10_EXPORT DriverAPI* DriverAPI::get() {
   static DriverAPI singleton = create_driver_api();
   return &singleton;
+}
+
+typedef cudaError_t (*VersionedGetEntryPoint)(const char *, void **, unsigned int,
+                                              unsigned long long,  // NOLINT(*)
+                                              cudaDriverEntryPointQueryResult *);
+typedef cudaError_t (*GetEntryPoint)(const char *, void **, unsigned long long,  // NOLINT(*)
+                                     cudaDriverEntryPointQueryResult *);
+
+void *get_symbol(const char *symbol, int cuda_version) {
+  constexpr char driver_entrypoint[] = "cudaGetDriverEntryPoint";
+  constexpr char driver_entrypoint_versioned[] = "cudaGetDriverEntryPointByVersion";
+  // We link to the libcudart.so already, so can search for it in the current context
+  static GetEntryPoint driver_entrypoint_fun =
+      reinterpret_cast<GetEntryPoint>(dlsym(RTLD_DEFAULT, driver_entrypoint));
+  static VersionedGetEntryPoint driver_entrypoint_versioned_fun =
+      reinterpret_cast<VersionedGetEntryPoint>(dlsym(RTLD_DEFAULT, driver_entrypoint_versioned));
+
+  cudaDriverEntryPointQueryResult driver_result;
+  void *entry_point = nullptr;
+  if (driver_entrypoint_versioned_fun != nullptr) {
+    // Found versioned entrypoint function
+    (driver_entrypoint_versioned_fun(symbol, &entry_point, cuda_version,
+                                                    cudaEnableDefault, &driver_result));
+  } else {
+    (driver_entrypoint_fun != nullptr, "Error finding the CUDA Runtime-Driver interop.");
+    // Versioned entrypoint function not found
+    (driver_entrypoint_fun(symbol, &entry_point, cudaEnableDefault, &driver_result));
+  }
+  (driver_result == cudaDriverEntryPointSuccess,
+             "Could not find CUDA driver entry point for ", symbol);
+  return entry_point;
 }
 
 } // namespace c10::cuda
