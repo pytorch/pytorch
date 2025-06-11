@@ -1819,7 +1819,7 @@ def unfold(x, dimension, size, step):
     sizevars.guard_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
-    if sizevars.size_hint(dim_size, fallback=-1) > 0:
+    if sizevars.size_hint_or_throw(dim_size) > 0:
         x.mark_reuse(
             sizevars.size_hint_or_throw(CeilDiv(new_dim_size * size, dim_size))
         )
