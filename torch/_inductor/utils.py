@@ -288,6 +288,8 @@ def do_bench_using_profiling(
     for _ in range(n_warmup):
         fn()
 
+    torch.cuda.synchronize()
+
     with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CUDA,
