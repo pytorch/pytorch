@@ -669,7 +669,7 @@ assumption that the fill value is negative infinity.
 .. See https://github.com/Quansight-Labs/rfcs/tree/pearu/rfc-fill-value/RFC-0004-sparse-fill-value for a new API
 
 (sparse-compressed-docs)=
-### Sparse Compressed Tensors
+## Sparse Compressed Tensors
 
 Sparse Compressed Tensors represents a class of sparse tensors that
 have a common feature of compressing the indices of a certain dimension
