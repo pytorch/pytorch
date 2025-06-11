@@ -72,12 +72,13 @@ bool priority_order_init_ = false;
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
-  return false; // not default for now
-#if defined(CUDNN_VERSION)
-
+  static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_PREFERRED") == true;
+  if (!prefer_cudnn) {
+    return false;
+  }
 #if CUDNN_VERSION > 90000
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  return dprops->major >= 9;
+  return dprops->major >= 9 && !dprops->minor;
 #else
   return false;
 #endif

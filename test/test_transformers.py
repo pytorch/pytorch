@@ -3064,9 +3064,8 @@ class TestSDPACudaOnly(NNTestCase):
         device_capability = None
         if "cuda" in str(device):
             device_capability = torch.cuda.get_device_capability()
-        prefer_cudnn = False
-        # TODO(eqy): uncomment the following condition
-        # device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
+        prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" in os.environ
+        prefer_cudnn = prefer_cudnn and device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
 
         # TODO we are currently disabling this by default, lets assert that this returns
         # FlashAttention, we need to change when we make remove opt-in for cudnn
