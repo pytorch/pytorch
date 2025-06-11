@@ -967,6 +967,9 @@ class SetVariable(ConstDictVariable):
         # Already EQUALS_MATCH guarded
         pass
 
+    def install_dict_contains_guard(self, tx, args):
+        super().install_dict_contains_guard(tx, args)
+
 
 class FrozensetVariable(SetVariable):
     def __init__(
