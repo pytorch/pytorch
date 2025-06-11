@@ -537,7 +537,9 @@ def guard_collectives_hook(guard_eval_result):
         dist.all_gather_object(all_results, guard_eval_result, group=pg)
         # True = everyone hit, OK to run
         # False = someone missed, force recompile everywhere
-        return all(all_results)
+        res = all(all_results)
+        log.info("guard_collective %s -> %s", guard_eval_result, res)
+        return res
     return guard_eval_result
 
 
