@@ -1312,7 +1312,7 @@ The following Tensor methods support sparse COO tensors:
 {meth}`~torch.Tensor.transpose_`
 {meth}`~torch.Tensor.zero_`
 
-## Torch functions specific to sparse Tensors
+### Torch functions specific to sparse Tensors
 
 ```{eval-rst}
 .. autosummary::
