@@ -210,7 +210,7 @@ class VariableTrackerCache:
         self.cache.clear()
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
 
@@ -392,8 +392,8 @@ class OutputGraph(OutputGraphGuardsState):
         # Set of globals installed via install_global* APIs
         self.installed_globals: set[str] = set()
 
-        self.f_code = f_code
-        # TODO: maybe should only store the entire f_code
+        # TODO: maybe should just pass the entire f_code in here?  Not
+        # sure...
         self.co_fields = {
             "co_name": f_code.co_name,
             "co_filename": f_code.co_filename,
@@ -437,6 +437,7 @@ class OutputGraph(OutputGraphGuardsState):
                 export=self.export,
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.tracing_context.traced_code.append(f_code)
         self.dynamo_compile_id: Optional[CompileId] = (
             CompileContext.current_compile_id()
         )
