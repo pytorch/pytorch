@@ -6,12 +6,14 @@ import functools
 import itertools
 import logging
 import math
+from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
+from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -158,7 +160,7 @@ class MetalExprPrinter(ExprPrinter_):
 
 
 class MetalOverrides(OpOverrides):
-    """Implements Metal-specific overrids for ops. Base class emits Python-friendly overrides"""
+    """Implements Metal-specific overrides for ops. Base class emits Python-friendly overrides."""
 
     @staticmethod
     def to_dtype(
@@ -472,7 +474,7 @@ class MetalKernel(SIMDKernel):
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
     headers: OrderedSet[str] = OrderedSet(["utils"])
-    multistage_reduction_entry: Optional[IterationRangesEntry] = None
+    multistage_reduction_entry: list[IterationRangesEntry] = []
 
     def __init__(
         self,
@@ -719,14 +721,14 @@ class MetalKernel(SIMDKernel):
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
-        if entry.is_reduction and entry.root.numel > self.max_threadgroup_size:
-            self.multistage_reduction_entry = entry
-        if not entry.is_reduction or self.multistage_reduction_entry is None:
+
+        if not entry.is_reduction or entry.root.numel < self.max_threadgroup_size:
             self.indexing_code.writeline(
                 f"{self.index_dtype} {entry.name} = {index_str};"
             )
             return
-        # When reducing the thensor whose size exceeds max threadgroup size
+        self.multistage_reduction_entry.append(entry)
+        # When reducing the tensor whose size exceeds max threadgroup size
         # loop over extra indices per reduction thread and perform part of the operation
         # using values in the shared memory
         loop_size = (
@@ -757,12 +759,12 @@ class MetalKernel(SIMDKernel):
             with self.body.indent():
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
-            self.body.writeline("}")
+            self.body.writeline("}" * len(self.multistage_reduction_entry))
             # Invalidate variables instantiated inside loop
             self.cse.invalidate(OrderedSet(self.cse.reduction_cache.values()))
             # And loop codegen
-            self.multistage_reduction_entry.cache_clear()
-            self.multistage_reduction_entry = None
+            while self.multistage_reduction_entry:
+                self.multistage_reduction_entry.pop().cache_clear()
         else:
             self.body.splice(self.loads)
             self.body.splice(self.compute)
@@ -786,6 +788,17 @@ class MetalKernel(SIMDKernel):
             if not V.graph.cpp_wrapper:
                 for header in self.headers:
                     code.writeline(f"#include <c10/metal/{header}.h>")
+            else:
+                headers = [
+                    f"#include <c10/metal/{header}.h>" for header in self.headers
+                ]
+                header_contents = _embed_headers(
+                    headers,
+                    [Path(__file__).parent.parent.parent / "include"],
+                    OrderedSet(),  # type: ignore[arg-type]
+                )
+                code.writeline(header_contents)
+
             if self.inside_reduction:
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
@@ -850,7 +863,7 @@ class MetalKernel(SIMDKernel):
     def call_kernel(self, name: str, node: Any = None) -> None:
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
-        # Make sure sizevarss has been computed
+        # Make sure sizevars has been computed
         for v in self.args.sizevars.keys():
             wrapper.ensure_size_computed(v)
 
@@ -870,9 +883,9 @@ class MetalKernel(SIMDKernel):
             ]
 
             if V.graph.cpp_wrapper:
-                args += [f"{', '.join(threads)}"]
+                args.append(f"{{{', '.join(threads)}}}")
             else:
-                args += [f"threads=[{', '.join(threads)}]"]
+                args.append(f"threads=[{', '.join(threads)}]")
         else:
             if V.graph.cpp_wrapper:
                 raise RuntimeError("We should always have threads?")
@@ -885,9 +898,9 @@ class MetalKernel(SIMDKernel):
                 for v in self.active_range_trees()
             ]
             if V.graph.cpp_wrapper:
-                args += [f"{{{', '.join(threads)}}}"]
+                args.append(f"{{{', '.join(threads)}}}")
             else:
-                args += [f"group_size=[{', '.join(threads)}]"]
+                args.append(f"group_size=[{', '.join(threads)}]")
         else:
             if V.graph.cpp_wrapper:
                 # Add a None so that we always have a group_size in the

@@ -57,7 +57,7 @@ class TestHfStorage(TestCase):
 
             save_plan = SavePlan(
                 [write_item_1, write_item_2],
-                storage_data={"fqn_to_file_mapping": {"tensor_0": 1, "tensor_1": 2}},
+                storage_data={"fqn_to_index_mapping": {"tensor_0": 1, "tensor_1": 2}},
             )
             save_planner = DefaultSavePlanner()
             save_planner.set_up_planner(state_dict=state_dict)
@@ -168,11 +168,10 @@ class TestHfStorage(TestCase):
         # Mock the deserialize function to return our test tensors
         # The format matches what's expected in the read_data method
         mock_safetensors.deserialize.return_value = [
-            ("tensor_0", {
-                "data": tensor_0.numpy().tobytes(),
-                "dtype": "F32",
-                "shape": [4]
-            }),
+            (
+                "tensor_0",
+                {"data": tensor_0.numpy().tobytes(), "dtype": "F32", "shape": [4]},
+            ),
         ]
 
         with tempfile.TemporaryDirectory() as path:
@@ -187,9 +186,10 @@ class TestHfStorage(TestCase):
 
             # Set up storage data with _StorageInfo objects
             storage_data = {
-                "tensor_0": _StorageInfo(file_path, 0, tensor_0.numel() * tensor_0.element_size()),
+                "tensor_0": _StorageInfo(
+                    file_path, 0, tensor_0.numel() * tensor_0.element_size()
+                ),
             }
-
 
             reader.storage_data = storage_data
 
@@ -202,7 +202,9 @@ class TestHfStorage(TestCase):
             # Create read items for the load plan
             read_items = []
             for name, tensor in state_dict.items():
-                storage_index = MetadataIndex(fqn=name, offset=torch.Size([0]), index=None)
+                storage_index = MetadataIndex(
+                    fqn=name, offset=torch.Size([0]), index=None
+                )
                 dest_index = MetadataIndex(fqn=name, offset=torch.Size([0]), index=None)
                 read_items.append(
                     ReadItem(
@@ -220,14 +222,21 @@ class TestHfStorage(TestCase):
             load_planner = DefaultLoadPlanner()
             load_planner.set_up_planner(
                 state_dict=state_dict,
-                 metadata=Metadata(
-                            state_dict_metadata={
-                                "tensor_0": TensorStorageMetadata(
-                                            properties=TensorProperties(dtype=torch.float32),
-                                            size=torch.Size([4]),
-                                            chunks=[ChunkStorageMetadata(offsets=[0], sizes=torch.Size([4]))])},
-                                 storage_data=storage_data)
-                            )
+                metadata=Metadata(
+                    state_dict_metadata={
+                        "tensor_0": TensorStorageMetadata(
+                            properties=TensorProperties(dtype=torch.float32),
+                            size=torch.Size([4]),
+                            chunks=[
+                                ChunkStorageMetadata(
+                                    offsets=torch.Size([0]), sizes=torch.Size([4])
+                                )
+                            ],
+                        )
+                    },
+                    storage_data=storage_data,
+                ),
+            )
 
             # Call read_data
             future = reader.read_data(load_plan, load_planner)
@@ -293,7 +302,13 @@ class TestHfStorage(TestCase):
             with open(os.path.join(path, file_name), "wb") as f:
                 # write metadata the same way it would be in safetensors file
                 metadata_contents = json.dumps(
-                    {'tensor_0': {'dtype': "F32", "shape": [5, 10], "data_offsets": [0, 200]}}
+                    {
+                        "tensor_0": {
+                            "dtype": "F32",
+                            "shape": [5, 10],
+                            "data_offsets": [0, 200],
+                        }
+                    }
                 )
                 metadata_bytes = metadata_contents.encode("utf-8")
 
@@ -306,15 +321,26 @@ class TestHfStorage(TestCase):
                 metadata.state_dict_metadata,
                 {
                     key: TensorStorageMetadata(
-                            properties=TensorProperties(dtype=torch.float32),
-                            size=torch.Size([5, 10]),
-                            chunks=[ChunkStorageMetadata(offsets=[0, 0], sizes=torch.Size([5, 10]))],
+                        properties=TensorProperties(dtype=torch.float32),
+                        size=torch.Size([5, 10]),
+                        chunks=[
+                            ChunkStorageMetadata(
+                                offsets=torch.Size([0, 0]), sizes=torch.Size([5, 10])
+                            )
+                        ],
                     ),
                 },
             )
             self.assertEqual(
                 metadata.storage_data,
-                {key: _StorageInfo(os.path.join(path, file_name), 0, 200, transform_descriptors=None)},
+                {
+                    key: _StorageInfo(
+                        os.path.join(path, file_name),
+                        0,
+                        200,
+                        transform_descriptors=None,
+                    )
+                },
             )
 
 
