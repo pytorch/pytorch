@@ -548,7 +548,7 @@ class FloorToInt(sympy.Function):
         if isinstance(number, sympy.Integer):
             return number
         if isinstance(number, sympy.Number):
-            return sympy.Integer(math.floor(float(number)))
+            return sympy.Integer(sympy.floor(number))
 
 
 class CeilDiv(sympy.Function):
