@@ -3651,7 +3651,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         num_gb = None
         if config.benchmark_kernel or config.profile_bandwidth:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
-            inductor_meta["kernel_num_gb"] = num_gb
+            if num_gb is not None:
+                inductor_meta["kernel_num_gb"] = num_gb
+        if config.benchmark_kernel:
+            flops = self.estimate_flops()
+            if flops is not None:
+                inductor_meta["kernel_flop"] = flops
 
         triton_meta["configs"] = [config_of(signature)]
 
