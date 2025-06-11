@@ -1211,11 +1211,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                     config.bundled_autograd_cache
                     and aot_config.precompile_backend_id is not None
                 ):
-                    # TODO: multiple artifacts can be identical here if AOTAutogradCache
-                    # cache hits on the same compile, but we have to serialize it each time
-                    # because PrecompileContext wants each key to correspond to a unique artifact.
-                    # We can fix this by adding additional keys to BundledAOTAutogradCacheArtifact,
-                    # so that we only have to save the same backend entry once
+                    # NB: We don't want to use the cached aot_config.precompile_backend_id
+                    # 1. because we set it to None on save 2. even if we didn't, this new run
+                    # that cache hit has a *new* backend id associated with it.
                     PrecompileContext.record_artifact(
                         BundledAOTAutogradCacheArtifact.type(),
                         aot_config.precompile_backend_id,
@@ -1255,6 +1253,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 and entry.sanitized_aot_config.precompile_backend_id is not None
             ):
                 precompile_key = entry.sanitized_aot_config.precompile_backend_id
+                # Now that we're saving it, the precompile_backend_id field is no longer
+                # useful, remove it from the entry.
+                entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(
                     BundledAOTAutogradCacheArtifact.type(), precompile_key, content
                 )
