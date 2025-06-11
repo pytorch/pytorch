@@ -163,4 +163,19 @@ TEST(SplitTest, ConsecutiveDelimiters) {
   EXPECT_EQ("atom2", result[2]);
 }
 } // namespace test_split
+
+namespace test_str_enum {
+TEST(StringUtilTest, testStrEnum) {
+  enum class Foo { Bar = 1, Baz = 2 };
+  EXPECT_EQ(c10::str(Foo::Baz, Foo::Bar), "21");
+
+  enum UnscopedEnum { Bar2 = 1, Baz2 = 2 };
+  EXPECT_EQ(c10::str(Baz2, Bar2), "21");
+
+  static_assert(c10::detail::Streamable<int>::value);
+  static_assert(!c10::detail::Streamable<Foo>::value);
+
+  static_assert(c10::detail::Streamable<UnscopedEnum>::value);
+}
+} // namespace test_str_enum
 } // namespace

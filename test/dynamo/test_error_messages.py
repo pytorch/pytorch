@@ -96,7 +96,12 @@ from user code:
                 torch.Tensor([1])
             ),
             """\
-Tensor.item
+Unsupported Tensor.item() call with capture_scalar_outputs=False
+  Explanation: Dynamo does not support tracing `Tensor.item()` with config.capture_scalar_outputs=False.
+  Hint: Set `torch._dynamo.config.capture_scalar_outputs = True` or `export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1` to include these operations in the captured graph.
+
+  Developer debug context: call_method TensorVariable() item () {}
+
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -239,6 +244,7 @@ from user code:
 Unsupported context manager
   Explanation: Dynamo does not know how to enter a `int` context manager.
   Hint: Avoid using the unsupported context manager.
+  Hint: If the context manager seems like it should be supported (e.g. torch.set_grad_enabled), then it may be the case that it was created outside the compiled region, which Dynamo does not support. Supported context managers can cross graph break boundaries only if they are local non-closure variables, or are intermediate values.
   Hint: File an issue to PyTorch. Simple context managers can potentially be supported, but note that context managers can't be supported in general
 
   Developer debug context: Attempted SETUP_WITH/BEFORE_WITH on ConstantVariable(int: 3)
@@ -956,8 +962,8 @@ from user code:
 Traceback (most recent call last):
   File "test_error_messages.py", line N, in test_no_internal_compiler_stacktrace
     torch.compile(fn, backend="eager", fullgraph=True)()
-  File "eval_frame.py", line N, in _fn
-    raise e.with_traceback(None) from e.__cause__
+  File "eval_frame.py", line N, in compile_wrapper
+    raise e.with_traceback(None) from e.__cause__  # User compiler error
 torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
