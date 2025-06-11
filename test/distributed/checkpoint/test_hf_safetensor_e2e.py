@@ -1,7 +1,5 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
-import sys
-
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch.distributed.checkpoint import _HuggingFaceLoadPlanner
@@ -39,7 +37,7 @@ class TestSingleRankSaveLoad(TestCase):
             from safetensors.torch import load_file
         except ImportError:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
 
@@ -66,7 +64,7 @@ class TestSingleRankSaveLoad(TestCase):
             from safetensors.torch import save_file
         except ImportError:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
 
@@ -95,7 +93,7 @@ class TestSingleRankSaveLoad(TestCase):
             from safetensors.torch import save_file
         except ImportError:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
 
@@ -122,7 +120,7 @@ class TestSingleRankSaveLoad(TestCase):
             from safetensors.torch import save_file
         except ImportError:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
 
@@ -186,7 +184,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             import safetensors
         except ImportError:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
 
@@ -246,7 +244,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             import safetensors
         except ImportError:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
         for two_d_to_two_d_placements in TWO_D_TO_TWO_D_PLACEMENTS:
@@ -307,7 +305,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             import safetensors
         except ImportError:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
         for placements_1d in ONE_D_PLACEMENTS:
@@ -360,7 +358,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             import safetensors
         except ImportError:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
         for placements_2d in TWO_D_PLACEMENTS:
@@ -417,7 +415,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             import safetensors
         except ImportError:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         tensor = torch.rand(1).cuda()
         mesh = init_device_mesh(self.device_type, (self.world_size,))
