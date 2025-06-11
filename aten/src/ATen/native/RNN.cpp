@@ -68,7 +68,7 @@ namespace at::native {
 namespace {
 
 // Check if pytorch is compiled with MIOpen.
-bool use_miopen(const at::Tensor& input, const double dropout_state) {
+bool use_miopen(const at::Tensor& input, const double /*dropout_state*/) {
     bool is_miopen_acceptable = ((input.scalar_type() == at::kFloat)|| (input.scalar_type() == at::kHalf)) &&
                                 (detail::getCUDAHooks().compiledWithMIOpen()) &&
                                 (input.is_cuda()) &&
@@ -82,7 +82,7 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
     return is_miopen_acceptable;
 }
 
-bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
+bool use_mkldnn([[maybe_unused]] const Tensor& input, [[maybe_unused]] TensorList params, [[maybe_unused]] TensorList hx) {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
@@ -124,7 +124,6 @@ struct relu_f {
 };
 
 struct PackedSequence {
-  PackedSequence() = default;
   PackedSequence(Tensor _data, Tensor _batch_sizes)
     : data(std::move(_data)), batch_sizes(std::move(_batch_sizes)) {}
 
@@ -180,11 +179,13 @@ struct CellParams : public CellParamsBase {
       const Tensor& _w_hr)
       : w_ih(_w_ih), w_hh(_w_hh), b_ih_(_b_ih), b_hh_(_b_hh), w_hr(_w_hr) {}
 
+  // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
   const Tensor& w_ih;
   const Tensor& w_hh;
   const Tensor& b_ih_; /* optional */
   const Tensor& b_hh_; /* optional */
   const Tensor& w_hr;  /* only defined for LSTMs with projections */
+  // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 
   Tensor matmul_ih(const Tensor& input) const override {
     return at::matmul(input, w_ih.t());
@@ -213,8 +214,8 @@ struct CellParams : public CellParamsBase {
   CellParamsSerializationType __getstate__() const override {
     TORCH_INTERNAL_ASSERT(false, "Not yet implemented");
   }
-  static c10::intrusive_ptr<CellParamsBase> __setstate__(
-      const CellParamsSerializationType& state) {
+  [[maybe_unused]] static c10::intrusive_ptr<CellParamsBase> __setstate__(
+      const CellParamsSerializationType& /*state*/) {
     TORCH_INTERNAL_ASSERT(false, "Not yet implemented");
   }
 };
@@ -252,6 +253,7 @@ struct QuantizedCellParams : public CellParamsBase {
         zero_point_ih(std::move(_zero_point_ih)),
         zero_point_hh(std::move(_zero_point_hh)) {}
 
+  // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
   const Tensor w_ih;
   const Tensor w_hh;
   const Tensor b_ih_;
@@ -264,11 +266,12 @@ struct QuantizedCellParams : public CellParamsBase {
   const Scalar scale_hh;
   const Scalar zero_point_ih;
   const Scalar zero_point_hh;
+  // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 
-  Tensor matmul_ih(const Tensor& input) const override {
+  Tensor matmul_ih(const Tensor& /*input*/) const override {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
-  Tensor matmul_hh(const Tensor& h) const override {
+  Tensor matmul_hh(const Tensor& /*h*/) const override {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
   Tensor linear_ih(const Tensor& input) const override {
@@ -400,14 +403,16 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
 
   c10::intrusive_ptr<LinearPackedParamsBase> packed_w_ih;
   c10::intrusive_ptr<LinearPackedParamsBase> packed_w_hh;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const Tensor b_ih_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const Tensor b_hh_;
   bool reduce_range_;
 
-  Tensor matmul_ih(const Tensor& input) const override {
+  Tensor matmul_ih(const Tensor& /*input*/) const override {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
-  Tensor matmul_hh(const Tensor& h) const override {
+  Tensor matmul_hh(const Tensor& /*h*/) const override {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
 
@@ -485,7 +490,9 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
 
   c10::intrusive_ptr<LinearPackedParamsBase> packed_ih;
   c10::intrusive_ptr<LinearPackedParamsBase> packed_hh;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const Tensor b_ih_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const Tensor b_hh_;
 
   Tensor matmul_ih(const Tensor& /* unused */) const override {
@@ -541,7 +548,7 @@ static std::unordered_map<
 
 // Stupid wrapper to convert from -> to .
 struct QRNNCellParamsWrapper {
-  QRNNCellParamsWrapper(c10::intrusive_ptr<CellParamsBase> param)
+  explicit QRNNCellParamsWrapper(c10::intrusive_ptr<CellParamsBase> param)
       : param_(std::move(param)) {}
 
   Tensor matmul_ih(const Tensor& input) const {
@@ -583,6 +590,7 @@ static std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
 
 // Flattens a vector of pairs
 template<typename T>
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 static std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
   std::vector<T> result;
   result.reserve(vals.size() * 2);
@@ -822,7 +830,7 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
       typename Layer<Tensor, hidden_type, cell_params>::output_type;
   using unstacked_output_type = LayerOutput<std::vector<Tensor>, hidden_type>;
 
-  FullLayer(Cell<hidden_type, cell_params>& cell)
+  explicit FullLayer(Cell<hidden_type, cell_params>& cell)
     : cell_(cell) {}
 
   unstacked_output_type operator()(
@@ -857,6 +865,7 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
             unstacked_output.final_hidden};
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   Cell<hidden_type, cell_params>& cell_;
 };
 
@@ -867,7 +876,7 @@ struct FullBidirectionalLayer
   using param_type = pair_of<cell_params>;
   using output_type = typename Layer<Tensor, hidden_type, param_type>::output_type;
 
-  FullBidirectionalLayer(Cell<dir_hidden_type, cell_params>& cell)
+  explicit FullBidirectionalLayer(Cell<dir_hidden_type, cell_params>& cell)
     : layer_(cell) {}
 
   output_type operator()(
@@ -919,7 +928,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
   using output_type =
       typename Layer<PackedSequence, hidden_type, cell_params>::output_type;
 
-  PackedLayer(Cell<hidden_type, cell_params>& cell)
+  explicit PackedLayer(Cell<hidden_type, cell_params>& cell)
     : cell_(cell) {}
 
   output_type operator()(
@@ -972,6 +981,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
             hidden_concat(hiddens)};
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   Cell<hidden_type, cell_params>& cell_;
 };
 
@@ -980,7 +990,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
   using output_type =
       typename Layer<PackedSequence, hidden_type, cell_params>::output_type;
 
-  ReversedPackedLayer(Cell<hidden_type, cell_params>& cell)
+  explicit ReversedPackedLayer(Cell<hidden_type, cell_params>& cell)
     : cell_(cell) {}
 
   output_type operator()(
@@ -1026,6 +1036,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
             hidden};
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   Cell<hidden_type, cell_params>& cell_;
 };
 
@@ -1037,7 +1048,7 @@ struct PackedBidirectionalLayer
   using output_type =
       typename Layer<PackedSequence, hidden_type, param_type>::output_type;
 
-  PackedBidirectionalLayer(Cell<dir_hidden_type, cell_params>& cell)
+  explicit PackedBidirectionalLayer(Cell<dir_hidden_type, cell_params>& cell)
     : layer_(cell), rev_layer_(cell) {}
 
   output_type operator()(
@@ -1138,7 +1149,7 @@ std::tuple<io_type, Tensor, Tensor> _lstm_impl(
   // to transpose a pair of those tensors.
   auto layer_hx = hx.unbind(0);
   auto layer_cx = cx.unbind(0);
-  int64_t total_layers = layer_hx.size();
+  int64_t total_layers = static_cast<int64_t>(layer_hx.size());
   std::vector<typename LSTMCell<cell_params>::hidden_type> hiddens;
   hiddens.reserve(total_layers);
   for (const auto i : c10::irange(total_layers)) {
@@ -1315,8 +1326,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
   static std::tuple<Tensor, Tensor> NAME##_input(                           \
       const Tensor& _input,                                                 \
       const Tensor& hx,                                                     \
-      c10::List<c10::intrusive_ptr<CellParamsBase>> _params,                \
-      bool has_biases,                                                      \
+      const c10::List<c10::intrusive_ptr<CellParamsBase>>& _params,         \
+      bool /*has_biases*/,                                                  \
       int64_t num_layers,                                                   \
       double dropout_p,                                                     \
       bool train,                                                           \
@@ -1346,8 +1357,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       const Tensor& data,                                                   \
       const Tensor& batch_sizes,                                            \
       const Tensor& hx,                                                     \
-      c10::List<c10::intrusive_ptr<CellParamsBase>> _params,                \
-      bool has_biases,                                                      \
+      const c10::List<c10::intrusive_ptr<CellParamsBase>>& _params,         \
+      bool /*has_biases*/,                                                  \
       int64_t num_layers,                                                   \
       double dropout_p,                                                     \
       bool train,                                                           \
@@ -1377,15 +1388,15 @@ ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QRNNCellParamsWrapper>)
 // BC wrappers for quantized_gru
 
 static std::tuple<Tensor, Tensor> quantized_gru_input_legacy(
-    const Tensor& _input,
-    const Tensor& hx,
-    c10::List<at::Tensor> _params,
-    bool has_biases,
-    int64_t num_layers,
-    double dropout_p,
-    bool train,
-    bool bidirectional,
-    bool batch_first) {
+    const Tensor& /*_input*/,
+    const Tensor& /*hx*/,
+    const c10::List<at::Tensor>& /*_params*/,
+    bool /*has_biases*/,
+    int64_t /*num_layers*/,
+    double /*dropout_p*/,
+    bool /*train*/,
+    bool /*bidirectional*/,
+    bool /*batch_first*/) {
   TORCH_CHECK(
       false,
       "torch.quantized_gru with List[Tensor] for parameters is "
@@ -1394,15 +1405,15 @@ static std::tuple<Tensor, Tensor> quantized_gru_input_legacy(
 }
 
 static std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
-    const Tensor& data,
-    const Tensor& batch_sizes,
-    const Tensor& hx,
-    c10::List<at::Tensor> _params,
-    bool has_biases,
-    int64_t num_layers,
-    double dropout_p,
-    bool train,
-    bool bidirectional) {
+    const Tensor& /*data*/,
+    const Tensor& /*batch_sizes*/,
+    const Tensor& /*hx*/,
+    const c10::List<at::Tensor>& /*_params*/,
+    bool /*has_biases*/,
+    int64_t /*num_layers*/,
+    double /*dropout_p*/,
+    bool /*train*/,
+    bool /*bidirectional*/) {
   TORCH_CHECK(
       false,
       "torch.quantized_gru with List[Tensor] for parameters is "
@@ -1533,7 +1544,7 @@ std::tuple<Tensor, Tensor> lstm_cell(
   check_rnn_cell_forward_input(input, w_ih.sym_size(1));
   auto hidden_size = w_hh.sym_size(1);
   check_rnn_cell_forward_hidden(input, hx[0], hidden_size, 0);
-  check_rnn_cell_forward_hidden(input, hx[1], std::move(hidden_size), 1);
+  check_rnn_cell_forward_hidden(input, hx[1], hidden_size, 1);
   static at::Tensor undefined;
   return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
@@ -1562,10 +1573,10 @@ _thnn_differentiable_lstm_cell_backward( const std::optional<Tensor>& grad_hy_op
     gates = gates + hidden_bias;
   }
   auto chunked_gates = gates.unsafe_chunk(4, 1);
-  Tensor i = chunked_gates[0].sigmoid();
-  Tensor f = chunked_gates[1].sigmoid();
-  Tensor c = chunked_gates[2].tanh();
-  Tensor o = chunked_gates[3].sigmoid();
+  Tensor i = chunked_gates[0].sigmoid(); // NOLINT(facebook-hte-LocalUncheckedArrayBounds)
+  Tensor f = chunked_gates[1].sigmoid(); // NOLINT(facebook-hte-LocalUncheckedArrayBounds)
+  Tensor c = chunked_gates[2].tanh();    // NOLINT(facebook-hte-LocalUncheckedArrayBounds)
+  Tensor o = chunked_gates[3].sigmoid(); // NOLINT(facebook-hte-LocalUncheckedArrayBounds)
 
   Tensor gcx = cy.tanh();
   Tensor gog;
@@ -1612,13 +1623,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
     h_g = h_g + hidden_bias;
   }
   auto chunked_input_gates = in_g.unsafe_chunk(3, 1);
-  Tensor ir = chunked_input_gates[0];
-  Tensor ii = chunked_input_gates[1];
-  Tensor in = chunked_input_gates[2];
+  Tensor ir = chunked_input_gates[0]; // NOLINT(facebook-hte-LocalUncheckedArrayBounds)
+  Tensor ii = chunked_input_gates[1]; // NOLINT(facebook-hte-LocalUncheckedArrayBounds)
+  Tensor in = chunked_input_gates[2]; // NOLINT(facebook-hte-LocalUncheckedArrayBounds)
   auto chunked_hidden_gates = h_g.unsafe_chunk(3, 1);
-  Tensor hr = chunked_hidden_gates[0];
-  Tensor hi = chunked_hidden_gates[1];
-  Tensor hn = chunked_hidden_gates[2];
+  Tensor hr = chunked_hidden_gates[0]; // NOLINT(facebook-hte-LocalUncheckedArrayBounds)
+  Tensor hi = chunked_hidden_gates[1]; // NOLINT(facebook-hte-LocalUncheckedArrayBounds)
+  Tensor hn = chunked_hidden_gates[2]; // NOLINT(facebook-hte-LocalUncheckedArrayBounds)
   Tensor rg = (ir + hr).sigmoid();
   Tensor ig = (ii + hi).sigmoid();
   Tensor grad_hx = grad_hy * ig;
@@ -1685,8 +1696,8 @@ Tensor rnn_relu_cell(
 
 static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
     const Tensor& _input,
-    c10::List<at::Tensor> hx_,
-    c10::List<c10::intrusive_ptr<CellParamsBase>> _params_,
+    const c10::List<at::Tensor>& hx_,
+    const c10::List<c10::intrusive_ptr<CellParamsBase>>& _params_,
     bool has_biases,
     int64_t num_layers,
     double dropout_p,
@@ -1694,7 +1705,7 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
     bool bidirectional,
     bool batch_first,
     std::optional<ScalarType> dtype,
-    bool use_dynamic) {
+    bool /*use_dynamic*/) {
   auto hx = hx_.vec();
   std::vector<QRNNCellParamsWrapper> params;
   params.reserve(_params_.size());
@@ -1724,17 +1735,17 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
 // BC wrappers for quantized_lstm
 
 static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
-    const Tensor& _input,
-    c10::List<at::Tensor> hx_,
-    c10::List<at::Tensor> _params_,
-    bool has_biases,
-    int64_t num_layers,
-    double dropout_p,
-    bool train,
-    bool bidirectional,
-    bool batch_first,
-    std::optional<ScalarType> dtype,
-    bool use_dynamic) {
+    const Tensor& /*_input*/,
+    const c10::List<at::Tensor>& /*hx_*/,
+    const c10::List<at::Tensor>& /*_params_*/,
+    bool /*has_biases*/,
+    int64_t /*num_layers*/,
+    double /*dropout_p*/,
+    bool /*train*/,
+    bool /*bidirectional*/,
+    bool /*batch_first*/,
+    std::optional<ScalarType> /*dtype*/,
+    bool /*use_dynamic*/) {
   TORCH_CHECK(
       false,
       "torch.quantized_lstm with List[Tensor] for parameters is "
@@ -1747,13 +1758,13 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
     const Tensor& batch_sizes,
     const c10::List<at::Tensor>& hx_,
     const c10::List<c10::intrusive_ptr<CellParamsBase>>& _params_,
-    bool has_biases,
+    bool /*has_biases*/,
     int64_t num_layers,
     double dropout_p,
     bool train,
     bool bidirectional,
-    std::optional<ScalarType> dtype,
-    bool use_dynamic) {
+    std::optional<ScalarType> /*dtype*/,
+    bool /*use_dynamic*/) {
   auto hx = hx_.vec();
   std::vector<QRNNCellParamsWrapper> params;
   params.reserve(_params_.size());
@@ -1774,17 +1785,17 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
 }
 
 static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
-    const Tensor& data,
-    const Tensor& batch_sizes,
-    c10::List<at::Tensor> hx_,
-    c10::List<at::Tensor> _params_,
-    bool has_biases,
-    int64_t num_layers,
-    double dropout_p,
-    bool train,
-    bool bidirectional,
-    std::optional<ScalarType> dtype,
-    bool use_dynamic) {
+    const Tensor& /*data*/,
+    const Tensor& /*batch_sizes*/,
+    const c10::List<at::Tensor>& /*hx_*/,
+    const c10::List<at::Tensor>& /*_params_*/,
+    bool /*has_biases*/,
+    int64_t /*num_layers*/,
+    double /*dropout_p*/,
+    bool /*train*/,
+    bool /*bidirectional*/,
+    std::optional<ScalarType> /*dtype*/,
+    bool /*use_dynamic*/) {
   TORCH_CHECK(
       false,
       "torch.quantized_lstm with List[Tensor] for parameters is "
