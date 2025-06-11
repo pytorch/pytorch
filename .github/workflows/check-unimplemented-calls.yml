@@ -4,6 +4,7 @@ name: Check unimplemented_v2 calls
 on:
   pull_request:
     paths:
+      - 'torch/_dynamo/*.py'
       - 'torch/_dynamo/**/*.py'
 
 jobs:
