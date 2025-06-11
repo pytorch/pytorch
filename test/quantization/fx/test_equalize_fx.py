@@ -43,7 +43,6 @@ from torch.testing._internal.common_quantization import (
     FunctionalConvReluModel,
     FunctionalConvReluConvModel,
 )
-from torch.testing._internal.common_utils import raise_on_run_directly
 
 # Standard Libraries
 import copy
@@ -895,6 +894,3 @@ class TestEqualizeFx(QuantizationTestCase):
 
         # Check the order of nodes in the graph
         self.checkGraphModuleNodes(equalized_model, expected_node_list=node_list)
-
-if __name__ == "__main__":
-    raise_on_run_directly("test/test_quantization.py")

@@ -25,10 +25,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoX86,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import (
-    raise_on_run_directly,
-    skipIfTorchDynamo,
-)
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 
 class NodePosType(Enum):
@@ -2861,7 +2858,3 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list,
                 lower=True,
             )
-
-
-if __name__ == "__main__":
-    raise_on_run_directly("test/test_quantization.py")
