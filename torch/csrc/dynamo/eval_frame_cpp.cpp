@@ -7,6 +7,10 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 
+extern "C" {
+extern PyObject* guard_complete_hook;
+}
+
 static constexpr const char* cache_lookup_profiler_str =
     "TorchDynamo Cache Lookup";
 
@@ -191,6 +195,21 @@ PyObject* dynamo__custom_eval_frame(
       strategy.cur_action == RUN_ONLY || callback.is(py::bool_(false));
   if (run_only) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
+  }
+
+
+  // NB: We only do guard collectives when there are any compiled code entries
+  // at all; these reduces overtriggering and we don't need to do guard
+  // collectives the very first time we've seen a frame
+  // TODO: We could also check if we had just created extra for the first
+  // time?  Not too sure the best condition for extra->cache_entry_list
+  if (guard_complete_hook != nullptr && !extra->cache_entry_list.empty()) {
+    py::handle guard_complete_hook_handle(guard_complete_hook);
+    // False means force compilation (someone cache missed)
+    py::object res = guard_complete_hook_handle(maybe_cached_code != nullptr);
+    if (!py::cast<bool>(res)) {
+      maybe_cached_code = Py_None; // NB: non-owning
+    }
   }
 
   if (maybe_cached_code == nullptr) {
