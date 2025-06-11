@@ -288,7 +288,7 @@ SparseSemiStructuredTensor(shape=torch.Size([128, 128]), transposed=False, value
 dtype=torch.int16))
 ```
 
-## Sparse Semi-Structured Tensor Operations
+### Sparse Semi-Structured Tensor Operations
 
 Currently, the following operations are supported for semi-structured sparse tensors:
 
