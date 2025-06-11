@@ -12,14 +12,12 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: check-unimplemented-calls
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11
       test-matrix: |
         { include: [
-          { config: "check_unimplemented_calls", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" }
+          { config: "check_unimplemented_calls", shard: 1, num_shards: 1}
         ]}
     secrets: inherit
 

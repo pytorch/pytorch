@@ -1,7 +1,8 @@
-from .exc import (
-    unimplemented_v2
-)
+# mypy: ignore-errors
+
 from . import graph_break_hints
+from .exc import unimplemented_v2
+
 
 def dummy_method():
     unimplemented_v2(

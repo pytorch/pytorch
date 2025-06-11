@@ -1732,8 +1732,7 @@ elif [[ "${TEST_CONFIG}" == smoke ]]; then
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "check_unimplemented_calls" ]]; then
-  python tools/dynamo/gb_id_mapping.py check --files "$(git diff --name-only "$GITHUB_BASE_SHA" "$GITHUB_SHA" | grep '\.py$' | tr '\n' ' ')" --registry-path tools/dynamo/graph_break_registry.json
-  if [ $? -ne 0 ]; then
+  if ! python tools/dynamo/gb_id_mapping.py check --files "$(git diff --name-only "$GITHUB_BASE_SHA" "$GITHUB_SHA" | grep '\.py$' | tr '\n' ' ')" --registry-path tools/dynamo/graph_break_registry.json; then
     echo "::error::Found unimplemented_v2 calls that don't match the registry."
     echo "::error::Please update the registry using one of these commands:"
     echo "::error::- Add new entry: python tools/dynamo/gb_id_mapping.py add \"GB_TYPE\" PATH_TO_FILE [--additional-info \"INFO\"]"
