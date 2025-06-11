@@ -587,6 +587,10 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
     ) -> str:
         if generate_super:
             set_output_super = f"{parent_class}::set_output_raw_strided(output_idx, sizes, strides, options, names);"
+        elif k.inplace:
+            # Inplace variants without a super call don't use the strides argument.
+            # This silences -Werror=unused-parameter
+            set_output_super = "(void)strides;"
         else:
             set_output_super = ""
 
