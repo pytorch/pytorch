@@ -12,7 +12,7 @@
   We highly welcome feature requests, bug reports and general suggestions as GitHub issues.
 ```
 
-## Why and when to use sparsity
+### Why and when to use sparsity
 
 By default, PyTorch stores {class}`torch.Tensor` elements contiguously in
 physical memory. This leads to efficient implementations of various array
