@@ -878,7 +878,7 @@ tensor([[0.9078],
 ```
 
 (sparse-csc-docs)=
-## Sparse CSC Tensor
+### Sparse CSC Tensor
 
 The sparse CSC (Compressed Sparse Column) tensor format implements the
 CSC format for storage of 2 dimensional tensors with an extension to
