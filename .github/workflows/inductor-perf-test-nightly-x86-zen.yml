@@ -75,7 +75,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.9-gcc11-build
+      build-environment: linux-jammy-zen-py3.9-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
       test-matrix: |
         { include: [
@@ -101,7 +101,7 @@ jobs:
     needs: linux-jammy-zen-cpu-py3_9-gcc11-inductor-build
     if: github.event.schedule == '0 7 * * *'
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
+      build-environment: linux-jammy-zen-py3.9-gcc11-build
       dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true
       docker-image: ${{ needs.linux-jammy-zen-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-zen-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
@@ -119,7 +119,7 @@ jobs:
     needs: linux-jammy-zen-cpu-py3_9-gcc11-inductor-build
     if: github.event_name == 'workflow_dispatch'
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
+      build-environment: linux-jammy-zen-py3.9-gcc11-build
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}
       docker-image: ${{ needs.linux-jammy-zen-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-zen-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
