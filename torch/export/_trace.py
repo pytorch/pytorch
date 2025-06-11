@@ -2108,7 +2108,7 @@ def _export(
     operations inside and produce a ExportedProgram.
 
     Args:
-        f: the `nn.Module` to trace.
+        mod: the `nn.Module` to trace.
 
         args: example positional inputs.
 
@@ -2144,7 +2144,7 @@ def _export(
          while not emitting runtime asserts, returning a cleaner graph with lesser guarantees around dynamic shapes.
 
     Returns:
-        An ExportedProgram containing the traced method.
+        An ExportedProgram containing the traced module.
     """
 
     from torch._utils_internal import export_training_ir_rollout_check
