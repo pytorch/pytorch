@@ -580,7 +580,7 @@ class SizeVarAllocator:
         try:
             return int(out)
         except Exception:
-            log.debug("failed on: %s", out)
+            log.debug("failed on: %s", out, exc_info=True)
             raise
 
     def size_hints(

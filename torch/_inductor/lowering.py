@@ -1139,9 +1139,7 @@ def repeat(x, repeats):
         return x_loader(index)
 
     if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
-        old_size_product = V.graph.sizevars.size_hint_or_throw(
-            sympy_product(old_size)
-        )
+        old_size_product = V.graph.sizevars.size_hint_or_throw(sympy_product(old_size))
         if old_size_product > 0:
             # maybe realize the input but skip for unbacked symints since it'll
             # choke on the size hint.
