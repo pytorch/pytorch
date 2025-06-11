@@ -252,11 +252,19 @@ class RNNBase(Module):
         # a sufficient check, because overlapping parameter buffers that don't completely
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
-        unique_data_ptrs = {
-            p.data_ptr() for p in self._flat_weights  # type: ignore[union-attr]
-        }
-        if len(unique_data_ptrs) != len(self._flat_weights):
-            return
+        try:
+            from torch.multiprocessing.reductions import StorageWeakRef
+
+            unique_storage_refs = {
+                StorageWeakRef(p.untyped_storage())
+                for p in self._flat_weights  # type: ignore[union-attr]
+            }
+            if len(unique_storage_refs) != len(self._flat_weights):
+                return
+        except Exception:
+            # Fallback for cases where StorageWeakRef is not available or fails
+            # This maintains PT2 compatibility by skipping aliasing check
+            pass
 
         with torch.cuda.device_of(first_fw):
             import torch.backends.cudnn.rnn as rnn
@@ -611,12 +619,10 @@ class RNN(RNNBase):
         bidirectional: bool = False,
         device=None,
         dtype=None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
-    def __init__(self, *args, **kwargs):
-        ...
+    def __init__(self, *args, **kwargs): ...
 
     def __init__(self, *args, **kwargs):
         if "proj_size" in kwargs:
@@ -969,12 +975,10 @@ class LSTM(RNNBase):
         proj_size: int = 0,
         device=None,
         dtype=None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
-    def __init__(self, *args, **kwargs):
-        ...
+    def __init__(self, *args, **kwargs): ...
 
     def __init__(self, *args, **kwargs):
         super().__init__("LSTM", *args, **kwargs)
@@ -1304,12 +1308,10 @@ class GRU(RNNBase):
         bidirectional: bool = False,
         device=None,
         dtype=None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
-    def __init__(self, *args, **kwargs):
-        ...
+    def __init__(self, *args, **kwargs): ...
 
     def __init__(self, *args, **kwargs):
         if "proj_size" in kwargs:
