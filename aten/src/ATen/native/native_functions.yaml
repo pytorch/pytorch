@@ -526,8 +526,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: acos_out
-    MPS: acos_out_mps
+    CPU, CUDA, MPS: acos_out
   tags: pointwise
 
 # arccos, alias of acos
@@ -981,8 +980,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: asin_out
-    MPS: asin_out_mps
+    CPU, CUDA, MPS: asin_out
     SparseCPU, SparseCUDA: asin_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: asin_sparse_csr_out
   tags: pointwise
@@ -1019,8 +1017,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: atan_out
-    MPS: atan_out_mps
+    CPU, CUDA, MPS: atan_out
     SparseCPU, SparseCUDA: atan_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: atan_sparse_csr_out
   tags: pointwise
@@ -1851,8 +1848,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: cosh_out
-    MPS: cosh_out_mps
+    CPU, CUDA, MPS: cosh_out
   tags: pointwise
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
@@ -5435,8 +5431,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: sinh_out
-    MPS: sinh_out_mps
+    CPU, CUDA, MPS: sinh_out
     SparseCPU, SparseCUDA: sinh_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sinh_sparse_csr_out
 

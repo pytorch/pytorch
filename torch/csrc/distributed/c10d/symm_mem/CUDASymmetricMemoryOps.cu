@@ -15,10 +15,9 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
-
-#include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
-#include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
