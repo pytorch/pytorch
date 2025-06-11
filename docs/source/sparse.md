@@ -409,7 +409,7 @@ tensor(indices=tensor([], size=(2, 0)),
 ```
 
 (sparse-hybrid-coo-docs)=
-## Sparse hybrid COO tensors
+### Sparse hybrid COO tensors
 
 PyTorch implements an extension of sparse tensors with scalar values
 to sparse tensors with (contiguous) tensor values. Such tensors are
