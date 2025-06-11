@@ -122,6 +122,11 @@ class UnsupportedOperatorException(RuntimeError):
 
 
 @dataclass
+class UnsupportedMutationAliasingException(RuntimeError):
+    reason: str
+
+
+@dataclass
 class MetadataMismatchError(RuntimeError):
     reason: str
 
