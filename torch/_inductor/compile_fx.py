@@ -470,7 +470,9 @@ def _recursive_joint_graph_passes(
 
         # Some joint graph passes may create new sub graph module. Run one round
         # for the newly created graph modules.
-        for subgraph_name in _get_subgraph_names(out_gm, skip_invoke_subgraph):
+        # We should not skip graphs for invoke_subgraph HOPs for newly
+        # generated subgraphs.
+        for subgraph_name in _get_subgraph_names(out_gm, skip_invoke_subgraph=False):
             if subgraph_name not in old_subgraph_names:
                 _run_on_sub_graph_module(subgraph_name)
         return out_gm
