@@ -102,10 +102,6 @@ class TORCH_API Context {
             opt_device_type.value())) { // passed device not an accelerator
       return false;
     }
-    if (!init_[static_cast<int8_t>(opt_device_type.value())].test_once()) {
-      // If the device is not initialized, no pointer can be pinned for it
-      return false;
-    }
     return at::getHostAllocator(opt_device_type.value())->is_pinned(data);
   }
 
