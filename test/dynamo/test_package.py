@@ -9,8 +9,8 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
+from torch._dynamo.package import CompilePackage, DynamoStore
 from torch._functorch import config as functorch_config
-from torch._dynamo.package import _CompilePackage, DynamoStore
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -36,7 +36,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         args = (torch.randn(3, 2, device="cpu",),)
 
         # Saving
-        package = _CompilePackage(fn)
+        package = CompilePackage(fn)
         compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
         expected = compiled_fn(*args)
         if backend == "eager":
@@ -80,7 +80,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ]
 
         # Saving
-        package = _CompilePackage(fn)
+        package = CompilePackage(fn)
         compiled_fn = torch._dynamo.optimize(
             backend="eager", package=package, guard_filter_fn=guard_filter_fn
         )(fn)
@@ -129,7 +129,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         torch._dynamo.mark_dynamic(args[0], 0, min=3, max=5)
 
         # Saving
-        package = _CompilePackage(fn)
+        package = CompilePackage(fn)
         compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
         compiled_fn(*args)
         for backend_id, backend in package.cached_backends.items():

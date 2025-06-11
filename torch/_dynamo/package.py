@@ -16,7 +16,6 @@ import dataclasses
 import functools
 import hashlib
 import importlib
-import itertools
 import logging
 import pickle
 import platform
@@ -51,9 +50,9 @@ class SerializedCode:
     co_filename: str
     co_name: str
     co_firstlineno: int
-    co_linetable: bytes
     co_cellvars: tuple[str, ...]
     co_freevars: tuple[str, ...]
+    co_linetable: Optional[bytes] = None
     co_qualname: Optional[str] = None
     co_exceptiontable: Optional[bytes] = None
     co_lnotab: Optional[str] = None
@@ -122,57 +121,12 @@ class _DynamoCodeCacheEntry:
     import_sources: dict[str, str]
     backend_ids: list[_BackendId]
 
-    # Merge multiple entrys for global caching.
-    @classmethod
-    def merge(
-        cls, a: "_DynamoCodeCacheEntry", b: "_DynamoCodeCacheEntry"
-    ) -> "_DynamoCodeCacheEntry":
-        assert a.python_code is b.python_code
-        assert a.python_module == b.python_module
-
-        merged_codes = {}
-        for guarded_code in itertools.chain(a.guarded_codes, b.guarded_codes):
-            if guarded_code.guards_state not in merged_codes:
-                merged_codes[guarded_code.guards_state] = guarded_code
-
-        merged_imports = {}
-        for alias, module_name in itertools.chain(
-            a.import_sources.items(), b.import_sources.items()
-        ):
-            if alias not in merged_imports:
-                merged_imports[alias] = module_name
-            else:
-                assert module_name == merged_imports[alias]
-
-        return _DynamoCodeCacheEntry(
-            python_code=a.python_code,
-            python_module=a.python_module,
-            function_names=list({*a.function_names, *b.function_names}),
-            guarded_codes=merged_codes,
-            import_sources=merged_imports,
-            backend_ids=list({*a.backend_ids, *b.backend_ids}),
-        )
-
 
 @dataclasses.dataclass
 class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
     python_version: str = platform.python_version()
     torch_version: str = torch.__version__
-
-    # Merge multiple entrys for global caching.
-    @classmethod
-    def merge(
-        cls, a: "_DynamoCacheEntry", b: "_DynamoCacheEntry"
-    ) -> "_DynamoCacheEntry":
-        merged_codes = {}
-        for code in itertools.chain(a.codes, b.codes):
-            py_code = code.python_code
-            if existing_code := merged_codes.get(py_code):
-                merged_codes[py_code] = _DynamoCodeCacheEntry.merge(existing_code, code)
-            else:
-                merged_codes[py_code] = code
-        return _DynamoCacheEntry(codes=list(merged_codes.values()))
 
     @property
     def backend_ids(self) -> set[_BackendId]:
@@ -187,7 +141,7 @@ class _DynamoCacheArtifact(PrecompileCacheArtifact[_DynamoCacheEntry]):
     def after_deserialization(self) -> _DynamoCacheEntry:
         return pickle.loads(self.content)
 
-class _CompilePackage:
+class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
     end users. It has the following interface:
@@ -200,7 +154,7 @@ class _CompilePackage:
         updates with compiled functions and resume functions.
     """
 
-    def __init__(self, fn, dynamo: Optional[_DynamoCacheEntry] = None):
+    def __init__(self, fn: Any, dynamo: Optional[_DynamoCacheEntry] = None) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
@@ -213,10 +167,11 @@ class _CompilePackage:
         self._initialize(fn, dynamo)
         self.validate()
 
-    def _initialize(self, fn, dynamo: Optional[_DynamoCacheEntry] = None):
+    def _initialize(self, fn: Any, dynamo: Optional[_DynamoCacheEntry] = None) -> None:
         from .eval_frame import innermost_fn
 
         self._innermost_fn = innermost_fn(fn)
+        assert self._innermost_fn is not None
         if dynamo is not None:
             assert isinstance(dynamo, _DynamoCacheEntry)
             if dynamo.python_version != platform.python_version():
@@ -261,11 +216,12 @@ class _CompilePackage:
             code.function_names.append(name)
 
     @property
-    def cached_backends(self):
+    def cached_backends(self) -> dict[_BackendId, Any]:
         return self._cached_backends
 
     @functools.cached_property
     def source_id(self) -> str:
+        assert self._innermost_fn is not None
         sha256_hash = hashlib.sha256()
         sha256_hash.update(self._innermost_fn.__qualname__.encode())
         sha256_hash.update(str(self._innermost_fn.__code__.co_firstlineno).encode())
@@ -287,6 +243,7 @@ class _CompilePackage:
         guards_state: bytes,
         dynamo_code: types.CodeType,
     ) -> None:
+        assert self._current_entry is not None
         guarded_code_entry = _GuardedCodeCacheEntry(
             guards_state=guards_state,
             dynamo_code=SerializedCode.from_code_object(dynamo_code),
@@ -303,10 +260,12 @@ class _CompilePackage:
             python_code, python_module, _FunctionId(name) if name else None
         )
 
-    def add_import_source(self, alias: str, module_name: str):
+    def add_import_source(self, alias: str, module_name: str) -> None:
+        assert self._current_entry is not None
         self._current_entry.import_sources[alias] = module_name
 
-    def add_backend_id(self, backend_id: str, backend=None) -> None:
+    def add_backend_id(self, backend_id: str, backend: Optional[Any] = None) -> None:
+        assert self._current_entry is not None
         assert backend_id.startswith("__compiled_fn_")  # sanity check
         backend_id = _BackendId(backend_id)
         self._current_entry.backend_ids.append(backend_id)
@@ -318,13 +277,14 @@ class _CompilePackage:
         assert self._innermost_fn is not None
         assert next(iter(self._codes)) is self._innermost_fn.__code__
 
-    def _install_global(self, module: types.ModuleType, name: str, value):
+    def _install_global(self, module: types.ModuleType, name: str, value: Any) -> None:
         module.__dict__[name] = value
         self._installed_globals.setdefault(module, []).append(name)
 
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
+        assert self._innermost_fn is not None
         for module, names in self._installed_globals.items():
             for name in names:
                 module.__dict__.pop(name)
@@ -399,7 +359,7 @@ class EagerCacheArtifact(PrecompileCacheArtifact[Any]):
 
 class DynamoStore:
 
-    def record_package(self, package: _CompilePackage) -> None:
+    def record_package(self, package: CompilePackage) -> None:
         # records a package to PrecompileContext
         cache_entry = package.cache_entry()
         pickled_result = pickle.dumps(cache_entry)
@@ -410,7 +370,7 @@ class DynamoStore:
         pickled_result = pickle.dumps(backend)
         PrecompileContext.record_artifact(EagerCacheArtifact.type(), key=backend_id, content = pickled_result)
 
-    def save_package(self, package: _CompilePackage, path: str) -> None:
+    def save_package(self, package: CompilePackage, path: str) -> None:
         # saves a package to a given path
         backend_content = {}
         cache_entry = package.cache_entry()
@@ -427,7 +387,7 @@ class DynamoStore:
         except Exception as e:
             raise RuntimeError(f"Failed to save package to {path}: {e}")
 
-    def load_package(self, fn, path: str) -> tuple[_CompilePackage, dict[_BackendId, Any]]:
+    def load_package(self, fn, path: str) -> tuple[CompilePackage, dict[_BackendId, Any]]:
         # loads a package from a given path and returns it plus a list of deserialized backends
         try:
             with open(os.path.join(path, "dynamo"), "rb") as dynamo_path:
@@ -438,5 +398,5 @@ class DynamoStore:
             raise RuntimeError(f"Failed to load package from path {path}: {e}")
         for backend_id, backend in backend_content.items():
             backend_content[backend_id] = backend.after_deserialization()
-        package = _CompilePackage(fn, cache_entry)
+        package = CompilePackage(fn, cache_entry)
         return package, backend_content
