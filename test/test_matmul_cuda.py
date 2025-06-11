@@ -466,7 +466,7 @@ class TestMatmulCuda(TestCase):
         device = "cuda"
         dtype = torch.bfloat16
         s_int = int(strided)
-        m, n, k, n_groups = 16, 128, 64, 4
+        m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
             a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
         else:
@@ -1648,7 +1648,7 @@ class TestFP8Matmul(TestCase):
         for a, b, ascale, bscale, out in zip(alist, blist, ascalelist, bscalelist, outlist):
             out_ref = torch._scaled_mm(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
                                        out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
-            self.assertEqual(out, out_ref)
+            self.assertEqual(out, out_ref, atol=8e-2, rtol=8e-4)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM100OrLater

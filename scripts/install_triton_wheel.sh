@@ -20,7 +20,7 @@ else
     # 2. [Not exposed to user] If the user set `TRITON_XPU_BUILD_FROM_SOURCE=1` flag,
     #    it will install Triton from the source.
 
-    TRITON_VERSION="pytorch-triton-xpu==$(cat .ci/docker/triton_version.txt)"
+    TRITON_VERSION="pytorch-triton-xpu==$(cat .ci/docker/triton_xpu_version.txt)"
     TRITON_XPU_COMMIT_ID="$(head -c 8 .ci/docker/ci_commit_pins/triton-xpu.txt)"
     if [[ -z "${TRITON_XPU_BUILD_FROM_SOURCE}" ]]; then
         ${PIP} install --index-url ${DOWNLOAD_PYTORCH_ORG}/nightly/ ${TRITON_VERSION}+git${TRITON_XPU_COMMIT_ID}
