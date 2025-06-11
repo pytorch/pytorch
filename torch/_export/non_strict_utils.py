@@ -68,11 +68,75 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-def key_path_to_source(kp: KeyPath) -> Source:
+class _KeyPath:
+    """
+    Wraps `KeyPath` to aid `isinstance` checks.
+    """
+
+    def __init__(self, kp: KeyPath):
+        self.kp = kp
+
+
+class _KeyPathTrie:
+    """
+    Builds a trie of `KeyPath` prefixes mapping to `Source` leaves.
+    """
+
+    def __init__(self):
+        self.root = {}
+
+    def add(self, kp: KeyPath, src: Source):
+        assert len(kp) > 0
+        *path, leaf = kp
+        node = self.root
+        for k in path:
+            if k not in node:
+                node[k] = {}
+            node = node[k]
+        node[leaf] = src
+
+    def get(self, kp: KeyPath) -> tuple[Source, KeyPath]:
+        node = self.root
+        while not isinstance(node, Source):
+            assert len(kp) > 0
+            k, *kp = kp
+            node = node[k]
+        return node, kp
+
+
+def make_sourced_prefixes(nn_module, args, kwargs) -> _KeyPathTrie:
+    kp_args, kp_kwargs = tree_map_with_path(
+        lambda kp, _: _KeyPath(kp),
+        (tuple(None for _ in args), {k: None for k in kwargs}),
+    )
+    kp_combined_args = _combine_args(nn_module, kp_args, kp_kwargs)
+
+    sourced_prefixes = _KeyPathTrie()
+    for name, prefix in kp_combined_args.items():
+        src = LocalSource(name)
+
+        if isinstance(prefix, _KeyPath):
+            sourced_prefixes.add(prefix.kp, src)
+        elif isinstance(prefix, tuple):
+            for i, prefix in enumerate(prefix):
+                assert isinstance(prefix, _KeyPath)
+                sourced_prefixes.add(prefix.kp, GetItemSource(src, i))
+        elif isinstance(prefix, dict):
+            for k, prefix in prefix.items():
+                assert isinstance(prefix, _KeyPath)
+                sourced_prefixes.add(prefix.kp, GetItemSource(src, k))
+
+    return sourced_prefixes
+
+
+def key_path_to_source(kp: KeyPath, sourced_prefixes: Optional[_KeyPathTrie] = None) -> Source:
     """
     Given a key path, return the source for the key path.
     """
-    source: Source = LocalSource("args")
+    if sourced_prefixes is None:
+        source = LocalSource("args")
+    else:
+        source, kp = sourced_prefixes.get(kp)
     for k in kp:
         if isinstance(k, SequenceKey):
             source = GetItemSource(source, k.idx)
@@ -96,8 +160,9 @@ def fakify(
     t: Any,
     t_constraints: dict[int, dict[int, Constraint]],
     sources: dict[tuple[int, int], list[Source]],
+    sourced_prefixes: Optional[dict[str, KeyPath]] = None,
 ):
-    source = key_path_to_source(kp)
+    source = key_path_to_source(kp, sourced_prefixes=sourced_prefixes)
     if _is_constant_argument(t) or isinstance(t, (torch.ScriptObject, torch.nn.Module)):
         return t
 
@@ -344,8 +409,16 @@ def make_fake_inputs(
         else:
             original_signature = None
         sources: dict[tuple[int, int], list[Source]] = defaultdict(list)
+        sourced_prefixes = make_sourced_prefixes(nn_module, args, kwargs)
         fake_args, fake_kwargs = tree_map_with_path(
-            lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
+            lambda kp, val: fakify(
+                fake_mode,
+                kp,
+                val,
+                t_constraints,
+                sources,
+                sourced_prefixes=sourced_prefixes,
+            ),
             (args, kwargs),
         )
 
