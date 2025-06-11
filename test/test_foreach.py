@@ -192,7 +192,7 @@ class TestForeach(TestCase):
 
     # Skip CUDA version 12.6 as the upgrade makes profiler results flaky
     # https://github.com/pytorch/pytorch/issues/148681
-    @skipCUDAVersionIn([(12, 6)(12, 8)])
+    @skipCUDAVersionIn([(12, 6), (12, 8)])
     @skipIfRocmVersionLessThan((6, 0))
     @ops(
         foreach_unary_op_db
@@ -307,7 +307,7 @@ class TestForeach(TestCase):
 
     # Skip CUDA version 12.6 as the upgrade makes profiler results flaky
     # https://github.com/pytorch/pytorch/issues/148681
-    @skipCUDAVersionIn([(12, 6)(12, 8)])
+    @skipCUDAVersionIn([(12, 6), (12, 8)])
     @ops(filter(lambda op: op.supports_scalar_self_arg, foreach_binary_op_db))
     @parametrize("is_fastpath", (True, False))
     def test_binary_op_with_scalar_self_support(self, device, dtype, op, is_fastpath):
