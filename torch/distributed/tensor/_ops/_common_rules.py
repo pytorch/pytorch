@@ -267,7 +267,7 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
 
     enforce_sharding: dict[str, int] = {}
     if op_schema.is_inplace_op():
-        follow_spec = cast(DTensorSpec, op_schema.args_spec[0])
+        follow_spec = op_schema.args_spec[0]
         enforce_sharding.update(zip(out_dimchars, follow_spec.dim_map))
     elif op_schema.is_out_variant_op():
         follow_spec = cast(DTensorSpec, op_schema.kwargs_schema["out"])
