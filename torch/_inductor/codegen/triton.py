@@ -227,12 +227,7 @@ class IndexingOptions:
 
     @property
     def mask_str(self) -> str:
-        # The sorted call is added to make sure the order is still
-        # deterministic if self.mask_vars contains mix of string
-        # and TritonCSEVariable
-        return (
-            " & ".join(sorted(map(str, self.mask_vars))) if self.mask_vars else "None"
-        )
+        return " & ".join(map(str, self.mask_vars)) if self.mask_vars else "None"
 
 
 @dataclasses.dataclass
