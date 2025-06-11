@@ -1,6 +1,6 @@
-```{meta}
-:robots: noindex
-```
+---
+robots: noindex
+---
 # torch.utils.mobile_optimizer
 
 PyTorch Mobile is no longer actively supported. Redirecting to [ExecuTorch documentation](https://docs.pytorch.org/executorch).
