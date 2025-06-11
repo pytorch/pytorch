@@ -1111,7 +1111,7 @@ compressed indices. This allows various tools on these tensors to
 share the same implementations that are parameterized by tensor
 layout.
 
-### Construction of sparse compressed tensors
+#### Construction of sparse compressed tensors
 
 Sparse CSR, CSC, BSR, and CSC tensors can be constructed by using
 {func}`torch.sparse_compressed_tensor` function that have the same
