@@ -195,7 +195,8 @@ jobs:
           set -ex
 
           # TODO: Remove me later, and properly activate venv
-          export PATH=$(dirname $(which python)):$PATH
+          PATH="$(dirname "$(which python)"):$PATH"
+          export PATH
 
           # Print out some information about the test environment
           for tool in python3 python; do
