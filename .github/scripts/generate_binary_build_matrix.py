@@ -298,10 +298,10 @@ def generate_wheels_matrix(
                 continue
 
             if use_split_build and (
-                arch_version not in ["12.6", "12.8", "11.8", "cpu"] or os != "linux"
+                arch_version not in ["12.6", "12.8", "cpu"] or os != "linux"
             ):
                 raise RuntimeError(
-                    "Split build is only supported on linux with cuda 12*, 11.8, and cpu.\n"
+                    "Split build is only supported on linux with cuda 12*, and cpu.\n"
                     f"Currently attempting to build on arch version {arch_version} and os {os}.\n"
                     "Please modify the matrix generation to exclude this combination."
                 )
@@ -309,7 +309,7 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["12.8", "12.6", "11.8"]
+                arch_version in ["12.8", "12.6"]
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
