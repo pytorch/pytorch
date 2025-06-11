@@ -178,7 +178,7 @@ any given model.
 
 (sparse-semi-structured-docs)=
 
-## Sparse Semi-Structured Tensors
+### Sparse Semi-Structured Tensors
 
 ```{warning}
 Sparse semi-structured tensors are currently a prototype feature and subject to change. Please feel free to open an issue to report a bug or if you have feedback to share.
