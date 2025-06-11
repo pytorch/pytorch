@@ -108,7 +108,8 @@ class PrecompileContext(CacheArtifactManager):
         "mega" list
         """
         artifact = CacheArtifactFactory.encode_create(artifact_type, key, content)
-        # TODO: use seen artifacts so we don't have to save the same object twice
+        if artifact in cls._seen_artifacts:
+            return
         cls._new_cache_artifacts_by_key[key] = artifact
         cls._seen_artifacts.add(artifact)
 
