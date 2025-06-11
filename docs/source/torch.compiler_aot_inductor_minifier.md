@@ -17,7 +17,7 @@ Here is sample code which will generate an error because we injected an error on
 `torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY = "compile_error"`.
 
 
-```python
+```
 import torch
 from torch._inductor import config as inductor_config
 
@@ -58,7 +58,7 @@ SyntaxError: invalid syntax (cfrlf4smkwe4lub4i4cahkrb3qiczhf7hliqqwpewbw3aplj5g3
 This is because we injected an error on relu, and so the generated triton kernel looks like below. Note that we have `compile error!`
 instead if `relu`, so we get a `SyntaxError`.
 
-```python
+```
 @triton.jit
 def triton_poi_fused_addmm_relu_sigmoid_0(in_out_ptr0, in_ptr0, xnumel, XBLOCK : tl.constexpr):
     xnumel = 128
@@ -93,7 +93,7 @@ The `command='minify'` parameter means the script will run the minifier to creat
 use `command='run'` to just compile, load, and run the loaded model (without running the minifier).
 
 
-```python
+```
 import torch
 import torch._inductor.inductor_prims
 
@@ -154,7 +154,7 @@ If you get an `AOTIMinifierError` when running `minifier_launcher.py`, please re
 The `repro.py` looks like this. Notice that the exported program is printed at the top of the file, and it contains only the relu node. The minifier successfully reduced the graph to the op that raises the error.
 
 
-```python
+```
 # from torch.nn import *
 # class Repro(torch.nn.Module):
 #     def __init__(self) -> None:
