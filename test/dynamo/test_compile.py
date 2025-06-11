@@ -236,17 +236,9 @@ class PublicTorchCompilerTests(TestCase):
         public_sig = inspect.signature(public_fn)
         private_sig = inspect.signature(private_fn)
 
-        matching = public_sig == private_sig
-        matching |= len(public_sig.parameters) < len(private_sig.parameters) and all(
-            public == private
-            for public, private in zip(
-                public_sig.parameters.items(), private_sig.parameters.items()
-            )
-        )
-
         self.assertEqual(
-            matching,
-            True,
+            public_sig,
+            private_sig,
             f"Signatures do not match for function {public_fn_name}() \n Public: {public_sig} \n Private: {private_sig}",
         )
 
