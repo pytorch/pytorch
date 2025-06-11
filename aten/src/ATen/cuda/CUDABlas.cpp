@@ -1562,6 +1562,11 @@ bool gemm_and_bias(
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
   CuBlasLtMatmulPreference preference;
+#ifdef USE_ROCM
+  TORCH_INTERNAL_ASSERT(!bias2d, "2D bias in gemm_and_bias is not enabled on ROCm");
+  // only beta = 1.0 is supported as bias is added in epilogue
+  beta_val = 0.0;
+#endif
   void * alpha_ptr = &alpha_val;
   void * beta_ptr = &beta_val;
 #ifndef USE_ROCM
@@ -1630,21 +1635,33 @@ bool gemm_and_bias(
 #endif
 
   cublasLtEpilogue_t epilogue;
+#ifndef USE_ROCM
   if (activation == GEMMAndBiasActivationEpilogue::RELU) {
     epilogue = CUBLASLT_EPILOGUE_RELU;
   } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
-#if CUDA_VERSION >= 11040 || defined(USE_ROCM)
     epilogue = CUBLASLT_EPILOGUE_GELU;
-#endif
   }
+#else
+  epilogue = CUBLASLT_EPILOGUE_BIAS;
+  if (activation == GEMMAndBiasActivationEpilogue::RELU) {
+    epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
+  } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
+    epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
+  }
+#endif
   if (activation != GEMMAndBiasActivationEpilogue::None) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
   }
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
+#ifndef USE_ROCM
   CuBlasLtMatrixLayout Cdesc(cType, m, n, bias2d ? result_ld : 0);
   CuBlasLtMatrixLayout Ddesc(cType, m, n, result_ld);
+#else
+  CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
+#endif
+
 
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
@@ -1659,6 +1676,11 @@ bool gemm_and_bias(
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES, d_alignment);
 #endif
+#ifndef USE_ROCM
+  auto useDdesc = Cdesc.descriptor();
+#else
+  auto useDdesc = Ddesc.descriptor();
+#endif
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
@@ -1669,7 +1691,7 @@ bool gemm_and_bias(
       Adesc.descriptor(),
       Bdesc.descriptor(),
       Cdesc.descriptor(),
-      Ddesc.descriptor(),
+      useDdesc,
       preference.descriptor(),
       1,
       &heuristicResult,
@@ -1691,7 +1713,7 @@ bool gemm_and_bias(
       bias,
       Cdesc.descriptor(),
       result_ptr,
-      Ddesc.descriptor(),
+      useDdesc,
       &heuristicResult.algo,
       ltworkspace.ptr,
       ltworkspace.size,
