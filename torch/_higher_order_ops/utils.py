@@ -9,7 +9,6 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
-from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
@@ -25,6 +24,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._python_dispatch import _disable_current_modes
 
 
 @dataclass
@@ -255,27 +255,50 @@ def _set_compilation_env():
         torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
 
 
+# detect_fake_mode requires there could be only one active fake mode. This
+# restricts the usage of this function because the global TracingContext
+# has a persistent fake mode but fake tensors can be created
+# outside of the tracing context (e.g. in testing).
+# Instead, we just look at fake_args fake tensor mode
+def _get_fake_mode_from_fake_args(
+    args: list[Any],
+) -> Optional[torch._subclasses.FakeTensorMode]:
+    fake_modes = [arg.fake_mode for arg in args if isinstance(arg, FakeTensor)]
+    if len(fake_modes) == 0:
+        return None
+
+    mode = fake_modes[0]
+    for m in fake_modes[1:]:
+        if m is not mode:
+            raise RuntimeError(
+                f"Found mixed fake mode for {args}",
+                f"One fake mode is created at \n{mode.stack}"
+                f"The other fake mode is created at \n{m.stack}",
+            )
+    return mode
+
+
 # The invariant here is that we always trace the branch with fake tensor
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
-    fake_mode = detect_fake_mode(inputs)
+    fake_mode = _get_fake_mode_from_fake_args(inputs)
     tracing_mode = "real"
     if fake_mode is None:
-        fake_mode = nullcontext()
+        fake_mode = nullcontext()  # type: ignore[assignment]
         tracing_mode = "fake"
 
     # Note: we need to turn off proxy tensor mode to avoid tracing infra
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
     # as fake tensor.
-    with fake_mode, disable_proxy_modes_tracing():
+    with fake_mode, disable_proxy_modes_tracing():  # type: ignore[union-attr]
         gm = make_fx(
             fn,
             tracing_mode=tracing_mode,
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
-        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:
+        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:  # type: ignore[union-attr]
             insert_deferred_runtime_asserts(
-                gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
+                gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True  # type: ignore[union-attr]
             )
         return gm
 
@@ -525,7 +548,7 @@ def unmask_none_gradients(grads, operands):
 
 def _maybe_fake_prop_ignore_unbacked(fn, args):
     with ExitStack() as ctx_stack:
-        if (fake_mode := detect_fake_mode(args)) is not None:
+        if (fake_mode := _get_fake_mode_from_fake_args(args)) is not None:
             ctx_stack.enter_context(fake_mode)
             if fake_mode.shape_env is not None:
                 ctx_stack.enter_context(
@@ -782,7 +805,7 @@ def check_input_alias_and_mutation(
 
 def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
-    fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
+    fake_args: Union[list[Union[Any]], tuple[Any, ...]],
 ) -> tuple[
     dict[int, int],
     dict[int, int],
@@ -790,109 +813,90 @@ def check_input_alias_and_mutation_return_outputs(
     list[int],
     Union[tuple[Any, ...], list[Any]],
 ]:
-    # This function can be called under autograd, functional, proxy and fake tensor mode.
-    # We need to return either a fake tensor or a real tensor depending on the mode.
-    # to detect the input mutation/aliasing.
-    with disable_proxy_modes_tracing(), disable_functional_mode(), suspend_functionalization():
+    """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
+    in the graph module gm. It checks whether input tensor versions have
+    changed after run gm once to detect mutation and checks tensor storage
+    to detect alias.
 
-        def _from_functional_tensor(t: torch.Tensor) -> torch.Tensor:
-            if isinstance(t, FunctionalTensor) or torch._is_functional_tensor(t):
-                return torch.empty_strided(
-                    t.size(),
-                    t.stride(),
-                    dtype=t.dtype,
-                    requires_grad=t.requires_grad,
-                    device=t.device,
-                )
-            return t
+    This function can be called under autograd, functional, proxy and fake tensor mode.
+    """
 
-        fake_args = pytree.tree_map_only(
-            torch.Tensor, _from_functional_tensor, fake_args
+    def _get_shape_env(
+        fake_args,
+    ) -> Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv]:
+        fake_mode = _get_fake_mode_from_fake_args(fake_args)
+        if fake_mode is not None:
+            return fake_mode.shape_env
+
+        return torch.fx.experimental.symbolic_shapes.ShapeEnv(
+            allow_scalar_outputs=True,
+            allow_dynamic_output_shape_ops=True,
         )
-    # We want to disable active functional, proxy and fake modes if any.
-    # to create a encapsulated environment for fake tensor prop
-    with torch.utils._python_dispatch._disable_current_modes():
-        """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
-        in the graph module gm. It checks whether input tensor versions have
-        changed after run gm once to detect mutation and checks tensor storage
-        to detect alias.
-        """
+
+    def _empty_like_unwrap_functional(t: torch.Tensor) -> torch.Tensor:
+        ret = torch.empty_strided(
+            t.size(),
+            t.stride(),
+            dtype=t.dtype,
+            requires_grad=t.requires_grad,
+            device=t.device,
+        )
+        if torch._is_functional_tensor(ret):
+            ret = torch._from_functional_tensor(ret)
+            assert not torch._is_functional_tensor(ret)
+        return ret
+
+    # We need to re-use prev_fake_mode's shape env to resolve
+    # the runtime assertions for unbacked symbols.
+    new_fake_mode = torch._subclasses.FakeTensorMode(
+        shape_env=_get_shape_env(fake_args),
+        allow_non_fake_inputs=False,
+    )
+
+    with ExitStack() as ctx_stack:
+        ctx_stack.enter_context(_disable_current_modes())
+        ctx_stack.enter_context(suspend_functionalization())
+        ctx_stack.enter_context(new_fake_mode)
+        # We need to temporarily turn inference_mode off because
+        # under inference mode, tensor version counter is not tracked.
+        ctx_stack.enter_context(torch.inference_mode(False))
+        if new_fake_mode.shape_env is not None:
+            ctx_stack.enter_context(
+                new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+            )
 
         def _tensor_version(t) -> Optional[int]:
             if isinstance(t, torch.Tensor):
                 if not isinstance(t, FakeTensor):
-                    raise RuntimeError("Only fake tensor is allowed")
+                    raise RuntimeError(f"Only fake tensor is allowed but got {t}.")
                 return t._version
             return None
 
+        new_fake_args = [
+            _empty_like_unwrap_functional(arg) if isinstance(arg, torch.Tensor) else arg
+            for arg in fake_args
+        ]
+        before = [_tensor_version(arg) for arg in new_fake_args]
+        outputs = gm(*new_fake_args)
+        outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
+        after = [_tensor_version(arg) for arg in new_fake_args]
+        mutated_inputs = [
+            i for i, (v1, v2) in enumerate(zip(before, after)) if v1 != v2
+        ]
+
+        # We need to analyze the original fake_args to detect
+        # inp-inp alias.
         def _tensor_storage(t) -> StorageWeakRef:
             return StorageWeakRef(t._typed_storage())
 
-        def _get_shape_env(
-            fake_args,
-        ) -> Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv]:
-            # detect_fake_mode requires there could be only one active fake mode. This
-            # restricts the usage of this function because the global TracingContext
-            # has a persistent fake mode but fake tensors can be created
-            # outside of the tracing context (e.g. in testing).
-            # Instead, we just look at fake_args fake tensor mode
-            if len(fake_args) == 0:
-                return torch.fx.experimental.symbolic_shapes.ShapeEnv()
-
-            for arg in fake_args:
-                if isinstance(arg, FakeTensor):
-                    return arg.fake_mode.shape_env
-            return None
-
-        # Clone the fake args to avoid mutating the original fake args
-        with ExitStack() as ctx_stack:
-            # We need to re-use prev_fake_mode's shape env to resolve
-            # the runtime assertions for unbacked symbols.
-            new_fake_mode = torch._subclasses.FakeTensorMode(
-                shape_env=_get_shape_env(fake_args),
-                allow_non_fake_inputs=False,
-            )
-            # We need to temporarily turn inference_mode off because
-            # under inference mode, tensor version counter is not tracked.
-            no_inference_mode_ctx = torch.inference_mode(False)
-            ctx_stack.enter_context(new_fake_mode)
-            ctx_stack.enter_context(no_inference_mode_ctx)
-            if new_fake_mode.shape_env is not None:
-                ctx_stack.enter_context(
-                    new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                )
-
-            # create new fake tensors in new fake mode to avoid mutating original tensors
-            cloned = [
-                torch.empty_strided(
-                    arg.size(),
-                    arg.stride(),
-                    dtype=arg.dtype,
-                    device=arg.device,
-                    requires_grad=arg.requires_grad,
-                    layout=arg.layout,
-                )
-                if isinstance(arg, torch.Tensor)
-                else arg
-                for arg in fake_args
-            ]
-            before = [_tensor_version(arg) for arg in cloned]
-            outputs = gm(*cloned)
-            outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
-            after = [_tensor_version(arg) for arg in cloned]
-            mutated_inputs = [
-                i for i, (v1, v2) in enumerate(zip(before, after)) if v1 != v2
-            ]
-        # We need to analyze the original fake_args to detect
-        # inp-inp alias.
         inp_storage_map = {
             _tensor_storage(inp): i
-            for i, inp in enumerate(fake_args)
+            for i, inp in enumerate(new_fake_args)
             if isinstance(inp, torch.Tensor)
         }
         inp_inp_alias_map = {
             i: inp_storage_map[_tensor_storage(inp)]
-            for i, inp in enumerate(fake_args)
+            for i, inp in enumerate(new_fake_args)
             if isinstance(inp, torch.Tensor)
             and inp_storage_map[_tensor_storage(inp)] != i
         }
@@ -909,7 +913,7 @@ def check_input_alias_and_mutation_return_outputs(
         }
         inp_out_alias_map = {
             i: out_storage_map[_tensor_storage(inp)]
-            for i, inp in enumerate(cloned)
+            for i, inp in enumerate(new_fake_args)
             if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
         }
         return (
