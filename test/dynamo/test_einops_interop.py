@@ -1,14 +1,18 @@
 # Owner(s): ["module: dynamo"]
 
 import os
-import torch
 import subprocess
 import sys
 import unittest
 
+import torch
 import torch._dynamo.test_case
 from torch._dynamo.exc import Unsupported
-from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
+
 
 try:
     import einops
@@ -30,8 +34,8 @@ except ImportError:
 # einops.pack (v0.6.0)
 # einops.unpack (v0.6.0)
 
-class TestEinops(torch._dynamo.test_case.TestCase):
 
+class TestEinops(torch._dynamo.test_case.TestCase):
     def _run_in_subprocess(self, flag, method, einops_method, snippet):
         # run in a different process
         script = f"""
@@ -59,22 +63,31 @@ print(normalize_gm(graph.print_readable(print_output=False)))
 """
         script = script.strip()
         try:
-            output = subprocess.check_output(
-                [sys.executable, "-c", script],
-                stderr=subprocess.STDOUT,
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-                # env=os.environ.copy(),
-            ).decode("utf-8").strip()
+            output = (
+                subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    stderr=subprocess.STDOUT,
+                    cwd=os.path.dirname(os.path.realpath(__file__)),
+                    # env=os.environ.copy(),
+                )
+                .decode("utf-8")
+                .strip()
+            )
         except subprocess.CalledProcessError as e:
-            self.fail(msg=(f"Subprocess exception {method}:\n" + e.output.decode("utf-8")))
+            self.fail(
+                msg=(f"Subprocess exception {method}:\n" + e.output.decode("utf-8"))
+            )
         else:
             if flag:
                 self.assertNotIn(einops_method, output)
             else:
                 self.assertIn(einops_method, output)
 
-
-    @parametrize("method", ["reduce", "repeat", "pack", "unpack", "einsum", "rearrange"], name_fn=lambda f: f)
+    @parametrize(
+        "method",
+        ["reduce", "repeat", "pack", "unpack", "einsum", "rearrange"],
+        name_fn=lambda f: f,
+    )
     @parametrize("flag", [True, False], name_fn=lambda f: f)
     def test_einops_method(self, flag, method):
         if not hasattr(einops, method):
@@ -104,7 +117,6 @@ print(normalize_gm(graph.print_readable(print_output=False)))
 
     @torch._dynamo.config.patch(enable_einops_tracing=True)
     def test_graph_break_message(self):
-
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             y = einops.reduce(x, "a b -> a", "min")
@@ -134,10 +146,13 @@ Failed to trace einops function 'reduce'.
 
 from user code:
    File "test_einops.py", line N, in fn
-    y = einops.reduce(x, "a b -> a", "min")""",
+    y = einops.reduce(x, "a b -> a", "min")""",  # noqa: B950
         )
 
-    @unittest.skipIf(einops.__version__ < "0.7", reason=f"Needs einops 0.7 or newer, got {einops.__version__}")
+    @unittest.skipIf(
+        einops.__version__ < "0.7",
+        reason=f"Needs einops 0.7 or newer, got {einops.__version__}",
+    )
     @torch._dynamo.config.patch(enable_einops_tracing=True)
     def test_trace_einops(self):
         from einops import einsum, pack, rearrange, reduce, repeat, unpack
