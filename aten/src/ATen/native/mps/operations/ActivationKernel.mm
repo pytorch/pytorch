@@ -17,7 +17,7 @@ static void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0
   lib.exec_unary_kernel(iter, "hardshrink", lambda);
 }
 
-static void hardshrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0.5) {
+static void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0.5) {
   lib.exec_binary_kernel(iter, "hardshrink_backward", lambda);
 }
 
@@ -49,12 +49,8 @@ static void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0
   lib.exec_unary_kernel(iter, "softshrink", lambda);
 }
 
-static void softshrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0.5) {
-  lib.exec_binary_kernel(iter, "softshrink_backward", lambda);
-}
-
 REGISTER_DISPATCH(hardshrink_stub, hardshrink_kernel);
-REGISTER_DISPATCH(shrink_backward_stub, hardshrink_backward_kernel);
+REGISTER_DISPATCH(shrink_backward_stub, shrink_backward_kernel);
 REGISTER_DISPATCH(hardsigmoid_stub, hardsigmoid_kernel);
 REGISTER_DISPATCH(hardsigmoid_backward_stub, hardsigmoid_backward_kernel);
 REGISTER_DISPATCH(hardswish_stub, hardswish_kernel);
@@ -62,6 +58,5 @@ REGISTER_DISPATCH(hardswish_backward_stub, hardswish_backward_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, leaky_relu_backward_kernel);
 REGISTER_DISPATCH(softshrink_stub, softshrink_kernel);
-REGISTER_DISPATCH(shrink_backward_stub, softshrink_backward_kernel);
 
 } // namespace at::native

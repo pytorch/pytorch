@@ -1269,7 +1269,6 @@ Tensor mish_backward_mps(const Tensor& grad_output, const Tensor& self) {
   }
 }
 
-
 Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
   using namespace mps;
 
