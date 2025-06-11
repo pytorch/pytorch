@@ -1,44 +1,46 @@
-Torch Distributed Elastic
-============================
+# Torch Distributed Elastic
 
 Makes distributed PyTorch fault-tolerant and elastic.
 
-Get Started
----------------
-.. toctree::
-   :maxdepth: 1
-   :caption: Usage
+## Get Started
 
-   elastic/quickstart
-   elastic/train_script
-   elastic/examples
+```{toctree}
+:caption: Usage
+:maxdepth: 1
 
-Documentation
----------------
+elastic/quickstart
+elastic/train_script
+elastic/examples
+```
 
-.. toctree::
-   :maxdepth: 1
-   :caption: API
+## Documentation
 
-   elastic/run
-   elastic/agent
-   elastic/multiprocessing
-   elastic/errors
-   elastic/rendezvous
-   elastic/timer
-   elastic/metrics
-   elastic/events
-   elastic/subprocess_handler
-   elastic/control_plane
+```{toctree}
+:caption: API
+:maxdepth: 1
 
-.. toctree::
-   :maxdepth: 1
-   :caption: Advanced
+elastic/run
+elastic/agent
+elastic/multiprocessing
+elastic/errors
+elastic/rendezvous
+elastic/timer
+elastic/metrics
+elastic/events
+elastic/subprocess_handler
+elastic/control_plane
+```
 
-   elastic/customization
+```{toctree}
+:caption: Advanced
+:maxdepth: 1
 
-.. toctree::
-   :maxdepth: 1
-   :caption: Plugins
+elastic/customization
+```
 
-   elastic/kubernetes
+```{toctree}
+:caption: Plugins
+:maxdepth: 1
+
+elastic/kubernetes
+```

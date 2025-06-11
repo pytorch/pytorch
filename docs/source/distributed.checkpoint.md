@@ -76,7 +76,11 @@ The following module is also useful for additional customization of the staging 
 ```
 
 In addition to the above entrypoints, `Stateful` objects, as described below, provide additional customization during saving/loading
+
+```{eval-rst}
 .. automodule:: torch.distributed.checkpoint.stateful
+   :noindex:
+```
 
 ```{eval-rst}
 .. autoclass:: torch.distributed.checkpoint.stateful.Stateful
