@@ -30,6 +30,7 @@ from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
     FakeCompiledAutogradEngine,
+    unwrap_maybe_dynamic_int,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import (
@@ -322,9 +323,20 @@ class AutogradCompilerInstance:
             )
             for idx, val in enumerate(sizes)
         ]
-        proxies = self.bind_objects_to_proxies(sizes, self.sizes_proxy, sizes_origins)
+
+        # We want to mark every size as dynamic, but since there's no way to
+        # mark a primitive `int` as dynamic, we need to wrap it in a tensor.
+        # In the graph, we unwrap it with `unwrap_maybe_dynamic_int` back into a primitive.
+        proxies = [self.sizes_proxy[i] for i in range(len(sizes))]  # type: ignore[index]
         for i, symint in enumerate(sizes):
+            proxies[i] = self.fx_tracer.create_proxy(
+                "call_function",
+                unwrap_maybe_dynamic_int,
+                (proxies[i],),
+                {},
+            )
             self.symnode_proxy_lookup[symint.node] = proxies[i]
+        proxies = self.bind_objects_to_proxies(sizes, proxies, sizes_origins)
 
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
@@ -410,6 +422,13 @@ class AutogradCompilerInstance:
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         aot_id = CompiledFunction._aot_id
         del CompiledFunction
+
+        if torch.is_grad_enabled():
+            for output_alias_info in metadata.output_info:
+                if output_alias_info.requires_grad:
+                    raise RuntimeError(
+                        "torch.compile does not currently support higher order gradients."
+                    )
 
         @torch._dynamo.allow_in_graph  # type: ignore[misc]
         def call_aot_bwd_prologue(ctx_saved_tensors, ctx_symints, *flat_args):
@@ -514,6 +533,17 @@ class AutogradCompilerInstance:
                         node, lambda n: value_remap[n]
                     )
                     result.name = make_unique(node.name)
+                    value_remap[node] = result
+                elif node.op == "call_module":
+                    name = node.target
+                    qualname = self.fx_tracer.get_fresh_qualname(name)
+                    setattr(
+                        self.fx_tracer.root, qualname, getattr(ctx._bw_module, name)
+                    )
+                    result = self.fx_tracer.graph.node_copy(
+                        node, lambda n: value_remap[n]
+                    )
+                    result.target = qualname
                     value_remap[node] = result
                 else:
                     raise AssertionError("shouldn't get here")
@@ -871,6 +901,40 @@ class AutogradCompilerInstance:
         after = len(self.fx_tracer.graph.nodes)
         verbose_log.debug("DCE removed %d nodes", before - after)
 
+    def remove_unused_sizes(self):
+        used_sizes = []
+        unused_sizes = []
+
+        # seek placeholder, should be at nodes[1]
+        it = iter(self.fx_tracer.graph.nodes)
+        next(it)
+        sizes_node = next(it)
+        assert sizes_node.name == "sizes"
+
+        for getitem_node in sizes_node.users.keys():
+            assert getitem_node.target == operator.getitem
+            if getitem_node.users:
+                used_sizes.append(getitem_node)
+            else:
+                # remove from the graph
+                unused_sizes.append(getitem_node)
+
+        used_sizes_idx: set[int] = set()
+        for used in used_sizes:
+            assert isinstance(used.args, tuple)
+            assert used.args[0] == sizes_node
+            assert isinstance(used.args[1], int)
+            next_size_idx = len(used_sizes_idx)
+            # used later reindex the runtime sizes arg
+            used_sizes_idx.add(used.args[1])
+            # reindex the graph
+            used.args = (used.args[0], next_size_idx)
+
+        for unused in unused_sizes:
+            self.fx_tracer.graph.erase_node(unused)
+
+        return used_sizes_idx
+
     def create_graph_module(self, id):
         return GraphModule(self.fx_tracer.root, self.fx_tracer.graph, id)
 
@@ -933,6 +997,9 @@ class AutogradCompilerInstance:
         if self.nan_checker:
             self.nan_checker.prep_with_graph(self.fx_tracer.graph)
 
+        # keep only sizes that are actually used in the graph
+        used_sizes_idx = self.remove_unused_sizes()
+
         graph = self.create_graph_module(f"CompiledAutograd{self.id}")
         set_locals_to_steal(graph, ["inputs"])
         lazy_graph_code = lazy_format_graph_code(
@@ -953,14 +1020,27 @@ class AutogradCompilerInstance:
             global in_compiled_autograd_region
             try:
                 in_compiled_autograd_region = True
+
                 if self.nan_checker:
                     self.nan_checker.prep_with_inputs(inputs)
+
+                filtered_sizes = []
+                for idx, integer in enumerate(sizes):
+                    if idx in used_sizes_idx:
+                        # can't create negative size
+                        if integer > 0:
+                            filtered_sizes.append(torch.empty(0, integer))
+                            torch._dynamo.maybe_mark_dynamic(filtered_sizes[-1], 1)
+                        else:
+                            filtered_sizes.append(integer)
 
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
                 with _disable(), make_compile_context(self.id):
-                    out = compiled_fn(inputs, sizes, scalars, hooks, packed_inputs)
+                    out = compiled_fn(
+                        inputs, filtered_sizes, scalars, hooks, packed_inputs
+                    )
                     if self.nan_checker:
                         self.nan_checker.check(out)
                     return out
@@ -1342,7 +1422,7 @@ def _enable(compiler_fn, dynamic: bool = True):
             functools.partial(AutogradCompilerInstance, compiler_fn), dynamic
         )
         if snapshot_verbose_logging_enabled():
-            torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)
+            torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)  # type:ignore[arg-type]
         global compiled_autograd_enabled
         compiled_autograd_enabled = True
         try:

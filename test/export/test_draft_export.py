@@ -5,8 +5,8 @@ import unittest
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.export import Dim, export
-from torch.export._draft_export import draft_export, FailureType
+from torch.export import Dim, draft_export, export
+from torch.export._draft_export import FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
@@ -323,7 +323,7 @@ class TestDraftExport(TestCase):
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
-        self.assertEqual(report.failures[0].data["expr"], "Eq(9380*u1, 0)")
+        self.assertEqual(report.failures[0].data["expr"], "Eq(Mod(10, 2*u1), 0)")
 
     def test_dedup_data_dependent_failure(self):
         class M(torch.nn.Module):
@@ -382,13 +382,6 @@ class TestDraftExport(TestCase):
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
         for _ep in [ep, ep.run_decompositions()]:
-            # check data-dependent asserts
-            assert_scalar_nodes = [
-                node
-                for node in _ep.graph.nodes
-                if node.target == torch.ops.aten._assert_scalar.default
-            ]
-            self.assertEqual(len(assert_scalar_nodes), 5)
             # unbacked bindings
             unbacked_binding_symbols = set()
             for node in _ep.graph.nodes:
