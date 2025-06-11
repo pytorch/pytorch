@@ -816,7 +816,7 @@ class OptimizeContext(_TorchDynamoContext):
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
                 ctx = torch._dynamo.compiled_autograd._enable(
-                    compiler_fn, dynamic=_dynamic
+                    compiler_fn, dynamic=_dynamic, ignore_active_disable_ctx=False
                 )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
@@ -1025,7 +1025,6 @@ def _optimize(
     guard_export_fn=None,
     guard_fail_fn=None,
     guard_filter_fn=None,
-    frame_traced_fn=None,
     disable=False,
     dynamic=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
@@ -1065,7 +1064,6 @@ def _optimize(
         guard_export_fn=guard_export_fn,
         guard_fail_fn=guard_fail_fn,
         guard_filter_fn=guard_filter_fn,
-        frame_traced_fn=frame_traced_fn,
     )
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if (
@@ -2015,7 +2013,7 @@ def _optimize_assert(
 
 class TorchPatcher:
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def patch():
         # A better way to disable the following would be decorate the source
         # functions with @torch._disable_dynamo. However, this causes issues

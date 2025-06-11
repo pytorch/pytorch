@@ -1923,20 +1923,14 @@ def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
         return dec_fn(func)
     return dec_fn
 
-def skipIfMPS(func=None, *, msg="test doesn't currently work with MPS"):
-    def dec_fn(fn):
-        reason = f"skipIfMPS: {msg}"
-
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            if TEST_MPS:
-                raise unittest.SkipTest(reason)
-            else:
-                return fn(*args, **kwargs)
-        return wrapper
-    if func:
-        return dec_fn(func)
-    return dec_fn
+def skipIfMPS(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_MPS:
+            raise unittest.SkipTest("test doesn't currently work with MPS")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 
 def skipIfMPSOnMacOS13(fn):

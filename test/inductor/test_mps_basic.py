@@ -223,30 +223,17 @@ class MPSBasicTestsAOTI(TestCase):
         m = M().to("mps")
         self.check_model(m, inp)
 
-    def test_const(self):
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.y = torch.randn(10, 10, device="mps")
-
-            def forward(self, x):
-                return x + self.y
-
-        inp = (torch.randn(10, 10, device="mps"),)
-        m = M().to("mps")
-        self.check_model(m, inp)
-
     def test_two_const(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.y = torch.ones(3, 3, device="mps", dtype=torch.int32)
-                self.z = torch.ones(3, 3, device="mps", dtype=torch.int32) * 2
+                self.y = torch.ones(3, 3, device="mps")
+                self.z = torch.full((3, 3), 2, device="mps")
 
             def forward(self, x):
                 return x + self.y + self.z
 
-        inp = (torch.ones(3, 3, device="mps", dtype=torch.int32),)
+        inp = (torch.ones(3, 3, device="mps"),)
         m = Model().to(device="mps")
         self.check_model(m, inp)
 
