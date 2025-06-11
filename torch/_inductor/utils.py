@@ -3121,7 +3121,7 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
         and wrapper.partition_signatures is not None
     )
 
-  
+
 def dtype_from_size(size: int) -> torch.dtype:
     from .virtualized import V
 
