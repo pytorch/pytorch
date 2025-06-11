@@ -713,6 +713,51 @@ else()
   caffe2_update_option(USE_FAKELOWP OFF)
 endif()
 
+# ---[ FBGEMM GenAI
+if(USE_FBGEMM_GENAI)
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(WARNING
+      "x64 operating system is required for FBGEMM_GENAI. "
+      "Not compiling with FBGEMM_GENAI. "
+      "Turn this warning off by USE_FBGEMM_GENAI=OFF.")
+    set(USE_FBGEMM_GENAI OFF)
+  endif()
+  if(NOT (USE_CUDA OR USE_ROCM))
+    message(WARNING
+      "USE_CUDA or USE_ROCM is required for FBGEMM_GENAI. "
+      "Not compiling with FBGEMM_GENAI. "
+      "Turn this warning off by USE_FBGEMM_GENAI=OFF.")
+    set(USE_FBGEMM_GENAI OFF)
+  endif()
+
+  if(USE_FBGEMM_GENAI AND NOT TARGET fbgemm_gpu_gen_ai)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+    if(NOT DEFINED FBGEMM_GENAI_SOURCE_DIR)
+      set(FBGEMM_GENAI_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fbgemm/fbgemm_gpu/experimental/gen_ai" CACHE STRING "FBGEMM GenAI source directory")
+    endif()
+    set(FBGEMM "${FBGEMM_SOURCE_DIR}")
+
+    set(FBGEMM_BUILD_TESTS OFF CACHE BOOL "")
+    set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
+
+    set(FBGEMM_BUILD_TARGET "genai" CACHE STRING "Build target for fbgemm_gpu")
+    if(USE_CUDA)
+      set(FBGEMM_BUILD_VARIANT "cuda" CACHE STRING "Build fbgemm_gpu for cuda")
+    else()
+      set(FBGEMM_BUILD_VARIANT "rocm" CACHE STRING "Build fbgemm_gpu for rocm")
+    endif()
+
+    # FBGEMM GenAI needs the ATen includes
+    # We do a trick here, by adding both the build and src dirs.
+    set(FBGEMM_GENAI_INCLUDE_DIRS "${CAFFE2_THIRD_PARTY_ROOT}/fbgemm/external/cutlass/include;${CAFFE2_THIRD_PARTY_ROOT}/fbgemm/external/cutlass/tools/util/include;${PROJECT_SOURCE_DIR}/aten/src/;${CMAKE_BINARY_DIR}/aten/src/;${CUDA_INCLUDE_DIRS}")
+
+    # FBGEMM GenAI depends on libtorch_cuda.so
+    set(FBGEMM_GENAI_TORCH_LIBS torch_cuda)
+
+    add_subdirectory("${FBGEMM_GENAI_SOURCE_DIR}")
+  endif()
+endif()
+
 if(USE_OPENCL)
   message(INFO "USING OPENCL")
   find_package(OpenCL REQUIRED)

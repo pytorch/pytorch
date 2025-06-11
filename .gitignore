@@ -122,6 +122,7 @@ torch/lib64
 torch/include/
 torch/share/
 torch/test/
+torch/fbgemm_gpu/
 torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
