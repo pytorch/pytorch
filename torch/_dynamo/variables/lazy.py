@@ -22,15 +22,15 @@ class LazyCache:
     def realize(self) -> None:
         assert self.vt is None
         from ..symbolic_convert import InstructionTranslator
+        from . import builder
 
         tx = InstructionTranslator.current_tx()
 
         if isinstance(self.value, LazySymNodeFormatString):
-            source = None
+            self.vt = builder.SourcelessBuilder.create(tx, self.value)
         else:
-            source = self.source
+            self.vt = builder.VariableBuilder(tx, self.source)(self.value)
 
-        self.vt = VariableTracker.build(tx, self.value, source)
         del self.value
         del self.source
 

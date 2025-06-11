@@ -16,6 +16,8 @@
   _(Long, 4)                           \
   _(Half, 5)                           \
   _(Float, 6)                          \
+  _(ComplexHalf, 8)                    \
+  _(ComplexFloat, 9)                   \
   _(Bool, 11)                          \
   _(BFloat16, 15)
 #else
@@ -27,6 +29,8 @@
   _(Long, 4)                           \
   _(Half, 5)                           \
   _(Float, 6)                          \
+  _(ComplexHalf, 8)                    \
+  _(ComplexFloat, 9)                   \
   _(Bool, 11)
 #endif
 

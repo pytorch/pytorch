@@ -171,7 +171,7 @@ def redistribute_local_tensor(
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
 
-    new_local_tensor = None
+    new_local_tensor = local_tensor
     device_mesh = current_spec.mesh
 
     my_coordinate = device_mesh.get_coordinate()
@@ -272,10 +272,7 @@ def redistribute_local_tensor(
                 # partial -> partial no op, should never hit
                 new_local_tensor = local_tensor
 
-        assert new_local_tensor is not None
         local_tensor = new_local_tensor
-
-    assert new_local_tensor is not None, "redistribute failed!"
 
     if not async_op and isinstance(new_local_tensor, funcol.AsyncCollectiveTensor):
         new_local_tensor = new_local_tensor.wait()
@@ -321,7 +318,6 @@ class Redistribute(torch.autograd.Function):
                 device_mesh, placements, tensor_meta=current_spec.tensor_meta
             )
 
-            local_tensor = input._local_tensor
             output = redistribute_local_tensor(
                 local_tensor, current_spec, target_spec, async_op=async_op
             )
