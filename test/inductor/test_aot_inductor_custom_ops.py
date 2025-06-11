@@ -161,6 +161,20 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(m, args)
 
+    def test_fn_with_optional_tensor_nullopt_output(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.fn_with_optional_tensor_nullopt_output(
+                    x, y
+                )
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        self.check_model(m, args)
+
     def test_fn_with_int_output(self) -> None:
         class M(torch.nn.Module):
             def forward(self, x, y):
