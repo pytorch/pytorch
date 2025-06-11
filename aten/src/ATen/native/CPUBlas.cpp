@@ -353,7 +353,7 @@ void gemm(
      return;
    }
 #endif
-#if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
+#if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM) && !defined(__aarch64__)
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);

@@ -4,7 +4,7 @@
 set -ex
 
 cd /
-OPENBLAS_HASH="b30dc9701f8e971720a02e24068acea274fd9cee" #Use SVE kernel for S/DGEMVT for SVE machines
+OPENBLAS_HASH="fe220a0d7d7c5188e698643428708063c8c1a9f6" #Use SVE kernel for S/DGEMVT for SVE machines
 OPENBLAS_CHECKOUT_DIR="OpenBLAS"
 git clone https://github.com/OpenMathLib/OpenBLAS.git -b develop --shallow-submodules
 git -C $OPENBLAS_CHECKOUT_DIR fetch --depth 1 origin $OPENBLAS_HASH
