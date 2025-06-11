@@ -3852,7 +3852,7 @@ module_db: list[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=operator.itemgetter('training') and not _macos15_or_newer,
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),

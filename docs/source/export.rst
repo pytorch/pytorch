@@ -660,7 +660,7 @@ buffers) always have static shapes.
 Python Primitives
 ~~~~~~~~~~~~~~~~~
 
-``torch.export`` also specializes on Python primitives,
+``torch.export`` also specializes on Python primtivies,
 such as ``int``, ``float``, ``bool``, and ``str``. However they do have dynamic
 variants such as ``SymInt``, ``SymFloat``, and ``SymBool``.
 
