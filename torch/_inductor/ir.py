@@ -421,13 +421,13 @@ def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> b
         return False
 
     aligned_strides = all(
-        (V.graph.sizevars.size_hint(x.get_stride()[i]) % alignment) == 0
+        (V.graph.sizevars.size_hint(x.get_stride()[i], fallback=1) % alignment) == 0
         for i in range(len(x.get_stride()) - 1)
     )
     # if the last dim size is <= 1, stride doesnt matter
     aligned_last_dim = (
-        V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
-        or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
+        V.graph.sizevars.size_hint(x.get_stride()[-1], fallback=1) == 1
+        or V.graph.sizevars.size_hint(x.get_size()[-1], fallback=1) <= 1
     )
     return aligned_last_dim and aligned_strides
 
@@ -1480,7 +1480,7 @@ class Reduction(Loops):
 
         if (
             isinstance(reduction_numel, Integer)
-            and V.graph.sizevars.size_hint(reduction_numel)
+            and V.graph.sizevars.size_hint(reduction_numel, fallback=config.unroll_reductions_threshold)
             < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
         ):
@@ -1764,7 +1764,7 @@ class Reduction(Loops):
         ) -> OpsValue:
             return intermediate_loader([*index, *reduction_index])
 
-        numel_hint = V.graph.sizevars.size_hint(sympy_product(original_ranges))
+        numel_hint = V.graph.sizevars.size_hint(sympy_product(original_ranges), fallback=1)
         reduction_hint = cls._multilayer_second_step_hint(
             split, numel_hint, reduction_hint
         )
@@ -2171,7 +2171,7 @@ class WelfordReduction(MultiOutputReduction):
         ) -> OpsValue:
             return loader([*index, *reduction_index])
 
-        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
+        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges), fallback=1)
         reduction_hint = cls._multilayer_second_step_hint(
             split, numel_hint, reduction_hint
         )
@@ -3058,7 +3058,8 @@ class View(GenericView):
         """
         Perform a reshape entirely by modifying indexing math
         """
-        size_hint = V.graph.sizevars.size_hint
+        def size_hint(x):
+            return V.graph.sizevars.size_hint(x, fallback=1)
         # TODO: These symbols may not escape, if they don't assert so and
         # treat them as temporary
         vars = [
@@ -3736,7 +3737,7 @@ class FlexibleLayout(Layout):
         the fill order should be [1, 3, 2, 0]
         """
         assert len(sizes) == len(stride)
-        stride = [V.graph.sizevars.size_hint(x) for x in stride]
+        stride = [V.graph.sizevars.size_hint(x, fallback=1) for x in stride]
         fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
@@ -5888,7 +5889,7 @@ class ExternKernel(InputsKernel):
         sizevars = V.graph.sizevars
         sizes = self.get_size()
         strides = self.get_stride()
-        strides = [sizevars.size_hint(x) for x in strides]
+        strides = [sizevars.size_hint(x, fallback=1) for x in strides]
         # TODO: I can't tell if the symbols here are temporary
         index_vars = [sympy_index_symbol(f"d{i}") for i in range(len(sizes))]
         # reorder index vars according to stride
