@@ -394,8 +394,12 @@ class DispatchKeySet final {
   bool empty() const {
     return repr_ == 0;
   }
-  uint64_t raw_repr() {
+  uint64_t raw_repr() const {
     return repr_;
+  }
+
+  static DispatchKeySet from_raw_repr(uint64_t x) {
+    return DispatchKeySet(RAW, x);
   }
 
   DispatchKey highestFunctionalityKey() const {

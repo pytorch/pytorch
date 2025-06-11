@@ -51,6 +51,7 @@ class Reducer:
         param_to_name_mapping: dict[int, str] = ...,
         first_bucket_types_cap: int = ...,  # kDefaultFirstBucketBytes in reducer.hpp
         skip_all_reduce_unused_params: bool = ...,
+        use_python_reducer: bool = ...,
     ) -> None: ...
     def prepare_for_forward(self) -> None: ...
     def prepare_for_backward(self, output: list[Tensor]) -> None: ...
@@ -563,6 +564,8 @@ class ProcessGroupGloo(Backend):
     class Options(Backend.Options):
         devices: list[ProcessGroupGloo.Device]
         threads: int
+        global_ranks_in_group: list[int]
+        group_name: str
 
         def __init__(self): ...
 
@@ -578,6 +581,8 @@ class ProcessGroupGloo(Backend):
     @staticmethod
     def create_default_device(lazy_init=None) -> Device: ...
     def _set_default_timeout(self, timeout) -> None: ...
+    @property
+    def options(self) -> Options: ...  # type: ignore[override]
 
 class _ProcessGroupWrapper(Backend):
     def __init__(self, pg: Backend, gloo_pg: ProcessGroupGloo) -> None: ...

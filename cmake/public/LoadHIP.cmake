@@ -26,12 +26,6 @@ else()
   endif()
 endif()
 
-if(NOT DEFINED ENV{ROCM_INCLUDE_DIRS})
-  set(ROCM_INCLUDE_DIRS ${ROCM_PATH}/include)
-else()
-  set(ROCM_INCLUDE_DIRS $ENV{ROCM_INCLUDE_DIRS})
-endif()
-
 # MAGMA_HOME
 if(NOT DEFINED ENV{MAGMA_HOME})
   set(MAGMA_HOME ${ROCM_PATH}/magma)
@@ -71,7 +65,14 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
-  message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
+  if(NOT ${PACKAGE_NAME}_FOUND)
+    message("Optional package ${PACKAGE_NAME} not found")
+  else()
+    message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
+    if(${PACKAGE_NAME}_INCLUDE_DIR)
+      list(APPEND ROCM_INCLUDE_DIRS ${${PACKAGE_NAME}_INCLUDE_DIR})
+    endif()
+  endif()
 endmacro()
 
 # Find the HIP Package
@@ -81,10 +82,33 @@ find_package_and_print_version(HIP 1.0 MODULE)
 
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
+  find_package_and_print_version(hip REQUIRED CONFIG)
 
-  # Find ROCM version for checks. UNIX filename is rocm_version.h, Windows is hip_version.h
-  find_file(ROCM_VERSION_HEADER_PATH NAMES rocm_version.h hip_version.h
-      HINTS ${ROCM_INCLUDE_DIRS}/rocm-core ${ROCM_INCLUDE_DIRS}/hip /usr/include)
+  # The rocm-core package was only introduced in ROCm 6.4, so we make it optional.
+  find_package(rocm-core CONFIG)
+
+  # Some old consumer HIP SDKs do not distribute rocm_version.h, so we allow
+  # falling back to the hip version, which everyone should have.
+  # rocm_version.h lives in the rocm-core package and hip_version.h lives in the
+  # hip (lower-case) package. Both are probed above and will be in
+  # ROCM_INCLUDE_DIRS if available.
+  find_file(ROCM_VERSION_HEADER_PATH
+    NAMES rocm-core/rocm_version.h
+    NO_DEFAULT_PATH
+    PATHS ${ROCM_INCLUDE_DIRS}
+  )
+  set(ROCM_LIB_NAME "ROCM")
+  if(NOT ROCM_VERSION_HEADER_PATH)
+    find_file(ROCM_VERSION_HEADER_PATH
+      NAMES hip/hip_version.h
+      NO_DEFAULT_PATH
+      PATHS ${ROCM_INCLUDE_DIRS}
+    )
+    set(ROCM_LIB_NAME "HIP")
+  endif()
+  if(NOT ROCM_VERSION_HEADER_PATH)
+    message(FATAL_ERROR "Could not find hip/hip_version.h or rocm-core/rocm_version.h in ${ROCM_INCLUDE_DIRS}")
+  endif()
   get_filename_component(ROCM_HEADER_NAME ${ROCM_VERSION_HEADER_PATH} NAME)
 
   if(EXISTS ${ROCM_VERSION_HEADER_PATH})
@@ -94,15 +118,10 @@ if(HIP_FOUND)
   endif()
 
   # Read the ROCM headerfile into a variable
-  file(READ ${ROCM_HEADER_FILE} ROCM_HEADER_CONTENT)
+  message(STATUS "Reading ROCM version from: ${ROCM_HEADER_FILE}")
+  message(STATUS "Content: ${ROCM_HEADER_CONTENT}")
+  file(READ "${ROCM_HEADER_FILE}" ROCM_HEADER_CONTENT)
 
-  # Since Windows currently supports only a part of ROCm and names it HIP-SDK,
-  # we need to refer to the HIP-SDK equivalents of entities existing in ROCm lib.
-  if(UNIX)
-    set(ROCM_LIB_NAME "ROCM")
-  else() # Win32
-    set(ROCM_LIB_NAME "HIP")
-  endif()
   # Below we use a RegEx to find ROCM version numbers.
   # Note that CMake does not support \s for blank space. That is
   # why in the regular expressions below we have a blank space in
@@ -141,7 +160,6 @@ if(HIP_FOUND)
   # Find ROCM components using Config mode
   # These components will be searced for recursively in ${ROCM_PATH}
   message("\n***** Library versions from cmake find_package *****\n")
-  find_package_and_print_version(hip REQUIRED CONFIG)
   find_package_and_print_version(amd_comgr REQUIRED)
   find_package_and_print_version(rocrand REQUIRED)
   find_package_and_print_version(hiprand REQUIRED)
@@ -168,7 +186,14 @@ if(HIP_FOUND)
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
+  endif()
 
+  # Optional components.
+  find_package_and_print_version(hipsparselt)  # Will be required when ready.
+
+  list(REMOVE_DUPLICATES ROCM_INCLUDE_DIRS)
+
+  if(UNIX)
     # roctx is part of roctracer
     find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
 
