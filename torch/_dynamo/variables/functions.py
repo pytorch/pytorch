@@ -2261,6 +2261,7 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
     ) -> None:
         assert rank in (1, 2)
         super().__init__(**kwargs)
+        self.rank = rank
 
     def call_function(
         self,
