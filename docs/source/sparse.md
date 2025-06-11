@@ -1386,7 +1386,7 @@ see:
     sparse.as_sparse_gradcheck
 ```
 
-## Zero-preserving unary functions
+### Zero-preserving unary functions
 
 We aim to support all 'zero-preserving unary functions': functions of one argument that map zero to zero.
 
