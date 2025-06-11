@@ -1338,7 +1338,7 @@ The following Tensor methods support sparse COO tensors:
     sparse.spdiags
 ```
 
-## Other functions
+### Other functions
 The following {mod}`torch` functions support sparse tensors:
 
 {func}`~torch.cat`
