@@ -8,7 +8,7 @@
 #endif
 
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 11701
-// cuSOLVER version >= 12060 includes 64-bit API for batched syev
+// cuSOLVER version >= 11701 includes 64-bit API for batched syev
 #define USE_CUSOLVER_64_BIT_XSYEV_BATCHED
 #endif
 
