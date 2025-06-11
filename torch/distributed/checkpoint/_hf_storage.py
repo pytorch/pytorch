@@ -4,13 +4,13 @@ import io
 import json
 import queue
 import struct
-import torch
-from torch.distributed._shard._utils import narrow_tensor_by_index
 from typing import Any, Optional
 
+import torch
+from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint._hf_planner import _HuggingFaceLoadPlanner
-from torch.distributed.checkpoint.filesystem import SerializationFormat, _StorageInfo
+from torch.distributed.checkpoint.filesystem import _StorageInfo, SerializationFormat
 from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
     Metadata,
@@ -244,23 +244,25 @@ class _HuggingFaceStorageReader(FsspecReader):
             with self.fs.create_stream(file_name, "rb") as stream:
                 # TODO: make this more efficient by doing offset reads instead of a
                 # full deserialization of the file
+
                 deserialized: list[tuple(str, dict[str, Any])] = deserialize(
                     stream.read()
-                )
+                )  # type: ignore[valid-type]
                 deserialized_dict: dict[str, dict[str, Any]] = {
                     tensor_info[0]: tensor_info[1] for tensor_info in deserialized
                 }
 
                 for req in reqs:
                     tensor_bytes = deserialized_dict[req.dest_index.fqn]["data"]
-                    assert planner.metadata is not None
+                    planner_metadata = planner.metadata  # type: ignore[attr-defined]
                     tensor = torch.frombuffer(
                         tensor_bytes,
-                        dtype=planner.metadata.state_dict_metadata[
+                        dtype=planner_metadata.state_dict_metadata[
                             req.dest_index.fqn
                         ].properties.dtype,
                     )
-                    # TODO: update this to req.lengths once I get rid of allow_tensor_resize, shouldn't need to look at the deserialized
+                    # TODO: update this to req.lengths once I get rid of allow_tensor_resize,
+                    # shouldn't need to look at the deserialized
                     # dict for metadata as we've already done that in read_metadata file
                     tensor = tensor.reshape(
                         deserialized_dict[req.dest_index.fqn]["shape"]
@@ -358,6 +360,6 @@ def _get_dtype(dtype_str: str) -> torch.dtype:
     try:
         dtype = DTYPE_MAP[dtype_str]
     except KeyError:
-        dtype = torch.get_default_dtype
+        dtype = torch.get_default_dtype()
 
     return dtype
