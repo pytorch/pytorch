@@ -1962,6 +1962,9 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
+    # Initialize AsyncCompile subproc pool as early as possible.
+    if any(device.type == "cuda" for device in get_all_devices(model_)):
+        torch._inductor.async_compile.AsyncCompilePoolManager.warmup()
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
