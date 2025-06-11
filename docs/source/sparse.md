@@ -115,7 +115,7 @@ tensor(indices=tensor([[0, 1],
         size=(2, 2, 2), nnz=2, layout=torch.sparse_coo)
 ```
 
-### Operator overview
+## Operator overview
 
 Fundamentally, operations on Tensor with sparse storage formats behave the same as
 operations on Tensor with strided (or other) storage formats. The particularities of
