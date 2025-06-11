@@ -238,7 +238,34 @@ def record_original_output_strides(gm: GraphModule) -> None:
     output_node.meta["original_output_strides"] = output_strides
 
 
-@functools.cache
+def _recursive_record_original_output_strides(gm: GraphModule) -> None:
+    # invoke_subgraph HOP requires output strides to be respected
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        subgraph = getattr(gm, node.args[0].target)
+        _recursive_record_original_output_strides(subgraph)
+
+    record_original_output_strides(gm)
+
+
+def _recursive_record_user_visible_output_idxs(gm: GraphModule) -> None:
+    # invoke_subgraph HOP requires output strides to be respected
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        subgraph = getattr(gm, node.args[0].target)
+
+        for node in subgraph.graph.find_nodes(op="output"):
+            node.meta["user_visible_output_idxs"] = [
+                idx
+                for idx in range(len(node.args[0]))
+                if isinstance(node.args[0][idx], torch.fx.Node)
+            ]
+        _recursive_record_user_visible_output_idxs(subgraph)
+
+
+@functools.lru_cache(None)
 def _step_logger() -> Callable[..., None]:
     return dynamo_logging.get_step_logger(log)
 
@@ -1185,7 +1212,7 @@ class _InProcessFxCompile(FxCompile):
                 with torch.no_grad():
                     fake_mode = fake_tensor_prop(gm, example_inputs)
 
-            record_original_output_strides(gm)
+            _recursive_record_original_output_strides(gm)
 
             # pattern matcher passes might not preserve striding information
             # on node.meta["val"]. if in the future we rely on these being
@@ -2228,6 +2255,11 @@ def compile_fx(
                     ]
                 else:
                     model_outputs_node.meta["user_visible_output_idxs"] = []
+
+                # We also mark the invoke_subgraph outputs as user_visible to
+                # force the outputs of invoke_subgraph subgraph to follow the
+                # original strides
+                _recursive_record_user_visible_output_idxs(gm)
 
                 return inner_compile(
                     gm,
