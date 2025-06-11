@@ -2,6 +2,7 @@
 
 import copy
 import itertools
+import logging
 import math
 
 import torch
@@ -14,7 +15,12 @@ from torch.ao.pruning._experimental.data_sparsifier.quantization_utils import (
     post_training_sparse_quantize,
 )
 from torch.nn.utils.parametrize import is_parametrized
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import TestCase
+
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
 
 class ImplementedSparsifier(BaseDataSparsifier):
@@ -786,7 +792,3 @@ class TestQuantizationUtils(TestCase):
         assert abs(sl_embbag1 - 0.80) <= 0.05  # +- 5% leeway
         assert abs(sl_emb_seq_0 - 0.80) <= 0.05  # +- 5% leeway
         assert abs(sl_emb_seq_1 - 0.80) <= 0.05  # +- 5% leeway
-
-
-if __name__ == "__main__":
-    raise_on_run_directly("test/test_ao_sparsity.py")

@@ -1,5 +1,7 @@
-(torch_environment_variables)=
-# Torch Environment Variables
+.. _torch_environment_variables:
+
+Torch Environment Variables
+===============================
 
 PyTorch leverages environment variables for adjusting various settings that influence its runtime behavior.
 These variables offer control over key functionalities, such as displaying the C++ stack trace upon encountering errors, synchronizing the execution of CUDA kernels,
@@ -14,7 +16,6 @@ Please note that while this documentation covers a broad spectrum of environment
 If you find anything in this documentation that is missing, incorrect, or could be improved, please let us know by filing an issue or opening a pull request.
 
 
-```{eval-rst}
 .. toctree::
    :maxdepth: 1
 
@@ -25,5 +26,3 @@ If you find anything in this documentation that is missing, incorrect, or could 
    miscellaneous_environment_variables
    logging
    torch_nccl_environment_variables
-
-```
