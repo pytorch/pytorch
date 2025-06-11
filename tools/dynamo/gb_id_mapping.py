@@ -152,7 +152,7 @@ def find_unimplemented_v2_calls(path):
     return results
 
 
-def cmd_add_new_gb_type(gb_type, file_path, registry_path):
+def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None):
     """
     Add a new graph break type to the registry.
 
@@ -187,6 +187,7 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path):
             "Context": matching_call["context"],
             "Explanation": matching_call["explanation"],
             "Hints": matching_call["hints"] or [],
+            **({"Additional_Info": [additional_info]} if additional_info else {}),
         }
     ]
 
@@ -195,7 +196,9 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path):
     return True
 
 
-def cmd_update_gb_type(old_gb_type, file_path, registry_path, new_gb_type=None):
+def cmd_update_gb_type(
+    old_gb_type, file_path, registry_path, new_gb_type=None, additional_info=None
+):
     """
     Update an existing graph break type in the registry by adding a new version
     to the version history list.
@@ -244,12 +247,69 @@ def cmd_update_gb_type(old_gb_type, file_path, registry_path, new_gb_type=None):
         "Hints": matching_call["hints"] or [],
     }
 
+    if additional_info:
+        additional_info_list = reg[gb_id][0].get("Additional_Info", [])
+        new_entry["Additional_Info"] = (
+            additional_info_list + [additional_info]
+            if additional_info_list
+            else [additional_info]
+        )
+    elif "Additional_Info" in reg[gb_id][0]:
+        new_entry["Additional_Info"] = reg[gb_id][0]["Additional_Info"]
+
     reg[gb_id].insert(0, new_entry)
 
     save_registry(reg, registry_path)
     print(
         f"Updated {old_gb_type} to {matching_call['gb_type']} in registry with ID {gb_id}"
     )
+    return True
+
+
+def check_unimplemented_calls(files, registry_path):
+    """
+    Checks if the unimplemented_v2 calls in the specified files match the entries in the registry.
+
+    Args:
+        files (list of str): A list of file paths to check for unimplemented_v2 calls.
+        registry_path (str or Path): The path to the registry JSON file containing expected entries.
+
+    Returns:
+        bool: True if all unimplemented_v2 calls match the registry entries, False if there are mismatches.
+
+    The function compares the gb_type, context, explanation, and hints of each unimplemented_v2 call
+    in the provided files against the corresponding entries in the registry. If any discrepancies are
+    found, it prints the details and returns False. Otherwise, it confirms that all calls match the
+    registry and returns True.
+    """
+    registry_path = Path(registry_path)
+    reg = load_registry(registry_path)
+
+    gb_type_to_entry = {entries[0]["Gb_type"]: entries[0] for _, entries in reg.items()}
+
+    mismatches = []
+    for file in files:
+        calls = find_unimplemented_v2_calls(Path(file))
+        for call in calls:
+            gb_type = call["gb_type"]
+            if gb_type not in gb_type_to_entry:
+                mismatches.append((gb_type, file, "Not found in registry"))
+                continue
+
+            entry = gb_type_to_entry[gb_type]
+            if call["context"] != entry["Context"]:
+                mismatches.append((gb_type, file, "Context mismatch"))
+            elif call["explanation"] != entry["Explanation"]:
+                mismatches.append((gb_type, file, "Explanation mismatch"))
+            elif sorted(call["hints"]) != sorted(entry["Hints"]):
+                mismatches.append((gb_type, file, "Hints mismatch"))
+
+    if mismatches:
+        for gb_type, file, reason in mismatches:
+            print(f"  - {gb_type} in {file}: {reason}")
+        return False
+
+    print("All unimplemented_v2 calls match the registry.")
     return True
 
 
@@ -301,11 +361,26 @@ def main():
         default=default_dynamo_dir,
         help="Directory to search for unimplemented_v2 calls.",
     )
+    create_parser.add_argument(
+        "--registry-path",
+        type=str,
+        default=str(registry_path),
+        help="Path to save the registry JSON file",
+    )
 
     add_parser = subparsers.add_parser("add", help="Add a gb_type to registry")
     add_parser.add_argument("gb_type", help="The gb_type to add")
     add_parser.add_argument(
         "file_path", help="Path to the file containing the unimplemented_v2 call"
+    )
+    add_parser.add_argument(
+        "--additional-info", help="Optional additional information to include"
+    )
+    add_parser.add_argument(
+        "--registry-path",
+        type=str,
+        default=str(registry_path),
+        help="Path to save the registry JSON file",
     )
 
     update_parser = subparsers.add_parser(
@@ -319,8 +394,23 @@ def main():
     update_parser.add_argument(
         "--new_gb_type", help="New gb_type name if it has changed", default=None
     )
+    update_parser.add_argument(
+        "--additional-info", help="Optional additional information to include"
+    )
+    update_parser.add_argument(
+        "--registry-path",
+        type=str,
+        default=str(registry_path),
+        help="Path to save the registry JSON file",
+    )
 
-    parser.add_argument(
+    check_parser = subparsers.add_parser(
+        "check", help="Check if unimplemented_v2 calls match registry entries"
+    )
+    check_parser.add_argument(
+        "--files", type=str, help="Space-separated list of files to check"
+    )
+    check_parser.add_argument(
         "--registry-path",
         type=str,
         default=str(registry_path),
@@ -332,13 +422,24 @@ def main():
     if args.command == "create":
         create_registry(args.dynamo_dir, args.registry_path)
     elif args.command == "add":
-        success = cmd_add_new_gb_type(args.gb_type, args.file_path, args.registry_path)
+        success = cmd_add_new_gb_type(
+            args.gb_type, args.file_path, args.registry_path, args.additional_info
+        )
         if not success:
             sys.exit(1)
     elif args.command == "update":
         success = cmd_update_gb_type(
-            args.gb_type, args.file_path, args.registry_path, args.new_gb_type
+            args.gb_type,
+            args.file_path,
+            args.registry_path,
+            args.new_gb_type,
+            args.additional_info,
         )
+        if not success:
+            sys.exit(1)
+    elif args.command == "check":
+        files = args.files.split()
+        success = check_unimplemented_calls(files, args.registry_path)
         if not success:
             sys.exit(1)
     else:
