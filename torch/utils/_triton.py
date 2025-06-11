@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import hashlib
+from typing import Optional
 
 
 @functools.lru_cache(None)
@@ -62,6 +63,37 @@ def has_triton_tma_device():
 
 
 @functools.lru_cache(None)
+def has_triton_make_tensor_descriptor():
+    if has_triton_package():
+        import torch
+
+        if (
+            torch.cuda.is_available()
+            and torch.cuda.get_device_capability() >= (9, 0)
+            and not torch.version.hip
+        ):
+            try:
+                from triton.language.extra.cuda import (  # noqa: F401
+                    _experimental_make_tensor_descriptor,
+                )
+
+                return True
+            except ImportError:
+                pass
+
+            try:
+                from triton.language.extra.cuda import (  # noqa: F401
+                    make_tensor_descriptor,
+                )
+
+                return True
+            except ImportError:
+                pass
+
+    return False
+
+
+@functools.lru_cache(None)
 def has_triton() -> bool:
     if not has_triton_package():
         return False
@@ -113,3 +145,17 @@ def triton_hash_with_backend():
 
     # Hash is upper case so that it can't contain any Python keywords.
     return hashlib.sha256(key.encode("utf-8")).hexdigest().upper()
+
+
+@functools.lru_cache(None)
+def triton_set_allocator(device):
+    import torch
+
+    assert torch.cuda.current_device() == device
+    
+    def alloc_fn(size: int, alignment: int, stream: Optional[int]):
+        return torch.empty(size, device=device, dtype=torch.int8)
+    
+    import triton
+    
+    triton.set_allocator(alloc_fn)
