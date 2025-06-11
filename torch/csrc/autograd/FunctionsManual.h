@@ -139,11 +139,14 @@ at::Tensor pow_backward_exponent(
     const at::Tensor& result);
 at::Tensor angle_backward(const at::Tensor& grad, const at::Tensor& self);
 template <typename T>
-at::Tensor mul_tensor_backward(const Tensor& grad, T other, ScalarType self_st);
+at::Tensor mul_tensor_backward(
+    const Tensor& grad,
+    const T& other,
+    ScalarType self_st);
 template <typename T>
 at::Tensor div_tensor_self_backward(
     const Tensor& grad,
-    T other,
+    const T& other,
     ScalarType self_st,
     const std::optional<std::string_view>& rounding_mode = std::nullopt);
 at::Tensor div_tensor_other_backward(

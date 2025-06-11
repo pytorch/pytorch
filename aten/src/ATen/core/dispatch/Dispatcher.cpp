@@ -70,7 +70,7 @@ private:
 void _print_dispatch_trace(const std::string& label, const std::string& op_name, const DispatchKeySet& dispatchKeySet) {
   auto nesting_value = dispatch_trace_nesting_value();
   for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
-  std::cerr << label << " op=[" << op_name << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+  std::cerr << label << " op=[" << op_name << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << '\n';
 }
 } // namespace detail
 
@@ -201,9 +201,11 @@ OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
 // Windows build doesn't produce the destructor symbol in PyTorch libs
 // causing a linker failure in downstream projects.
 // x-ref https://github.com/pytorch/pytorch/issues/70032
+#if defined(_WIN32)
 OperatorHandle::~OperatorHandle() = default;
+#endif
 
-RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string debug) {
+RegistrationHandleRAII Dispatcher::registerLibrary(const std::string& ns, std::string debug) {
   std::lock_guard<std::mutex> lock(guard_->mutex);
   auto found = libraries_.find(ns);
   TORCH_CHECK(
@@ -294,7 +296,7 @@ PythonModuleMapType& pythonModulesSingleton() {
 
 }
 
-std::optional<std::pair<const char*, const char*>> Dispatcher::getPyStub(OperatorName op_name) {
+std::optional<std::pair<const char*, const char*>> Dispatcher::getPyStub(const OperatorName& op_name) {
   std::lock_guard<std::mutex> lock(guard_->mutex);
   auto found = pythonModulesSingleton().find(op_name);
   if (found == pythonModulesSingleton().end()) {
@@ -330,7 +332,7 @@ RegistrationHandleRAII Dispatcher::registerPythonModule(
   });
 }
 
-void Dispatcher::throwIfHasPythonModule(OperatorName op_name) {
+void Dispatcher::throwIfHasPythonModule(const OperatorName& op_name) {
   std::lock_guard<std::mutex> lock(guard_->mutex);
   auto elt = pythonModulesSingleton().find(op_name);
   if (elt == pythonModulesSingleton().end()) {
@@ -350,7 +352,7 @@ void Dispatcher::throwIfHasPythonModule(OperatorName op_name) {
 }
 
 RegistrationHandleRAII Dispatcher::registerImpl(
-  OperatorName op_name,
+  const OperatorName& op_name,
   std::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
   std::optional<impl::CppSignature> cpp_signature,
@@ -365,7 +367,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
     *this,
     dispatch_key,
     std::move(kernel),
-    std::move(cpp_signature),
+    cpp_signature,
     std::move(inferred_function_schema),
     std::move(debug)
   );
@@ -394,7 +396,7 @@ void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& o
   cleanup(op, op_name);
 }
 
-RegistrationHandleRAII Dispatcher::registerName(OperatorName op_name) {
+RegistrationHandleRAII Dispatcher::registerName(const OperatorName& op_name) {
   std::lock_guard<std::mutex> lock(guard_->mutex);
   auto op = findOrRegisterName_(op_name);
   ++op.operatorDef_->def_and_impl_count;
