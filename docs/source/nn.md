@@ -566,6 +566,7 @@ The following are aliases to their counterparts in ``torch.nn``:
 <!--
 This module needs to be documented. Adding here in the meantime for tracking purposes
 
+```{eval-rst}
 .. py:module:: torch.nn.backends
 .. py:module:: torch.nn.utils.stateless
 .. py:module:: torch.nn.backends.thnn
@@ -613,4 +614,5 @@ This module needs to be documented. Adding here in the meantime for tracking pur
 .. py:module:: torch.nn.utils.parametrize
 .. py:module:: torch.nn.utils.prune
 .. py:module:: torch.nn.utils.rnn
+```
 -->
