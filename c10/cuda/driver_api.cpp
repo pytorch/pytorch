@@ -54,7 +54,7 @@ typedef cudaError_t (*VersionedGetEntryPoint)(const char *, void **, unsigned in
 typedef cudaError_t (*GetEntryPoint)(const char *, void **, unsigned long long,  // NOLINT(*)
                                      cudaDriverEntryPointQueryResult *);
 
-void *get_symbol(const char *symbol, int cuda_version) {
+C10_EXPORT void *get_symbol(const char *symbol, int cuda_version) {
   constexpr char driver_entrypoint[] = "cudaGetDriverEntryPoint";
   constexpr char driver_entrypoint_versioned[] = "cudaGetDriverEntryPointByVersion";
   // We link to the libcudart.so already, so can search for it in the current context
