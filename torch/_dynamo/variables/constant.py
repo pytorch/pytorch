@@ -190,7 +190,12 @@ its type to `common_constant_types`.
                     )
                     return SymNodeVariable.create(tx, proxy, add_target)
                 else:
-                    return ConstantVariable.create(op(self.value, add_target))
+                    try:
+                        return ConstantVariable.create(op(self.value, add_target))
+                    except Exception as e:
+                        raise_observed_exception(
+                            type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                        )
         elif isinstance(self.value, bytes) and name == "decode":
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))

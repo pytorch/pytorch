@@ -56,10 +56,11 @@ class _RequiredParameter:
 required = _RequiredParameter()
 
 
-def _use_grad_for_differentiable(func):
-    def _use_grad(self, *args, **kwargs):
+def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
+    def _use_grad(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         import torch._dynamo
 
+        self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
         try:
             # Note on graph break below:
@@ -76,7 +77,7 @@ def _use_grad_for_differentiable(func):
             # see https://github.com/pytorch/pytorch/issues/104053
             torch.set_grad_enabled(self.defaults["differentiable"])
             torch._dynamo.graph_break()
-            ret = func(self, *args, **kwargs)
+            ret = func(*args, **kwargs)
         finally:
             torch._dynamo.graph_break()
             torch.set_grad_enabled(prev_grad)
@@ -270,9 +271,10 @@ _fused_doc = r"""fused (bool, optional): whether the fused implementation is use
               implementation, pass False for either foreach or fused. """
 
 _capturable_doc = r"""capturable (bool, optional): whether this instance is safe to
-            capture in a CUDA graph. Passing True can impair ungraphed performance,
-            so if you don't intend to graph capture this instance, leave it False
-            (default: False)"""
+            capture in a graph, whether for CUDA graphs or for torch.compile support.
+            Tensors are only capturable when on supported :ref:`accelerators<accelerators>`.
+            Passing True can impair ungraphed performance, so if you don't intend to graph
+            capture this instance, leave it False (default: False)"""
 
 _differentiable_doc = r"""differentiable (bool, optional): whether autograd should
             occur through the optimizer step in training. Otherwise, the step()
@@ -856,6 +858,10 @@ class Optimizer:
             state_dict (dict): optimizer state. Should be an object returned
                 from a call to :meth:`state_dict`.
 
+        .. warning::
+            Make sure this method is called after initializing :class:`torch.optim.lr_scheduler.LRScheduler`,
+            as calling it beforehand will overwrite the loaded learning rates.
+
         .. note::
             The names of the parameters (if they exist under the "param_names" key of each param group
             in :meth:`state_dict`) will not affect the loading process.
@@ -866,6 +872,18 @@ class Optimizer:
             If ``param_names`` exist in loaded state dict ``param_groups`` they will be saved and override
             the current names, if present, in the optimizer state. If they do not exist in loaded state dict,
             the optimizer ``param_names`` will remain unchanged.
+
+        Example:
+            >>> # xdoctest: +SKIP
+            >>> model = torch.nn.Linear(10, 10)
+            >>> optim = torch.optim.SGD(model.parameters(), lr=3e-4)
+            >>> scheduler1 = torch.optim.lr_scheduler.LinearLR(optim, start_factor=0.1, end_factor=1, total_iters=20)
+            >>> scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=80, eta_min=3e-5)
+            >>> lr = torch.optim.lr_scheduler.SequentialLR(optim, schedulers=[scheduler1, scheduler2], milestones=[20])
+            >>> lr.load_state_dict(torch.load('./save_seq.pt'))
+            >>> # now load the optimizer checkpoint after loading the LRScheduler
+            >>> optim.load_state_dict(torch.load('./save_optim.pt'))
+
         """
         # shallow copy, to be consistent with module API
         state_dict = state_dict.copy()
@@ -1003,7 +1021,7 @@ class Optimizer:
                         torch._foreach_zero_(grads)
 
     @overload
-    def step(self, closure: None = ...) -> None:
+    def step(self, closure: None = None) -> None:
         ...
 
     @overload

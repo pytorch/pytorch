@@ -6,7 +6,12 @@ import subprocess
 from pathlib import Path
 
 from .setup_helpers.cmake import CMake, USE_NINJA
-from .setup_helpers.env import check_negative_env_flag, IS_64BIT, IS_WINDOWS
+from .setup_helpers.env import (
+    check_env_flag,
+    check_negative_env_flag,
+    IS_64BIT,
+    IS_WINDOWS,
+)
 
 
 repo_root = Path(__file__).absolute().parent.parent
@@ -94,10 +99,18 @@ def checkout_nccl() -> None:
     nccl_basedir = os.path.join(third_party_path, "nccl")
     if not os.path.exists(nccl_basedir):
         subprocess.check_call(
-            ["git", "clone", "https://github.com/NVIDIA/nccl.git", "nccl"],
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                release_tag,
+                "https://github.com/NVIDIA/nccl.git",
+                "nccl",
+            ],
             cwd=third_party_path,
         )
-        subprocess.check_call(["git", "checkout", release_tag], cwd=nccl_basedir)
 
 
 def build_pytorch(
@@ -109,7 +122,11 @@ def build_pytorch(
     cmake: CMake,
 ) -> None:
     my_env = _create_build_env()
-    if os.getenv("USE_SYSTEM_NCCL", "0") == "0":
+    if (
+        not check_negative_env_flag("USE_CUDA")
+        and not check_negative_env_flag("USE_NCCL")
+        and not check_env_flag("USE_SYSTEM_NCCL")
+    ):
         checkout_nccl()
     build_test = not check_negative_env_flag("BUILD_TEST")
     cmake.generate(
