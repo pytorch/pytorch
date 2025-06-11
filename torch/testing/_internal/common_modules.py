@@ -4040,26 +4040,9 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Hardshrink,
                module_inputs_func=module_inputs_torch_nn_Hardshrink,
-               skips=(
-                   # not supported on MPS backend
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_if_train_and_eval_modes_differ', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors', device_type='mps'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_save_load', device_type='mps'),),
                ),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
-               skips=None if _macos15_or_newer else (
-                   # Fails on backward check on MPS
-                   # See https://github.com/pytorch/pytorch/issues/107214
-                   DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
-                   ),),
                supports_gradgrad=False),
     ModuleInfo(torch.nn.Hardtanh,
                module_inputs_func=module_inputs_torch_nn_Hardtanh,
