@@ -265,6 +265,7 @@ def cmd_update_gb_type(
     )
     return True
 
+
 def check_unimplemented_calls(files, registry_path):
     """
     Checks if the unimplemented_v2 calls in the specified files match the entries in the registry.
