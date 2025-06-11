@@ -212,7 +212,8 @@ def _is_proxy_tensor_update_tensor_tracker_disabled() -> bool:
     """
     Returns current state of disabling update tensor tracker.
     """
-    return _disable_update_tensor_tracker_tls.value
+    return False
+    # return _disable_update_tensor_tracker_tls.value
 
 
 @contextmanager
@@ -242,8 +243,7 @@ def set_proxy_slot(  # type: ignore[no-redef]
         # We DO want to clobber proxies whenever we run an inplace operation
         # on a tensor, and it affects the metadata on the proxy.
         assert isinstance(proxy, _ProxyTensor)
-        if not _is_proxy_tensor_update_tensor_tracker_disabled():
-            tracer.tensor_tracker[obj] = proxy
+        tracer.tensor_tracker[obj] = proxy
     elif isinstance(obj, (_AnyScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
         assert isinstance(proxy, Proxy)
@@ -1015,7 +1015,8 @@ def proxy_call(
     else:
         constant = None
 
-    track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    if not func._schema.is_mutable:
+        track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     _maybe_record_pointwise_barrier(func, proxy_mode)
     return out
 
