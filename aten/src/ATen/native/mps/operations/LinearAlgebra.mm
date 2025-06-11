@@ -55,9 +55,10 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
       getMPSProfiler().beginProfileKernel(matmulPSO, "matmul", {self, other});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
-      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self.size(0)),
+      std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(self.size(0)),
                                        static_cast<uint32_t>(self.size(1)),
-                                       static_cast<uint32_t>(output.size(1))};
+                                       static_cast<uint32_t>(output.size(1)),
+                                       0};
       std::array<int64_t, 6> strides = {
           self.stride(0), self.stride(1), other.stride(0), other.stride(1), output.stride(0), output.stride(1)};
       constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
