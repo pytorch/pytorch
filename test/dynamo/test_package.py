@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
+@functorch_config.patch("bundled_autograd_cache", True)
 @instantiate_parametrized_tests
 class TestPackage(torch._inductor.test_case.TestCase):
     def path(self):
@@ -28,7 +29,6 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda"))
-    @functorch_config.patch("bundled_autograd_cache", True)
     def test_basic_fn(self, backend, device):
         if device == "cuda" and not HAS_CUDA:
             unittest.skip("Requires CUDA")
@@ -70,7 +70,6 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda"))
-    @functorch_config.patch("bundled_autograd_cache", True)
     def test_graph_break_bomb(self, backend, device):
         if device == "cuda" and not HAS_CUDA:
             unittest.skip("Requires CUDA")
@@ -131,25 +130,30 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(torch.tensor(N), 0, N - 1)
 
-    def test_dynamic_shape(self):
+    @parametrize("backend", ("eager", "inductor"))
+    @parametrize("device", ("cpu", "cuda"))
+    def test_dynamic_shape(self, backend, device):
+        if device == "cuda" and not HAS_CUDA:
+            unittest.skip("Requires CUDA")
         ctx = DynamoStore()
 
         def fn(x):
             return x + x.shape[0]
 
-        args = (torch.randn(3, 2),)
-        args1 = (torch.randn(5, 2),)
-        args2 = (torch.randn(7, 2),)
+        args = (torch.randn(3, 2, device=device),)
+        args1 = (torch.randn(5, 2, device=device),)
+        args2 = (torch.randn(7, 2, device=device),)
         expected1 = fn(*args1)
 
         torch._dynamo.mark_dynamic(args[0], 0, min=3, max=5)
 
         # Saving
         package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        compiled_fn = torch._dynamo.optimize(backend=backend, package=package)(fn)
         compiled_fn(*args)
-        for backend_id, backend in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, backend)
+        if backend == "eager":
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
         ctx.save_package(package, self.path())
 
         # Loading
