@@ -85,6 +85,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.data.distributed import DistributedSampler
@@ -4865,6 +4866,7 @@ class DistributedTest:
                         init_before=init_before,
                     )
 
+        @skipIfRocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
             for init_before in [True, False]:
