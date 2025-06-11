@@ -18,3 +18,22 @@ torch.accelerator
     current_stream
     synchronize
     device_index
+
+.. automodule:: torch.accelerator.memory
+.. currentmodule:: torch.accelerator.memory
+
+Memory management
+-----------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+     empty_cache
+     max_memory_allocated
+     max_memory_reserved
+     memory_allocated
+     memory_reserved
+     memory_stats
+     memory_stats_as_nested_dict
+     reset_accumulated_memory_stats
+     reset_peak_memory_stats
