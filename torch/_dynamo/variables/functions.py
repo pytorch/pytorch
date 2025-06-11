@@ -2068,7 +2068,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             v = combined_args_raw[k]
             if isinstance(v, TMADescriptorVariable):
                 tma_descriptor_metadata[k] = v.to_metadata()
-                combined_args_raw[k] = v.data_ptr.from_tensor
+                combined_args_raw[k] = v.get_tensor()
 
         combined_args = {
             variables.ConstantVariable.create(k): v
@@ -2171,6 +2171,17 @@ class TritonKernelVariable(VariableTracker):
 
 
 class TMADescriptorVariable(VariableTracker):
+    def to_metadata(self):
+        raise NotImplementedError
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        raise NotImplementedError
+
+    def get_tensor(self):
+        raise NotImplementedError
+
+
+class TMADescriptorExperimentalVariable(VariableTracker):
     def __init__(
         self,
         data_ptr: "variables.DataPtrVariable",
@@ -2205,8 +2216,43 @@ class TMADescriptorVariable(VariableTracker):
         codegen.foreach(args)
         codegen.call_function(len(args) + 1, False)
 
+    def get_tensor(self):
+        return self.data_ptr.from_tensor
 
-class CreateTMADescriptorVariable(VariableTracker):
+
+class TMADescriptorStableVariable(TMADescriptorVariable):
+    def __init__(
+        self,
+        tensor: "variables.TensorVariable",
+        block_shape: "variables.ListVariable",
+        **kwargs,
+    ):
+        assert isinstance(tensor, variables.TensorVariable)
+        super().__init__(**kwargs)
+        self.tensor = tensor
+        self.block_shape = block_shape
+
+    def to_metadata(self):
+        # TODO(dberard) implement this
+        raise NotImplementedError
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "triton.tools.tensor_descriptor",
+                "TensorDescriptor",
+            )
+        )
+        codegen.load_method("from_tensor")
+        self.tensor.reconstruct(codegen)
+        codegen(self.block_shape)
+        codegen.call_method(2)
+
+    def get_tensor(self) -> "variables.TensorVariable":
+        return self.tensor
+
+
+class CreateTMADescriptorExperimentalVariable(VariableTracker):
     def __init__(
         self,
         rank: int,
@@ -2251,9 +2297,25 @@ class CreateTMADescriptorVariable(VariableTracker):
             ]
         element_size = kwargs["element_size"] if "element_size" in kwargs else args[-1]
 
-        return TMADescriptorVariable(
+        return TMADescriptorExperimentalVariable(
             data_ptr=ptr,
             dims=dims,
             block_dims=block_dims,
             element_size=element_size,
+        )
+
+
+class CreateTMADescriptorStableVariable(VariableTracker):
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        tensor = kwargs["tensor"] if "tensor" in kwargs else args[0]
+        block_shape = kwargs["block_shape"] if "block_shape" in kwargs else args[1]
+
+        return TMADescriptorStableVariable(
+            tensor=tensor,
+            block_shape=block_shape,
         )
