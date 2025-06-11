@@ -1,3 +1,8 @@
+```{eval-rst}
+.. role:: hidden
+    :class: hidden-section
+```
+
 # torch.nn.functional
 
 ```{eval-rst}
@@ -206,7 +211,7 @@ The :mod:`torch.nn.attention.bias` module contains attention_biases that are des
 
 ## DataParallel functions (multi-GPU, distributed)
 
-<!-- :hidden:`data_parallel` -->
+### {hidden}`data_parallel`
 
 ```{eval-rst}
 .. autosummary::

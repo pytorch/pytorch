@@ -1,3 +1,8 @@
+```{eval-rst}
+.. role:: hidden
+    :class: hidden-section
+```
+
 # torch.nn
 
 ```{eval-rst}
@@ -10,7 +15,7 @@ These are the basic building blocks for graphs:
 ```{eval-rst}
 .. contents:: torch.nn
     :depth: 2
-    :local:
+    :local: true
     :backlinks: top
 ```
 

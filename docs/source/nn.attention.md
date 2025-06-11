@@ -1,3 +1,8 @@
+```{eval-rst}
+.. role:: hidden
+    :class: hidden-section
+```
+
 # torch.nn.attention
 
 ```{eval-rst}

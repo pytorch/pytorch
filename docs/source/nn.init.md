@@ -1,3 +1,8 @@
+```{eval-rst}
+.. role:: hidden
+    :class: hidden-section
+```
+
 (nn-init-doc)=
 
 # torch.nn.init
