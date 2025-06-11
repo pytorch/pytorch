@@ -35,6 +35,11 @@ namespace {
         "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i + ndim, " being "
         "empty");
+      if (input.size(i) != output_size[i + 2]) {
+        TORCH_WARN(
+          "Input dimensions ", input.sizes(), " different with output_size ", output_size
+          );
+      }
     }
 
     TORCH_CHECK(input.dtype() == output.dtype(),
