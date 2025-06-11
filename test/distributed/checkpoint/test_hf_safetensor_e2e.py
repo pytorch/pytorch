@@ -5,7 +5,6 @@ import sys
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch.distributed.checkpoint import _HuggingFaceLoadPlanner
-from torch.distributed.checkpoint.default_planner import _EmptyStateDictLoadPlanner
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Replicate, Shard, zeros
@@ -32,6 +31,7 @@ class MyTestModule(torch.nn.Module):
         self.linear_2 = torch.nn.Linear(5, 1)
         self.emb = torch.nn.EmbeddingBag(5, 10)
 
+
 class TestSingleRankSaveLoad(TestCase):
     @with_temp_dir
     def test_save(self) -> None:
@@ -46,15 +46,19 @@ class TestSingleRankSaveLoad(TestCase):
         state_dict_to_save = MyTestModule().state_dict()
         dist_cp.save(
             state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(
-                    path=CHECKPOINT_DIR
-                ),
-            )
+            storage_writer=dist_cp._HuggingFaceStorageWriter(path=CHECKPOINT_DIR),
+        )
 
-        state_dict_loaded = load_file(CHECKPOINT_DIR + "/model-00001-of-00001.safetensors")
-        self.assertEqual(sorted(state_dict_to_save.keys()), sorted(state_dict_loaded.keys()))
+        state_dict_loaded = load_file(
+            CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
+        )
+        self.assertEqual(
+            sorted(state_dict_to_save.keys()), sorted(state_dict_loaded.keys())
+        )
         for key in state_dict_to_save.keys():
-            self.assertTrue(torch.equal(state_dict_to_save[key], state_dict_loaded[key]))
+            self.assertTrue(
+                torch.equal(state_dict_to_save[key], state_dict_loaded[key])
+            )
 
     @with_temp_dir
     def test_load(self) -> None:
@@ -68,18 +72,22 @@ class TestSingleRankSaveLoad(TestCase):
 
         state_dict_to_save = MyTestModule().state_dict()
         state_dict_to_load = MyTestModule().state_dict()
-        save_file(state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors")
+        save_file(
+            state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
+        )
 
         dist_cp.load(
             state_dict=state_dict_to_load,
-                storage_reader=dist_cp._HuggingFaceStorageReader(
-                    path=CHECKPOINT_DIR
-                ),
-            )
+            storage_reader=dist_cp._HuggingFaceStorageReader(path=CHECKPOINT_DIR),
+        )
 
-        self.assertEqual(sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys()))
+        self.assertEqual(
+            sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys())
+        )
         for key in state_dict_to_save.keys():
-            self.assertTrue(torch.equal(state_dict_to_save[key], state_dict_to_load[key]))
+            self.assertTrue(
+                torch.equal(state_dict_to_save[key], state_dict_to_load[key])
+            )
 
     @with_temp_dir
     def test_load_into_empty_dict(self) -> None:
@@ -92,17 +100,21 @@ class TestSingleRankSaveLoad(TestCase):
         CHECKPOINT_DIR = self.temp_dir
 
         state_dict_to_save = MyTestModule().state_dict()
-        save_file(state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors")
+        save_file(
+            state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
+        )
 
         state_dict_loaded = _load_state_dict_from_keys(
-                storage_reader=dist_cp._HuggingFaceStorageReader(
-                    path=CHECKPOINT_DIR
-                ),
-            )
+            storage_reader=dist_cp._HuggingFaceStorageReader(path=CHECKPOINT_DIR),
+        )
 
-        self.assertEqual(sorted(state_dict_to_save.keys()), sorted(state_dict_loaded.keys()))
+        self.assertEqual(
+            sorted(state_dict_to_save.keys()), sorted(state_dict_loaded.keys())
+        )
         for key in state_dict_to_save.keys():
-            self.assertTrue(torch.equal(state_dict_to_save[key], state_dict_loaded[key]))
+            self.assertTrue(
+                torch.equal(state_dict_to_save[key], state_dict_loaded[key])
+            )
 
     @with_temp_dir
     def test_load_allowing_resize(self) -> None:
@@ -115,23 +127,28 @@ class TestSingleRankSaveLoad(TestCase):
         CHECKPOINT_DIR = self.temp_dir
 
         state_dict_to_save = MyTestModule().state_dict()
-        save_file(state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors")
+        save_file(
+            state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
+        )
 
-        state_dict_to_load= {}
+        state_dict_to_load = {}
         for key in state_dict_to_save.keys():
             state_dict_to_load[key] = torch.zeros(1)
 
         dist_cp.load(
             state_dict=state_dict_to_load,
-                storage_reader=dist_cp._HuggingFaceStorageReader(
-                    path=CHECKPOINT_DIR
-                ),
-                planner=_HuggingFaceLoadPlanner(allow_tensor_resize=True),
+            storage_reader=dist_cp._HuggingFaceStorageReader(path=CHECKPOINT_DIR),
+            planner=_HuggingFaceLoadPlanner(allow_tensor_resize=True),
+        )
+
+        self.assertEqual(
+            sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys())
+        )
+        for key in state_dict_to_save.keys():
+            self.assertTrue(
+                torch.equal(state_dict_to_save[key], state_dict_to_load[key])
             )
 
-        self.assertEqual(sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys()))
-        for key in state_dict_to_save.keys():
-            self.assertTrue(torch.equal(state_dict_to_save[key], state_dict_to_load[key]))
 
 ONE_D_PLACEMENTS = [
     [Shard(0)],
@@ -247,7 +264,9 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(path=CHECKPOINT_DIR, save_sharded=True),
+                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                    path=CHECKPOINT_DIR, save_sharded=True
+                ),
                 planner=dist_cp.DefaultSavePlanner(),
             )
 
@@ -302,7 +321,9 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(path=CHECKPOINT_DIR, save_sharded=True),
+                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                    path=CHECKPOINT_DIR, save_sharded=True
+                ),
             )
 
             for placements_2d in TWO_D_PLACEMENTS:
@@ -353,7 +374,9 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(path=CHECKPOINT_DIR, save_sharded=True),
+                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                    path=CHECKPOINT_DIR, save_sharded=True
+                ),
                 planner=dist_cp.DefaultSavePlanner(),
             )
 
@@ -403,7 +426,9 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
         dist_cp.save(
             state_dict=ref_state_dict,
-            storage_writer=dist_cp._HuggingFaceStorageWriter(path=self.temp_dir, save_sharded=True),
+            storage_writer=dist_cp._HuggingFaceStorageWriter(
+                path=self.temp_dir, save_sharded=True
+            ),
         )
 
         tensor = torch.rand(1).cuda()

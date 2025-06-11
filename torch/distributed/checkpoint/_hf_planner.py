@@ -30,5 +30,8 @@ class _HuggingFaceLoadPlanner(DefaultLoadPlanner):
         # This will be deprecated in favor of _load_state_dict_from_keys and then we
         # can remove this planner all together.
         return create_default_local_load_plan(
-            self.state_dict, self.metadata, not self.allow_partial_load, check_md_size=not self.allow_tensor_resize,
+            self.state_dict,
+            self.metadata,
+            not self.allow_partial_load,
+            check_md_size=not self.allow_tensor_resize,
         )

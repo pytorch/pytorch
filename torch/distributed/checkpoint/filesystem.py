@@ -431,12 +431,22 @@ def _write_files_from_queue(
                         )
                     )
                     tensor_dict[write_item.index.fqn] = tensor
-                    metadata_dict[write_item.index.fqn] = {"saved_offsets": write_item.tensor_data.chunk.offsets}
+                    metadata_dict[write_item.index.fqn] = {
+                        "saved_offsets": write_item.tensor_data.chunk.offsets
+                    }
 
                 if serialization_format == SerializationFormat.SAFETENSORS:
                     from safetensors.torch import save  # type: ignore[import-not-found]
 
-                    stream.write(save(tensor_dict, metadata={"DCP_SHARDING_INFO": json.dumps(metadata_dict), "DCP_VERSION": "1.0"}))
+                    stream.write(
+                        save(
+                            tensor_dict,
+                            metadata={
+                                "DCP_SHARDING_INFO": json.dumps(metadata_dict),
+                                "DCP_VERSION": "1.0",
+                            },
+                        )
+                    )
 
                 if use_fsync:
                     try:
