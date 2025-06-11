@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import os
-import pickle
 
 import torch
 import torch._dynamo.testing

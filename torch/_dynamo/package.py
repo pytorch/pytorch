@@ -8,15 +8,13 @@ be provided about cache hit for a specific compiled model. Users can load the co
 from a different process or host.
 """
 
-from abc import ABC, abstractmethod
-
-import os
 import contextlib
 import dataclasses
 import functools
 import hashlib
 import importlib
 import logging
+import os
 import pickle
 import platform
 import sys
@@ -25,9 +23,9 @@ from collections.abc import Generator
 from typing import Any, NewType, Optional
 
 import torch
-from torch._dynamo.precompile_context import PrecompileContext, PrecompileCacheArtifact
-from torch.compiler._cache import CacheArtifactFactory
 import torch._inductor.package
+from torch._dynamo.precompile_context import PrecompileCacheArtifact, PrecompileContext
+from torch.compiler._cache import CacheArtifactFactory
 
 from .bytecode_transformation import get_code_keys
 
@@ -132,6 +130,7 @@ class _DynamoCacheEntry:
     def backend_ids(self) -> set[_BackendId]:
         return {backend_id for code in self.codes for backend_id in code.backend_ids}
 
+
 @CacheArtifactFactory.register
 class _DynamoCacheArtifact(PrecompileCacheArtifact[_DynamoCacheEntry]):
     @staticmethod
@@ -140,6 +139,7 @@ class _DynamoCacheArtifact(PrecompileCacheArtifact[_DynamoCacheEntry]):
 
     def after_deserialization(self) -> _DynamoCacheEntry:
         return pickle.loads(self.content)
+
 
 class CompilePackage:
     """
@@ -356,35 +356,41 @@ class EagerCacheArtifact(PrecompileCacheArtifact[Any]):
         return pickle.loads(self.content)
 
 
-
 class DynamoStore:
-
     def record_package(self, package: CompilePackage) -> None:
         # records a package to PrecompileContext
         cache_entry = package.cache_entry()
         pickled_result = pickle.dumps(cache_entry)
-        PrecompileContext.record_artifact(_DynamoCacheArtifact.type(), key=package.source_id, content = pickled_result)
+        PrecompileContext.record_artifact(
+            _DynamoCacheArtifact.type(), key=package.source_id, content=pickled_result
+        )
 
     def record_eager_backend(self, backend_id: _BackendId, backend: Any) -> None:
         # Records eager fx graphs to PrecompileContext for testing
         pickled_result = pickle.dumps(backend)
-        PrecompileContext.record_artifact(EagerCacheArtifact.type(), key=backend_id, content = pickled_result)
+        PrecompileContext.record_artifact(
+            EagerCacheArtifact.type(), key=backend_id, content=pickled_result
+        )
 
     def save_package(self, package: CompilePackage, path: str) -> None:
         # saves a package to a given path
         backend_content = {}
         cache_entry = package.cache_entry()
         for backend_id in cache_entry.backend_ids:
-            backend_content[backend_id] = PrecompileContext.serialize_artifact_by_key(backend_id)
+            backend_content[backend_id] = PrecompileContext.serialize_artifact_by_key(
+                backend_id
+            )
         try:
             with open(os.path.join(path, "dynamo"), "wb") as dynamo_path:
                 pickle.dump(cache_entry, dynamo_path)
             with open(os.path.join(path, "backends"), "wb") as backend_path:
                 pickle.dump(backend_content, backend_path)
         except Exception as e:
-            raise RuntimeError(f"Failed to save package to {path}: {e}")
+            raise RuntimeError(f"Failed to save package to {path}: {e}") from e
 
-    def load_package(self, fn, path: str) -> tuple[CompilePackage, dict[_BackendId, Any]]:
+    def load_package(
+        self, fn: Any, path: str
+    ) -> tuple[CompilePackage, dict[_BackendId, Any]]:
         # loads a package from a given path and returns it plus a list of deserialized backends
         try:
             with open(os.path.join(path, "dynamo"), "rb") as dynamo_path:
@@ -392,7 +398,7 @@ class DynamoStore:
             with open(os.path.join(path, "backends"), "rb") as backend_path:
                 backend_content = pickle.load(backend_path)
         except Exception as e:
-            raise RuntimeError(f"Failed to load package from path {path}: {e}")
+            raise RuntimeError(f"Failed to load package from path {path}: {e}") from e
         for backend_id, backend in backend_content.items():
             backend_content[backend_id] = backend.after_deserialization()
         package = CompilePackage(fn, cache_entry)
