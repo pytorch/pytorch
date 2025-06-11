@@ -955,7 +955,7 @@ tensor(ccol_indices=tensor([0, 1, 2, 3, 3]),
 ```
 
 (sparse-bsr-docs)=
-## Sparse BSR Tensor
+### Sparse BSR Tensor
 
 The sparse BSR (Block compressed Sparse Row) tensor format implements the
 BSR format for storage of two-dimensional tensors with an extension to
