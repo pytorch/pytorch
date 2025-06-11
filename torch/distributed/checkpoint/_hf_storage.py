@@ -245,9 +245,7 @@ class _HuggingFaceStorageReader(FsspecReader):
                 # TODO: make this more efficient by doing offset reads instead of a
                 # full deserialization of the file
 
-                deserialized: list[tuple(str, dict[str, Any])] = deserialize(
-                    stream.read()
-                )  # type: ignore[valid-type]
+                deserialized = deserialize(stream.read())
                 deserialized_dict: dict[str, dict[str, Any]] = {
                     tensor_info[0]: tensor_info[1] for tensor_info in deserialized
                 }
