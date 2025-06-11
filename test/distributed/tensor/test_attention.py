@@ -1,13 +1,15 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import unittest
+from typing import Any, Callable
 
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
+from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import DeviceMesh
+from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental._attention import (
     _AttentionContextParallel,
@@ -22,6 +24,7 @@ from torch.distributed.tensor.experimental._attention import (
 )
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.nn.attention.flex_attention import create_block_mask
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -449,7 +452,7 @@ class RingFlexAttentionTest(DTensorTestBase):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+        from torch.nn.attention.flex_attention import flex_attention
 
         # Compile the flex_attention function
         flex_attention = torch.compile(flex_attention, dynamic=False, fullgraph=True)
@@ -526,33 +529,72 @@ class RingFlexAttentionTest(DTensorTestBase):
         cp_k = k.detach().clone()
         cp_v = v.detach().clone()
 
+        """
         with context_parallel(
             device_mesh,
             buffers=[cp_q, cp_k, cp_v],
             buffer_seq_dims=[2, 2, 2],
         ):
-            cp_q.requires_grad = True
-            cp_k.requires_grad = True
-            cp_v.requires_grad = True
+        """
+        cp_q.requires_grad = True
+        cp_k.requires_grad = True
+        cp_v.requires_grad = True
 
-            from torch.distributed.tensor import DTensor, Shard
+        from torch.distributed.tensor import Shard
 
-            cp_q_dist = DTensor.from_local(cp_q, device_mesh, [Shard(2)])
-            cp_k_dist = DTensor.from_local(cp_k, device_mesh, [Shard(2)])
-            cp_v_dist = DTensor.from_local(cp_v, device_mesh, [Shard(2)])
+        cp_q_dist = distribute_tensor(cp_q, device_mesh, [Shard(2)])
+        cp_k_dist = distribute_tensor(cp_k, device_mesh, [Shard(2)])
+        cp_v_dist = distribute_tensor(cp_v, device_mesh, [Shard(2)])
 
-            cp_out, cp_lse = flex_attention(
-                cp_q_dist,
-                cp_k_dist,
-                cp_v_dist,
-                block_mask=block_mask,
-                return_lse=True,
-            )
-            cp_out.sum().backward()
+        cp_out, cp_lse = flex_attention(
+            cp_q_dist,
+            cp_k_dist,
+            cp_v_dist,
+            block_mask=block_mask,
+            return_lse=True,
+        )
+        cp_out.sum().backward()
 
-            cp_q.requires_grad = False
-            cp_k.requires_grad = False
-            cp_v.requires_grad = False
+        """
+        cp_q.requires_grad = False
+        cp_k.requires_grad = False
+        cp_v.requires_grad = False
+        """
+
+
+@flex_attention_hop.py_impl(DTensor)
+def cp_flex_attention(
+    mode,
+    query: DTensor,
+    key: DTensor,
+    value: DTensor,
+    score_mod: Callable,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple = (),
+    mask_mod_other_buffers: tuple = (),
+) -> tuple[DTensor, DTensor]:
+    q_local = query.to_local()
+    k_local = key.to_local()
+    v_local = value.to_local()
+
+    out = flex_attention_hop(
+        q_local,
+        k_local,
+        v_local,
+        score_mod=score_mod,  # TODO: rewrite score_mod for cp
+        block_mask=block_mask,
+        scale=scale,
+        kernel_options=kernel_options,
+        score_mod_other_buffers=score_mod_other_buffers,
+        mask_mod_other_buffers=mask_mod_other_buffers,
+    )
+
+    return (
+        DTensor.from_local(out[0], query.device_mesh, query.placements),
+        DTensor.from_local(out[1], query.device_mesh, query.placements),
+    )
 
 
 if __name__ == "__main__":

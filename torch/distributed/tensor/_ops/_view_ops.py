@@ -254,9 +254,9 @@ def dim_movedim(
 
 def dim_repeat(ndim: int, sizes: Shape) -> DimMap:
     sizes = normalize_sizes(sizes)
-    assert len(sizes) >= ndim, (
-        f"Number of dimensions of repeat dims {sizes} can not be smaller than number of dimensions of tensor {ndim}."
-    )
+    assert (
+        len(sizes) >= ndim
+    ), f"Number of dimensions of repeat dims {sizes} can not be smaller than number of dimensions of tensor {ndim}."
     pad = len(sizes) - ndim
     return tuple(Repeat.new(Singleton(), s) for s in sizes[:pad]) + tuple(
         Repeat.new(InputDim(i), s) for i, s in enumerate(sizes[pad:])
@@ -275,9 +275,9 @@ def infer_size(total_size: int, sizes: Shape) -> Shape:
     if infers:
         size = -size
         missing_size = total_size // size
-        assert total_size % size == 0, (
-            f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
-        )
+        assert (
+            total_size % size == 0
+        ), f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
         return tuple(s if s != -1 else missing_size for s in sizes)
     assert size == total_size, f"sizes do not match {total_size} vs {size}"
     return sizes
@@ -576,9 +576,9 @@ def propagate_shape_and_sharding(
                 for size, shard in zip(mesh_sizes, input_src_placements):
                     if isinstance(shard, Shard) and shard.dim == in_dim:
                         submesh_size *= size
-                assert out_size % submesh_size == 0, (
-                    f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
-                )
+                assert (
+                    out_size % submesh_size == 0
+                ), f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
 
             # we will only shard our first component of the split
             return in_dim if cmd.split_id == 0 else None
@@ -674,6 +674,48 @@ def register_op_strategy_map(
             )
 
         return output_strategy
+
+
+@register_op_strategy(aten.as_strided.default, schema_info=RuntimeSchemaInfo(1))
+def as_strided_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Note: this `as_strided` strategy is a simplified version only for unblocking
+    DTensor `flex_attention` implementation. It only supports the case where
+    the `input` has the same shape as `size` and `storage_offset` is `None`, and
+    in `FakeTensorMode` only, i.e. it only guarantees the correctness of shape and
+    stride propagation.
+    """
+    assert (
+        len(op_schema.args_schema) > 2
+    ), f"as_strided should have at least 3 args but got {len(op_schema.args_schema)}"
+
+    inp_strategy = op_schema.args_schema[0]
+    assert isinstance(inp_strategy, OpStrategy)
+
+    target_size = op_schema.args_schema[1]
+    assert isinstance(target_size, (tuple, list))
+    target_stride = op_schema.args_schema[2]
+    assert isinstance(target_stride, (tuple, list))
+    target_size, target_stride = tuple(target_size), tuple(target_stride)
+
+    if len(op_schema.args_schema) == 4:
+        storage_offset = op_schema.args_schema[3]
+        assert (
+            storage_offset is None
+        ), f"DTensor as_strided only supports storage_offset == None but got {storage_offset}"
+
+    inp_size = inp_strategy.shape
+    assert (
+        inp_size == target_size
+    ), f"as_strided only supports the same size: input has size {inp_size} but target size is {target_size}"
+
+    assert len(target_size) == len(
+        target_stride
+    ), f"size and stride should have the same length, but got {len(target_size)} and {len(target_stride)}"
+
+    from torch.distributed.tensor._ops._tensor_ops import default_strategy
+
+    return default_strategy(op_schema)
 
 
 register_op_strategy_map(aten.squeeze.default, torch.squeeze)
