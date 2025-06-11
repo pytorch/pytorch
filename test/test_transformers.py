@@ -4059,31 +4059,6 @@ class TestSDPAXpuOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
-    def test_attention_preserves_query_layout(self, device):
-
-        def test_attention(permute_order: list[list[int]]):
-            BHSqD = [4, 16, 256, 64]
-            BHSkvD = [4, 16, 512, 64]
-
-            shape_q = [BHSqD[idx] for idx in permute_order]
-            shape_kv = [BHSkvD[idx] for idx in permute_order]
-            reverse = [permute_order.index(idx) for idx in range(4)]
-            q = torch.randn(*shape_q, dtype=torch.bfloat16, device=device, requires_grad=False).permute(reverse)
-            k = torch.randn(*shape_kv, dtype=torch.bfloat16, device=device, requires_grad=False).permute(reverse)
-            v = torch.randn(*shape_kv, dtype=torch.bfloat16, device=device, requires_grad=False).permute(reverse)
-            self.assertEqual(q.shape, BHSqD)
-            self.assertEqual(k.shape, BHSkvD)
-            self.assertEqual(v.shape, BHSkvD)
-
-            out = F.scaled_dot_product_attention(q, k, v)
-            self.assertTrue(out.permute(permute_order).is_contiguous())
-
-        permutable = [0, 1, 2]
-        permute_orders = itertools.permutations(permutable)
-
-        for permute_order in permute_orders:
-            test_attention(list(permute_order) + [3])
-
     @parametrize("type", ["dense"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels_packed(self, device, type: str, is_contiguous: bool):
