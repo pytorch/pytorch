@@ -98,7 +98,7 @@ def _disable_user_warnings(
     return wrapper
 
 
-@functools.lru_cache(None)
+@functools.cache
 @_disable_user_warnings
 def get_ignored_functions() -> set[Callable]:
     """
@@ -378,7 +378,7 @@ def get_ignored_functions() -> set[Callable]:
     }
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_default_nowrap_functions() -> set[Callable]:
     """
     Return public functions that do not wrap in a subclass when invoked by
@@ -404,7 +404,7 @@ def get_default_nowrap_functions() -> set[Callable]:
     }
 
 
-@functools.lru_cache(None)
+@functools.cache
 @_disable_user_warnings
 def get_testing_overrides() -> dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
@@ -1808,7 +1808,7 @@ has_torch_function_variadic = _add_docstr(
 )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _get_overridable_functions() -> tuple[
     dict[Any, list[Callable]], dict[Callable, str]
 ]:
@@ -1929,7 +1929,7 @@ def resolve_name(f):
     return _get_overridable_functions()[1].get(f)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _get_tensor_methods() -> set[Callable]:
     """Returns a set of the overridable methods on ``torch.Tensor``"""
     overridable_funcs = get_overridable_functions()

@@ -1229,7 +1229,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 remote_cache.put(key, cache_data)
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
         """
         Attempts to load the remote cache, returns None on error.

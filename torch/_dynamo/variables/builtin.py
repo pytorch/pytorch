@@ -169,7 +169,7 @@ class BuiltinVariable(VariableTracker):
         return cls(value, source=source)
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _constant_fold_functions():
         fns = {
             abs,
@@ -239,7 +239,7 @@ class BuiltinVariable(VariableTracker):
         return self.fn in self._constant_fold_functions()
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _fx_graph_functions():
         fns = {
             operator.abs,
@@ -285,7 +285,7 @@ class BuiltinVariable(VariableTracker):
         return fns
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _binops() -> dict[
         Callable[..., object], tuple[list[str], Callable[..., object]]
     ]:
@@ -324,7 +324,7 @@ class BuiltinVariable(VariableTracker):
         return fns
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _binop_handlers():
         # Multiple dispatch mechanism defining custom binop behavior for certain type
         # combinations. Handlers are attempted in order, and will be used if the type checks

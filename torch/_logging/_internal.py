@@ -1143,7 +1143,7 @@ class LazyTraceHandler(logging.StreamHandler):
             super().emit(record)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def warning_once(logger_obj, *args, **kwargs) -> None:
     """
     This function is similar to `logger.warning()`, but will emit the warning with the same message only once

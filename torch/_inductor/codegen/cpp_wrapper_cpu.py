@@ -274,12 +274,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ):
         code = self.prefix
 
-        @functools.lru_cache(None)
+        @functools.cache
         def sizeof(name):
             self.codegen_input_size_var_decl(code, name)
             return f"{name}_size"
 
-        @functools.lru_cache(None)
+        @functools.cache
         def strideof(name):
             self.codegen_input_stride_var_decl(code, name)
             return f"{name}_stride"
@@ -1469,7 +1469,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_memory_formats.add(memory_format_str)
         return f"cached_torch_memory_format_{memory_format_str}"
 
-    @functools.lru_cache(None)  # noqa: B019
+    @functools.cache  # noqa: B019
     def codegen_int_array_var(
         self,
         int_array: str,

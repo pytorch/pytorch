@@ -7379,7 +7379,7 @@ class ShapeEnv:
 
         # Don't track this one. (Because this cache is inside this function the
         # cache only lasts for the invocation of this function call)
-        @functools.lru_cache(None)
+        @functools.cache
         def compute_concrete_val() -> sympy.Basic:
             if hint is None:
                 # This is only ever called for expressions WITHOUT unbacked

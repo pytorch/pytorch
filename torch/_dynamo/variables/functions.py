@@ -1805,7 +1805,7 @@ class PolyfilledFunctionVariable(VariableTracker):
     }
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _get_polyfill_handlers(cls) -> dict[Callable[..., Any], types.FunctionType]:
         return {}
 

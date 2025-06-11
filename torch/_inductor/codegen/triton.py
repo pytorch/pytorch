@@ -1311,7 +1311,7 @@ class TritonKernelOverrides(TritonOverrides):
         self._setup_libdevice_routing()
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _setup_libdevice_routing(cls):
         """Set up routing to libdevice implementations for fp64 inputs."""
 

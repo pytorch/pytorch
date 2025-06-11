@@ -127,7 +127,7 @@ def install_gcc_via_conda() -> str:
     return cxx_path
 
 
-@functools.lru_cache(None)
+@functools.cache
 def check_compiler_exist_windows(compiler: str) -> None:
     """
     Check if compiler is ready, in case end user not activate MSVC environment.
@@ -200,13 +200,13 @@ def convert_cubin_to_obj(
     return obj_file
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_apple_clang(cpp_compiler: str) -> bool:
     version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
     return "Apple" in version_string.splitlines()[0]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
@@ -221,7 +221,7 @@ def _is_clang(cpp_compiler: str) -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_gcc(cpp_compiler: str) -> bool:
     # Since "clang++" ends with "g++", the regex match below would validate on it.
     if _is_clang(cpp_compiler):
@@ -229,7 +229,7 @@ def _is_gcc(cpp_compiler: str) -> bool:
     return bool(re.search(r"(gcc|g\+\+|gnu-c\+\+)", cpp_compiler))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_msvc_cl(cpp_compiler: str) -> bool:
     if not _IS_WINDOWS:
         return False
@@ -247,7 +247,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_intel_compiler(cpp_compiler: str) -> bool:
     def _check_minimal_version(compiler_version: TorchVersion) -> None:
         """
@@ -291,32 +291,32 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_gcc() -> bool:
     return _is_gcc(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_clang() -> bool:
     return _is_clang(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_intel_compiler() -> bool:
     return _is_intel_compiler(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_apple_clang() -> bool:
     return _is_apple_clang(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_msvc_cl() -> bool:
     return _is_msvc_cl(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_compiler_version_info(compiler: str) -> str:
     env = os.environ.copy()
     env["LC_ALL"] = "C"  # Don't localize output
@@ -885,7 +885,7 @@ def _get_python_related_args() -> tuple[list[str], list[str]]:
     return python_include_dirs, python_lib_path
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_conda_llvm_openmp_installed() -> bool:
     try:
         command = "conda list llvm-openmp --json"
@@ -895,7 +895,7 @@ def is_conda_llvm_openmp_installed() -> bool:
         return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def homebrew_libomp() -> tuple[bool, str]:
     try:
         # check if `brew` is installed
@@ -916,7 +916,7 @@ def homebrew_libomp() -> tuple[bool, str]:
         return False, ""
 
 
-@functools.lru_cache(None)
+@functools.cache
 def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
     try:
         output = subprocess.check_output([cpp_compiler, "-print-file-name=bin"]).decode(
@@ -930,7 +930,7 @@ def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
         pass
 
 
-@functools.lru_cache(None)
+@functools.cache
 def perload_icx_libomp_win(cpp_compiler: str) -> None:
     def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
         try:

@@ -149,7 +149,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return f"{self.__class__.__name__}({self.value})"
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _constant_fold_classes():
         return {
             torch.device,
@@ -159,7 +159,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         }
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _in_graph_classes():
         _in_graph_class_list = {
             torch.Tensor,
@@ -177,7 +177,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return set(tensortype_to_dtype.keys()) | _in_graph_class_list
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def supported_c_new_functions():
         exceptions = [
             getattr(builtins, name).__new__
@@ -843,7 +843,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _supported_random_functions():
         fns = {
             random.random,

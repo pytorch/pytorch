@@ -560,7 +560,7 @@ def nothing(f):
     return f
 
 
-@functools.lru_cache(None)
+@functools.cache
 def patch_torch_manual_seed():
     """Make torch manual seed deterministic. Helps with accuracy testing."""
 

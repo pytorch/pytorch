@@ -511,7 +511,7 @@ scaled_mm_device_tma_template = TritonTemplate(
 
 
 # prevent duplication registration of extern functions
-@functools.lru_cache(None)
+@functools.cache
 def lazy_register_extern_choice(fn):
     return ExternKernelChoice(fn)
 
@@ -1175,7 +1175,7 @@ def tuned_scaled_mm(
     return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
     props = torch.cuda.get_device_properties(index or 0)
     return props.major <= 7

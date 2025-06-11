@@ -2013,7 +2013,7 @@ def _optimize_assert(
 
 class TorchPatcher:
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def patch():
         # A better way to disable the following would be decorate the source
         # functions with @torch._disable_dynamo. However, this causes issues
