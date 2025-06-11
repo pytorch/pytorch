@@ -8515,7 +8515,7 @@ class GraphModule(torch.nn.Module):
         return (sub,)
 
     class cond_true_0(torch.nn.Module):
-        def forward(self, l_x_, s94, s17_true_branch, getitem_2_false_branch, l_z__false_branch):
+        def forward(self, l_x_: "f32[s17, s94]", s94: "Sym(s94)", s17_true_branch: "Sym(s17)", getitem_2_false_branch: "Sym(s17)", l_z__false_branch: "f32[s17, s94]"):
             l_x__1 = l_x_
             s94_1 = s94
 
@@ -8525,7 +8525,7 @@ class GraphModule(torch.nn.Module):
             return (clone,)
 
     class cond_false_0(torch.nn.Module):
-        def forward(self, l_x_, s94, s17_true_branch, getitem_2_false_branch, l_z__false_branch):
+        def forward(self, l_x_: "f32[s17, s94]", s94: "Sym(s94)", s17_true_branch: "Sym(s17)", getitem_2_false_branch: "Sym(s17)", l_z__false_branch: "f32[s17, s94]"):
             l_x__1 = l_x_
             s94_1 = s94
 
@@ -8718,37 +8718,6 @@ class TestHopSchema(TestCase):
         flat_schema = schema_gen.gen_schema()
         self.assertExpectedInline(
             str(flat_schema), """cond(Tensor tuple_args0, Tensor tuple_args1) -> ()"""
-        )
-
-    def test_cond_gen_schema_tensor_inputs(self):
-        schema = torch.ops.higher_order.cond.gen_schema(
-            torch.tensor(True),
-            lambda x: x.sin(),
-            lambda x: x.cos(),
-            (torch.randn(3, 4),),
-        )
-        self.assertExpectedInline(
-            str(schema),
-            """cond(Tensor pred, Any true_fn, Any false_fn, Tensor operand0) -> ((Tensor))""",
-        )
-
-    def test_cond_gen_schema_symbool_inputs(self):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        with fake_mode, fake_mode.shape_env.ignore_fresh_unbacked_symbols():
-            sym_bool = torch.randn(3, 4).nonzero().size(0) == 0
-
-        schema = torch.ops.higher_order.cond.gen_schema(
-            sym_bool,
-            lambda x: x.sin(),
-            lambda x: x.cos(),
-            (torch.randn(3, 4),),
-        )
-        self.assertExpectedInline(
-            str(schema),
-            """cond(SymBool pred, Any true_fn, Any false_fn, Tensor operand0) -> ((Tensor))""",
         )
 
 
