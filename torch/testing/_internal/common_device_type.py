@@ -1969,6 +1969,28 @@ flex_attention_supported_platform = unittest.skipUnless(
     ),
     "Requires CUDA and Triton, or CPU with avx2 and later",
 )
+
+# mimics the logic of `torch.testing._internal.common_device_type.get_device_type_test_bases`
+def get_target_devices() -> list[str]:
+    devices = []
+    if IS_SANDCASTLE or IS_FBCODE:
+        if IS_REMOTE_GPU:
+            # Skip if sanitizer is enabled
+            if not TEST_WITH_ASAN and not TEST_WITH_TSAN and not TEST_WITH_UBSAN:
+                devices.append("cuda")
+        else:
+            devices.append("cpu")
+    else:
+        devices.append("cpu")
+        if torch.cuda.is_available():
+            devices.append("cuda")
+    if TEST_HPU:
+        devices.append("hpu")
+    return devices
+
+
+target_devices = get_target_devices()
+
 if torch.version.hip and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName:
     e4m3_type = torch.float8_e4m3fnuz
     e5m2_type = torch.float8_e5m2fnuz
