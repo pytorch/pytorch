@@ -311,7 +311,7 @@ void SymbolicShapeMeta::init_is_contiguous() const {
 }
 
 void SymbolicShapeMeta::init_def_contiguous() const {
-  set_is_contiguous(compute_def_contiguous());
+  set_def_contiguous(compute_def_contiguous());
 }
 
 void SymbolicShapeMeta::init_is_channels_last_contiguous() const {

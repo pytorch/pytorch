@@ -15164,7 +15164,9 @@ class TestExportCustomClass(TorchTestCase):
         }
 
         traced = export(MyModel(), example_inputs, strict=True)
-        self.assertExpectedInline(traced.graph_module.code, """\
+        self.assertExpectedInline(
+            traced.graph_module.code,
+            """\
 def forward(self, x, mask):
     masked_select = torch.ops.aten.masked_select.default(x, mask);  x = mask = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(masked_select, 0)
@@ -15180,7 +15182,9 @@ def forward(self, x, mask):
     contiguous = torch.ops.aten.contiguous.default(view);  view = None
     add = torch.ops.aten.add.Tensor(contiguous, 1);  contiguous = None
     return (add,)
-    """, ignore_empty_lines=True)
+    """,
+            ignore_empty_lines=True,
+        )
 
 
 if __name__ == "__main__":
