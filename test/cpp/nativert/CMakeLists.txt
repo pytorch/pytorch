@@ -13,7 +13,6 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/executor/Weights.cpp
   ${TORCH_ROOT}/torch/nativert/common/FileUtil.cpp
   ${TORCH_ROOT}/torch/nativert/executor/memory/FunctionSchema.cpp
-  ${TORCH_ROOT}/torch/nativert/executor/ExecutionPlanner.cpp
 )
 
 add_executable(test_nativert

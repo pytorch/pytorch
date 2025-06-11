@@ -115,7 +115,8 @@ struct alignas(64) HostStatsStaged {
  * never do any possible expensive operations (such as CUDA runtime API calls)
  * while holding the lock.
  *
- * There are four public methods: allocate, free, record_event and empty_cache.
+ * There are several public methods such as allocate, free, record_event,
+ * empty_cache, etc.
  *   1) In the allocate path, we first check to see if we can service our
  * request from this free list, and otherwise we create a new block with
  * allocate_host_memory.
@@ -453,6 +454,10 @@ struct CachingHostAllocatorImpl {
     }
   }
 
+  virtual bool is_pinned(const void* ptr) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for is_pinned");
+  }
+
  private:
   virtual void add_allocated_block(B* block) {
     std::lock_guard<std::mutex> g(blocks_mutex_);
@@ -652,6 +657,23 @@ struct TORCH_API HostAllocator : public at::Allocator {
 
   // Resets the peak memory usage metrics
   virtual void reset_peak_stats() = 0;
+
+  // Checks if the given pointer is a pinned memory allocation
+  virtual bool is_pinned(const void* ptr) const = 0;
+
+  // Initializes the host allocator to avoid early runtime calls in is_pinned.
+  virtual void init() {
+    initialized_ = true;
+  }
+
+  // Return true if the host allocator has been initialized
+  bool is_initialized() const {
+    return initialized_;
+  }
+
+private:
+  // Indicates whether the allocator has been initialized
+  bool initialized_{false};
 };
 
 template <typename T, c10::DeleterFnPtr deleteFunc>
@@ -696,6 +718,15 @@ struct CachingHostAllocatorInterface : public HostAllocator {
     impl_->resetPeakStats();
   }
 
+  bool is_pinned(const void* ptr) const override {
+    if (!is_initialized()) {
+      // If the host allocator is not initialized, we assume that the pointer
+      // isn't pinned to avoid early runtime call.
+      return false;
+    }
+    return impl_->is_pinned(ptr);
+  }
+
   std::unique_ptr<T> impl_;
 };
 
@@ -703,7 +734,7 @@ struct CachingHostAllocatorInterface : public HostAllocator {
   void deleter(void* ptr);                                          \
   struct name final                                                 \
       : public at::CachingHostAllocatorInterface<impl, deleter> {}; \
-  static name instance;                                                    \
+  static name instance;                                             \
   void deleter(void* ptr) {                                         \
     instance.free(ptr);                                             \
   }
