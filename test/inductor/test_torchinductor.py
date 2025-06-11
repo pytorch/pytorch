@@ -3872,9 +3872,7 @@ class CommonTemplate:
         with self.assertRaisesRegex(RuntimeError, msg):
             with torch.no_grad():
                 torch.compile(fn)(t)
-        # TODO: Autograd internal assertion
-        msg = r".*isDifferentiableType\(variable.scalar_type\(\)\) INTERNAL ASSERT FAILED.*"
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(RuntimeError, "Autograd not support dtype:.*"):
             torch.compile(fn)(t)
 
     @unittest.skipIf(
