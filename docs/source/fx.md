@@ -420,7 +420,7 @@ If you’re not familiar with debuggers, please see the auxiliary section
 * Nondeterministic `set` iteration order. In Python, the `set` datatype is
   unordered. Using `set` to contain collections of objects like `Node`\ s,
   for example, can cause unexpected nondeterminism. An example is iterating
-  over a set of `Node`\ s to insert them into a `Graph`. Because the
+  over a set of `Node` s to insert them into a `Graph`. Because the
   `set` data type is unordered, the ordering of the operations in the output
   program will be nondeterministic and can change across program invocations.
   The recommended alternative is to use a `dict` data type, which is
