@@ -269,12 +269,12 @@ class C10_API SymbolicShapeMeta {
   // Mutex to prevent races when initializing the variable from const accessors
   mutable std::mutex mutables_;
   mutable SymInt numel_ = 1;
-  mutable SymBool is_contiguous_{false};
+  mutable SymBool is_contiguous_{true};
   mutable SymBool is_channels_last_contiguous_{false};
   mutable SymBool is_channels_last_3d_contiguous_{false};
   mutable SymBool is_channels_last_{false};
   mutable SymBool is_channels_last_3d_{false};
-  mutable SymBool is_non_overlapping_and_dense_{false};
+  mutable SymBool is_non_overlapping_and_dense_{true};
 
   mutable SymBool def_contiguous_{false};
   mutable SymBool def_channels_last_contiguous_{false};
