@@ -124,6 +124,8 @@ class TORCH_API Context {
 
   void lazyInitDevice(c10::DeviceType device_type) {
     if (device_type != at::kCPU) {
+      // ensure host allocator is initialized
+      at::getHostAllocator(device_type)->init(); 
       c10::call_once(init_[static_cast<int8_t>(device_type)], [&] {
         getAcceleratorHooksInterface(device_type).init();
       });
