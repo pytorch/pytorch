@@ -62,6 +62,6 @@ REGISTER_DISPATCH(hardswish_backward_stub, hardswish_backward_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, leaky_relu_backward_kernel);
 REGISTER_DISPATCH(softshrink_stub, softshrink_kernel);
-REGISTER_DISPATCH(softshrink_backward_stub, softshrink_backward_kernel);
+REGISTER_DISPATCH(shrink_backward_stub, softshrink_backward_kernel);
 
 } // namespace at::native
