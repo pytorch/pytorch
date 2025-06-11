@@ -19,7 +19,7 @@ namespace cuda {
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
-  CUDAGraph(bool instantiate_eagerly=false);
+  CUDAGraph(bool keep_graph=false);
   ~CUDAGraph();
 
   // See Note [Explicit Registration of Generators to the CUDA Graph]
@@ -84,7 +84,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   static constexpr c10::DeviceIndex UNDEFINED_DEVICE = -1;
   c10::DeviceIndex capture_dev_{UNDEFINED_DEVICE};
 
-  bool instantiate_eagerly_;
+  bool keep_graph_;
 };
 
 } // namespace cuda
