@@ -25,6 +25,7 @@ static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
 }
 
 REGISTER_UNARY_TI_DISPATCH(exp);
+REGISTER_UNARY_TI_DISPATCH(expm1);
 REGISTER_UNARY_TI_DISPATCH(erf);
 REGISTER_UNARY_TI_DISPATCH(erfc);
 REGISTER_UNARY_TI_DISPATCH(erfinv);
