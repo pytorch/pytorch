@@ -696,7 +696,6 @@ class TestDraftExport(TestCase):
 
         # right now it's actually exactly 4x;
         # I guess original tensor, 2 tensors per add op, 1 for clone stored in node.meta["val"]
-        print(x_usage, peak_mem_usage)
         self.assertTrue((peak_mem_usage - base_usage) <= (x_usage - base_usage) * 4.0)
 
 
