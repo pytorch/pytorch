@@ -23,6 +23,10 @@ from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
 from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -39,6 +43,7 @@ from torch.testing._internal.inductor_utils import (
     scalar_asserts=False,
     nan_asserts=False,
 )
+@instantiate_parametrized_tests
 class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
@@ -181,6 +186,33 @@ class FxirTestCase(InductorTestCase):
 
         args = [torch.randn(8, device=self.device) for _ in range(2)]
         self._compile_and_check(foo, args, expected_num_triton_kernels=1)
+
+    def test_cat_views(self):
+        """
+        Test concatenation with multiple kernels writing to the same buffer.
+        """
+
+        def foo(x, y):
+            a = x - 2
+            b = y.sum(0, keepdim=True)
+            c = torch.cat((a, b)).clone()
+            return a, b, c
+
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=2)
+
+        def get_offset(node: torch.fx.Node) -> int:
+            (input_, shape, stride, offset) = node.args
+            assert isinstance(offset, int)
+            return offset
+
+        # Check for 2 views, one of which is offset.
+        as_strided_nodes = list(
+            gm.graph.find_nodes(op="call_function", target=torch.as_strided)
+        )
+        self.assertEqual(len(as_strided_nodes), 2)
+        num_offset_views = sum(get_offset(node) > 0 for node in as_strided_nodes)
+        self.assertEqual(num_offset_views, 1)
 
     def test_cat_to_alloc(self):
         """
@@ -375,6 +407,32 @@ class FxirTestCase(InductorTestCase):
             output_code = f.read()
         self.assertIn("triton_kernel_wrapper_mutation", output_code)
 
+    @parametrize(
+        "const",
+        (1, 1.5),
+    )
+    def test_export_const_placeholder(self, const):
+        """
+        Test that we can compile a graph coming from torch.export with a constant input.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x, y):
+                return x - y
+
+        args = (torch.randn(8, device=self.device), const)
+        mod = TestModule()
+        export_gm = torch.export.export(mod, args).module()
+
+        def compile_module(*inps):
+            torch._inductor.compile(export_gm, inps)
+
+        (inductor_gm,) = self._run_and_capture_graphs(compile_module, args)
+        result = inductor_gm(*args)
+        ref = mod(*args)
+
+        self.assertTrue(same(ref, result))
+
     @torch._inductor.config.patch("graph_partition", True)
     def test_subgraph_raises(self):
         """
@@ -408,6 +466,39 @@ class FxirTestCase(InductorTestCase):
             common.device_codegens, {device.type: cpp_backend}
         ), self.assertRaisesRegex(BackendCompilerFailed, "Triton"):
             self._compile_and_check(foo, args)
+
+    @parametrize("enable_tuning", (False, True))
+    @parametrize("use_dynamic_shapes", (False, True))
+    def test_autotune(self, use_dynamic_shapes: bool, enable_tuning: bool):
+        orig_run = torch._inductor.runtime.triton_heuristics.CachingAutotuner.run
+        called = False
+
+        def run(*args, **kwargs):
+            nonlocal called
+            called = True
+            return orig_run(*args, **kwargs)
+
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+
+        with config.patch(
+            "triton.autotune_at_compile_time", enable_tuning
+        ), unittest.mock.patch.object(
+            torch._inductor.runtime.triton_heuristics.CachingAutotuner, "run", run
+        ):
+            # Compile and check that the tuner was called.
+            self.assertFalse(called)
+            (gm,) = self._compile_and_check(
+                torch.mul, args, compile_kwargs={"dynamic": use_dynamic_shapes}
+            )
+            self.assertEqual(called, enable_tuning)
+
+        # Check for a symbolic output shape.
+        (empty_strided,) = gm.graph.find_nodes(
+            op="call_function", target=torch.empty_strided
+        )
+        (shape, stride) = empty_strided.args
+        output_is_symbolic = any(isinstance(dim, torch.SymInt) for dim in shape)
+        self.assertEqual(output_is_symbolic, use_dynamic_shapes)
 
 
 if __name__ == "__main__":

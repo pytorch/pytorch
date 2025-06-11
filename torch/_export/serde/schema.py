@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 7)
+SCHEMA_VERSION = (8, 8)
 TREESPEC_VERSION = 1
 
 
@@ -202,6 +202,7 @@ class Argument(_Union):
     as_operator: Annotated[str, 220]
     as_sym_float: Annotated[SymFloatArgument, 230]
     as_sym_floats: Annotated[list[SymFloatArgument], 240]
+    as_optional_tensor: Annotated[OptionalTensorArgument, 250]
 
 
 class ArgumentKind(IntEnum):

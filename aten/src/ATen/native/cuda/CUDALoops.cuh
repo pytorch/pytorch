@@ -345,8 +345,8 @@ static inline void launch_vectorized_kernel(
       auto output_calc = TrivialOffsetCalculator<1>();
       auto loader = memory::LoadWithoutCast();
       auto storer = memory::StoreWithoutCast();
-      int64_t grid_unrolled = (N + io_block_work_size<io_size>() - 1) / io_block_work_size<io_size>();
-      unrolled_elementwise_kernel<func_t, array_t, elems_per_thread<io_size>()>
+      int64_t grid_unrolled = (N + elementwise_block_work_size() - 1) / elementwise_block_work_size();
+      unrolled_elementwise_kernel<func_t, array_t, elementwise_thread_work_size()>
           <<<grid_unrolled, num_threads(), 0, stream>>>(
               N, f, data, input_calc, output_calc, loader, storer);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
