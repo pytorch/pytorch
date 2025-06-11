@@ -1198,7 +1198,7 @@ matrix arguments.
    S == (S.t() @ D.t()).t()``.
 ```
 
-## Tensor methods and sparse
+### Tensor methods and sparse
 
 The following Tensor methods are related to sparse tensors:
 
