@@ -7,8 +7,6 @@ import queue
 import struct
 from typing import Any, Optional
 
-import fsspec  # type: ignore[import-untyped]
-
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint._hf_planner import _HuggingFaceLoadPlanner
 from torch.distributed.checkpoint.filesystem import SerializationFormat
@@ -42,7 +40,8 @@ SUFFIX = ".safetensors"
 class _HuggingFaceStorageWriter(FsspecWriter):
     """
     A writer that writes to a huggingface repository in the huggingface format.
-    Uses in Fsspec back-end to communicate with the huggingface hub.
+    Uses Fsspec back-end to communicate with back-end storage.
+    Fsspec registration of the storage solution is required.
     """
 
     def __init__(
@@ -56,19 +55,18 @@ class _HuggingFaceStorageWriter(FsspecWriter):
         Initialize the huggingface writer pointing to path.
 
         Args:
-            path: hf directory where the checkpoint will be written to. Should begin with hf://.
+            path: hf directory where the checkpoint will be read from.
+                  Needs to have .safetensors files, but can be from any fsspec supported storage,
+                  including localFS and hf://.
             fqn_to_index_mapping: A mapping from tensor FQN to the index of the file that the tensor should be written to.
                               Indices are from 1 to N, where N is the number of files. If not provided,
-                              the tensors will be written to a single file.
+                              the tensors will be written to a single file. If none, then all the tensors on the
+                              same rank will be written to the same file.
             token: The token to use to authenticate with huggingface hub.
             save_sharded: If True, save the checkpoint as a sharded checkpoint where every rank saves its own shard.
                         Default is False which assumes full tensors are being saved.
 
         """
-        from huggingface_hub import HfFileSystem  # type: ignore[import-not-found]
-
-        if HfFileSystem.protocol not in fsspec.available_protocols():
-            fsspec.register_implementation(HfFileSystem.protocol, HfFileSystem)
 
         if token is not None:
             super().__init__(
@@ -87,9 +85,9 @@ class _HuggingFaceStorageWriter(FsspecWriter):
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         new_plans = []
         for i, plan in enumerate(plans, start=1):
-            storage_data = {}
+            storage_data: dict[str, Any] = {}
             if self._fqn_to_index_mapping is not None:
-                storage_data["fqn_to_file_mapping"] = self._fqn_to_index_mapping
+                storage_data["fqn_to_index_mapping"] = self._fqn_to_index_mapping
             if self._save_sharded:
                 storage_data["shard_index"] = i
 
@@ -111,8 +109,8 @@ class _HuggingFaceStorageWriter(FsspecWriter):
         storage_data: dict[str, Any] = plan.storage_data
         storage_plan: Optional[dict[str, int]] = None
         shard_index: Optional[int] = None
-        if "fqn_to_file_mapping" in storage_data:
-            storage_plan = storage_data["fqn_to_file_mapping"]
+        if "fqn_to_index_mapping" in storage_data:
+            storage_plan = storage_data["fqn_to_index_mapping"]
         if "shard_index" in storage_data:
             shard_index = storage_data["shard_index"]
 
@@ -165,15 +163,22 @@ class _HuggingFaceStorageWriter(FsspecWriter):
 
         return buckets
 
-    def _gen_file_name(self, index: int, largest_index: int, shard_index: Optional[int]) -> str:
+    def _gen_file_name(
+        self, index: int, largest_index: int, shard_index: Optional[int]
+    ) -> str:
         if shard_index is not None:
-            return SHARDED_FILE_NAME.format(
-                shard_idx=f"{shard_index}".zfill(5), cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
-            ) + SUFFIX
+            return (
+                SHARDED_FILE_NAME.format(
+                    shard_idx=f"{shard_index}".zfill(5),
+                    cpt_idx=f"{index}".zfill(5),
+                    num_files=f"{largest_index}".zfill(5),
+                )
+                + SUFFIX
+            )
         else:
             return (
                 FILE_NAME.format(
-                cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
+                    cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
                 )
                 + SUFFIX
             )
@@ -186,7 +191,8 @@ class _HuggingFaceStorageWriter(FsspecWriter):
 class _HuggingFaceStorageReader(FsspecReader):
     """
     A reader that reads from a huggingface repository in the huggingface format.
-    Uses in Fsspec back-end to communicate with the huggingface hub.
+    Uses in Fsspec back-end to communicate with storage.
+    Fsspec registration of the storage solution is required.
     """
 
     def __init__(self, path: str, token: Optional[str] = None) -> None:
@@ -194,14 +200,11 @@ class _HuggingFaceStorageReader(FsspecReader):
         Initialize the huggingface reader pointing to path.
 
         Args:
-            path: hf directory where the checkpoint will be read from. Should begin with hf://.
+            path: hf directory where the checkpoint will be read from.
+            Needs to have .safetensors file, but can be from any fsspec supported storage,
+            including localFS and hf://.
             token: The token to use to authenticate with huggingface hub.
         """
-        from huggingface_hub import HfFileSystem  # type: ignore[import-not-found]
-
-        if HfFileSystem.protocol not in fsspec.available_protocols():
-            fsspec.register_implementation(HfFileSystem.protocol, HfFileSystem)
-
         if token is not None:
             super().__init__(path=path, token=token)
         else:

@@ -8,9 +8,7 @@ import tempfile
 from unittest.mock import MagicMock
 
 import torch
-from torch.distributed.checkpoint._hf_planner import (
-    _HuggingFaceLoadPlanner,
-)
+from torch.distributed.checkpoint._hf_planner import _HuggingFaceLoadPlanner
 from torch.distributed.checkpoint._hf_storage import (
     _HuggingFaceStorageReader,
     _HuggingFaceStorageWriter,
@@ -58,7 +56,7 @@ class TestHfStorage(TestCase):
 
             save_plan = SavePlan(
                 [write_item_1, write_item_2],
-                storage_data={"fqn_to_file_mapping": {"tensor_0": 1, "tensor_1": 2}},
+                storage_data={"fqn_to_index_mapping": {"tensor_0": 1, "tensor_1": 2}},
             )
             save_planner = DefaultSavePlanner()
             save_planner.set_up_planner(state_dict=state_dict)

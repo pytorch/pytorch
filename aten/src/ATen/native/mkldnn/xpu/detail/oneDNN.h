@@ -95,7 +95,8 @@ TORCH_API void woq_matmul_int4(
     const at::Tensor& mat2_, // quantized weight, [K/8, N]
     const at::Tensor& scale, // [K/group_size, N]
     const at::Tensor& zp, // [k/group_size, N]
-    int64_t group_size);
+    int64_t group_size,
+    bool pri_cache = true);
 
 dnnl::memory::dims conv_dst_size(
     int64_t ndim,
