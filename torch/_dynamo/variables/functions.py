@@ -1965,6 +1965,8 @@ class SysFunctionVariable(VariableTracker):
 
 from torch._higher_order_ops.triton_kernel_wrap import (
     TMADescriptorMetadata,
+    create_tma_experimental_metadata,
+    create_tma_stable_metadata,
     TritonHOPifier,
 )
 
@@ -2068,7 +2070,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             v = combined_args_raw[k]
             if isinstance(v, TMADescriptorVariable):
                 tma_descriptor_metadata[k] = v.to_metadata()
-                combined_args_raw[k] = v.data_ptr.from_tensor
+                combined_args_raw[k] = v.get_kernel_arg()
 
         combined_args = {
             variables.ConstantVariable.create(k): v
@@ -2171,6 +2173,17 @@ class TritonKernelVariable(VariableTracker):
 
 
 class TMADescriptorVariable(VariableTracker):
+    def to_metadata(self):
+        raise NotImplementedError
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        raise NotImplementedError
+
+    def get_kernel_arg(self):
+        raise NotImplementedError
+
+
+class TMADescriptorExperimentalVariable(TMADescriptorVariable):
     def __init__(
         self,
         data_ptr: "variables.DataPtrVariable",
@@ -2187,7 +2200,7 @@ class TMADescriptorVariable(VariableTracker):
         self.element_size = element_size
 
     def to_metadata(self):
-        return (
+        return create_tma_experimental_metadata(
             [dim.as_proxy() for dim in self.dims],
             [dim.as_proxy() for dim in self.block_dims],
             self.element_size.as_proxy(),
@@ -2205,8 +2218,42 @@ class TMADescriptorVariable(VariableTracker):
         codegen.foreach(args)
         codegen.call_function(len(args) + 1, False)
 
+    def get_kernel_arg(self):
+        return self.data_ptr.from_tensor
 
-class CreateTMADescriptorVariable(VariableTracker):
+
+class TMADescriptorStableVariable(TMADescriptorVariable):
+    def __init__(
+        self,
+        tensor: "variables.TensorVariable",
+        block_shape: "variables.ListVariable",
+        **kwargs,
+    ):
+        assert isinstance(tensor, variables.TensorVariable)
+        super().__init__(**kwargs)
+        self.tensor = tensor
+        self.block_shape = block_shape
+
+    def to_metadata(self):
+        return create_tma_stable_metadata(self.block_shape.as_proxy())
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "triton.tools.tensor_descriptor",
+                "TensorDescriptor",
+            )
+        )
+        codegen.load_method("from_tensor")
+        self.tensor.reconstruct(codegen)
+        codegen(self.block_shape)
+        codegen.call_method(2)
+
+    def get_kernel_arg(self) -> "variables.TensorVariable":
+        return self.tensor
+
+
+class CreateTMADescriptorExperimentalVariable(VariableTracker):
     def __init__(
         self,
         rank: int,
@@ -2214,7 +2261,6 @@ class CreateTMADescriptorVariable(VariableTracker):
     ) -> None:
         assert rank in (1, 2)
         super().__init__(**kwargs)
-        self.rank = rank
 
     def call_function(
         self,
@@ -2251,9 +2297,24 @@ class CreateTMADescriptorVariable(VariableTracker):
             ]
         element_size = kwargs["element_size"] if "element_size" in kwargs else args[-1]
 
-        return TMADescriptorVariable(
+        return TMADescriptorExperimentalVariable(
             data_ptr=ptr,
             dims=dims,
             block_dims=block_dims,
             element_size=element_size,
+        )
+
+class CreateTMADescriptorStableVariable(VariableTracker):
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        tensor = kwargs["tensor"] if "tensor" in kwargs else args[0]
+        block_shape = kwargs["block_shape"] if "block_shape" in kwargs else args[1]
+
+        return TMADescriptorStableVariable(
+            tensor=tensor,
+            block_shape=block_shape,
         )

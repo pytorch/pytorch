@@ -6075,14 +6075,35 @@ class TMADescriptor(ExternKernel):
     def create(  # type: ignore[no-untyped-def]
         cls,
         tensor: IRNode,
+        metadata: tuple[str, tuple[Union[int, torch.SymInt], ...]]
+    ):
+        key = (id(tensor), metadata)
+        if key not in cls._CACHE:
+            if metadata[0] == "experimental":
+                cls._CACHE[key] = cls._create_experimental_api(tensor, *metadata[1])
+            else:
+                assert metadata[0] == "stable"
+                cls._CACHE[key] = cls._create_stable_api(tensor, *metadata[1])
+        return cls._CACHE[key]
+
+    @classmethod
+    def _create_experimental_api(
+        cls,
+        tensor: IRNode,
         dims: list[Union[int, torch.SymInt]],
         block_dims: list[Union[int, torch.SymInt]],
         element_size: Optional[int] = None,
     ):
-        key = (id(tensor), dims, block_dims, element_size)
-        if key not in cls._CACHE:
-            cls._CACHE[key] = TMADescriptor(tensor, dims, block_dims, element_size)
-        return cls._CACHE[key]
+        return TMADescriptor(tensor, dims, block_dims, element_size)
+
+    @classmethod
+    def _create_stable_api(
+        cls,
+        tensor: IRNode,
+        block_shape: list[Union[int, torch.SymInt]],
+    ):
+        # todo
+        return TMADescriptor(blah)
 
     def __init__(
         self,

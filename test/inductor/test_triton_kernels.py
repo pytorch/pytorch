@@ -1739,9 +1739,10 @@ def forward(self, x_1, output_1):
         )(a, b)
 
         if dynamic:
-            self.assertExpectedInline(
-                backend.fw_graphs[0].code.strip(),
-                """\
+            if tma_version == "new":
+                self.assertExpectedInline(
+                    backend.fw_graphs[0].code.strip(),
+                    """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg1_1, pin_memory = False)
     add_2 = arg0_1 + 256
@@ -1750,17 +1751,41 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ([arg0_1], [256], 4), 'in_desc_ptr1': ([arg0_1], [256], 4), 'out_desc_ptr': ([arg0_1], [256], 4)}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
-            )
+                )
+            elif tma_version == "old":
+                self.assertExpectedInline(
+                    backend.fw_graphs[0].code.strip(),
+                    """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    zeros_like = torch.ops.aten.zeros_like.default(arg1_1, pin_memory = False)
+    add_2 = arg0_1 + 256
+    sub_1 = add_2 - 1;  add_2 = None
+    floordiv = sub_1 // 256;  sub_1 = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ([arg0_1], [256], 4), 'in_desc_ptr1': ([arg0_1], [256], 4), 'out_desc_ptr': ([arg0_1], [256], 4)}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
+    getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
+    return (getitem,)""",
+                )
         else:
-            self.assertExpectedInline(
-                backend.fw_graphs[0].code.strip(),
-                """\
+            if tma_version == "new":
+                self.assertExpectedInline(
+                    backend.fw_graphs[0].code.strip(),
+                    """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
     triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ([301], [256], 4), 'in_desc_ptr1': ([301], [256], 4), 'out_desc_ptr': ([301], [256], 4)}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
-            )
+                )
+            elif tma_version == "old":
+                self.assertExpectedInline(
+                    backend.fw_graphs[0].code.strip(),
+                    """\
+def forward(self, arg0_1, arg1_1):
+    zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ([301], [256], 4), 'in_desc_ptr1': ([301], [256], 4), 'out_desc_ptr': ([301], [256], 4)}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
+    getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
+    return (getitem,)""",
+                )
 
     @requires_gpu
     @common_utils.parametrize("after_data_ptr", [False, True])
