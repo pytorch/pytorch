@@ -152,6 +152,8 @@ class CompilePackage:
         self._cached_backends: dict[_BackendId, Any] = {}
 
         self._initialize(fn, dynamo)
+        # Always go back to a clean state after initialization.
+        self.uninstall()
         self.validate()
 
     def _initialize(self, fn: Any, dynamo: Optional[_DynamoCacheEntry] = None) -> None:
