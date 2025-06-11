@@ -14,8 +14,7 @@ set -eux -o pipefail
 # 5. MKL is available everywhere except for MacOS wheels
 # 6. XNNPACK is available everywhere except for MacOS wheels
 # 7. CUDA is setup correctly and does not hang
-# 8. Magma is available for CUDA builds
-# 9. CuDNN is available for CUDA builds
+# 8. CuDNN is available for CUDA builds
 #
 # This script needs the env variables DESIRED_PYTHON, DESIRED_CUDA,
 # DESIRED_DEVTOOLSET and PACKAGE_TYPE
@@ -246,9 +245,6 @@ if [[ "$DESIRED_CUDA" != 'cpu' && "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" !=
     timeout 20 python -c 'import torch; torch.randn([3,5]).cuda()'
 
     # These have to run after CUDA is initialized
-
-    echo "Checking that magma is available"
-    python -c 'import torch; torch.rand(1).cuda(); exit(0 if torch.cuda.has_magma else 1)'
 
     echo "Checking that CuDNN is available"
     python -c 'import torch; exit(0 if torch.backends.cudnn.is_available() else 1)'

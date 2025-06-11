@@ -17,17 +17,6 @@
 #if defined(BUILD_LAZY_CUDA_LINALG)
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 
-#if AT_MAGMA_ENABLED()
-#include <ATen/cuda/detail/CUDAHooks.h>
-
-namespace {
-struct MagmaInitializer {
-  MagmaInitializer() {
-    ::at::cuda::detail::set_magma_init_fn([]{ });
-  };
-} initializer;
-}  // namespace (anonymous)
-#endif
 #endif
 namespace at::native {
 #if defined(BUILD_LAZY_CUDA_LINALG)

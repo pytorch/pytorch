@@ -1829,8 +1829,6 @@ TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
   }
   const auto cpu = A.device() == kCPU;
 
-  // We can perform this optimisation just on CPU as it fails for MAGMA
-  // due to some bug
   if (cpu) {
     if (upper) {
       at::triu_out(const_cast<Tensor&>(L), A);
@@ -1910,7 +1908,6 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
   checkSameDevice("cholesky_inverse", result, input);
   checkLinalgCompatibleDtype("cholesky_inverse", result, input);
 
-  // MAGMA requires 'infos' to reside in CPU memory, therefore we create 'infos' only on CPU for now.
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
 
   bool result_input_same_type = (result.scalar_type() == input.scalar_type());
@@ -1935,7 +1932,7 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
     result = cholesky_inverse_out_info(result, infos, input, upper);
   }
 
-  // Now check LAPACK/MAGMA error codes
+  // Now check LAPACK error codes
   at::_linalg_check_errors(infos, "cholesky_inverse", result.dim() == 2);
   return result;
 }
@@ -2529,7 +2526,7 @@ DEFINE_DISPATCH(orgqr_stub);
   * `tau` - Tensor containing the magnitudes of the elementary reflectors.
   * `result` - result Tensor, which will contain the orthogonal (or unitary) matrix Q.
 
-  For further details, please see the LAPACK/MAGMA documentation.
+  For further details, please see the LAPACK documentation.
 */
 static Tensor& householder_product_out_helper(const Tensor& input, const Tensor& tau, Tensor& result) {
   TORCH_INTERNAL_ASSERT(input.dim() >= 2);
@@ -2802,7 +2799,7 @@ DEFINE_DISPATCH(linalg_eigh_stub);
   * 'input' - input Tensor for eigendecomposition
   * 'values' - Tensor to store computed eigenvalues
   * 'vectors' - Tensor to store computed eigenvectors
-  * 'infos' - Tensor to store LAPACK/MAGMA/cuSOLVER error codes
+  * 'infos' - Tensor to store LAPACK/cuSOLVER error codes
   * 'compute_eigenvectors' - controls whether eigenvectors should be computed
   * 'uplo' - controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
     "u", "U" - upper triangular portion of the input matrix is used in computations; "l", "L" - lower.
@@ -2858,7 +2855,6 @@ Tensor& linalg_eigvalsh_out(const Tensor& A, std::string_view uplo, Tensor& L) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // This function returns complex-valued eigenvectors that is obtained from LAPACK GEEV's real-valued output
-// This function is also used for the MAGMA path because intermediate MAGMA's results live on CPU
 template <typename scalar_t>
 static void linalg_eig_make_complex_eigenvectors_impl(Tensor& result, const Tensor& complex_values, const Tensor& real_vectors) {
   // From GEEV documentation:
@@ -2917,8 +2913,6 @@ static Tensor& linalg_eig_make_complex_eigenvectors(Tensor& complex_vectors, con
 DEFINE_DISPATCH(linalg_eig_stub);
 
 static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
-  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
-  // therefore we create all intermediate tensors on CPU
   auto options = input.options().device(at::kCPU);
 
   // These internal asserts make explicit the assumptions in the implementation
@@ -2986,10 +2980,6 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
     }
   }
 
-  // MAGMA uses a hybrid CPU-GPU algorithm that performs well only for large matrices
-  // See: https://github.com/pytorch/pytorch/pull/52491#issuecomment-795685687
-  // Here we call CPU path for matrices smaller than 2048x2048
-  // that should be in general significantly faster than calling MAGMA
   if (input.size(-1) <= 2048) {
     linalg_eig_stub(at::kCPU, real_imag_values, maybe_complex_vectors, infos, input.to(kCPU), compute_eigenvectors);
   } else {
@@ -3039,7 +3029,6 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
   checkSameDevice("torch.linalg.eig", values, input, "eigenvalues");
   checkSameDevice("torch.linalg.eig", vectors, input, "eigenvectors");
 
-  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
   auto options = input.options().device(at::kCPU);
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, options.dtype(kInt));
 
@@ -3067,8 +3056,6 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
   vectors_tmp_needed |= !vectors_expected_type;
   // we will allocate a temporary tensor and do the copy
 
-  // because MAGMA's GEEV takes CPU inputs and returns CPU outputs
-  // "out" tensors that are on GPU device can't be used directly
   values_tmp_needed |= values.is_cuda();
   vectors_tmp_needed |= vectors.is_cuda();
 
@@ -3107,7 +3094,7 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
     std::tie(values, vectors) = linalg_eig_out_info(input, values, vectors, infos, true);
   }
 
-  // Now check LAPACK/MAGMA error codes
+  // Now check LAPACK error codes
   at::_linalg_check_errors(infos, "torch.linalg.eig", input.dim() == 2);
   return std::tuple<Tensor&, Tensor&>(values, vectors);
 }
@@ -3129,7 +3116,6 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
   checkLinalgCompatibleDtype("torch.linalg.eigvals", values.scalar_type(), toComplexType(input.scalar_type()), "eigenvalues");
   checkSameDevice("torch.linalg.eigvals", values, input, "eigenvalues");
 
-  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
   auto options = input.options().device(at::kCPU);
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, options.dtype(kInt));
 
@@ -3146,8 +3132,6 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
   values_tmp_needed |= !values_expected_type;
   // we will allocate a temporary tensor and do the copy
 
-  // because MAGMA's GEEV takes CPU inputs and returns CPU outputs
-  // 'values' tensor that is on GPU device can't be used directly
   values_tmp_needed |= (!values.is_cpu());
 
   // determine the appropriate scalar_type for the temporary tensors
@@ -3168,7 +3152,7 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
     std::tie(values, std::ignore) = linalg_eig_out_info(input, values, vectors, infos, /*compute_eigenvectors=*/false);
   }
 
-  // Now check LAPACK/MAGMA error codes
+  // Now check LAPACK error codes
   at::_linalg_check_errors(infos, "torch.linalg.eigvals", input.dim() == 2);
   return values;
 }
@@ -3234,8 +3218,7 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
     "torch.linalg.svd: keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend.");
 
   // A always needs to be copied as its contents will be destroyed during the computation of the SVD
-  // Now, MAGMA needs the copy to be on CPU, while cuSOLVER needs it to be on CUDA, so we'll defer
-  // the copy as a column major matrix to the backends.
+  // Now, cuSOLVER needs it to be on CUDA, so we'll defer the copy as a column major matrix to the backends.
   const auto info = at::zeros(IntArrayRef(A.sizes().begin(), A.sizes().end() - 2), A.options().dtype(kInt));
 
   svd_stub(A.device().type(),

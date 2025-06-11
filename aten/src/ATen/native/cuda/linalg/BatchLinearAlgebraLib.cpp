@@ -217,7 +217,7 @@ void ldl_factor_cusolver(
         "torch.linalg.ldl_factor: complex tensors with hermitian=True flag are not supported with cuSOLVER backend. ",
         "Currently preferred backend is ",
         at::globalContext().linalgPreferredBackend(),
-        ", please set 'default' or 'magma' backend with torch.backends.cuda.preferred_linalg_library");
+        ", please set 'default' backend with torch.backends.cuda.preferred_linalg_library");
   }
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       LD.scalar_type(), "ldl_factor_looped_cusolver", [&] {
@@ -322,7 +322,7 @@ static void svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Tensor& S
   const auto not_A_H = A.size(-2) >= A.size(-1);
   Tensor Vcopy = V; // Shallow copy
 #ifdef USE_ROCM
-  // Similar to the case in svd_magma(), experiments have shown Vh tensor is
+  // Experiments have shown Vh tensor is
   // not guaranteed to be column major on ROCM, we have to create a copy to
   // deal with this
   if (!not_A_H) {
@@ -866,8 +866,6 @@ static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, const Tenso
 }
 
 
-// This code path is only dispatched to if MAGMA is not linked in the pytorch build.
-// cusolverDn<t>potrsBatched only supports nrhs == 1
 template<typename scalar_t>
 static void apply_cholesky_cusolver_potrsBatched(Tensor& self_working_copy, const Tensor& A_column_major_copy, bool upper, Tensor& infos) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
@@ -1479,8 +1477,6 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
     }
   });
 
-  // Necessary because cuSOLVER uses nan for outputs that correspond to 0 in MAGMA for non-pivoted LU.
-  // https://github.com/pytorch/pytorch/issues/53879#issuecomment-830633572
   if (!get_pivots) {
     // nan_to_num does not work for complex inputs
     // https://github.com/pytorch/pytorch/issues/59247

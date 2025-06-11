@@ -31,7 +31,6 @@ default_compiler_flags = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",
     "-DCPU_CAPABILITY_DEFAULT",
     "-DTH_INDEX_BASE=0",
-    "-DMAGMA_V2",
     "-DNO_CUDNN_DESTROY_HANDLE",
     "-DUSE_FBGEMM",
     "-DUSE_PYTORCH_QNNPACK",

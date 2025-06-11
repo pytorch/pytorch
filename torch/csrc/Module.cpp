@@ -2234,8 +2234,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py::enum_<at::LinalgBackend>(py_module, "_LinalgBackend")
       .value("Default", at::LinalgBackend::Default)
-      .value("Cusolver", at::LinalgBackend::Cusolver)
-      .value("Magma", at::LinalgBackend::Magma);
+      .value("Cusolver", at::LinalgBackend::Cusolver);
 
   py_module.def("_set_linalg_preferred_backend", [](at::LinalgBackend b) {
     at::globalContext().setLinalgPreferredBackend(b);
@@ -2395,8 +2394,6 @@ Call this whenever a new thread is created in order to propagate values from
 #endif
 
   ASSERT_TRUE(set_module_attr("_has_cuda", has_cuda));
-  ASSERT_TRUE(
-      set_module_attr("_has_magma", at::hasMAGMA() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("_has_mps", has_mps));
   ASSERT_TRUE(set_module_attr("_has_xpu", has_xpu));
   ASSERT_TRUE(

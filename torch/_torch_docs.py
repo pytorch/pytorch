@@ -8720,7 +8720,7 @@ Otherwise, if :attr:`some` is ``False``, this function returns the complete QR f
           columns of :attr:`input` are linearly independent.
           This behavior will probably change once QR supports pivoting.
 
-.. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
+.. note:: This function uses LAPACK for CPU inputs and cuSOLVER for CUDA inputs,
           and may produce different (valid) decompositions on different device types
           or different platforms.
 
@@ -10849,7 +10849,7 @@ always be real-valued, even if :attr:`input` is complex.
 .. note:: The implementation of :func:`torch.linalg.svd` on CPU uses LAPACK's routine `?gesdd`
           (a divide-and-conquer algorithm) instead of `?gesvd` for speed. Analogously,
           on GPU, it uses cuSOLVER's routines `gesvdj` and `gesvdjBatched` on CUDA 10.1.243
-          and later, and MAGMA's routine `gesdd` on earlier versions of CUDA.
+          and later.
 
 .. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
           be represented as a column-major matrix (i.e. Fortran-contiguous).

@@ -9,12 +9,6 @@
 
 namespace at::cuda::detail {
 
-// Set the callback to initialize Magma, which is set by
-// torch_cuda_cu. This indirection is required so magma_init is called
-// in the same library where Magma will be used.
-TORCH_CUDA_CPP_API void set_magma_init_fn(void (*magma_init_fn)());
-
-
 // The real implementation of CUDAHooksInterface
 struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
@@ -26,7 +20,6 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   Generator getNewGenerator(
       DeviceIndex device_index = -1) const override;
   bool hasCUDA() const override;
-  bool hasMAGMA() const override;
   bool hasCuDNN() const override;
   bool hasCuSOLVER() const override;
   bool hasCuBLASLt() const override;

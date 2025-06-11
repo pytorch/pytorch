@@ -16,10 +16,6 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 
-call %INSTALLER_DIR%\install_magma.bat
-if errorlevel 1 goto fail
-if not errorlevel 0 goto fail
-
 call %INSTALLER_DIR%\install_sccache.bat
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail

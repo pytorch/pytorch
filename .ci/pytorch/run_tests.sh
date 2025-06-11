@@ -137,8 +137,6 @@ if [[ "$cuda_ver" != 'cpu' ]]; then
       timeout 20 python -c 'import torch; torch.randn([3,5]).cuda()'
 
       # These have to run after CUDA is initialized
-      echo "Checking that magma is available"
-      python -c 'import torch; torch.rand(1).cuda(); exit(0 if torch.cuda.has_magma else 1)'
       echo "Checking that CuDNN is available"
       python -c 'import torch; exit(0 if torch.backends.cudnn.is_available() else 1)'
     fi

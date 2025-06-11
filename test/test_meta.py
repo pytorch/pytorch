@@ -453,7 +453,7 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
 # lists at the end of a test suite run.  The intended usage looks like this:
 #
 # 1. Run `PYTORCH_COLLECT_EXPECT=1 python test/test_meta.py` on a CUDA build
-#    of PyTorch that has LAPACK/MAGMA installed.  You can filter `-k test_meta`
+#    of PyTorch that has LAPACK installed.  You can filter `-k test_meta`
 #    or `-k test_dispatch_meta` to only focus on one or another list
 # 2. Given the printed skip/xfail list, add them to the corresponding lists;
 #    torch.* entries go in meta_function and aten.* entries go in meta_dispatch.

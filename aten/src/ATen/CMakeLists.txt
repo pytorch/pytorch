@@ -30,7 +30,6 @@ set_bool(AT_BUILD_WITH_BLAS USE_BLAS)
 set_bool(AT_BUILD_WITH_LAPACK USE_LAPACK)
 set_bool(AT_BLAS_F2C BLAS_F2C)
 set_bool(AT_BLAS_USE_CBLAS_DOT BLAS_USE_CBLAS_DOT)
-set_bool(AT_MAGMA_ENABLED USE_MAGMA)
 set_bool(CAFFE2_STATIC_LINK_CUDA_INT CAFFE2_STATIC_LINK_CUDA)
 set_bool(AT_CUDNN_ENABLED CAFFE2_USE_CUDNN)
 set_bool(AT_CUSPARSELT_ENABLED CAFFE2_USE_CUSPARSELT)
@@ -425,7 +424,7 @@ if(LAPACK_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
   if(USE_CUDA AND MSVC)
     # Although Lapack provides CPU (and thus, one might expect that ATen_cuda
-    # would not need this at all), some of our libraries (magma in particular)
+    # would not need this at all), some of our libraries 
     # backend to CPU BLAS/LAPACK implementations, and so it is very important
     # we get the *right* implementation, because even if the symbols are the
     # same, LAPACK implementions may have different calling conventions.
@@ -592,22 +591,6 @@ if(USE_CUDA AND NOT USE_ROCM)
   endif($ENV{ATEN_STATIC_CUDA})
 endif()
 
-
-  if(USE_MAGMA)
-    if(USE_CUDA AND NOT BUILD_LAZY_CUDA_LINALG)
-      list(APPEND ATen_CUDA_DEPENDENCY_LIBS torch::magma)
-    endif(USE_CUDA AND NOT BUILD_LAZY_CUDA_LINALG)
-    if(USE_ROCM)
-      list(APPEND ATen_HIP_DEPENDENCY_LIBS torch::magma)
-    endif(USE_ROCM)
-    if(MSVC)
-      if($ENV{TH_BINARY_BUILD})
-        # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
-        # in caffe2/CMakeLists.txt
-        list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
-      endif($ENV{TH_BINARY_BUILD})
-    endif(MSVC)
-  endif(USE_MAGMA)
 
 # Include CPU paths for CUDA/HIP as well
 list(APPEND ATen_CUDA_INCLUDE ${ATen_CPU_INCLUDE})

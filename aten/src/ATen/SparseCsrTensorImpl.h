@@ -17,7 +17,7 @@ namespace at {
 //
 // Since the main advantage of the CSR format over the COO format is speed of
 // computation, care must be taken to facilitate smooth interfacing of
-// these data structures with optimized libraries such as MKL and MAGMA.
+// these data structures with optimized libraries such as MKL.
 // Since the MKL interface for pytorch currently uses indexing with int32
 // type, it is important to make sure that the `crow_indices` and `col_indices`
 // are of type int32 when calling MKL routines such as SPMM or SPMV.

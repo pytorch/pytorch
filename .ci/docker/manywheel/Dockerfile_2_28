@@ -46,12 +46,6 @@ FROM base as intel
 ADD ./common/install_mkl.sh install_mkl.sh
 RUN bash ./install_mkl.sh && rm install_mkl.sh
 
-FROM base as magma
-ARG BASE_CUDA_VERSION=12.6
-# Install magma
-ADD ./common/install_magma.sh install_magma.sh
-RUN bash ./install_magma.sh ${BASE_CUDA_VERSION} && rm install_magma.sh
-
 FROM base as jni
 # Install java jni header
 ADD ./common/install_jni.sh install_jni.sh
@@ -140,7 +134,6 @@ RUN yum install -y python3-pip && \
 FROM cpu_final as cuda_final
 RUN rm -rf /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=cuda     /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
-COPY --from=magma    /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
 RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
 
@@ -163,8 +156,6 @@ RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
 # ROCm 6.4 rocm-smi depends on system drm.h header
 RUN yum install -y libdrm-devel
 ENV MKLROOT /opt/intel
-ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh ${ROCM_VERSION} && rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 

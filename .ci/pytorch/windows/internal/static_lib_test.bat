@@ -22,26 +22,6 @@ for /F "delims=" %%i in ('wmic path win32_VideoController get name') do (
 :gpu_check_end
 endlocal & set NVIDIA_GPU_EXISTS=%NVIDIA_GPU_EXISTS%
 
-:: Download MAGMA Files on CUDA builds
-set MAGMA_VERSION=2.5.4
-set CUDA_PREFIX=cuda%CUDA_VERSION%
-if "%CUDA_VERSION%" == "92" set MAGMA_VERSION=2.5.2
-if "%CUDA_VERSION%" == "100" set MAGMA_VERSION=2.5.2
-
-if "%DEBUG%" == "1" (
-    set BUILD_TYPE=debug
-) else (
-    set BUILD_TYPE=release
-)
-
-if not "%CUDA_VERSION%" == "cpu" (
-    rmdir /s /q magma_%CUDA_PREFIX%_%BUILD_TYPE%
-    del magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_%MAGMA_VERSION%_%CUDA_PREFIX%_%BUILD_TYPE%.7z -o magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z & REM @lint-ignore
-    7z x -aoa magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z -omagma_%CUDA_PREFIX%_%BUILD_TYPE%
-    set LIB=%CD%\magma_%CUDA_PREFIX%_%BUILD_TYPE%\lib;%LIB%
-)
-
 echo "install conda package"
 
 :: Install Miniconda3

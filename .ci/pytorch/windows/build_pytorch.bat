@@ -1,6 +1,6 @@
 @echo off
 
-:: This script parses args, installs required libraries (MKL, Magma, libuv)
+:: This script parses args, installs required libraries (MKL, libuv)
 :: and then delegates to cpu.bat, cuda80.bat, etc.
 
 if not "%CUDA_VERSION%" == "" if not "%PYTORCH_BUILD_VERSION%" == "" if not "%PYTORCH_BUILD_NUMBER%" == "" goto env_end
@@ -51,22 +51,6 @@ echo "Failed to setup build environment"
 exit /B 1
 :done
 
-:: Download MAGMA Files on CUDA builds
-set MAGMA_VERSION=2.5.4
-
-if "%DEBUG%" == "1" (
-    set BUILD_TYPE=debug
-) else (
-    set BUILD_TYPE=release
-)
-
-if not "%CUDA_VERSION%" == "cpu" if not "%CUDA_VERSION%" == "xpu" (
-    rmdir /s /q magma_%CUDA_PREFIX%_%BUILD_TYPE%
-    del magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_%MAGMA_VERSION%_%CUDA_PREFIX%_%BUILD_TYPE%.7z -o magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z %= @lint-ignore =%
-    7z x -aoa magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z -omagma_%CUDA_PREFIX%_%BUILD_TYPE%
-)
-
 :: Install sccache
 if "%USE_SCCACHE%" == "1" (
     mkdir %CD%\tmp_bin
@@ -108,10 +92,6 @@ for %%v in (%DESIRED_PYTHON_PREFIX%) do (
 
     pip install ninja
     @setlocal
-    :: Set Flags
-    if not "%CUDA_VERSION%"=="cpu" if not "%CUDA_VERSION%" == "xpu" (
-        set "MAGMA_HOME=%cd%\magma_%CUDA_PREFIX%_%BUILD_TYPE%"
-    )
     echo "Calling arch build script"
     call %CUDA_PREFIX%.bat
     if ERRORLEVEL 1 exit /b 1

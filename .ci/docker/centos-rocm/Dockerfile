@@ -58,9 +58,6 @@ ARG ROCM_VERSION
 COPY ./common/install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh
-COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh ${ROCM_VERSION}
-RUN rm install_rocm_magma.sh
 COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
 RUN rm install_amdsmi.sh
@@ -69,7 +66,6 @@ ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
 ENV PATH /opt/rocm/opencl/bin:$PATH
 ENV PATH /opt/rocm/llvm/bin:$PATH
-ENV MAGMA_HOME /opt/rocm/magma
 ENV LANG en_US.utf8
 ENV LC_ALL en_US.utf8
 

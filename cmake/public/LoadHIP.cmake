@@ -26,14 +26,6 @@ else()
   endif()
 endif()
 
-# MAGMA_HOME
-if(NOT DEFINED ENV{MAGMA_HOME})
-  set(MAGMA_HOME ${ROCM_PATH}/magma)
-  set(ENV{MAGMA_HOME} ${ROCM_PATH}/magma)
-else()
-  set(MAGMA_HOME $ENV{MAGMA_HOME})
-endif()
-
 # MIOpen isn't a part of HIP-SDK for Windows and hence, may have a different
 # installation directory.
 if(WIN32)

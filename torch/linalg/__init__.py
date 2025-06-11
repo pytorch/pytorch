@@ -1157,7 +1157,7 @@ Args:
                              precision of the dtype of :attr:`A` times `max(m, n)`. Default: `None`.
 
 Keyword args:
-    driver (str, optional): name of the LAPACK/MAGMA method to be used.
+    driver (str, optional): name of the LAPACK method to be used.
         If `None`, `'gelsy'` is used for CPU inputs and `'gels'` for CUDA inputs.
         Default: `None`.
 

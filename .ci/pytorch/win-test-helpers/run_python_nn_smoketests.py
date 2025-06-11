@@ -22,10 +22,6 @@ GPU_TESTS = [
         "import torch; torch.randn([3,5]).cuda()",
     ),
     (
-        "Checking that magma is available",
-        "import torch; torch.rand(1).cuda(); exit(0 if torch.cuda.has_magma else 1)",
-    ),
-    (
         "Checking that CuDNN is available",
         "import torch; exit(0 if torch.backends.cudnn.is_available() else 1)",
     ),

@@ -25,7 +25,7 @@ from torch.testing._internal.common_dtype import (
     empty_types, complex_types_and, integral_types, custom_types, all_types_complex_float8_and, float8_types,
 )
 from torch.testing._internal.common_device_type import \
-    (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
+    (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
@@ -12725,7 +12725,7 @@ op_db: list[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],),
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],),
     OpInfo('cholesky_inverse',
            dtypes=floating_and_complex_types(),
            backward_dtypes=floating_and_complex_types(),
@@ -12737,7 +12737,7 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_cholesky_inverse,
            gradcheck_wrapper=gradcheck_wrapper_triangular_input_real_positive_diagonal,
            decorators=[
-               skipCUDAIfNoMagma,
+               skipCUDAIfNoCusolver,
                skipCPUIfNoLapack,
                DecorateInfo(
                    toleranceOverride({
@@ -12764,7 +12764,7 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack]),
     OpInfo('chunk',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
@@ -13740,7 +13740,7 @@ op_db: list[OpInfo] = [
     OpInfo('geqrf',
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_qr_geqrf,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
            supports_autograd=False,
            skips=(
                # FIXME: geqrf can't forward with complex inputs that require grad
@@ -14083,7 +14083,7 @@ op_db: list[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_lu,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
            skips=(
                # we skip jit tests because `lu` is a torch function
                # RuntimeError:
@@ -14115,7 +14115,7 @@ op_db: list[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Tests different backward paths"),
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
-           decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver]),
+           decorators=[skipCPUIfNoLapack, skipCUDAIfNoCusolver]),
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int8, torch.bool, torch.int32),
@@ -17859,7 +17859,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
            decorators=[
-               skipCUDAIfNoMagma,
+               skipCUDAIfNoCusolver,
                skipCPUIfNoLapack,
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=3e-5, rtol=3e-6)}),
@@ -18142,7 +18142,7 @@ op_db: list[OpInfo] = [
            # We're using at::allclose, which does not have a batching rule
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off],
            skips=(
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
                DecorateInfo(
@@ -18460,7 +18460,7 @@ op_db: list[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False,
            sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
            skips=(
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                             device_type='mps', dtypes=[torch.float32]),
@@ -20324,7 +20324,7 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
-        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+        decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack]),
     # `log_softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo(
@@ -20597,7 +20597,7 @@ op_db: list[OpInfo] = [
     OpInfo('norm',
            variant_test_name='nuc',
            sample_inputs_func=sample_inputs_norm_nuc,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
            check_batched_gradgrad=False,
            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
            # got: Could not allocate memory to change Tensor SizesAndStrides!

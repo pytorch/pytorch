@@ -7,7 +7,7 @@
 
 namespace at {
 
-enum class LinalgBackend : int8_t { Default, Cusolver, Magma };
+enum class LinalgBackend : int8_t { Default, Cusolver };
 
 inline std::string LinalgBackendToString(at::LinalgBackend backend) {
   switch (backend) {
@@ -15,8 +15,6 @@ inline std::string LinalgBackendToString(at::LinalgBackend backend) {
       return "at::LinalgBackend::Default";
     case LinalgBackend::Cusolver:
       return "at::LinalgBackend::Cusolver";
-    case LinalgBackend::Magma:
-      return "at::LinalgBackend::Magma";
     default:
       TORCH_CHECK(false, "Unknown linalg backend");
   }

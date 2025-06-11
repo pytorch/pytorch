@@ -75,12 +75,6 @@ COPY ./common/install_cusparselt.sh install_cusparselt.sh
 COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
 RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && rm install_cuda.sh install_nccl.sh ci_commit_pins/nccl-cu* install_cusparselt.sh
 
-FROM base as magma
-ARG BASE_CUDA_VERSION
-# Install magma
-ADD ./common/install_magma.sh install_magma.sh
-RUN bash ./install_magma.sh ${BASE_CUDA_VERSION} && rm install_magma.sh
-
 FROM base as nvpl
 # Install nvpl
 ADD ./common/install_nvpl.sh install_nvpl.sh
@@ -90,7 +84,6 @@ FROM final as cuda_final
 ARG BASE_CUDA_VERSION
 RUN rm -rf /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=cuda     /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
-COPY --from=magma    /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=nvpl /opt/nvpl/lib/  /usr/local/lib/
 COPY --from=nvpl /opt/nvpl/include/  /usr/local/include/
 RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda

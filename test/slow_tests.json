@@ -122,7 +122,6 @@
   "test_custom_module_lstm (__main__.TestQuantizedOps)": 666.0326605902778,
   "test_dispatch_symbolic_meta_outplace_all_strides_nn_functional_gaussian_nll_loss_cuda_float32 (__main__.TestMetaCUDA)": 84.40749867757161,
   "test_dtensor_op_db_nn_functional_gaussian_nll_loss_cpu_float32 (__main__.TestDTensorOpsCPU)": 88.80566660563152,
-  "test_eig_check_magma_cuda_float32 (__main__.TestLinalgCUDA)": 153.85249682267508,
   "test_error_detection_and_propagation (__main__.NcclErrorHandlingTest)": 67.68433125813802,
   "test_fail_arithmetic_ops.py (__main__.TestTyping)": 64.70655483669705,
   "test_fail_creation_ops.py (__main__.TestTyping)": 70.33796894550323,

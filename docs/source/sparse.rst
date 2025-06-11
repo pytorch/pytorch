@@ -714,7 +714,7 @@ Sparse CSR Tensor
 
 The primary advantage of the CSR format over the COO format is better
 use of storage and much faster computation operations such as sparse
-matrix-vector multiplication using MKL and MAGMA backends.
+matrix-vector multiplication using MKL backend.
 
 In the simplest case, a (0 + 2 + 0)-dimensional sparse CSR tensor
 consists of three 1-D tensors: ``crow_indices``, ``col_indices`` and

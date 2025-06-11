@@ -189,10 +189,6 @@ export DESIRED_CUDA="$cuda_version_nodot"
 rm -rf /usr/local/cuda || true
 ln -s "/usr/local/cuda-${CUDA_VERSION}" /usr/local/cuda
 
-# Switch `/usr/local/magma` to the desired CUDA version
-rm -rf /usr/local/magma || true
-ln -s /usr/local/cuda-${CUDA_VERSION}/magma /usr/local/magma
-
 export CUDA_VERSION=$(ls /usr/local/cuda/lib64/libcudart.so.*|sort|tac | head -1 | rev | cut -d"." -f -3 | rev) # 10.0.130
 export CUDA_VERSION_SHORT=$(ls /usr/local/cuda/lib64/libcudart.so.*|sort|tac | head -1 | rev | cut -d"." -f -3 | rev | cut -f1,2 -d".") # 10.0
 export CUDNN_VERSION=$(ls /usr/local/cuda/lib64/libcudnn.so.*|sort|tac | head -1 | rev | cut -d"." -f -3 | rev)

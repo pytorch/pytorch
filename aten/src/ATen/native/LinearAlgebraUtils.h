@@ -87,7 +87,7 @@ inline c10::MaybeOwned<Tensor> borrow_else_clone(const bool cond, const Tensor& 
  * namely:
  * 1. It uses `copy` instead of `clone` which could be much faster.
  * 2. `nrows` parameter used to create inputs with the number of rows larger
- *  than the original input, which is required for some LAPACK/MAGMA methods.
+ *  than the original input, which is required for some LAPACK methods.
  * 3. `desired_batch_size` is used to create copies with the batch size
  *  which is either the original batch size of the input, or its larger
  *  broadcasted shape.
@@ -175,7 +175,7 @@ inline TransposeType to_transpose_type(const bool contig, const bool conj) {
 // 2. a.shape[:-2] broadcasts over b.shape[:-2]
 // 3. a.size(i) <= b.size(i) for i=0,..., a.dim() - 3 (only for batch dimensions)
 //
-// MAGMA/LAPACK modify tensor `a` in-place, and the main goal of this method
+// LAPACK modify tensor `a` in-place, and the main goal of this method
 // is to be memory efficient, which means that if there exists an index i such that
 // a.shape[i] < b.shape[i], 0 <= i <= a.dim() - 3,
 // then instead of materializing copies of `a` in the broadcasted shape, we keep
@@ -187,7 +187,7 @@ inline TransposeType to_transpose_type(const bool contig, const bool conj) {
 //
 // func_t `f` is a callable that is being supplied with
 // scalar_t* a_working_ptr, scalar_t* b_working_ptr, int64_t a_linear_batch_idx.
-// a_working_ptr and b_working_ptr can directly be passed to LAPACK/MAGMA routines,
+// a_working_ptr and b_working_ptr can directly be passed to LAPACK routines,
 // and a_linear_batch_idx is an index in the 3d representation which corresponds to
 // the memory a_working_ptr points to, in other words:
 // a_working_ptr == a.view({-1, a.size(-2), a.size(-1)}.select(0, a_linear_batch_idx).data_ptr<scalar_t>();
@@ -411,8 +411,7 @@ inline std::tuple<DimVector, DimVector, int64_t> _compute_geometry_for_Q(
 inline bool svd_uses_cusolver(const Tensor& A) {
   // if cusolver is available, it is used unconditionally
   return A.is_cuda()
-         && at::globalContext().hasCuSOLVER()
-         && at::globalContext().linalgPreferredBackend() != at::LinalgBackend::Magma;
+         && at::globalContext().hasCuSOLVER();
 }
 
 
@@ -463,7 +462,7 @@ inline std::vector<int64_t> create_reverse_permutation(std::vector<int64_t> perm
   return reverse_permutation;
 }
 
-// Compute R-work array size for MAGMA/LAPACK cgesdd/zgesdd
+// Compute R-work array size for LAPACK cgesdd/zgesdd
 // See https://github.com/Reference-LAPACK/lapack/blob/122506cd8b6ce050a200920c3d4c0b153b150fd8/SRC/cgesdd.f#L186
 inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
   auto mn = std::min(m, n);

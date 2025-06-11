@@ -250,9 +250,6 @@ pip install -r requirements.txt
 
 ```bash
 pip install mkl-static mkl-include
-# CUDA only: Add LAPACK support for the GPU if needed
-# magma installation: run with active conda environment. specify CUDA version to install
-.ci/docker/common/install_magma_conda.sh 12.4
 
 # (optional) If using torch.compile with inductor/triton, install the matching version of triton
 # Run from the pytorch directory after cloning
@@ -324,8 +321,7 @@ Make sure that CUDA with Nsight Compute is installed after Visual Studio.
 Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
 <br/> If Ninja is selected as the generator, the latest MSVC will get selected as the underlying toolchain.
 
-Additional libraries such as
-[Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) to install them.
+Additional libraries such as [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) to install them.
 
 You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
 

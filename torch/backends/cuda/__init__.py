@@ -152,7 +152,6 @@ class cuBLASModule:
 _LinalgBackends = {
     "default": torch._C._LinalgBackend.Default,
     "cusolver": torch._C._LinalgBackend.Cusolver,
-    "magma": torch._C._LinalgBackend.Magma,
 }
 _LinalgBackends_str = ", ".join(_LinalgBackends.keys())
 
@@ -161,18 +160,16 @@ def preferred_linalg_library(
     backend: Union[None, str, torch._C._LinalgBackend] = None
 ) -> torch._C._LinalgBackend:
     r"""
-    Override the heuristic PyTorch uses to choose between cuSOLVER and MAGMA for CUDA linear algebra operations.
+    Override the heuristic PyTorch uses to choose between cuSOLVER for CUDA linear algebra operations.
 
     .. warning:: This flag is experimental and subject to change.
 
-    When PyTorch runs a CUDA linear algebra operation it often uses the cuSOLVER or MAGMA libraries,
+    When PyTorch runs a CUDA linear algebra operation it often uses the cuSOLVER libraries,
     and if both are available it decides which to use with a heuristic.
     This flag (a :class:`str`) allows overriding those heuristics.
 
     * If `"cusolver"` is set then cuSOLVER will be used wherever possible.
-    * If `"magma"` is set then MAGMA will be used wherever possible.
-    * If `"default"` (the default) is set then heuristics will be used to pick between
-      cuSOLVER and MAGMA if both are available.
+    * If `"default"` (the default) is set then heuristics will be used to pick between backends.
     * When no input is given, this function returns the currently preferred library.
     * User may use the environment variable TORCH_LINALG_PREFER_CUSOLVER=1 to set the preferred library to cuSOLVER
       globally.

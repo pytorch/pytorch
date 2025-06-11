@@ -149,9 +149,6 @@ class AutocastTestLists:
             ("group_norm", mat0_fp16 + (1,)),
             ("norm", pointwise0_fp16),
             ("norm", pointwise0_fp16, {"dim": 0}),
-            # these need magma
-            # ("norm", mat0_fp16, {"p": "nuc"}),
-            # ("norm", mat0_fp16, {"p": "nuc", "dim": 0}),
             ("norm", pointwise0_fp16, {"p": 1}),
             ("norm", pointwise0_fp16, {"p": 1, "dim": 0}),
             ("cosine_similarity", mat0_fp16 + mat1_fp16),

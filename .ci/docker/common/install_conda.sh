@@ -75,13 +75,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # and libpython-static for torch deploy
   conda_install llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
 
-  # Magma package names are concatenation of CUDA major and minor ignoring revision
-  # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
-  # Magma is installed from a tarball in the ossci-linux bucket into the conda env
-  if [ -n "$CUDA_VERSION" ]; then
-    conda_run ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION})
-  fi
-
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 

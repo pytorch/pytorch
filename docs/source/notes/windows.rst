@@ -8,7 +8,7 @@ Include optional components
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 There are two supported components for Windows PyTorch:
-MKL and MAGMA. Here are the steps to build with them.
+MKL. Here are the steps to build with them.
 
 .. code-block:: bat
 
@@ -18,22 +18,6 @@ MKL and MAGMA. Here are the steps to build with them.
     curl https://s3.amazonaws.com/ossci-windows/mkl_2020.2.254.7z -k -O
     7z x -aoa mkl_2020.2.254.7z -omkl
 
-    REM Download MAGMA files
-    REM version available:
-    REM 2.5.4 (CUDA 10.1 10.2 11.0 11.1) x (Debug Release)
-    REM 2.5.3 (CUDA 10.1 10.2 11.0) x (Debug Release)
-    REM 2.5.2 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
-    REM 2.5.1 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
-    set "CUDA_PREFIX=cuda102"
-    set "CONFIG=release"
-    set "HOST=https://s3.amazonaws.com/ossci-windows"
-    curl -k "%HOST%/magma_2.5.4_%CUDA_PREFIX%_%CONFIG%.7z" -o magma.7z
-    7z x -aoa magma.7z -omagma
-
-    REM Setting essential environment variables
-    set "CMAKE_INCLUDE_PATH=%cd%\mkl\include"
-    set "LIB=%cd%\mkl\lib;%LIB%"
-    set "MAGMA_HOME=%cd%\magma"
 
 Speeding CUDA build for Windows
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
