@@ -357,7 +357,7 @@ the default strided tensor layout. Notice the 200 fold memory
 saving from using the COO storage format.
 ```
 
-## Construction
+### Construction
 
 A sparse COO tensor can be constructed by providing the two tensors of
 indices and values, as well as the size of the sparse tensor (when it
