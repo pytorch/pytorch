@@ -310,7 +310,7 @@ To use these ops, simply pass the output of ``to_sparse_semi_structured(tensor)`
 True
 ```
 
-## Accelerating nn.Linear with semi-structured sparsity
+### Accelerating nn.Linear with semi-structured sparsity
 
 You can accelerate the linear layers in your model if the weights are already semi-structured sparse with just a few lines of code:
 
