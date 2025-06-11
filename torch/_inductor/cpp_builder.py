@@ -479,7 +479,7 @@ class BuildOptionsBase:
         return self._include_dirs
 
     def get_cflags(self) -> list[str]:
-        return self._cflags + ["g"]
+        return self._cflags
 
     def get_ldflags(self) -> list[str]:
         return self._ldflags
