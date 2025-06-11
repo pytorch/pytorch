@@ -1,3 +1,5 @@
+(nn-init-doc)=
+
 # torch.nn.init
 
 ```{warning}
