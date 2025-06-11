@@ -1,4 +1,4 @@
-(export.ir-spec)=
+(export.ir_spec)=
 
 # torch.export IR Specification
 
