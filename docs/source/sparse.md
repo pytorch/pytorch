@@ -1145,7 +1145,7 @@ tensor(True)
 ```
 
 (sparse-ops-docs)=
-### Supported operations
+## Supported operations
 
 ### Linear Algebra operations
 
