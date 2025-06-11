@@ -216,8 +216,6 @@ class _HuggingFaceStorageReader(FsspecReader):
             super().__init__(path=path)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
-        from safetensors import deserialize  # type: ignore[import-not-found]
-
         per_file: dict[str, list[ReadItem]] = {}
 
         for read_item in plan.items:
@@ -227,17 +225,10 @@ class _HuggingFaceStorageReader(FsspecReader):
 
         for file_name, reqs in per_file.items():
             with self.fs.create_stream(file_name, "rb") as stream:
-                # TODO: make this more efficient by doing offset reads instead of a
-                # full deserialization of the file
-                deserialized: list[tuple(str, dict[str, Any])] = deserialize(
-                    stream.read()
-                )
-                deserialized_dict: dict[str, dict[str, Any]] = {
-                    tensor_info[0]: tensor_info[1] for tensor_info in deserialized
-                }
-
                 for req in reqs:
-                    tensor_bytes = deserialized_dict[req.dest_index.fqn]["data"]
+                    item_md = self.storage_data[req.storage_index]
+                    stream.seek(item_md.offset)
+                    tensor_bytes = stream.read(item_md.length)
                     assert planner.metadata is not None
                     tensor = torch.frombuffer(
                         tensor_bytes,
@@ -245,32 +236,17 @@ class _HuggingFaceStorageReader(FsspecReader):
                             req.dest_index.fqn
                         ].properties.dtype,
                     )
-                    # TODO: update this to req.lengths once I get rid of allow_tensor_resize, shouldn't need to look at the deserialized
-                    # dict for metadata as we've already done that in read_metadata file
                     tensor = tensor.reshape(
-                        deserialized_dict[req.dest_index.fqn]["shape"]
+                        req.lengths
                     )
+                    tensor = narrow_tensor_by_index(
+                        tensor, req.storage_offsets, req.lengths
+                    )
+                    target_tensor = planner.resolve_tensor(req).detach()
 
-                    if (
-                        isinstance(planner, _HuggingFaceLoadPlanner)
-                        and planner.allow_tensor_resize
-                    ):
-                        # this is to support the case when users are calling load on
-                        # an empty state dict without specifying the correct size of the tensors
-                        # in the state dict. Resizing is a hacky way to support this use case.
-                        # But will migrate users to _load_state_dict_from_keys method and deprecate this.
-                        target_tensor = planner.resolve_tensor(req)
-                        target_tensor.resize_(tensor.size())
-                        target_tensor = target_tensor.detach()
-                    else:
-                        tensor = narrow_tensor_by_index(
-                            tensor, req.storage_offsets, req.lengths
-                        )
-                        target_tensor = planner.resolve_tensor(req).detach()
-
-                        assert target_tensor.size() == tensor.size(), (
-                            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-                        )
+                    assert target_tensor.size() == tensor.size(), (
+                        f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+                    )
 
                     target_tensor.copy_(tensor)
                     planner.commit_tensor(req, target_tensor)
@@ -290,7 +266,7 @@ class _HuggingFaceStorageReader(FsspecReader):
 
         for safetensor_file in safetensors_files:
             with self.fs.create_stream(safetensor_file, "rb") as f:
-                safetensors_metadata, _ = _get_safetensors_file_metadata(f)
+                safetensors_metadata, metadata_size = _get_safetensors_file_metadata(f)
                 custom_metadata = safetensors_metadata.get(DEFAULT_EXTRA_METADATA_KEY)
 
                 dcp_sharding_info = None
@@ -327,7 +303,7 @@ class _HuggingFaceStorageReader(FsspecReader):
                         metadata_index = MetadataIndex(fqn=key, offset=[0] * len(val[SHAPE_KEY]))
                     storage_data[metadata_index] = _StorageInfo(
                         safetensor_file,
-                        val[DATA_OFFSETS_KEY][0],
+                        val[DATA_OFFSETS_KEY][0] + metadata_size,
                         val[DATA_OFFSETS_KEY][1] - val[DATA_OFFSETS_KEY][0],
                     )
         
