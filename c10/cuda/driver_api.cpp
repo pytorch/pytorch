@@ -3,7 +3,6 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <dlfcn.h>
-#include <iostream>
 
 namespace c10::cuda {
 
@@ -46,48 +45,6 @@ void* DriverAPI::get_nvml_handle() {
 C10_EXPORT DriverAPI* DriverAPI::get() {
   static DriverAPI singleton = create_driver_api();
   return &singleton;
-}
-
-// Implementation of the new get_entry_point functionality
-void* DriverAPI::load_driver_entry_point(const char* symbol, unsigned int version) {
-  void* entry_point = nullptr;
-  
-  try {
-#if (CUDA_VERSION >= 12050)
-    // Use versioned entry point API if available
-    cudaError_t result = cudaGetDriverEntryPointByVersion(
-        symbol, &entry_point, version, cudaEnableDefault);
-    
-    if (result != cudaSuccess) {
-      // Note: We don't log errors here to avoid spam, as some APIs might not be available
-      // The caller should check for nullptr return value
-      return nullptr;
-    }
-#else
-    // Use standard entry point API
-    (void)version; // Suppress unused parameter warning
-    cudaError_t result = cudaGetDriverEntryPoint(
-        symbol, &entry_point, cudaEnableDefault);
-    
-    if (result != cudaSuccess) {
-      return nullptr;
-    }
-#endif
-    
-    if (entry_point == nullptr) {
-      // cudaGetDriverEntryPoint returned success but null pointer
-      return nullptr;
-    }
-    
-  } catch (const std::exception& e) {
-    // Exception while loading - return nullptr
-    return nullptr;
-  } catch (...) {
-    // Unknown exception while loading - return nullptr
-    return nullptr;
-  }
-  
-  return entry_point;
 }
 
 } // namespace c10::cuda
