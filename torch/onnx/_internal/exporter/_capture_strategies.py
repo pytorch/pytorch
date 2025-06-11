@@ -12,6 +12,8 @@ import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
+import torch.fx.experimental
+import torch.fx.experimental._config
 from torch.export import _draft_export
 
 
@@ -152,7 +154,10 @@ class TorchExportStrictStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        with _patch_dynamo_unsupported_functions():
+        with (
+            _patch_dynamo_unsupported_functions(),
+            torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
+        ):
             try:
                 return torch.export.export(
                     model,
