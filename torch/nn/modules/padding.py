@@ -58,6 +58,7 @@ class CircularPad1d(_CircularPadNd):
         padding (int, tuple): the size of the padding. If is `int`, uses the same
             padding in all boundaries. If a 2-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
+            Note that padding size should be less than or equal to the corresponding input dimension.
 
     Shape:
         - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
@@ -107,6 +108,7 @@ class CircularPad2d(_CircularPadNd):
         padding (int, tuple): the size of the padding. If is `int`, uses the same
             padding in all boundaries. If a 4-`tuple`, uses (:math:`\text{padding\_left}`,
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
+            Note that padding size should be less than or equal to the corresponding input dimension.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
@@ -168,6 +170,7 @@ class CircularPad3d(_CircularPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`,
             :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`,
             :math:`\text{padding\_front}`, :math:`\text{padding\_back}`)
+            Note that padding size should be less than or equal to the corresponding input dimension.
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
