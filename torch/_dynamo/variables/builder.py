@@ -109,10 +109,10 @@ from ..source import (
     is_from_unspecialized_nn_module_source,
     ListGetItemSource,
     LocalSource,
+    NonSerializableSetGetItemSource,
     NumpyTensorSource,
     OptimizerSource,
     RandomValueSource,
-    SetGetItemSource,
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
@@ -760,10 +760,15 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
-            # The dictionary gives a ordering for the set items
+            # The list gives a ordering for the set items. The ordering is based
+            # on the Python hash and it is not related to object ordering inside
+            # the set object. The order being incorrect at runtime will lead to
+            # a recompilation.
             L = list(value)
             items = [
-                LazyVariableTracker.create(v, source=SetGetItemSource(self.source, i))
+                LazyVariableTracker.create(
+                    v, source=NonSerializableSetGetItemSource(self.source, i)
+                )
                 for i, v in enumerate(L)
             ]
             result = SetVariable(items, source=self.source)
