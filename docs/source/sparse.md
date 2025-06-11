@@ -238,7 +238,7 @@ C = \frac{M_{sparse}}{M_{dense}} =  \frac{1}{2} + \frac{1}{e}
 
 By using this formula, we find that the compression ratio is 56.25% for ``torch.float16`` or ``torch.bfloat16``, and 62.5% for ``torch.int8``.
 
-# Constructing Sparse Semi-Structured Tensors
+## Constructing Sparse Semi-Structured Tensors
 
 You can transform a dense tensor into a sparse semi-structured tensor by simply using the ``torch.to_sparse_semi_structured`` function.
 
