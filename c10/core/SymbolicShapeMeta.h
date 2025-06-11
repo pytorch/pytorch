@@ -53,6 +53,8 @@ class C10_API SymbolicShapeMeta {
     return static_cast<int64_t>(sizes_.size());
   }
 
+  // Accessors for derived quantities, computed lazily on first access
+
   bool has_numel() const {
     return available_.load() & numel_avail;
   }
@@ -251,7 +253,6 @@ class C10_API SymbolicShapeMeta {
   // indicating whether the value has been initialized
   mutable std::atomic<int> available_{0};
 
-  // Accessors for derived quantities, computed lazily on first access
   enum avail {
     numel_avail = 1 << 0,
     is_contiguous_avail = 1 << 1,
