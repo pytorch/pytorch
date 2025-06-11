@@ -80,9 +80,6 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   Device getDeviceFromPtr(void* data) const override {
-#if defined(__APPLE__)
-      return at::mps::getDeviceFromPtr(data);
-#endif
     TORCH_CHECK(false, "Cannot get device of pointer on MPS without ATen_mps library. ");
   }
   virtual void releaseEvent(uint32_t event_id) const {
