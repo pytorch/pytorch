@@ -3520,12 +3520,18 @@ exit(2)
         with self.assertRaises(RuntimeError) as context:
             raw_pointer = graph.instantiate()
 
-        self.assertTrue("instantiate() is intended to be called by the user only when keep_graph=true" in str(context.exception))
+        self.assertTrue(
+            "instantiate() is intended to be called by the user only when keep_graph=true"
+            in str(context.exception)
+        )
 
         with self.assertRaises(RuntimeError) as context:
             raw_pointer = graph.raw_cuda_graph()
 
-        self.assertTrue("You cannot access the raw cudaGraph_t instance unless CUDAGraph was initialized with keep_graph=true" in str(context.exception))
+        self.assertTrue(
+            "You cannot access the raw cudaGraph_t instance unless CUDAGraph was initialized with keep_graph=true"
+            in str(context.exception)
+        )
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON,
@@ -3604,10 +3610,7 @@ exit(2)
         s0.wait_stream(s1)
         with torch.cuda.stream(s0):
             g.capture_end()
-        print("BEFORE:", len(existing_pools))
         segments = torch.cuda.memory_snapshot()
-        print("AFTER:", len(existing_pools))
-        import ipdb; ipdb.set_trace()
         x = [
             s["segment_pool_id"]
             for s in segments

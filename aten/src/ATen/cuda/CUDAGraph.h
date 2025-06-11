@@ -43,7 +43,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaGraphExec_t graph_exec_ = nullptr;
 
   // internal states so reset() can do its best cleaning up
-  // Set to true in capture_begin if cudaStreamBeginCapture succeeded
+  // Set to true in capture_end if cudaStreamEndCapture succeeded
+  // Set back to false after instantiate() unless keep_graph=True or
+  // enable_debug_mode() was called on any CUDAGraph instance.
   bool has_graph_ = false;
   // Set to true in capture_end if cudaStreamEndCapture succeeded
   bool capture_ended_ = false;
