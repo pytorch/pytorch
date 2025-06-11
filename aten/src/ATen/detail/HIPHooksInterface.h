@@ -6,8 +6,6 @@
 
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
-#include <memory>
-
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
 
@@ -39,7 +37,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
 
   C10_DEPRECATED_MESSAGE(
     "getHIPHooks().isPinnedPtr(...) is deprecated. Please use at::getHostAllocator(at::kHIP)->is_pinned(...) instead.")
-  bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* /*data*/) const override {
     return false;
   }
 
@@ -51,7 +49,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
     return 0;
   }
 
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex /*device_index*/ ) const override {
     TORCH_CHECK(false, "Cannot check primary context without ATen_hip library.");
   }
 };

@@ -356,7 +356,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     else:
                         self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
-                    "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
+                    "[[maybe_unused]] auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
     def generate_return(self, output_refs: list[str]):

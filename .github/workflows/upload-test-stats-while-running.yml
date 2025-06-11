@@ -24,17 +24,12 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
-      - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
-        with:
-          python-version: "3.10"
-
       - name: Install requirements
         run: |
-          ${CONDA_RUN} pip install requests==2.32.2 boto3==1.35.42
+          python3 -m pip install requests==2.32.2 boto3==1.35.42
 
       - name: Upload test stats
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ${CONDA_RUN} python -m tools.stats.upload_test_stats_running_jobs
+          python3 -m tools.stats.upload_test_stats_running_jobs
