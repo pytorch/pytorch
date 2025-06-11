@@ -11,7 +11,20 @@ struct hardshrink_functor {
   }
 };
 
-struct hardshrink_backward_functor {
+struct softshrink_functor {
+  template <typename T>
+  inline T operator()(const T x, const T lambda) {
+    if (x > lambda) {
+      return x - lambda;
+    } else if (x < -lambda) {
+      return x + lambda;
+    } else {
+      return T(0);
+    }
+  }
+};
+
+struct shrink_backward_functor {
   template <typename T>
   inline T operator()(const T grad_output, const T x, const T lambda) {
     return (x >= -lambda && x <= lambda) ? T(0) : grad_output;
@@ -24,10 +37,16 @@ REGISTER_UNARY_ALPHA_OP(hardshrink, half, half, half);
 REGISTER_UNARY_ALPHA_OP(hardshrink, bfloat, bfloat, bfloat);
 #endif
 
-REGISTER_BINARY_ALPHA_OP(hardshrink_backward, float, float, float);
-REGISTER_BINARY_ALPHA_OP(hardshrink_backward, half, half, half);
+REGISTER_UNARY_ALPHA_OP(softshrink, float, float, float);
+REGISTER_UNARY_ALPHA_OP(softshrink, half, half, half);
 #if __METAL_VERSION__ >= 310
-REGISTER_BINARY_ALPHA_OP(hardshrink_backward, bfloat, bfloat, bfloat);
+REGISTER_UNARY_ALPHA_OP(softshrink, bfloat, bfloat, bfloat);
+#endif
+
+REGISTER_BINARY_ALPHA_OP(shrink_backward, float, float, float);
+REGISTER_BINARY_ALPHA_OP(shrink_backward, half, half, half);
+#if __METAL_VERSION__ >= 310
+REGISTER_BINARY_ALPHA_OP(shrink_backward, bfloat, bfloat, bfloat);
 #endif
 
 struct hardsigmoid_functor {
