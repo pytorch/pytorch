@@ -2181,7 +2181,7 @@ class TMADescriptorVariable(VariableTracker):
         raise NotImplementedError
 
 
-class TMADescriptorExperimentalVariable(VariableTracker):
+class TMADescriptorExperimentalVariable(TMADescriptorVariable):
     def __init__(
         self,
         data_ptr: "variables.DataPtrVariable",
