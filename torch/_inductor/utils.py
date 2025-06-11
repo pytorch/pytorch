@@ -1743,6 +1743,16 @@ def use_ck_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
     )
 
 
+def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
+    from .virtualized import V
+
+    return (
+        _use_autotune_backend("CKTILE")
+        and use_ck_template(layout)
+        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+    )
+
+
 def use_ck_conv_template(layout: Layout) -> bool:
     return _use_conv_autotune_backend("CK") and use_ck_template(layout)
 
@@ -3110,3 +3120,14 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
         isinstance(wrapper, SubgraphPythonWrapperCodegen)
         and wrapper.partition_signatures is not None
     )
+
+
+def dtype_from_size(size: int) -> torch.dtype:
+    from .virtualized import V
+
+    if V.graph.sizevars.statically_known_lt(
+        size, 2**31
+    ) and V.graph.sizevars.statically_known_geq(size, -(2**31)):
+        return torch.int32
+    else:
+        return torch.int64
