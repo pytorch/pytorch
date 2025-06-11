@@ -968,8 +968,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
   int64_t batch_size = query.size(0);
 
   if (batch_size > MAX_BATCH_SIZE) {
-    TORCH_CHECK(!compute_log_sumexp && (dropout_p == 0.0),
-                "Efficient attention cannot produce valid seed, logsumexp and offset outputs when "
+    TORCH_CHECK(dropout_p == 0.0,
+                "Efficient attention cannot produce valid seed and offset outputs when "
                 "the batch size exceeds (", MAX_BATCH_SIZE, ").");
   }
   auto process_chunk = [&](const Tensor& q_chunk,
@@ -1030,6 +1030,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     }
     Tensor final_attention = at::empty_strided(sizes, attn.strides(), attn.options());
     final_attention.slice(0, start, end).copy_(attn);
+    Tensor final_log_sumexp;
+    if (compute_log_sumexp && log_sumexp.numel() > 0) {
+      std::vector<int64_t> lse_sizes;
+      lse_sizes.reserve(log_sumexp.dim());
+      lse_sizes.push_back(batch_size);
+      for (int i = 1; i < log_sumexp.dim(); i++) {
+        lse_sizes.push_back(log_sumexp.size(i));
+      }
+      final_log_sumexp = at::empty(std::move(lse_sizes), log_sumexp.options());
+      final_log_sumexp.slice(0, start, end).copy_(log_sumexp);
+    }
 
     for (start = end; start < batch_size; start += MAX_BATCH_SIZE) {
       end = std::min(start + MAX_BATCH_SIZE, batch_size);
@@ -1045,10 +1056,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       auto [chunk_attn, chunk_log_sumexp, chunk_seed, chunk_offset] =
           process_chunk(query_chunk, key_chunk, value_chunk, bias_chunk);
       final_attention.slice(0, start, end).copy_(chunk_attn);
+      if (compute_log_sumexp && chunk_log_sumexp.numel() > 0) {
+        final_log_sumexp.slice(0, start, end).copy_(chunk_log_sumexp);
+      }
     }
 
     return std::make_tuple(std::move(final_attention),
-              std::move(log_sumexp),
+              std::move(final_log_sumexp),
               std::move(seed),
               std::move(offset));
   }
