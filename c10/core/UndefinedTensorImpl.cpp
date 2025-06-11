@@ -15,6 +15,10 @@ UndefinedTensorImpl::UndefinedTensorImpl()
 bool UndefinedTensorImpl::is_contiguous_custom(MemoryFormat format) const {
   return is_contiguous_default(format);
 }
+bool UndefinedTensorImpl::definitely_contiguous_fast_custom(
+    MemoryFormat format) const {
+  return definitely_contiguous_fast_default(format);
+}
 IntArrayRef UndefinedTensorImpl::strides_custom() const {
   TORCH_CHECK(false, "strides() called on an undefined Tensor");
 }

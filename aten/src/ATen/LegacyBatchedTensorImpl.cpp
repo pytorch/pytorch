@@ -91,6 +91,10 @@ bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) con
   return is_contiguous_;
 }
 
+bool BatchedTensorImpl::definitely_contiguous_fast_custom(at::MemoryFormat memory_format) const {
+  return this->is_contiguous_custom(memory_format);
+}
+
 // The following are some internal inherited methods that we do not support.
 // They should never get called.
 void BatchedTensorImpl::set_size(int64_t dim, int64_t new_size) {

@@ -318,6 +318,16 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   return is_contiguous_default(memory_format);
 }
 
+bool TensorImpl::definitely_contiguous_fast_custom(
+    at::MemoryFormat memory_format) const {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+    // Do we need to call definitely_contiguous here.
+    return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
+        this, memory_format);
+  }
+  return definitely_contiguous_fast_default(memory_format);
+}
+
 bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->is_strides_like(

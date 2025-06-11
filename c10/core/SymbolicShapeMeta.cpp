@@ -22,6 +22,10 @@ SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other)
   is_channels_last_ = other.is_channels_last_;
   is_channels_last_3d_ = other.is_channels_last_3d_;
   is_non_overlapping_and_dense_ = other.is_non_overlapping_and_dense_;
+
+  def_contiguous_ = other.def_contiguous_;
+  def_channels_last_contiguous_ = other.def_channels_last_contiguous_;
+  def_channels_last_3d_contiguous_ = other.def_channels_last_3d_contiguous_;
   available_.store(other.available_.load());
   // NOLINTEND(cppcoreguidelines-prefer-member-initializer)
 }
@@ -82,15 +86,24 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   return _compute_contiguous(sizes, strides, numel());
 }
 
+SymBool SymbolicShapeMeta::compute_def_contiguous() const {
+  if (!strides_valid_) {
+    return false;
+  }
+  c10::SymIntArrayRef sizes(sizes_);
+  c10::SymIntArrayRef strides(strides_);
+  return _compute_def_contiguous(sizes, strides, numel());
+}
+
 // The rest of them
-#define DEFINE_EAGER_SYMBOOL_COMPUTE(name, nodeimpl, fallback) \
-  SymBool SymbolicShapeMeta::name() const {                    \
-    if (!strides_valid_) {                                     \
-      return false;                                            \
-    }                                                          \
-    c10::SymIntArrayRef sizes(sizes_);                         \
-    c10::SymIntArrayRef strides(strides_);                     \
-    return fallback(sizes, strides);                           \
+#define DEFINE_EAGER_SYMBOOL_COMPUTE(name, fallback) \
+  SymBool SymbolicShapeMeta::name() const {          \
+    if (!strides_valid_) {                           \
+      return false;                                  \
+    }                                                \
+    c10::SymIntArrayRef sizes(sizes_);               \
+    c10::SymIntArrayRef strides(strides_);           \
+    return fallback(sizes, strides);                 \
   }
 
 #define DEFINE_SYMBOOL_COMPUTE(name, nodeimpl, fallback)        \
@@ -110,11 +123,15 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   }
 
 // clang-format off
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_channels_last_contiguous_2d, is_channels_last_contiguous_2d, _compute_channels_last_contiguous_2d)
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_channels_last_contiguous_3d, is_channels_last_contiguous_3d, _compute_channels_last_contiguous_3d)
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_strides_like_channels_last_2d, is_channels_last_strides_2d, is_channels_last_strides_2d)
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_strides_like_channels_last_3d, is_channels_last_strides_3d, is_channels_last_strides_3d)
+DEFINE_EAGER_SYMBOOL_COMPUTE(compute_channels_last_contiguous_2d, _compute_channels_last_contiguous_2d)
+DEFINE_EAGER_SYMBOOL_COMPUTE(compute_channels_last_contiguous_3d, _compute_channels_last_contiguous_3d)
+DEFINE_EAGER_SYMBOOL_COMPUTE(compute_strides_like_channels_last_2d, is_channels_last_strides_2d)
+DEFINE_EAGER_SYMBOOL_COMPUTE(compute_strides_like_channels_last_3d, is_channels_last_strides_3d)
+DEFINE_EAGER_SYMBOOL_COMPUTE(compute_def_channels_last_contiguous_2d, _compute_def_channels_last_contiguous_2d)
+DEFINE_EAGER_SYMBOOL_COMPUTE(compute_def_channels_last_contiguous_3d, _compute_def_channels_last_contiguous_3d)
+
 DEFINE_SYMBOOL_COMPUTE(compute_non_overlapping_and_dense, is_non_overlapping_and_dense, _compute_non_overlapping_and_dense)
+
 // clang-format on
 
 #undef DEFINE_SYMBOOL_COMPUTE
@@ -145,6 +162,17 @@ SymBool SymbolicShapeMeta::compute_channels_last_contiguous_3d_dim5() const {
     return false;
   }
   return ~is_channels_last_contiguous() & compute_channels_last_contiguous_3d();
+}
+
+SymBool SymbolicShapeMeta::compute_def_channels_last_contiguous_3d_dim5()
+    const {
+  init_def_channels_last_contiguous();
+  if (guard_or_false(
+          definitely_channels_last_contiguous_fast(), __FILE__, __LINE__)) {
+    return false;
+  }
+  return ~definitely_channels_last_contiguous_fast() &
+      compute_def_channels_last_contiguous_3d();
 }
 
 SymBool SymbolicShapeMeta::compute_channels_last_2d_dim5() const {
@@ -192,6 +220,7 @@ void SymbolicShapeMeta::set_numel(SymInt val) const {
   numel_ = std::move(val);
   available_.fetch_or(numel_avail);
 }
+
 void SymbolicShapeMeta::set_is_contiguous(SymBool val) const {
   std::scoped_lock lock(mutables_);
   if (has_is_contiguous()) {
@@ -200,6 +229,7 @@ void SymbolicShapeMeta::set_is_contiguous(SymBool val) const {
   is_contiguous_ = std::move(val);
   available_.fetch_or(is_contiguous_avail);
 }
+
 void SymbolicShapeMeta::set_is_channels_last_contiguous(SymBool val) const {
   std::scoped_lock lock(mutables_);
   if (has_is_channels_last_contiguous()) {
@@ -208,6 +238,7 @@ void SymbolicShapeMeta::set_is_channels_last_contiguous(SymBool val) const {
   is_channels_last_contiguous_ = std::move(val);
   available_.fetch_or(is_channels_last_contiguous_avail);
 }
+
 void SymbolicShapeMeta::set_is_channels_last_3d_contiguous(SymBool val) const {
   std::scoped_lock lock(mutables_);
   if (has_is_channels_last_3d_contiguous()) {
@@ -216,6 +247,7 @@ void SymbolicShapeMeta::set_is_channels_last_3d_contiguous(SymBool val) const {
   is_channels_last_3d_contiguous_ = std::move(val);
   available_.fetch_or(is_channels_last_3d_contiguous_avail);
 }
+
 void SymbolicShapeMeta::set_is_channels_last(SymBool val) const {
   std::scoped_lock lock(mutables_);
   if (has_is_channels_last()) {
@@ -224,6 +256,7 @@ void SymbolicShapeMeta::set_is_channels_last(SymBool val) const {
   is_channels_last_ = std::move(val);
   available_.fetch_or(is_channels_last_avail);
 }
+
 void SymbolicShapeMeta::set_is_channels_last_3d(SymBool val) const {
   std::scoped_lock lock(mutables_);
   if (has_is_channels_last_3d()) {
@@ -231,6 +264,33 @@ void SymbolicShapeMeta::set_is_channels_last_3d(SymBool val) const {
   }
   is_channels_last_3d_ = std::move(val);
   available_.fetch_or(is_channels_last_3d_avail);
+}
+
+void SymbolicShapeMeta::set_def_contiguous(SymBool val) const {
+  std::scoped_lock lock(mutables_);
+  if (has_def_contiguous()) {
+    return;
+  }
+  def_contiguous_ = std::move(val);
+  available_.fetch_or(def_contiguous_avail);
+}
+
+void SymbolicShapeMeta::set_def_channels_last_contiguous(SymBool val) const {
+  std::scoped_lock lock(mutables_);
+  if (has_def_channels_last_contiguous()) {
+    return;
+  }
+  def_channels_last_contiguous_ = std::move(val);
+  available_.fetch_or(def_channels_last_contiguous_avail);
+}
+
+void SymbolicShapeMeta::set_def_channels_last_3d_contiguous(SymBool val) const {
+  std::scoped_lock lock(mutables_);
+  if (has_def_channels_last_3d_contiguous()) {
+    return;
+  }
+  def_channels_last_3d_contiguous_ = std::move(val);
+  available_.fetch_or(def_channels_last_3d_contiguous_avail);
 }
 
 void SymbolicShapeMeta::set_is_non_overlapping_and_dense(SymBool val) const {
@@ -250,6 +310,10 @@ void SymbolicShapeMeta::init_is_contiguous() const {
   set_is_contiguous(compute_contiguous());
 }
 
+void SymbolicShapeMeta::init_def_contiguous() const {
+  set_def_contiguous(compute_def_contiguous());
+}
+
 void SymbolicShapeMeta::init_is_channels_last_contiguous() const {
   set_is_channels_last_contiguous([&] {
     switch (dim()) {
@@ -263,11 +327,35 @@ void SymbolicShapeMeta::init_is_channels_last_contiguous() const {
   }());
 }
 
+void SymbolicShapeMeta::init_def_channels_last_contiguous() const {
+  set_def_channels_last_contiguous([&] {
+    switch (dim()) {
+      case 5:
+      case 4: {
+        return compute_def_channels_last_contiguous_2d();
+      }
+      default:
+        return SymBool{false};
+    }
+  }());
+}
+
 void SymbolicShapeMeta::init_is_channels_last_3d_contiguous() const {
   set_is_channels_last_3d_contiguous([&] {
     switch (dim()) {
       case 5:
         return compute_channels_last_contiguous_3d_dim5();
+      default:
+        return SymBool{false};
+    }
+  }());
+}
+
+void SymbolicShapeMeta::init_def_channels_last_3d_contiguous() const {
+  set_def_channels_last_3d_contiguous([&] {
+    switch (dim()) {
+      case 5:
+        return compute_def_channels_last_contiguous_3d_dim5();
       default:
         return SymBool{false};
     }

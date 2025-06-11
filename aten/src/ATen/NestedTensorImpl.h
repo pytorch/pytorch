@@ -116,6 +116,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   int64_t numel_custom() const override;
   c10::SymInt sym_numel_custom() const override;
   bool is_contiguous_custom(MemoryFormat) const override;
+  bool definitely_contiguous_fast_custom(MemoryFormat) const override;
   int64_t size_custom(int64_t d) const override {
     return this->size(d);
   }
