@@ -48,34 +48,52 @@ C10_EXPORT DriverAPI* DriverAPI::get() {
   return &singleton;
 }
 
-typedef cudaError_t (*VersionedGetEntryPoint)(const char *, void **, unsigned int,
-                                              unsigned long long,  // NOLINT(*)
-                                              cudaDriverEntryPointQueryResult *);
-typedef cudaError_t (*GetEntryPoint)(const char *, void **, unsigned long long,  // NOLINT(*)
-                                     cudaDriverEntryPointQueryResult *);
+typedef cudaError_t (*VersionedGetEntryPoint)(
+    const char*,
+    void**,
+    unsigned int,
+    unsigned long long, // NOLINT(*)
+    cudaDriverEntryPointQueryResult*);
+typedef cudaError_t (*GetEntryPoint)(
+    const char*,
+    void**,
+    unsigned long long, // NOLINT(*)
+    cudaDriverEntryPointQueryResult*);
 
-C10_EXPORT void *get_symbol(const char *symbol, int cuda_version) {
+C10_EXPORT void* get_symbol(const char* symbol, int cuda_version) {
   constexpr char driver_entrypoint[] = "cudaGetDriverEntryPoint";
-  constexpr char driver_entrypoint_versioned[] = "cudaGetDriverEntryPointByVersion";
-  // We link to the libcudart.so already, so can search for it in the current context
+  constexpr char driver_entrypoint_versioned[] =
+      "cudaGetDriverEntryPointByVersion";
+  // We link to the libcudart.so already, so can search for it in the current
+  // context
   static GetEntryPoint driver_entrypoint_fun =
       reinterpret_cast<GetEntryPoint>(dlsym(RTLD_DEFAULT, driver_entrypoint));
   static VersionedGetEntryPoint driver_entrypoint_versioned_fun =
-      reinterpret_cast<VersionedGetEntryPoint>(dlsym(RTLD_DEFAULT, driver_entrypoint_versioned));
+      reinterpret_cast<VersionedGetEntryPoint>(
+          dlsym(RTLD_DEFAULT, driver_entrypoint_versioned));
 
   cudaDriverEntryPointQueryResult driver_result;
-  void *entry_point = nullptr;
+  void* entry_point = nullptr;
   if (driver_entrypoint_versioned_fun != nullptr) {
     // Found versioned entrypoint function
-    (driver_entrypoint_versioned_fun(symbol, &entry_point, cuda_version,
-                                                    cudaEnableDefault, &driver_result));
+    cudaError_t result = driver_entrypoint_versioned_fun(
+        symbol, &entry_point, cuda_version, cudaEnableDefault, &driver_result);
+    TORCH_CHECK(
+        result == cudaSuccess,
+        "Error calling cudaGetDriverEntryPointByVersion");
   } else {
-    (driver_entrypoint_fun != nullptr, "Error finding the CUDA Runtime-Driver interop.");
+    TORCH_CHECK(
+        driver_entrypoint_fun != nullptr,
+        "Error finding the CUDA Runtime-Driver interop.");
     // Versioned entrypoint function not found
-    (driver_entrypoint_fun(symbol, &entry_point, cudaEnableDefault, &driver_result));
+    cudaError_t result = driver_entrypoint_fun(
+        symbol, &entry_point, cudaEnableDefault, &driver_result);
+    TORCH_CHECK(result == cudaSuccess, "Error calling cudaGetDriverEntryPoint");
   }
-  (driver_result == cudaDriverEntryPointSuccess,
-             "Could not find CUDA driver entry point for ", symbol);
+  TORCH_CHECK(
+      driver_result == cudaDriverEntryPointSuccess,
+      "Could not find CUDA driver entry point for ",
+      symbol);
   return entry_point;
 }
 
