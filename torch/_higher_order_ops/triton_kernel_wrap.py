@@ -870,11 +870,14 @@ def identify_mutated_tensors(
         # The cache for analyze kernel mutations is mainly used for cycle
         # detection, so each top level invocation needs a clean cache
 
+        """
+        TODO(dberard) DELETE THIS
         for fn_name, fn in functions.items():
             print(f"\n    {fn_name}")
             for ret, ops in fn.items():
                 for op in ops:
                     print(f"{ret}: {op}")
+        """
 
         analyze_kernel_mutations.reset()
         get_tma_stores.reset()
