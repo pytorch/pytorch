@@ -552,7 +552,7 @@ advantageous for implementing algorithms that involve many element
 selection operations, such as slicing or matrix products.
 ```
 
-## Working with sparse COO tensors
+### Working with sparse COO tensors
 
 Let's consider the following example:
 
