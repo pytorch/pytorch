@@ -1,6 +1,5 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections import defaultdict
-from itertools import chain
 from typing import Any, Generic, Optional, TypeVar
 from typing_extensions import override
 
@@ -21,7 +20,6 @@ Classes and implementations related to precompile
 """
 
 T = TypeVar("T")
-
 
 
 class PrecompileCacheArtifact(CacheArtifact, Generic[T]):
