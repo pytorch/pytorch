@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import copy
+from functools import wraps
 
 import torch
 import torch.nn as nn
@@ -22,6 +23,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
     requires_nccl,
     skip_if_lt_x_gpu,
+    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -33,6 +35,24 @@ from torch.testing._internal.common_utils import (
 
 
 device_type = "cuda"
+
+
+def handle_sys_exit():
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                func(*args, **kwargs)
+            except SystemExit as e:
+                for test_skip in TEST_SKIPS.values():
+                    if test_skip.exit_code == e.code:
+                        import pytest
+
+                        pytest.skip(test_skip.message)
+
+        return wrapper
+
+    return decorator
 
 
 # MLP Layer
@@ -185,6 +205,7 @@ class ComposabilityTest(MultiProcContinousTest):
         return pipeline_schedule, partial_models, offsets
 
     @requires_nccl()
+    @handle_sys_exit()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize(
@@ -266,6 +287,7 @@ class ComposabilityTest(MultiProcContinousTest):
                 torch.testing.assert_close(p.grad, ref_p.grad)
 
     @requires_nccl()
+    @handle_sys_exit()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
