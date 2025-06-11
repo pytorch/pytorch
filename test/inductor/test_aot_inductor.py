@@ -6139,6 +6139,7 @@ GPU_TEST_FAILURES = {
 MPS_TEST_FAILURES = {
     # Compilation Error
     "test_while_loop_with_mixed_device": fail_mps(),
+    "test_aoti_runtime_asserts_backed_symint": fail_mps(),
     "test_index_put_with_none_index": fail_mps(),
     "test_size_from_multi_ouptut": fail_mps(),
     "test_simple_embed_kernel_binary_False": fail_mps(),
