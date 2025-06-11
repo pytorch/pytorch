@@ -33,26 +33,21 @@ REGISTER_BINARY_ALPHA_OP(hardshrink_backward, bfloat, bfloat, bfloat);
 struct hardsigmoid_functor {
   template <typename T>
   inline T operator()(const T x) {
-    T zero(0);
-    T three(3);
-    T six(6);
-    T result = min(max(x + three, zero), six) / six;
-    return result;
+    return static_cast<T>(min(max(x + 3.0f, .0f), 6.f) / 6.f);
   }
 };
 
 struct hardsigmoid_backward_functor {
   template <typename T>
   inline T operator()(const T grad_output, const T self) {
-    T zero(0);
-    T one_sixth(T(1.0 / 6.0));
-    T neg_three(-3);
-    T three(3);
+    constexpr T zero(0);
+    constexpr T neg_three(-3);
+    constexpr T three(3);
 
     if (self < neg_three || self > three) {
       return zero;
     } else {
-      return grad_output * one_sixth;
+      return static_cast<T>(grad_output * (1.0f / 6.0f));
     }
   }
 };
@@ -72,28 +67,23 @@ REGISTER_BINARY_OP(hardsigmoid_backward, bfloat, bfloat);
 struct hardswish_functor {
   template <typename T>
   inline T operator()(const T x) {
-    T zero(0);
-    T three(3);
-    T six(6);
-    T result = x * (min(max(x + three, zero), six) / six);
-    return result;
+    return static_cast<T>(x * min(max(x + 3.0f, .0f), 6.f) / 6.f);
   }
 };
 
 struct hardswish_backward_functor {
   template <typename T>
   inline T operator()(const T grad_output, const T self) {
-    T zero(0);
-    T three(3);
-    T neg_three(-3);
-    T one_half(T(0.5));
+    constexpr T zero(0);
+    constexpr T three(3);
+    constexpr T neg_three(-3);
 
     if (self <= neg_three) {
       return zero;
     } else if (self >= three) {
       return grad_output;
     } else {
-      return grad_output * (self / three + one_half);
+      return static_cast<T>(grad_output * (self / 3.0f + 0.5f));
     }
   }
 };
@@ -113,8 +103,7 @@ REGISTER_BINARY_OP(hardswish_backward, bfloat, bfloat);
 struct leaky_relu_functor {
   template <typename T>
   inline T operator()(const T x, const T negative_slope) {
-    T zero(0);
-    return x >= zero ? x : x * negative_slope;
+    return x >= T(0) ? x : x * negative_slope;
   }
 };
 
@@ -124,8 +113,7 @@ struct leaky_relu_backward_functor {
       const T grad_output,
       const T self,
       const T negative_slope) {
-    T zero(0);
-    return self >= zero ? grad_output : grad_output * negative_slope;
+    return self >= T(0) ? grad_output : grad_output * negative_slope;
   }
 };
 
@@ -144,13 +132,12 @@ REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, bfloat, bfloat, bfloat);
 struct softshrink_functor {
   template <typename T>
   inline T operator()(const T x, const T lambda) {
-    T zero(0);
     if (x > lambda) {
       return x - lambda;
     } else if (x < -lambda) {
       return x + lambda;
     } else {
-      return zero;
+      return T(0);
     }
   }
 };
