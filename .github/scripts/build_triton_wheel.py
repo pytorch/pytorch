@@ -21,8 +21,11 @@ def read_triton_pin(device: str = "cuda") -> str:
         return f.read().strip()
 
 
-def read_triton_version() -> str:
-    with open(REPO_DIR / ".ci" / "docker" / "triton_version.txt") as f:
+def read_triton_version(device: str = "cuda") -> str:
+    triton_version_file = "triton_version.txt"
+    if device == "xpu":
+        triton_version_file = "triton_xpu_version.txt"
+    with open(REPO_DIR / ".ci" / "docker" / triton_version_file) as f:
         return f.read().strip()
 
 
@@ -91,7 +94,7 @@ def build_triton(
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",
-            expected_version=None,
+            expected_version=read_triton_version(device),
         )
 
         if device == "rocm":
