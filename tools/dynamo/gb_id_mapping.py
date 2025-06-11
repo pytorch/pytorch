@@ -267,6 +267,21 @@ def cmd_update_gb_type(
 
 
 def check_unimplemented_calls(files, registry_path):
+    """
+    Checks if the unimplemented_v2 calls in the specified files match the entries in the registry.
+
+    Args:
+        files (list of str): A list of file paths to check for unimplemented_v2 calls.
+        registry_path (str or Path): The path to the registry JSON file containing expected entries.
+
+    Returns:
+        bool: True if all unimplemented_v2 calls match the registry entries, False if there are mismatches.
+
+    The function compares the gb_type, context, explanation, and hints of each unimplemented_v2 call
+    in the provided files against the corresponding entries in the registry. If any discrepancies are
+    found, it prints the details and returns False. Otherwise, it confirms that all calls match the
+    registry and returns True.
+    """
     registry_path = Path(registry_path)
     reg = load_registry(registry_path)
 
