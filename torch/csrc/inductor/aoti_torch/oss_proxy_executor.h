@@ -82,6 +82,16 @@ struct OSSOpKernel {
     return num_output_tensors;
   }
 
+  int num_output_ints() const {
+    int num_output_ints = 0;
+    for (const auto& output : outputs_) {
+      if (output.arg_type == DynamicArgType::IntType) {
+        num_output_ints += output.length;
+      }
+    }
+    return num_output_ints;
+  }
+
   virtual void run(std::vector<c10::IValue>& stack) = 0;
   virtual c10::FunctionSchema schema() const = 0;
   virtual ~OSSOpKernel() = default;

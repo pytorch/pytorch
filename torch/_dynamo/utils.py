@@ -50,7 +50,7 @@ from collections import Counter, OrderedDict
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
-from types import MethodWrapperType
+from types import CodeType, MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -4672,3 +4672,11 @@ def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
 
 def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
     cm.__exit__(None, None, None)
+
+
+# Returns a set of code objects present traced in the current TracingContext, or None
+# if there is no current TracingContext.
+def get_traced_code() -> list[CodeType]:
+    from torch._guards import TracingContext
+
+    return TracingContext.get_traced_code()

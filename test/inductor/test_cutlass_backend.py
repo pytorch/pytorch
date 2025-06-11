@@ -495,7 +495,7 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
-    @parametrize("use_aoti", (False,))
+    @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float8_e4m3fn,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_fp8_scaled_mm(
@@ -1145,6 +1145,93 @@ class TestCutlassBackend(TestCase):
                             ), "Only pingpong Kernels should have been allowed"
                             cuda_template_count += 1
                     assert cuda_template_count > 0, "No CUDATemplateCaller choices"
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_backend_fp8_scaled_mm_fast_accum_filtering(
+        self,
+    ):
+        float8_dtype = torch.float8_e4m3fn
+        # Only bf16 output type is supported for row-wise scaling, not fp32
+        output_dtype: torch.dtype = torch.bfloat16
+        device = "cuda"
+        M, K, N = 128, 128, 128  # Matmul Y = X [M, K] x W [N, K]
+        x = torch.randn(M, K, dtype=output_dtype, device=device)
+        w = torch.randn(N, K, dtype=output_dtype, device=device)
+        bias = None
+        # quantize weight (prior to inference)
+        w_fp8, w_inverse_scale = _quantize_rowwise(w, float8_dtype)
+        w_t_fp8 = w_fp8.t()
+        w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+
+        # quantize input x
+        x_fp8, x_inverse_scale = _quantize_rowwise(x, float8_dtype)
+
+        def linear(
+            x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias, use_fast_accum
+        ):
+            y = torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                w_inverse_scale,
+                bias,
+                out_dtype=output_dtype,
+                use_fast_accum=use_fast_accum,
+            )
+            return y
+
+        linear_compiled = torch.compile(linear, backend="inductor")
+
+        def select_no_algorithm(*args, **kwargs):
+            raise NoValidChoicesError
+
+        def run_test(use_fast_accum):
+            with fresh_inductor_cache():
+                with config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_gemm_backends": "CUTLASS",
+                        "cuda.cutlass_max_profiling_configs": 2,
+                    }
+                ):
+                    with mock.patch(
+                        "torch._inductor.kernel.mm.autotune_select_algorithm",
+                        wraps=select_no_algorithm,
+                    ) as sa:
+                        with self.assertRaisesRegex(
+                            InductorError, r".*NoValidChoicesError.*"
+                        ):
+                            linear_compiled(
+                                x_fp8,
+                                x_inverse_scale,
+                                w_t_fp8,
+                                w_inverse_scale,
+                                bias,
+                                use_fast_accum,
+                            )
+
+                        args, _ = sa.call_args
+                        _, choices, _, _ = args
+                        cuda_template_count = 0
+                        for choice in choices:
+                            if isinstance(choice, CUDATemplateCaller):
+                                choice_info = choice.info_dict()
+                                op_conf_name = choice_info.get("op_conf_name", "")
+                                assert isinstance(op_conf_name, str)
+                                if use_fast_accum:
+                                    assert (
+                                        "fastaccum" in op_conf_name
+                                    ), "Only fastaccum Kernels should have been allowed"
+                                else:
+                                    assert (
+                                        "fastaccum" not in op_conf_name
+                                    ), "fastaccum Kernels should have been filtered"
+                                cuda_template_count += 1
+                        assert cuda_template_count > 0, "No CUDATemplateCaller choices"
+
+        run_test(True)
+        run_test(False)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})

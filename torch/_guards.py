@@ -986,6 +986,13 @@ class TracingContext:
         # framesummary.
         TracingContext.get().loc_in_frame = (filename, lineno, frame_name)
 
+    @staticmethod
+    def get_traced_code():
+        tc = TracingContext.try_get()
+        if tc is None:
+            return None
+        return tc.traced_code
+
 
 @contextmanager
 def compile_context(context: Optional[CompileContext]):
