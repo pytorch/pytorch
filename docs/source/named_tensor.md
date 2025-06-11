@@ -3,6 +3,7 @@
 ```
 
 (named_tensors-doc)=
+
 # Named Tensors
 
 Named Tensors allow users to give explicit names to tensor dimensions.
