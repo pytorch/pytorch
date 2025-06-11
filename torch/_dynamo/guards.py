@@ -418,7 +418,7 @@ def from_numpy(a):
 
 
 # For user stack printing
-@functools.lru_cache(None)
+@functools.cache
 def uninteresting_files():
     import torch._dynamo.external_utils
     import torch._dynamo.polyfills
@@ -623,7 +623,7 @@ class GuardManagerType(enum.Enum):
     DICT_GUARD_MANAGER = 2
 
 
-@functools.lru_cache(None)
+@functools.cache
 def code_framelocals_names_reversed_cached(code: types.CodeType):
     return list(reversed(code_framelocals_names(code)))
 
