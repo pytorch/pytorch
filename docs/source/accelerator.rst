@@ -19,6 +19,8 @@ torch.accelerator
     synchronize
     device_index
 
+.. automodule:: torch.accelerator.memory
+.. currentmodule:: torch.accelerator.memory
 
 Memory management
 -----------------
