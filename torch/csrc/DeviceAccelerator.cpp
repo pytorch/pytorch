@@ -75,7 +75,7 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_isAllocatorInitialized", []() {
     const auto device_type = at::accelerator::getAccelerator(true).value();
-    return at::GetDeviceAllocator(device_type)->initialized();
+    return at::getDeviceAllocator(device_type)->initialized();
   });
 
   m.def("_accelerator_emptyCache", []() { at::accelerator::emptyCache(); });
