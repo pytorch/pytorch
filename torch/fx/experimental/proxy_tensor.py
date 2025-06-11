@@ -1136,8 +1136,6 @@ def _should_save_eager_input_vals(
     target: Any,
     args_kwargs: Optional[tuple[tuple[Argument, ...], dict[str, Argument]]] = None,
 ) -> bool:
-    from torch._higher_order_ops.invoke_subgraph import InvokeSubgraphHOP
-
     if not callable(target):
         return False
     if isinstance(
@@ -1145,7 +1143,6 @@ def _should_save_eager_input_vals(
         (
             torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
             torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
-            InvokeSubgraphHOP,
         ),
     ):
         return True

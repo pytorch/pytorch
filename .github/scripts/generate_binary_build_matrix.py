@@ -15,19 +15,21 @@ import os
 from typing import Optional
 
 
-# NOTE: Please also update the CUDA sources in `PIP_SOURCES` in tools/nightly.py when changing this
-CUDA_ARCHES = ["12.6", "12.8"]
+# NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
+CUDA_ARCHES = ["11.8", "12.6", "12.8"]
 CUDA_STABLE = "12.6"
 CUDA_ARCHES_FULL_VERSION = {
+    "11.8": "11.8.0",
     "12.6": "12.6.3",
     "12.8": "12.8.1",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
+    "11.8": "9",
     "12.6": "9",
     "12.8": "9",
 }
 
-# NOTE: Please also update the ROCm sources in `PIP_SOURCES` in tools/nightly.py when changing this
+# NOTE: Also update the ROCm sources in tools/nightly.py when changing this list
 ROCM_ARCHES = ["6.3", "6.4"]
 
 XPU_ARCHES = ["xpu"]
