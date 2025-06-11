@@ -142,7 +142,7 @@ class AveragedModel(Module):
             :class:`AveragedModel` parameters as a list, the current values of :attr:`model`
             parameters as a list, and the number of models already averaged; if None,
             an equally weighted average is used (default: None)
-        use_buffers (bool): if ``True``, it will compute running averages for
+        use_buffers (bool, optional): if ``True``, it will compute running averages for
             both the parameters and the buffers of the model. (default: ``False``)
 
     Example:
@@ -375,12 +375,12 @@ class SWALR(LRScheduler):
         optimizer (torch.optim.Optimizer): wrapped optimizer
         swa_lrs (float or list): the learning rate value for all param groups
             together or separately for each group.
-        annealing_epochs (int): number of epochs in the annealing phase
+        annealing_epochs (int, optional): number of epochs in the annealing phase
             (default: 10)
-        annealing_strategy (str): "cos" or "linear"; specifies the annealing
+        annealing_strategy (str, optional): "cos" or "linear"; specifies the annealing
             strategy: "cos" for cosine annealing, "linear" for linear annealing
             (default: "cos")
-        last_epoch (int): the index of the last epoch (default: -1)
+        last_epoch (int, optional): the index of the last epoch (default: -1)
 
     The :class:`SWALR` scheduler can be used together with other
     schedulers to switch to a constant learning rate late in the training
@@ -404,6 +404,18 @@ class SWALR(LRScheduler):
         >>>          swa_scheduler.step()
         >>>      else:
         >>>          scheduler.step()
+        >>>
+        >>> # SWA with a cyclical scheduler
+        >>> cyclic_scheduler = CyclicLR(optimizer, base_lr=0.001, max_lr=0.01, step_size_up=5)
+        >>> swa_model = AveragedModel(model)
+        >>> swa_scheduler = SWALR(optimizer, swa_lr=0.001)
+        >>> for epoch in range(num_epochs):
+        >>>     if epoch < swa_start:
+        >>>         optimizer.step()
+        >>>         cyclic_scheduler.step()
+        >>>     else:
+        >>>         swa_model.update_parameters(model)
+        >>>         swa_scheduler.step()
 
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
