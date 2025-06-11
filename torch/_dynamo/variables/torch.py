@@ -170,7 +170,7 @@ constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
     # Defined as a function to avoid circular import like torch.onnx
     return {
@@ -197,7 +197,7 @@ dispatch_key_set_functions = {
 }
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_overridable_functions():
     from itertools import chain
 
@@ -432,7 +432,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         return self.value
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _get_handlers():
         """Build a dict from function -> method to handle it so that we are O(1)
         in terms of the number of function with special handling."""
