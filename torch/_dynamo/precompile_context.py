@@ -1,6 +1,5 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections import defaultdict
-from itertools import chain
 from typing import Any, Generic, Optional, TypeVar
 from typing_extensions import override
 
@@ -21,7 +20,6 @@ Classes and implementations related to precompile
 """
 
 T = TypeVar("T")
-
 
 
 class PrecompileCacheArtifact(CacheArtifact, Generic[T]):
@@ -110,8 +108,7 @@ class PrecompileContext(CacheArtifactManager):
         "mega" list
         """
         artifact = CacheArtifactFactory.encode_create(artifact_type, key, content)
-        if artifact in cls._seen_artifacts:
-            return
+        # TODO: use seen artifacts so we don't have to save the same object twice
         cls._new_cache_artifacts_by_key[key] = artifact
         cls._seen_artifacts.add(artifact)
 
