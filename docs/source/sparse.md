@@ -1070,7 +1070,7 @@ A sparse BSC tensor consists of three tensors: ``ccol_indices``,
     K)-D tensor of shape ``(nse, nrowblocks, ncolblocks,
     *densesize)``.
 
-### Construction of BSC tensors
+#### Construction of BSC tensors
 
 Sparse BSC tensors can be directly constructed by using the
 {func}`torch.sparse_bsc_tensor` function. The user must supply the row
