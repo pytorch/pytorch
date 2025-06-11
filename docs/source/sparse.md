@@ -481,7 +481,7 @@ of dense and sparse dimensions is not supported.
 To be sure that a constructed sparse tensor has consistent indices,
 values, and size, the invariant checks can be enabled per tensor
 creation via ``check_invariants=True`` keyword argument, or
-globally using :class:`torch.sparse.check_sparse_tensor_invariants`
+globally using {class}`torch.sparse.check_sparse_tensor_invariants`
 context manager instance. By default, the sparse tensor invariants
 checks are disabled.
 ```
@@ -711,7 +711,7 @@ sparse compressed tensors is always two, ``M == 2``.
    To be sure that a constructed sparse tensor has consistent indices,
    values, and size, the invariant checks can be enabled per tensor
    creation via ``check_invariants=True`` keyword argument, or
-   globally using :class:`torch.sparse.check_sparse_tensor_invariants`
+   globally using {class}`torch.sparse.check_sparse_tensor_invariants`
    context manager instance. By default, the sparse tensor invariants
    checks are disabled.
 ```
@@ -809,7 +809,7 @@ ncols, *densesize)`` where ``len(batchsize) == B`` and
    prod(densesize)) * nse) * prod(batchsize)`` bytes (plus a constant
    overhead from storing other tensor data).
 
-   With the same example data of :ref:`the note in sparse COO format
+   With the same example data of {ref}`the note in sparse COO format
    introduction<sparse-coo-docs>`, the memory consumption of a 10 000
    x 10 000 tensor with 100 000 non-zero 32-bit floating point numbers
    is at least ``(10000 * 8 + (8 + 4 * 1) * 100 000) * 1 = 1 280 000``
@@ -1202,7 +1202,7 @@ matrix arguments.
 
 The following Tensor methods are related to sparse tensors:
 
-```{code-block} python
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -1224,7 +1224,7 @@ The following Tensor methods are related to sparse tensors:
 
 The following Tensor methods are specific to sparse COO tensors:
 
-```{code-block} python
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -1236,9 +1236,9 @@ The following Tensor methods are specific to sparse COO tensors:
     Tensor.indices
 ```
 
-The following methods are specific to :ref:`sparse CSR tensors <sparse-csr-docs>` and :ref:`sparse BSR tensors <sparse-bsr-docs>`:
+The following methods are specific to {ref}`sparse CSR tensors <sparse-csr-docs>` and {ref}`sparse BSR tensors <sparse-bsr-docs>`:
 
-```{code-block} python
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -1247,9 +1247,9 @@ The following methods are specific to :ref:`sparse CSR tensors <sparse-csr-docs>
     Tensor.col_indices
 ```
 
-The following methods are specific to :ref:`sparse CSC tensors <sparse-csc-docs>` and :ref:`sparse BSC tensors <sparse-bsc-docs>`:
+The following methods are specific to {ref}`sparse CSC tensors <sparse-csc-docs>` and {ref}`sparse BSC tensors <sparse-bsc-docs>`:
 
-```{code-block} python
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
