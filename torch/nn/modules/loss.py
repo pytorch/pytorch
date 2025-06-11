@@ -1332,33 +1332,34 @@ class CrossEntropyLoss(_WeightedLoss):
 
         >>> # Example of target with incorrectly specified class probabilities
         >>> loss = nn.CrossEntropyLoss()
+        >>> torch.manual_seed(283)
         >>> input = torch.randn(3, 5, requires_grad=True)
         >>> target = torch.randn(3, 5)
         >>> # Provided target class probabilities are not in range [0,1]
         >>> target
-        tensor([[-0.6846,  1.1029, -0.5028,  0.7858, -1.5158],
-                [ 0.6152, -0.3215,  0.4336, -0.3655,  0.5295],
-                [ 1.0120,  1.5263, -1.6144, -0.2656, -0.7357]])
+        tensor([[ 0.7105,  0.4446,  2.0297,  0.2671, -0.6075],
+                [-1.0496, -0.2753, -0.3586,  0.9270,  1.0027],
+                [ 0.7551,  0.1003,  1.3468, -0.3581, -0.9569]])
         >>> # Provided target class probabilities do not sum to 1
         >>> target.sum(axis=1)
-        tensor([-0.8146,  0.8914, -0.0774])
+        tensor([2.8444, 0.2462, 0.8873])
         >>> # No error message and possible misleading loss value
         >>> loss(input, target).item()
-        -0.10109150409698486
-
+        4.6379876136779785
+        >>>
         >>> # Example of target with correctly specified class probabilities
         >>> # Use .softmax() to ensure true probability distribution
         >>> target_new = target.softmax(dim=1)
         >>> # New target class probabilities all in range [0,1]
         >>> target_new
-        tensor([[0.0772, 0.4610, 0.0925, 0.3357, 0.0336],
-                [0.2842, 0.1114, 0.2370, 0.1066, 0.2609],
-                [0.3127, 0.5230, 0.0226, 0.0872, 0.0545]])
+        tensor([[0.1559, 0.1195, 0.5830, 0.1000, 0.0417],
+                [0.0496, 0.1075, 0.0990, 0.3579, 0.3860],
+                [0.2607, 0.1355, 0.4711, 0.0856, 0.0471]])
         >>> # New target class probabilities sum to 1
         >>> target_new.sum(axis=1)
         tensor([1.0000, 1.0000, 1.0000])
         >>> loss(input, target_new).item()
-        2.048427104949951
+        2.55349063873291
     """
 
     __constants__ = ["ignore_index", "reduction", "label_smoothing"]
