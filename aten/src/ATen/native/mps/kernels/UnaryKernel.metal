@@ -35,7 +35,7 @@ struct expm1_functor {
     if (::metal::fabs(x) < 1e-5f) {
       return static_cast<T>(c10::metal::expm1f(static_cast<float>(x)));
     } else {
-      return static_cast<T>(::metal::exp(static_cast<float>(x)) - 1.0f);
+      return static_cast<T>(exp_(static_cast<float>(x)) - 1.0f);
     }
   }
   template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
@@ -47,7 +47,7 @@ struct expm1_functor {
     if (::precise::sqrt(dot(x, x)) < 1e-2) {
       return T(
           c10::metal::expm1f(x.x + ::precise::log(precise::cos(x.y))),
-          precise::exp(x.x) * precise::sin(x.y));
+          exp_(x.x) * precise::sin(x.y));
     } else {
       return exp_(x) - T(1.0f, 0.0f);
     }
