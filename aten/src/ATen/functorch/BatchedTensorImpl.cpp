@@ -133,6 +133,13 @@ bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) con
   return is_contiguous_default(memory_format);
 }
 
+bool BatchedTensorImpl::definitely_contiguous_fast_custom(at::MemoryFormat memory_format) const {
+  TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
+      "NYI: querying is_contiguous inside of vmap for memory_format ",
+      "other than torch.contiguous_format");
+  return definitely_contiguous_fast_default(memory_format);
+}
+
 // The following are some internal inherited methods that we do not support.
 // They should never get called.
 void BatchedTensorImpl::set_size(int64_t dim, int64_t new_size) {

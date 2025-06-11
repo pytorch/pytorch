@@ -276,6 +276,9 @@ c10::SymInt NestedTensorImpl::sym_numel_custom() const {
 bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
   return nested_tensor_impl_is_contiguous(this);
 }
+bool NestedTensorImpl::definitely_contiguous_fast_custom(MemoryFormat format) const {
+  return this->is_contiguous_custom(format);
+}
 IntArrayRef NestedTensorImpl::sizes_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue.");
 }

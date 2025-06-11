@@ -255,5 +255,7 @@ void SparseCsrTensorImpl::set_storage_offset(int64_t storage_offset) {
 bool SparseCsrTensorImpl::is_contiguous_custom(MemoryFormat) const {
   TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have is_contiguous");
 }
-
+bool SparseCsrTensorImpl::definitely_contiguous_fast_custom(MemoryFormat format) const {
+  return this->is_contiguous_custom(format);
+}
 } // namespace at

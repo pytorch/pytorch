@@ -42,6 +42,8 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   int64_t storage_offset_custom() const override;
   int64_t dim_custom() const override;
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
+  bool definitely_contiguous_fast_custom(
+      at::MemoryFormat memory_format) const override;
   bool is_strides_like_custom(at::MemoryFormat memory_format) const override;
   bool is_non_overlapping_and_dense_custom() const override;
 

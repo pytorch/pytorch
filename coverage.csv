@@ -1,0 +1,3 @@
+dev,name,batch_size,accuracy
+cuda,sam_fast,0,eager_fail_to_run
+cuda,sam_fast,0,eager_fail_to_run

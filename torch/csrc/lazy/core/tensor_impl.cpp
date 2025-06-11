@@ -216,4 +216,20 @@ bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat _unused) const {
   return true;
 }
 
+bool LTCTensorImpl::definitely_contiguous_fast_custom(
+    c10::MemoryFormat _unused) const {
+  // TODO(ezyang): I don't think this branch is actually necessary
+  // TODO(ezyang): I don't think this logic is right, shouldn't we pass on
+  // the memory format?
+  const auto data = tensor_->CurrentTensorData();
+  if (data.has_value()) {
+    return data->definitely_contiguous_fast();
+  }
+  // Only check that the storage is already contiguous.
+  TORCH_CHECK(is_contiguous_, "Non-contiguous storage for lazy tensor");
+  // TODO: I don't think logic is right, we should check the requested memory
+  // format before returning true
+  return true;
+}
+
 } // namespace torch::lazy
