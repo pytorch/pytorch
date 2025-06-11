@@ -1,3 +1,4 @@
+```{eval-rst}
 .. testsetup::
 
     # These are hidden from the docs, but these are necessary for `doctest`
@@ -18,6 +19,7 @@
         return original_trace(obj, *args, **kwargs)
 
     torch.jit.trace = trace_wrapper
+```
 
 .. _language-reference-v2:
 
