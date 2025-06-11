@@ -2769,7 +2769,10 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_size_oblivious,
+    )
 
     # This is a bit tricky.  Naively, you would expect to just pick one
     # arbitrary tensor and check that all tensors match this tensor.  However,
@@ -2830,7 +2833,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
             )
         else:
             # Remove inputs that are 1-D, zero size
-            if tensor.ndim == 1 and guard_size_oblivious(tensor.shape[0] == 0):
+            if tensor.ndim == 1 and guard_or_false(tensor.shape[0] == 0):
                 continue
             # Don't bother checking size match, prims.cat will handle it
             filtered.append(tensor)
