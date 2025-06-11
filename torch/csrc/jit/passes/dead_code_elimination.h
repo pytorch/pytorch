@@ -4,6 +4,15 @@
 
 namespace torch::jit {
 
+class MarkResult {
+ public:
+  bool markUpdated_; // Returns true iff this marked something we haven't marked
+                     // before.
+  bool fullyMarked_; // Returns true iff all unders are fully marked.
+  MarkResult(bool markUpdated, bool fullyMarked)
+      : markUpdated_(markUpdated), fullyMarked_(fullyMarked) {}
+};
+
 // If given a top-level graph, DCE will construct do alias analysis that allows
 // for "smarter" dead code elimination (we will eliminate mutable ops if we can
 // prove the mutated values are not used). Otherwise, we will not allow DCE to

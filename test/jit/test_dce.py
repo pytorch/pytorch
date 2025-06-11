@@ -73,3 +73,19 @@ class TestDCE(JitTestCase):
         torch._C._jit_pass_dce_graph(fn_s.graph)
 
         FileCheck().check("aten::add_").run(fn_s.graph)
+
+    def test_nested_loop(self):
+        def fn(x: torch.Tensor):
+            y = x.sin()
+            for i in range(2):
+                y.add_(x[i * 3])
+                if i > 1:
+                    for j in range(3):
+                        y.mul_(x[j])
+            z = y.cos()
+            return z
+
+        fn_s = torch.jit.script(fn)
+        torch._C._jit_pass_dce_graph(fn_s.graph)
+        FileCheck().check("aten::add_").run(fn_s.graph)
+        FileCheck().check("aten::mul_").run(fn_s.graph)
