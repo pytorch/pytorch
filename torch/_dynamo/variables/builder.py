@@ -99,6 +99,7 @@ from ..source import (
     ConstDictKeySource,
     ConvertIntSource,
     DictGetItemSource,
+    DictSubclassGetItemSource,
     FloatTensorSource,
     GetItemSource,
     GradSource,
@@ -1355,7 +1356,7 @@ class VariableBuilder:
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
 
-                source_value = DictGetItemSource(base, source_key)
+                source_value = DictSubclassGetItemSource(base, source_key)
                 res_value = LazyVariableTracker.create(v, source_value)
 
                 return key, res_value
