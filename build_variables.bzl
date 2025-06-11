@@ -593,9 +593,11 @@ libtorch_core_jit_sources = sorted(jit_sources_full)
 libtorch_nativert_sources = [
     "torch/nativert/graph/Graph.cpp",
     "torch/nativert/graph/GraphSignature.cpp",
+    "torch/nativert/graph/Serialization.cpp",
     "torch/nativert/graph/TensorMeta.cpp",
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/PlacementUtils.cpp",
+    "torch/nativert/executor/Weights.cpp",
     "torch/nativert/executor/memory/FunctionSchema.cpp",
     "torch/nativert/common/FileUtil.cpp",
 ]

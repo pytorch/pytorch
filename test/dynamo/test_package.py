@@ -9,7 +9,7 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.package import _CompilePackage
+from torch._dynamo.package import CompilePackage
 from torch._inductor.runtime.runtime_utils import cache_dir
 
 
@@ -70,7 +70,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         args = (torch.randn(3, 2),)
 
         # Saving
-        package = _CompilePackage(fn)
+        package = CompilePackage(fn)
         compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
         expected = compiled_fn(*args)
         for backend_id, backend in package.cached_backends.items():
@@ -86,7 +86,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(*args)
 
-            package = _CompilePackage(fn, storage.load_package())
+            package = CompilePackage(fn, storage.load_package())
             compiled_fn = torch._dynamo.optimize(package=package)(fn)
             package.install(storage.backends)
             self.assertEqual(expected, compiled_fn(*args))
@@ -112,7 +112,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ]
 
         # Saving
-        package = _CompilePackage(fn)
+        package = CompilePackage(fn)
         compiled_fn = torch._dynamo.optimize(
             backend="eager", package=package, guard_filter_fn=guard_filter_fn
         )(fn)
@@ -133,7 +133,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
                     "Detected recompile when torch.compile stance is 'fail_on_recompile'",
                 ):
                     compiled_fn(*args)
-            package = _CompilePackage(fn, storage.load_package())
+            package = CompilePackage(fn, storage.load_package())
             compiled_fn = torch._dynamo.optimize(
                 backend="eager", package=package, guard_filter_fn=guard_filter_fn
             )(fn)
@@ -161,7 +161,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         torch._dynamo.mark_dynamic(args[0], 0, min=3, max=5)
 
         # Saving
-        package = _CompilePackage(fn)
+        package = CompilePackage(fn)
         compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
         compiled_fn(*args)
         for backend_id, backend in package.cached_backends.items():
@@ -177,7 +177,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(*args1)
 
-            package = _CompilePackage(fn, storage.load_package())
+            package = CompilePackage(fn, storage.load_package())
             compiled_fn = torch._dynamo.optimize(package=package)(fn)
             package.install(storage.backends)
 
