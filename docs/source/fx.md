@@ -829,7 +829,7 @@ that contain this code can be traced as calls to the Method (see
 {ref}`Customizing Tracing`) or function (see
 {func}`wrap`) rather than tracing through them.
 
-### Non-\ `torch` Functions
+### Non- `torch` Functions
 
 FX uses `__torch_function__` as the mechanism by which it intercepts
 calls (see the [technical
