@@ -638,12 +638,11 @@ class VariableBuilder:
                 pass
 
         if has_triton_experimental_host_tma():
-            # TODO(triton) remove after triton 3.2 support is dropped
             from triton.tools.experimental_descriptor import (  # noqa: F811
                 create_1d_tma_descriptor,
                 create_2d_tma_descriptor,
             )
-        elif has_triton_tensor_descriptor_host_tma():
+        if has_triton_tensor_descriptor_host_tma():
             from triton.tools.tensor_descriptor import TensorDescriptor  # noqa: F811
 
         # Handle exact type() match

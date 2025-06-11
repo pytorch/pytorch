@@ -2070,7 +2070,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             v = combined_args_raw[k]
             if isinstance(v, TMADescriptorVariable):
                 tma_descriptor_metadata[k] = v.to_metadata()
-                combined_args_raw[k] = v.get_kernel_arg()
+                combined_args_raw[k] = v.get_tensor()
 
         combined_args = {
             variables.ConstantVariable.create(k): v
@@ -2179,12 +2179,12 @@ class TMADescriptorVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen"):
         raise NotImplementedError
 
-    def get_kernel_arg(self):
+    def get_tensor(self):
         raise NotImplementedError
 
 
-class TMADescriptorExperimentalVariable(TMADescriptorVariable):
-    def __init__(
+class TMADescriptorExperimentalVariable(VariableTracker):
+def __init__(
         self,
         data_ptr: "variables.DataPtrVariable",
         dims: "list[ConstantVariable]",
@@ -2218,7 +2218,7 @@ class TMADescriptorExperimentalVariable(TMADescriptorVariable):
         codegen.foreach(args)
         codegen.call_function(len(args) + 1, False)
 
-    def get_kernel_arg(self):
+    def get_tensor(self):
         return self.data_ptr.from_tensor
 
 
@@ -2249,7 +2249,7 @@ class TMADescriptorStableVariable(TMADescriptorVariable):
         codegen(self.block_shape)
         codegen.call_method(2)
 
-    def get_kernel_arg(self) -> "variables.TensorVariable":
+    def get_tensor(self) -> "variables.TensorVariable":
         return self.tensor
 
 
@@ -2303,6 +2303,7 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
             block_dims=block_dims,
             element_size=element_size,
         )
+
 
 class CreateTMADescriptorStableVariable(VariableTracker):
     def call_function(
