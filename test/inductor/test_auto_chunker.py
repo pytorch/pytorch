@@ -12,9 +12,12 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
 
 USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT", "1") == "1"
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
+DO_PROFILING = os.environ.get("DO_PROFILING") == "1"
 
 
-@config.patch("AutoChunker.enable", True)
+@config.patch(
+    "AutoChunker.enable", os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER", "1") == "1"
+)
 class AutoChunkerTest(TestCase):
     def setUp(self):
         super().setUp()
@@ -136,7 +139,7 @@ class AutoChunkerTest(TestCase):
 
         opt_f = torch.compile(f)
 
-        x = torch.randn(B, T, C, dtype=dtype, requires_grad=True).cuda()
+        x = torch.randn(B, T, C, dtype=dtype, requires_grad=True, device="cuda")
         x.retain_grad()
         y = torch.randint(0, V, (B, T)).cuda()
 
@@ -155,12 +158,23 @@ class AutoChunkerTest(TestCase):
             ms_opt = do_bench(lambda: opt_f(x, y))
             print(f"Eager v.s. Compile perf: {ms_eager:.3f}ms v.s. {ms_opt:.3f}ms")
 
-        self.assertEqual(metrics.num_auto_chunking, 1)
-        expected_bound = B * T * V * x.dtype.itemsize
-        self.assertTrue(
-            peak_memory < expected_bound,
-            f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
-        )
+        if DO_PERF_TEST and DO_PROFILING:
+            # no need for warmup since we have done perf test previously
+            with torch.profiler.profile() as p:
+                for step in range(5):
+                    with torch.profiler.record_function(f"Step {step}"):
+                        opt_f(x, y)
+            path = "/tmp/trace.json"
+            print(f"Write the chrome trace to {path}")
+            p.export_chrome_trace(path)
+
+        if config.AutoChunker.enable:
+            self.assertEqual(metrics.num_auto_chunking, 1)
+            expected_bound = B * T * V * x.dtype.itemsize
+            self.assertTrue(
+                peak_memory < expected_bound,
+                f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
+            )
 
 
 if __name__ == "__main__":
