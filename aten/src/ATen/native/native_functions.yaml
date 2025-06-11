@@ -11899,8 +11899,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA: hardsigmoid_out
-    MPS: hardsigmoid_out_mps
+    CPU, CUDA, MPS: hardsigmoid_out
     QuantizedCPU: hardsigmoid_out_quantized_cpu
 
 - func: hardsigmoid(Tensor self) -> Tensor
@@ -11921,8 +11920,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA: hardsigmoid_backward_out
-    MPS: hardsigmoid_backward_out_mps
+    CPU, CUDA, MPS: hardsigmoid_backward_out
 
 - func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
   structured_delegate: hardsigmoid_backward.grad_input
