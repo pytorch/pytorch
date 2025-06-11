@@ -2410,9 +2410,9 @@ def make_mutation_test(fn):
     def test_fn(self):
         from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
 
-        kernel, inputs, outputs = fn()
+        kernel, inputs, tma_descriptor_metadata, outputs = fn()
         self.assertListEqual(
-            identify_mutated_tensors(kernel, inputs),
+            identify_mutated_tensors(kernel, inputs, tma_descriptor_metadata),
             outputs,
         )
 
@@ -2464,6 +2464,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2495,6 +2496,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2525,7 +2527,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         # old TTIR string parsing-based one). remove this gating
         # and use ["c_ptr"] as `expected` after the new Triton
         # pin lands both in OSS and internally.
-        ttir_module, _ = generate_ttir(kernel, kwargs)
+        ttir_module, _ = generate_ttir(kernel, kwargs, tma_descriptor_metadata={})
         if hasattr(ttir_module, "walk"):
             # with MLIR-based Triton analysis pass
             expected = ["c_ptr"]
@@ -2536,6 +2538,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         return (
             kernel,
             kwargs,
+            {},
             expected,
         )
 
@@ -2566,7 +2569,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         # old TTIR string parsing-based one). remove this gating
         # and use ["c_ptr"] as `expected` after the new Triton
         # pin lands both in OSS and internally.
-        ttir_module, _ = generate_ttir(kernel, kwargs)
+        ttir_module, _ = generate_ttir(kernel, kwargs, tma_descriptor_metadata={})
         if hasattr(ttir_module, "walk"):
             # with MLIR-based Triton analysis pass
             expected = ["c_ptr"]
@@ -2577,6 +2580,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         return (
             kernel,
             kwargs,
+            {},
             expected,
         )
 
@@ -2622,7 +2626,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         # old TTIR string parsing-based one). remove this gating
         # and use ["out_ptr"] as `expected` after the new Triton
         # pin lands both in OSS and internally.
-        ttir_module, _ = generate_ttir(kernel, kwargs)
+        ttir_module, _ = generate_ttir(kernel, kwargs, tma_descriptor_metadata={})
         if hasattr(ttir_module, "walk"):
             # with MLIR-based Triton analysis pass
             expected = ["out_ptr"]
@@ -2633,6 +2637,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         return (
             kernel,
             kwargs,
+            {},
             expected,
         )
 
@@ -2666,6 +2671,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2698,6 +2704,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2734,6 +2741,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2768,6 +2776,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2802,6 +2811,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2837,6 +2847,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2875,6 +2886,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2909,6 +2921,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2968,6 +2981,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "BLOCK_SIZE_M": 64,
                 "BLOCK_SIZE_C2": 64,
             },
+            {},
             ["O_ptr"],
         )
 
@@ -3027,6 +3041,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "BLOCK_M": M,
                 "BLOCK_N": N,
             },
+            {},
             ["o_ptr"],
         )
 
@@ -3088,6 +3103,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "BLOCK_M": M,
                 "BLOCK_N": N,
             },
+            {},
             ["o_ptr"],
         )
 
@@ -3133,6 +3149,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 14,
                 "BLOCK_SIZE": 16,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -3236,6 +3253,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n": 1024,
                 "BLOCK_SIZE": 32,
             },
+            {},
             ["B", "workspace_ptr"],
         )
 
@@ -3253,6 +3271,7 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         ],
         [
@@ -3264,6 +3283,7 @@ if HAS_GPU:
                 "x_elements": 4,
                 "y_elements": 4,
             },
+            {},
             ["out_ptr"],
         ],
         [
@@ -3275,6 +3295,7 @@ if HAS_GPU:
                 "BLOCK_SIZE": 4,
                 "ACTIVATION": "mul2_inplace_kernel",
             },
+            {},
             ["in_ptr0", "out_ptr"],
         ],
         [
@@ -3286,21 +3307,25 @@ if HAS_GPU:
                 "BLOCK_SIZE": 4,
                 "ACTIVATION": "add_kernel",
             },
+            {},
             ["out_ptr"],
         ],
         [
             mul2_inplace_kernel,
             {"ptr": t, "n_elements": 4, "BLOCK_SIZE": 4},
+            {},
             ["ptr"],
         ],
         [
             inline_asm_kernel_is_pure_true,
             {"X": t, "Y": t, "Z": t, "n": 4, "BLOCK": 4},
+            {},
             ["Z"],
         ],
         [
             inline_asm_kernel_is_pure_false,
             {"X": t, "Y": t, "Z": t, "n": 4, "BLOCK": 4},
+            {},
             ["X", "Y", "Z"],
         ],
         [
@@ -3312,6 +3337,7 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["output_ptr"],
         ],
         [
@@ -3322,6 +3348,7 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["output_ptr"],
         ],
         [
@@ -3333,6 +3360,7 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         ],
         [
@@ -3344,6 +3372,7 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         ],
         [
@@ -3355,6 +3384,7 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         ],
         [
@@ -3366,16 +3396,18 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         ],
     ]
-    for kernel, inputs, outputs in tests:
+    for kernel, inputs, tma_descriptor_metadata, outputs in tests:
         fn = make_mutation_test(
             # Add default arguments to avoid Python lambda capture pitfall
             # This forces the capture at lambda creation
-            lambda kernel=kernel, inputs=inputs, outputs=outputs: (
+            lambda kernel=kernel, inputs=inputs, tma_descriptor_metadata=tma_descriptor_metadata, outputs=outputs: (
                 kernel,
                 inputs,
+                tma_descriptor_metadata,
                 outputs,
             )
         )

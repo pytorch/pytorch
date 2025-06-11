@@ -9,7 +9,7 @@ import operator
 import threading
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import sympy
@@ -78,15 +78,13 @@ TMAExperimentalMetadata = tuple[
     tuple[
         list[IntLikeType],  # dims
         list[IntLikeType],  # block_dims
-        IntLikeType  # element_size
+        IntLikeType,  # element_size
     ],
 ]
 
 TMAStableMetadata = tuple[
     str,  # type of TMA ("experimental" or "stable")
-    tuple[
-        list[IntLikeType],  # block_shape
-    ],
+    tuple[list[IntLikeType],],  # block_shape
 ]
 
 
@@ -96,6 +94,7 @@ def create_tma_experimental_metadata(
     element_size: IntLikeType,
 ) -> TMAExperimentalMetadata:
     return ("experimental", (dims, block_dims, element_size))
+
 
 def create_tma_stable_metadata(
     block_shape: list[IntLikeType],
@@ -202,7 +201,9 @@ class Op:
 
 
 def generate_ttir(
-    kernel: "TritonKernelType", kwargs: dict[str, Any], tma_descriptor_metadata: TMADescriptorMetadata
+    kernel: "TritonKernelType",
+    kwargs: dict[str, Any],
+    tma_descriptor_metadata: TMADescriptorMetadata,
 ) -> tuple["TritonIRModule", list[str]]:
     """
     Uses Triton's internal code generation to create TTIR
@@ -269,11 +270,15 @@ def generate_ttir(
 
         if (tma_meta := tma_descriptor_metadata.get(name, (None,)))[0] == "stable":
             from triton.tools.tensor_descriptor import TensorDescriptor
-            ordered_args[name] = TensorDescriptor.from_tensor(ordered_args[name], tma_meta[1][0])
+
+            ordered_args[name] = TensorDescriptor.from_tensor(
+                ordered_args[name], tma_meta[1][0]
+            )
 
     def is_tensor_descriptor_arg(arg):
         if has_triton_tensor_descriptor_host_tma():
             from triton.tools.tensor_descriptor import TensorDescriptor
+
             if isinstance(arg, TensorDescriptor):
                 return True
         return False
@@ -293,9 +298,11 @@ def generate_ttir(
             return [name, name + "_STRIDE_PLACEHOLDER", name + "_SIZE_PLACEHOLDER"]
         return []
 
-    ordered_tensor_names = list(itertools.chain.from_iterable(
-        get_tensor_names(name, arg) for name, arg in ordered_args.items()
-    ))
+    ordered_tensor_names = list(
+        itertools.chain.from_iterable(
+            get_tensor_names(name, arg) for name, arg in ordered_args.items()
+        )
+    )
 
     def _get_specialization(args):  # type: ignore[no-untyped-def]
         # Support multiple triton versions.
@@ -845,7 +852,9 @@ def analyze_kernel_mutations(
 
 
 def identify_mutated_tensors(
-    kernel: "TritonKernelType", kwargs: dict[str, Any], tma_descriptor_metadata: TMADescriptorMetadata
+    kernel: "TritonKernelType",
+    kwargs: dict[str, Any],
+    tma_descriptor_metadata: TMADescriptorMetadata,
 ) -> list[str]:
     """
     Given a triton kernel and the arguments for this kernel, this function
@@ -857,7 +866,9 @@ def identify_mutated_tensors(
     ttir_module = None
     functions = None
     try:
-        ttir_module, ordered_tensor_names = generate_ttir(kernel, kwargs, tma_descriptor_metadata)
+        ttir_module, ordered_tensor_names = generate_ttir(
+            kernel, kwargs, tma_descriptor_metadata
+        )
 
         # extract functions from TTIR using MLIR bindings exposed by Triton code
         functions = ttir_to_functions(ttir_module)
@@ -1112,11 +1123,16 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
 
 
 def get_mutated_tensors(
-    kernel_idx: int, constant_args_idx: int, kwargs: dict[str, Any], tma_descriptor_metadata: TMADescriptorMetadata
+    kernel_idx: int,
+    constant_args_idx: int,
+    kwargs: dict[str, Any],
+    tma_descriptor_metadata: TMADescriptorMetadata,
 ) -> list[str]:
     kernel = kernel_side_table.get_kernel(kernel_idx)
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
-    return identify_mutated_tensors(kernel, {**kwargs, **constant_args}, tma_descriptor_metadata)
+    return identify_mutated_tensors(
+        kernel, {**kwargs, **constant_args}, tma_descriptor_metadata
+    )
 
 
 @triton_kernel_wrapper_mutation.py_functionalize_impl

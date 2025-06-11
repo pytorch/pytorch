@@ -6073,9 +6073,7 @@ class TMADescriptor(ExternKernel):
 
     @classmethod
     def create(  # type: ignore[no-untyped-def]
-        cls,
-        tensor: IRNode,
-        metadata: tuple[str, tuple[Union[int, torch.SymInt], ...]]
+        cls, tensor: IRNode, metadata: tuple[str, tuple[Union[int, torch.SymInt], ...]]
     ):
         key = (id(tensor), metadata)
         if key not in cls._CACHE:

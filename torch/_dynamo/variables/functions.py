@@ -1964,9 +1964,9 @@ class SysFunctionVariable(VariableTracker):
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
-    TMADescriptorMetadata,
     create_tma_experimental_metadata,
     create_tma_stable_metadata,
+    TMADescriptorMetadata,
     TritonHOPifier,
 )
 
