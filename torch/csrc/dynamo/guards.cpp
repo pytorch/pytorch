@@ -4177,7 +4177,7 @@ class ListGetItemGuardAccessor : public GuardAccessor {
 };
 
 /**
- * Represents set[index] accessor by converting the set into a dictionary.
+ * Represents set[index] accessor by converting the set into a list.
  */
 class SetGetItemGuardAccessor : public GuardAccessor {
  public:
@@ -4200,13 +4200,8 @@ class SetGetItemGuardAccessor : public GuardAccessor {
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
 
-    // PyObject* dict_type = (PyObject*)&PyDict_Type;
-    // PyObject* fromkeys =
-    //     PyObject_CallMethod(dict_type, "fromkeys", "O", obj);
-
     PyObject* lst = PySequence_List(obj);
     PyObject* x = PyList_GetItem(lst, _index); // borrowed ref
-    // Py_XDECREF(fromkeys);
     Py_XDECREF(lst);
     if (x == nullptr) {
       PyErr_Clear();
@@ -4219,13 +4214,8 @@ class SetGetItemGuardAccessor : public GuardAccessor {
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
 
-    // PyObject* dict_type = (PyObject*)&PyDict_Type;
-    // PyObject* fromkeys =
-    //     PyObject_CallMethod(dict_type, "fromkeys", "O", obj);
-
     PyObject* lst = PySequence_List(obj);
     PyObject* x = PyList_GetItem(lst, _index); // borrowed ref
-    // Py_XDECREF(fromkeys);
     Py_XDECREF(lst);
 
     if (x == nullptr) {
