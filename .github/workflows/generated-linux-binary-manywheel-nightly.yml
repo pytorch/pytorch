@@ -155,7 +155,7 @@ jobs:
       build_name: manywheel-py3_9-cuda12_6
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.4xlarge.nvidia.gpu # for other cuda versions, we use 4xlarge runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_6-upload:  # Uploading
@@ -224,7 +224,7 @@ jobs:
       build_name: manywheel-py3_9-cuda12_8
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 build needs sm_70+ runner
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_8-upload:  # Uploading
@@ -293,7 +293,7 @@ jobs:
       build_name: manywheel-py3_9-cuda12_9
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_9-upload:  # Uploading
@@ -768,7 +768,7 @@ jobs:
       build_name: manywheel-py3_10-cuda12_6
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.4xlarge.nvidia.gpu # for other cuda versions, we use 4xlarge runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_6-upload:  # Uploading
@@ -837,7 +837,7 @@ jobs:
       build_name: manywheel-py3_10-cuda12_8
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 build needs sm_70+ runner
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_8-upload:  # Uploading
@@ -906,7 +906,7 @@ jobs:
       build_name: manywheel-py3_10-cuda12_9
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_9-upload:  # Uploading
@@ -1381,7 +1381,7 @@ jobs:
       build_name: manywheel-py3_11-cuda12_6
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.4xlarge.nvidia.gpu # for other cuda versions, we use 4xlarge runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_6-upload:  # Uploading
@@ -1449,7 +1449,7 @@ jobs:
       build_name: manywheel-py3_11-cuda12_6-full
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.4xlarge.nvidia.gpu # for other cuda versions, we use 4xlarge runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_6-full-upload:  # Uploading
@@ -1518,7 +1518,7 @@ jobs:
       build_name: manywheel-py3_11-cuda12_8
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 build needs sm_70+ runner
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_8-upload:  # Uploading
@@ -1587,7 +1587,7 @@ jobs:
       build_name: manywheel-py3_11-cuda12_9
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_9-upload:  # Uploading
@@ -2062,7 +2062,7 @@ jobs:
       build_name: manywheel-py3_12-cuda12_6
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.4xlarge.nvidia.gpu # for other cuda versions, we use 4xlarge runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_6-upload:  # Uploading
@@ -2131,7 +2131,7 @@ jobs:
       build_name: manywheel-py3_12-cuda12_8
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 build needs sm_70+ runner
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_8-upload:  # Uploading
@@ -2200,7 +2200,7 @@ jobs:
       build_name: manywheel-py3_12-cuda12_9
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_9-upload:  # Uploading
@@ -2675,7 +2675,7 @@ jobs:
       build_name: manywheel-py3_13-cuda12_6
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.4xlarge.nvidia.gpu # for other cuda versions, we use 4xlarge runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_6-upload:  # Uploading
@@ -2744,7 +2744,7 @@ jobs:
       build_name: manywheel-py3_13-cuda12_8
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 build needs sm_70+ runner
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_8-upload:  # Uploading
@@ -2813,7 +2813,7 @@ jobs:
       build_name: manywheel-py3_13-cuda12_9
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_9-upload:  # Uploading
@@ -3288,7 +3288,7 @@ jobs:
       build_name: manywheel-py3_13t-cuda12_6
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.4xlarge.nvidia.gpu # for other cuda versions, we use 4xlarge runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cuda12_6-upload:  # Uploading
@@ -3357,7 +3357,7 @@ jobs:
       build_name: manywheel-py3_13t-cuda12_8
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 build needs sm_70+ runner
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cuda12_8-upload:  # Uploading
@@ -3426,7 +3426,7 @@ jobs:
       build_name: manywheel-py3_13t-cuda12_9
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cuda12_9-upload:  # Uploading
