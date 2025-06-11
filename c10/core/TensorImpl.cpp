@@ -923,10 +923,13 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
       sym_shape_meta.strides_.resize(dim_);
       if (dim_ > 0) {
         const auto last_idx = dim_ - 1;
+        auto accum = c10::SymInt(1);
         sym_shape_meta.strides_[last_idx] = c10::SymInt(1);
         for (auto i = last_idx - 1; i >= 0; --i) {
-          sym_shape_meta.strides_[i] = sym_shape_meta.strides_[i + 1] *
-              sym_shape_meta.sizes_[i + 1].max(1);
+          if (TORCH_GUARD_OR_TRUE(sym_shape_meta.sizes_[i + 1].sym_gt(1))) {
+            accum *= sym_shape_meta.sizes_[i + 1];
+          }
+          sym_shape_meta.strides_[i] = accum;
         }
       }
       break;
