@@ -656,6 +656,8 @@
 
 .. py:module:: torch.distributions.lowrank_multivariate_normal
 
+.. py:module:: torch.distributions.mixture_same_family
+
 .. py:module:: torch.distributions.multinomial
 
 .. py:module:: torch.distributions.multivariate_normal
