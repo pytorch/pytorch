@@ -24,8 +24,15 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, IS_MACOS, IS_SANDCASTLE, IS_FBCODE, IS_ARM64
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    TestCase,
+    IS_PPC,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_FBCODE,
+    IS_ARM64
+)
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -3139,6 +3146,105 @@ class TestQuantizedOps(TestCase):
                     # Verify the result is scriptable
                     mha_quantized_scripted = torch.jit.script(mha_quantized)
 
+    @skipIfNoONEDNN
+    def test_int8_mul_onednn(self):
+        output_dtype_list = [torch.uint8, torch.float, torch.bfloat16, torch.half]
+        shape_list = [(16, 64), (15, 63)]
+        cases = itertools.product(shape_list, output_dtype_list)
+        for shape, output_dtype in cases:
+            a = torch.randn(shape)
+            b = torch.randn(shape)
+            s_a, z_a = 0.1, 1
+            s_b, z_b = 0.2, 2
+            if output_dtype == torch.uint8:
+                s_c, z_c = 0.3, 3
+            else:
+                s_c, z_c = 1, 0
+            qa = torch.quantize_per_tensor(a, s_a, z_a, torch.quint8)
+            qb = torch.quantize_per_tensor(b, s_b, z_b, torch.quint8)
+            dqa = qa.dequantize()
+            dqb = qb.dequantize()
+            c_ref = dqa * dqb
+            if output_dtype == torch.uint8:
+                c_ref = torch.ops.quantized_decomposed.quantize_per_tensor.default(c_ref, s_c, z_c, 0, 255, torch.uint8)
+            c_ref = c_ref.to(output_dtype)
+
+            a_int8 = qa.int_repr()
+            b_int8 = qb.int_repr()
+            c = torch.ops.onednn.qmul.tensor(a_int8, s_a, z_a, b_int8, s_b, z_b, s_c, z_c, output_dtype)
+            self.assertEqual(c, c_ref)
+
+    @skipIfNoONEDNN
+    @given(relu_fused=st.booleans())
+    def test_int8_add_onednn(self, relu_fused):
+        output_dtype_list = [torch.uint8, torch.float, torch.bfloat16, torch.half]
+        shape_list = [(16, 64), (15, 63)]
+        cases = itertools.product(shape_list, output_dtype_list)
+        for shape, output_dtype in cases:
+            a = torch.randn(shape)
+            b = torch.randn(shape)
+            s_a, z_a = 0.1, 1
+            s_b, z_b = 0.2, 2
+            if output_dtype == torch.uint8:
+                s_c, z_c = 0.3, 3
+            else:
+                s_c, z_c = 1, 0
+            qa = torch.quantize_per_tensor(a, s_a, z_a, torch.quint8)
+            qb = torch.quantize_per_tensor(b, s_b, z_b, torch.quint8)
+            dqa = qa.dequantize()
+            dqb = qb.dequantize()
+            c_ref = dqa + dqb
+            if relu_fused:
+                c_ref = torch.nn.functional.relu(c_ref)
+            if output_dtype == torch.uint8:
+                c_ref = torch.ops.quantized_decomposed.quantize_per_tensor.default(c_ref, s_c, z_c, 0, 255, torch.uint8)
+            c_ref = c_ref.to(output_dtype)
+
+            a_int8 = qa.int_repr()
+            b_int8 = qb.int_repr()
+            if relu_fused:
+                c = torch.ops.onednn.qadd_relu.tensor(a_int8, s_a, z_a, b_int8, s_b, z_b, s_c, z_c, output_dtype)
+            else:
+                c = torch.ops.onednn.qadd.tensor(a_int8, s_a, z_a, b_int8, s_b, z_b, s_c, z_c, output_dtype)
+            self.assertEqual(c, c_ref)
+
+    @skipIfNoONEDNN
+    def test_int8_batch_norm_onednn(self):
+        # hypothesis too slow for this test, create test cases manually
+        channel_len_list = (8, 64, 100, 120, 128)
+        output_dtype_list = [torch.uint8, torch.float, torch.bfloat16, torch.half]
+        x_scale, x_zero_point = 0.1, 1
+        cases = itertools.product(channel_len_list, output_dtype_list)
+        for channels, out_dtype in cases:
+            shapes = [8, channels, 8, 8]
+            y_scale, y_zero_point = (0.2, 2) if out_dtype == torch.uint8 else (1, 0)
+
+            x = torch.randn(shapes, dtype=torch.float32)
+            mean = torch.rand(channels).float()
+            var = torch.rand(channels).float()
+            weight = torch.rand(channels).float()
+            bias = torch.rand(channels).float()
+            eps = 0.001
+            qx = torch.ops.quantized_decomposed.quantize_per_tensor.default(
+                x, x_scale, x_zero_point, 0, 255, torch.uint8
+            )
+            y = torch.ops.onednn.qbatch_norm2d(
+                qx, x_scale, x_zero_point, weight, bias, mean, var, eps, y_scale, y_zero_point, out_dtype
+            )
+
+            dqx = torch.ops.quantized_decomposed.dequantize_per_tensor.default(
+                qx, x_scale, x_zero_point, 0, 255, torch.uint8
+            )
+            y_ref = F.batch_norm(dqx, weight=weight, bias=bias,
+                                 running_mean=mean, running_var=var, training=False,
+                                 momentum=0, eps=eps)
+            if out_dtype == torch.uint8:
+                y_ref = torch.ops.quantized_decomposed.quantize_per_tensor.default(
+                    y_ref, y_scale, y_zero_point, 0, 255, torch.uint8
+                )
+            y_ref = y_ref.to(out_dtype)
+            self.assertEqual(y, y_ref, msg=f"{y} vs {y_ref}")
+
 
 class TestDynamicQuantizedOps(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
@@ -5172,7 +5278,7 @@ class TestQuantizedConv(TestCase):
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
         #     abs(desired-actual) < 1.5 * 10**(-decimal)
-        # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
+        # (https://numpy.org/doc/stable/reference/generated/numpy.testing.assert_almost_equal.html)
         # We use decimal = 0 to ignore off-by-1 differences between
         # reference and test. Off-by-1 differences arise due to the order of
         # round and zero_point addition operation, i.e., if addition
@@ -6907,7 +7013,7 @@ class TestQuantizedConv(TestCase):
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
         #     abs(desired-actual) < 1.5 * 10**(-decimal)
-        # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
+        # (https://numpy.org/doc/stable/reference/generated/numpy.testing.assert_almost_equal.html)
         # We use decimal = 0 to ignore off-by-1 differences between
         # reference and test. Off-by-1 differences arise due to the order of
         # round and zero_point addition operation, i.e., if addition
@@ -8166,3 +8272,6 @@ class TestComparatorOps(TestCase):
             note(f"result 3: {result}")
             self.assertEqual(result_ref, result,
                              msg=f"'tensor.{op}(scalar)'' failed")
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

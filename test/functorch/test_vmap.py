@@ -1718,11 +1718,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(op, (getter([], device), getter([B0], device)), in_dims=(None, 0))
         test(op, (getter([2, B0], device), getter([2], device)), in_dims=(1, None))
 
-    @skipIf(
-        TEST_WITH_TORCHDYNAMO
-        and os.getenv("BUILD_ENVIRONMENT", "") == "linux-focal-py3.8-clang10",
-        "Segfaults with dynamo on focal, see https://github.com/pytorch/pytorch/issues/107173",
-    )
     @parametrize(
         "case",
         [
@@ -5169,7 +5164,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             xfail("linalg.vecdot"),
             # throws in vmap on CUDA
             # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
-            # https://github.com/pytorch/pytorch/runs/8110653462?check_suite_focus=true
             # but it passes locally
             xfail("linalg.diagonal"),
             skip("linalg.matrix_norm", ""),
