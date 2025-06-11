@@ -7515,6 +7515,7 @@ def forward(self, x):
             def __init__(self):
                 super().__init__()
                 self.lin = torch.nn.Linear(32, 64)
+
             def forward(self, x):
                 n = x.item()
                 y = torch.empty(x).view(1, -1, 32)
