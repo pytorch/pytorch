@@ -194,6 +194,8 @@ def run_functionalized_fw_and_collect_metadata(
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         with disable_above, mode, suppress_pending:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
+            # breakpoint()
+            # temp = _to_fun(flat_args[4])
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
             # We didn't do any tracing, so we don't need to process the

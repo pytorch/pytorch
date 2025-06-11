@@ -4539,6 +4539,7 @@ xfail_divergence_from_eager = {
     "test_grad_call_compiled_backward_fn",  # different functorch error
     "test_vjp_call_compiled_backward_fn",  # different functorch error
     "test_vmap_call_compiled_backward_fn",  # different functorch error
+    "test_accumulate_grad",  # always out of place add for compiled autograd
 }
 
 skipped_tests = set()
