@@ -217,6 +217,7 @@ def mark_nodes_dislike_padding(
             aten.convolution,
             aten.convolution_backward,
             aten._scaled_mm,
+            aten._scaled_grouped_mm,
         ]
     )
     # what's a better way to collect the reduction ops?
@@ -1066,7 +1067,12 @@ class GraphLowering(torch.fx.Interpreter):
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
-            expr = _get_placeholder_expr(example.node)
+            # TODO fix partitioning issue and re-enable for backward
+            # https://github.com/pytorch/pytorch/issues/155468.
+            if not V.graph.is_backward:
+                expr = _get_placeholder_expr(example.node)
+            else:
+                expr = example.node.expr
             self.graph_inputs[target] = expr
             self.graph_input_names.append(target)
             return expr
