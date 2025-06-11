@@ -1314,6 +1314,48 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> target = torch.randn(3, 5).softmax(dim=1)
         >>> output = loss(input, target)
         >>> output.backward()
+
+    .. note::
+        When providing `target` as class probabilities, it is expected that soft labels are passed
+        (i.e., `target` is a probability distribution over the possible classes for a given data sample
+        where each individual probability is between `[0,1]` and the distribution sums to `1`).
+        Hence the use of `.softmax()` on `target` in the above class probabilities example.
+
+        PyTorch does not validate whether the values provided in `target` lie in the range `[0,1]`
+        or whether they sum to `1`. No warning will be raised and it is the user's responsibility
+        to ensure that `target` is a valid probability distribution. Providing arbitrary values
+        may yield misleading loss values and unstable gradients during training.
+
+    Examples:
+
+        >>> # Example of target with incorrectly specified class probabilities
+        >>> loss = nn.CrossEntropyLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> # Provided target class probabilities are not in range [0,1]
+        >>> target
+        tensor([[-0.6846,  1.1029, -0.5028,  0.7858, -1.5158],
+                [ 0.6152, -0.3215,  0.4336, -0.3655,  0.5295],
+                [ 1.0120,  1.5263, -1.6144, -0.2656, -0.7357]])
+        >>> # Provided target class probabilities do not sum to 1
+        >>> target.sum(axis=1)
+        tensor([-0.8146,  0.8914, -0.0774])
+        >>> loss(input, target).item()
+        -0.10109150409698486
+
+        >>> # Example of target with correctly specified class probabilities
+        >>> # Use .softmax() to ensure true probability distribution
+        >>> target_new = target.softmax(dim=1)
+        >>> # New target class probabilities all in range [0,1]
+        >>> target_new
+        tensor([[0.0772, 0.4610, 0.0925, 0.3357, 0.0336],
+                [0.2842, 0.1114, 0.2370, 0.1066, 0.2609],
+                [0.3127, 0.5230, 0.0226, 0.0872, 0.0545]])
+        >>> # New target class probabilities sum to 1
+        >>> target_new.sum(axis=1)
+        tensor([1.0000, 1.0000, 1.0000])
+        >>> loss(input, target).item()
+        -0.10109150409698486
     """
 
     __constants__ = ["ignore_index", "reduction", "label_smoothing"]
