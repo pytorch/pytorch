@@ -220,8 +220,10 @@ def unwrap_maybe_dynamic_int(x: Union[torch.Tensor, int]) -> int:
     return x
 
 
-def call_accumulate_grad(variable: torch.Tensor, grad: torch.Tensor, has_post_hooks: bool):
-    new_grad = torch._dynamo.compiled_autograd.ops.AccumulateGrad(  # type: ignore[attr-defined]
-        [grad], variable, has_post_hooks
+def call_accumulate_grad(
+    variable: torch.Tensor, grad: torch.Tensor, has_post_hooks: bool
+):
+    updated_grad = torch._dynamo.compiled_autograd.ops.AccumulateGrad(  # type: ignore[attr-defined]
+        [grad], variable, variable.grad, has_post_hooks
     )
-    variable.grad = new_grad[0]
+    variable.grad = updated_grad[0]

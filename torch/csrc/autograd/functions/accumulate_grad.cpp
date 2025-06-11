@@ -22,8 +22,10 @@ namespace {
 variable_list AccumulateGrad_apply_functional_no_hooks(
     variable_list&& grads,
     at::Tensor& variable,
+    at::Tensor& variable_grad,
     int64_t num_expected_refs,
-    std::mutex* mutex = nullptr) {
+    std::mutex* mutex = nullptr,
+    bool mutate_variable = true) {
   std::cout << "\nAccumulateGrad_apply_functional_no_hooks\n";
   std::cout << "0. variable = " << variable.unsafeGetTensorImpl() << std::endl;
   check_input_variables("AccumulateGrad", grads, 1, 0);
@@ -50,22 +52,44 @@ variable_list AccumulateGrad_apply_functional_no_hooks(
     lock.emplace(*mutex);
   }
 
-  at::Tensor& grad = variable.mutable_grad();
+  at::Tensor& grad = variable_grad;
+  std::cout << "before variable defined? " << variable.defined() << std::endl;
+  std::cout << "before variable_grad defined? " << grad.defined() << std::endl;
+  if (mutate_variable) {
+    // If the function has post hooks (for example, a DDP allreduce hook),
+    // call_function in Engine.cpp will temporarily bump the expected refcount
+    // by one, hence the addition of !post_hooks().empty() for
+    // 'num_expected_refs' in addition to the one reference that we're holding.
+    // 'num_expected_refs' is used to determine whether or not we should clone
+    // the grad or can steal the grad.
+    accumulateGrad(
+        variable,
+        grad,
+        new_grad,
+        num_expected_refs,
+        [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
+    std::cout << "after variable_grad defined? " << grad.defined() << std::endl;
+    return {};
+  } else {
+    at::Tensor functional_grad;
 
-  // If the function has post hooks (for example, a DDP allreduce hook),
-  // call_function in Engine.cpp will temporarily bump the expected refcount
-  // by one, hence the addition of !post_hooks().empty() for 'num_expected_refs'
-  // in addition to the one reference that we're holding.
-  // 'num_expected_refs' is used to determine whether or not we should clone
-  // the grad or can steal the grad.
-  accumulateGrad(
-      variable,
-      grad,
-      new_grad,
-      num_expected_refs,
-      [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
+    accumulateGrad(
+        variable,
+        grad,
+        new_grad,
+        num_expected_refs,
+        [&functional_grad](at::Tensor&& grad_update) {
+          functional_grad = std::move(grad_update);
+        });
 
-  return {grad};
+    if (!functional_grad.defined()) {
+      // In-place accumulation does not execute the callback
+      functional_grad = std::move(grad);
+    }
+
+    std::cout << "after variable_grad defined? " << grad.defined() << std::endl;
+    return {functional_grad};
+  }
 }
 
 variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
@@ -73,12 +97,16 @@ variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
     const ivalue_list& args) {
   PackedArgs r(args);
   auto variable = r.unpack<at::Tensor>();
+  auto variable_grad =
+      r.unpack<at::Tensor>(); // functional tensor missing .grad support
   auto has_post_hooks = r.unpack<bool>();
   return AccumulateGrad_apply_functional_no_hooks(
       variable_list(grads),
       variable,
+      variable_grad,
       1 + has_post_hooks,
-      nullptr // no mutex needed since this is executed under a single thread
+      nullptr, // no mutex needed since this is executed under a single thread
+      false // we mutate the variable in python bytecode instead
   );
 }
 } // namespace
@@ -95,6 +123,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   AccumulateGrad_apply_functional_no_hooks(
       std::move(grads),
       variable,
+      variable.mutable_grad(),
       1 + !post_hooks().empty() /* num_expected_refs */,
       &mutex_);
 
@@ -140,6 +169,7 @@ variable_list AccumulateGrad::apply_with_saved(
   // proxy a call to torch.ops.inductor.accumulate_grad_.default
   static bool flag [[maybe_unused]] = [&]() {
     std::vector<at::TypePtr> schema = {
+        IValuePacker<at::Tensor>::packed_type(),
         IValuePacker<at::Tensor>::packed_type(),
         IValuePacker<bool>::packed_type()};
     const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();

@@ -37,11 +37,7 @@ namespace torch::autograd {
     }                                                                      \
   }
 
-// Given a variable with its current grad as variable_grad, accumulates
-// new_grad into variable_grad if in place accumulation is possible.
-// Otherwise, uses 'update_grad' to update the grad for the variable.
-
-// "Gradient Layout Contract"
+// Note: Gradient Layout Contract
 //
 // AccumulateGrad tries to stash strided (non-sparse) grads with memory layout
 // (strides) such that variables and grads interact efficiently in later
@@ -80,6 +76,67 @@ namespace torch::autograd {
 // degraded performance in Reducer.cpp or optimizer kernels, not death by
 // assert or silently bad numerics.
 
+// Gradient Accumulation
+// Given a variable with its current grad as variable_grad, accumulates
+// new_grad into variable_grad if in place accumulation is possible.
+// Otherwise, uses 'update_grad' to update the grad for the variable.
+//
+// Branch breakdown:
+// - Case 1: Param has no existing grad
+//   - Case 1.1: Stealable dense new_grad
+//     . We aren't setting up for double-backward.
+//     . No other user-visible tensor references new_grad.
+//     . new_grad obeys the "Gradient Layout Contract", there has a special
+//       case, For MKLDNN tensor, which is a opaque tensor, assuming it obeys
+//       layout_contract.
+//   - Case 1.2: Stealable sparse new_grad
+//     . Can't detach sparse tensor (since metadata changes are not allowed
+//       after detach), so just create a new one for the grad which is a
+//       shallow copy. We need a shallow copy so that modifying the original
+//       grad tensor doesn't modify the grad we accumulate.
+//     . We only skip clone if indices and values themselves are contiguous
+//       for backward compatibility reasons. Since without this optimization,
+//       earlier we would clone the entire SparseTensor which cloned indices
+//       and values. For details see
+//       https://github.com/pytorch/pytorch/issues/34375.
+//   - Case 1.3: Cloning sparse/nested new_grad
+//   - Case 1.4: Cloning MKLDNN new_grad
+//   - Case 1.5: Deep copies new_grad according to the Gradient Layout Contract.
+// - Case 2: Param has existing grad and grad mode is not enabled
+//   - This case is not strictly necessary, but it makes the first-order only
+//     case slightly more efficient.
+//   - Case 2.1: Sparse variable_grad + Dense new_grad
+//     . If `variable_grad` is sparse and `new_grad` is not sparse, their
+//       sum is not sparse, and we must change the TensorImpl type of
+//       `variable_grad` for it to store the result. However, changing the
+//       TensorImpl type of a tensor requires changing the tensor itself, and
+//       thus in this case we have to change the grad tensor.
+//   - Case 2.2: Vmap-incompatible
+//     . Ideally we'd perform an in-place operation to avoid changing
+//       the grad tensor. However, if that's impossible because the grads
+//       are vmap-incompatible (See NOTE: [vmap-incompatible in-place
+//       operations]), then we just add them out-of-place.
+//   - Case 2.3: In-place addition
+//     . In this case we can avoid changing the grad tensor. There are three
+//       scenarios when we'll hit this case:
+//       . `variable_grad` is sparse, and `new_grad` is sparse.
+//       . `variable_grad` is dense, and `new_grad` is sparse.
+//       . `variable_grad` is dense, and `new_grad` is dense.
+//       . `variable_grad` is mkldnn, and `new_grad` is mkldnn.
+//
+//       In all of these four cases, `variable_grad += new_grad` is a
+//       valid operation which adds `new_grad` to `variable_grad` in
+//       place. `variable_grad` is thus still referring to the same tensor
+//       after the operation.
+//     . DistributedDataParallel(DDP) package relies on grad being
+//       mutated in place for saving peak memory usage. DDP will still
+//       work correctly if it is mutated out of place here, but DDP will
+//       maintain one extra copy of grad tensors in buffer and thus
+//       increase peak memory usage.
+// - Case 3: Param has existing grad and grad mode is enabled
+//   - Case 3.1: Sparse variable_grad + Dense new_grad
+//   - Case 3.2: Not Sparse variable_grad + Dense new_grad
+//
 // variable: the variable whose grad we're accumulating.
 // variable_grad: the current grad for the variable.
 // new_grad: new grad we want to accumulate for the variable.
@@ -123,12 +180,15 @@ static void accumulateGrad(
         << new_grad_use_count << " <= " << num_expected_refs
         << "): " << (cond5 ? "true" : "false") << std::endl;
 
-    bool cond6_or_part1 = new_grad.is_mkldnn();
-    bool cond6_or_part2 = utils::obeys_layout_contract(new_grad, variable);
-    bool cond6_combined = cond6_or_part1 || cond6_or_part2;
-    std::cout
-        << "6. (new_grad.is_mkldnn() || utils::obeys_layout_contract(new_grad, variable)): "
-        << (cond6_combined ? "true" : "false") << std::endl;
+    // bool cond6_or_part1 = new_grad.is_mkldnn();
+    // bool cond6_or_part2 = utils::obeys_layout_contract(new_grad, variable);
+    // bool cond6_combined = cond6_or_part1 || cond6_or_part2;
+    // std::cout
+    //     << "6. (new_grad.is_mkldnn() ||
+    //     utils::obeys_layout_contract(new_grad, variable)): "
+    //     << (cond6_combined ? "true" : "false") << std::endl;
+    std::cout << "dunno cond6" << std::endl;
+    ool cond6_combined = true;
 
     bool final_condition =
         cond1 && cond2 && cond3 && cond4 && cond5 && cond6_combined;
@@ -144,18 +204,11 @@ static void accumulateGrad(
         !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
         at::caching::adjusted_use_count(new_grad) <= num_expected_refs &&
         (new_grad.is_mkldnn() ||
-         utils::obeys_layout_contract(new_grad, variable))) {
-      // we aren't setting up for double-backward
-      // not sparse
-      // no other user-visible tensor references new_grad
-      // new_grad obeys the "Gradient Layout Contract", there has a special
-      // case, For MKLDNN tensor, which is a opaque tensor, assuming it obeys
-      // layout_contract. Under these conditions, we can steal new_grad
-      // without a deep copy.
+
+         tils::obeys_layout_contract(new_grad, variable))) {
+      // See Case 1.1: Stealable dense new_grad
       std::cout << "case 1.1: steal grad" << std::endl;
       update_grad(new_grad.detach());
-      std::cout << "variable.grad_fn() is empty?="
-                << (variable.grad_fn() == nullptr) << std::endl;
     } else if (
         !GradMode::is_enabled() && new_grad.is_sparse() &&
         new_grad._indices().is_contiguous() &&
@@ -165,17 +218,8 @@ static void accumulateGrad(
         new_grad._indices().use_count() <= 1 &&
         new_grad._values().use_count() <= 1 &&
         new_grad.use_count() <= num_expected_refs) {
+      // Case 1.2: Stealable sparse new_grad
       std::cout << "case 1.2" << std::endl;
-      // Can't detach sparse tensor (since metadata changes are not allowed
-      // after detach), so just create a new one for the grad which is a
-      // shallow copy. We need a shallow copy so that modifying the original
-      // grad tensor doesn't modify the grad we accumulate.
-      // We only skip clone if indices and values themselves are contiguous
-      // for backward compatibility reasons. Since without this optimization,
-      // earlier we would clone the entire SparseTensor which cloned indices
-      // and values.
-      // For details see https://github.com/pytorch/pytorch/issues/34375.
-
       // No scenario where we expect this to be true currently
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           !at::caching::is_cached_tensor(new_grad._indices()) &&
@@ -190,64 +234,41 @@ static void accumulateGrad(
     } else {
       if (new_grad.is_sparse() || new_grad.is_sparse_csr() ||
           new_grad.is_nested()) {
+        // Case 1.3: Cloning sparse/nested new_grad
         std::cout << "case 1.3" << std::endl;
         update_grad(new_grad.clone());
       } else {
         if (new_grad.is_mkldnn()) {
           std::cout << "case 1.4" << std::endl;
+          // Case 1.4: Cloning MKLDNN new_grad
           update_grad(new_grad.clone());
         } else {
           std::cout << "case 1.5" << std::endl;
-          // Deep copies new_grad according to the "Gradient Layout Contract."
+          // Case 1.5: Deep copies new_grad according to the "Gradient
+          // Layout Contract."
           update_grad(utils::clone_obey_contract(new_grad, variable));
-          std::cout << "variable.grad_fn() is empty?="
-                    << (variable.grad_fn() == nullptr) << std::endl;
         }
       }
     }
   } else if (!GradMode::is_enabled()) {
-    // This case is not strictly necessary, but it makes the first-order only
-    // case slightly more efficient.
+    // Case 2: Param has existing grad and grad mode is not enabled
     if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
-      // If `variable_grad` is sparse and `new_grad` is not sparse, their
-      // sum is not sparse, and we must change the TensorImpl type of
-      // `variable_grad` for it to store the result. However, changing the
-      // TensorImpl type of a tensor requires changing the tensor itself, and
-      // thus in this case we have to change the grad tensor.
+      // Case 2.1: Sparse variable_grad + Dense new_grad
+      std::cout << "case 2.1" << std::endl;
       auto result = new_grad + variable_grad;
       CHECK_RESULT(result, variable);
       update_grad(std::move(result));
-      std::cout << "case 2.1" << std::endl;
     } else if (!at::inplaceIsVmapCompatible(variable_grad, new_grad)) {
-      // Ideally we'd perform an in-place operation to avoid changing
-      // the grad tensor. However, if that's impossible because the grads
-      // are vmap-incompatible (See NOTE: [vmap-incompatible in-place
-      // operations]), then we just add them out-of-place.
+      // Case 2.2: Vmap-incompatible
+      std::cout << "case 2.2" << std::endl;
       auto result = variable_grad + new_grad;
       CHECK_RESULT(result, variable);
       update_grad(std::move(result));
-      std::cout << "case 2.2" << std::endl;
     } else {
-      // In this case we can avoid changing the grad tensor. There are three
-      // scenarios when we'll hit this case:
-      //
-      // 1. `variable_grad` is sparse, and `new_grad` is sparse.
-      // 2. `variable_grad` is dense, and `new_grad` is sparse.
-      // 3. `variable_grad` is dense, and `new_grad` is dense.
-      // 4. `variable_grad` is mkldnn, and `new_grad` is mkldnn.
-      //
-      // In all of these four cases, `variable_grad += new_grad` is a
-      // valid operation which adds `new_grad` to `variable_grad` in
-      // place. `variable_grad` is thus still referring to the same tensor
-      // after the operation.
-      // Also DistributedDataParallel(DDP) package relies on grad being
-      // mutated in place for saving peak memory usage. DDP will still
-      // work correctly if it is mutated out of place here, but DDP will
-      // maintain one extra copy of grad tensors in buffer and thus
-      // increase peak memory usage.
+      // Case 2.3: In-place addition
+      std::cout << "case 2.3" << std::endl;
       variable_grad += new_grad;
       CHECK_RESULT(variable_grad, variable);
-      std::cout << "case 2.3: clone grad" << std::endl;
       // ^ We could enforce the contract more aggressively here by writing:
       // if (variable_grad.is_sparse() || new_grad.is_sparse()) {
       //   variable_grad += new_grad;
@@ -263,17 +284,20 @@ static void accumulateGrad(
       // which may break user code.
     }
   } else {
+    // Case 3: Param has existing grad and grad mode is enabled
     at::Tensor result;
     if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
-      // CPU backend throws an error on sparse + dense, so prefer dense +
-      // sparse here.
+      std::cout << "case 3.1" << std::endl;
+      // Case 3.1: Sparse variable_grad + Dense new_grad
+      // CPU backend throws an error on sparse + dense, so
+      // prefer dense + sparse here.
       result = new_grad + variable_grad;
-      std::cout << "case 3.1: clone grad" << std::endl;
     } else {
+      // Case 3.2: Not Sparse variable_grad + Dense new_grad
       // Assumes operator+ result typically matches strides of first arg,
       // and hopes variable_grad was originally created obeying layout
       // contract.
-      std::cout << "case 3.2: clone grad" << std::endl;
+      std::cout << "case 3.2" << std::endl;
       result = variable_grad + new_grad;
     }
     CHECK_RESULT(result, variable);
@@ -328,3 +352,4 @@ struct TORCH_API AccumulateGrad : public Node {
 #undef CHECK_RESULT
 
 } // namespace torch::autograd
+ 
