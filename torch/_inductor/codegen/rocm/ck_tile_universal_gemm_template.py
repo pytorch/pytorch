@@ -216,9 +216,7 @@ def ops():
         for epilogue in ["Default", "CShuffle"]
     ]
 
-    return list(
-        itertools.chain(compute_v3_instances, compute_v4_instances, mem_instances)
-    )
+    return itertools.chain(compute_v3_instances, compute_v4_instances, mem_instances)
 
 
 class CKTileGemmTemplate(CKTileTemplate):
@@ -860,13 +858,7 @@ class CKTileGemmTemplate(CKTileTemplate):
         An instance may invalidate the GEMM configuration at runtime.
         Such instances will be assigned +inf runtime by the autotune process.
         """
-        instances = ops()
-        if not instances:
-            raise AssertionError(
-                "No Composable Kernel Universal GEMM instances found. "
-                "Please check if the library is installed."
-            )
-        filtered_instances = list(filter(self.filter_op, instances))
+        filtered_instances = list(filter(self.filter_op, ops()))
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
@@ -879,7 +871,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             else filtered_instances
         )
         log.debug(
-            "generated %d ck instances after sample: %s",
+            "generated %d ck instances after filter: %s",
             len(chosen_instances),
             chosen_instances,
         )
