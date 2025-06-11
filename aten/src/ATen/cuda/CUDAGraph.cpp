@@ -109,6 +109,11 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
+
+  cudaStreamCaptureStatus status{};
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_));
+  TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
+
 }
 
 void CUDAGraph::capture_end() {
@@ -237,8 +242,6 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
   } else {
     TORCH_WARN("CUDA Graphs debug not enabled, set with [graph].enable_debug_mode()");
   }
-  TORCH_WARN("DEBUG: calling debug_dump()");
-  C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), cudaGraphDebugDotFlagsVerbose)); // most verbose output
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.3 or ROCM >= 5.6");
 #endif
