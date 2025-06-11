@@ -131,7 +131,6 @@ dtensor_fails = {
     xfail("cummin"),
     xfail("diagonal_scatter"),
     xfail("dist"),
-    xfail("dot"),
     xfail("empty"),
     xfail("empty_strided"),
     xfail("empty_like"),

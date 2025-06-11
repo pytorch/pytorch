@@ -18,6 +18,9 @@ inline namespace CPU_CAPABILITY {
 #if defined(CPU_CAPABILITY_AVX512)
 
 template <>
+struct is_vec_specialized_for<double> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<double> {
  private:
   static constexpr __m512i zero_vector{0, 0, 0, 0, 0, 0, 0, 0};

@@ -103,6 +103,7 @@ ENV SSL_CERT_FILE=/opt/_internal/certs.pem
 # Install LLVM version
 COPY --from=openssl            /opt/openssl                          /opt/openssl
 COPY --from=base               /opt/python                           /opt/python
+COPY --from=base               /usr/local/lib/                       /usr/local/lib/
 COPY --from=base               /opt/_internal                        /opt/_internal
 COPY --from=base               /usr/local/bin/auditwheel             /usr/local/bin/auditwheel
 COPY --from=intel              /opt/intel                            /opt/intel
@@ -174,6 +175,6 @@ ENV XPU_DRIVER_TYPE ROLLING
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
 ADD ./common/install_xpu.sh install_xpu.sh
-ENV XPU_VERSION 2025.0
+ENV XPU_VERSION 2025.1
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd

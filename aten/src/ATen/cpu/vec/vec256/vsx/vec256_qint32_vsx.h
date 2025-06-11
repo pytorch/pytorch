@@ -32,6 +32,8 @@ namespace vec {
 inline namespace CPU_CAPABILITY {
 
 template <>
+struct is_vec_specialized_for<c10::qint32> : std::bool_constant<true> {};
+template <>
 struct Vectorized<c10::qint32> {
  private:
   union {
