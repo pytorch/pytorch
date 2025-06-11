@@ -487,7 +487,7 @@ checks are disabled.
 ```
 
 (sparse-uncoalesced-coo-docs)=
-## Uncoalesced sparse COO tensors
+### Uncoalesced sparse COO tensors
 
 PyTorch sparse COO tensor format permits sparse *uncoalesced* tensors,
 where there may be duplicate coordinates in the indices; in this case,
