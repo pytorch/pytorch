@@ -1091,7 +1091,7 @@ class PythonKeyTracer(Tracer):
 
     def unwrap_proxy(self, e: T) -> object:
         if isinstance(e, Tensor):
-            return get_proxy_slot(e, self, e, lambda x: x.proxy)  # type: ignore[attr-defined]
+            return get_proxy_slot(e, self, e, lambda x: x.proxy)
         elif isinstance(e, py_sym_types):
             return get_proxy_slot(e, self, e, lambda e: e.force())
         elif isinstance(e, _AnyScriptObject):
@@ -1136,6 +1136,8 @@ def _should_save_eager_input_vals(
     target: Any,
     args_kwargs: Optional[tuple[tuple[Argument, ...], dict[str, Argument]]] = None,
 ) -> bool:
+    from torch._higher_order_ops.invoke_subgraph import InvokeSubgraphHOP
+
     if not callable(target):
         return False
     if isinstance(
@@ -1143,6 +1145,7 @@ def _should_save_eager_input_vals(
         (
             torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
             torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+            InvokeSubgraphHOP,
         ),
     ):
         return True

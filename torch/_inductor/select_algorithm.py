@@ -494,7 +494,10 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta: dict[str, Any] = {
             "signature": signature_to_meta(
-                signature, size_dtype=self.index_dtype, argdefs=argdefs
+                signature,
+                size_dtype=self.index_dtype,
+                argdefs=argdefs,
+                is_template=True,
             ),
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
@@ -1173,7 +1176,7 @@ class GeneratedCodeCache:
         input_nodes: tuple[ir.IRNode],
         num_stages: int,
         num_warps: int,
-        call_sizes: Sequence[sympy.core.symbol.Symbol],
+        call_sizes: list[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
@@ -1326,7 +1329,7 @@ class TritonTemplate(KernelTemplate):
         input_nodes: tuple[ir.IRNode],
         num_stages: int,
         num_warps: int,
-        call_sizes: Sequence[sympy.core.symbol.Symbol],
+        call_sizes: list[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
@@ -1526,7 +1529,7 @@ class TritonTemplate(KernelTemplate):
         epilogue_fn_hash: Optional[str] = None,
         subgraphs: Optional[list[ir.Buffer]] = None,
         mutated_inputs: Optional[list[ir.IRNode]] = None,
-        call_sizes: Optional[Sequence[sympy.core.symbol.Symbol]] = None,
+        call_sizes: Optional[list[sympy.core.symbol.Symbol]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
         generate_with_caching=False,
         **kwargs,
@@ -1900,7 +1903,7 @@ class ExternKernelCaller(ChoiceCaller):
             assert self.choice.op_overload is not None, (
                 "Please provide an op_overload to use ir.FallbackKernel"
             )
-            inner: ir.IRNode = ir.FallbackKernel.create(
+            inner = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
         elif self.choice.kernel_creator is not None:
@@ -2199,10 +2202,25 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def autotune(choices):
             log.debug("Starting autotuning")
+
             with dynamo_timed(
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
+                metadata={
+                    "autotune_strides": ", ".join(
+                        [str(n.get_stride()) for n in input_nodes]
+                    ),
+                    "autotune_dtypes": ", ".join(
+                        [str(n.get_dtype()) for n in input_nodes]
+                    ),
+                    "autotune_shape": ", ".join(
+                        ["x".join(map(str, n.get_size())) for n in input_nodes]
+                    ),
+                    "autotune_offset": ", ".join(
+                        [str(n.get_layout().offset) for n in input_nodes]
+                    ),
+                },
             ):
                 return make_benchmark_fn()(choices)
 

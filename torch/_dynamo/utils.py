@@ -50,7 +50,7 @@ from collections import Counter, OrderedDict
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
-from types import MethodWrapperType
+from types import CodeType, MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -4495,38 +4495,22 @@ def does_not_override_dict_iter_methods(user_cls):
     )
 
 
-# Helper functions below are to prevent __torch_function__
-# calls from happening in the middle of __torch_function__
-# compiled bytecode
-# They will be skipped which is the desired result
+# Helper functions below are to prevent TorchDynamo to prevent tracing of
+# __torch_function__ calls triggered on tensor properties in the pre graph
+# bytecode.
+@torch._disable_dynamo
 def call_size(x, i):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x, i):
-        return x.size(i)
-
-    return fn(x, i)
+    return x.size(i)
 
 
+@torch._disable_dynamo
 def call_stride(x, i):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x, i):
-        return x.stride(i)
-
-    return fn(x, i)
+    return x.stride(i)
 
 
+@torch._disable_dynamo
 def call_storage_offset(x):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x):
-        return x.storage_offset()
-
-    return fn(x)
+    return x.storage_offset()
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
@@ -4688,3 +4672,11 @@ def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
 
 def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
     cm.__exit__(None, None, None)
+
+
+# Returns a set of code objects present traced in the current TracingContext, or None
+# if there is no current TracingContext.
+def get_traced_code() -> list[CodeType]:
+    from torch._guards import TracingContext
+
+    return TracingContext.get_traced_code()

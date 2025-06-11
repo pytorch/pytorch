@@ -1417,11 +1417,12 @@ class PythonWrapperCodegen(CodeGen):
         self,
         buf_name: str,
         python_kernel_name: str,
-        codegen_args: Sequence[str],
-        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
-        raw_args: Sequence[Any],
-        outputs: Sequence[ir.Buffer],
-    ) -> None:
+        cpp_kernel_name: str,
+        codegen_args: list[str],
+        op_overload: Optional[torch._ops.OpOverload] = None,
+        raw_args=None,
+        outputs=None,
+    ):
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
     def generate(self, is_inference):
@@ -1775,12 +1776,12 @@ class PythonWrapperCodegen(CodeGen):
                     f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
                 )
 
-    def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
+    def codegen_device_copy(self, src, dst, non_blocking: bool):
         self.writeline(f"{dst}.copy_({src}, {non_blocking})")
 
     def codegen_multi_output(self, node: ir.MultiOutput):
         result_name = node.get_name()
-        arg_name = node.input_name(0)
+        arg_name = node.inputs[0].get_name()
         self.writeline(MultiOutputLine(self, result_name, arg_name, node.indices))
 
     def codegen_dynamic_scalar(self, node):

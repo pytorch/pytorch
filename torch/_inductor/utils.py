@@ -974,7 +974,7 @@ def get_first_incompatible_cudagraph_node(
         if (
             not torch._inductor.config.graph_partition
             and isinstance(node.target, torch._ops.OpOverload)
-            and torch._C.Tag.cudagraph_unsafe in node.target.tags  # type: ignore[attr-defined]
+            and torch._C.Tag.cudagraph_unsafe in node.target.tags
         ):
             # skip cudagraph if a cudagraph_unsafe op is detected.
             # graph_partition helps by spliting on this cudagraph_unsafe
@@ -992,25 +992,6 @@ def output_node(gm: torch.fx.GraphModule) -> Node:
     last_node = next(iter(reversed(gm.graph.nodes)))
     assert last_node.op == "output"
     return last_node
-
-
-def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
-    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
-    input_devices: OrderedSet[torch.device] = OrderedSet(
-        node.meta["val"].device
-        for node in placeholder_nodes
-        if isinstance(node.meta.get("val"), torch.Tensor)
-    )
-
-    out_arg = output_node(gm).args[0]  # type: ignore[union-attr]
-    out_args = out_arg if isinstance(out_arg, tuple) else (out_arg,)
-    out_devices: OrderedSet[torch.device] = OrderedSet(
-        arg.meta["val"].device
-        for arg in out_args
-        if isinstance(arg, torch.fx.Node)
-        and isinstance(arg.meta.get("val"), torch.Tensor)
-    )
-    return input_devices | out_devices
 
 
 _registered_caches: list[Any] = []
@@ -1762,6 +1743,16 @@ def use_ck_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
     )
 
 
+def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
+    from .virtualized import V
+
+    return (
+        _use_autotune_backend("CKTILE")
+        and use_ck_template(layout)
+        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+    )
+
+
 def use_ck_conv_template(layout: Layout) -> bool:
     return _use_conv_autotune_backend("CK") and use_ck_template(layout)
 
@@ -2277,7 +2268,7 @@ def is_output_of_multi_outputs_template(
     return (
         isinstance(input_buf, ir.MultiOutput)
         and len(input_buf.inputs) == 1
-        and is_multi_outputs_template(input_buf.inputs[0])  # type: ignore[arg-type]
+        and is_multi_outputs_template(input_buf.inputs[0])
     )
 
 
@@ -3102,7 +3093,7 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
 
     if (
         isinstance(node.op_overload, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags  # type: ignore[attr-defined]
+        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags
     ):
         return True
 
@@ -3129,3 +3120,14 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
         isinstance(wrapper, SubgraphPythonWrapperCodegen)
         and wrapper.partition_signatures is not None
     )
+
+
+def dtype_from_size(size: int) -> torch.dtype:
+    from .virtualized import V
+
+    if V.graph.sizevars.statically_known_lt(
+        size, 2**31
+    ) and V.graph.sizevars.statically_known_geq(size, -(2**31)):
+        return torch.int32
+    else:
+        return torch.int64
