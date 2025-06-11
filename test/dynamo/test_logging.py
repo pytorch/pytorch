@@ -169,6 +169,22 @@ class LoggingTests(LoggingTestCase):
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
         self.assertEqual(len([r for r in records if ".__output_code" in r.name]), 0)
 
+    @make_logging_test(hierarchical_compile=True)
+    def test_hierarchical_compile(self, records):
+        from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+
+        @mark_compile_region
+        def gn(x):
+            return x * 2
+
+        def fn(x):
+            return gn(x)
+
+        fn_opt = torch.compile(fn, backend="inductor")
+        fn_opt(torch.ones(1000, 1000))
+        fn_opt(torch.ones(1000, 1000))
+        self.assertGreater(len(records), 0)
+
     @make_logging_test()
     def test_dynamo_error(self, records):
         try:
@@ -960,6 +976,7 @@ exclusions = {
     "loop_tiling",
     "autotuning",
     "graph_region_expansion",
+    "hierarchical_compile",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
