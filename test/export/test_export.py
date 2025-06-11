@@ -7602,9 +7602,7 @@ def forward(self, x):
             RuntimeError, r".* expression Eq\(u0, 2\) \| Eq\(u0, 4\) \| Eq\(u0, 6\) .*"
         ):
             ep.module()(torch.tensor([3, 6, 5]))
-        with self.assertRaisesRegex(
-            RuntimeError, r".* expression Eq\(u2, 5\) & \(4 <= u1\) & \(u1 <= 8\) .*"
-        ):
+        with self.assertRaisesRegex(RuntimeError, r".* expression u[\d]+ <= 5 .*"):
             ep.module()(torch.tensor([6, 6, 6]))
 
     def test_redundant_assert_max_upper_bound(self):

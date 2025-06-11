@@ -7813,6 +7813,29 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(fn(torch.tensor([4])).size(0), 1)
         self.assertEqual(fn(torch.tensor([1])).size(0), 0)
 
+    def test_sym_and_terms(self):
+        from torch.fx.experimental.symbolic_shapes import sym_and
+
+        @torch.compile(fullgraph=True, dynamic=True, backend="eager")
+        def fn(xs):
+            u0, u1 = xs.tolist()
+            torch._check(sym_and(u0 >= 3, u0 <= 10, u1 >= 2))
+
+            # test individual checks
+            n = 0
+            if u0 >= 3:
+                n += 1
+            if u0 <= 11:
+                n += 1
+            if u1 >= 1:
+                n += 1
+            return u0 + u1 + n
+
+        fn(torch.tensor([5, 6]))
+        fn(torch.tensor([8, 7]))
+        with self.assertRaises(RuntimeError):
+            fn(torch.tensor([9, 0]))
+
     def test_unbacked_2d_expand(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
         def func(a, b):

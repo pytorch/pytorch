@@ -946,6 +946,28 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             elif isinstance(expr, ConstantVariable):
                 return expr
 
+        @register(torch.fx.experimental.symbolic_shapes.sym_and)
+        def handle_sym_and(self, tx: "InstructionTranslator", *terms):
+            if all(isinstance(x, SymNodeVariable) for x in terms):
+                return SymNodeVariable.create(
+                    tx,
+                    torch.fx.experimental.symbolic_shapes.sym_and(
+                        *(x.as_proxy() for x in terms)
+                    ),
+                    sym_num=None,
+                )
+
+        @register(torch.fx.experimental.symbolic_shapes.sym_or)
+        def handle_sym_or(self, tx: "InstructionTranslator", *terms):
+            if all(isinstance(x, SymNodeVariable) for x in terms):
+                return SymNodeVariable.create(
+                    tx,
+                    torch.fx.experimental.symbolic_shapes.sym_or(
+                        *(x.as_proxy() for x in terms)
+                    ),
+                    sym_num=None,
+                )
+
         @register(torch.fx.experimental.symbolic_shapes.has_static_value)
         def handle_has_static_value(self, tx: "InstructionTranslator", expr):
             if isinstance(expr, SymNodeVariable):
