@@ -31,12 +31,6 @@ if "%USE_XPU%"=="1" (
   if errorlevel 1 exit /b 1
 )
 
-:: Miniconda has been installed as part of the Windows AMI with all the dependencies.
-:: We just need to activate it here
-call %INSTALLER_DIR%\activate_miniconda3.bat
-if errorlevel 1 goto fail
-if not errorlevel 0 goto fail
-
 :: Update CMake
 call choco upgrade -y cmake --no-progress --installargs 'ADD_CMAKE_TO_PATH=System' --apply-install-arguments-to-dependencies --version=3.27.9
 if errorlevel 1 goto fail

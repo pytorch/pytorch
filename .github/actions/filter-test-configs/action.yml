@@ -57,7 +57,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: nick-fields/retry@v3.0.0
+    - uses: nick-fields/retry@v3.0.2
       name: Setup dependencies
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
