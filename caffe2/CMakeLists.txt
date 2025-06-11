@@ -996,7 +996,7 @@ elseif(USE_CUDA)
   if(NOT DEFINED NVSHMEM_HOME)
     message(WARNING "NVSHMEM_HOME not found. Please run `pip install nvidia-nvshmem-<version>`, or set NVSHMEM_HOME to its location.")
     # Disable nvshmem if NVSHMEM_HOME is not found
-    set(USE_NVSHMEM FALSE CACHE BOOL "Whether to build with NVSHMEM support")
+    set(USE_NVSHMEM FALSE)
   endif()
 
   if(USE_NVSHMEM)
@@ -1025,6 +1025,7 @@ elseif(USE_CUDA)
         ${NVSHMEM_LIB_DIR}/libnvshmem_host.so.3
         nvshmem_device
     )
+    target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
   endif()
@@ -1495,9 +1496,6 @@ if(USE_DISTRIBUTED)
   # can only be compiled with USE_TENSORPIPE is set.
   if(USE_TENSORPIPE)
     target_compile_definitions(torch_cpu PUBLIC USE_TENSORPIPE)
-  endif()
-  if(USE_NVSHMEM AND USE_CUDA)
-      target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
   endif()
 endif()
 
