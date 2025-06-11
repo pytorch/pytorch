@@ -91,7 +91,7 @@ T = TypeVar("T")
 
 # defines here before import torch._dynamo is for avoiding circular import
 # when get_gpu_type is imported from dynamo
-@functools.lru_cache(None)
+@functools.cache
 def get_gpu_type() -> str:
     avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
     assert len(avail_gpus) <= 1
@@ -288,6 +288,8 @@ def do_bench_using_profiling(
     for _ in range(n_warmup):
         fn()
 
+    torch.cuda.synchronize()
+
     with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CUDA,
@@ -338,7 +340,7 @@ def do_bench_using_profiling(
     return res
 
 
-@functools.lru_cache(None)
+@functools.cache
 def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
@@ -1384,7 +1386,7 @@ class DelayReplaceLine(DeferredLineBase):
         return DelayReplaceLine(self.key, self.value_fn, line)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
@@ -1599,7 +1601,7 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
     # If k is a sympy expression, we can't do any splitting
     if isinstance(k, sympy.Expr) and not k.is_number:
@@ -1652,12 +1654,12 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
         return best_splits[:k_splits_limit]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _rocm_native_device_arch_name(device: str) -> str:
     return torch.cuda.get_device_properties(device).gcnArchName
 
 
-@functools.lru_cache(None)
+@functools.cache
 def try_import_ck_lib() -> tuple[
     Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
 ]:
@@ -2106,7 +2108,7 @@ def parallel_num_threads() -> int:
     return threads
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_backend_num_stages() -> int:
     from .runtime.triton_helpers import get_backend_options
 
@@ -2114,7 +2116,7 @@ def get_backend_num_stages() -> int:
     return options.get("num_stages", 2 if torch.version.hip else 3)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_device_tflops(dtype: torch.dtype) -> int:
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
@@ -2142,7 +2144,7 @@ def get_device_tflops(dtype: torch.dtype) -> int:
             return get_max_simd_tflops(torch.float32)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_gpu_dram_gbps() -> int:
     from triton.testing import get_dram_gbps
 
@@ -2862,7 +2864,7 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor) -> bool:
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def boolean_ops() -> tuple[str, ...]:
     return (
         "isinf",
@@ -3051,7 +3053,7 @@ class TritonAttrsDescriptorVersion(enum.Enum):
     V4_DICT = 4  # a raw dict
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
     if importlib.util.find_spec("triton") is None:
         return TritonAttrsDescriptorVersion.V0_NO_TRITON
