@@ -336,17 +336,18 @@ class TestLocalMap(DTensorTestBase):
         )
         torch.manual_seed(12)
 
-        # consider X as a batch of 2 on dim 0.
+        # ground truth output, consider X as a batch of 2 on dim 0.
         X = torch.randn(4, 2, device=self.device_type, requires_grad=True)
         X1, X2 = torch.chunk(X, 2, dim=0)
         X1 = X1.detach().requires_grad_()
         X2 = X2.detach().requires_grad_()
         W = torch.randn(2, 4, device=self.device_type, requires_grad=True)
         Y1 = torch.mm(X1, W)
-        Y1.backward(torch.ones_like(Y1))
         Y2 = torch.mm(X2, W)
-        Y2.backward(torch.ones_like(Y2))
-        in_placement_mismatch_choice = (True, False)
+        loss = Y1.sum() + Y2.sum()
+        loss.backward()
+
+        in_placement_mismatch_choice = (False, True)
         for is_in_placement_mismatch in in_placement_mismatch_choice:
             if is_in_placement_mismatch:
                 # in_placements for local_map() will take effect
@@ -360,21 +361,19 @@ class TestLocalMap(DTensorTestBase):
             local_mm_forward = local_map(
                 mm_forward,
                 out_placements=[Shard(0)],
-                in_placements=(row_wise, replicate),  # simulate DDP
+                in_placements=(row_wise, replicate),
                 in_grad_placements=in_grad_placements,
                 device_mesh=device_mesh,
                 redistribute_inputs=True,
             )
-            Y_dt = local_mm_forward(X_dt, W_dt)  # Y_dt is shard(0) now
+            Y_dt = local_mm_forward(X_dt, W_dt)
             self.assertEqual(Y_dt.full_tensor(), torch.cat([Y1, Y2], dim=0))
 
-            # Note: this is a way to simulate how DPP works. In fact, we don't
-            # need to all_gather the loss. Instead, we do all_reduce to each
-            # distributed weight.
-            local_Y = Y_dt.redistribute(placements=replicate)  # all_reduce loss
-            local_Y = local_Y.to_local()
-
-            local_Y.backward(torch.ones_like(local_Y))
+            # Note: this is a way to simulate how DPP works. We don't need to
+            # all_gather the loss. Instead, we do all_reduce to each distributed
+            # weight.
+            loss = Y_dt.to_local().sum()
+            loss.backward()
 
             if not is_in_placement_mismatch:
                 self.assertEqual(X_dt.grad.placements, in_grad_placements[0])
