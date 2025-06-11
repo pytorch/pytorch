@@ -8,7 +8,7 @@
 ```
 
 ```{eval-rst}
-.. module:: torch.ao.ns._numeric_suite_fx
+.. automodule:: torch.ao.ns._numeric_suite_fx
     :members:
     :member-order: bysource
 
