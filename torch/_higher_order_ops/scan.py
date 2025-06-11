@@ -8,18 +8,16 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.cond import create_bw_fn, materialize_as_graph
+from torch._higher_order_ops.cond import create_bw_fn
 from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
     _maybe_compile_and_run_fn,
     check_meta_consistency,
     first_slice_copy,
+    materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
     unique_graph_id,
-    UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
@@ -808,19 +806,6 @@ class ScanAutogradOp(torch.autograd.Function):
 
 @scan_op.py_autograd_impl
 def scan_autograd(combine_fn, init, xs, additional_inputs):
-    if not any(
-        el.requires_grad
-        for el in (tuple(init) + tuple(xs) + additional_inputs)
-        if isinstance(el, torch.Tensor)
-    ):
-        with torch._C._AutoDispatchBelowAutograd():
-            return scan_op(
-                combine_fn,
-                init,
-                xs,
-                additional_inputs,
-            )
-
     num_leaves_init = len(init)
     num_leaves_xs = len(xs)
     num_additional_inputs = len(additional_inputs)
@@ -861,12 +846,19 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
 
 @scan_op.py_functionalize_impl
 def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
+    from torch._higher_order_ops.utils import (
+        _check_alias_and_mutation,
+        _maybe_run_with_interpreter,
+    )
+
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_init = ctx.unwrap_tensors(init)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
+
     with ctx.redispatch_to_next():
-        functional_combine_fn = ctx.functionalize(combine_fn)
-        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        functional_combine_fn = ctx.functionalize(
+            _maybe_run_with_interpreter(combine_fn)
+        )
         sample_unwrapped_xs_sliced = [first_slice_copy(inp) for inp in unwrapped_xs]
         sample_inputs = list(
             itertools.chain(
@@ -875,18 +867,8 @@ def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
                 unwrapped_additional_inputs,
             )
         )
-        if _has_potential_branch_input_mutation(
-            combine_fn, sample_inputs, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException(
-                "Combine_fn might be modifying the input!"
-            )
-        if _has_potential_branch_input_alias(
-            combine_fn, sample_inputs, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException(
-                "Combine_fn might be aliasing the input!"
-            )
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        _check_alias_and_mutation(combine_fn, sample_inputs, "scan", pre_dispatch)
         ret = scan_op(
             functional_combine_fn,
             unwrapped_init,
