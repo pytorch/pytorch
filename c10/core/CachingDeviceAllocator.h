@@ -100,10 +100,10 @@ struct C10_API DeviceAllocator : public c10::Allocator {
 
 // This function is used to get the DeviceAllocator for a specific device type
 // and keep backward compatibility with c10::GetAllocator.
-C10_API inline DeviceAllocator* GetDeviceAllocator(const DeviceType& t) {
+C10_API inline DeviceAllocator* getDeviceAllocator(const DeviceType& t) {
   TORCH_CHECK(
       t != DeviceType::CPU,
-      "GetDeviceAllocator is not supported for CPU device type.");
+      "getDeviceAllocator is not supported for CPU device type.");
   auto* allocator = c10::GetAllocator(t);
   auto* device_allocator = dynamic_cast<DeviceAllocator*>(allocator);
   TORCH_INTERNAL_ASSERT(
