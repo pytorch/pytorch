@@ -265,6 +265,7 @@ persistent_tma_mm_template = TritonTemplate(
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
+    {%- if TMA_EXPERIMENTAL_API %}
     triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=a_desc_ptr,
         global_address=A,
@@ -282,6 +283,23 @@ persistent_tma_mm_template = TritonTemplate(
 
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
+
+    a_desc = a_desc_ptr
+    b_desc = b_desc_ptr
+    {%- else %}
+    a_desc = triton.language.make_tensor_descriptor(
+        base=A,
+        shape=[M, K] if A_ROW_MAJOR else [K, M],
+        strides=[K, 1] if A_ROW_MAJOR else [M, 1],
+        block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
+    )
+    b_desc = triton.language.make_tensor_descriptor(
+        base=B,
+        shape=[K, N] if B_ROW_MAJOR else [N, K],
+        strides=[N, 1] if B_ROW_MAJOR else [K, 1],
+        block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
+    )
+    {%- endif %}
 
     pid_m = 0
     pid_n = 0
@@ -303,18 +321,29 @@ persistent_tma_mm_template = TritonTemplate(
 
         rk = ki * BLOCK_K
 
+        {%- if TMA_EXPERIMENTAL_API %}
         a = tl._experimental_descriptor_load(
-            a_desc_ptr,
+            a_desc,
             [rm, rk] if A_ROW_MAJOR else [rk, rm],
             [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
             A.dtype.element_ty,
         )
         b = tl._experimental_descriptor_load(
-            b_desc_ptr,
+            b_desc,
             [rk, rn] if B_ROW_MAJOR else [rn, rk],
             [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
             B.dtype.element_ty,
         )
+        {%- else %}
+        a = tl.load_tensor_descriptor(
+            a_desc,
+            [rm, rk] if A_ROW_MAJOR else [rk, rm],
+        )
+        b = tl.load_tensor_descriptor(
+            b_desc,
+            [rk, rn] if B_ROW_MAJOR else [rn, rk],
+        )
+        {%- endif %}
         acc += tl.dot(
             a if A_ROW_MAJOR else a.T,
             b if B_ROW_MAJOR else b.T,
@@ -416,6 +445,7 @@ device_tma = r"""
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
+    {%- if TMA_EXPERIMENTAL_API %}
     triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=a_desc_ptr,
         global_address=A,
@@ -433,6 +463,23 @@ device_tma = r"""
 
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
+
+    a_desc = a_desc_ptr
+    b_desc = a_desc_ptr
+    {%- else %}
+    a_desc = triton.language.make_tensor_descriptor(
+        base=A,
+        shape=[M, K],
+        strides=[K, 1],
+        block_shape=[BLOCK_M, BLOCK_K],
+    )
+    b_desc = triton.language.make_tensor_descriptor(
+        base=B,
+        shape=[N, K],
+        strides=[K, 1],
+        block_shape=[BLOCK_N, BLOCK_K],
+    )
+    {%- endif %}
 
     tiles_per_SM = num_tiles // NUM_SMS
     if start_pid < num_tiles % NUM_SMS:
@@ -465,12 +512,17 @@ device_tma = r"""
 
         offs_k = ki * BLOCK_K
 
+        {%- if TMA_EXPERIMENTAL_API %}
         a = tl._experimental_descriptor_load(
             a_desc_ptr, [offs_am, offs_k], [BLOCK_M, BLOCK_K],  A.dtype.element_ty
         )
         b = tl._experimental_descriptor_load(
             b_desc_ptr, [offs_bn, offs_k], [BLOCK_N, BLOCK_K],  B.dtype.element_ty
         )
+        {%- else %}
+        a = tl.load_tensor_descriptor(a_desc, [offs_am, offs_k])
+        b = tl.load_tensor_descriptor(b_desc, [offs_bn, offs_k])
+        {%- endif %}
         if USE_FAST_ACCUM:
             accumulator = tl.dot(a, b.T, accumulator)
         else:

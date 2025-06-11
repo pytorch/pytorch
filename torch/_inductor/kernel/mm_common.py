@@ -79,13 +79,21 @@ def mm_options(config, sym_m, sym_n, sym_k, layout):
     return options_dict
 
 
+def tma_options() -> dict[str, Any]:
+    from torch.utils._triton import has_triton_stable_tma_api
+
+    return {"TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api()}
+
+
 def persistent_mm_options(mat1, mat2):
-    return dict(
+    res = dict(
         A_ROW_MAJOR=not mat1.layout.is_transposed(),
         B_ROW_MAJOR=not mat2.layout.is_transposed(),
         NUM_SMS=get_num_sms(),
         TMA_SIZE=TMA_DESCRIPTOR_SIZE,
     )
+    res.update(tma_options())
+    return res
 
 
 def scaled_mm_options(  # type: ignore[no-untyped-def]
@@ -125,6 +133,8 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     if device_tma:
         mm_template_options["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE
         mm_template_options["NUM_SMS"] = get_num_sms()
+
+    mm_template_options.update(tma_options())
 
     return mm_template_options
 
