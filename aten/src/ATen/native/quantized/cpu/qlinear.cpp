@@ -939,10 +939,10 @@ static at::Tensor linear_int8_with_onednn_weight(
     std::string_view& unary_post_op_algorithm) {
   using ideep::tensor;
   const int64_t dim = input.dim();
-  TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte || input.scalar_type() == c10::ScalarType::Char,
-      "qlinear with mkldnn tensor: data type of input should be uint8 or int8 (unsigned char or char).");
-  TORCH_CHECK(onednn_weight.scalar_type() == c10::ScalarType::Char,
-      "qlinear with mkldnn tensor: data type of weight should be int8 (char).");
+  TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte || input.scalar_type() == c10::ScalarType::Char || input.scalar_type() == c10::ScalarType::Float8_e4m3fn,
+      "qlinear with mkldnn tensor: data type of input should be uint8, int8 or float8_e4m3fn.");
+  TORCH_CHECK(onednn_weight.scalar_type() == c10::ScalarType::Char || onednn_weight.scalar_type() == c10::ScalarType::Float8_e4m3fn,
+      "qlinear with mkldnn tensor: data type of weight should be int8 or float8_e4m3fn.");
   TORCH_CHECK(
       weight_scales.scalar_type() == c10::ScalarType::Float, "weight scales should be dtype c10::ScalarType::Float.");
   TORCH_CHECK(
@@ -976,7 +976,7 @@ static at::Tensor linear_int8_with_onednn_weight(
       );
     }
     if (binary_post_op == "sum") {
-      auto expected_dtype = output_dtype.has_value() ? output_dtype.value() : c10::kByte;
+      auto expected_dtype = output_dtype.has_value() ? output_dtype.value() : input.scalar_type();
       TORCH_CHECK(
           other.value().scalar_type() == expected_dtype,
           "onednn qlinear: the dtype of extra input for binary post op should be ", expected_dtype,
@@ -1016,7 +1016,7 @@ static at::Tensor linear_int8_with_onednn_weight(
       at::empty(
         dst_dims,
         at::device(c10::kCPU)
-            .dtype(fp32_output ? c10::kFloat : (bf16_output ? c10::kBFloat16 : c10::kByte))
+            .dtype(fp32_output ? c10::kFloat : (bf16_output ? c10::kBFloat16 : input.scalar_type()))
       );
   if (output.numel() == 0) {
     return output;
@@ -1029,7 +1029,11 @@ static at::Tensor linear_int8_with_onednn_weight(
       empty_tensor;
 
   // Create onednn primitive
-  auto src_dtype = input.scalar_type() == c10::kByte ? ideep::data_type::u8 : ideep::data_type::s8;
+  auto src_dtype = input.scalar_type() == c10::kByte
+      ? ideep::data_type::u8
+      : input.scalar_type() == c10::kChar
+          ? ideep::data_type::s8
+          : ideep::data_type::f8_e4m3;
   auto src_desc = tensor::desc(src_dims, src_dtype, ideep::format_tag::any);
   auto weights_desc = packed_weight.get_desc();
   auto dst_dtype = dst.get_data_type();
