@@ -1677,9 +1677,9 @@ bool gemm_and_bias(
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES, d_alignment);
 #endif
 #ifndef USE_ROCM
-  auto useDdesc = Cdesc.descriptor();
-#else
   auto useDdesc = Ddesc.descriptor();
+#else
+  auto useDdesc = Cdesc.descriptor();
 #endif
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
