@@ -9,9 +9,6 @@
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
 
-constexpr const char* MAIA_HELP =
-    "Cannot initialize MAIA without ATen_maia library.";
-
 struct TORCH_API MAIAHooksInterface : AcceleratorHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
@@ -39,8 +36,12 @@ struct TORCH_API MAIAHooksInterface : AcceleratorHooksInterface {
   }
 
   Allocator* getPinnedMemoryAllocator() const override {
-    TORCH_CHECK(false, "Pinned memory requires MAIA. ");
+    TORCH_CHECK(false, "Pinned memory requires MAIA.");
   }
+
+ private:
+  static constexpr const char* MAIA_HELP =
+      "Cannot initialize MAIA without ATen_maia library.";
 };
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
@@ -54,5 +55,4 @@ TORCH_DECLARE_REGISTRY(MAIAHooksRegistry, MAIAHooksInterface, MAIAHooksArgs);
 namespace detail {
 TORCH_API const MAIAHooksInterface& getMAIAHooks();
 } // namespace detail
-
 } // namespace at
