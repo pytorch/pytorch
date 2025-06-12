@@ -574,6 +574,17 @@ std::string getNcclErrorDetailStr(
   return interpret + err;
 }
 
+// Helper function that gets the data type and issues error if not supported
+ncclDataType_t getNcclDataType(at::ScalarType type) {
+  auto it = ncclDataType.find(type);
+  TORCH_CHECK_WITH(
+      TypeError,
+      it != ncclDataType.end(),
+      "Input tensor data type is not supported for NCCL process group: ",
+      type);
+  return it->second;
+}
+
 // Dump proxyTrace log to stdout
 void printNcclCommProxyTrace(
     const std::string& dumpReason,
