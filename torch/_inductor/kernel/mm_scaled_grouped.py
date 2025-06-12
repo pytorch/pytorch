@@ -5,8 +5,9 @@ from typing import Any, Optional
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.virtualized import V
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import has_triton
 
 from ..ir import ChoiceCaller, Layout, TensorBox
 from ..lowering import register_lowering
@@ -58,30 +59,9 @@ _NV_CONFIGS = [
     for num_warps in [4, 8]
 ]
 
-_AMD_CONFIGS = [
-    Config(
-        {
-            "BLOCK_M": block_size_m,
-            "BLOCK_N": block_size_n,
-            "BLOCK_K": block_size_k,
-            "waves_per_eu": waves_per_cu,
-            "matrix_instr_nonkdim": matrix_instr_nonkdim,
-            "NUM_CONSUMER_GROUPS": 1,
-        },
-        num_stages=num_stages,
-        num_warps=num_warps,
-    )
-    for block_size_m in [32, 64, 128]
-    for block_size_n in [32, 64, 128, 256]
-    for block_size_k in [128, 256]
-    for num_stages in [1, 2]
-    for num_warps, waves_per_cu in [(4, 1), (8, 2), (16, 4)]
-    for matrix_instr_nonkdim in [16]
-]
-
 
 def grouped_mm_configs():
-    return _AMD_CONFIGS if torch.version.hip else _NV_CONFIGS
+    return _NV_CONFIGS
 
 
 def early_config_prune(g, m, configs, named_args):
@@ -99,30 +79,26 @@ def early_config_prune(g, m, configs, named_args):
         )
 
         # 1. Prune NV configs depending on g and m.
-        if not torch.version.hip:
-            if not has_free_symbols((g, m)):
-                a_is_2d, b_is_2d = named_args["A_IS_2D"], named_args["B_IS_2D"]
-                m_avg = m // g if a_is_2d and not b_is_2d else m
-                if m_avg <= 16:
-                    if BLOCK_M > 32:
-                        continue
-                elif m_avg <= 32:
-                    if BLOCK_M > 64:
-                        continue
-                elif m_avg <= 64:
-                    if BLOCK_M <= 16:
-                        continue
-                else:
-                    if BLOCK_M <= 32:
-                        continue
+        if not has_free_symbols((g, m)):
+            a_is_2d, b_is_2d = named_args["A_IS_2D"], named_args["B_IS_2D"]
+            m_avg = m // g if a_is_2d and not b_is_2d else m
+            if m_avg <= 16:
+                if BLOCK_M > 32:
+                    continue
+            elif m_avg <= 32:
+                if BLOCK_M > 64:
+                    continue
+            elif m_avg <= 64:
+                if BLOCK_M <= 16:
+                    continue
+            else:
+                if BLOCK_M <= 32:
+                    continue
 
         # 2. make sure we have enough smem
         max_shared_memory = get_gpu_shared_memory()
 
-        if torch.version.hip:
-            required_shared_memory = BLOCK_N * BLOCK_K * num_stages * dtsize
-        else:
-            required_shared_memory = (BLOCK_M + BLOCK_N) * BLOCK_K * num_stages * dtsize
+        required_shared_memory = (BLOCK_M + BLOCK_N) * BLOCK_K * num_stages * dtsize
         if required_shared_memory > max_shared_memory:
             continue
 
@@ -190,8 +166,12 @@ triton_grouped_mm_source = r"""
     SCALE_B_STRIDE_G = {{stride("scale_b_ptr", 0)}}
 {%- endif %}
 
-    # fixme: a_desc = tl.make_tensor_descriptor(
+{%- if USE_TMA_LOAD %}
+{%- if USE_EXPERIMENTAL_MAKE_TENSOR_DESCRIPTOR %}
     a_desc = tl._experimental_make_tensor_descriptor(
+{%- else %}
+    a_desc = tl.make_tensor_descriptor(
+{%- endif %}
         a_ptr,
 {%- if A_IS_2D %}
         shape=[M, K],
@@ -206,8 +186,11 @@ triton_grouped_mm_source = r"""
 {%- endif %}
     )
 
-    # fixme: b_desc = tl.make_tensor_descriptor(
+{%- if USE_EXPERIMENTAL_MAKE_TENSOR_DESCRIPTOR %}
     b_desc = tl._experimental_make_tensor_descriptor(
+{%- else %}
+    b_desc = tl.make_tensor_descriptor(
+{%- endif %}
         b_ptr,
 {%- if B_IS_2D %}
         shape=[N, K],
@@ -221,6 +204,7 @@ triton_grouped_mm_source = r"""
         block_shape=[1, BLOCK_N, BLOCK_K],
 {%- endif %}
     )
+{%- endif %}
 
 {%- if M_IS_VARYING %}
     m_end_offset = 0
@@ -460,7 +444,13 @@ def can_use_triton_kernel(
     bias: Optional[TensorBox],
     scale_result: Optional[TensorBox],
 ) -> bool:
-    if not has_triton_tma_device():
+    if not (
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (9, 0)
+        and not torch.version.hip
+    ):
+        return False
+    if not has_triton():
         return False
 
     # The _grouped_mm()/_scaled_grouped_mm() operator do not support
@@ -596,12 +586,22 @@ def _tuned_grouped_mm_common(
                 V.graph.sizevars.guard_equals(k1, k2)
                 a_is_2d, b_is_2d = False, False
 
+        triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
+        triton_has_experimental_make_tensor_descriptor = hasattr(
+            tl, "_experimental_make_tensor_descriptor"
+        )
+        use_tma_load = (
+            triton_has_make_tensor_descriptor
+            or triton_has_experimental_make_tensor_descriptor
+        )
+
         kwargs = {
             "A_IS_2D": a_is_2d,
             "B_IS_2D": b_is_2d,
             "USE_FAST_ACCUM": use_fast_accum,
             "NUM_SMS": get_num_sms(),
-            "USE_TMA_LOAD": True,
+            "USE_TMA_LOAD": use_tma_load,
+            "USE_EXPERIMENTAL_MAKE_TENSOR_DESCRIPTOR": triton_has_experimental_make_tensor_descriptor,
         }
 
         for config in early_config_prune(g, m, grouped_mm_configs(), kwargs):
