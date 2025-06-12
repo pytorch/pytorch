@@ -12,8 +12,6 @@ import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-import torch.fx.experimental
-import torch.fx.experimental._config
 from torch.export import _draft_export
 
 
