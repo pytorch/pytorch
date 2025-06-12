@@ -9,7 +9,7 @@ from typing import Any, cast, Optional, Union
 import requests
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 from tools.stats.upload_metrics import emit_metric
 
