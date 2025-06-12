@@ -354,6 +354,8 @@ class DistributedDataParallel(Module, Joinable):
 
     where i is from 0 to N-1. For XPU devices, you can use the following API
     to map each process on a single XPU in order to use ``DistributedDataParallel``.
+
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> torch.xpu.set_device(i)
 
     In each process, you should refer the following
