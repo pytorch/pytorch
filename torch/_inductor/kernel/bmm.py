@@ -13,12 +13,12 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    _use_cutlass_for_op,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_bmm_template,
     use_cutlass_template,
     use_triton_template,
-    _use_cutlass_for_op,
 )
 from ..virtualized import V
 from .mm_common import (
@@ -219,7 +219,12 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest = is_batch_stride_largest(mat1, mat2, layout)
-    if batch_stride_largest and is_nonzero and use_cutlass_template(layout, m, n, k) and _use_cutlass_for_op("bmm"):
+    if (
+        batch_stride_largest
+        and is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("bmm")
+    ):
         from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])  # type: ignore[arg-type]
