@@ -1732,7 +1732,17 @@ elif [[ "${TEST_CONFIG}" == smoke ]]; then
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == check_unimplemented_calls ]]; then
-  if ! python tools/dynamo/gb_id_mapping.py check --files "$(git diff --name-only "$GITHUB_BASE_SHA" "$GITHUB_SHA" | grep '\.py$' | tr '\n' ' ')" --registry-path tools/dynamo/graph_break_registry.json; then
+  # Get the changed files from the PR that match torch/_dynamo/**/*.py pattern
+  CHANGED_FILES=$(git diff --name-only "$GITHUB_BASE_SHA" "$GITHUB_SHA" | grep -E 'torch/_dynamo/.*\.py$' | tr '\n' ' ')
+
+  if [[ -z "$CHANGED_FILES" ]]; then
+    echo "No Python files in torch/_dynamo/ directory were modified."
+    exit 0
+  fi
+
+  echo "Checking unimplemented_v2 calls in: $CHANGED_FILES"
+
+  if ! python tools/dynamo/gb_id_mapping.py check --files "$CHANGED_FILES" --registry-path tools/dynamo/graph_break_registry.json; then
     echo "::error::Found unimplemented_v2 calls that don't match the registry."
     echo "::error::Please update the registry using one of these commands:"
     echo "::error::- Add new entry: python tools/dynamo/gb_id_mapping.py add \"GB_TYPE\" PATH_TO_FILE [--additional-info \"INFO\"]"
@@ -1741,6 +1751,9 @@ elif [[ "${TEST_CONFIG}" == check_unimplemented_calls ]]; then
     echo "::error::Note: If you've reset the entire registry file, you can force push to bypass this check."
     exit 1
   fi
+
+  echo "All unimplemented_v2 calls match the registry."
+
 else
   install_torchvision
   install_monkeytype
