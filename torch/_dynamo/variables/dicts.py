@@ -958,6 +958,12 @@ class SetVariable(ConstDictVariable):
                     ],
                 )
             return self.call_method(tx, "difference", args, kwargs)
+        elif name in cmp_name_to_op_mapping:
+            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+                return ConstantVariable.create(NotImplemented)
+            return ConstantVariable.create(
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items)
+            )
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
