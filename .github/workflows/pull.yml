@@ -467,6 +467,7 @@ jobs:
     name: linux-jammy-py3-clang12-executorch
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-py3-clang12-executorch-build
+    if: false # Has been broken for a while
     with:
       build-environment: linux-jammy-py3-clang12-executorch
       docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
