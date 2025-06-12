@@ -11,7 +11,7 @@ $MODULE_NAME = "pytorch"
 
 # Check if setup.py or MODULE_NAME directory exists
 if (-not (Test-Path "setup.py") -and -not (Test-Path $MODULE_NAME)) {
-    Invoke-ExternalCommand "$PSScriptRoot\internal\clone.bat"
+    Invoke-ExternalCommand "$PSScriptRoot\internal\clone.ps1"
     Set-Location $PSScriptRoot
 } else {
     Invoke-ExternalCommand "$PSScriptRoot\internal\clean.bat"
