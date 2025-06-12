@@ -1146,24 +1146,28 @@ def main():
     if BUILD_PYTHON_ONLY:
         install_requires.append(f"{LIBTORCH_PKG_NAME}=={get_torch_version()}")
 
-    use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
     if (
-        use_prioritized_text == ""
+        os.getenv("USE_PRIORITIZED_TEXT_FOR_LD") is None
         and platform.system() == "Linux"
         and platform.processor() == "aarch64"
     ):
+        os.environ["USE_PRIORITIZED_TEXT_FOR_LD"] = "1"
         print_box(
             """
-            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
-            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+            Enabling prioritized text linker optimization for ARM64 (aarch64).
             """
         )
+
+    use_prioritized_text = os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")
     if use_prioritized_text == "1" or use_prioritized_text == "True":
         gen_linker_script(
             filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
         )
         linker_script_path = os.path.abspath("cmake/linker_script.ld")
-        os.environ["LDFLAGS"] = os.getenv("LDFLAGS", "") + f" -T{linker_script_path}"
+        os.environ["LDFLAGS"] = (
+            os.getenv("LDFLAGS", "")
+            + f" -Wl,-z,max-page-size=0x10000 -T{linker_script_path}"
+        )
         os.environ["CFLAGS"] = (
             os.getenv("CFLAGS", "") + " -ffunction-sections -fdata-sections"
         )
