@@ -237,6 +237,30 @@ class MPSBasicTestsAOTI(TestCase):
         m = Model().to(device="mps")
         self.check_model(m, inp)
 
+    def test_simple_dynamic(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                add_0 = x + y
+                return torch.nn.functional.relu(input=add_0, inplace=False)
+
+        x = torch.randn(128, 2048, device="mps")
+        y = torch.randn(128, 2048, device="mps")
+        inp = (x, y)
+
+        m = Model().to(device="mps")
+        res2 = m(*inp)
+
+        dim0_x = torch.export.Dim("dim0_x", min=1, max=2048)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_x}}
+        ep = torch.export.export(m, inp, dynamic_shapes=dynamic_shapes)
+        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
+        m = torch._inductor.aoti_load_package(path)
+        res = m(*inp)
+        self.assertTrue(torch.allclose(res, res2))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
