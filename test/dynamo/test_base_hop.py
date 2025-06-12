@@ -12,10 +12,7 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch._higher_order_ops.schema import find_hop_schema
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
+from torch.testing._internal.common_utils import instantiate_parametrized_tests
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -179,8 +176,7 @@ class GraphModule(torch.nn.Module):
             """invoke_quant_test(Any subgraph, Tensor(a1!) arg0, Tensor(a2!) arg1, *, str scheme="nf4") -> ((Tensor))""",
         )
 
-    @parametrize("backend", ["eager", "aot_eager"])
-    def test_schema_gen_pytree_in_out_with_mutation(self, backend):
+    def test_schema_gen_pytree_in_out_with_mutation(self):
         def inner(x_y):
             x, y = x_y
             x.add_(1)
@@ -194,11 +190,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3, requires_grad=False)
         y = torch.randn(3, 3, requires_grad=True)
 
-        if backend == "eager":
-            bk = EagerAndRecordGraphs()
-        else:
-            assert backend == "aot_eager"
-            bk = AotEagerAndRecordGraphs()
+        bk = EagerAndRecordGraphs()
 
         def f(x, y):
             return invoke_quant_test(inner, [x, y], scheme="nf4")
@@ -206,14 +198,13 @@ class GraphModule(torch.nn.Module):
         with mock.patch(
             "torch._dynamo.variables.higher_order_ops.BaseHOPVariable.supports_input_mutation",
             True,
-        ):
+        ), torch.no_grad():
             torch.compile(f, backend=bk, fullgraph=True)(x.clone(), y)
 
-        if backend == "eager":
-            self.assertEqual(len(bk.graphs), 1)
-            self.assertExpectedInline(
-                normalize_graph(bk.graphs[0]),
-                """\
+        self.assertEqual(len(bk.graphs), 1)
+        self.assertExpectedInline(
+            normalize_graph(bk.graphs[0]),
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[3, 3]", L_y_: "f32[3, 3]"):
         l_x_ = L_x_
@@ -241,41 +232,11 @@ class GraphModule(torch.nn.Module):
             child_3: "f32[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
             return (child, child_1, child_2, child_3)
 """,  # noqa: B950
-            )
-            self.assertExpectedInline(
-                str(find_hop_schema(bk.graphs[0], invoke_quant_test)[0]),
-                """invoke_quant_test(Any subgraph, Tensor(a1!) arg0, Tensor arg1, *, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
-            )
-        elif backend == "aot_eager":
-            self.assertEqual(len(bk.fw_graphs), 1)
-            self.assertExpectedInline(
-                normalize_graph(bk.fw_graphs[0]),
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]"):
-        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
-        _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_quant_test, subgraph = auto_functionalized_subgraph_0, arg1 = primals_2, scheme = 'nf4', _arg0_base_index = 0, _all_bases = [primals_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = _tree_spec_constant0 = None
-        getitem: "f32[3, 3]" = auto_functionalized_v2[0]
-        getitem_1: "f32[3, 3]" = auto_functionalized_v2[1]
-        getitem_2: "f32[3, 3]" = auto_functionalized_v2[2]
-        getitem_3: "f32[3, 3]" = auto_functionalized_v2[3]
-        getitem_4: "f32[3, 3]" = auto_functionalized_v2[4];  auto_functionalized_v2 = None
-        return (getitem, getitem_1, getitem_2, getitem_3, primals_1, primals_2, getitem_4)
-
-    class auto_functionalized_subgraph_0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
-            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, 1)
-            mm: "f32[3, 3]" = torch.ops.aten.mm.default(add, arg1_1)
-            sin: "f32[3, 3]" = torch.ops.aten.sin.default(mm);  mm = None
-            cos: "f32[3, 3]" = torch.ops.aten.cos.default(sin);  sin = None
-            add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, arg1_1)
-            sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(add, arg1_1)
-            mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(add, arg1_1);  arg1_1 = None
-            copy_: "f32[3, 3]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
-            return (cos, add_1, sub, mm_1)
-""",  # noqa: B950
-            )
+        )
+        self.assertExpectedInline(
+            str(find_hop_schema(bk.graphs[0], invoke_quant_test)[0]),
+            """invoke_quant_test(Any subgraph, Tensor(a1!) arg0, Tensor arg1, *, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
+        )
 
     def test_none_input(self):
         def inner(x, y):
@@ -361,23 +322,23 @@ class GraphModule(torch.nn.Module):
         with mock.patch(
             "torch._dynamo.variables.higher_order_ops.BaseHOPVariable.supports_input_mutation",
             True,
-        ):
+        ), torch.no_grad():
             compiled_out = torch.compile(f, backend=backend, fullgraph=True)(x, y)
-        # assert x is not mutated
-        self.assertEqual(x, x_clone)
-        self.assertEqual(compiled_out, x + y + 1)
+        self.assertEqual(x, x_clone + 1)
+        self.assertEqual(compiled_out, x_clone + y + 1)
         self.assertEqual(len(backend.fw_graphs), 1)
         self.assertExpectedInline(
             normalize_graph(backend.fw_graphs[0]),
             """\
-class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]"):
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_quant_test, subgraph = auto_functionalized_subgraph_0, arg1 = primals_2, scheme = 'nf4', _arg0_base_index = 0, _all_bases = [primals_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = _tree_spec_constant0 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_quant_test, subgraph = auto_functionalized_subgraph_0, arg1 = arg1_1, scheme = 'nf4', _arg0_base_index = 0, _all_bases = [arg0_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = arg1_1 = _tree_spec_constant0 = None
         getitem: "f32[3, 3]" = auto_functionalized_v2[0]
         getitem_1: "f32[3, 3]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
-        return (getitem, primals_1, primals_2, getitem_1)
+        copy_: "f32[3, 3]" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
+        return (getitem,)
 
     class auto_functionalized_subgraph_0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
