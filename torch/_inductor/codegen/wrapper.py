@@ -915,7 +915,7 @@ class PythonWrapperCodegen(CodeGen):
             self.write_get_raw_stream
         )
 
-        @functools.lru_cache(None)
+        @functools.cache
         def add_import_once(line: str) -> None:
             self.imports.writeline(line)
             if config.triton.autotune_at_compile_time:
@@ -1417,11 +1417,12 @@ class PythonWrapperCodegen(CodeGen):
         self,
         buf_name: str,
         python_kernel_name: str,
-        codegen_args: Sequence[str],
-        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
-        raw_args: Sequence[Any],
-        outputs: Sequence[ir.Buffer],
-    ) -> None:
+        cpp_kernel_name: str,
+        codegen_args: list[str],
+        op_overload: Optional[torch._ops.OpOverload] = None,
+        raw_args=None,
+        outputs=None,
+    ):
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
     def generate(self, is_inference):
@@ -1624,12 +1625,12 @@ class PythonWrapperCodegen(CodeGen):
     ):
         code = self.prefix
 
-        @functools.lru_cache(None)
+        @functools.cache
         def sizeof(name):
             code.writeline(f"{name}_size = {name}.size()")
             return f"{name}_size"
 
-        @functools.lru_cache(None)
+        @functools.cache
         def strideof(name):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
