@@ -27,6 +27,53 @@ std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>> fn_with_optiona
   return {t3, t4, t5};
 }
 
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>> fn_with_optional_tensor_output_2_impl(Tensor t1, Tensor t2) {
+  Tensor t3 = t1 + t2;
+  Tensor t4;
+  Tensor t5 = t1 - t2;
+  return {t3, t4, t5};
+}
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>> fn_with_optional_tensor_output_2_meta(Tensor t1, Tensor t2) {
+  Tensor t3 = t1.clone();
+  Tensor t4;
+  Tensor t5 = t1.clone();
+  return {t3, t4, t5};
+}
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>, std::optional<Tensor>> fn_with_optional_tensor_nullopt_output_impl(Tensor t1, Tensor t2) {
+  Tensor t3 = t1 + t2;
+  Tensor t4;
+  Tensor t5 = t1 - t2;
+  return {t3, t4, t5, std::nullopt};
+}
+
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>, std::optional<Tensor>> fn_with_optional_tensor_nullopt_output_meta(Tensor t1, Tensor t2) {
+  Tensor t3 = t1.clone();
+  Tensor t4;
+  Tensor t5 = t1.clone();
+  return {t3, t4, t5, std::nullopt};
+}
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>, int64_t, int64_t> fn_with_int_output_impl(Tensor t1, Tensor t2, int64_t i1) {
+  Tensor t3 = t1 + t2;
+  Tensor t4 = t1 - t2;
+  Tensor t5;
+  int64_t i2 = 0;
+  int64_t i3 = 0;
+  return {t3, t4, t5, i2, i3};
+}
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>, int64_t, int64_t> fn_with_int_output_meta(Tensor t1, Tensor t2, int64_t i1) {
+  Tensor t3 = t1.clone();
+  Tensor t4 = t1.clone();
+  Tensor t5;
+  int64_t i2 = 0;
+  int64_t i3 = 0;
+  return {t3, t4, t5, i2, i3};
+}
+
 Tensor fn_with_all_inputs_impl(
     const Tensor& tensor,
     const c10::List<Tensor>& tensors,
@@ -364,6 +411,9 @@ extern "C" {
 TORCH_LIBRARY(aoti_custom_ops, m) {
   m.def("custom_add(Tensor t1, Tensor t2) -> Tensor");
   m.def("fn_with_optional_tensor_output(Tensor t1, Tensor t2) -> (Tensor, Tensor?, Tensor?)");
+  m.def("fn_with_optional_tensor_output_2(Tensor t1, Tensor t2) -> (Tensor, Tensor?, Tensor?)");
+  m.def("fn_with_optional_tensor_nullopt_output(Tensor t1, Tensor t2) -> (Tensor, Tensor?, Tensor?, Tensor?)");
+  m.def("fn_with_int_output(Tensor t1, Tensor t2, int i) -> (Tensor, Tensor?, Tensor?, int, int)");
   m.def(
       "fn_with_all_inputs(Tensor tensor, "
       "Tensor[] tensors, "
@@ -410,6 +460,9 @@ TORCH_LIBRARY(aoti_custom_ops, m) {
 TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
   m.impl("custom_add", at::custom_add_impl);
   m.impl("fn_with_optional_tensor_output", at::fn_with_optional_tensor_output_impl);
+  m.impl("fn_with_optional_tensor_output_2", at::fn_with_optional_tensor_output_2_impl);
+  m.impl("fn_with_optional_tensor_nullopt_output", at::fn_with_optional_tensor_nullopt_output_impl);
+  m.impl("fn_with_int_output", at::fn_with_int_output_impl);
   m.impl("fn_with_all_inputs", at::fn_with_all_inputs_impl);
   m.impl("fn_with_default_input", at::fn_with_default_input_impl);
   m.impl("fn_with_tuple_output", at::fn_with_tuple_output_impl);
@@ -422,6 +475,9 @@ TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
 
 TORCH_LIBRARY_IMPL(aoti_custom_ops, Meta, m) {
   m.impl("fn_with_optional_tensor_output", at::fn_with_optional_tensor_output_meta);
+  m.impl("fn_with_optional_tensor_output_2", at::fn_with_optional_tensor_output_2_meta);
+  m.impl("fn_with_optional_tensor_nullopt_output", at::fn_with_optional_tensor_nullopt_output_meta);
+  m.impl("fn_with_int_output", at::fn_with_int_output_meta);
   m.impl("fn_with_all_inputs", at::fn_with_all_inputs_meta);
   m.impl("fn_with_default_input", at::fn_with_default_input_meta);
   m.impl("fn_with_tuple_output", at::fn_with_tuple_output_meta);

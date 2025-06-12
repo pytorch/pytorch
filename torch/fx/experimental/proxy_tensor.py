@@ -367,12 +367,12 @@ def get_proxy_slot(
     return res
 
 
-def snapshot_fake(val: Tensor, include_real: bool = False) -> Optional[Tensor]:
+def snapshot_fake(val: Tensor) -> Optional[Tensor]:
     # val.detach() will also eventually call fast_detach(),
     # but this saves us a full trip into __torch_dispatch__
     # (snapshot_fake is called a lot)
     if isinstance(val, FakeTensor):
-        return fast_detach(val.fake_mode, val, include_real)
+        return fast_detach(val.fake_mode, val)
     else:
         return val.detach()
 
@@ -393,9 +393,9 @@ _ExtractValType = Optional[
 ]
 
 
-def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractValType:
+def extract_val(val: _ExtractValType) -> _ExtractValType:
     if is_fake(val):
-        return snapshot_fake(val, include_real=include_real)
+        return snapshot_fake(val)
     elif isinstance(val, py_sym_types):
         return val
     elif isinstance(val, _AnyScriptObject):
@@ -494,9 +494,7 @@ def maybe_enable_thunkify() -> Generator[None, None, None]:
 # grad_fn, _base (_base actually may be set due to recursive call to
 # ADInplaceOrView, but you shouldn't rely on it.)
 def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
-    proxy.node.meta["val"] = extract_val(
-        val, include_real=(proxy.node.op == "placeholder")
-    )
+    proxy.node.meta["val"] = extract_val(val)
 
     with _enable_thunkify(proxy.tracer):  # type: ignore[arg-type]
         # Best effort tensor_meta setting; prefer using val!
@@ -1027,6 +1025,7 @@ class PythonKeyTracer(Tracer):
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
+    stack_trace: bool = False
 
     def __init__(self) -> None:
         super().__init__(autowrap_modules=())  # type: ignore[arg-type]
@@ -1112,6 +1111,39 @@ class PythonKeyTracer(Tracer):
     ) -> torch.fx.Node:
         node = super().create_node(kind, target, args, kwargs, name, type_expr)  # type: ignore[arg-type]
 
+        # stack_trace
+        if (
+            self.stack_trace
+            and "stack_trace" not in node.meta
+            and node.op not in ["placeholder", "output"]
+        ):
+            user_frame_summary = CapturedTraceback.extract().summary()
+            if user_frame_summary:
+                # we retain frames from forward() calls, or ops
+                # located in torch/__init__.py (e.g. sym_int, sym_constrain_range, vmap)
+                stack_trace = [
+                    frame
+                    for frame in user_frame_summary
+                    if (
+                        frame.name == "forward"
+                        or frame.filename.endswith("torch/__init__.py")
+                    )
+                ]
+                # filter out forward() frames from fx/_symbolic_trace.py, export/_trace.py
+                # this is hardcoded, but leads to a much cleaner stack trace
+                stack_trace = [
+                    frame
+                    for frame in stack_trace
+                    if not frame.filename.endswith(
+                        ("fx/_symbolic_trace.py", "export/_trace.py")
+                    )
+                ]
+                if (
+                    stack_trace
+                ):  # empty list for strict mode, dynamo should handle stack_trace
+                    stack_trace = traceback.StackSummary.from_list(stack_trace)
+                    node.meta["stack_trace"] = "".join(stack_trace.format()).strip()
+
         def map_fn(v: Any) -> Optional[_ExtractValType]:
             if not isinstance(v, torch.fx.Node) or "val" not in v.meta:
                 return None
@@ -1138,6 +1170,8 @@ def _should_save_eager_input_vals(
     target: Any,
     args_kwargs: Optional[tuple[tuple[Argument, ...], dict[str, Argument]]] = None,
 ) -> bool:
+    from torch._higher_order_ops.invoke_subgraph import InvokeSubgraphHOP
+
     if not callable(target):
         return False
     if isinstance(
@@ -1145,6 +1179,7 @@ def _should_save_eager_input_vals(
         (
             torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
             torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+            InvokeSubgraphHOP,
         ),
     ):
         return True
@@ -1658,6 +1693,7 @@ class _ModuleStackTracer(PythonKeyTracer):
 
     def __init__(self, scope_root: GraphModule) -> None:
         super().__init__()
+        self.stack_trace = True
         self.scope_root = scope_root
         self.enable_attr_proxy = False
         self.submodule_paths = {}
@@ -1908,36 +1944,6 @@ class _ModuleStackTracer(PythonKeyTracer):
                 f"{self.torch_fn_metadata.__class__.__name__}.{self.torch_fn_metadata.__name__}",
             )
 
-        # stack_trace
-        if "stack_trace" not in node.meta and node.op not in ["placeholder", "output"]:
-            user_frame_summary = CapturedTraceback.extract().summary()
-            if user_frame_summary:
-                # we retain frames from forward() calls, or ops
-                # located in torch/__init__.py (e.g. sym_int, sym_constrain_range, vmap)
-                stack_trace = [
-                    frame
-                    for frame in user_frame_summary
-                    if (
-                        frame.name == "forward"
-                        or frame.filename.endswith("torch/__init__.py")
-                    )
-                ]
-                # filter out forward() frames from fx/_symbolic_trace.py, export/_trace.py
-                # this is hardcoded, but leads to a much cleaner stack trace
-                stack_trace = [
-                    frame
-                    for frame in stack_trace
-                    if not (
-                        frame.filename.endswith("fx/_symbolic_trace.py")
-                        or frame.filename.endswith("export/_trace.py")
-                    )
-                ]
-                if (
-                    stack_trace
-                ):  # empty list for strict mode, dynamo should handle stack_trace
-                    stack_trace = traceback.StackSummary.from_list(stack_trace)
-                    node.meta["stack_trace"] = "".join(stack_trace.format()).strip()
-
         return node
 
 
@@ -1951,6 +1957,7 @@ class _MakefxTracer:
         record_module_stack: bool,
         _allow_fake_constant: bool,
         _error_on_data_dependent_ops: bool,
+        stack_trace: bool = False,
     ) -> None:
         # Configurations that are used to initialize the context managers and their states.
         # Should not modify them during tracing.
@@ -1969,7 +1976,7 @@ class _MakefxTracer:
 
         # All context managers and their states should be initialized before tracing based on the inputs
         # and configurations. After tracing, their states should be cleaned except for shape_env.
-        # Remember to specify how to intialize it from user inputs and from parent tracer whenever
+        # Remember to specify how to initialize it from user inputs and from parent tracer whenever
         # adding new modes in _MakefxTracer.
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self.proxy_mode: Union[nullcontext, ProxyTorchDispatchMode] = nullcontext()
@@ -1981,6 +1988,7 @@ class _MakefxTracer:
         self.torch_fn_metadata_mode: Union[
             nullcontext, TorchFunctionMetadataMode
         ] = nullcontext()
+        self.stack_trace = stack_trace
 
     def _checkpoint_modes(self) -> list[Any]:
         return [
@@ -2019,9 +2027,11 @@ class _MakefxTracer:
 
             if hasattr(f, "_orig_mod") and self.record_module_stack:
                 scope_root = f._orig_mod
+                # _ModuleStackTracer always try to preserve stack trace
                 self.fx_tracer = _ModuleStackTracer(scope_root)
             else:
                 self.fx_tracer = PythonKeyTracer()
+                self.fx_tracer.stack_trace = self.stack_trace
 
             if self.tracing_mode == "fake":
                 import torch._dynamo
@@ -2273,14 +2283,19 @@ def make_fx(
     record_module_stack: bool = False,
     _allow_fake_constant: bool = False,
     _error_on_data_dependent_ops: bool = True,
+    stack_trace: bool = False,
 ) -> Callable[..., GraphModule]:
     """
     Given a function f, return a new function which when executed with valid
     arguments to f, returns an FX GraphModule representing the set of operations that
     were executed during the course of execution.
+
+    If stack_trace is True, the stack_trace will be preserved on node.meta["stack_trace"]
     """
 
     assert tracing_mode in ["real", "fake", "symbolic"]
+
+    from torch._inductor import config
 
     make_fx_tracer = _MakefxTracer(
         decomposition_table,
@@ -2290,6 +2305,7 @@ def make_fx(
         record_module_stack,
         _allow_fake_constant,
         _error_on_data_dependent_ops,
+        stack_trace=stack_trace or config.trace.enabled,
     )
 
     @functools.wraps(f)
