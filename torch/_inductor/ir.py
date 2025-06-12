@@ -7151,7 +7151,7 @@ class FallbackKernel(ExternKernelAlloc):
                 # dispatch.
                 do_runtime_dispatch()
             else:
-                wrapper.generate_fallback_kernel(self)
+                wrapper.generate_fallback_kernel(self, args)
                 if isinstance(self.layout, Layout):
                     self.codegen_size_asserts(wrapper)
                     self.codegen_alignment_asserts(wrapper)

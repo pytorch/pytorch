@@ -531,7 +531,8 @@ class SimpleElasticAgent(ElasticAgent):
             "  role_ranks=%(role_ranks)s\n"
             "  global_ranks=%(global_ranks)s\n"
             "  role_world_sizes=%(role_world_sizes)s\n"
-            "  global_world_sizes=%(global_world_sizes)s\n",
+            "  global_world_sizes=%(global_world_sizes)s\n"
+            "  event_log_handler=%(event_log_handler)s\n",
             {
                 "role": spec.role,
                 "restart_count": restart_count,
@@ -544,6 +545,7 @@ class SimpleElasticAgent(ElasticAgent):
                 "global_ranks": [worker.global_rank for worker in workers],
                 "role_world_sizes": [worker.role_world_size for worker in workers],
                 "global_world_sizes": [worker.world_size for worker in workers],
+                "event_log_handler": spec.event_log_handler,
             },
         )
 
@@ -685,7 +687,10 @@ class SimpleElasticAgent(ElasticAgent):
         for local_rank, w_id in worker_ids.items():
             worker = worker_group.workers[local_rank]
             worker.id = w_id
-            record(self._construct_event("START", EventSource.WORKER, worker))
+            record(
+                self._construct_event("START", EventSource.WORKER, worker),
+                worker_group.spec.event_log_handler,
+            )
 
         worker_group.state = WorkerState.HEALTHY
 
@@ -743,7 +748,10 @@ class SimpleElasticAgent(ElasticAgent):
             failure = result.failures.get(worker.global_rank)
             state: str = self._get_worker_state(worker, result)
             raw_error = json.dumps(failure.error_file_data) if failure else None
-            record(self._construct_event(state, EventSource.WORKER, worker, raw_error))
+            record(
+                self._construct_event(state, EventSource.WORKER, worker, raw_error),
+                self._worker_group.spec.event_log_handler,
+            )
 
     def _get_worker_state(self, worker: Worker, result: RunResult) -> str:
         failure = result.failures.get(worker.global_rank)
@@ -766,7 +774,8 @@ class SimpleElasticAgent(ElasticAgent):
             record(
                 self._construct_event(
                     state=state, source=EventSource.AGENT, duration_ms=duration_ms
-                )
+                ),
+                self._worker_group.spec.event_log_handler,
             )
 
     def _construct_event(
