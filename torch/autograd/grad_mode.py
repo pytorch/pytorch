@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from typing import Any, Union
+from typing_extensions import Self
 
 import torch
 from torch.utils._contextlib import (
@@ -196,7 +197,7 @@ class set_grad_enabled(_DecoratorContextManager):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
 
-    def clone(self) -> "set_grad_enabled":
+    def clone(self) -> Self:
         r"""
         Create a copy of this class
         """
@@ -273,7 +274,7 @@ class inference_mode(_DecoratorContextManager):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         self._inference_mode_context.__exit__(exc_type, exc_value, traceback)
 
-    def clone(self) -> "inference_mode":
+    def clone(self) -> Self:
         r"""
         Create a copy of this class
         """
@@ -319,7 +320,7 @@ class set_multithreading_enabled(_DecoratorContextManager):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_multithreading_enabled(self.prev)
 
-    def clone(self) -> "set_multithreading_enabled":
+    def clone(self) -> Self:
         r"""
         Create a copy of this class
         """
@@ -359,7 +360,7 @@ class _force_original_view_tracking(_DecoratorContextManager):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_view_replay_enabled(self.prev)
 
-    def clone(self):
+    def clone(self) -> Self:
         return self.__class__(self.mode)
 
 
