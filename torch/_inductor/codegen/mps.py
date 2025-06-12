@@ -870,6 +870,14 @@ class MetalKernel(SIMDKernel):
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
         args += [str(v) for v in self.args.sizevars.keys()]
+
+        def format_threads(threads: list[str], kwarg: str) -> str:
+            if V.graph.cpp_wrapper:
+                threads = [f"static_cast<uint64_t>({t})" for t in threads]
+                return f"{{{', '.join(threads)}}}"
+            else:
+                return f"{kwarg}=[{', '.join(threads)}]"
+
         # For reduction kernels, limit the maximum size over reduction dimentions to
         # a maximum threadgroup size
         if len(self.active_range_trees()) > 0:
@@ -882,10 +890,7 @@ class MetalKernel(SIMDKernel):
                 for v in self.active_range_trees()
             ]
 
-            if V.graph.cpp_wrapper:
-                args.append(f"{{{', '.join(threads)}}}")
-            else:
-                args.append(f"threads=[{', '.join(threads)}]")
+            args.append(format_threads(threads, "threads"))
         else:
             if V.graph.cpp_wrapper:
                 raise RuntimeError("We should always have threads?")
@@ -897,10 +902,7 @@ class MetalKernel(SIMDKernel):
                 else "1"
                 for v in self.active_range_trees()
             ]
-            if V.graph.cpp_wrapper:
-                args.append(f"{{{', '.join(threads)}}}")
-            else:
-                args.append(f"group_size=[{', '.join(threads)}]")
+            args.append(format_threads(threads, "group_size"))
         else:
             if V.graph.cpp_wrapper:
                 # Add a None so that we always have a group_size in the
