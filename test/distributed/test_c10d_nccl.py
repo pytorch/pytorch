@@ -1204,6 +1204,8 @@ class DistributedDataParallelTest(
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(common.find_free_port())
         self._spawn_processes()
 
     def _get_process_group(self):
@@ -1517,8 +1519,7 @@ class DistributedDataParallelTest(
         dist.init_process_group(
             backend="nccl",
             world_size=self.world_size,
-            rank=self.rank,
-            init_method=f"file://{self.file_name}",
+            rank=self.rank
         )
         process_group = c10d.distributed_c10d._get_default_group()
 
@@ -1905,7 +1906,6 @@ class DistributedDataParallelTest(
     def test_pass_default_pg(self):
         dist.init_process_group(
             "nccl",
-            init_method=f"file://{self.file_name}",
             world_size=self.world_size,
             rank=self.rank,
         )
