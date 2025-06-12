@@ -1226,7 +1226,6 @@ class DecompOneOffTests(TestCase):
         for o_ref, o in zip(out_ref, out):
             self.assertEqual(o_ref.dtype, o.dtype)
 
-    @onlyCUDA
     def test_rms_norm_decomp(self, device):
         @torch.compile
         def rms_norm_sinh(a, b, c):
