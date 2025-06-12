@@ -1277,6 +1277,7 @@ def lower_cpu(
     else:
         no_full_kv_block = False
         input_nodes += [full_kv_num_blocks]
+        input_nodes += [full_kv_indices]
     has_other_buffer = False
     kernel_input_name_to_buffer = {}
     if score_mod_other_buffers or mask_mod_other_buffers:
@@ -1317,6 +1318,7 @@ def lower_cpu(
         score_mod=None if skip_mask_score else subgraph_buffer,
         mask_mod=None if skip_mask_score else mask_graph_buffer,
         kv_block_size=SPARSE_KV_BLOCK_SIZE,
+        q_block_size=SPARSE_Q_BLOCK_SIZE,
         has_other_buffer=has_other_buffer,
         no_full_kv_block=no_full_kv_block,
         fake_buffers=fake_buffers,

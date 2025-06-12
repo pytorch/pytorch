@@ -775,6 +775,32 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
+        # handle negative 1 in size argument of view
+        def f(x):
+            x = aten.view.default(x, [3, 5, 7])
+            x = aten.view.default(x, [-1, 7])
+            return x
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+    def test_pointless_view_pair_dynamic_shapes(self):
+        def f(x):
+            s1, s2 = x.shape
+            x = aten.view.default(x, [-1])
+            x = aten.view.default(x, [s1, s2])
+            return x
+
+        x = torch.randn(15, 7, device=GPU_TYPE)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        out = torch.compile(f, dynamic=True)(x)
+        self.assertTrue(torch.equal(x, out))
+
+        self.assertEqual(counters["inductor"]["removed_pointless_view_pair"], 1)
+
     def test_pointless_permute_pair(self):
         def f(x):
             x = aten.permute.default(x, [1, 0])
@@ -1323,6 +1349,19 @@ class TestPatternMatcher(TestCase):
                 torch.testing.assert_close(actual, expected)
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_replace_mul_zero(self):
+        def test(x, y):
+            return x + (y * 0)
+
+        x = torch.rand([256], device=GPU_TYPE)
+        y = torch.rand([256], device=GPU_TYPE)
+
+        test_c = torch.compile(test)
+
+        out, code = run_and_get_code(test_c, x, y)
+        FileCheck().check_not(".run").run(code[0])
+        self.assertEqual(out, test(x, y))
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):

@@ -32,6 +32,8 @@ from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     hint_int,
     is_symbol_binding_fx_node,
+    statically_known_false,
+    statically_known_true,
 )
 from torch.fx.passes import graph_drawer
 from torch.utils._ordered_set import OrderedSet
@@ -488,13 +490,26 @@ def should_quantize(node: torch.fx.Node) -> bool:
     allowed_dtypes = get_allowed_dtypes()
     if not is_node_meta_valid(node) or node.meta["val"].dtype not in allowed_dtypes:
         return False
-
-    # calculate the size of the node
-    size_in_mb = calculate_tensor_size(node.meta["val"])
-
-    return size_in_mb >= torch._inductor.config.post_grad_fusion_options[
+    size_threshold = torch._inductor.config.post_grad_fusion_options[
         "activation_quantization_aten_pass"
     ].get("size_in_mb", 100)
+    # calculate the size of the node
+    size_in_mb = calculate_tensor_size(node.meta["val"])
+    if not torch._inductor.config.post_grad_fusion_options[
+        "activation_quantization_aten_pass"
+    ].get("skip_dynamo_guards", False):
+        return size_in_mb >= size_threshold
+    else:
+        # case 1: we alway quantize tensors with dynamic shapes
+        if torch._inductor.config.post_grad_fusion_options[
+            "activation_quantization_aten_pass"
+        ].get("quantize_dynamic_shape", False):
+            return statically_known_true(
+                size_in_mb >= size_threshold
+            ) or not statically_known_false(size_in_mb >= size_threshold)
+        else:
+            # case 2: we alway not quantize tensors with dynamic shapes
+            return statically_known_true(size_in_mb >= size_threshold)
 
 
 def get_quant_type() -> torch.dtype:
@@ -1034,10 +1049,10 @@ def _count_ops(graph: fx.Graph):
     for node in graph.nodes:
         if node.op == "call_function":
             cnt[node.target.__name__] += 1
-    log.info("%s", sorted(cnt.items(), key=lambda x: x[1], reverse=True))
+    log.info("%s", sorted(cnt.items(), key=operator.itemgetter(1), reverse=True))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def pointwise_ops():
     ops = []
     for attr_name in dir(torch.ops.aten):
@@ -1059,7 +1074,7 @@ def sort_depths(args, depth_map: dict[fx.Node, int]) -> list[tuple[fx.Node, int]
     arg_depths = {
         arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)
     }
-    return sorted(arg_depths.items(), key=lambda x: x[1], reverse=True)
+    return sorted(arg_depths.items(), key=operator.itemgetter(1), reverse=True)
 
 
 def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
@@ -1126,6 +1141,11 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
         return gm
 
     # Build the graph op-by-op by starting from the node all the way to the end
+    # copy_ can be not using tangents at all, we must copy it.
+    for node in list(gm.graph.nodes)[: order[first_node_in_bwd]]:
+        if node.op == "call_function" and node.target == torch.ops.aten.copy_.default:
+            insert_node_in_graph(node)
+
     for node in list(gm.graph.nodes)[order[first_node_in_bwd] :]:
         insert_node_in_graph(node)
 
@@ -2654,7 +2674,9 @@ def min_cut_rematerialization_partition(
             len(fw_module_nodes),
             len(bw_module_nodes),
         )
-        rematerialized_ops = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+        rematerialized_ops = sorted(
+            counts.items(), key=operator.itemgetter(1), reverse=True
+        )
         log.info("Count of Ops Rematerialized: %s", rematerialized_ops)
     return fw_module, bw_module
 
