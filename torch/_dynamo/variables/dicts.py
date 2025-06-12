@@ -612,7 +612,9 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(None)
         elif name == "__or__":
             assert len(args) == 1
-            if not isinstance(args[0], ConstDictVariable):
+            if not isinstance(
+                args[0], (ConstDictVariable, variables.UserDefinedDictVariable)
+            ):
                 msg = ConstantVariable.create(
                     f"unsupported operand type(s) for |: 'dict' and '{args[0].python_type().__name__}'"
                 )
