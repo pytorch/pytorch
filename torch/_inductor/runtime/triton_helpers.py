@@ -743,18 +743,15 @@ if HAS_NEW_TMA_API:
     def make_tensor_descriptor(
         base_ptr,
         global_shape,
+        strides,
         block_shape,
         desc_ptr,
+        element_ty,
     ):
-        # note: this static assert isn't a fundamental limitation,
-        # inferring strides just isn't yet implemented for >2 dimensions.
-        tl.static_assert(
-            len(global_shape) == 2, "Only 2D tensors are supported by current API"
-        )
         return tl.make_tensor_descriptor(
             base=base_ptr,
             shape=global_shape,
-            strides=[global_shape[1], 1],
+            strides=strides,
             block_shape=block_shape,
         )
 
@@ -787,15 +784,17 @@ else:
     def make_tensor_descriptor(
         base_ptr,
         global_shape,
+        strides,
         block_shape,
         desc_ptr,
+        element_ty,
     ):
         tl.extra.cuda.experimental_device_tensormap_create2d(
             desc_ptr=desc_ptr,
             global_address=base_ptr,
             load_size=block_shape,
             global_size=global_shape,
-            element_ty=base_ptr.dtype.element_ty,
+            element_ty=element_ty,
         )
 
         return desc_ptr
