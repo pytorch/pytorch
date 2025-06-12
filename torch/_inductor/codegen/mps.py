@@ -15,7 +15,7 @@ from sympy.printing.precedence import PRECEDENCE
 import torch
 from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
+from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
@@ -471,6 +471,7 @@ class MetalKernel(SIMDKernel):
     max_threadgroup_size = 1024
     simd_group_size = 32
     pexpr = PythonPrinter().doprint
+    cexpr = CppPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
     headers: OrderedSet[str] = OrderedSet(["utils"])
@@ -877,12 +878,20 @@ class MetalKernel(SIMDKernel):
         args += [str(v) for v in self.args.sizevars.keys()]
 
         arg_types = [arg_name_to_type[arg] for arg in args]
+        expr_printer = self.cexpr if V.graph.cpp_wrapper else self.pexpr
+
+        def format_threads(threads: list[str], kwarg: str) -> str:
+            if V.graph.cpp_wrapper:
+                threads = [f"static_cast<uint64_t>({t})" for t in threads]
+                return f"{{{', '.join(threads)}}}"
+            else:
+                return f"{kwarg}=[{', '.join(threads)}]"
 
         # For reduction kernels, limit the maximum size over reduction dimentions to
         # a maximum threadgroup size
         if len(self.active_range_trees()) > 0:
             threads = [
-                self.pexpr(
+                expr_printer(
                     sympy.Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
                     if v.is_reduction
                     else v.numel
@@ -890,37 +899,21 @@ class MetalKernel(SIMDKernel):
                 for v in self.active_range_trees()
             ]
 
-            if V.graph.cpp_wrapper:
-                threads = [f"static_cast<uint64_t>({t})" for t in threads]
-                if len(threads) == 1:
-                    args.append(threads[0])
-                    arg_types.append(int)
-                else:
-                    args.append(f"{{{', '.join(threads)}}}")
-                    arg_types.append(list)
-            else:
-                args.append(f"threads=[{', '.join(threads)}]")
+            args.append(format_threads(threads, "threads"))
+            arg_types.append(list)
         else:
             if V.graph.cpp_wrapper:
                 raise RuntimeError("We should always have threads?")
 
         if self.inside_reduction:
             threads = [
-                self.pexpr(sympy.Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
+                expr_printer(sympy.Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
                 if v.is_reduction
                 else "1"
                 for v in self.active_range_trees()
             ]
-            if V.graph.cpp_wrapper:
-                threads = [f"static_cast<uint64_t>({t})" for t in threads]
-                if len(threads) == 1:
-                    args.append(threads[0])
-                    arg_types.append(int)
-                else:
-                    args.append(f"{{{', '.join(threads)}}}")
-                    arg_types.append(list)
-            else:
-                args.append(f"group_size=[{', '.join(threads)}]")
+            args.append(format_threads(threads, "group_size"))
+            arg_types.append(list)
         else:
             if V.graph.cpp_wrapper:
                 # Add a None so that we always have a group_size in the
