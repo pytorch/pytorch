@@ -9,6 +9,8 @@ from typing import Any, Callable, TYPE_CHECKING
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
+from .kernel.kernel_params import CPUTritonKernelParams, PersistentTMATritonTemplateMMParams, ROCmTritonTemplateMMParams, TritonTemplateMMParams
+from .kernel.mm_common import mm_options, persistent_mm_options
 from .utils import get_backend_num_stages
 from .virtualized import V
 
@@ -449,6 +451,79 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     def get_extra_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.extra_mm_configs)
 
+    def _to_params(
+        self,
+        input_nodes,
+        m,
+        n,
+        k,
+        config_gen_fn
+    ) -> Generator[TritonTemplateMMParams, None, None]:
+        """
+        Generate TritonTemplateMMParams for matrix multiplication.
+        Uses the provided config generating function to generate TritonConfig objects,
+        then converts them to TritonTemplateMMParams.
+
+        Args:
+            input_nodes: Input nodes for the problem
+            m, n, k: Matrix dimensions
+            config_gen_fn: Function that generates TritonConfig objects
+        """
+        mm_configs_gen = config_gen_fn(m, n, k)
+        for config in mm_configs_gen:
+            # Generate the options dictionary using mm_options
+            options = mm_options(config, m, n, k, input_nodes[0].layout)
+
+            # Create and yield a TritonTemplateMMParams object
+            yield TritonTemplateMMParams(**options)
+
+    def _to_persistent_params(
+        self,
+        input_nodes,
+        m,
+        n,
+        k,
+        config_gen_fn
+    ) -> Generator[PersistentTMATritonTemplateMMParams, None, None]:
+        """
+        Generate PersistentTMATritonTemplateMMParams for persistent matrix multiplication.
+        First generates TritonTemplateMMParams using _to_params, then converts them
+        to PersistentTMATritonTemplateMMParams by adding persistent-specific parameters.
+
+        Args:
+            input_nodes: Input nodes for the problem
+            m, n, k: Matrix dimensions
+            config_gen_fn: Function that generates TritonConfig objects
+        """
+        # Get persistent MM options
+        persistent_options = persistent_mm_options(input_nodes[0], input_nodes[1])
+
+        # Generate base params first
+        for base_params in self._to_params(input_nodes, m, n, k, config_gen_fn):
+            # Convert to PersistentTMATritonTemplateMMParams by adding persistent-specific parameters
+            yield PersistentTMATritonTemplateMMParams(
+                **base_params.kwargs(),
+                **persistent_options,
+            )
+
+    def get_mm_params(self) -> partial[Generator[TritonTemplateMMParams, None, None]]:
+        """
+        Return a partial function that generates TritonTemplateMMParams for matrix multiplication.
+        """
+        return partial(self._to_params, config_gen_fn=self.get_mm_configs())
+
+    def get_exhaustive_mm_params(self) -> partial[Generator[TritonTemplateMMParams, None, None]]:
+        """
+        Return a partial function that generates TritonTemplateMMParams for exhaustive matrix multiplication.
+        """
+        return partial(self._to_params, config_gen_fn=self.get_exhaustive_mm_configs())
+
+    def get_persistent_mm_params(self) -> partial[Generator[PersistentTMATritonTemplateMMParams, None, None]]:
+        """
+        Return a partial function that generates PersistentTMATritonTemplateMMParams for persistent matrix multiplication.
+        """
+        return partial(self._to_persistent_params, config_gen_fn=self.get_persistent_mm_configs())
+
     def get_int8_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.int8_mm_configs)
 
@@ -481,7 +556,53 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
 
 class CPUConfigHeuristic(BaseConfigHeuristic):
-    pass
+    def _to_params(
+        self,
+        input_nodes,
+        m,
+        n,
+        k,
+        config_gen_fn
+    ) -> Generator[CPUTritonKernelParams, None, None]:
+        """
+        Generate CPUTritonKernelParams for matrix multiplication on CPU.
+        Uses the provided config generating function to generate TritonConfig objects,
+        then converts them to CPUTritonKernelParams.
+
+        Args:
+            input_nodes: Input nodes for the problem
+            m, n, k: Matrix dimensions
+            config_gen_fn: Function that generates TritonConfig objects
+        """
+        mm_configs_gen = config_gen_fn(m, n, k)
+        for config in mm_configs_gen:
+            # Generate the options dictionary using mm_options
+            options = mm_options(config, m, n, k, input_nodes[0].layout)
+
+            # Add CPU-specific parameters
+            # Thresholds are experimentally determined to reduce Triton CPU compile times
+            exclude = m * n > 2**13  # _is_large_block_for_cpu from mm.py
+
+            # Create and yield a CPUTritonKernelParams object
+            yield CPUTritonKernelParams(**options, exclude=exclude)
+
+    def get_mm_params(self) -> partial[Generator[CPUTritonKernelParams, None, None]]:
+        """
+        Return a partial function that generates CPUTritonKernelParams for matrix multiplication.
+        """
+        return partial(self._to_params, config_gen_fn=self.get_mm_configs())
+
+    def get_exhaustive_mm_params(self) -> partial[Generator[CPUTritonKernelParams, None, None]]:
+        """
+        Return a partial function that generates CPUTritonKernelParams for exhaustive matrix multiplication.
+        """
+        return partial(self._to_params, config_gen_fn=self.get_exhaustive_mm_configs())
+
+    def get_persistent_mm_params(self) -> partial[Generator[CPUTritonKernelParams, None, None]]:
+        """
+        Return a partial function that generates CPUTritonKernelParams for persistent matrix multiplication.
+        """
+        return partial(self._to_params, config_gen_fn=self.get_persistent_mm_configs())
 
 
 class CUDAConfigHeuristic(BaseConfigHeuristic):
@@ -699,6 +820,50 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             self.conv_configs, self.default_num_stages
         )
         return partial(self.preprocess_mm_configs, configs=filtered_configs)
+
+    def _to_params(
+        self,
+        input_nodes,
+        m,
+        n,
+        k,
+        config_gen_fn
+    ) -> Generator[ROCmTritonTemplateMMParams, None, None]:
+        """
+        Generate ROCmTritonTemplateMMParams for matrix multiplication.
+        Uses the provided config generating function to generate TritonConfig objects,
+        then converts them to ROCmTritonTemplateMMParams.
+
+        Args:
+            input_nodes: Input nodes for the problem
+            m, n, k: Matrix dimensions
+            config_gen_fn: Function that generates TritonConfig objects
+        """
+        mm_configs_gen = config_gen_fn(m, n, k)
+        for config in mm_configs_gen:
+            # Generate the options dictionary using mm_options
+            options = mm_options(config, m, n, k, input_nodes[0].layout)
+
+            # Create and yield a ROCmTritonTemplateMMParams object
+            yield ROCmTritonTemplateMMParams(**options)
+
+    def get_mm_params(self) -> partial[Generator[ROCmTritonTemplateMMParams, None, None]]:
+        """
+        Return a partial function that generates ROCmTritonTemplateMMParams for matrix multiplication.
+        """
+        return partial(self._to_params, config_gen_fn=self.get_mm_configs())
+
+    def get_exhaustive_mm_params(self) -> partial[Generator[ROCmTritonTemplateMMParams, None, None]]:
+        """
+        Return a partial function that generates ROCmTritonTemplateMMParams for exhaustive matrix multiplication.
+        """
+        return partial(self._to_params, config_gen_fn=self.get_exhaustive_mm_configs())
+
+    def get_persistent_mm_params(self) -> partial[Generator[ROCmTritonTemplateMMParams, None, None]]:
+        """
+        Return a partial function that generates ROCmTritonTemplateMMParams for persistent matrix multiplication.
+        """
+        return partial(self._to_params, config_gen_fn=self.get_persistent_mm_configs())
 
 
 class XPUConfigHeuristic(BaseConfigHeuristic):
