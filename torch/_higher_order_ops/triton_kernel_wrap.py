@@ -288,25 +288,26 @@ def generate_ttir(
         a = kwargs[name]
         if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool, sympy.Expr)):
             ordered_args[name] = 2
+        elif (
+            stable_meta := maybe_unpack_tma_stable_metadata(
+                tma_descriptor_metadata.get(name, None)
+            )
+        ) is not None:
+            from triton.tools.tensor_descriptor import TensorDescriptor
+
+            block_shape = stable_meta[0]
+            with torch._C._DisableTorchDispatch():
+                # need 16-byte aligned strides
+                elements_per_dim = max(1, 16 // a.dtype.itemsize)
+                base_tensor = torch.empty(
+                    [elements_per_dim] * len(block_shape), dtype=a.dtype
+                )
+            ordered_args[name] = TensorDescriptor.from_tensor(base_tensor, block_shape)
         elif isinstance(a, (FakeTensor, torch._inductor.ir.TensorBox)):
             with torch._C._DisableTorchDispatch():
                 ordered_args[name] = torch.empty(2, dtype=a.dtype)
         else:
             ordered_args[name] = a
-
-        # triton's make_ir requires that the TMA descriptor inputs are actually
-        # marked as TMA descriptor inputs. So here, create an example TMA descriptor
-        # if that's what the kernel is expecting.
-        if (
-            stable_meta := maybe_unpack_tma_stable_metadata(
-                tma_descriptor_metadata.get(name, None)  # type: ignore[arg-type]
-            )
-        ) is not None:
-            from triton.tools.tensor_descriptor import TensorDescriptor
-
-            ordered_args[name] = TensorDescriptor.from_tensor(
-                ordered_args[name], *stable_meta
-            )
 
     def is_stable_tensor_descriptor_arg(arg: Any) -> bool:
         if has_triton_tensor_descriptor_host_tma():
@@ -333,7 +334,16 @@ def generate_ttir(
         if isinstance(arg, Tensor):
             return [name]
         if is_stable_tensor_descriptor_arg(arg):
-            return [name, name + " STRIDE PLACEHOLDER", name + " SIZE PLACEHOLDER"]
+            stable_meta = maybe_unpack_tma_stable_metadata(
+                tma_descriptor_metadata[name]
+            )
+            assert stable_meta is not None
+            block_shape = stable_meta[0]
+            tensor_rank = len(block_shape)
+            names = [name]
+            names.extend(name + f" STRIDE PLACEHOLDER {i}" for i in range(tensor_rank))
+            names.extend(name + f" SIZE PLACEHOLDER {i}" for i in range(tensor_rank))
+            return names
         return []
 
     ordered_tensor_names = list(

@@ -2075,9 +2075,9 @@ class PythonWrapperCodegen(CodeGen):
             else:
                 if isinstance(arg, ir.TMADescriptor):
                     api_type, block_shape, dtype = (
-                        ("experimental", None, None)
-                        if isinstance(arg, ir.TMADescriptorExperimental)
-                        else ("stable", arg.block_shape, arg.tensor.get_dtype())
+                        ("stable", arg.block_shape, arg.tensor.get_dtype())
+                        if isinstance(arg, ir.TMADescriptorStable)
+                        else ("experimental", None, None)
                     )
                     add_arg(
                         idx,
