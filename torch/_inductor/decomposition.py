@@ -495,8 +495,9 @@ def add(
         reshaped_tensor = tensor.view(new_shape)
         return reshaped_tensor
 
-    x = aten.conj_physical(x)
-    z = aten.conj_physical(z)
+    # Manually resolve complex tensors, as .is_conj() is unreliable after cloning during compilation.
+    x = x + 0
+    z = z + 0
 
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
