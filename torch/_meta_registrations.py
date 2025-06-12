@@ -7356,15 +7356,6 @@ def _meta_grouped_mm_common(
     mat_a_is_2d = mat_a.dim() == 2
     mat_b_is_2d = mat_b.dim() == 2
 
-    torch._check(
-        mat_a.shape[-1] % 16 == 0,
-        lambda: f"Expected mat_a.shape[-1] to be divisible by 16, but got mat_a.shape[-1]={mat_a.shape[1]}",
-    )
-    torch._check(
-        mat_b.shape[-2] % 16 == 0 and mat_b.shape[-1] % 16 == 0,
-        lambda: f"Expected mat_b.shape[-2] and mat_b.shape[-1] to be both divisble by 16 but got {mat_b.shape[-2]} and {mat_b.shape[-1]}",  # noqa: B950
-    )
-
     if scaled:
 
         def is_row_major(mat):

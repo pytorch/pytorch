@@ -49,16 +49,28 @@ __global__ void prepare_grouped_gemm_data(
     delta = offs[tid] - start;
     CUDA_KERNEL_ASSERT(delta >=0 && "expected ofsets to be greater or equal 0\n");
 
-    // TMA loads require global memory tensor strides to be either 1,
-    // or multiple of 16 bytes.  Check this requirement here, in case
-    // strides are along the dynamic dimension.
+    // TMA transfers require global memory tensor addresses to be
+    // aligned to 16 bytes.
+
+    // Check this requirement for input tensors, in case group
+    // addresses are increased along the dynamic dimension.
     if ((K < 0 && (a_row_major || !b_row_major)) ||  // 2D/2D: check along K dimension
         (M < 0 && !a_row_major) ||                   // 2D/3D: check along M dimension
         (N < 0 && b_row_major)) {                    // 3D/2D: check along N dimension
       int align = 128 / cutlass::sizeof_bits<DtypeA>::value;
       CUDA_KERNEL_ASSERT(
         delta % align == 0 &&
-        "expected dynamic dimension byte size to be non-negative multiple of 16\n");
+        "expected input tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+    }
+
+    // Check the same requirement for output tensor (that is always
+    // contiguous, and in row-major layout).
+    if (N < 0) {
+      int align = 128 / cutlass::sizeof_bits<DtypeOutput>::value;
+      CUDA_KERNEL_ASSERT(
+        delta % align == 0 &&
+        "expected output tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+
     }
   }
   int64_t lda, ldb, ldoutput;
