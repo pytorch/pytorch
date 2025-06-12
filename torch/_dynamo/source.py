@@ -599,7 +599,7 @@ class DictGetItemSource(ChainedSource):
         from .variables import ConstantVariable
 
         assert isinstance(
-            self.index, (ConstDictKeySource, type)
+            self.index, ConstDictKeySource
         ) or ConstantVariable.is_literal(self.index)
 
     def guard_source(self):
@@ -625,17 +625,10 @@ class DictGetItemSource(ChainedSource):
         codegen.extend_output(create_call_function(2, False))
 
     def name(self):
-        from .variables import ConstantVariable
-
         if isinstance(self.index, ConstDictKeySource):
             return f"dict.__getitem__({self.base.name()}, {self.index.name()})"
-        elif ConstantVariable.is_literal(self.index):
+        else:
             return f"{self.base.name()}[{self.index!r}]"
-        elif isinstance(self.index, type):
-            # UserDefinedClassVariable
-            assert str(self.index).startswith("<class"), self.index
-            idx = str(self.index).removeprefix("<class '").removesuffix("'>")
-            return f"{self.base.name()}[{idx}]"
 
 
 @dataclasses.dataclass(frozen=True)
