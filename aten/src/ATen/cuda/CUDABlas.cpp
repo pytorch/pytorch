@@ -1641,6 +1641,9 @@ bool gemm_and_bias(
   } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
     epilogue = CUBLASLT_EPILOGUE_GELU;
   }
+  if (activation != GEMMAndBiasActivationEpilogue::None) {
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
+  }
 #else
   epilogue = CUBLASLT_EPILOGUE_BIAS;
   if (activation == GEMMAndBiasActivationEpilogue::RELU) {
@@ -1648,10 +1651,9 @@ bool gemm_and_bias(
   } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
     epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
   }
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
 #endif
-  if (activation != GEMMAndBiasActivationEpilogue::None) {
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
-  }
+
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
