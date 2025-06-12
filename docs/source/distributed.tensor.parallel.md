@@ -78,16 +78,13 @@ since `RowwiseParallel` accepts input that is sharded on the last dimension, it 
 the input tensor has already been evenly sharded on the last dimension. For the case of uneven sharded activation tensors, one could pass in DTensor directly to the partitioned modules, and use `use_local_output=False` to return DTensor after each `ParallelStyle`, where DTensor could track the uneven sharding information.
 :::
 
-For models like Transformer, we recommend users to use `ColwiseParallel`
-and `RowwiseParallel` together in the parallelize_plan for achieve the desired
+For models like Transformer, we recommend users to use ``ColwiseParallel``
+and ``RowwiseParallel`` together in the parallelize_plan for achieve the desired
 sharding for the entire model (i.e. Attention and MLP).
 
 Parallelized cross-entropy loss computation (loss parallelism), is supported via the following context manager:
 
-```{eval-rst}
 .. autofunction:: torch.distributed.tensor.parallel.loss_parallel
-```
 
-:::{warning}
-The loss_parallel API is experimental and subject to change.
-:::
+.. warning ::
+    The loss_parallel API is experimental and subject to change.
