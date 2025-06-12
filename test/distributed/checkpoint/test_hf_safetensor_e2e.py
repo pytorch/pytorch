@@ -182,9 +182,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
     def test_1d_to_1d_reshard_placement_change(self) -> None:
-        try:
-            importlib.util.find_spec("safetensors")
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
 
@@ -242,9 +240,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
     def test_2d_to_2d_reshard_placement_change(self) -> None:
-        try:
-            importlib.util.find_spec("safetensors")
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
 
@@ -303,9 +299,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
     def test_1d_to_2d_reshard_mesh_change(self) -> None:
-        try:
-            importlib.util.find_spec("safetensors")
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
 
@@ -356,9 +350,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
     @with_temp_dir
     @skip_if_lt_x_gpu(4)
     def test_2d_to_1d_reshard_mesh_change(self) -> None:
-        try:
-            importlib.util.find_spec("safetensors")
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
 
@@ -413,9 +405,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
         """
         Test dtensor checkpoint resharding with dtensor containing empty shards.
         """
-        try:
-            importlib.util.find_spec("safetensors")
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
 
