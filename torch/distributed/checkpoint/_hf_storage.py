@@ -336,7 +336,7 @@ class _HuggingFaceStorageReader(FsspecReader):
 
         if getattr(metadata, "storage_meta", None) is None:
             metadata.storage_meta = StorageMeta()
-        metadata.storage_meta.load_id = self.load_id
+        metadata.storage_meta.load_id = self.load_id  # type: ignore[union-attr]
 
         return metadata
 

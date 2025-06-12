@@ -174,7 +174,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return super().from_float(
             cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -238,7 +238,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         return self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return super().from_float(
             cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -302,7 +302,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         return self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return super().from_float(
             cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )

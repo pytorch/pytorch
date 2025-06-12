@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
 
-from onnxscript.onnx_opset import opset20 as op20, opset21 as op21, opset23 as op23
+from onnxscript.onnx_opset import opset20 as op20, opset21 as op21, opset23 as op23  # type: ignore[attr-defined]
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir

@@ -423,12 +423,12 @@ def _write_files_from_queue(
                             transforms,
                             stream,
                             tensor,
-                            write_item,
+                            write_item,  # type: ignore[arg-type]
                             storage_key,
                             serialization_format,
                         )
                     )
-                    tensor_dict[write_item.index.fqn] = tensor
+                    tensor_dict[write_item.index.fqn] = tensor  # type: ignore[attr-defined]
 
                 if serialization_format == SerializationFormat.SAFETENSORS:
                     from safetensors.torch import save  # type: ignore[import-not-found]
