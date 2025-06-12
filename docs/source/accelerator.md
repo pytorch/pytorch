@@ -1,8 +1,14 @@
-torch.accelerator
-===================================
-.. automodule:: torch.accelerator
-.. currentmodule:: torch.accelerator
+# torch.accelerator
 
+```{eval-rst}
+.. automodule:: torch.accelerator
+```
+
+```{eval-rst}
+.. currentmodule:: torch.accelerator
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -18,3 +24,4 @@ torch.accelerator
     current_stream
     synchronize
     device_index
+```
