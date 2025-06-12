@@ -11,10 +11,15 @@ from typing import Any, Union
 import torch
 import torch._guards
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import counters
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch._inductor.utils import get_gpu_type
-from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    guard_or_true,
+    statically_known_true,
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
@@ -694,18 +699,47 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
 
 
 def definitely_equal(
-    lhs_sizes: Sequence[Union[torch.SymInt, bool]],
-    rhs_sizes: Sequence[Union[torch.SymInt, bool]],
+    old_sizes: Sequence[Union[torch.SymInt, int]],
+    new_sizes: Sequence[Union[torch.SymInt, torch.fx.Node, int]],
 ) -> bool:
     """
-    Leverage guard_or_false to compare if two lists of int/symint are equal.
+    Leverage guard_or_true/false to compare if two lists of int/symint are equal.
     Useful to compare sizes, strides etc.
+
+    Can handle -1 in new_sizes which happens in the size arguments of a
+    view op. old_sizes is supposed to be the tensor shape and should not
+    contain -1.
+
+    new_sizes can contains fx.Node when dynamic shape is enabled. In that
+    case new_sizes[i].meta['val'] contains the real torch.SymInt.
     """
 
-    return len(lhs_sizes) == len(rhs_sizes) and all(
-        guard_or_false(lhs_item == rhs_item)
-        for lhs_item, rhs_item in zip(lhs_sizes, rhs_sizes)
-    )
+    num_neg1 = 0
+
+    if len(old_sizes) != len(new_sizes):
+        return False
+
+    for lhs_item, rhs_item in zip(old_sizes, new_sizes):
+        if isinstance(rhs_item, torch.fx.Node):
+            rhs_item = rhs_item.meta["val"]
+
+        assert isinstance(lhs_item, (int, torch.SymInt)), type(lhs_item)
+        assert isinstance(rhs_item, (int, torch.SymInt)), type(rhs_item)
+
+        # It still makes sense to call guard_or_true/false since lhs_item
+        # rhs_item are torch.SymInt rather than sympy expressions when
+        # dynamic shape is enabled.
+        if guard_or_false(lhs_item == rhs_item):
+            continue
+
+        if guard_or_true(rhs_item != -1):
+            return False
+
+        num_neg1 += 1
+
+        if num_neg1 > 1:
+            return False
+    return True
 
 
 @register_graph_pattern(
@@ -716,7 +750,7 @@ def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
-    if definitely_equal(size, arg_size):
+    if definitely_equal(arg_size, size):
         node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
         match.erase_nodes()
 
@@ -738,6 +772,7 @@ def pointless_view_pair(match: Match, arg, size1, size2):
     if definitely_equal(arg_size, size2):
         node.replace_all_uses_with(arg)
         match.erase_nodes()
+        counters["inductor"]["removed_pointless_view_pair"] += 1
 
 
 @register_graph_pattern(
