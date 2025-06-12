@@ -252,8 +252,12 @@ def construct_dict(cls, /, *args, **kwargs):
     return dst
 
 
-def assert_sequence_equal(unit, a, b, msg=None, seq_type=None):
-    unit.assertTrue(a == b, msg)
+def assert_sequence_equal(self_, a, b, msg=None, seq_type=None):
+    self_.assertTrue(a == b, msg)
+
+
+def assert_dict_equal(self_, d1, d2, msg=None):
+    self_.assertTrue(d1 == d2, msg)
 
 
 def foreach_map_fn(*args):
