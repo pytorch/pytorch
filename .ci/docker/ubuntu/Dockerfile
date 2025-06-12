@@ -151,7 +151,7 @@ ARG OPENBLAS
 COPY ./common/install_openblas.sh install_openblas.sh
 RUN if [ -n "${OPENBLAS}" ]; then bash ./install_openblas.sh; fi
 RUN rm install_openblas.sh
-ENV INSTALLED_OPENBLAS ${OPENBLA}
+ENV INSTALLED_OPENBLAS ${OPENBLAS}
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ARG SKIP_SCCACHE_INSTALL
