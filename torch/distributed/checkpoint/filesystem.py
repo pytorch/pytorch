@@ -18,9 +18,6 @@ from io import UnsupportedOperation
 from pathlib import Path
 from typing import Any, Callable, cast, IO, Optional, Union
 
-# introduced as collections.abc.Buffer in Python 3.12
-from typing_extensions import Buffer
-
 import torch
 from torch import Tensor
 from torch._utils import _get_available_device_type, _get_device_module
@@ -40,7 +37,7 @@ from torch.distributed.checkpoint.planner import (
     WriteItem,
     WriteItemType,
 )
-from torch.distributed.checkpoint.staging import BlockingAsyncStager
+from torch.distributed.checkpoint.staging import DefaultAsyncStager
 from torch.distributed.checkpoint.storage import (
     StorageReader,
     StorageWriter,
@@ -48,6 +45,9 @@ from torch.distributed.checkpoint.storage import (
 )
 from torch.distributed.checkpoint.utils import _create_file_view
 from torch.futures import Future
+
+# introduced as collections.abc.Buffer in Python 3.12
+from typing_extensions import Buffer
 
 
 __all__ = [
@@ -888,7 +888,7 @@ class FileSystemReader(StorageReader):
         return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
-class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
+class FileSystemWriter(_FileSystemWriter, DefaultAsyncStager):
     """
     Basic implementation of StorageWriter using file IO.
 
@@ -913,6 +913,8 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
         overwrite: bool = True,
         _extensions: Optional[Sequence[StreamTransformExtension]] = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
+        share_memory: bool = False,
+        block_on_staging: bool = False,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -942,14 +944,21 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             _extensions=_extensions,
             serialization_format=serialization_format,
         )
-        BlockingAsyncStager.__init__(
+        DefaultAsyncStager.__init__(
             self,
             cache_staged_state_dict=cache_staged_state_dict,
+            share_memory=share_memory,
         )
+        # for bwc
+        self._block_on_staging = block_on_staging
 
-    def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+    def stage(self, state_dict: STATE_DICT_TYPE) ->  Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE]:
         """Override of AsyncStager.stage"""
         # in the async case, the state dict is already on CPU, so maintaining this
         # buffer makes no sense
         self.per_thread_copy_ahead = 0
-        return super().stage(state_dict)
+        if self._block_on_staging:
+            return super().stage(state_dict).result()
+        else:
+            return super().stage(state_dict)
+

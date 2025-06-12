@@ -1,11 +1,13 @@
-from typing import Optional, runtime_checkable
+from typing import Optional, runtime_checkable, Union
 from typing_extensions import Protocol
 
 from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
+import torch
+from concurrent.futures import Future, ThreadPoolExecutor
 
 
-__all__ = ["AsyncStager", "BlockingAsyncStager"]
+__all__ = ["AsyncStager", "BlockingAsyncStager", "DefaultAsyncStager"]
 
 
 @runtime_checkable
@@ -47,7 +49,7 @@ class AsyncStager(Protocol):
 
         return self._synchronize_after_execute
 
-    def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+    def stage(self, state_dict: STATE_DICT_TYPE) -> Union[STATE_DICT_TYPE, Future[STATE_DICT_TYPE]]:
         """
         Returns a "staged" copy of `state_dict`. The expectation of the staged copy is that it is
         innoculated from any updates incurred after the stage call is complete.
@@ -61,6 +63,65 @@ class AsyncStager(Protocol):
         In the case `stage` is async in some way, this method should be called to ensure staging
         is complete and it is safe to begin modifying the original `state_dict`
         """
+
+def default_stage(state_dict: STATE_DICT_TYPE, cpu_state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+    """Default stage function. This function will stage the state_dict on to the
+    staging storage (defaults to CPU memory).
+
+    Args:
+        state_dict STATE_DICT_TYPE: The state_dict to stage.
+
+    Returns:
+       STATE_DICT_TYPE: staged state_dict
+    """
+    staging_stream = torch.cuda.Stream()
+    with staging_stream:
+        staged_state_dict = _copy_state_dict(state_dict, cpu_state_dict, True, type_check=False)
+    staging_stream.synchronize()
+    return staged_state_dict
+
+class DefaultAsyncStager(AsyncStager):
+    """
+    An implementation of AsyncStager which stages the state_dict on CPU RAM in a non-blocking way
+    This implementation also provides an option to optimize stage latency using pinned memory.
+    """
+    def __init__(
+        self,
+        cache_staged_state_dict: bool = False,
+        type_check: bool = False,
+        share_memory: bool = False,
+    ):
+        """
+        Initializes the DefaultAsyncStager.
+
+        Args:
+            cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
+                at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
+                that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
+            type_check: Whether to perform a type check during cpu_offload. Defaults to False.
+            share_memory: Whether to use shared memory segment for staging. Default to False.
+
+        """
+        self.cache_staged_state_dict = cache_staged_state_dict
+        self.type_check = type_check
+        self.share_memory = share_memory
+        self.state_dict_cache: Optional[STATE_DICT_TYPE] = None
+        self.staging_future: Future[STATE_DICT_TYPE]
+
+    def stage(self, state_dict: STATE_DICT_TYPE) -> Union[STATE_DICT_TYPE, Future[STATE_DICT_TYPE]]:
+        """
+        Returns a copy of `state_dict` on the CPU.
+        """
+        staging_executor = ThreadPoolExecutor(max_workers=1)
+        if self.cache_staged_state_dict:
+            if not self.state_dict_cache:
+                self.state_dict_cache = _create_cpu_state_dict(state_dict, pin_memory=True, share_memory=self.share_memory)
+            cpu_state_dict = self.state_dict_cache
+        else:
+            cpu_state_dict = _create_cpu_state_dict(state_dict, pin_memory=True, share_memory=self.share_memory)
+        self.staging_future = staging_executor.submit(default_stage, state_dict, cpu_state_dict)
+        self.staging_future.add_done_callback(lambda f: staging_executor.shutdown(wait=False))
+        return self.staging_future
 
 
 class BlockingAsyncStager(AsyncStager):
@@ -113,3 +174,4 @@ class BlockingAsyncStager(AsyncStager):
         """
         No-op function, since staging is blocking.
         """
+
