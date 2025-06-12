@@ -52,7 +52,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if not hasattr(self, "device"):
             self.device = "cpu"
         # must be initialized prior to calling super().__init__()
-        self.included_devices = OrderedSet[str]()
+        self.included_devices: OrderedSet[str] = OrderedSet()
         super().__init__()
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
@@ -62,14 +62,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.supports_intermediate_hooks = False
         self.kernel_callsite_id = count()
         self.int_array_id = count()  # for int array local variable declarations
-        self.declared_int_array_vars = OrderedSet[str]()
+        self.declared_int_array_vars: OrderedSet[str] = OrderedSet()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
-        self.used_cached_devices = OrderedSet[str]()
-        self.used_cached_dtypes = OrderedSet[str]()
-        self.used_cached_layouts = OrderedSet[str]()
-        self.used_cached_memory_formats = OrderedSet[str]()
-        self.used_cond_predicate = OrderedSet[str]()
+        self.used_cached_devices: OrderedSet[str] = OrderedSet()
+        self.used_cached_dtypes: OrderedSet[str] = OrderedSet()
+        self.used_cached_layouts: OrderedSet[str] = OrderedSet()
+        self.used_cached_memory_formats: OrderedSet[str] = OrderedSet()
+        self.used_cond_predicate: OrderedSet[str] = OrderedSet()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -274,12 +274,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ):
         code = self.prefix
 
-        @functools.lru_cache(None)
+        @functools.cache
         def sizeof(name):
             self.codegen_input_size_var_decl(code, name)
             return f"{name}_size"
 
-        @functools.lru_cache(None)
+        @functools.cache
         def strideof(name):
             self.codegen_input_stride_var_decl(code, name)
             return f"{name}_stride"
@@ -1469,7 +1469,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_memory_formats.add(memory_format_str)
         return f"cached_torch_memory_format_{memory_format_str}"
 
-    @functools.lru_cache(None)  # noqa: B019
+    @functools.cache  # noqa: B019
     def codegen_int_array_var(
         self,
         int_array: str,
@@ -1885,6 +1885,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         output_args: Optional[list[str]] = None,
         raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
+        """
+        Generates declarations for external kernel arguments if needed, based on the provided
+        operator and its arguments. It processes both input and output arguments, categorizing
+        them into tensor and integer arguments for further code generation.
+        """
         schema = None
         if isinstance(op_overload, torch._higher_order_ops.torchbind.CallTorchBind):
             obj = raw_args[0]
@@ -2006,7 +2011,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         # TODO: Only support None and tensor(s) returns for now, SymInt is not implemented yet
         for return_type in return_types:
-            if isinstance(return_type, (torch.TensorType, torch.NoneType)):
+            if isinstance(
+                return_type, (torch.TensorType, torch.NoneType, torch.IntType)
+            ):
                 pass
             elif isinstance(return_type, torch.OptionalType):
                 assert isinstance(return_type.getElementType(), torch.TensorType)
@@ -2021,6 +2028,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # None output is supported, but Optional return types are not yet supported
             if output_arg is None:
                 continue
+            elif isinstance(raw_output_arg, int):
+                new_int_args.append(str(raw_output_arg))
             elif isinstance(output_arg, (list, tuple)):
                 for out in output_arg:
                     fill_output_arg(
@@ -2060,6 +2069,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return mutated_buf_names[0]
             elif isinstance(out, (list, tuple)):
                 return type(out)(extract_output_name(o) for o in out)
+            elif isinstance(out, int):
+                return str(out)
             else:
                 raise AssertionError(f"Unexpected output: {type(out)}")
 

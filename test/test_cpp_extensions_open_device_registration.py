@@ -4,6 +4,7 @@ import _codecs
 import io
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -14,18 +15,7 @@ import torch
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.serialization import safe_globals
-from torch.testing._internal.common_utils import (
-    IS_ARM64,
-    skipIfTorchDynamo,
-    TemporaryFileName,
-    TEST_CUDA,
-    TEST_XPU,
-)
-from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-
-
-TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
-TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
+from torch.testing._internal.common_utils import TemporaryFileName
 
 
 def generate_faked_module():
@@ -35,10 +25,9 @@ def generate_faked_module():
     return _OpenRegMod()
 
 
-@unittest.skipIf(IS_ARM64, "Does not work on arm")
-@unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
-@torch.testing._internal.common_utils.markDynamoStrictTest
-class TestCppExtensionOpenRgistration(common.TestCase):
+@unittest.skipIf(common.TEST_XPU, "XPU does not support cppextension currently")
+@common.markDynamoStrictTest
+class TestCppExtensionOpenRegistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions."""
 
     module = None
@@ -61,7 +50,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+        common.remove_cpp_extensions_build_root()
 
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
@@ -288,7 +277,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         sys.version_info >= (3, 13),
         "Error: Please register PrivateUse1HooksInterface by `RegisterPrivateUse1HooksInterface` first.",
     )
-    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
+    @common.skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_open_device_storage_pin_memory(self):
         # Check if the pin_memory is functioning properly on custom device
         cpu_tensor = torch.empty(3)
@@ -313,22 +302,23 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("openreg")
         self.assertTrue(cpu_untyped_storage_pinned.is_pinned("openreg"))
 
+    @unittest.skip(
+        "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function"
+    )
     def test_open_device_serialization(self):
         self.module.set_custom_device_index(-1)
         storage = torch.UntypedStorage(4, device=torch.device("openreg"))
-        self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
+        self.assertEqual(torch.serialization.location_tag(storage), "openreg")
 
         self.module.set_custom_device_index(0)
         storage = torch.UntypedStorage(4, device=torch.device("openreg"))
         self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
 
-        # TODO(FFFrog): Comment this because openreg.device is missing
-        # Uncomment this after improving openreg
-        # cpu_storage = torch.empty(4, 4).storage()
-        # openreg_storage = torch.serialization.default_restore_location(
-        #     cpu_storage, "openreg:0"
-        # )
-        # self.assertTrue(openreg_storage.is_openreg)
+        cpu_storage = torch.empty(4, 4).storage()
+        openreg_storage = torch.serialization.default_restore_location(
+            cpu_storage, "openreg:0"
+        )
+        self.assertTrue(openreg_storage.is_openreg)
 
         # test tensor MetaData serialization
         x = torch.empty(4, 4).long()
@@ -337,24 +327,22 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.module.custom_set_backend_meta(y)
         self.assertTrue(self.module.check_backend_meta(y))
 
-        # TODO(FFFrog): Comment this because openreg.device is missing
-        # Uncomment this after improving openreg
-        # self.module.custom_serialization_registry()
-        # with tempfile.TemporaryDirectory() as tmpdir:
-        # path = os.path.join(tmpdir, "data.pt")
-        # torch.save(y, path)
-        # z1 = torch.load(path)
-        # loads correctly onto the openreg backend device
-        # self.assertTrue(z1.is_openreg)
-        # loads BackendMeta data correctly
-        # self.assertTrue(self.module.check_backend_meta(z1))
+        self.module.custom_serialization_registry()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "data.pt")
+            torch.save(y, path)
+            z1 = torch.load(path)
+            # loads correctly onto the openreg backend device
+            self.assertTrue(z1.is_openreg)
+            # loads BackendMeta data correctly
+            self.assertTrue(self.module.check_backend_meta(z1))
 
-        # cross-backend
-        # z2 = torch.load(path, map_location="cpu")
-        # loads correctly onto the cpu backend device
-        # self.assertFalse(z2.is_openreg)
-        # loads BackendMeta data correctly
-        # self.assertFalse(self.module.check_backend_meta(z2))
+            # cross-backend
+            z2 = torch.load(path, map_location="cpu")
+            # loads correctly onto the cpu backend device
+            self.assertFalse(z2.is_openreg)
+            # loads BackendMeta data correctly
+            self.assertFalse(self.module.check_backend_meta(z2))
 
     def test_open_device_storage_resize(self):
         cpu_tensor = torch.randn([8])
@@ -427,7 +415,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     # Not an open registration test - this file is just very convenient
     # for testing torch.compile on custom C++ operators
-    @skipIfTorchDynamo("Temporary disabled due to torch._ops.OpOverloadPacket")
+    @common.skipIfTorchDynamo("Temporary disabled due to torch._ops.OpOverloadPacket")
     def test_compile_autograd_function_aliasing(self):
         x_ref = torch.randn(4, requires_grad=True)
         out_ref = torch.ops._test_funcs.custom_autograd_fn_aliasing(x_ref)
@@ -488,7 +476,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # call _fused_adamw_ with undefined tensor.
         self.module.fallback_with_undefined_tensor()
 
-    @skipIfTorchDynamo()
+    @common.skipIfTorchDynamo()
     @unittest.skipIf(
         np.__version__ < "1.25",
         "versions < 1.25 serialize dtypes differently from how it's serialized in data_legacy_numpy",
