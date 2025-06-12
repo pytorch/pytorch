@@ -84,6 +84,8 @@ curl -k -L "http://s3.amazonaws.com/ossci-windows/zlib123dllx64.zip" --output "%
 7z x "%SRC_DIR%\temp_build\zlib123dllx64.zip" -o"%SRC_DIR%\temp_build\zlib"
 xcopy /Y "%SRC_DIR%\temp_build\zlib\dll_x64\*.dll" "C:\Windows\System32"
 
+goto cuda_common
+
 :cuda129
 
 set CUDA_INSTALL_EXE=cuda_12.9.1_576.57_windows.exe
