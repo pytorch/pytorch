@@ -160,8 +160,7 @@ def propagate_dynamo_source(orig_gm, split_gm) -> None:
 
     for _, module in split_gm.named_modules():
         for node in module.graph.find_nodes(op="placeholder"):
-            # only placeholders of orig_gm have dynamo_source. non-placeholder
-            # in original_gm may become placeholder in submodules
+            # non-placeholder in original_gm may become placeholder in submodules
             node._dynamo_source = name_to_dynamo_source.get(node.name, None)
 
 
