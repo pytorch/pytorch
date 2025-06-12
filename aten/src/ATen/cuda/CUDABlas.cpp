@@ -1652,8 +1652,10 @@ bool gemm_and_bias(
     epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
   }
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
+  if (bias) {
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
+  }
 #endif
-
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
@@ -1663,7 +1665,6 @@ bool gemm_and_bias(
 #else
   CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 #endif
-
 
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
