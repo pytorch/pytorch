@@ -6,6 +6,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor.kernel.mm_common import mm_args
 
+from . import config
 from . import ir
 from .codegen.cpp_gemm_template import CppGemmTemplate
 from .codegen.cpp_grouped_gemm_template import CppGroupedGemmTemplate
@@ -25,7 +26,7 @@ from .select_algorithm import (
     ChoiceCaller,
     ExternKernelChoice,
 )
-from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotune
+from .utils import use_aten_gemm_kernels, use_cpp_gemm_template
 from .virtualized import ops, OpsValue, V
 
 
@@ -139,7 +140,7 @@ def grouped_gemm_lowering(
         x = view(x, [-1, x_size[-1]])
     num_gemm = len(w)
 
-    assert use_max_autotune()
+    assert config.max_autotune or config.max_autotune_gemm
     b = [bias if bias is None else ir.ExternKernel.realize_input(bias) for bias in b]
 
     choices: list[ChoiceCaller] = []
