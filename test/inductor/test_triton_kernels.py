@@ -3205,6 +3205,10 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(get_tma_stores(functions, "main"), {Param(idx=0)})
 
+    @unittest.skipIf(
+        not has_triton_experimental_host_tma(),
+        "Requires experimental TMA API in Triton",
+    )
     @make_mutation_test
     def test_on_device_tma_store_old_api():
         @triton.jit
