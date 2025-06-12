@@ -1,7 +1,7 @@
 @echo off
 
 :: This script parses args, installs required libraries (MKL, Magma, libuv)
-:: and then delegates to cpu.bat, cuda80.bat, etc.
+:: and then delegates to cpu.ps1, cuda126.ps1, etc.
 
 if not "%CUDA_VERSION%" == "" if not "%PYTORCH_BUILD_VERSION%" == "" if not "%PYTORCH_BUILD_NUMBER%" == "" goto env_end
 if "%~1"=="" goto arg_error
@@ -113,7 +113,7 @@ for %%v in (%DESIRED_PYTHON_PREFIX%) do (
         set "MAGMA_HOME=%cd%\magma_%CUDA_PREFIX%_%BUILD_TYPE%"
     )
     echo "Calling arch build script"
-    call %CUDA_PREFIX%.bat
+    call %CUDA_PREFIX%.ps1
     if ERRORLEVEL 1 exit /b 1
     @endlocal
 )
