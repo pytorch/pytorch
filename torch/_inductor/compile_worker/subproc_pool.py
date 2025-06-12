@@ -37,7 +37,7 @@ class MsgType(IntEnum):
     ERROR = 0
     SHUTDOWN = 1
     QUIESCE = 2
-    WARMUP = 3
+    WAKEUP = 3
     JOB = 4
 
 
@@ -155,9 +155,9 @@ class SubprocPool:
                 "PYTHONPATH": os.environ.get(
                     "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
                 ),
-                # We don't want to re-warm the pool when the subprocess imports
-                # torch._inductor.codecache since the warming process is what
-                # creates the SubprocPool in the first place.
+                # We don't want to re-create the pool when the subprocess imports
+                # torch._inductor.codecache since the warmup call is what creates
+                # the SubprocPool in the first place.
                 "TORCH_WARM_POOL": "0",
                 # Some internal usages need a modified LD_LIBRARY_PATH.
                 "LD_LIBRARY_PATH": get_ld_library_path(),
@@ -247,8 +247,8 @@ class SubprocPool:
     def quiesce(self) -> None:
         self._send(MsgType.QUIESCE)
 
-    def warmup(self) -> None:
-        self._send(MsgType.WARMUP)
+    def wakeup(self) -> None:
+        self._send(MsgType.WAKEUP)
 
     def shutdown(self) -> None:
         try:
@@ -294,7 +294,7 @@ class SubprocMain:
             msg_type, job_id, data = _recv_msg(self.read_pipe)
             if msg_type == MsgType.JOB:
                 self.submit(job_id, data)
-            elif msg_type == MsgType.WARMUP:
+            elif msg_type == MsgType.WAKEUP:
                 self._start_pool()
             elif msg_type == MsgType.QUIESCE:
                 self._quiesce()

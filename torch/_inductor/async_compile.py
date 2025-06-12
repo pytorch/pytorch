@@ -221,13 +221,13 @@ _ASYNC_COMPILE_POOL_MANAGER: Optional[AsyncCompilePoolManager] = None
 
 class AsyncCompilePoolManager:
     """
-    Context manager to help warmup and quiesce the subproc pool. This CM can
-    be entered early during compile, i.e., in dynamo. It then handles warming
+    Context manager to help quiesce and wakeup the subproc pool. This CM can
+    be entered early during compile, i.e., in dynamo. It then handles waking
     up the pool at most once and quiescing at exit.
     """
 
     def __init__(self):
-        self._warmed_up = False
+        self._ready = False
 
     def __enter__(self):
         global _ASYNC_COMPILE_POOL_MANAGER
@@ -239,16 +239,16 @@ class AsyncCompilePoolManager:
         AsyncCompile.quiesce()
         _ASYNC_COMPILE_POOL_MANAGER = None
 
-    def _warmup(self):
-        if not self._warmed_up:
-            torch._inductor.async_compile.AsyncCompile.warm_pool()
-            self._warmed_up = True
+    def _wakeup(self):
+        if not self._ready:
+            torch._inductor.async_compile.AsyncCompile.wakeup()
+            self._ready = True
 
     @staticmethod
-    def warmup():
+    def wakeup():
         global _ASYNC_COMPILE_POOL_MANAGER
         if _ASYNC_COMPILE_POOL_MANAGER is not None:
-            _ASYNC_COMPILE_POOL_MANAGER._warmup()
+            _ASYNC_COMPILE_POOL_MANAGER._wakeup()
 
 
 class AsyncCompile:
@@ -307,18 +307,32 @@ class AsyncCompile:
         if get_compile_threads() <= 1:
             return
         _compile_start()
+        # Pool is created on first access
         pool = cls.process_pool()
-        if isinstance(pool, SubprocPool):
-            pool.warmup()
         _compile_end()
 
     @classmethod
     def quiesce(cls) -> None:
+        """
+        If using a SubprocPool, shut down the sidecar processe's internal
+        ProcessPoolExecutor.
+        """
         # Don't inadvertently create a process pool if it doesn't already exist:
-        if cls.process_pool.cache_info().currsize:
+        if get_compile_threads() > 1 and cls.process_pool.cache_info().currsize:
             pool = cls.process_pool()
             if isinstance(pool, SubprocPool):
                 pool.quiesce()
+
+    @classmethod
+    def wakekup(cls) -> None:
+        """
+        If using a SubprocPool, signal the side car process to start up its
+        internal ProcessPoolExecutor.
+        """
+        if get_compile_threads() > 1:
+            pool = cls.process_pool()
+            if isinstance(pool, SubprocPool):
+                pool.wakeup()
 
     @classmethod
     def submit(cls, task: Callable[..., Any]) -> Any:
