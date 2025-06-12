@@ -446,11 +446,6 @@ struct ConvParams {
       }
     }
     if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous) {
-      // bypass dilation checks for channels_last convolution
-      if (deterministic && is_dilated()) {
-        // cudnn doesn't support deterministic dilated convolution fully yet
-        return false;
-      }
       if (is_dilated()) {
         return detail::getCUDAHooks().supportsDilatedConvolutionWithCuDNN() && !is_output_padding_big();
       }

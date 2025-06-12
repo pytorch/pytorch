@@ -12,6 +12,8 @@ import torch
 import torch.library
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._inductor import metrics
+from torch._inductor.codegen.common import device_codegens, register_backend_for_device
+from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
@@ -32,12 +34,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_CPU,
-    HAS_GPU,
-    patch_inductor_backend,
-)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
 # Make the helper files in test/ importable
@@ -935,13 +932,23 @@ class TestInductorDynamic(TestCase):
                 _test_wrapper_codegen_statically_known_int_or_none_in_context()
                 return super().generate(is_inference, *args, **kwargs)
 
-        with patch_inductor_backend("cpu", python_wrapper_codegen=TestWrapperCodegen):
+        if "cpu" not in device_codegens:
+            register_backend_for_device("cpu", CppScheduling, PythonWrapperCodegen)
+        orig_cpu_codegens = device_codegens["cpu"]
+        try:
+            register_backend_for_device(
+                "cpu", orig_cpu_codegens.scheduling, TestWrapperCodegen
+            )
             # Compile each of the functions above, with an example input
             # that has 5 in the first dimension, but is marked as dynamic
 
             torch.compile(backend="inductor", dynamic=None)(fn_1)(_x)
             torch.compile(backend="inductor", dynamic=None)(fn_2)(_x)
             torch.compile(backend="inductor", dynamic=None)(fn_3)(_x)
+        finally:
+            register_backend_for_device(
+                "cpu", orig_cpu_codegens.scheduling, orig_cpu_codegens.wrapper_codegen
+            )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_unbacked_stride_nobreak(self, device):
