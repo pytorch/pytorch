@@ -18,14 +18,8 @@ from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TemporaryFileName,
-    TEST_CUDA,
     TEST_XPU,
 )
-from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-
-
-TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
-TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 
 
 def generate_faked_module():
@@ -35,8 +29,8 @@ def generate_faked_module():
     return _OpenRegMod()
 
 
-@unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
-@torch.testing._internal.common_utils.markDynamoStrictTest
+@unittest.skipIf(common.TEST_XPU, "XPU does not support cppextension currently")
+@common.markDynamoStrictTest
 class TestCppExtensionOpenRgistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions."""
 
@@ -60,7 +54,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+        common.remove_cpp_extensions_build_root()
 
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
