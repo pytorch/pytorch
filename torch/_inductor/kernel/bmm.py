@@ -282,11 +282,4 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
             )
 
-    _, is_nonzero = _is_static_problem(layout)
-    batch_stride_largest = is_batch_stride_largest(mat1, mat2, layout)
-    if batch_stride_largest and is_nonzero and use_cutlass_template(layout, m, n, k) and _use_cutlass_for_op("baddbmm"):
-        from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
-
-        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])  # type: ignore[arg-type]
-
     return autotune_select_algorithm("baddbmm", choices, [inp, mat1, mat2], layout)
