@@ -175,6 +175,7 @@ def allow_in_graph(fn):
 
     WARNING: this API can be a footgun, please read the documentation carefully.
     """
+
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
     assert callable(fn), "allow_in_graph expects a callable"
@@ -732,6 +733,29 @@ def mark_static_address(t, guard=True):
         t._dynamo_static_input_type = "unguarded"  # type: ignore[attr-defined]
 
 
+def _force_trace_einops(einops):
+    # einops register some of its methods using "allow_in_graph". Remove them
+    # so Dynamo can trace it
+    trace_rules._force_trace_callable_ids.add(id(einops.rearrange))
+    trace_rules._force_trace_callable_ids.add(id(einops.reduce))
+    if hasattr(einops, "repeat"):
+        trace_rules._force_trace_callable_ids.add(
+            id(einops.repeat)
+        )  # available since einops 0.2.0
+    if hasattr(einops, "einsum"):
+        trace_rules._force_trace_callable_ids.add(
+            id(einops.einsum)
+        )  # available since einops 0.5.0
+    if hasattr(einops, "pack"):
+        trace_rules._force_trace_callable_ids.add(
+            id(einops.pack)
+        )  # available since einops 0.6.0
+    if hasattr(einops, "unpack"):
+        trace_rules._force_trace_callable_ids.add(
+            id(einops.unpack)
+        )  # available since einops 0.6.0
+
+
 # Note: this carefully avoids eagerly import einops.
 # TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
 def _allow_in_graph_einops():
@@ -744,6 +768,9 @@ def _allow_in_graph_einops():
         # internal xref https://fb.workplace.com/groups/1026248852325474/permalink/1107135774236781/
         if Version(mod.__version__) <= Version("0.8.1") or is_fbcode():
             import einops
+
+            if torch._dynamo.config.enable_einops_tracing:
+                _force_trace_einops(einops)
 
             try:
                 # requires einops > 0.6.1, torch >= 2.0

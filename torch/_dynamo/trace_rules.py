@@ -3012,6 +3012,15 @@ def _allowed_callable_ids() -> dict[int, str]:
 
 
 @FunctionIdSet
+def _force_trace_callable_ids() -> dict[int, str]:
+    # This is different from `_disallowed_callable_ids`, which forces the function
+    # to be a SkipFunctionsVariable. Whereas functions in this list should
+    # be traced, even if they are in `_allowed_callable_ids`.
+    rv: dict[int, str] = {}
+    return rv
+
+
+@FunctionIdSet
 def _disallowed_callable_ids() -> dict[int, str]:
     rv: dict[int, str] = {}
     return rv
@@ -3125,7 +3134,7 @@ def _maybe_init_lazy_module(obj: object) -> None:
 
 def is_callable_allowed(obj) -> bool:
     _maybe_init_lazy_module(obj)
-    return id(obj) in _allowed_callable_ids
+    return id(obj) in _allowed_callable_ids and id(obj) not in _force_trace_callable_ids
 
 
 def is_nonstrict_trace_callable(obj) -> bool:
