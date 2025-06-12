@@ -852,6 +852,8 @@ def check_input_alias_and_mutation_return_outputs(
         shape_env=_get_shape_env(fake_args),
         allow_non_fake_inputs=False,
     )
+    # We need to disable the cache to get a clean environment
+    new_fake_mode.cache_enabled = False
 
     with ExitStack() as ctx_stack:
         ctx_stack.enter_context(_disable_current_modes())
