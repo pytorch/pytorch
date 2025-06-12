@@ -138,7 +138,6 @@ jobs:
           { config: "default", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
         ]}
       sync-tag: asan-build
-      allow-reuse-old-whl: true
     secrets: inherit
 
 
@@ -203,7 +202,6 @@ jobs:
           { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
-      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-py3_9-clang12-test:
@@ -239,7 +237,6 @@ jobs:
           { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
-      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-py3_13-clang12-test:
@@ -299,7 +296,6 @@ jobs:
           { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
         ]}
-      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc11-test:
@@ -434,7 +430,6 @@ jobs:
           { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
         ]}
-      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc11-sm89-test:
@@ -487,7 +482,6 @@ jobs:
         { include: [
           { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu" },
         ]}
-      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc9-inductor-test:
