@@ -1289,7 +1289,7 @@ class CrossEntropyLoss(_WeightedLoss):
           target must be the same shape input, and each value should be between :math:`[0, 1]`. This means the target
           data type is required to be float when using class probabilities. Note that PyTorch does not strictly enforce
           probability constraints on the class probabilities and that it is the user's responsibility to ensure
-          `target` is a valid probability distribution (see below examples section for more details).
+          `target` contains valid probability distributions (see below examples section for more details).
         - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
 
@@ -1319,14 +1319,15 @@ class CrossEntropyLoss(_WeightedLoss):
 
     .. note::
         When providing `target` as class probabilities, it is expected that soft labels are passed
-        (i.e., `target` is a probability distribution over the possible classes for a given data sample
+        (i.e., `target` contains probability distributions over the possible classes for a given data sample
         where each individual probability is between `[0,1]` and the distribution sums to `1`).
-        Hence the use of `.softmax()` on `target` in the above class probabilities example.
+        Hence the use of :func:`softmax()` on ``target`` in the above class probabilities example.
 
         PyTorch does not validate whether the values provided in `target` lie in the range `[0,1]`
-        or whether they sum to `1`. No warning will be raised and it is the user's responsibility
-        to ensure that `target` is a valid probability distribution. Providing arbitrary values
-        may yield misleading loss values and unstable gradients during training.
+        or whether the distribution of each data sample sums to `1`.
+        No warning will be raised and it is the user's responsibility
+        to ensure that `target` contains valid probability distributions.
+        Providing arbitrary values may yield misleading loss values and unstable gradients during training.
 
     Examples:
 
