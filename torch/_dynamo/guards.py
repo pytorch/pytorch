@@ -384,7 +384,7 @@ class GuardManagerWrapper:
 
     def populate_code_parts_for_debugging(self):
         # This should be called when the guard manager is fully populated
-        relational_guards_seen = set()
+        tensor_aliasing_guard_seen = False
 
         def get_code_parts(leaf_guard):
             code_parts = []
@@ -394,12 +394,12 @@ class GuardManagerWrapper:
             return code_parts
 
         def visit(mgr):
-            nonlocal relational_guards_seen
+            nonlocal tensor_aliasing_guard_seen
             for guard in mgr.get_leaf_guards():
-                if isinstance(guard, torch._C._dynamo.guards.RelationalGuard):  # type: ignore[attr-defined]
-                    if guard not in relational_guards_seen:
+                if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
+                    if not tensor_aliasing_guard_seen:
                         self.code_parts.extend(get_code_parts(guard))
-                        relational_guards_seen.add(guard)
+                        tensor_aliasing_guard_seen = True
                 else:
                     self.code_parts.extend(get_code_parts(guard))
 
@@ -418,7 +418,7 @@ def from_numpy(a):
 
 
 # For user stack printing
-@functools.lru_cache(None)
+@functools.cache
 def uninteresting_files():
     import torch._dynamo.external_utils
     import torch._dynamo.polyfills
@@ -623,7 +623,7 @@ class GuardManagerType(enum.Enum):
     DICT_GUARD_MANAGER = 2
 
 
-@functools.lru_cache(None)
+@functools.cache
 def code_framelocals_names_reversed_cached(code: types.CodeType):
     return list(reversed(code_framelocals_names(code)))
 
@@ -1665,7 +1665,7 @@ class GuardBuilder(GuardBuilderBase):
             metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
-    def EQUALS_MATCH(self, guard: Guard):
+    def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         if np:
@@ -1762,9 +1762,14 @@ class GuardBuilder(GuardBuilderBase):
             # is immutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
             # pointer equality check.
             val = deepcopy(val)
-        self.get_guard_manager(guard).add_equals_match_guard(
-            val, get_verbose_code_parts(code, guard)
-        )
+
+        verbose_code_parts = get_verbose_code_parts(code, guard)
+        if recompile_hint:
+            verbose_code_parts = [
+                f"{part} (HINT: {recompile_hint})" for part in verbose_code_parts
+            ]
+
+        self.get_guard_manager(guard).add_equals_match_guard(val, verbose_code_parts)
         self._set_guard_export_info(guard, code)
         return
 
@@ -2859,12 +2864,14 @@ class CheckFunctionManager:
                     self.guard_manager, output_graph.local_scope
                 )
 
-            # NB for developers: n_iters is chosen to be 50 to achieve
-            # statistical significance.  If you are working on a guard
-            # optimization, it might be a good idea to increase this number for
-            # more stabiilty during development.
+            # NB for developers: n_iters is chosen to be 1 to prevent excessive
+            # increase in compile time. We first do a cache flush to measure the
+            # guard latency more accurately. This cache flush is expensive.
+            # Note  - If you are working on a guard optimization, it might be a
+            # good idea to increase this number for more stabiilty during
+            # development.
             latency = profile_guard_manager(
-                self.guard_manager.root, output_graph.local_scope, 50
+                self.guard_manager.root, output_graph.local_scope, 1
             )
             guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
             # Note: We use `increment_toplevel` instead of `compilation_metric`
