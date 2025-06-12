@@ -3,9 +3,6 @@ import functools
 import logging
 from typing import Any, Optional
 
-# TODO(coconutruben): move into the param abstract
-from dataclasses import asdict
-
 import sympy
 
 import torch
@@ -69,6 +66,9 @@ from .mm_common import (
     scale_mm_epilogue,
     scaled_mm_options,
 )
+
+
+# TODO(coconutruben): move into the param abstract
 
 
 try:

@@ -26,16 +26,13 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
 
-    from torch.utils._ordered_set import OrderedSet
-
     from triton import Config as TritonConfig
+
+    from torch.utils._ordered_set import OrderedSet
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
-
-    from .kernel.kernel_params import (
-        KernelTemplateParams,
-    )
+    from .kernel.kernel_params import KernelTemplateParams
 
 
 class Sortable(typing.Protocol):

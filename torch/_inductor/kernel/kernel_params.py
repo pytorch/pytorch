@@ -27,6 +27,7 @@ class TritonTemplateMMParams(KernelTemplateParams):
     Contains all parameters that would be passed to mm_template.maybe_append_choice
     via mm_options.
     """
+
     # Parameters from mm_options
     BLOCK_M: int
     BLOCK_N: int
@@ -47,6 +48,7 @@ class PersistentTMATritonTemplateMMParams(TritonTemplateMMParams):
     Contains all parameters that would be passed to persistent_tma_mm_template.maybe_append_choice
     via mm_options and persistent_mm_options.
     """
+
     # Additional parameters from persistent_mm_options
     A_ROW_MAJOR: bool = True
     B_ROW_MAJOR: bool = True
@@ -61,6 +63,7 @@ class ROCmTritonTemplateMMParams(TritonTemplateMMParams):
     Contains all parameters that would be passed to mm_template.maybe_append_choice
     via mm_options with ROCm-specific additions.
     """
+
     # Additional parameters for ROCm
     matrix_instr_nonkdim: int = 16
     waves_per_eu: int = 0
@@ -74,6 +77,7 @@ class CPUTritonKernelParams(TritonTemplateMMParams):
     Contains all parameters that would be passed to mm_template.maybe_append_choice
     via mm_options with CPU-specific additions.
     """
+
     # CPU-specific parameters
     scale: float = 0.5
     exclude: bool = False
