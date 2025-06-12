@@ -486,7 +486,7 @@ class DTensor(torch.Tensor):
     ) -> "DTensor":
         """
         ``redistribute`` performs necessary collective operations that redistribute the current
-        DTensor from its current placements to a new placements, or from is current DeviceMesh
+        DTensor from its current placements to a new placements, or from its current DeviceMesh
         to a new DeviceMesh. i.e. we can turn a Sharded DTensor to a Replicated DTensor by
         specifying a Replicate placement for each dimension of the DeviceMesh.
 
