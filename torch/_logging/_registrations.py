@@ -13,6 +13,7 @@ DISTRIBUTED = [
     "torch.nn.parallel.distributed",
 ]
 
+register_log("async_compile", ["torch._inductor.async_compile"])
 register_log(
     "cache", ("torch._inductor.remote_cache", "torch._inductor.fb.remote_cache")
 )

@@ -269,7 +269,9 @@ class SubprocMain:
         self.running = True
 
     def _new_pool(self, nprocs: int, warm: bool) -> ProcessPoolExecutor:
-        pool = ProcessPoolExecutor(
+        from torch._inductor.async_compile import TrackedProcessPoolExecutor
+
+        pool = TrackedProcessPoolExecutor(
             nprocs,
             mp_context=multiprocessing.get_context(self.kind.value),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
