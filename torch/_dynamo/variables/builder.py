@@ -475,7 +475,7 @@ class VariableBuilder:
         return cls._type_dispatch_impl(config.trace_numpy)
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _type_dispatch_impl(cls, trace_numpy):
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
@@ -576,7 +576,7 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_mutable(value, result)
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _id_dispatch(
         cls,
     ) -> dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
