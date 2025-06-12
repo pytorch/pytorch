@@ -161,9 +161,8 @@ def _torchscript_schema_to_signature(
     return res
 
 
-@compatibility(is_backward_compatible=False)
-def check_for_mutable_operation(
-    target: Callable, args: tuple["Argument", ...], kwargs: dict[str, "Argument"]
+def _check_for_mutable_operation(
+    target: Callable, args: tuple["Argument", ...], kwargs: dict[str, "Argument"], callback: Callable
 ):
     signatures, schemas = get_signature_for_torch_op(target, return_schemas=True)
 
@@ -182,11 +181,7 @@ def check_for_mutable_operation(
 
         def throw_if_mutable(schema):
             if schema.is_mutable:
-                raise RuntimeError(
-                    f"Tried to trace mutable operation {schema}. FX only supports functional "
-                    f"code, so operations that mutate operands in-place (e.g. via `out` arguments) "
-                    f"are not supported"
-                )
+                callback(schema)
 
         if len(matched_schemas) == 0:
             # Did not match any schema. Cannot check for mutation
@@ -200,6 +195,19 @@ def check_for_mutable_operation(
             # do nothing.
             pass
 
+
+@compatibility(is_backward_compatible=False)
+def check_for_mutable_operation(
+    target: Callable, args: tuple["Argument", ...], kwargs: dict[str, "Argument"]
+):
+    def _fn(schema):
+        raise RuntimeError(
+            f"Tried to trace mutable operation {schema}. FX only supports functional "
+            f"code, so operations that mutate operands in-place (e.g. via `out` arguments) "
+            f"are not supported"
+        )
+
+    _check_for_mutable_operation(target, args, kwargs, _fn)
 
 @compatibility(is_backward_compatible=False)
 def get_signature_for_torch_op(op: Callable, return_schemas: bool = False):

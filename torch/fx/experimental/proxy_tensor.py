@@ -201,36 +201,36 @@ def set_proxy_slot(
     ...
 
 
-class _DisableUpdateTensorTracker(threading.local):
-    value: bool = False
-
-
-_disable_update_tensor_tracker_tls = _DisableUpdateTensorTracker()
-
-
-def _is_proxy_tensor_update_tensor_tracker_disabled() -> bool:
-    """
-    Returns current state of disabling update tensor tracker.
-    """
-    return False
-    # return _disable_update_tensor_tracker_tls.value
-
-
-@contextmanager
-def _proxy_tensor_disable_update_tensor_tracker() -> Generator[None, None, None]:
-    """
-    By default tensor_tracker is updated every time.
-    This leads to chaining every operation on the FakeTensor.
-    For some cases of non-functional code, e.g. mutations in aotdispatch,
-    we want emitted nodes to be disconnected that partitioner will be able
-    to separate them into different subgraphs.
-    """
-    orig_value = _disable_update_tensor_tracker_tls.value
-    _disable_update_tensor_tracker_tls.value = True
-    try:
-        yield
-    finally:
-        _disable_update_tensor_tracker_tls.value = orig_value
+# class _DisableUpdateTensorTracker(threading.local):
+#     value: bool = False
+# 
+# 
+# _disable_update_tensor_tracker_tls = _DisableUpdateTensorTracker()
+# 
+# 
+# def _is_proxy_tensor_update_tensor_tracker_disabled() -> bool:
+#     """
+#     Returns current state of disabling update tensor tracker.
+#     """
+#     return False
+#     # return _disable_update_tensor_tracker_tls.value
+# 
+# 
+# @contextmanager
+# def _proxy_tensor_disable_update_tensor_tracker() -> Generator[None, None, None]:
+#     """
+#     By default tensor_tracker is updated every time.
+#     This leads to chaining every operation on the FakeTensor.
+#     For some cases of non-functional code, e.g. mutations in aotdispatch,
+#     we want emitted nodes to be disconnected that partitioner will be able
+#     to separate them into different subgraphs.
+#     """
+#     orig_value = _disable_update_tensor_tracker_tls.value
+#     _disable_update_tensor_tracker_tls.value = True
+#     try:
+#         yield
+#     finally:
+#         _disable_update_tensor_tracker_tls.value = orig_value
 
 
 def set_proxy_slot(  # type: ignore[no-redef]
@@ -240,8 +240,6 @@ def set_proxy_slot(  # type: ignore[no-redef]
 ) -> None:
     log.debug("set_proxy_slot %s (%s) %s", obj, id(obj), proxy)
     if isinstance(obj, Tensor):
-        # We DO want to clobber proxies whenever we run an inplace operation
-        # on a tensor, and it affects the metadata on the proxy.
         assert isinstance(proxy, _ProxyTensor)
         tracer.tensor_tracker[obj] = proxy
     elif isinstance(obj, (_AnyScriptObject)):
@@ -951,8 +949,14 @@ def proxy_call(
         name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
     )
 
+    # XXX For mutable ops we want proxy_out to be a proxy of mutated argument.
+    # TODO: Do proper check of schema and get the idx of mutated arg.
+    if func is torch.ops.aten.copy_.default:
+        proxy_out = proxy_args[0]
+
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
+
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
@@ -1015,8 +1019,7 @@ def proxy_call(
     else:
         constant = None
 
-    if not func._schema.is_mutable:
-        track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     _maybe_record_pointwise_barrier(func, proxy_mode)
     return out
 
