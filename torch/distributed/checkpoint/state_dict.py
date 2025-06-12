@@ -531,7 +531,7 @@ def _get_model_state_dict(
                 state_dict.pop(fqn)
 
     for key, p in list(state_dict.items()):
-        if p.is_meta:
+        if torch.is_tensor(p) and p.is_meta:
             state_dict.pop(key)
 
     return _maybe_full_or_cpu_state_dict(state_dict, info)
