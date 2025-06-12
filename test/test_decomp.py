@@ -1226,6 +1226,32 @@ class DecompOneOffTests(TestCase):
         for o_ref, o in zip(out_ref, out):
             self.assertEqual(o_ref.dtype, o.dtype)
 
+    @onlyCUDA
+    def test_rms_norm_decomp(self, device):
+        @torch.compile
+        def rms_norm_sinh(a, b, c):
+            output = torch.nn.functional.rms_norm(a, b, c)
+            return torch.sinh(output)
+
+        normalized_shape_arg = (3, 3, 3)
+        input_tensor = torch.randn(3, 3, 3, device=device, requires_grad=True)
+        weight_tensor = torch.randn(3, 3, 3, device=device, requires_grad=True)
+
+        def forward_pass_fn():
+            return rms_norm_sinh(input_tensor, normalized_shape_arg, weight_tensor)
+
+        model_output, generated_codes = torch._inductor.utils.run_fw_bw_and_get_code(
+            forward_pass_fn
+        )
+
+        # check RMSNorm was fused with sinh
+        self.assertTrue(
+            "triton_per_fused_add_mean_mul_pow_rsqrt_sinh" in generated_codes[0]
+        )
+        self.assertTrue(
+            "triton_per_fused__fused_rms_norm_backward" in generated_codes[1]
+        )
+
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
 
