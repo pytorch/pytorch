@@ -47,10 +47,19 @@ typedef struct CacheEntry CacheEntry;
 
 #ifdef __cplusplus
 
+typedef struct VISIBILITY_HIDDEN PrecompileEntry {
+  py::object guard_manager;
+  py::object code;
+  void* root_mgr;
+
+  PrecompileEntry(py::object gm, py::object c);
+} PrecompileEntry;
+
 typedef struct VISIBILITY_HIDDEN ExtraState {
   // A pointer to the orig_code object to prevent race conditions in invalidate
   // function.
   PyCodeObject* orig_code;
+  std::list<PrecompileEntry> precompile_entries;
   // List of cache entries for compiled code objects
   std::list<CacheEntry> cache_entry_list;
   // Frame state to detect dynamic shape dims
@@ -68,6 +77,7 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
 #else
 
 typedef struct ExtraState ExtraState;
+typedef struct PrecompileEntry PrecompileEntry;
 
 #endif
 
@@ -187,5 +197,10 @@ PyObject* get_backend(PyObject* callback);
 // Returns the list of CacheEntry corresponding to code_obj.
 // Warning: returns references whose lifetimes are controlled by C++
 py::list _debug_get_cache_entry_list(const py::handle& code_obj);
+void _reset_precompile_entries(const py::handle& code_obj);
+void _load_precompile_entry(
+    const py::handle& code_obj,
+    py::object guard_manager,
+    py::object dynamo_code);
 
 #endif

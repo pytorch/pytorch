@@ -31,7 +31,7 @@ def get_config_request_key(
     """
     hash_target = "-".join(
         [
-            cutlass_key().decode(),
+            cutlass_key().hex(),
             arch,
             cuda_version,
             instantiation_level,
@@ -48,7 +48,7 @@ def _generate_config_filename(request_key: str) -> str:
 
 
 @clear_on_fresh_inductor_cache
-@functools.lru_cache(None)
+@functools.cache
 def maybe_fetch_ops() -> Optional[list[Any]]:
     """
     Fetch ops from databases.
@@ -73,8 +73,20 @@ def maybe_fetch_ops() -> Optional[list[Any]]:
     start_time = time.time()
     if os.path.isfile(filepath):
         # locally
-        with open(filepath) as f:
-            serialized_ops = json.load(f)
+        try:
+            with open(filepath) as f:
+                serialized_ops = json.load(f)
+
+            assert isinstance(serialized_ops, list), (
+                f"Expected serialized ops is a list, got {type(serialized_ops)}"
+            )
+        except Exception as e:
+            log.warning(
+                "Failed to load CUTLASS config %s from local cache: %s",
+                filename,
+                e,
+            )
+            serialized_ops = None
     elif config.is_fbcode():
         from torch._inductor.fb.cutlass_remote_cache import (
             maybe_fetch_cutlass_configs_from_remote,
