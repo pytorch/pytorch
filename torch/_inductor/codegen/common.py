@@ -441,7 +441,7 @@ def get_wrapper_codegen_for_device(
     return None
 
 
-@functools.lru_cache(None)
+@functools.cache
 def init_backend_registration() -> None:
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
@@ -2223,7 +2223,7 @@ class OptimizationContext:
     ops_name: str = ""
 
 
-@functools.lru_cache(None)
+@functools.cache
 def jinja2_env() -> Any:
     try:
         import jinja2
