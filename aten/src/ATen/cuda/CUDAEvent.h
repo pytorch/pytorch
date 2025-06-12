@@ -130,9 +130,13 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       " does not match recording stream's device ", stream.device_index(), ".");
     CUDAGuard guard(device_index_);
 
+#ifndef USE_ROCM
     // it is an error to use cudaEventRecordExternal when not doing stream capture
     unsigned int flags = (c10::cuda::currentStreamCaptureStatusMayInitCtx() != c10::cuda::CaptureStatus::None && external_) ? cudaEventRecordExternal : cudaEventRecordDefault;
     AT_CUDA_CHECK(cudaEventRecordWithFlags(event_, stream, flags));
+#else
+    AT_CUDA_CHECK(cudaEventRecord(event_, stream));
+#endif
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(at::kCUDA,
@@ -149,8 +153,12 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     if (is_created_) {
       CUDAGuard guard(stream.device_index());
       // it is an error to use cudaEventWaitExternal when not doing stream capture
+#ifndef USE_ROCM
       unsigned int flags = (c10::cuda::currentStreamCaptureStatusMayInitCtx() != c10::cuda::CaptureStatus::None && external_) ? cudaEventWaitExternal : cudaEventWaitDefault;
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, flags));
+#else
+      AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_));
+#endif
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_wait(at::kCUDA,
@@ -215,6 +223,9 @@ private:
 
   void createEvent(DeviceIndex device_index) {
     external_ = (flags_ & cudaEventExternal) != 0;
+#ifdef USE_ROCM
+    TORCH_CHECK(!external_, "External events are disallowed in rocm");
+#endif
     flags_ &= ~cudaEventExternal;
     device_index_ = device_index;
     CUDAGuard guard(device_index_);
