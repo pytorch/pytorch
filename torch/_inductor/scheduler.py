@@ -212,7 +212,7 @@ class BaseSchedulerNode:
 
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node: Optional[ir.Operation] = node
-        self.ancestors = OrderedSet[str]()
+        self.ancestors: OrderedSet[str] = OrderedSet()
         self.last_usage = OrderedSet[
             str
         ]()  # buffers that won't be used after this kernel
@@ -325,7 +325,7 @@ class BaseSchedulerNode:
         )
 
     def used_or_aliased_buffer_names(self) -> OrderedSet[str]:
-        used_names = OrderedSet[str]()
+        used_names: OrderedSet[str] = OrderedSet()
 
         deps = [
             dep.name
@@ -1238,7 +1238,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     @cache_on_self
     def _get_atomic_add_buffers(self) -> OrderedSet[str]:
-        buffers_store_as_atomic_add = OrderedSet[str]()
+        buffers_store_as_atomic_add: OrderedSet[str] = OrderedSet()
         if isinstance(self._body, LoopBody):
             for node in self._body.get_nodes():
                 if (
@@ -1441,7 +1441,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         super().set_last_usage(future_used_buffers, mutation_real_name)
         # Set self.last_usage on the snodes
         # This will be used for optimisations within the kernel
-        future_used_buffers = OrderedSet[str]()
+        future_used_buffers: OrderedSet[str] = OrderedSet()
         for node in reversed(self.snodes):
             node.set_last_usage(future_used_buffers, mutation_real_name)
             future_used_buffers.update(node.last_usage)
@@ -2032,7 +2032,7 @@ class Scheduler:
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self._graph_partition_counter = itertools.count()
 
-        self.completed_operations = OrderedSet[str]()
+        self.completed_operations: OrderedSet[str] = OrderedSet()
         self.available_buffer_names = OrderedSet(
             [
                 *V.graph.graph_inputs.keys(),
@@ -2101,6 +2101,8 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
+        if config._post_fusion_custom_pass is not None:
+            self.nodes = config._post_fusion_custom_pass(self.nodes)
         self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.combo_kernels:
@@ -2132,7 +2134,7 @@ class Scheduler:
         self.debug_draw_graph()
 
         # used during codegen:
-        self.buffer_names_to_free = OrderedSet[str]()
+        self.buffer_names_to_free: OrderedSet[str] = OrderedSet()
 
         # fx graph node to the position it appears in the graph
         # for debug attribution
@@ -2192,7 +2194,7 @@ class Scheduler:
             raise NotImplementedError(node)
 
     def create_foreach_nodes(self) -> None:
-        removed_node_names = OrderedSet[str]()
+        removed_node_names: OrderedSet[str] = OrderedSet()
         fe_nodes = []
         kept_node_names = self.name_to_fused_node.keys()
 
@@ -2513,7 +2515,7 @@ class Scheduler:
         return result
 
     def _get_unmet_dep_nodes(self, snode: BaseSchedulerNode) -> list[BaseSchedulerNode]:
-        unmet_deps = OrderedSet[str]()
+        unmet_deps: OrderedSet[str] = OrderedSet()
         if isinstance(
             snode,
             (
@@ -2565,7 +2567,7 @@ class Scheduler:
         # note self.nodes is topologically sorted
         name_to_ancestors: dict[str, OrderedSet[str]] = {}
         for node in self.nodes:
-            ancestors = OrderedSet[str]()
+            ancestors: OrderedSet[str] = OrderedSet()
             for dep in node.unmet_dependencies:
                 dep_node_name = self.name_to_buf[dep.name].defining_op_name()
                 ancestors.add(dep_node_name)
@@ -2909,7 +2911,7 @@ class Scheduler:
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
-                choice_timings.items(), key=lambda x: x[1]
+                choice_timings.items(), key=operator.itemgetter(1)
             ):
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
@@ -3227,7 +3229,11 @@ class Scheduler:
 
         def check_all_pairs(nodes: list[BaseSchedulerNode]) -> None:
             for node1_index, node1 in enumerate(nodes):
-                for node2 in nodes[node1_index + 1 :]:
+                for node2 in nodes[
+                    node1_index + 1 : node1_index
+                    + 1
+                    + config.max_fusion_buffer_group_pairwise_attempts
+                ]:
                     key = (node1, node2)
                     if key in seen:
                         continue
@@ -3505,7 +3511,7 @@ class Scheduler:
             return 0
 
         # Pick the largest buffer to guide the loop reordering
-        _numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
+        _numel, lhs_dep, rhs_dep = max(candidates, key=operator.itemgetter(0))
 
         if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
             return 0
@@ -4249,7 +4255,15 @@ class Scheduler:
             *(get_input_node_symbols(node) for _, node in input_nodes.items())
         )
 
-        return filter_symbols(candidate_symbols)
+        candidate_symbols = filter_symbols(candidate_symbols)
+
+        res: OrderedSet[sympy.Symbol] = OrderedSet()
+        for s in candidate_symbols:
+            symplified_s = V.graph.sizevars.simplify(s)
+            # use free_symbols only when s is simplified to an Integer or expr
+            res.update(symplified_s.free_symbols)
+
+        return OrderedSet(sorted(res, key=operator.attrgetter("name")))
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]

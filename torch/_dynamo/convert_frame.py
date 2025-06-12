@@ -48,6 +48,7 @@ from weakref import ReferenceType
 import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
+from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._guards import compile_context, CompileContext, CompileId, tracing
@@ -99,6 +100,7 @@ from .exc import (
     FailOnRecompileLimitHit,
     format_error_msg,
     InternalTorchDynamoError,
+    PackageError,
     RecompileLimitExceeded,
     ShortenTraceback,
     SkipCodeRecursiveException,
@@ -773,7 +775,11 @@ def _compile(
         transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> ConvertFrameReturn:
         with contextlib.ExitStack() as stack:
-            stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
+            stack.enter_context(
+                torch._dynamo.callback_handler.install_callbacks(
+                    CallbackTrigger.DYNAMO, str(CompileContext.current_compile_id())
+                )
+            )
             stack.enter_context(CompileTimeInstructionCounter.record())
             return _compile_inner(code, one_graph, hooks, transform)
 
@@ -1130,6 +1136,7 @@ def _compile(
                     UncapturedHigherOrderOpError,
                     BisectValidationException,
                     ShortenTraceback,
+                    PackageError,
                 ),
             ):
                 raise

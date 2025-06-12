@@ -270,6 +270,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         guard_or_false,
         guard_or_true,
         guard_size_oblivious,
+        is_nested_int,
     )
 
     maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
@@ -280,7 +281,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
 
     expected_stride = 1
     for x, y in reversed(tuple(zip(a.shape, a.stride()))):
-        # Skips checking strides when a dimension has length 1
+        # Skips checking strides when a dimension has length 1.
         if maybe_guard_or_false(x == 1):
             continue
 
@@ -288,8 +289,12 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
             return False
 
         # if x is 0 then a is contiguous anyway. So in the check above for non-contiguity condition we can
-        # can assume x is not 0 in expected_stride equation. This is also consistent with make_contiguous_strides_for.
-        expected_stride = expected_stride * sym_max(x, 1)
+        # can assume x is not 0 in expected_stride equation. This make the check consistent with
+        # make_contiguous_strides_for. If we make a tensor and used strides from make_contiguous_strides_for
+        # and then called definitely_contiguous we should get True.
+        expected_stride *= (
+            x if is_nested_int(x) else sym_max(x, 1)
+        )  # type:ignore[assignment]
 
     return True
 
@@ -391,12 +396,12 @@ def definitely_contiguous(a: TensorLikeType) -> bool:
 
 
 # similar to is_channels_last_contiguous_2d but return false on data dependency.
-def is_known_channels_last_contiguous_2d(a: Tensor) -> bool:
+def definitely_channels_last_contiguous_2d(a: Tensor) -> bool:
     return is_channels_last_contiguous_2d(a, false_if_dde=True)
 
 
 # similar to is_channels_last_contiguous_3d but return false on data dependency.
-def is_known_channels_last_contiguous_3d(a: Tensor) -> bool:
+def definitely_channels_last_contiguous_3d(a: Tensor) -> bool:
     return is_channels_last_contiguous_3d(a, false_if_dde=True)
 
 
@@ -427,10 +432,10 @@ def is_channels_last_contiguous(a: Tensor) -> bool:
 
 
 # similar to is_channels_last_contiguous but return false on data dependency.
-def is_known_channels_last_contiguous(a: Tensor) -> bool:
-    return is_known_channels_last_contiguous_2d(
+def definitely_channels_last_contiguous(a: Tensor) -> bool:
+    return definitely_channels_last_contiguous_2d(
         a
-    ) or is_known_channels_last_contiguous_3d(a)
+    ) or definitely_channels_last_contiguous_3d(a)
 
 
 def is_non_overlapping_and_dense(a: Tensor) -> bool:
@@ -447,7 +452,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
         return False
 
     # Short-circuits if the tensor is already contiguous or channels-last contiguous
-    if is_contiguous(a) or is_channels_last_contiguous(a):
+    if definitely_contiguous(a) or definitely_channels_last_contiguous(a):
         return True
 
     # The following is equivalent to compute_non_overlapping_and_dense in TensorImpl.cpp

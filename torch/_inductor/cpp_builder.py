@@ -127,7 +127,7 @@ def install_gcc_via_conda() -> str:
     return cxx_path
 
 
-@functools.lru_cache(None)
+@functools.cache
 def check_compiler_exist_windows(compiler: str) -> None:
     """
     Check if compiler is ready, in case end user not activate MSVC environment.
@@ -183,7 +183,6 @@ def convert_cubin_to_obj(
     # Convert .cubin to .o
     cmd = f"{ld} -r -b binary -z noexecstack -o {obj_file} {cubin_file}"
     subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
-    os.remove(cubin_file)
     # Rename .data to .rodata
     cmd = f"{objcopy} --rename-section .data=.rodata,alloc,load,readonly,data,contents {obj_file}"
     subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
@@ -201,13 +200,13 @@ def convert_cubin_to_obj(
     return obj_file
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_apple_clang(cpp_compiler: str) -> bool:
     version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
     return "Apple" in version_string.splitlines()[0]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
@@ -222,7 +221,7 @@ def _is_clang(cpp_compiler: str) -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_gcc(cpp_compiler: str) -> bool:
     # Since "clang++" ends with "g++", the regex match below would validate on it.
     if _is_clang(cpp_compiler):
@@ -230,7 +229,7 @@ def _is_gcc(cpp_compiler: str) -> bool:
     return bool(re.search(r"(gcc|g\+\+|gnu-c\+\+)", cpp_compiler))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_msvc_cl(cpp_compiler: str) -> bool:
     if not _IS_WINDOWS:
         return False
@@ -248,7 +247,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_intel_compiler(cpp_compiler: str) -> bool:
     def _check_minimal_version(compiler_version: TorchVersion) -> None:
         """
@@ -292,32 +291,32 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_gcc() -> bool:
     return _is_gcc(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_clang() -> bool:
     return _is_clang(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_intel_compiler() -> bool:
     return _is_intel_compiler(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_apple_clang() -> bool:
     return _is_apple_clang(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_msvc_cl() -> bool:
     return _is_msvc_cl(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_compiler_version_info(compiler: str) -> str:
     env = os.environ.copy()
     env["LC_ALL"] = "C"  # Don't localize output
@@ -886,7 +885,7 @@ def _get_python_related_args() -> tuple[list[str], list[str]]:
     return python_include_dirs, python_lib_path
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_conda_llvm_openmp_installed() -> bool:
     try:
         command = "conda list llvm-openmp --json"
@@ -896,7 +895,7 @@ def is_conda_llvm_openmp_installed() -> bool:
         return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def homebrew_libomp() -> tuple[bool, str]:
     try:
         # check if `brew` is installed
@@ -917,7 +916,7 @@ def homebrew_libomp() -> tuple[bool, str]:
         return False, ""
 
 
-@functools.lru_cache(None)
+@functools.cache
 def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
     try:
         output = subprocess.check_output([cpp_compiler, "-print-file-name=bin"]).decode(
@@ -931,7 +930,7 @@ def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
         pass
 
 
-@functools.lru_cache(None)
+@functools.cache
 def perload_icx_libomp_win(cpp_compiler: str) -> None:
     def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
         try:
@@ -1749,9 +1748,12 @@ class CppBuilder:
 
             """
         )
-        if device_type == "cuda":
+        if device_type == "cuda" and torch.version.hip is None:
+            from torch._inductor.codecache import _nvcc_arch_as_compile_option
+
+            current_arch = _nvcc_arch_as_compile_option()
             contents += textwrap.dedent(
-                """
+                f"""
                 find_package(CUDA REQUIRED)
 
                 find_program(OBJCOPY_EXECUTABLE objcopy)
@@ -1763,49 +1765,47 @@ class CppBuilder:
                 set(KERNEL_OBJECT_FILES "")
                 # Function to embed a single kernel
                 function(embed_gpu_kernel KERNEL_NAME PTX_FILE)
-                    set(FATBIN_BASENAME ${KERNEL_NAME}.fatbin)
-                    set(FATBIN_FILE ${CMAKE_CURRENT_BINARY_DIR}/${FATBIN_BASENAME})
-                    set(OBJECT_BASENAME ${KERNEL_NAME}.fatbin.o)
-                    set(OBJECT_FILE ${CMAKE_CURRENT_BINARY_DIR}/${OBJECT_BASENAME})
+                    set(FATBIN_BASENAME ${{KERNEL_NAME}}.fatbin)
+                    set(FATBIN_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{FATBIN_BASENAME}})
+                    set(OBJECT_BASENAME ${{KERNEL_NAME}}.fatbin.o)
+                    set(OBJECT_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{OBJECT_BASENAME}})
 
                     # --- Define UNIQUE C symbol names ---
-                    set(SYMBOL_START __${KERNEL_NAME}_start)
-                    set(SYMBOL_END __${KERNEL_NAME}_end)
-                    set(SYMBOL_SIZE __${KERNEL_NAME}_size)
-                    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" MANGLED_BASENAME ${FATBIN_FILE})
-                    set(OBJCOPY_START_SYM _binary_${MANGLED_BASENAME}_start)
-                    set(OBJCOPY_END_SYM _binary_${MANGLED_BASENAME}_end)
-                    set(OBJCOPY_SIZE_SYM _binary_${MANGLED_BASENAME}_size)
+                    set(SYMBOL_START __${{KERNEL_NAME}}_start)
+                    set(SYMBOL_END __${{KERNEL_NAME}}_end)
+                    set(SYMBOL_SIZE __${{KERNEL_NAME}}_size)
+                    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" MANGLED_BASENAME ${{FATBIN_FILE}})
+                    set(OBJCOPY_START_SYM _binary_${{MANGLED_BASENAME}}_start)
+                    set(OBJCOPY_END_SYM _binary_${{MANGLED_BASENAME}}_end)
+                    set(OBJCOPY_SIZE_SYM _binary_${{MANGLED_BASENAME}}_size)
 
                     # --- PTX to FATBIN Command & Target ---
                     add_custom_command(
-                        OUTPUT ${FATBIN_FILE}
-                        COMMAND ${CUDA_NVCC_EXECUTABLE} --fatbin ${PTX_FILE} -o ${FATBIN_FILE} ${NVCC_GENCODE_FLAGS}
+                        OUTPUT ${{FATBIN_FILE}}
+                        COMMAND ${{CUDA_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
                                 -gencode arch=compute_80,code=compute_80
-                                -gencode arch=compute_86,code=compute_86
-                                -gencode arch=compute_89,code=compute_89
-                                -gencode arch=compute_90,code=compute_90
-                        DEPENDS ${PTX_FILE}
+                                -gencode arch=compute_{current_arch},code=sm_{current_arch}
+                        DEPENDS ${{PTX_FILE}}
                     )
 
                     # --- FATBIN to Object File (.o) Command ---
                     add_custom_command(
-                        OUTPUT ${OBJECT_FILE}
-                        COMMAND ${CMAKE_LINKER} -r -b binary -z noexecstack -o ${OBJECT_FILE} ${FATBIN_FILE}
-                        COMMAND ${OBJCOPY_EXECUTABLE} --rename-section .data=.rodata,alloc,load,readonly,data,contents
-                                ${OBJECT_FILE}
-                        COMMAND ${OBJCOPY_EXECUTABLE}
-                                --redefine-sym ${OBJCOPY_START_SYM}=${SYMBOL_START}
-                                --redefine-sym ${OBJCOPY_END_SYM}=${SYMBOL_END}
-                                --redefine-sym ${OBJCOPY_SIZE_SYM}=${SYMBOL_SIZE}
-                                ${OBJECT_FILE}
-                        DEPENDS ${FATBIN_FILE}
+                        OUTPUT ${{OBJECT_FILE}}
+                        COMMAND ${{CMAKE_LINKER}} -r -b binary -z noexecstack -o ${{OBJECT_FILE}} ${{FATBIN_FILE}}
+                        COMMAND ${{OBJCOPY_EXECUTABLE}} --rename-section .data=.rodata,alloc,load,readonly,data,contents
+                                ${{OBJECT_FILE}}
+                        COMMAND ${{OBJCOPY_EXECUTABLE}}
+                                --redefine-sym ${{OBJCOPY_START_SYM}}=${{SYMBOL_START}}
+                                --redefine-sym ${{OBJCOPY_END_SYM}}=${{SYMBOL_END}}
+                                --redefine-sym ${{OBJCOPY_SIZE_SYM}}=${{SYMBOL_SIZE}}
+                                ${{OBJECT_FILE}}
+                        DEPENDS ${{FATBIN_FILE}}
                     )
-                    add_custom_target(build_kernel_object_${KERNEL_NAME} DEPENDS ${OBJECT_FILE})
+                    add_custom_target(build_kernel_object_${{KERNEL_NAME}} DEPENDS ${{OBJECT_FILE}})
 
                     # --- Add to a list for linking later ---
-                    set(KERNEL_TARGETS ${KERNEL_TARGETS} build_kernel_object_${KERNEL_NAME} PARENT_SCOPE)
-                    set(KERNEL_OBJECT_FILES ${KERNEL_OBJECT_FILES} ${OBJECT_FILE} PARENT_SCOPE)
+                    set(KERNEL_TARGETS ${{KERNEL_TARGETS}} build_kernel_object_${{KERNEL_NAME}} PARENT_SCOPE)
+                    set(KERNEL_OBJECT_FILES ${{KERNEL_OBJECT_FILES}} ${{OBJECT_FILE}} PARENT_SCOPE)
                 endfunction()
 
                 """
