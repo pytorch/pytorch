@@ -402,7 +402,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_nestedten
                                                     dropout_p,
                                                     is_causal,
                                                     scale);
-  return std::make_tuple(dq, dk, dv);
+  return std::make_tuple(std::move(dq), std::move(dk), std::move(dv));
 }
 
 
