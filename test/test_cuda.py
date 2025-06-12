@@ -2255,8 +2255,8 @@ torch.cuda.synchronize()
             g.debug_dump(os.path.join(tempdir, "out_multi_stream.dot"))
 
     @unittest.skipIf(
-        not TEST_CUDA_GRAPH,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for external events in cuda graphs",
+        not TEST_CUDA_GRAPH or TEST_WITH_ROCM,
+        "CUDA >= 11.0 required for external events in cuda graphs. rocm does not support external events",
     )
     def test_graph_timing(self):
         torch.cuda.empty_cache()
@@ -2277,7 +2277,7 @@ torch.cuda.synchronize()
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH or TEST_WITH_ROCM,
-        "CUDA >= 11.0 required for external events in cuda graphs",
+        "CUDA >= 11.0 required for external events in cuda graphs. rocm does not support external events",
     )
     def test_graph_external_wait_and_record(self):
         torch.cuda.empty_cache()
