@@ -1964,6 +1964,8 @@ class SysFunctionVariable(VariableTracker):
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
+    create_tma_experimental_metadata,
+    create_tma_stable_metadata,
     TMADescriptorMetadata,
     TritonHOPifier,
 )
@@ -2190,7 +2192,7 @@ class TMADescriptorExperimentalVariable(VariableTracker):
         self.element_size = element_size
 
     def to_metadata(self):
-        return (
+        return create_tma_experimental_metadata(
             [dim.as_proxy() for dim in self.dims],
             [dim.as_proxy() for dim in self.block_dims],
             self.element_size.as_proxy(),
@@ -2225,10 +2227,7 @@ class TMADescriptorStableVariable(VariableTracker):
         self.block_shape = block_shape
 
     def to_metadata(self):
-        # TODO(dberard) implement this
-        raise NotImplementedError(
-            "TensorDescriptor.from_tensor support is not yet implemented"
-        )
+        return create_tma_stable_metadata(self.block_shape.as_proxy())
 
     def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(

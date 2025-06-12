@@ -6061,10 +6061,12 @@ class MutationOutput(Buffer):
 
 class TMADescriptor(ExternKernel):
     """
-    An IR node representing a host-side TMA descriptor in the Triton API
-    (the ones obtained via create_{1d,2d}_tma_descriptor calls). Mostly
-    useful for user-defined Triton kernels relying on host-side TMA; but
-    can, in principle, be used for Inductor's Triton templates, too.
+    An IR node representing a generic host-side TMA descriptor in the Triton API
+    Mostly useful for user-defined Triton kernels relying on host-side TMA;
+    but can, in principle, be used for Inductor's Triton templates, too.
+
+    See TMADescriptorExperimental and TMADescriptorStable for the two implementations
+    (the old API and the new API)
     """
 
     # as TMA descriptors are immutable,
@@ -6072,17 +6074,59 @@ class TMADescriptor(ExternKernel):
     _CACHE: dict[Any, TMADescriptor] = {}
 
     @classmethod
-    def create(  # type: ignore[no-untyped-def]
-        cls,
-        tensor: IRNode,
-        dims: list[Union[int, torch.SymInt]],
-        block_dims: list[Union[int, torch.SymInt]],
-        element_size: Optional[int] = None,
-    ):
-        key = (id(tensor), dims, block_dims, element_size)
+    def _create_impl(
+        cls, tensor: IRNode, tma_meta: tuple[str, tuple[Any, ...]]
+    ) -> TMADescriptor:
+        assert len(tma_meta) == 2
+        if tma_meta[0] == "experimental":
+            return TMADescriptorExperimental(tensor, *tma_meta[1])
+        else:
+            assert tma_meta[0] == "stable"
+            return TMADescriptorStable(tensor, *tma_meta[1])
+
+    @classmethod
+    def create(
+        cls, tensor: IRNode, tma_meta: tuple[str, tuple[Any, ...]]
+    ) -> TMADescriptor:
+        key = (id(tensor), tma_meta)
         if key not in cls._CACHE:
-            cls._CACHE[key] = TMADescriptor(tensor, dims, block_dims, element_size)
+            cls._CACHE[key] = cls._create_impl(tensor, tma_meta)
         return cls._CACHE[key]
+
+    def __init__(self, tensor: IRNode, inputs, constant_args):  # type: ignore[no-untyped-def]
+        super().__init__(
+            None,
+            # link back to the underlying tensor in terms of ownership
+            # to avoid getting the underlying tensor deleted *before*
+            # the TMADescriptor node can be deleted.
+            NonOwningLayout(
+                ReinterpretView(
+                    data=tensor,
+                    layout=tensor.get_layout(),
+                )
+            ),
+            inputs,
+            tuple(constant_args),
+            None,
+        )
+
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        wrapper.generate_tma_descriptor(self)
+
+    def get_tensor(self) -> IRNode:
+        raise NotImplementedError
+
+
+class TMADescriptorExperimental(TMADescriptor):
+    """
+    the new host-side TMA Descriptor API:
+    (the ones obtained via create_{1d,2d}_tma_descriptor calls).
+
+    See also TMADescriptorStable for the new API.
+    """
 
     def __init__(
         self,
@@ -6111,26 +6155,35 @@ class TMADescriptor(ExternKernel):
         ]
 
         super().__init__(
-            None,
-            # link back to the underlying tensor in terms of ownership
-            # to avoid getting the underlying tensor deleted *before*
-            # the TMADescriptor node can be deleted.
-            NonOwningLayout(
-                ReinterpretView(
-                    data=tensor,
-                    layout=tensor.get_layout(),
-                )
-            ),
-            inputs,
-            tuple(constant_args),
-            None,
+            tensor=tensor,
+            inputs=inputs,
+            constant_args=constant_args,
         )
 
-        self.name = V.graph.register_buffer(self)
-        V.graph.register_operation(self)
+    def get_tensor(self) -> IRNode:
+        return self.tensor
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        wrapper.generate_tma_descriptor(self)
+
+class TMADescriptorStable(TMADescriptor):
+    """
+    the new host-side TMA descriptor API
+    (the ones obtained via TensorDescriptor.from_tensor).
+
+    See also TMADescriptorExperimental for the old API.
+    """
+
+    def __init__(self, tensor: IRNode, block_shape: list[Union[int, torch.SymInt]]):
+        self.tensor = tensor
+        self.block_shape = block_shape
+
+        super().__init__(
+            tensor=tensor,
+            inputs=[tensor],
+            constant_args=block_shape,
+        )
+
+    def get_tensor(self) -> IRNode:
+        return self.tensor
 
 
 class SubgraphBuffer(ExternKernel):
@@ -6315,7 +6368,7 @@ class UserDefinedTritonKernel(ExternKernel):
             if isinstance(v, TensorBox):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
                 if k in tma_descriptor_metadata:
-                    t = TMADescriptor.create(t, *tma_descriptor_metadata[k])
+                    t = TMADescriptor.create(t, tma_descriptor_metadata[k])
                 inputs.append(t)
                 kwargs[k] = t
             else:
@@ -6348,7 +6401,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.mutable_args = [
             kernel_args[key]
             for key in identify_mutated_tensors(
-                kernel, {**kernel_args, **autotuned_kwargs}
+                kernel, {**kernel_args, **autotuned_kwargs}, tma_descriptor_metadata
             )
         ]
 
