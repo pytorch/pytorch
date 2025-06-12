@@ -241,7 +241,7 @@ class AsyncCompilePoolManager:
 
     def _wakeup(self):
         if not self._ready:
-            torch._inductor.async_compile.AsyncCompile.wakeup()
+            AsyncCompile.wakeup()
             self._ready = True
 
     @staticmethod
@@ -252,6 +252,10 @@ class AsyncCompilePoolManager:
 
 
 class AsyncCompile:
+    """
+    Utilities to compile in thread pools or subprocess pools (in the case of Triton).
+    """
+
     def __init__(self) -> None:
         pass
 
@@ -308,7 +312,7 @@ class AsyncCompile:
             return
         _compile_start()
         # Pool is created on first access
-        pool = cls.process_pool()
+        cls.process_pool()
         _compile_end()
 
     @classmethod
@@ -324,7 +328,7 @@ class AsyncCompile:
                 pool.quiesce()
 
     @classmethod
-    def wakekup(cls) -> None:
+    def wakeup(cls) -> None:
         """
         If using a SubprocPool, signal the side car process to start up its
         internal ProcessPoolExecutor.

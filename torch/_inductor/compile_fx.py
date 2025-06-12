@@ -1964,7 +1964,7 @@ def compile_fx(
     """
     # Initialize AsyncCompile subproc pool as early as possible.
     if any(device.type == "cuda" for device in get_all_devices(model_)):
-        torch._inductor.async_compile.AsyncCompilePoolManager.warmup()
+        torch._inductor.async_compile.AsyncCompilePoolManager.wakeup()
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
