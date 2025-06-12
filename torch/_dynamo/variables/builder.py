@@ -1451,7 +1451,7 @@ class VariableBuilder:
             output = [
                 LazyVariableTracker.create(
                     list.__getitem__(L, i),
-                    source=SetGetItemSource(self.get_source(), i),
+                    source=NonSerializableSetGetItemSource(self.get_source(), i),
                 )
                 for i in range(list.__len__(L))
             ]
