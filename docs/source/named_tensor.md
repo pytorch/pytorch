@@ -43,7 +43,7 @@ The following factory functions support named tensors:
 - {func}`torch.tensor`
 - {func}`torch.zeros`
 
-### Named dimensions
+## Named dimensions
 
 See {attr}`~Tensor.names` for restrictions on tensor names.
 
@@ -70,7 +70,7 @@ tensors do not require all dimensions to be named.
     (None, 'C', 'H', 'W')
 ```
 
-### Name propagation semantics
+## Name propagation semantics
 
 Named tensors use names to automatically check that APIs are being called
 correctly at runtime. This occurs in a process called *name inference*.
@@ -90,7 +90,7 @@ All operations that support named tensors propagate names.
 
 
 (match_semantics-doc)=
-#### match semantics
+### match semantics
 
 
 Two names *match* if they are equal (string equality) or if at least one is ``None``.
@@ -106,7 +106,7 @@ then it errors.
     all unnamed dimensions to be named dimensions by using {meth}`~Tensor.refine_names`.
 ```
 
-#### Basic name inference rules
+### Basic name inference rules
 
 Let's see how ``match`` and ``unify`` are used in name inference in the case of
 adding two one-dim tensors with no broadcasting.
@@ -147,7 +147,7 @@ Here are two common operations that may be useful to go over:
 - Binary arithmetic ops: {ref}`unifies_names_from_inputs-doc`
 - Matrix multiplication ops: {ref}`contracts_away_dims-doc`
 
-### Explicit alignment by names
+## Explicit alignment by names
 
 Use {meth}`~Tensor.align_as` or {meth}`~Tensor.align_to` to align tensor dimensions
 by name to a specified ordering. This is useful for performing "broadcasting by names".
@@ -170,7 +170,7 @@ by name to a specified ordering. This is useful for performing "broadcasting by 
     >>> scale_channels(videos, scale)
 ```
 
-### Manipulating dimensions
+## Manipulating dimensions
 
 Use {meth}`~Tensor.align_to` to permute large amounts of dimensions without
 mentioning all of them as in required by {meth}`~Tensor.permute`.
@@ -205,7 +205,7 @@ and {meth}`~Tensor.reshape`, but have more semantic meaning to someone reading t
 ```
 
 (named_tensors_autograd-doc)=
-### Autograd support
+## Autograd support
 
 Autograd currently supports named tensors in a limited manner: autograd ignores
 names on all tensors. Gradient computation is still correct but we lose the
@@ -229,9 +229,9 @@ safety that names give us.
     tensor([-1.8107, -0.6357,  0.0783])
 ```
 
-### Currently supported operations and subsystems
+## Currently supported operations and subsystems
 
-#### Operators
+### Operators
 
 See {ref}`name_inference_reference-doc` for a full list of the supported torch and
 tensor operations. We do not yet support the following that is not covered by the link:
@@ -247,7 +247,7 @@ For ``torch.nn.functional`` operators, we support the following:
 - {func}`torch.nn.functional.sigmoid`
 - {func}`torch.nn.functional.dropout`
 
-#### Subsystems
+### Subsystems
 
 
 Autograd is supported, see {ref}`named_tensors_autograd-doc`.
@@ -274,7 +274,7 @@ If any of these would help your use case, please
 [search if an issue has already been filed](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+named+tensor%22)
 and if not, [file one](https://github.com/pytorch/pytorch/issues/new/choose).
 
-### Named tensor API reference
+## Named tensor API reference
 
 In this section please find the documentation for named tensor specific APIs.
 For a comprehensive reference for how names are propagated through other PyTorch
