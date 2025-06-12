@@ -1879,7 +1879,7 @@ def fallback_handler(kernel, add_to_fallback_set=True):
     return handler
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _warn_complex_not_supported():
     warnings.warn(
         "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
@@ -2439,28 +2439,29 @@ def require_channels_last(_, *args, **kwargs):
     return args, kwargs
 
 
-def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
-    def apply_constraint(arg, fake_arg):
-        if isinstance(arg, ir.IRNode):
-            meta_stride_expr = [
-                s.node.expr if isinstance(s, torch.SymInt) else s
-                for s in fake_arg.stride()
-            ]
-            return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
-        if isinstance(arg, dict):
-            return {
-                key: apply_constraint(arg[key], fake_arg[key]) for key in arg.keys()
-            }
-        elif isinstance(arg, (tuple, list)):
-            return type(arg)(
-                apply_constraint(a, f_a) for (a, f_a) in zip(arg, fake_arg)
-            )
-        return arg
+def constrain_to_fake_tensor(arg, fake_arg):
+    if isinstance(arg, ir.IRNode):
+        meta_stride_expr = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in fake_arg.stride()
+        ]
+        return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
+    if isinstance(arg, dict):
+        return {
+            key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg.keys()
+        }
+    elif isinstance(arg, (tuple, list)):
+        return type(arg)(
+            constrain_to_fake_tensor(a, f_a) for (a, f_a) in zip(arg, fake_arg)
+        )
+    return arg
 
+
+def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
     args = tuple(
-        apply_constraint(arg, fake_arg) for arg, fake_arg in zip(args, fake_args)
+        constrain_to_fake_tensor(arg, fake_arg)
+        for arg, fake_arg in zip(args, fake_args)
     )
-    kwargs = {k: apply_constraint(v, fake_kwargs[k]) for k, v in kwargs.items()}
+    kwargs = {k: constrain_to_fake_tensor(v, fake_kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
 
 

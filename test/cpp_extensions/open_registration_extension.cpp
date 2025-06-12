@@ -126,7 +126,7 @@ bool custom_add_called() {
 }
 
 void fallback_with_undefined_tensor() {
-  at::Tensor first = at::empty((2,3)).to(at::DeviceType::PrivateUse1);
+  at::Tensor first = at::empty({2, 3}).to(at::DeviceType::PrivateUse1);
   at::Tensor second = at::Tensor();
   at::Tensor step = at::empty({}).fill_(2).to(at::DeviceType::PrivateUse1);
   at::Tensor grad_scale = at::empty({}).fill_(0.00001).to(at::DeviceType::PrivateUse1);
