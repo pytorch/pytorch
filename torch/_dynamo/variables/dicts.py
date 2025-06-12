@@ -113,6 +113,7 @@ def is_hashable(x):
                 variables.SymNodeVariable,
                 variables.ConstantVariable,
                 variables.EnumVariable,
+                variables.FrozensetVariable,
                 variables.UserDefinedClassVariable,
                 variables.UserFunctionVariable,
                 variables.SkipFunctionVariable,
@@ -569,9 +570,11 @@ class ConstDictVariable(VariableTracker):
         elif name == "__or__":
             assert len(args) == 1
             if not isinstance(args[0], ConstDictVariable):
-                raise TypeError(
-                    f"unsupported operand type(s) for |: 'dict' and '{args[0].python_type().__name__}'"
+                msg = (
+                    f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
+                    f"and '{args[0].python_type().__name__}'"
                 )
+                raise_observed_exception(TypeError, tx, args=[msg])
 
             self.install_dict_keys_match_guard()
             new_dict_vt = self.clone(
@@ -939,7 +942,7 @@ class FrozensetVariable(SetVariable):
         return frozenset
 
     def as_python_constant(self):
-        return {k.vt.as_python_constant() for k in self.set_items}
+        return frozenset({k.vt.as_python_constant() for k in self.set_items})
 
     def reconstruct(self, codegen: "PyCodegen"):
         codegen.foreach([x.vt for x in self.set_items])
@@ -970,6 +973,14 @@ class FrozensetVariable(SetVariable):
             # In[3]: s
             # frozenset({1, 2})
             return ConstantVariable.create(None)
+        elif name in (
+            "copy",
+            "difference",
+            "intersection",
+            "symmetric_difference",
+        ):
+            r = super().call_method(tx, name, args, kwargs)
+            return FrozensetVariable(r.items)
         return super().call_method(tx, name, args, kwargs)
 
 
