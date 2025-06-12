@@ -5521,8 +5521,9 @@ class ShapeEnv:
                     )
                     msg = (
                         f"You marked {self._debug_name(source)} as dynamic but your code "
-                        f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
-                        f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        f"specialized it to be a constant ({val}). If you're using mark_dynamic, "
+                        f"either remove it or use maybe_mark_dynamic. If you're using Dim.DYNAMIC, "
+                        f"replace it with either Dim.STATIC or Dim.AUTO."
                         + (
                             "\n\nFramework stack:\n" + "".join(framework_stack.format())
                             if framework_stack
