@@ -367,12 +367,12 @@ def get_proxy_slot(
     return res
 
 
-def snapshot_fake(val: Tensor) -> Optional[Tensor]:
+def snapshot_fake(val: Tensor, include_real: bool = False) -> Optional[Tensor]:
     # val.detach() will also eventually call fast_detach(),
     # but this saves us a full trip into __torch_dispatch__
     # (snapshot_fake is called a lot)
     if isinstance(val, FakeTensor):
-        return fast_detach(val.fake_mode, val)
+        return fast_detach(val.fake_mode, val, include_real)
     else:
         return val.detach()
 
@@ -393,9 +393,9 @@ _ExtractValType = Optional[
 ]
 
 
-def extract_val(val: _ExtractValType) -> _ExtractValType:
+def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractValType:
     if is_fake(val):
-        return snapshot_fake(val)
+        return snapshot_fake(val, include_real=include_real)
     elif isinstance(val, py_sym_types):
         return val
     elif isinstance(val, _AnyScriptObject):
@@ -494,7 +494,9 @@ def maybe_enable_thunkify() -> Generator[None, None, None]:
 # grad_fn, _base (_base actually may be set due to recursive call to
 # ADInplaceOrView, but you shouldn't rely on it.)
 def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
-    proxy.node.meta["val"] = extract_val(val)
+    proxy.node.meta["val"] = extract_val(
+        val, include_real=(proxy.node.op == "placeholder")
+    )
 
     with _enable_thunkify(proxy.tracer):  # type: ignore[arg-type]
         # Best effort tensor_meta setting; prefer using val!
