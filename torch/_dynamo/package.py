@@ -358,12 +358,16 @@ class EagerCacheArtifact(PrecompileCacheArtifact[Any]):
         return pickle.loads(self.content)
 
 
+_Backends = dict[_BackendId, PrecompileCacheArtifact[Any]]
+
+
 class DynamoStore(abc.ABC):
     """
     A DynamoStore tracks active CompilePackages, and provides methods to store and retrieve them.
 
     This is an abstract base class for different storage implementations.
     """
+
     def record_package(self, package: CompilePackage) -> None:
         """
         Records a package to PrecompileContext, so that it can be serialized later.
@@ -384,7 +388,12 @@ class DynamoStore(abc.ABC):
         )
 
     @abc.abstractmethod
-    def write(self, dynamo: _DynamoCacheEntry, backends: dict[str, bytes], path: str) -> None:
+    def write(
+        self,
+        dynamo: _DynamoCacheEntry,
+        backends: _Backends,
+        path: str,
+    ) -> None:
         """
         Abstract method to write dynamo cache entry and backends to storage.
 
@@ -399,7 +408,7 @@ class DynamoStore(abc.ABC):
         """
         Saves a package to a given path. Grabs backends from PrecompileContext.
         """
-        backend_content = {}
+        backend_content: _Backends = {}
         cache_entry = package.cache_entry()
         for backend_id in cache_entry.backend_ids:
             serialized_backend = PrecompileContext.serialize_artifact_by_key(backend_id)
@@ -407,12 +416,13 @@ class DynamoStore(abc.ABC):
                 raise RuntimeError(
                     f"Backend {backend_id} is not found in the given backends"
                 )
+            assert isinstance(serialized_backend, PrecompileCacheArtifact)
             backend_content[backend_id] = serialized_backend
 
         self.write(cache_entry, backend_content, key)
 
     @abc.abstractmethod
-    def read(self, path: str) -> tuple[_DynamoCacheEntry, dict]:
+    def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
         """
         Abstract method to read dynamo cache entry and backends from storage.
 
@@ -443,16 +453,22 @@ class InMemoryDynamoStore(DynamoStore):
     """
     A DynamoStore implementation that keeps state about CompilePackages in memory.
     """
-    def __init__(self):
-        self.packages = {}  # Dict mapping package IDs to (dynamo, backends) tuples
 
-    def write(self, dynamo: _DynamoCacheEntry, backends: dict[str, bytes], path: str) -> None:
+    def __init__(self) -> None:
+        self.packages: dict[str, tuple[_DynamoCacheEntry, _Backends]] = {}
+
+    def write(
+        self,
+        dynamo: _DynamoCacheEntry,
+        backends: _Backends,
+        path: str,
+    ) -> None:
         """
         Store the dynamo cache entry and backends in memory instead of writing to disk.
         """
         self.packages[path] = (dynamo, backends)
 
-    def read(self, path: str) -> tuple[_DynamoCacheEntry, dict]:
+    def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
         """
         Read dynamo cache entry and backends from memory.
         """
@@ -466,6 +482,7 @@ class DiskDynamoStore(DynamoStore):
     """
     A DynamoStore implementation that keeps state about CompilePackages on disk.
     """
+
     def __init__(self, path_prefix: str = ""):
         """
         Initialize a DiskDynamoStore with a path prefix.
@@ -475,7 +492,12 @@ class DiskDynamoStore(DynamoStore):
         """
         self.path_prefix = path_prefix
 
-    def write(self, dynamo: _DynamoCacheEntry, backends: dict[str, bytes], path: str) -> None:
+    def write(
+        self,
+        dynamo: _DynamoCacheEntry,
+        backends: _Backends,
+        path: str,
+    ) -> None:
         """
         Write dynamo cache entry and backends to disk.
         """
@@ -487,7 +509,7 @@ class DiskDynamoStore(DynamoStore):
         except Exception as e:
             raise RuntimeError(f"Failed to save package to {path}: {e}") from e
 
-    def read(self, path: str) -> tuple[_DynamoCacheEntry, dict]:
+    def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
         """
         Read dynamo cache entry and backends from disk.
         """
