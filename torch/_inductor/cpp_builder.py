@@ -1313,6 +1313,9 @@ def get_cpp_torch_device_options(
                 "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
             )
 
+    if device_type == "mps":
+        definitions.append(" USE_MPS")
+
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
 
