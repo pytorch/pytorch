@@ -3017,7 +3017,7 @@ class InstructionTranslatorBase(
             self.popn(2)
 
     def LOAD_FAST_CHECK(self, inst):
-        if isinstance(self.symbolic_locals[inst.argval], NullVariable):
+        if isinstance(self.symbolic_locals.get(inst.argval, None), NullVariable):
             unimplemented_v2(
                 gb_type="LOAD_FAST_CHECK on uninitialized variable",
                 context=inst.argval,

@@ -6899,6 +6899,17 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = torch.compile(f, backend="aot_eager")()
         self.assertEqual(ref, res)
 
+    def test_delete_local(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y = x + 1
+            del y
+            z = y + 1
+            return z
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            fn(torch.ones(3))
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
