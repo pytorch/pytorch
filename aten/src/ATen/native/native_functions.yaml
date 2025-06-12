@@ -357,8 +357,7 @@
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: abs_out
-    MPS: abs_out_mps
+    CPU, CUDA, MPS: abs_out
     SparseCPU, SparseCUDA: abs_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: abs_sparse_csr_out
   tags: pointwise
@@ -527,8 +526,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: acos_out
-    MPS: acos_out_mps
+    CPU, CUDA, MPS: acos_out
   tags: pointwise
 
 # arccos, alias of acos
@@ -982,8 +980,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: asin_out
-    MPS: asin_out_mps
+    CPU, CUDA, MPS: asin_out
     SparseCPU, SparseCUDA: asin_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: asin_sparse_csr_out
   tags: pointwise
@@ -1020,8 +1017,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: atan_out
-    MPS: atan_out_mps
+    CPU, CUDA, MPS: atan_out
     SparseCPU, SparseCUDA: atan_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: atan_sparse_csr_out
   tags: pointwise
@@ -1852,8 +1848,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: cosh_out
-    MPS: cosh_out_mps
+    CPU, CUDA, MPS: cosh_out
   tags: pointwise
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
@@ -2633,8 +2628,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: expm1_out
-    MPS: expm1_out_mps
+    CPU, CUDA, MPS: expm1_out
     SparseCPU, SparseCUDA: expm1_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: expm1_sparse_csr_out
   tags: pointwise
@@ -5172,7 +5166,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: hardshrink_out
+    CPU, CUDA, MPS: hardshrink_out
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   structured_delegate: hardshrink.out
@@ -5184,7 +5178,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: hardshrink_backward_out
+    CPU, CUDA, MPS: hardshrink_backward_out
 
 - func: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd) -> Tensor
   structured_delegate: hardshrink_backward.grad_input
@@ -5436,8 +5430,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: sinh_out
-    MPS: sinh_out_mps
+    CPU, CUDA, MPS: sinh_out
     SparseCPU, SparseCUDA: sinh_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sinh_sparse_csr_out
 
@@ -11906,8 +11899,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA: hardsigmoid_out
-    MPS: hardsigmoid_out_mps
+    CPU, CUDA, MPS: hardsigmoid_out
     QuantizedCPU: hardsigmoid_out_quantized_cpu
 
 - func: hardsigmoid(Tensor self) -> Tensor
@@ -11928,8 +11920,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA: hardsigmoid_backward_out
-    MPS: hardsigmoid_backward_out_mps
+    CPU, CUDA, MPS: hardsigmoid_backward_out
 
 - func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
   structured_delegate: hardsigmoid_backward.grad_input
@@ -11973,28 +11964,24 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA: hardswish_out
-    MPS: hardswish_out_mps
+    CPU, CUDA, MPS: hardswish_out
 
 - func: hardswish(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA: hardswish
-    MPS: hardswish_mps
+    CPU, CUDA, MPS: hardswish
 
 - func: hardswish_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA: hardswish_
-    MPS: hardswish_mps_
+    CPU, CUDA, MPS: hardswish_
 
 - func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
   dispatch:
-    CPU, CUDA: hardswish_backward
-    MPS: hardswish_backward_mps
+    CPU, CUDA, MPS: hardswish_backward
   autogen: hardswish_backward.out
 
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
@@ -12003,8 +11990,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA: leaky_relu_out
-    MPS: leaky_relu_out_mps
+    CPU, CUDA, MPS: leaky_relu_out
     QuantizedCPU: leaky_relu_out_quantized_cpu
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
@@ -12020,8 +12006,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA: leaky_relu_backward_out
-    MPS: leaky_relu_backward_out_mps
+    CPU, CUDA, MPS: leaky_relu_backward_out
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result) -> Tensor
   structured_delegate: leaky_relu_backward.grad_input
