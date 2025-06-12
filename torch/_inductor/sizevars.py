@@ -303,11 +303,16 @@ class SizeVarAllocator:
 
         return [x for x in sizes if x is not None], reindex, prune
 
+    # Note - [On Statically Known]
     # The statically_known_* family of functions below NEVER guard, they could return True if the
     # asked questions can be answered without guarding otherwise they return False.
-    # Those are similar to statically_known_true in symbolic_shapes but operate on sympy expressions 
-    # instead of symnodes.
+    # Those are similar to statically_known_true in symbolic_shapes but operate on sympy
+    # expressions instead of symnodes.
     def statically_known_true(self, expr: Union[sympy.Basic, bool]) -> bool:
+        """
+        Returns true if an expression is always true (symbolically or via guards),
+        false otherwise. Never add guards, or throw data dependent errors.
+        """
         return statically_known_true(self.shape_env, expr)
 
     def statically_known_equals(
@@ -360,6 +365,11 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
+        # The reason we skip unbacked here is that we want to avoid the cost of trying to eval this symbolically.
+        if has_free_unbacked_symbols(numerator) or has_free_unbacked_symbols(
+            denominator
+        ):
+            return False
         expr = sympy.Eq(numerator % denominator, 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 
@@ -542,7 +552,7 @@ class SizeVarAllocator:
 
     def size_hints(
         self,
-        exprs: Iterable[Expr],
+        exprs: Iterable[Union[Expr, int]],
         *,
         fallback: Optional[int] = None,
     ) -> tuple[int, ...]:
