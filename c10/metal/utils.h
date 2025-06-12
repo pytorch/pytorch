@@ -85,6 +85,45 @@ struct OpMathType<bfloat> {
   using type = float;
 };
 #endif
+
+// Type promotion structure for higher precision accumulation
+template <typename T>
+struct AccumulationType {
+  using type = T;
+  static type to_accum(T val) {
+    return val;
+  }
+  static T from_accum(type val) {
+    return val;
+  }
+};
+
+// Specialization for half - promote to float for accumulation
+template <>
+struct AccumulationType<half> {
+  using type = float;
+  static type to_accum(half val) {
+    return static_cast<float>(val);
+  }
+  static half from_accum(type val) {
+    return static_cast<half>(val);
+  }
+};
+
+#if __METAL_VERSION__ >= 310
+// Specialization for bfloat - promote to float for accumulation
+template <>
+struct AccumulationType<bfloat> {
+  using type = float;
+  static type to_accum(bfloat val) {
+    return static_cast<float>(val);
+  }
+  static bfloat from_accum(type val) {
+    return static_cast<bfloat>(val);
+  }
+};
+#endif
+
 } // namespace detail
 
 template <typename T>
