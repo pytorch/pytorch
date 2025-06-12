@@ -927,6 +927,19 @@ class SetVariable(ConstDictVariable):
             return variables.BuiltinVariable(op.get(name)).call_function(
                 tx, [self, other], {}
             )
+        elif name in ("__and__", "__or__", "__xor__", "__sub__"):
+            m = {
+                "__and__": "intersection",
+                "__or__": "union",
+                "__xor__": "symmetric_difference",
+                "__sub__": "difference",
+            }.get(name)
+            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+                msg = ConstantVariable.create(
+                    f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
+            return self.call_method(tx, m, args, kwargs)
         elif name in ("__iand__", "__ior__", "__ixor__", "__isub__"):
             if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
                 msg = ConstantVariable.create(
@@ -946,18 +959,6 @@ class SetVariable(ConstDictVariable):
                 return ConstantVariable.create(False)
             r = self.call_method(tx, "symmetric_difference", args, kwargs)
             return ConstantVariable.create(len(r.set_items) == 0)
-        elif name == "__sub__":
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        ConstantVariable.create(
-                            f"unsupported operand type(s) for -: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
-                        )
-                    ],
-                )
-            return self.call_method(tx, "difference", args, kwargs)
         elif name in cmp_name_to_op_mapping:
             if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
                 return ConstantVariable.create(NotImplemented)
