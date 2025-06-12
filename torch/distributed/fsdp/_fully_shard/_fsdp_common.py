@@ -26,9 +26,9 @@ if torch._running_with_deploy():
 else:
 
     def detect_compiled_autograd():
-        assert not torch.compiler.is_compiling(), (
-            "`detect_compiled_autograd()` is designed to be called in eager mode"
-        )
+        assert (
+            not torch.compiler.is_compiling()
+        ), "`detect_compiled_autograd()` is designed to be called in eager mode"
         global _compiled_autograd_enabled
         import torch._dynamo.compiled_autograd as ca
 
@@ -115,6 +115,13 @@ def _is_composable_with_fsdp(module: nn.Module) -> bool:
 
 def _get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Size:
     padded_dim0 = math.ceil(tensor_size[0] / dim0_factor) * dim0_factor
+    return torch.Size([padded_dim0]) + tensor_size[1:]
+
+
+def _get_2d_dim0_padded_size(
+    tensor_size: torch.Size, dim0_factor: int, dim0_2d_factor: int
+) -> torch.Size:
+    padded_dim0 = math.ceil(tensor_size[0] / dim0_factor / dim0_2d_factor) * dim0_factor
     return torch.Size([padded_dim0]) + tensor_size[1:]
 
 

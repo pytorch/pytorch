@@ -387,16 +387,18 @@ def foreach_reduce(
         reduce_scatter_group, all_reduce_group, reduce_dtype, device.type
     )
     world_size = reduce_scatter_group.size()
+    all_reduce_world_size = all_reduce_group.size()
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
             continue
-        assert unsharded_grad.size(shard_dim) % world_size == 0, (
-            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
-        )
+        assert (
+            unsharded_grad.size(shard_dim) % world_size == 0
+        ), f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
         chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
         unsharded_grads[i] = torch.cat(chunks, dim=0)
     padded_unsharded_sizes = tuple(
-        _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
+        _get_dim0_padded_size(grad.size(), world_size * all_reduce_world_size)
+        for grad in unsharded_grads
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
@@ -456,7 +458,6 @@ def foreach_reduce(
                 all_reduce_input = reduce_output
                 all_reduce_event = all_reduce_stream.record_event()
                 """
-                all_reduce_world_size = all_reduce_group.size()
                 all_reduce_input_numel = reduce_scatter_output_numel
                 all_reduce_output_numel = (
                     all_reduce_input_numel // all_reduce_world_size
@@ -547,12 +548,14 @@ def foreach_reduce(
                     and fsdp_param.sharded_param_fully_shard.dtype
                     != new_sharded_dtensor_grad.dtype
                 ):
+                    torch.distributed.breakpoint()
                     fsdp_param.sharded_param_fully_shard.grad = (
                         new_sharded_dtensor_grad.to(
                             fsdp_param.sharded_param_fully_shard.dtype
                         )
                     )
                 else:
+                    torch.distributed.breakpoint()
                     fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad
                 fsdp_param._setattr_on_modules(fsdp_param.sharded_param_fully_shard)
             if not compiled_autograd_enabled():

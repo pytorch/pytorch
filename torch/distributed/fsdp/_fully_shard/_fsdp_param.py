@@ -372,6 +372,7 @@ class FSDPParam:
         self.sharded_size = _get_dim_chunked_size(
             sharded_param, param_data.size(), dim=shard_dim
         )
+        torch.distributed.breakpoint()
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
 
         replicate_rank = self.mesh_info.replicate_mesh_rank
