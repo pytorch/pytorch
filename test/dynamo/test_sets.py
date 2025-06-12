@@ -107,6 +107,7 @@ class TestSetGuards(LoggingTestCase):
             "Dynamo",
             "Inductor",
             "PyTorch",
+            torch.sin,
         }
         cnts = CompileCounter()
 
