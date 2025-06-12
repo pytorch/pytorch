@@ -40,7 +40,7 @@ if [[ $PYLONG_API_CHECK == 0 ]]; then
 fi
 set -ex -o pipefail
 
-"$SCRIPT_HELPERS_DIR"/build_pytorch.bat
+"$SCRIPT_HELPERS_DIR"/build_pytorch.ps1
 
 assert_git_not_dirty
 
