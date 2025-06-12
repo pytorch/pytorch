@@ -7003,13 +7003,12 @@ class ShapeEnv:
                 stack_info=True if log.getEffectiveLevel() < logging.WARNING else False,
             )
 
-    def _get_user_frame(self) -> types.FrameType:
+    def _get_user_frame(self) -> Optional[types.FrameType]:
         frame = inspect.currentframe()
         while frame is not None:
             if frame.f_code.co_filename not in uninteresting_files():
                 return frame
             frame = frame.f_back
-        assert frame is not None
         return frame
 
     def _get_stack_summary(
@@ -7019,11 +7018,12 @@ class ShapeEnv:
         if floc is None:
             frame = self._get_user_frame()
             try:
-                floc = traceback.FrameSummary(
-                    frame.f_code.co_filename,
-                    frame.f_lineno,
-                    frame.f_code.co_name,
-                )
+                if frame is not None:
+                    floc = traceback.FrameSummary(
+                        frame.f_code.co_filename,
+                        frame.f_lineno,
+                        frame.f_code.co_name,
+                    )
             finally:
                 del frame
 
