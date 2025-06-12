@@ -45,13 +45,13 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  libtorch-linux-jammy-cuda12_6-py3_10-gcc11-debug-build:
-    name: libtorch-linux-jammy-cuda12.6-py3.10-gcc11-debug
+  libtorch-linux-jammy-cuda12_8-py3_10-gcc11-debug-build:
+    name: libtorch-linux-jammy-cuda12.8-py3.10-gcc11-debug
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: libtorch-linux-jammy-cuda12.6-py3.10-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc11
+      build-environment: libtorch-linux-jammy-cuda12.8-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       build-generates-artifacts: false
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "linux.4xlarge"
@@ -62,14 +62,14 @@ jobs:
     secrets: inherit
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  linux-jammy-cuda12_6-py3_10-gcc11-no-ops-build:
-    name: linux-jammy-cuda12.6-py3.10-gcc11-no-ops
+  linux-jammy-cuda12_8-py3_10-gcc11-no-ops-build:
+    name: linux-jammy-cuda12.8-py3.10-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.6-py3.10-gcc11-no-ops
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-no-ops
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
