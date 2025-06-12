@@ -32,7 +32,7 @@ if [[ "$OS" == "windows-arm64" ]]; then
         ./windows/arm64/build_pytorch.bat
     fi
 else
-    ./windows/internal/build_wheels.bat
+    ./windows/internal/build_wheels.ps1
 fi
 
 echo "Free space on filesystem after build:"
