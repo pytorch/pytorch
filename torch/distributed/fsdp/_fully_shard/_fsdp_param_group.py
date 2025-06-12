@@ -49,7 +49,7 @@ reference to avoid holding onto memory after forward.
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
-    def lazy_init(self, device: torch.device, mempool: Optional[torch.cuda.MemPool]):
+    def lazy_init(self, device: torch.device):
         self.device_handle = _get_device_handle(device.type)
         # Setting the all-gather/reduce-scatter streams to be higher priority
         # can help avoid some issues where their copies in/out are delayed and
@@ -78,7 +78,6 @@ class FSDPCommContext:
         self.reduce_scatter_state: Optional[ReduceScatterState] = None
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: list[FSDPParamGroup] = []  # will cause ref cycles
-        self.mempool = mempool
 
     def get_all_gather_streams(
         self, async_op: bool, training_state: TrainingState
@@ -112,7 +111,7 @@ class AllReduceState(NamedTuple):
 class FSDPParamGroup:
     """This class represents a parameter group to communicate together."""
 
-    _orig_dtype: torch.dtype
+    _orig_dtype: Optional[torch.dtype]
     _reduce_dtype: Optional[torch.dtype]
 
     def __init__(
@@ -125,6 +124,7 @@ class FSDPParamGroup:
         shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]],
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
+        allocate_memory_from_process_group: bool = False,
     ):
         self.modules = modules  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, modules)
@@ -148,6 +148,7 @@ class FSDPParamGroup:
         self.device_handle = _get_device_handle(device.type)
         self.mp_policy = mp_policy
         self.offload_policy = offload_policy
+        self.allocate_memory_from_process_group = allocate_memory_from_process_group
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
         self._sharded_state = ShardedState.SHARDED
@@ -213,22 +214,27 @@ class FSDPParamGroup:
     def _init_mp_dtypes(self) -> None:
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_dtype_attrs(self.mp_policy)
-        orig_dtypes = {fsdp_param.orig_dtype for fsdp_param in self.fsdp_params}
-        if len(orig_dtypes) != 1:
-            # This can be relaxed if we copy-out for the reduce-scatter
+        trainable_params: list[FSDPParam] = [
+            p for p in self.fsdp_params if p.sharded_param.requires_grad
+        ]
+        orig_dtypes = {p.orig_dtype for p in trainable_params}
+        reduce_dtypes = {p.reduce_dtype for p in trainable_params}
+        if len(trainable_params) > 0 and len(orig_dtypes) != 1:
+            # Models may have no grad params
             raise AssertionError(
                 f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
             )
-        self._orig_dtype = next(iter(orig_dtypes))
-        reduce_dtypes = {fsdp_param.reduce_dtype for fsdp_param in self.fsdp_params}
-        if len(reduce_dtypes) != 1:
+        self._orig_dtype = next(iter(orig_dtypes)) if len(trainable_params) else None
+        if len(trainable_params) > 0 and len(reduce_dtypes) != 1:
             # This can be relaxed if we issue one reduce-scatter per reduce
             # dtype (but we would need a way for users to specify multiple
             # reduce dtypes)
             raise AssertionError(
                 f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
             )
-        self._reduce_dtype = next(iter(reduce_dtypes))
+        self._reduce_dtype = (
+            next(iter(reduce_dtypes)) if len(trainable_params) else None
+        )
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -272,7 +278,7 @@ class FSDPParamGroup:
                 async_op,
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
-                self.comm_ctx.mempool,
+                self.allocate_memory_from_process_group,
             )
 
     def wait_for_unshard(self):
@@ -458,7 +464,7 @@ class FSDPParamGroup:
                 self.all_reduce_grads,
                 self._partial_reduce_output,
                 self._all_reduce_hook,
-                self.comm_ctx.mempool,
+                self.allocate_memory_from_process_group,
             )
             self.comm_ctx.reduce_scatter_state = ReduceScatterState(
                 reduce_scatter_input, reduce_scatter_event

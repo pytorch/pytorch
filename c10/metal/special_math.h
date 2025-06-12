@@ -6,30 +6,44 @@
 namespace c10 {
 namespace metal {
 
-// Translated to metal from https://www.johndcook.com/cpp_erf.html
-
+/*
+ * Approximation to the error function.
+ * Based on code from:
+ * https://stackoverflow.com/questions/35148198/efficient-faithfully-rounded-implementation-of-error-function-erff#answer-35148199
+ * Copy-n-pasted from
+ * https://github.com/ml-explore/mlx/blob/2e8cf0b4506c200a5c2d199ecbbf655fdf4c2ce2/mlx/backend/metal/kernels/erf.h#L11
+ */
 template <typename T>
-inline T erf(T x) {
-  T a1 = 0.254829592;
-  T a2 = -0.284496736;
-  T a3 = 1.421413741;
-  T a4 = -1.453152027;
-  T a5 = 1.061405429;
-  T p = 0.3275911;
+inline float erf(T x) {
+  const auto a = static_cast<float>(x);
+  const auto t = ::metal::abs(a);
+  const auto s = a * a;
+  if (t > 0.927734375f) {
+    // maximum error 0.99527 ulp
+    auto r = ::metal::fma(
+        -1.72853470e-5f, t, 3.83197126e-4f); // -0x1.220000p-16,0x1.91cfb2p-12
+    const auto u = ::metal::fma(
+        -3.88396438e-3f, t, 2.42546219e-2f); // -0x1.fd1438p-9, 0x1.8d6342p-6
+    r = ::metal::fma(r, s, u);
+    r = ::metal::fma(r, t, -1.06777877e-1f); // -0x1.b55cb8p-4
+    r = ::metal::fma(r, t, -6.34846687e-1f); // -0x1.450aa0p-1
+    r = ::metal::fma(r, t, -1.28717512e-1f); // -0x1.079d0cp-3
+    r = ::metal::fma(r, t, -t);
+    // TODO, replace with expm1 when implemented
+    r = 1.0f - ::metal::exp(r);
+    r = ::metal::copysign(r, a);
+    return r;
+  }
 
-  // Save the sign of x
-  int sign = 1;
-  if (x < 0)
-    sign = -1;
-  x = ::metal::fabs(x);
-
-  // A&S formula 7.1.26
-  T t = 1.0 / (1.0 + p * x);
-  T y = 1.0 -
-      (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t *
-          ::metal::exp(-x * x);
-
-  return sign * y;
+  // maximum error 0.98929 ulp
+  auto r = -5.96761703e-4f; // -0x1.38e000p-11
+  r = ::metal::fma(r, s, 4.99119423e-3f); //  0x1.471a58p-8
+  r = ::metal::fma(r, s, -2.67681349e-2f); // -0x1.b691b2p-6
+  r = ::metal::fma(r, s, 1.12819925e-1f); //  0x1.ce1c44p-4
+  r = ::metal::fma(r, s, -3.76125336e-1f); // -0x1.812700p-2
+  r = ::metal::fma(r, s, 1.28379166e-1f); //  0x1.06eba8p-3
+  r = ::metal::fma(r, a, a);
+  return r;
 }
 
 template <typename T>
@@ -478,14 +492,6 @@ inline float zeta(float x, float q) {
   return s;
 }
 
-template <typename T0>
-inline float polygamma(const int64_t order, const T0 input) {
-  float x = input;
-  float n = order;
-  float sgn = ((order % 2) ? 1 : -1);
-  return sgn * gamma(n + 1) * zeta(n + 1, x);
-}
-
 inline float calc_digamma_positive_domain(float x) {
   constexpr float DIGAMMA_COEF[7] = {
       8.33333333333333333333E-2,
@@ -546,6 +552,19 @@ inline float digamma(T0 x) {
   }
 }
 
+template <typename T0>
+inline float polygamma(const int64_t order, const T0 input) {
+  // Filter out n == 0.
+  if (order == 0) {
+    return digamma(input);
+  }
+
+  float x = input;
+  float n = order;
+  float sgn = ((order % 2) ? 1 : -1);
+  return sgn * gamma(n + 1) * zeta(n + 1, x);
+}
+
 template <typename T>
 inline ::metal::enable_if_t<is_scalar_floating_point_v<T>, T> sinc(T a) {
   if (a == static_cast<T>(0)) {
@@ -598,20 +617,6 @@ inline T spherical_bessel_j0(T x) {
   return static_cast<T>(::metal::sin(x) / x);
 }
 
-// Compute log(1+x) without losing precision for small values of x
-// Adapted from https://www.johndcook.com/blog/cpp_log_one_plus_x/
-template <typename T>
-inline float log1p(T x) {
-  // x is large enough that the obvious evaluation is OK
-  if (::metal::fabs(x) > 1E-4) {
-    return ::metal::log(1. + x);
-  }
-
-  // Use Taylor approx. log(1 + x) = x - x^2/2 with error roughly x^3/3
-  // Since |x| < 10^-4, |x|^3 < 10^-12, relative error less than 10^-8
-  return (-0.5 * x + 1.0) * x;
-}
-
 template <typename T>
 inline float xlog1py(T x, T y) {
   if (::metal::isnan(y)) {
@@ -622,7 +627,7 @@ inline float xlog1py(T x, T y) {
     return x;
   }
 
-  return x * log1p(y);
+  return x * ::c10::metal::log1p(y);
 }
 
 template <typename T>
@@ -1752,6 +1757,37 @@ inline float hermite_polynomial_h_forward(T x, int64_t n) {
 
   return r;
 } // hermite_polynomial_h_forward(T x, int64_t n)
+
+template <typename T>
+inline float hermite_polynomial_he_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return x;
+  }
+
+  if (n > getHermitianLimit<T>()) {
+    return NAN;
+  }
+
+  float p = 1.0;
+  float q = x;
+  float r;
+
+  for (int64_t k = 1; k < n; k++) {
+    r = x * q - k * p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // hermite_polynomial_he_forward(T x, int64_t n)
 
 } // namespace metal
 } // namespace c10

@@ -116,8 +116,8 @@ void PrefixStore::queuePush(
   store_->queuePush(joinKey(key), value);
 }
 
-std::vector<uint8_t> PrefixStore::queuePop(const std::string& key) {
-  return store_->queuePop(joinKey(key));
+std::vector<uint8_t> PrefixStore::queuePop(const std::string& key, bool block) {
+  return store_->queuePop(joinKey(key), block);
 }
 
 int64_t PrefixStore::queueLen(const std::string& key) {

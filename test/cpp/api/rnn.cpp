@@ -441,7 +441,7 @@ lstm_output_to_device(
 }
 
 // This test is a port of python code introduced here:
-// https://towardsdatascience.com/understanding-bidirectional-rnn-in-pytorch-5bd25a5dd66
+// https://medium.com/data-science/understanding-bidirectional-rnn-in-pytorch-5bd25a5dd66
 // Reverse forward of bidirectional GRU should act
 // as regular forward of unidirectional GRU
 void BidirectionalGRUReverseForward(bool cuda) {

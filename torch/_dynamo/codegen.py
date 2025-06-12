@@ -23,7 +23,7 @@ from typing import Optional, TYPE_CHECKING, Union
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
 
-from . import graph_break_hints, utils
+from . import config, graph_break_hints, utils
 from .bytecode_transformation import (
     add_push_null,
     add_push_null_call_function_ex,
@@ -79,7 +79,7 @@ class PyCodegen:
     ) -> None:
         self.root = root
         self.top_of_stack: Optional[Union[VariableTracker, Source]] = None
-        self.uses: Counter[VariableTracker] = collections.Counter()
+        self.uses: Counter[Union[VariableTracker, Source]] = collections.Counter()
         self.graph_outputs: dict[int, GraphOutputEntry] = {}
         self._output: list[Instruction] = []
         # This determines which VariableTracker/Source should be stored as
@@ -181,9 +181,9 @@ class PyCodegen:
         Notable effects:
         1. `self.top_of_stack` will be set to `value`, if we don't codegen
            `value` based on source.
-        2. `self.uses[value]` will increment, if we don't codegen `value` based
-           on source or cache/top-of-stack reuse; in other words, if we codegen
-           as if `value` is modelling some brand new python value.
+        2. `self.uses[value]` will increment, unless (a). we codegen via
+            `top_of_stack` or cached `tempvars`, or (b). `value` has special VT
+            types like `NNModuleVariable`, etc.
         """
         if isinstance(value, Source):
             # If the source needs to be overridden, use the new one.
@@ -198,6 +198,7 @@ class PyCodegen:
                 self.top_of_stack = source
                 return
 
+            self.uses[source] += 1
             try:
                 self.call_reconstruct(source)
             except NotImplementedError:
@@ -207,9 +208,9 @@ class PyCodegen:
                     explanation=f"Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
-
-            self._output.append(create_dup_top())
-            self.add_cache(source)
+            if source in self.tempvars:
+                self._output.append(create_dup_top())
+                self.add_cache(source)
             self.top_of_stack = source
 
             return
@@ -507,22 +508,6 @@ class PyCodegen:
                 create_instruction("UNPACK_SEQUENCE", arg=n),
             ]
 
-    def pop_null(self):
-        # POP_TOP doesn't work for null, so we pop nulls by pushing in a
-        # nop function, calling it (which consumes the null), and popping the result.
-        assert sys.version_info >= (3, 11)
-        return [
-            self.create_load_const_unchecked(lambda: None),
-            # 3.13 swapped NULL and callable
-            *(
-                (create_instruction("SWAP", arg=2),)
-                if sys.version_info >= (3, 13)
-                else ()
-            ),
-            *create_call_function(0, False),
-            create_instruction("POP_TOP"),
-        ]
-
     def pop_top(self):
         self.append_output(create_instruction("POP_TOP"))
 
@@ -629,6 +614,18 @@ class PyCodegen:
             if arg.source is not None:
                 collect_temp_source(arg.source)
 
+        cm_var = None
+        if config.record_pre_graph_bytecode_in_traces:
+            # Record the pregraph bytecode start
+            self.add_push_null(
+                lambda: self.load_import_from(
+                    utils.__name__, "record_pregraph_bytecode_enter"
+                )
+            )
+            self.extend_output(create_call_function(0, False))
+            cm_var = self.new_var()
+            self.store(cm_var)
+
         for arg in graphargs:
             if arg.pass_arg_as_tensor:
                 self.add_push_null(
@@ -643,6 +640,18 @@ class PyCodegen:
                 self.extend_output(create_call_function(1, False))
             else:
                 self.call_reconstruct(arg)
+
+        if config.record_pre_graph_bytecode_in_traces:
+            # Record the pregraph bytecode end
+            self.add_push_null(
+                lambda: self.load_import_from(
+                    utils.__name__, "record_pregraph_bytecode_exit"
+                )
+            )
+            assert cm_var is not None
+            self.extend_output([self.create_load(cm_var)])
+            self.extend_output(create_call_function(1, False))
+            self.pop_top()
 
         self.extend_output(create_call_function(len(graphargs), False))
 

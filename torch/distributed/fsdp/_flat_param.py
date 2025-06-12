@@ -593,6 +593,9 @@ class FlatParamHandle:
         )
         self._use_unsharded_views(as_params=False)
 
+    def __repr__(self):
+        return f"FlatParamHandle(flat_param.fqns={self.flat_param._fqns})"
+
     def _init_setattr_fns(self):
         use_unsafe_setattr = os.environ.get(_FSDP_USE_UNSAFE_SETATTR, "") == "1"
         self._setattr_tensor: Callable[[nn.Module, str, Tensor], None]

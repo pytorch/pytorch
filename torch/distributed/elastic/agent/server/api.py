@@ -71,7 +71,8 @@ class WorkerSpec:
         tee: tees the specified std stream(s) to console + file,
              selectively tee for a particular local rank by passing a map,
              takes precedence over ``redirects`` settings.
-
+        event_log_handler: name of the event logging handler as registered in
+          `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
     """
 
     role: str
@@ -86,6 +87,7 @@ class WorkerSpec:
     master_port: Optional[int] = None
     master_addr: Optional[str] = None
     local_addr: Optional[str] = None
+    event_log_handler: str = "null"
 
     def __post_init__(self):
         assert self.local_world_size > 0
@@ -457,9 +459,7 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _stop_workers(
-        self, worker_group: WorkerGroup, is_restart: bool = False
-    ) -> None:
+    def _stop_workers(self, worker_group: WorkerGroup) -> None:
         r"""Stop all workers in the given worker group.
 
         Implementors must deal with workers in all states defined by
@@ -477,9 +477,7 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _shutdown(
-        self, death_sig: signal.Signals = signal.SIGTERM, is_restart: bool = False
-    ) -> None:
+    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
         """Clean up any resources that were allocated during the agent's work.
 
         Args:
@@ -687,6 +685,7 @@ class SimpleElasticAgent(ElasticAgent):
         for local_rank, w_id in worker_ids.items():
             worker = worker_group.workers[local_rank]
             worker.id = w_id
+            record(self._construct_event("START", EventSource.WORKER, worker))
 
         worker_group.state = WorkerState.HEALTHY
 
@@ -697,7 +696,7 @@ class SimpleElasticAgent(ElasticAgent):
         """Restart (stops, rendezvous, starts) all local workers in the group."""
         role = worker_group.spec.role
         logger.info("[%s] Stopping worker group", role)
-        self._stop_workers(worker_group, is_restart=True)
+        self._stop_workers(worker_group)
         worker_group.state = WorkerState.STOPPED
         self._initialize_workers(worker_group)
 
@@ -809,6 +808,7 @@ class SimpleElasticAgent(ElasticAgent):
             "agent_restarts": spec.max_restarts - self._remaining_restarts,
             "duration_ms": duration_ms,
         }
+
         return Event(
             f"torchelastic.worker.status.{state}", source=source, metadata=metadata
         )
