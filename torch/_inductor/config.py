@@ -434,6 +434,13 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
+# Specify which operations should use CUTLASS backend
+# Comma-separated list like "mm,addmm,bmm" or "ALL" for all operations
+cutlass_enabled_ops: str = os.environ.get(
+    "TORCHINDUCTOR_CUTLASS_ENABLED_OPS", "ALL"
+).upper()
+
+
 # As above, specify candidate backends for conv autotune.
 # NB: in some cases for 1x1 convs we emit as matmul,
 # which will use the backends of `max_autotune_gemm_backends`
@@ -1485,6 +1492,12 @@ class cuda:
     # Experimental. Prescreen top x configs before tuning on swizzle.
     cutlass_prescreening: bool = (
         os.environ.get("TORCHINDUCTOR_CUTLASS_PRESCREENING", "1") == "1"
+    )
+
+    # Specify which operations should use CUTLASS backend
+    # Comma-separated list like "mm,addmm,bmm" or "all" for all operations
+    cutlass_enabled_ops: str = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_ENABLED_OPS", "all"
     )
 
 
