@@ -1,6 +1,7 @@
-.. currentmodule:: torch.distributed.tensor
+:::{currentmodule} torch.distributed.tensor
+:::
 
-torch.distributed.tensor
+# torch.distributed.tensor
 
 
 :::{note}
