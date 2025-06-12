@@ -33,6 +33,9 @@ enum class QueryType : uint8_t {
   MULTI_SET,
   CANCEL_WAIT,
   PING,
+  QUEUE_PUSH,
+  QUEUE_POP,
+  QUEUE_LEN,
 };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };

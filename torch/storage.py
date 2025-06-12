@@ -155,6 +155,10 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
+    def _release_ipc_counter(cls, *args, device=None, **kwargs):
+        return cls._release_ipc_counter_cuda(*args, **kwargs)
+
+    @classmethod
     def _release_ipc_counter_cuda(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
@@ -540,6 +544,7 @@ def _new_dtypes():
         torch.float8_e5m2fnuz,
         torch.float8_e4m3fnuz,
         torch.float8_e8m0fnu,
+        torch.float4_e2m1fn_x2,
         torch.bits8,
         torch.bits16,
         torch.bits1x8,

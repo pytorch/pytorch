@@ -42,20 +42,19 @@ size_t CUDAAllocatorConfig::roundup_power2_divisions(size_t size) {
 }
 
 void CUDAAllocatorConfig::lexArgs(
-    const char* env,
+    const std::string& env,
     std::vector<std::string>& config) {
   std::vector<char> buf;
 
-  size_t env_length = strlen(env);
-  for (size_t i = 0; i < env_length; i++) {
-    if (env[i] == ',' || env[i] == ':' || env[i] == '[' || env[i] == ']') {
+  for (char ch : env) {
+    if (ch == ',' || ch == ':' || ch == '[' || ch == ']') {
       if (!buf.empty()) {
         config.emplace_back(buf.begin(), buf.end());
         buf.clear();
       }
-      config.emplace_back(1, env[i]);
-    } else if (env[i] != ' ') {
-      buf.emplace_back(static_cast<char>(env[i]));
+      config.emplace_back(1, ch);
+    } else if (ch != ' ') {
+      buf.emplace_back(ch);
     }
   }
   if (!buf.empty()) {
@@ -220,6 +219,40 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
     const std::vector<std::string>& config,
     size_t i,
     bool& used_cudaMallocAsync) {
+  // For ease of maintenance and understanding, the CUDA and ROCm
+  // implementations of this function are separated. This avoids having many
+  // #ifdef's throughout.
+#ifdef USE_ROCM
+  // Ease burden on ROCm users by allowing either cuda or hip tokens.
+  // cuda token is broken up to prevent hipify matching it.
+#define PYTORCH_TOKEN1 \
+  "cud"                \
+  "aMallocAsync"
+#define PYTORCH_TOKEN2 "hipMallocAsync"
+  consumeToken(config, ++i, ':');
+  if (++i < config.size()) {
+    TORCH_CHECK(
+        ((config[i] == "native") || (config[i] == PYTORCH_TOKEN1) ||
+         (config[i] == PYTORCH_TOKEN2)),
+        "Unknown allocator backend, "
+        "options are native, " PYTORCH_TOKEN1 ", and " PYTORCH_TOKEN2);
+    used_cudaMallocAsync =
+        (config[i] == PYTORCH_TOKEN1 || config[i] == PYTORCH_TOKEN2);
+    TORCH_INTERNAL_ASSERT(
+        config[i] == get()->name() ||
+            (config[i] == PYTORCH_TOKEN1 && get()->name() == PYTORCH_TOKEN2),
+        "Allocator backend parsed at runtime != "
+        "allocator backend parsed at load time, ",
+        config[i],
+        " != ",
+        get()->name());
+  } else {
+    TORCH_CHECK(false, "Error parsing backend value", "");
+  }
+  return i;
+#undef PYTORCH_TOKEN1
+#undef PYTORCH_TOKEN2
+#else // USE_ROCM
   consumeToken(config, ++i, ':');
   if (++i < config.size()) {
     TORCH_CHECK(
@@ -227,8 +260,6 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
         "Unknown allocator backend, "
         "options are native and cudaMallocAsync");
     used_cudaMallocAsync = (config[i] == "cudaMallocAsync");
-#ifndef USE_ROCM
-    // HIP supports hipMallocAsync and does not need to check versions
     if (used_cudaMallocAsync) {
 #if CUDA_VERSION >= 11040
       int version = 0;
@@ -246,7 +277,6 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
           CUDA_VERSION);
 #endif
     }
-#endif
     TORCH_INTERNAL_ASSERT(
         config[i] == get()->name(),
         "Allocator backend parsed at runtime != "
@@ -255,9 +285,10 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
     TORCH_CHECK(false, "Error parsing backend value", "");
   }
   return i;
+#endif // USE_ROCM
 }
 
-void CUDAAllocatorConfig::parseArgs(const char* env) {
+void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
   // If empty, set the default values
   m_max_split_size = std::numeric_limits<size_t>::max();
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
@@ -265,16 +296,16 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
   bool used_cudaMallocAsync = false;
   bool used_native_specific_option = false;
 
-  if (env == nullptr) {
+  if (!env.has_value()) {
     return;
   }
   {
     std::lock_guard<std::mutex> lock(m_last_allocator_settings_mutex);
-    m_last_allocator_settings = env;
+    m_last_allocator_settings = env.value();
   }
 
   std::vector<std::string> config;
-  lexArgs(env, config);
+  lexArgs(env.value(), config);
 
   for (size_t i = 0; i < config.size(); i++) {
     std::string_view config_item_view(config[i]);

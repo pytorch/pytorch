@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-# flake8: noqa
+# flake8: noqa: B950
 
 import functools
 import itertools
@@ -13,7 +13,6 @@ from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd
 from torch._dynamo._trace_wrapped_higher_order_op import trace_wrapped
 from torch._dynamo.testing import normalize_gm
-from torch._dynamo.utils import counters
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
@@ -131,24 +130,32 @@ class _multiply_invoke(torch.nn.Module):
                     actual,
                     """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_ : list, L_sizes_0_: "Sym(s0)"):
+    def forward(self, L_inputs_ : list, s69: "Sym(s21)", L_sizes_0_: "f32[0, s21]"):
         l_inputs_ = L_inputs_
         l_sizes_0_ = L_sizes_0_
 
-        getitem: "f32[s0]" = l_inputs_[0];  l_inputs_ = None
+        getitem: "f32[s21]" = l_inputs_[0]
+        getitem_1: "f32[s21]" = l_inputs_[1]
+        getitem_2: "f32[s21]" = l_inputs_[2];  l_inputs_ = None
 
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [l_sizes_0_], False)]);  getitem = l_sizes_0_ = None
-        getitem_9: "f32[s0]" = validate_outputs[0];  validate_outputs = None
+        size: "Sym(s21)" = l_sizes_0_.size(1);  l_sizes_0_ = None
+
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [size], False)]);  getitem = size = None
+        getitem_9: "f32[s21]" = validate_outputs[0];  validate_outputs = None
 
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_9);  getitem_9 = None
-        aot1_tangents_1: "f32[s0]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
+        aot1_tangents_1: "f32[s21]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
 
-        new_grad: "f32[s0]" = torch.clone(aot1_tangents_1)
+        new_grad_strided: "f32[s21]" = torch.empty_like(getitem_1);  getitem_1 = None
 
-        result: "f32[s0]" = aot1_tangents_1 * aot1_tangents_1;  aot1_tangents_1 = None
+        copy_: "f32[s21]" = new_grad_strided.copy_(aot1_tangents_1);  copy_ = None
 
-        new_grad_1: "f32[s0]" = torch.clone(result);  result = None
-        return (new_grad, new_grad_1)
+        result: "f32[s21]" = aot1_tangents_1 * aot1_tangents_1;  aot1_tangents_1 = None
+
+        new_grad_strided_1: "f32[s21]" = torch.empty_like(getitem_2);  getitem_2 = None
+
+        copy__1: "f32[s21]" = new_grad_strided_1.copy_(result);  result = copy__1 = None
+        return (new_grad_strided, new_grad_strided_1)
 """,
                 )
             elif backend == "inductor":
@@ -156,24 +163,32 @@ class GraphModule(torch.nn.Module):
                     actual,
                     """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_ : list, L_sizes_0_: "Sym(s0)"):
+    def forward(self, L_inputs_ : list, s69: "Sym(s21)", L_sizes_0_: "f32[0, s21]"):
         l_inputs_ = L_inputs_
         l_sizes_0_ = L_sizes_0_
 
-        getitem: "f32[s0]" = l_inputs_[0];  l_inputs_ = None
+        getitem: "f32[s21]" = l_inputs_[0]
+        getitem_1: "f32[s21]" = l_inputs_[1]
+        getitem_2: "f32[s21]" = l_inputs_[2];  l_inputs_ = None
 
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [l_sizes_0_], False)]);  getitem = l_sizes_0_ = None
-        getitem_9: "f32[s0]" = validate_outputs[0];  validate_outputs = None
+        size: "Sym(s21)" = l_sizes_0_.size(1);  l_sizes_0_ = None
+
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [size], False)]);  getitem = size = None
+        getitem_9: "f32[s21]" = validate_outputs[0];  validate_outputs = None
 
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_9);  getitem_9 = None
-        aot3_tangents_1: "f32[s0]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
+        aot3_tangents_1: "f32[s21]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
 
-        new_grad: "f32[s0]" = torch.clone(aot3_tangents_1)
+        new_grad_strided: "f32[s21]" = torch.empty_like(getitem_1);  getitem_1 = None
 
-        result: "f32[s0]" = aot3_tangents_1 * aot3_tangents_1;  aot3_tangents_1 = None
+        copy_: "f32[s21]" = new_grad_strided.copy_(aot3_tangents_1);  copy_ = None
 
-        new_grad_1: "f32[s0]" = torch.clone(result);  result = None
-        return (new_grad, new_grad_1)
+        result: "f32[s21]" = aot3_tangents_1 * aot3_tangents_1;  aot3_tangents_1 = None
+
+        new_grad_strided_1: "f32[s21]" = torch.empty_like(getitem_2);  getitem_2 = None
+
+        copy__1: "f32[s21]" = new_grad_strided_1.copy_(result);  result = copy__1 = None
+        return (new_grad_strided, new_grad_strided_1)
 """,
                 )
 
@@ -233,27 +248,35 @@ class GraphModule(torch.nn.Module):
                     actual,
                     """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_ : list, L_sizes_0_: "Sym(s0)", L_hooks_1_keywords_fn_keywords_obj_counter: "Sym(s7)"):
+    def forward(self, L_inputs_ : list, s69: "Sym(s21)", L_sizes_0_: "f32[0, s21]", L_hooks_1_keywords_fn_keywords_obj_counter: "Sym(s45)"):
         l_inputs_ = L_inputs_
         l_sizes_0_ = L_sizes_0_
         l_hooks_1_keywords_fn_keywords_obj_counter = L_hooks_1_keywords_fn_keywords_obj_counter
 
-        getitem: "f32[s0]" = l_inputs_[0];  l_inputs_ = None
+        getitem: "f32[s21]" = l_inputs_[0]
+        getitem_1: "f32[s21]" = l_inputs_[1]
+        getitem_2: "f32[s21]" = l_inputs_[2];  l_inputs_ = None
 
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [l_sizes_0_], False)]);  getitem = l_sizes_0_ = None
-        getitem_9: "f32[s0]" = validate_outputs[0];  validate_outputs = None
+        size: "Sym(s21)" = l_sizes_0_.size(1);  l_sizes_0_ = None
+
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [size], False)]);  getitem = size = None
+        getitem_9: "f32[s21]" = validate_outputs[0];  validate_outputs = None
 
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_9);  getitem_9 = None
-        aot0_tangents_1: "f32[s0]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
+        aot0_tangents_1: "f32[s21]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
 
-        new_grad: "f32[s0]" = torch.clone(aot0_tangents_1)
+        new_grad_strided: "f32[s21]" = torch.empty_like(getitem_1);  getitem_1 = None
 
-        add: "Sym(s7 + 1)" = l_hooks_1_keywords_fn_keywords_obj_counter + 1;  l_hooks_1_keywords_fn_keywords_obj_counter = None
+        copy_: "f32[s21]" = new_grad_strided.copy_(aot0_tangents_1);  copy_ = None
 
-        result: "f32[s0]" = aot0_tangents_1 * aot0_tangents_1;  aot0_tangents_1 = None
+        add: "Sym(s45 + 1)" = l_hooks_1_keywords_fn_keywords_obj_counter + 1;  l_hooks_1_keywords_fn_keywords_obj_counter = None
 
-        new_grad_1: "f32[s0]" = torch.clone(result);  result = None
-        return (new_grad, new_grad_1, add)
+        result: "f32[s21]" = aot0_tangents_1 * aot0_tangents_1;  aot0_tangents_1 = None
+
+        new_grad_strided_1: "f32[s21]" = torch.empty_like(getitem_2);  getitem_2 = None
+
+        copy__1: "f32[s21]" = new_grad_strided_1.copy_(result);  result = copy__1 = None
+        return (new_grad_strided, new_grad_strided_1, add)
 """,
                 )
 

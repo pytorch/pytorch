@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/util/BFloat16.h>
-#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Float4_e2m1fn_x2.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
@@ -104,7 +104,8 @@ struct dummy_int1_7_t {};
   _(c10::dummy_int1_7_t<5>, Int5) /* 41 */               \
   _(c10::dummy_int1_7_t<6>, Int6) /* 42 */               \
   _(c10::dummy_int1_7_t<7>, Int7) /* 43 */               \
-  _(c10::Float8_e8m0fnu, Float8_e8m0fnu) /* 44 */
+  _(c10::Float8_e8m0fnu, Float8_e8m0fnu) /* 44 */        \
+  _(c10::Float4_e2m1fn_x2, Float4_e2m1fn_x2) /* 45 */
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
@@ -374,9 +375,9 @@ inline bool isIntegralType(ScalarType t, bool includeBool) {
   return isIntegral || (includeBool && t == ScalarType::Bool);
 }
 
-C10_DEPRECATED_MESSAGE(
-    "isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")
-inline bool isIntegralType(ScalarType t) {
+[[deprecated(
+    "isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")]] inline bool
+isIntegralType(ScalarType t) {
   return isIntegralType(t, /*includeBool=*/false);
 }
 
@@ -387,7 +388,8 @@ inline bool isFloat8Type(ScalarType t) {
 }
 
 inline bool isReducedFloatingType(ScalarType t) {
-  return t == ScalarType::Half || t == ScalarType::BFloat16 || isFloat8Type(t);
+  return t == ScalarType::Half || t == ScalarType::BFloat16 ||
+      isFloat8Type(t) || t == ScalarType::Float4_e2m1fn_x2;
 }
 
 inline bool isFloatingType(ScalarType t) {
@@ -502,6 +504,7 @@ inline bool isSignedType(ScalarType t) {
     case ScalarType::Int5:
     case ScalarType::Int6:
     case ScalarType::Int7:
+    case ScalarType::Float4_e2m1fn_x2:
       return true;
     case ScalarType::UInt1:
     case ScalarType::UInt2:

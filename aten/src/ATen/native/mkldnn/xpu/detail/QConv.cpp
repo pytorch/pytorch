@@ -135,7 +135,7 @@ at::Tensor quantized_convolution(
     mask_weight = (2 ^ 0) | (2 ^ 1); // 2^0 (group) | 2^1 (output channel)
   dnnl::primitive_attr pattr;
 
-  bool src_need_zp = (act_scale != 0);
+  bool src_need_zp = (act_zero_point != 0);
   bool dst_need_zp = (output_zero_point != 0);
 
   // create usr_md for tensors, and md for conv primitive

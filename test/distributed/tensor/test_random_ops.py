@@ -6,17 +6,22 @@ import itertools
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
-from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
-from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
-from torch.distributed._tensor.api import distribute_tensor
-from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.distributed_c10d import broadcast_object_list
 from torch.distributed.fsdp import fully_shard
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor._random import (
     is_rng_supported_mesh,
     manual_seed,
     OffsetBasedRNGTracker,
 )
+from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 from torch.testing._internal.common_utils import run_tests, TEST_HPU
@@ -60,12 +65,12 @@ class DistTensorRandomInitTest(DTensorTestBase):
             # compare with local tensors from other ranks
             for other_rank in range(self.world_size):
                 if self.rank != other_rank:
-                    slice_idx = [
+                    slice_idx = (
                         slice(input_size[0]),
                         slice(
                             other_rank * input_size[1], (other_rank + 1) * input_size[1]
                         ),
-                    ]
+                    )
                     # other rank should have a different local tensor
                     self.assertNotEqual(dtensor.full_tensor()[slice_idx], local_tensor)
 
@@ -396,8 +401,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
         size = [4, 4 * self.world_size]
 
         for fn in [
-            torch.distributed._tensor.rand,
-            torch.distributed._tensor.randn,
+            torch.distributed.tensor.rand,
+            torch.distributed.tensor.randn,
         ]:
             dtensor = fn(size, device_mesh=device_mesh, placements=[Shard(1)])
             local_tensor = funcol.all_gather_tensor(
@@ -506,11 +511,13 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     shard_dim = placement.dim
                     local_shard_list_on_dim[shard_dim] = []
                     for shard_idx_on_dim in range(mesh_dim_size):
-                        shard_size, shard_offset = placement._local_shard_size_on_dim(
+                        (
+                            shard_size,
+                            shard_offset,
+                        ) = placement._local_shard_size_and_offset(
                             dtensor_shape[shard_dim],
                             mesh_dim_size,
                             shard_idx_on_dim,
-                            return_offset=True,
                         )
                         local_shard_list_on_dim[shard_dim].append(
                             (shard_offset, shard_size)
@@ -530,9 +537,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     slice(offset, offset + size) for offset, size in other_local_shard
                 ]
                 if local_shard_offset == other_local_shard_offset:
-                    self.assertEqual(full_tensor[slice_idx], local_tensor)
+                    self.assertEqual(full_tensor[tuple(slice_idx)], local_tensor)
                 else:
-                    self.assertNotEqual(full_tensor[slice_idx], local_tensor)
+                    self.assertNotEqual(full_tensor[tuple(slice_idx)], local_tensor)
 
 
 class DistTensorRandomOpsTest3D(DTensorTestBase):

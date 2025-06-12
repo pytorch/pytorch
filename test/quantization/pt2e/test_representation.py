@@ -17,6 +17,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
     TestHelperModules,
 )
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 @skipIfNoQNNPACK
@@ -33,10 +34,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
     ) -> torch.nn.Module:
         # resetting dynamo cache
         torch._dynamo.reset()
-        model = export_for_training(
-            model,
-            example_inputs,
-        ).module()
+        model = export_for_training(model, example_inputs, strict=True).module()
         model_copy = copy.deepcopy(model)
 
         model = prepare_pt2e(model, quantizer)
@@ -309,3 +307,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
             ref_node_occurrence,
             non_ref_node_occurrence,
         )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")
