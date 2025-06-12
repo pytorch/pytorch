@@ -1678,7 +1678,10 @@ class BuiltinVariable(VariableTracker):
             assert len(args) == 1 and len(kwargs) == 1 and "value" in kwargs
             args = (*args, kwargs.pop("value"))
         if len(args) == 0:
-            raise UserError(TypeError, "fromkeys expected at least 1 argument, got 0")  # type: ignore[arg-type]
+            msg = ConstantVariable.create(
+                "fromkeys expected at least 1 arguments, got 0"
+            )
+            raise_observed_exception(TypeError, tx, args=[msg])
         if len(args) == 1:
             args = (*args, ConstantVariable.create(None))
         assert len(args) == 2
