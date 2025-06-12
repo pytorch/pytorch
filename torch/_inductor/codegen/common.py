@@ -282,6 +282,9 @@ class ConstexprArg:
 @dataclasses.dataclass
 class TMADescriptorArg:
     name: str
+    api_type: str  # "experimental" or "stable"
+    block_shape: Optional[list[sympy.Expr]]  # only needed for "stable"
+    dtype: Optional[torch.dtype]  # only needed for "stable"
 
 
 @dataclasses.dataclass

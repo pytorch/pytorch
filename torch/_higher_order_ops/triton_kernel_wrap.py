@@ -275,7 +275,7 @@ def generate_ttir(
                 ordered_args[name], tma_meta[1][0]
             )
 
-    def is_tensor_descriptor_arg(arg):
+    def is_stable_tensor_descriptor_arg(arg: Any) -> bool:
         if has_triton_tensor_descriptor_host_tma():
             from triton.tools.tensor_descriptor import TensorDescriptor
 
@@ -283,18 +283,18 @@ def generate_ttir(
                 return True
         return False
 
-    def is_tensor_like_arg(arg):
-        if isinstance(arg, Tensor) or is_tensor_descriptor_arg(arg):
+    def is_tensor_like_arg(arg: Any) -> bool:
+        if isinstance(arg, Tensor) or is_stable_tensor_descriptor_arg(arg):
             return True
         return False
 
     # TODO better description here
     # this is because TMA args get converted into >1 args: for the case of a 1D input tensor
     # (which we assume for the TTIR analysis), there will be 2 additional args
-    def get_tensor_names(name, arg):
+    def get_tensor_names(name: str, arg: Any) -> list[str]:
         if isinstance(arg, Tensor):
             return [name]
-        if is_tensor_descriptor_arg(arg):
+        if is_stable_tensor_descriptor_arg(arg):
             return [name, name + "_STRIDE_PLACEHOLDER", name + "_SIZE_PLACEHOLDER"]
         return []
 
@@ -1009,7 +1009,7 @@ def triton_kernel_wrapper_mutation_dense(
                     create_2d_tma_descriptor,
                 )
 
-                dims, block_dims, element_size = v[1]
+                dims, block_dims, element_size = v[1]  # type: ignore[misc]
                 create_tma_descriptor = (
                     create_1d_tma_descriptor
                     if len(dims) == 1

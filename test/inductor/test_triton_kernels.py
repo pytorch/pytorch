@@ -1951,7 +1951,10 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(compiled_out, expected_out)
 
         # 2 calls: one for two inputs (dedupped), one for the output
-        self.assertEqual(code.count("create_1d_tma_descriptor("), 2)
+        if tma_version == "new":
+            self.assertEqual(code.count("TensorDescriptor.from_tensor("), 2)
+        else:
+            self.assertEqual(code.count("create_1d_tma_descriptor("), 2)
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
@@ -1986,7 +1989,7 @@ def forward(self, arg0_1, arg1_1):
                 triton.cdiv(x_size, meta["BLOCK_SIZE_X"]),
                 triton.cdiv(y_size, meta["BLOCK_SIZE_Y"]),
             )
-            add_kernel_with_tma_2d[grid](
+            kernel[grid](
                 desc_a,
                 desc_b,
                 desc_out,
