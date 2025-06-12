@@ -9,6 +9,7 @@ import sys
 import unittest
 
 import torch
+import torch.utils.checkpoint as checkpoint
 import torch._dynamo.config as dynamo_config
 import torch.backends.cuda
 import torch.nn.functional as F
@@ -2123,6 +2124,57 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         out_eager = interpolate_chunked(x)
         out_compiled = torch.compile(interpolate_chunked)(x)
         self.assertEqual(out_eager, out_compiled)
+
+    def test_max_autotune_nograd(self):
+        class MyModel(nn.Module):
+            def __init__(self, in_features=2, out_features=2, max_parameters=50, increment=1, final_bias=True):
+                super(MyModel, self).__init__()
+                self.in_features = in_features
+                self.out_features = out_features
+                self.max_parameters = max_parameters
+                self.increment = increment
+                self.final_bias = final_bias
+
+                self.linear_layers = nn.ModuleList()
+                total_parameters = 0
+                dim = self.in_features
+                bias = False
+                while total_parameters < self.max_parameters:
+                    if total_parameters + dim * self.increment + (dim + self.increment) * self.out_features >= self.max_parameters:
+                        break
+                    self.linear_layers.append(nn.Linear(dim, self.increment, bias=bias))
+                    total_parameters += dim * self.increment
+                    dim += self.increment
+                self.final_layer = nn.Linear(dim, self.out_features, bias=self.final_bias)
+
+            def forward(self, x):
+                for layer in self.linear_layers:
+                    x2 = layer(x)
+                    x2 = F.relu(x2)
+                    x = torch.cat((x, x2), dim=1)
+
+                def custom_forward(x_):
+                    return self.final_layer(x_)
+
+                x = checkpoint.checkpoint(custom_forward, x)
+                return x
+
+        def GetInput():
+            return torch.randn((16, 2))
+
+        model = MyModel().to("cuda")
+        input_tensor = GetInput().to("cuda")
+
+        compile_default = torch.compile(model, mode="default")
+        compile_max_autotune = torch.compile(model, mode="max-autotune")
+
+        with torch.no_grad():
+            default_output = compile_default(input_tensor)
+            max_autotune_output = compile_max_autotune(input_tensor)
+
+        self.assertEqual(default_output, max_autotune_output)
+
+    
 
 
 if __name__ == "__main__":
