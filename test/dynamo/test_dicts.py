@@ -1589,6 +1589,18 @@ class OrderedDictMethodsTests(DictMethodsTests):
         self.assertIs(type(dict.__ior__(dict(d3), d2)), dict)
         self.assertIs(type(dict(d4).__ior__(d2)), dict)
 
+    @make_dynamo_test
+    def test_popitem_kwarg(self):
+        d = self.thetype.fromkeys("abcdf")
+        self.assertEqual(d.popitem(last=True), ("f", None))
+        self.assertEqual(list(d), list("abcd"))
+        self.assertEqual(d.popitem(last=False), ("a", None))
+        self.assertEqual(list(d), list("bcd"))
+        self.assertEqual(d.popitem(False), ("b", None))
+        self.assertEqual(list(d), list("cd"))
+        self.assertEqual(d.popitem(True), ("d", None))
+        self.assertEqual(list(d), list("c"))
+
 
 class OrderedDictSubclassOv(torch._dynamo.test_case.TestCase):
     def setUp(self):
