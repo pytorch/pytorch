@@ -80,7 +80,7 @@ def _timeit(name: str) -> Generator[None, None, None]:
     start = time.perf_counter()
     yield
     dur = time.perf_counter() - start
-    logger.info(f"{name} took {dur}s")
+    logger.info("%s took %ss", name, dur)
 
 
 def _prepare_tensor(tensor: torch.Tensor) -> tuple[torch.Tensor, _TensorMeta]:
@@ -184,25 +184,21 @@ class PGTransport:
         self._device = device
         self._state_dict = state_dict
 
-    def send_checkpoint(
-        self, dst_ranks: list[int], state_dict: object
-    ) -> None:
+    def send_checkpoint(self, dst_ranks: list[int], state_dict: object) -> None:
         """
         Send a checkpoint to multiple destination ranks.
-        
+
         The process:
         1. Prepares the state dict by converting tensors to a serializable format
         2. Sends metadata as pickled data
         3. Sends each tensor sequentially to all destination ranks
-        
+
         Args:
             dst_ranks: List of destination ranks to send the checkpoint to
             state_dict: The state dictionary containing model parameters
         """
         with _timeit("preparing state_dict"):
-            meta, tensors = _prepare_state_dict(
-                state_dict, device=self._device
-            )
+            meta, tensors = _prepare_state_dict(state_dict, device=self._device)
 
         work = []
 
@@ -234,15 +230,15 @@ class PGTransport:
     def recv_checkpoint(self, src_rank: int) -> object:
         """
         Receive a checkpoint from a source rank.
-        
+
         The process:
         1. Receives metadata about the checkpoint structure
         2. Receives each tensor, potentially reusing existing tensors for in-place updates
         3. Reconstructs the original state dict structure
-        
+
         Args:
             src_rank: The source rank to receive the checkpoint from
-            
+
         Returns:
             The reconstructed state dictionary with model parameters
         """

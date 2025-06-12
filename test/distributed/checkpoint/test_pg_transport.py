@@ -2,44 +2,30 @@
 
 import logging
 import os
-import sys
-import unittest
 from datetime import timedelta
 from typing import Optional
-from unittest import skipIf, skipUnless
 from unittest.mock import MagicMock, patch
 
 import torch
-import torch.distributed as dist
-
 import torch.nn as nn
-from torch.distributed import TCPStore
 from torch.distributed.checkpoint._pg_transport import (
     _cast_tensor,
-    _DTensorMeta,
     _prepare_state_dict,
     _prepare_tensor,
     _StateDictMeta,
     _TensorMeta,
-    _timeit,
     PGTransport,
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.distributed_c10d import _get_default_group
-
+from torch.distributed.tensor import DTensor
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
     requires_nccl,
 )
-
-from torch.distributed.tensor import DTensor
-
 from torch.testing._internal.common_utils import (
-    check_leaked_tensors,
-    instantiate_parametrized_tests,
-    parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TestCase,
@@ -94,7 +80,7 @@ def _test_pg_transport(self, device) -> None:
     self.assertEqual(original_state_dict, received_checkpoint)
 
 
-def _test_pg_transport_with_dtensor(self, device) -> None:
+def _test_pg_transport_with_mixed_content(self, device) -> None:
     # Create a device mesh for DTensor
     device_mesh = init_device_mesh(device.type, (self.world_size,))
 
@@ -102,10 +88,19 @@ def _test_pg_transport_with_dtensor(self, device) -> None:
     local_tensor = torch.randn(10, 10, device=device)
     dtensor = DTensor.from_local(local_tensor, device_mesh)
 
-    # Include DTensor in the state dict
+    # Include mixed content in the state dict
+    # Dtensor, Tensor, and non-tensor
     model = SimpleModel().to(device)
-    state_dict = model.state_dict()
-    state_dict["dtensor"] = dtensor
+    state_dict = {
+        "net1.weight": model.net1.weight.data,
+        "net1.bias": model.net1.bias.data,
+        "net2.weight": model.net2.weight.data,
+        "net2.bias": model.net2.bias.data,
+        "dtensor": dtensor,
+        "non-tensor": "some string",
+        "nested": {"tensor": torch.randn(1, 2), "value": 42},
+        "list": [1, 2, 3],
+    }
 
     transport = PGTransport(_get_default_group(), timedelta(seconds=10), device)
     received_checkpoint = ring_send_recv_checkpoint(
@@ -136,11 +131,10 @@ class PgTransportCPU(MultiProcContinousTest):
     def test_pg_transport(self) -> None:
         _test_pg_transport(self, self.device)
 
-    def test_pg_transport_with_dtensor(self) -> None:
-        _test_pg_transport_with_dtensor(self, self.device)
+    def test_pg_transport_with_mixed_content(self) -> None:
+        _test_pg_transport_with_mixed_content(self, self.device)
 
 
-@skipIf(not torch.cuda.is_available(), "CUDA not available")
 class PgTransportCUDA(MultiProcContinousTest):
     world_size = 2
     timeout: timedelta = timedelta(seconds=20)
@@ -157,11 +151,15 @@ class PgTransportCUDA(MultiProcContinousTest):
     def device(self) -> torch.device:
         return torch.device(f"{self.device_type()}:{self.rank}")
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_pg_transport(self) -> None:
         _test_pg_transport(self, self.device)
 
-    def test_pg_transport_with_dtensor(self) -> None:
-        _test_pg_transport_with_dtensor(self, self.device)
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_pg_transport_with_mixed_content(self) -> None:
+        _test_pg_transport_with_mixed_content(self, self.device)
 
 
 class TestCastTensor(TestCase):
@@ -346,7 +344,7 @@ class TestPGTransportMocked(TestCase):
         # Setup mock for pickle.loads to return a valid _StateDictMeta
         with patch("pickle.loads") as mock_loads:
             # Create a mock state dict metadata
-            from torch.utils._pytree import tree_flatten_with_path, tree_unflatten
+            from torch.utils._pytree import tree_flatten_with_path
 
             state_dict = {"weight": torch.randn(3, 4), "bias": torch.randn(4)}
             leaves, treespec = tree_flatten_with_path(state_dict)
@@ -380,7 +378,7 @@ class TestPGTransportMocked(TestCase):
 
             # Create transport and call recv_checkpoint
             transport = PGTransport(self.pg, self.timeout, self.device)
-            result = transport.recv_checkpoint(src_rank=0)
+            transport.recv_checkpoint(src_rank=0)
 
             # Check that recv was called
             self.assertGreaterEqual(
@@ -423,7 +421,7 @@ class TestPGTransportMocked(TestCase):
         # Setup mock for pickle.loads to return a valid _StateDictMeta
         with patch("pickle.loads") as mock_loads:
             # Create a mock state dict metadata
-            from torch.utils._pytree import tree_flatten_with_path, tree_unflatten
+            from torch.utils._pytree import tree_flatten_with_path
 
             state_dict = {"weight": torch.randn(3, 4), "bias": torch.randn(4)}
             leaves, treespec = tree_flatten_with_path(state_dict)
@@ -463,7 +461,7 @@ class TestPGTransportMocked(TestCase):
             transport = PGTransport(
                 self.pg, self.timeout, self.device, state_dict=state_dict_callback
             )
-            result = transport.recv_checkpoint(src_rank=0)
+            transport.recv_checkpoint(src_rank=0)
 
             # Check that state_dict callback was called
             state_dict_callback.assert_called_once()
@@ -482,53 +480,6 @@ class TestPGTransportEdgeCases(TestCase):
         # Setup process group mock to return mock_work
         self.pg.send = MagicMock(return_value=self.mock_work)
         self.pg.recv = MagicMock(return_value=self.mock_work)
-
-    def test_send_checkpoint_with_mixed_content(self):
-        # TODO skipping
-        return
-        """Test send_checkpoint with a mix of tensors, DTensors, and non-tensor values."""
-
-        # Create a proper mock DTensor class
-        class MockDTensor:
-            def __init__(self, local_tensor=None, spec=None):
-                self._local_tensor = (
-                    local_tensor if local_tensor is not None else torch.randn(3, 4)
-                )
-                self._spec = spec
-
-        # Store the original DTensor class
-        original_DTensor = None
-        if hasattr(torch.distributed.checkpoint._pg_transport, "DTensor"):
-            original_DTensor = torch.distributed.checkpoint._pg_transport.DTensor
-
-        # Replace with our mock class
-        torch.distributed.checkpoint._pg_transport.DTensor = MockDTensor
-
-        # Create a mock DTensor instance
-        mock_dtensor_spec = MagicMock()
-        mock_dtensor = MockDTensor(torch.randn(3, 4), mock_dtensor_spec)
-
-        # Create a state dict with mixed content
-        state_dict = {
-            "tensor": torch.randn(2, 3),
-            "dtensor": mock_dtensor,
-            "config": {"lr": 0.01},
-            "nested": {"tensor": torch.randn(1, 2), "value": 42},
-        }
-        with patch(
-            "torch.distributed.checkpoint._pg_transport._prepare_tensor"
-        ) as mock_prepare_tensor:
-            # Setup mock for _prepare_tensor
-            mock_tensor = torch.randn(3, 4)
-            mock_meta = MagicMock()
-            mock_prepare_tensor.return_value = (mock_tensor, mock_meta)
-
-            # Create transport and call send_checkpoint
-            transport = PGTransport(self.pg, self.timeout, self.device)
-            transport.send_checkpoint([1], state_dict)
-
-            # Check that _prepare_tensor was called for each tensor
-            self.assertEqual(mock_prepare_tensor.call_count, 3)  # 2 tensors + 1 dtensor
 
     def test_send_checkpoint_with_cpu_tensors(self):
         """Test send_checkpoint with CPU tensors when device is CUDA."""
