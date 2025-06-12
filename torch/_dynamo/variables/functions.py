@@ -2226,7 +2226,9 @@ class TMADescriptorStableVariable(VariableTracker):
 
     def to_metadata(self):
         # TODO(dberard) implement this
-        raise NotImplementedError
+        raise NotImplementedError(
+            "TensorDescriptor.from_tensor support is not yet implemented"
+        )
 
     def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
