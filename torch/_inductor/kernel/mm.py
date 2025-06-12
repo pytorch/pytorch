@@ -42,6 +42,7 @@ from ..utils import (
     get_tma_workspace_arg,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
+    use_ck_tile_gemm_template,
     use_cpp_gemm_template,
     use_cutlass_template,
     use_decompose_k_choice,
@@ -510,7 +511,7 @@ scaled_mm_device_tma_template = TritonTemplate(
 
 
 # prevent duplication registration of extern functions
-@functools.lru_cache(None)
+@functools.cache
 def lazy_register_extern_choice(fn):
     return ExternKernelChoice(fn)
 
@@ -724,6 +725,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
+    if is_nonzero and use_ck_tile_gemm_template(layout, m, n, k):
         CKTileGemmTemplate.add_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_gemm_template(layout, mat1, mat2):
@@ -916,6 +918,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 **mm_options(config, m, n, k, layout),
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
+                epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
             )
 
         if use_triton_tma_template(mat1, mat2):
@@ -1155,15 +1158,16 @@ def tuned_scaled_mm(
                 **kwargs,
                 suffix_args=suffix_args,
                 epilogue_fn=scale_mm_epilogue(),
+                epilogue_fn_hash="scale_mm_epilogue",
             )
 
     if is_nonzero and use_cutlass_template(layout, m, n, k):
-        if use_fast_accum:
-            log.warning(
-                "use_fast_accum=True is not supported by cutlass template, skipping cutlass choices"
-            )
-        else:
-            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, input_nodes)  # type: ignore[arg-type]
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+            choices,
+            layout,
+            input_nodes,  # type: ignore[arg-type]
+            use_fast_accum=use_fast_accum,  # type: ignore[arg-type]
+        )
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
@@ -1171,7 +1175,7 @@ def tuned_scaled_mm(
     return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
     props = torch.cuda.get_device_properties(index or 0)
     return props.major <= 7
