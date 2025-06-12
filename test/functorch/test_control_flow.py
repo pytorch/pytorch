@@ -14,6 +14,7 @@ from torch._higher_order_ops.associative_scan import (
 )
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
+from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -8705,6 +8706,22 @@ class TestHopSchema(TestCase):
             """while_loop(GraphModule cond_fn, GraphModule body_fn, Tensor[2] carried_inputs, Tensor[3] additional_inputs) -> Tensor[2]""",  # noqa: B950
         )
         self.assertEqual(schema.parse(str(schema)), schema)
+
+    def test_schema_tree_spec(self):
+        schema_gen = HopSchemaGenerator(torch.ops.higher_order.cond)
+        args = (torch.randn(3, 4), torch.randn(2, 3))
+        with self.assertRaisesRegex(
+            RuntimeError, "Please only add flattened inputs to the hop schema"
+        ):
+            schema_gen.add_arg("tuple_args", args)
+
+        for i, arg in enumerate(args):
+            schema_gen.add_arg(f"tuple_args{i}", arg)
+        schema_gen.add_schema_tree_spec(pytree.tree_flatten(args)[1])
+        flat_schema = schema_gen.gen_schema()
+        self.assertExpectedInline(
+            str(flat_schema), """cond(Tensor tuple_args0, Tensor tuple_args1) -> ()"""
+        )
 
 
 instantiate_parametrized_tests(TestHopSchema)
