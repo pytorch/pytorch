@@ -258,6 +258,7 @@ class RNNBase(Module):
             unique_storage_refs = {
                 StorageWeakRef(p.untyped_storage())
                 for p in self._flat_weights  # type: ignore[union-attr]
+                if p is not None
             }
             if len(unique_storage_refs) != len(self._flat_weights):
                 return
