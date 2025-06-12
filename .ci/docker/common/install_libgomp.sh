@@ -3,8 +3,6 @@
 
 set -ex
 
-source /opt/rh/gcc-toolset-11/enable
-
 # install dependencies
 dnf -y install gmp-devel libmpc-devel texinfo
 
@@ -17,10 +15,40 @@ mkdir -p gcc-11.4.0/build-gomp
 cd gcc-11.4.0/build-gomp
 
 # configure gcc build
-CFLAGS="-O2 -march=armv8-a -mtune=generic" \
-CXXFLAGS="-O2 -march=armv8-a -mtune=generic" \
-LDFLAGS="-Wl,--as-needed" \
-../configure --prefix=/usr --libdir=/usr/lib64 --enable-languages=c,c++ --disable-multilib --disable-bootstrap --enable-libgomp
+# I got these flags by by:
+# 1. downloading the source rpm for gcc-11 on AlmaLinux 8 container
+#    dnf install -y dnf-plugins-core rpmdevtools
+#   dnf download --source libgomp
+# 2. extracting the gcc.spec from the source.
+#    rpmdev-extract gcc-xx.src.rpm
+# 3. extracting optflags and ld_flags from gcc.spec:
+#    rpm --eval '%{optflags}'
+#    rpm --eval '%{build_ldflags}'
+#
+# I had to remove the following flags because they didn't compile for this version of libgomp:
+#   -Werror=format-security
+#   -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1
+#   -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1
+#
+# I added -march=armv8-a -mtune=generic to make them explicit. I don't think they're strictly needed.
+
+OPT_FLAGS='-O2 -march=armv8-a -mtune=generic \ 
+  -fexceptions -g -grecord-gcc-switches -pipe -Wall \
+  -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS \
+  -fstack-protector-strong -fasynchronous-unwind-tables \
+  -fstack-clash-protection'
+LDFLAGS='-Wl,-z,relro -Wl,--as-needed -Wl,-z,now'
+
+CFLAGS="$OPT_FLAGS" \
+CXXFLAGS="$OPT_FLAGS" \
+LDFLAGS="$LDFLAGS" \
+../configure \
+  --prefix=/usr \
+  --libdir=/usr/lib64 \
+  --enable-languages=c,c++ \
+  --disable-multilib \
+  --disable-bootstrap \
+  --enable-libgomp
 
 # only build libgomp
 make -j$(nproc) all-target-libgomp
