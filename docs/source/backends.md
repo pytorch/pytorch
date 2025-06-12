@@ -326,9 +326,7 @@ These backends include:
 ```
 
 % Docs for other backends need to be added here.
-
 % Automodules are just here to ensure checks run but they don't actually
-
 % add anything to the rendered page for now.
 
 ```{eval-rst}
