@@ -22,7 +22,7 @@ For Intel Data Center GPU
 For Intel Client GPU
 
 +-------------------------------------+---------------------------------------------------------------------------------------------------+
-| Supported OS                        | Validated Hardware                                                                                |
+| Supported OS                        | Validated Hardware                                                                                 |
 +=====================================+====================================================================================================+
 || Windows 11 & Ubuntu 24.10          || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                                |
 ||                                    || Intel® Arc B-Series Graphics (CodeName: Battlemage)                                               |
