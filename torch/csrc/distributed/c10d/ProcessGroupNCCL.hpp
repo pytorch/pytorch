@@ -684,22 +684,22 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     Watchdog(ProcessGroupNCCL* pg);
     virtual ~Watchdog() = default;
 
-    // Start the heartbeat monitor thread.
+    // Start the watchdog thread.
     void start();
 
-    // Join the heartbeat monitor thread.
+    // Join the watchdog thread.
     void join();
 
     // Function that runs as part of a separate thread and checks for errors on
     // NCCL communicators. We need a separate thread to check for NCCL errors
     // since we can't rely on the user calling certain methods like wait(),
-    // isCompleted() etc. to detect and remediate errors. In addition to this, we
-    // need a mechanism to safely abort and remove NCCL communicators from our
-    // cache. This can be done cleanly by having a thread for the ProcessGroupNCCL
-    // class. Attempting to modify the communicator cache from the WorkNCCL class
-    // might run into issues with object lifetime since the ProcessGroupNCCL
-    // object might get destroyed before the WorkNCCL object.
-    virtual void run();
+    // isCompleted() etc. to detect and remediate errors. In addition to this,
+    // we need a mechanism to safely abort and remove NCCL communicators from
+    // our cache. This can be done cleanly by having a thread for the
+    // ProcessGroupNCCL class. Attempting to modify the communicator cache from
+    // the WorkNCCL class might run into issues with object lifetime since the
+    // ProcessGroupNCCL object might get destroyed before the WorkNCCL object.
+    void run();
 
     // Watchdog's inside loop.
     // Takes care of cleaning up completed work, and aborting upon failure or
@@ -721,15 +721,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     void setDesyncDebug(bool desyncDebug);
 
-  private:
-    // Monitor thread which checks the heartbeat of Watchdog thread.
-    // If the monitor thread finds there is no heartbeat, it will dump debug
-    // info and then kill the watchdog thread to avoid hang.
+   private:
     std::thread ncclCommWatchdogThread_;
 
     // We need to keep a reference to the PG instance so that we can access
     // the member functions of the PG instance. We store a raw pointer on
-    // purpose because the heartbeat monitor thread now still lives within the
+    // purpose because the watchdog thread now still lives within the
     // lifetime of the PG instance.
     ProcessGroupNCCL* pg_;
 
@@ -1307,9 +1304,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // We gate the cudaEventCache so that we can roll it out gradually.
   std::atomic<bool> cudaEventCacheEnabled_{};
-
-  
-  std::thread ncclCommWatchdogThread_;
 
   std::thread onCompletionHookThread_;
 

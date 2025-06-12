@@ -988,8 +988,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 
-  // Initialize the heartbeat monitor/watchdog instance. This has to be done before
-  // the corresponding thread is launched to avoid the error.
+  // Initialize the heartbeat monitor/watchdog instance. This has to be done
+  // before the corresponding thread is launched to avoid the error.
   heartbeatMonitor_ = std::make_unique<HeartbeatMonitor>(this);
   watchdog_ = std::make_unique<Watchdog>(this);
 
@@ -1961,18 +1961,22 @@ ProcessGroupNCCL::Watchdog::Watchdog(ProcessGroupNCCL* pg) {
   rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
   propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
-    (pg_->dist_debug_level_ >= DebugLevel::Detail);
+      (pg_->dist_debug_level_ >= DebugLevel::Detail);
 
   // print out ENV settings for the watchdog thread.
-  LOG(INFO)
-    << pg_->logPrefix() << "PGNCCL Watchdog environments: "
-    << "TORCH_NCCL_RETHROW_CUDA_ERRORS: " << rethrowCUDAErrors_
-    << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
-    << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_;
+  LOG(INFO) << pg_->logPrefix() << "PGNCCL Watchdog environments: "
+            << "TORCH_NCCL_RETHROW_CUDA_ERRORS: " << rethrowCUDAErrors_
+            << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
+            << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_;
 
   // Enable Desync Debugger per user setting
   if (desyncDebug_) {
-    desyncDebugger_.init(pg_->getRank(), pg_->getSize(), pg_->globalRank(), pg_->getUid(), pg_->store_);
+    desyncDebugger_.init(
+        pg_->getRank(),
+        pg_->getSize(),
+        pg_->globalRank(),
+        pg_->getUid(),
+        pg_->store_);
   }
 }
 
@@ -1982,10 +1986,8 @@ void ProcessGroupNCCL::Watchdog::notify() {
 
 void ProcessGroupNCCL::Watchdog::start() {
   TORCH_CHECK(
-      !ncclCommWatchdogThread_.joinable(),
-      "Watchdog thread already started");
-  ncclCommWatchdogThread_ =
-      std::thread(&ProcessGroupNCCL::Watchdog::run, this);
+      !ncclCommWatchdogThread_.joinable(), "Watchdog thread already started");
+  ncclCommWatchdogThread_ = std::thread(&ProcessGroupNCCL::Watchdog::run, this);
 }
 
 void ProcessGroupNCCL::Watchdog::join() {
@@ -2030,12 +2032,64 @@ void ProcessGroupNCCL::Watchdog::run() {
     }
   } catch (...) {
     const auto exitMsg = c10::str(
-         pg_->logPrefix(),
+        pg_->logPrefix(),
         "Process group watchdog thread terminated with exception: unknown");
     LOG(ERROR) << exitMsg;
     watchDogException_ =
         std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
     std::rethrow_exception(watchDogException_);
+  }
+}
+
+int ProcessGroupNCCL::Watchdog::getSignalSrcRank(
+    c10::intrusive_ptr<Store>& store,
+    const std::string& signal) {
+  // This function is 'non blocking'. We first 'check' if the key exists in the
+  // store, then read/get the value only if the key exists.
+  int srcRank = -1;
+  bool signalExists = false;
+  try {
+    signalExists = store->check({signal});
+  } catch (const std::exception& e) {
+    LOG(WARNING) << pg_->logPrefix() << "Failed to check the signal " << signal
+                 << " on TCPStore, " << e.what();
+  }
+  if (!signalExists) {
+    return srcRank;
+  }
+
+  // key exists, now read and parse the value (source rank)
+  std::vector<uint8_t> vec;
+  try {
+    vec = store->get(std::string(signal));
+  } catch (const std::exception& e) {
+    LOG(ERROR) << pg_->logPrefix() << "Failed to get source rank of the signal "
+               << signal << " from TCPStore." << e.what();
+  }
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      vec.size() == sizeof(int),
+      "Invalid size for the timeout rank ID");
+  std::memcpy(&srcRank, vec.data(), vec.size());
+  return srcRank;
+}
+
+void ProcessGroupNCCL::Watchdog::checkAndSetRemoteError() {
+  // if the error is already set, no need to check again
+  if (pg_->getError() != ErrorType::SUCCESS) {
+    return;
+  }
+  // key/signal to read from the tcpstore is a string and pg specific:
+  // format is: remote_error:pg_uid
+  int remoteErrorRank = getSignalSrcRank(
+      pg_->store_, std::string(kStoreErrorSignalKey) + ':' + pg_->pg_uid_);
+  if (remoteErrorRank != -1) {
+    std::lock_guard<std::mutex> lock(pg_->errorMutex_);
+    pg_->error_ = ErrorType::REMOTE_ERROR;
+    LOG(ERROR) << c10::str(
+        pg_->logPrefix(),
+        " remote error detected from rank: ",
+        remoteErrorRank);
   }
 }
 
@@ -2096,8 +2150,10 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       data.integers["last_started_numel_out"] =
           static_cast<int64_t>(pg_->pgStatus_->lastStartedNumelOut);
       // logging strings
-      data.strings["last_enqueued_work_name"] = pg_->pgStatus_->lastEnqueuedWorkName;
-      data.strings["last_started_work_name"] = pg_->pgStatus_->lastStartedWorkName;
+      data.strings["last_enqueued_work_name"] =
+          pg_->pgStatus_->lastEnqueuedWorkName;
+      data.strings["last_started_work_name"] =
+          pg_->pgStatus_->lastStartedWorkName;
       data.strings["last_completed_work_name"] =
           pg_->pgStatus_->lastCompletedWorkName;
       data.strings["pg_name"] = pg_->pg_uid_;
@@ -2165,7 +2221,9 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
         // format is: remote_error:pg_uid
         if (propagatePgError_) {
           pg_->broadcastSignal(
-            pg_->store_, std::string(kStoreErrorSignalKey) + ':' + pg_->pg_uid_, pg_->rank_);
+              pg_->store_,
+              std::string(kStoreErrorSignalKey) + ':' + pg_->pg_uid_,
+              pg_->rank_);
         }
 
         // try to notify other ranks via global TCPStore to dump the flight
@@ -2177,8 +2235,8 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
         // look like, so it is better to let all ranks universally sleep for a
         // short period of time, in this case, 60 seconds, which is also the
         // maximum time we leave for FR dump.
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(pg_->heartbeatMonitor_->getDumpTimeout() * 4));
+        std::this_thread::sleep_for(std::chrono::milliseconds(
+            pg_->heartbeatMonitor_->getDumpTimeout() * 4));
 
         if (SHOULD_CLEAN_UP(pg_->asyncErrorHandling_)) {
           // Abort work and corresponding communicators
@@ -2253,9 +2311,10 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
           {
-            const std::lock_guard<std::mutex> lock(pg_->completedWorkListMutex_);
+            const std::lock_guard<std::mutex> lock(
+                pg_->completedWorkListMutex_);
             pg_->completedWorkList_.splice(
-              pg_->completedWorkList_.end(), pg_->workMetaList_, it++);
+                pg_->completedWorkList_.end(), pg_->workMetaList_, it++);
           }
           pg_->completedWorkListCV_.notify_one();
         } else {
@@ -2453,39 +2512,6 @@ void ProcessGroupNCCL::broadcastSignal(
   }
 }
 
-int ProcessGroupNCCL::Watchdog::getSignalSrcRank(
-    c10::intrusive_ptr<Store>& store,
-    const std::string& signal) {
-  // This function is 'non blocking'. We first 'check' if the key exists in the
-  // store, then read/get the value only if the key exists.
-  int srcRank = -1;
-  bool signalExists = false;
-  try {
-    signalExists = store->check({signal});
-  } catch (const std::exception& e) {
-    LOG(WARNING) << pg_->logPrefix() << "Failed to check the signal " << signal
-                 << " on TCPStore, " << e.what();
-  }
-  if (!signalExists) {
-    return srcRank;
-  }
-
-  // key exists, now read and parse the value (source rank)
-  std::vector<uint8_t> vec;
-  try {
-    vec = store->get(std::string(signal));
-  } catch (const std::exception& e) {
-    LOG(ERROR) << pg_->logPrefix() << "Failed to get source rank of the signal "
-               << signal << " from TCPStore." << e.what();
-  }
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      vec.size() == sizeof(int),
-      "Invalid size for the timeout rank ID");
-  std::memcpy(&srcRank, vec.data(), vec.size());
-  return srcRank;
-}
-
 void ProcessGroupNCCL::broadcastDumpSignal() {
   // broadcast dump signal to all other global ranks.
   broadcastSignal(globalStore_, std::string(kStoreDumpKey), globalRank());
@@ -2494,23 +2520,6 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
     LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
     // signal the monitor thread on PG0 to start dumping
     shouldDump_.store(true);
-  }
-}
-
-void ProcessGroupNCCL::Watchdog::checkAndSetRemoteError() {
-  // if the error is already set, no need to check again
-  if (pg_->getError() != ErrorType::SUCCESS) {
-    return;
-  }
-  // key/signal to read from the tcpstore is a string and pg specific:
-  // format is: remote_error:pg_uid
-  int remoteErrorRank = getSignalSrcRank(
-    pg_->store_, std::string(kStoreErrorSignalKey) + ':' + pg_->pg_uid_);
-  if (remoteErrorRank != -1) {
-    std::lock_guard<std::mutex> lock(pg_->errorMutex_);
-    pg_->error_ = ErrorType::REMOTE_ERROR;
-    LOG(ERROR) << c10::str(
-        pg_->logPrefix(), " remote error detected from rank: ", remoteErrorRank);
   }
 }
 
