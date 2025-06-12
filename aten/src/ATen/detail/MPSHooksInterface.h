@@ -3,7 +3,6 @@
 #pragma once
 
 #include <ATen/detail/AcceleratorHooksInterface.h>
-#include <ATen/mps/MPSDevice.h>
 
 #include <c10/core/Allocator.h>
 #include <c10/util/Exception.h>

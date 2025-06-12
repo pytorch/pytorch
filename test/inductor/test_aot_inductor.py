@@ -3083,14 +3083,9 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @common_utils.parametrize("dynamic", [False, True])
-<<<<<<< HEAD
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_tma_descriptor_1d(self, dynamic, tma_version):
-        if self.device != GPU_TYPE:
-=======
-    def test_triton_kernel_tma_descriptor_1d(self, dynamic):
         if not HAS_GPU:
->>>>>>> 7a2f04f9566 ([aoti] Enable test_aot_inductor.py tests)
             raise unittest.SkipTest("requires GPU")
         if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
