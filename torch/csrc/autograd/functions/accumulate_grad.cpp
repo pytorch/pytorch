@@ -10,7 +10,6 @@
 
 #include <cstdint>
 #include <stdexcept>
-#include <string_view>
 #include <utility>
 
 namespace torch::autograd {
@@ -26,12 +25,11 @@ variable_list AccumulateGrad_apply_functional_no_hooks(
     int64_t num_expected_refs,
     std::mutex* mutex = nullptr,
     bool mutate_variable = true) {
-  std::cout << "\nAccumulateGrad_apply_functional_no_hooks\n";
-  std::cout << "0. variable = " << variable.unsafeGetTensorImpl() << std::endl;
   check_input_variables("AccumulateGrad", grads, 1, 0);
 
   if (!grads[0].defined())
     return {};
+  // fix this
   // if (variable.grad_fn())
   //   throw std::logic_error(
   //       "leaf variable has been moved into the graph interior");
@@ -53,8 +51,6 @@ variable_list AccumulateGrad_apply_functional_no_hooks(
   }
 
   at::Tensor& grad = variable_grad;
-  std::cout << "before variable defined? " << variable.defined() << std::endl;
-  std::cout << "before variable_grad defined? " << grad.defined() << std::endl;
   if (mutate_variable) {
     // If the function has post hooks (for example, a DDP allreduce hook),
     // call_function in Engine.cpp will temporarily bump the expected refcount
@@ -62,18 +58,17 @@ variable_list AccumulateGrad_apply_functional_no_hooks(
     // 'num_expected_refs' in addition to the one reference that we're holding.
     // 'num_expected_refs' is used to determine whether or not we should clone
     // the grad or can steal the grad.
-    accumulateGrad(
+    AccumulateGrad::accumulateGrad(
         variable,
         grad,
         new_grad,
         num_expected_refs,
         [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
-    std::cout << "after variable_grad defined? " << grad.defined() << std::endl;
     return {};
   } else {
     at::Tensor functional_grad;
 
-    accumulateGrad(
+    AccumulateGrad::accumulateGrad(
         variable,
         grad,
         new_grad,
@@ -87,7 +82,6 @@ variable_list AccumulateGrad_apply_functional_no_hooks(
       functional_grad = std::move(grad);
     }
 
-    std::cout << "after variable_grad defined? " << grad.defined() << std::endl;
     return {functional_grad};
   }
 }

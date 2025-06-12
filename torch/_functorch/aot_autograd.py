@@ -548,11 +548,9 @@ def process_inputs(
                 source=source,
                 trace=trace,
             )
-            # result = fake_mode.from_tensor(x, static_shapes=ignore_shape_env, symbolic_context=symbolic_context, source=source, trace=trace)
             return result
 
-        out = FakifiedFlatArgs([convert(idx, x) for idx, x in enumerate(flat_args)])
-        return out
+        return FakifiedFlatArgs([convert(idx, x) for idx, x in enumerate(flat_args)])
 
 
 def construct_fake_mode(
