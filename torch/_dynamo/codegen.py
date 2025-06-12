@@ -79,7 +79,7 @@ class PyCodegen:
     ) -> None:
         self.root = root
         self.top_of_stack: Optional[Union[VariableTracker, Source]] = None
-        self.uses: Counter[VariableTracker] = collections.Counter()
+        self.uses: Counter[Union[VariableTracker, Source]] = collections.Counter()
         self.graph_outputs: dict[int, GraphOutputEntry] = {}
         self._output: list[Instruction] = []
         # This determines which VariableTracker/Source should be stored as
@@ -181,9 +181,9 @@ class PyCodegen:
         Notable effects:
         1. `self.top_of_stack` will be set to `value`, if we don't codegen
            `value` based on source.
-        2. `self.uses[value]` will increment, if we don't codegen `value` based
-           on source or cache/top-of-stack reuse; in other words, if we codegen
-           as if `value` is modelling some brand new python value.
+        2. `self.uses[value]` will increment, unless (a). we codegen via
+            `top_of_stack` or cached `tempvars`, or (b). `value` has special VT
+            types like `NNModuleVariable`, etc.
         """
         if isinstance(value, Source):
             # If the source needs to be overridden, use the new one.
@@ -198,6 +198,7 @@ class PyCodegen:
                 self.top_of_stack = source
                 return
 
+            self.uses[source] += 1
             try:
                 self.call_reconstruct(source)
             except NotImplementedError:
@@ -207,9 +208,9 @@ class PyCodegen:
                     explanation=f"Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
-
-            self._output.append(create_dup_top())
-            self.add_cache(source)
+            if source in self.tempvars:
+                self._output.append(create_dup_top())
+                self.add_cache(source)
             self.top_of_stack = source
 
             return
