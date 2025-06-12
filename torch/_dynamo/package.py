@@ -362,6 +362,7 @@ class DynamoStore:
     """
     A DynamoStore tracks active CompilePackages, and provides methods to store and retrieve them.
     """
+
     def record_package(self, package: CompilePackage) -> None:
         """Records a package to PrecompileContext, so that it can be serialized later."""
         cache_entry = package.cache_entry()
@@ -371,7 +372,7 @@ class DynamoStore:
         )
 
     def record_eager_backend(self, backend_id: _BackendId, backend: Any) -> None:
-        """Records eager fx graphs to PrecompileContext for testing purposes. """
+        """Records eager fx graphs to PrecompileContext for testing purposes."""
         pickled_result = pickle.dumps(backend)
         PrecompileContext.record_artifact(
             EagerCacheArtifact.type(), key=backend_id, content=pickled_result
