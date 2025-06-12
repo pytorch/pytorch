@@ -785,6 +785,18 @@ class OpOverload(OperatorBase):
                 # We will conservatively call mixed mutable/non-mutable
                 # aliased inputs as NOT a view
                 is_write = a.alias_info.is_write or is_write
+            self.__annotations__[a.name] = a.type
+        return_types = (
+            tuple(a.type for a in self._schema.returns)
+            if self._schema.returns
+            else None
+        )
+        if return_types is None:
+            self.__annotations__["return"] = None
+        else:
+            self.__annotations__["return"] = (
+                return_types if len(return_types) > 1 else return_types[0]
+            )
         self.is_view = is_write is not None and not is_write
 
     @property
