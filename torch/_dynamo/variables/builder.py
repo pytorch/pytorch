@@ -115,6 +115,8 @@ from ..source import (
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
+    UnspecializedBuiltinNNModuleSource,
+    UnspecializedNNModuleSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -434,7 +436,10 @@ class VariableBuilder:
             return cached_vt
 
         vt = self._wrap(value)
-        vt.source = self.source
+
+        if vt.source is None:
+            vt.source = self.source
+
         if (
             self._can_lift_attrs_to_inputs(vt)
             and value not in self.tx.output.side_effects
@@ -470,7 +475,7 @@ class VariableBuilder:
         return cls._type_dispatch_impl(config.trace_numpy)
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _type_dispatch_impl(cls, trace_numpy):
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
@@ -571,7 +576,7 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_mutable(value, result)
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _id_dispatch(
         cls,
     ) -> dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
@@ -1380,7 +1385,7 @@ class VariableBuilder:
 
             result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif isinstance(value, tuple) and type(value).__new__ is tuple.__new__:
+        elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -1397,7 +1402,7 @@ class VariableBuilder:
             tuple_vt = TupleVariable(
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
-            result = UserDefinedTupleVariable.create(
+            result = UserDefinedTupleVariable(
                 value, tuple_vt=tuple_vt, source=self.source
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
@@ -1714,7 +1719,6 @@ class VariableBuilder:
                 value = value.get_base()
                 self.source = AttrProxySource(self.source)
 
-            self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
                 freezing = is_parameter_freezing()
 
@@ -1749,12 +1753,27 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(("torch.nn.", "torch.ao.")) or getattr(
-                value.__class__, "_dynamo_marked_static", False
-            ):
-                result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
+            if (
+                value.__module__.startswith(("torch.nn.modules", "torch.ao."))
+                and not value.__module__.startswith("torch.nn.modules.container")
+            ) or getattr(value.__class__, "_dynamo_marked_static", False):
+                new_source = self.source
+                if config.inline_inbuilt_nn_modules and (
+                    not self.tx.output.export or config.install_free_tensors
+                ):
+                    # Export corner case - look at test_repros.py test_inlining_cornercase
+                    new_source = UnspecializedBuiltinNNModuleSource(self.source)
+                result = UnspecializedBuiltinNNModuleVariable(value, source=new_source)
+                install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
             else:
-                result = UnspecializedNNModuleVariable(value, source=self.source)
+                new_source = self.source
+                if config.inline_inbuilt_nn_modules and (
+                    not self.tx.output.export or config.install_free_tensors
+                ):
+                    # Export corner case - look at test_repros.py test_inlining_cornercase
+                    new_source = UnspecializedNNModuleSource(self.source)
+                result = UnspecializedNNModuleVariable(value, source=new_source)
+                install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
 
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
@@ -1788,7 +1807,28 @@ class VariableBuilder:
                 # unspecializing int by default, but still
                 # specialize for the following conditions
                 if is_int_specialization_case(value, self.source):
-                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    recompile_hint = None
+                    if (
+                        self.source.guard_source().is_unspecialized_builtin_nn_module()
+                        or self.source.guard_source().is_unspecialized_nn_module()
+                    ):
+                        # This means that it is an integer from a NN module.
+                        # Dynamo considers nn module int attributes to be static
+                        # (a good heursitic). But a user might want to mark the
+                        # int attribute to be a symint, so track this integer
+                        # for recompilation later.
+                        recompile_hint = (
+                            "torch.compile considers integer attributes of the nn.Module to be static. "
+                            "If you are observing recompilation, you might want to make this integer dynamic "
+                            "using torch._dynamo.config.allow_unspec_int_on_nn_module = True, or convert this "
+                            "integer into a tensor."
+                        )
+
+                    self.install_guards(
+                        functools.partial(
+                            GuardBuilder.EQUALS_MATCH, recompile_hint=recompile_hint
+                        )
+                    )
                     return ConstantVariable.create(value=value, source=self.source)
 
             return self.wrap_symint(value)
@@ -2126,6 +2166,10 @@ class VariableBuilder:
             example_strong_ref=tensor_value,
         )
         proxy.node.meta["grapharg"] = grapharg
+
+        # TODO - Why do we need to set the source of the np ndarray vt back to
+        # original source. Many tests fails.
+        numpy_ndarray_variable.source = self.source
 
         return numpy_ndarray_variable
 
