@@ -2,7 +2,8 @@
 astunparse==1.6.3
 expecttest==0.2.1
 hypothesis==5.35.1
-numpy==2.1.2
+numpy==2.0.2 ; python_version == "3.9"
+numpy==2.1.2 ; python_version > "3.9"
 psutil==7.0.0
 pyyaml==6.0.2
 requests==2.32.3
