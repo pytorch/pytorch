@@ -16,15 +16,10 @@ from torch.testing._internal.common_utils import (
 
 try:
     import einops
+
+    has_einops = True
 except ImportError:
-    unittest.skip("Test requires einops")
-
-
-# einops 0.8.1
-# - flag=True
-#   + trace
-# - flag=False
-#   + allow_in_graph
+    has_einops = False
 
 
 # einops.rearrange
@@ -36,6 +31,12 @@ except ImportError:
 
 
 class TestEinops(torch._dynamo.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if not has_einops:
+            raise unittest.SkipTest("Test requires einops")
+        return super().setUpClass()
+
     def _run_in_subprocess(self, flag, method, einops_method, snippet):
         # run in a different process
         script = f"""
@@ -149,12 +150,11 @@ from user code:
     y = einops.reduce(x, "a b -> a", "min")""",  # noqa: B950
         )
 
-    @unittest.skipIf(
-        einops.__version__ < "0.7",
-        reason=f"Needs einops 0.7 or newer, got {einops.__version__}",
-    )
     @torch._dynamo.config.patch(enable_einops_tracing=True)
     def test_trace_einops(self):
+        if einops.__version__ < "0.7":
+            self.skipTest(f"Needs einops 0.7 or newer, got {einops.__version__}")
+
         from einops import einsum, pack, rearrange, reduce, repeat, unpack
 
         # Test copied from arogozhnikov/einops at
