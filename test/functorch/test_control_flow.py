@@ -14,6 +14,7 @@ from torch._higher_order_ops.associative_scan import (
 )
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
+from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -7703,10 +7704,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, x):
-        x: "f32[s35, 3]";
+        x: "f32[s77, 3]";
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-        sym_size_int_1: "Sym(s35)" = torch.ops.aten.sym_size.int(x, 0)
+        sym_size_int_1: "Sym(s77)" = torch.ops.aten.sym_size.int(x, 0)
 
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
@@ -7720,27 +7721,27 @@ class GraphModule(torch.nn.Module):
         gt_1: "Sym(u1 > 0)" = getitem_2 > 0
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 0 < u1 on node 'gt_1'");  gt_1 = _assert_scalar_default_1 = None
 
-        getitem_1: "f32[s35, 3]" = while_loop[1];  while_loop = None
+        getitem_1: "f32[s77, 3]" = while_loop[1];  while_loop = None
 
         add: "Sym(u1 + 1)" = getitem_2 + 1
 
-        add_1: "f32[s35, 3]" = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = None
+        add_1: "f32[s77, 3]" = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = None
 
-        lt: "Sym(u1 < s35)" = getitem_2 < sym_size_int_1;  sym_size_int_1 = None
+        lt: "Sym(u1 < s77)" = getitem_2 < sym_size_int_1;  sym_size_int_1 = None
 
         mul: "Sym(2*u1)" = getitem_2 * 2;  getitem_2 = None
         ones: "f32[2*u1]" = torch.ops.aten.ones.default([mul], device = device(type='cpu'), pin_memory = False);  mul = None
         return pytree.tree_unflatten((add, add_1, lt, ones), self._out_spec)
 
     class while_loop_cond_graph_0(torch.nn.Module):
-        def forward(self, it_1: "Sym(u0)", x_1: "f32[s35, 3]"):
-            sym_size_int: "Sym(s35)" = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
-            lt: "Sym(u0 < s35)" = it_1 < sym_size_int;  it_1 = sym_size_int = None
+        def forward(self, it_1: "Sym(u0)", x_1: "f32[s77, 3]"):
+            sym_size_int: "Sym(s77)" = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
+            lt: "Sym(u0 < s77)" = it_1 < sym_size_int;  it_1 = sym_size_int = None
             return lt
 
     class while_loop_body_graph_0(torch.nn.Module):
-        def forward(self, it_1: "Sym(u0)", x_1: "f32[s35, 3]"):
-            clone: "f32[s35, 3]" = torch.ops.aten.clone.default(x_1);  x_1 = None
+        def forward(self, it_1: "Sym(u0)", x_1: "f32[s77, 3]"):
+            clone: "f32[s77, 3]" = torch.ops.aten.clone.default(x_1);  x_1 = None
             select: "f32[3]" = torch.ops.aten.select.int(clone, 0, it_1)
             select_1: "f32[3]" = torch.ops.aten.select.int(clone, 0, it_1)
             add: "f32[3]" = torch.ops.aten.add.Tensor(select_1, it_1);  select_1 = None
@@ -8705,6 +8706,22 @@ class TestHopSchema(TestCase):
             """while_loop(GraphModule cond_fn, GraphModule body_fn, Tensor[2] carried_inputs, Tensor[3] additional_inputs) -> Tensor[2]""",  # noqa: B950
         )
         self.assertEqual(schema.parse(str(schema)), schema)
+
+    def test_schema_tree_spec(self):
+        schema_gen = HopSchemaGenerator(torch.ops.higher_order.cond)
+        args = (torch.randn(3, 4), torch.randn(2, 3))
+        with self.assertRaisesRegex(
+            RuntimeError, "Please only add flattened inputs to the hop schema"
+        ):
+            schema_gen.add_arg("tuple_args", args)
+
+        for i, arg in enumerate(args):
+            schema_gen.add_arg(f"tuple_args{i}", arg)
+        schema_gen.add_schema_tree_spec(pytree.tree_flatten(args)[1])
+        flat_schema = schema_gen.gen_schema()
+        self.assertExpectedInline(
+            str(flat_schema), """cond(Tensor tuple_args0, Tensor tuple_args1) -> ()"""
+        )
 
 
 instantiate_parametrized_tests(TestHopSchema)
