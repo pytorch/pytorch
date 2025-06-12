@@ -12,8 +12,7 @@
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/model.h>
 
-namespace {
-
+namespace torch::aot_inductor {
 // The state transition is done by:
 // (1) NONE state: The default state when created. This state should only exist
 // when model_container is created and no constants are being loaded or updated.
@@ -23,7 +22,7 @@ namespace {
 // const_fold is being invoked.
 enum class ConstantState : uint8_t { NONE, INITIALIZED, FOLDED, UNKNOWN };
 
-std::string toStringConstantState(ConstantState state) {
+inline std::string toStringConstantState(ConstantState state) {
   switch (state) {
     case ConstantState::NONE:
       return "ConstantState::NONE";
@@ -37,10 +36,6 @@ std::string toStringConstantState(ConstantState state) {
       return "Unknown enum class state for ConstantState";
   }
 }
-
-} // namespace
-
-namespace torch::aot_inductor {
 
 class AOTInductorModelContainer {
  public:
@@ -107,25 +102,27 @@ class AOTInductorModelContainer {
     std::shared_lock model_lk(model_exec_mutex_);
     auto* model = get_available_model();
 
-    if (constant_folded_ == ConstantState::INITIALIZED) {
+    ConstantState& const_folded =
+        use_secondary_ ? constant_folded_secondary_ : constant_folded_;
+    if (const_folded == ConstantState::INITIALIZED) {
       // At this point, constant is not ready yet. We need to call constant
       // folding before we execute the model. We obtain a unique lock at this
       // point to make sure constant is ready for all.
       model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       // Double locking to make sure constant folding is only ran once.
-      if (constant_folded_ == ConstantState::INITIALIZED) {
+      if (const_folded == ConstantState::INITIALIZED) {
         auto folded_const_map = model->run_const_fold(
             stream, proxy_executor, /* initialization = */ true);
         update_constant_buffer(
             std::move(folded_const_map),
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
-        constant_folded_ = ConstantState::FOLDED;
+        const_folded = ConstantState::FOLDED;
       }
       constants_folding_lk.unlock();
       model_lk.lock();
-    } else if (constant_folded_ != ConstantState::FOLDED) {
+    } else if (const_folded != ConstantState::FOLDED) {
       throw std::runtime_error(
           "Unknown constant state: " + toStringConstantState(constant_folded_));
     }
@@ -159,14 +156,16 @@ class AOTInductorModelContainer {
       AOTIProxyExecutorHandle proxy_executor) {
     auto* model = available_models_[0];
 
-    if (constant_folded_ == ConstantState::INITIALIZED) {
+    ConstantState& const_folded =
+        use_secondary_ ? constant_folded_secondary_ : constant_folded_;
+    if (const_folded == ConstantState::INITIALIZED) {
       auto folded_const_map = model->run_const_fold(
           stream, proxy_executor, /* initialization = */ true);
       update_constant_buffer(
           std::move(folded_const_map),
           /* use_inactive = */ false,
           /* validate_full_update = */ false);
-      constant_folded_ = ConstantState::FOLDED;
+      const_folded = ConstantState::FOLDED;
     } else if (constant_folded_ != ConstantState::FOLDED) {
       throw std::runtime_error(
           "Unknown constant state: " + toStringConstantState(constant_folded_));
@@ -233,6 +232,13 @@ class AOTInductorModelContainer {
     return models_[0]->constant_from_folded(static_cast<int64_t>(idx));
   }
 
+  size_t constant_data_size(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_data_size(static_cast<int64_t>(idx));
+  }
+
   // retrieve type of constants_info_[idx]
   int32_t constant_type(size_t idx) const {
     if (this->num_models() == 0) {
@@ -253,29 +259,31 @@ class AOTInductorModelContainer {
       bool inactive_buffer,
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    std::shared_lock model_lk(model_exec_mutex_);
-    auto* model = get_available_model();
-
+    AOTInductorModel* model;
+    ConstantState& const_folded = inactive_buffer == use_secondary_
+        ? constant_folded_
+        : constant_folded_secondary_;
     if (!inactive_buffer) {
       // We would need to acquire a unique lock if we want to run constant
       // folding on the active buffer.
-      model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
+      model = get_available_model();
       try {
         auto folded_const_map = model->run_const_fold(stream, proxy_executor);
         update_constant_buffer(
             std::move(folded_const_map),
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
-        constant_folded_ = ConstantState::FOLDED;
+        const_folded = ConstantState::FOLDED;
       } catch (...) {
         std::lock_guard lk(models_mutex_);
         available_models_.push_back(model);
         throw;
       }
-      constants_folding_lk.unlock();
-      model_lk.lock();
     } else {
+      std::shared_lock model_lk(model_exec_mutex_);
+      model = get_available_model();
+
       // We swap the constant mapping to the inactive buffer in the model to run
       // const run.
       auto constants_map = get_constants_map(/* get_inactive= */ true);
@@ -298,7 +306,7 @@ class AOTInductorModelContainer {
         model->update_constants_map(
             constants_map, /* remap_constants_array= */ false);
         model->update_constants_array(constants_array);
-        constant_folded_secondary_ = ConstantState::FOLDED;
+        const_folded = ConstantState::FOLDED;
       } catch (...) {
         std::lock_guard lk(models_mutex_);
         available_models_.push_back(model);
@@ -535,7 +543,6 @@ class AOTInductorModelContainer {
       model->update_constants_array(constants_array);
     }
 
-    std::swap(constant_folded_, constant_folded_secondary_);
     use_secondary_ = !use_secondary_;
   }
 

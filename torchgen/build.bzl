@@ -18,13 +18,3 @@ def define_targets(rules):
             rules.requirement("typing-extensions"),
         ],
     )
-
-    rules.py_binary(
-        name = "gen_executorch",
-        srcs = [":torchgen"],
-        visibility = ["//visibility:public"],
-        deps = [
-            rules.requirement("PyYAML"),
-            rules.requirement("typing-extensions"),
-        ],
-    )

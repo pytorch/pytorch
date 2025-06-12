@@ -852,7 +852,7 @@ void RNNCellImplBase<Derived>::pretty_print(std::ostream& stream) const {
 template <typename Derived>
 void RNNCellImplBase<Derived>::check_forward_input(
     const Tensor& input,
-    const string& name) const {
+    const std::string& name) const {
   TORCH_CHECK(
       input.dim() == 1 || input.dim() == 2,
       "Expected ",

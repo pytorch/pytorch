@@ -307,7 +307,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 dtype == torch.float32
                 and epilogue == "add"
                 and not bias
-                and dynamo_config.dynamic_shapes
                 and not dynamo_config.assume_static_by_default
             )
         ):
@@ -1379,6 +1378,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize(
         "batch_size",
         (
+            1,
             17,
             32,
         ),
@@ -1430,8 +1430,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
-        vec_amx = VecAMX()
-        self._check_amx_counter(vec_amx)
+        if batch_size * mid_dim >= 16:
+            vec_amx = VecAMX()
+            self._check_amx_counter(vec_amx)
 
     @unittest.skipIf(
         not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
@@ -1551,7 +1552,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 return y.reshape(*x_shape[:-1], out_features)
 
         counters.clear()
-        seq_len = 8
+        seq_len = 4
         x = torch.rand((batch_size, seq_len, in_features), dtype=dtype)
         mod = M(in_features, out_features, group_size).eval()
         self.common(mod, (x,), reference_in_float=False)
@@ -1569,7 +1570,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
-    @parametrize("batch_size", (4, 6))
+    @parametrize("batch_size", (1, 4, 6))
     @parametrize("in_features", (128, 1024))
     @parametrize("out_features", (128, 1024))
     @parametrize("group_size", (32, 64, 128))

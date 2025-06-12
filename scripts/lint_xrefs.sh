@@ -18,16 +18,28 @@ while IFS=: read -r filepath link; do
     status=1
   fi
 done < <(
-  git --no-pager grep --no-color -I -P -o \
-    '(?!.*@lint-ignore)(?:\[[^]]+\]\([^[:space:])]*/[^[:space:])]*\)|href="[^"]*/[^"]*"|src="[^"]*/[^"]*")' \
-    -- '*' \
-    ':(exclude).*' \
-    ':(exclude)**/.*' \
-    ':(exclude)**/*.lock' \
-    ':(exclude)**/*.svg' \
-    ':(exclude)**/*.xml' \
-    ':(exclude,glob)**/third-party/**' \
-    ':(exclude,glob)**/third_party/**' \
+  pattern='(?!.*@lint-ignore)(?:\[[^]]+\]\([^[:space:]\)]+/[^[:space:]\)]+\)|href="[^"]*/[^"]*"|src="[^"]*/[^"]*")'
+  excludes=(
+    ':(exclude,glob)**/.*'
+    ':(exclude,glob)**/*.lock'
+    ':(exclude,glob)**/*.svg'
+    ':(exclude,glob)**/*.xml'
+    ':(exclude,glob)**/*.gradle*'
+    ':(exclude,glob)**/*gradle*'
+    ':(exclude,glob)**/third-party/**'
+    ':(exclude,glob)**/third_party/**'
+  )
+  if [ $# -eq 2 ]; then
+    for filename in $(git diff --name-only --unified=0 "$1...$2"); do
+      git diff --unified=0 "$1...$2" -- "$filename" "${excludes[@]}" \
+        | grep -E '^\+' \
+        | grep -Ev '^\+\+\+' \
+        | perl -nle 'print for m#'"$pattern"'#g' \
+        | sed 's|^|'"$filename"':|'
+    done
+  else
+    git --no-pager grep --no-color -I -P -o "$pattern" -- . "${excludes[@]}"
+  fi \
   | grep -Ev 'https?://' \
   | sed -E \
       -e 's#([^:]+):\[[^]]+\]\(([^)]+)\)#\1:\2#' \
