@@ -46,7 +46,6 @@ from ..utils import (
     use_cpp_gemm_template,
     use_cutlass_template,
     use_decompose_k_choice,
-    use_max_autotune,
     use_triton_template,
     use_triton_tma_template,
 )
@@ -682,7 +681,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     )
 
     aten_layout = layout
-    if not use_max_autotune():
+    if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
         aten_layout = FlexibleLayout(
             device=layout.device, dtype=layout.dtype, size=layout.size
         )
