@@ -116,18 +116,11 @@ struct MAIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void record(void** event,
     const Stream& stream,
     const DeviceIndex device_index,
-    const EventFlag flag) const override {
-    // TORCH_CHECK(false, "MAIA backend doesn't support events.");
-    return;
-  }
+    const EventFlag flag) const override { }
   void block(
     void* event,
-    const Stream& stream) const override {
-    // TORCH_CHECK(false, "MAIA backend doesn't support events.");
-    return;
-  }
+    const Stream& stream) const override { }
   bool queryEvent(void* event) const override {
-    // TORCH_CHECK(false, "MAIA backend doesn't support events.");
     return true;
   }
   void destroyEvent(
