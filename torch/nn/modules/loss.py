@@ -1319,7 +1319,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
     .. note::
         When providing `target` as class probabilities, it is expected that soft labels are passed
-        (i.e., `target` contains probability distributions over the possible classes for a given data sample
+        (i.e., `target` contains probability distributions over the possible classes for each data sample
         where each individual probability is between `[0,1]` and the distribution sums to `1`).
         Hence the use of :func:`softmax()` on ``target`` in the above class probabilities example.
 
