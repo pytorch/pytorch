@@ -290,6 +290,19 @@ guess_tangent_strides_as_outputs = False
 # it will untimately be removed once we share size_hints across ranks through compiler collectives
 _broadcast_rank0_decision = False
 
+# By default apply inlined saved_tensors_hooks only for "donated" buffers.
+# "donated" buffers are invisible to the user, they are intermediates of the forward graph.
+# Applying saved tensors hooks for memory optimizations only for intermediates
+# guarantees that original saved tensors could be deallocated.
+# This config enables saved_tensors_hooks are applied for **all** saved tensors,
+# that could include inputs, parameters, outputs.
+# "donated" - applied only to saved intermediates of the graph
+# "no_static" - applied to all saved but not "static"
+# (this includes parameters and user marked as static)
+# "all" - no filtering, everything saved for backward.
+saved_tensors_hooks_filtering_mode = "donated"
+
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 

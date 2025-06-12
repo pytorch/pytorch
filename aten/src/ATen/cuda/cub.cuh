@@ -291,7 +291,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
 #endif
 }
 
-# if (defined(CUDA_VERSION) && CUDA_VERSION > 11040) || defined(USE_ROCM)
+# if defined(CUDA_VERSION) || defined(USE_ROCM)
 
 template<typename T>
 struct BlockPrefixCallbackOp

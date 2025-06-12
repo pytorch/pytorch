@@ -32,6 +32,8 @@ from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     hint_int,
     is_symbol_binding_fx_node,
+    statically_known_false,
+    statically_known_true,
 )
 from torch.fx.passes import graph_drawer
 from torch.utils._ordered_set import OrderedSet
@@ -301,7 +303,7 @@ def _remove_by_name(saved_values: list[fx.Node], name: str):
 
 
 def find_first_sym_node(
-    fwd_module_outputs: Union[list[fx.Node], tuple[fx.Node]]
+    fwd_module_outputs: Union[list[fx.Node], tuple[fx.Node]],
 ) -> int:
     idx = len(fwd_module_outputs)
     for i in range(len(fwd_module_outputs) - 1, -1, -1):
@@ -379,7 +381,7 @@ def calculate_quantization_scaling(
         scale_node = graph.call_function(
             torch.ops.prims.convert_element_type.default,
             args=(mul_node, torch.float32),
-            name="scale_" + str(node.name),
+            name="fp8_scale_" + str(node.name),
         )
         scale_node.meta["val"] = torch.ops.prims.convert_element_type.default(
             mul_node.meta["val"], torch.float32
@@ -444,7 +446,7 @@ def perform_quantization(
         quant_activation_node = graph.call_function(
             torch.ops.prims.convert_element_type.default,
             args=(clamp_max_scaled_node, quant_type),
-            name="quant_" + str(node.name),
+            name="fp8_quant_" + str(node.name),
         )
         quant_activation_node.meta[
             "val"
@@ -488,13 +490,26 @@ def should_quantize(node: torch.fx.Node) -> bool:
     allowed_dtypes = get_allowed_dtypes()
     if not is_node_meta_valid(node) or node.meta["val"].dtype not in allowed_dtypes:
         return False
-
-    # calculate the size of the node
-    size_in_mb = calculate_tensor_size(node.meta["val"])
-
-    return size_in_mb >= torch._inductor.config.post_grad_fusion_options[
+    size_threshold = torch._inductor.config.post_grad_fusion_options[
         "activation_quantization_aten_pass"
     ].get("size_in_mb", 100)
+    # calculate the size of the node
+    size_in_mb = calculate_tensor_size(node.meta["val"])
+    if not torch._inductor.config.post_grad_fusion_options[
+        "activation_quantization_aten_pass"
+    ].get("skip_dynamo_guards", False):
+        return size_in_mb >= size_threshold
+    else:
+        # case 1: we alway quantize tensors with dynamic shapes
+        if torch._inductor.config.post_grad_fusion_options[
+            "activation_quantization_aten_pass"
+        ].get("quantize_dynamic_shape", False):
+            return statically_known_true(
+                size_in_mb >= size_threshold
+            ) or not statically_known_false(size_in_mb >= size_threshold)
+        else:
+            # case 2: we alway not quantize tensors with dynamic shapes
+            return statically_known_true(size_in_mb >= size_threshold)
 
 
 def get_quant_type() -> torch.dtype:
@@ -513,13 +528,8 @@ def calculate_range(dtype: torch.dtype) -> tuple:
     Returns:
         tuple: A tuple containing the minimum and maximum values.
     """
-    if dtype == torch.float8_e5m2:
-        # 8-bit floating-point format with e5m2 layout
-        min_val = -57344.0
-        max_val = 57344.0
-    else:
-        raise ValueError(f"Unsupported dtype: {dtype}")
-    return min_val, max_val
+    info = torch.finfo(dtype)
+    return info.min, info.max
 
 
 def quantize_activation_fw(graph: torch.fx.Graph) -> None:
@@ -535,7 +545,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
             # case: use scaling
             if torch._inductor.config.post_grad_fusion_options[
                 "activation_quantization_aten_pass"
-            ].get("use_scaling", False):
+            ].get("use_scaling", True):
                 # calculating the scale
                 scale_node = calculate_quantization_scaling(
                     graph, node, clamp_max, 1e-12
@@ -554,7 +564,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
                     quant_node = graph.call_function(
                         torch.ops.prims.convert_element_type.default,
                         args=(node, quant_type),
-                        name="quant_" + str(node.name),
+                        name="fp8_quant_" + str(node.name),
                     )
                     quant_node.meta[
                         "val"
@@ -595,12 +605,13 @@ def quantize_activation_bw(graph: torch.fx.Graph) -> None:
                 # case: use scaling
                 with graph.inserting_after(node):
                     # find corresponding scale node
-                    scale_name = "scale_" + node.name.replace("quant_", "")
+                    scale_name = "fp8_scale_" + node.name.replace("fp8_quant_", "")
                     scale_node = next(
                         bwd_input
                         for bwd_input in bw_inputs
                         if bwd_input.name == scale_name
                     )
+                with graph.inserting_after(scale_node):
                     activation_node = graph.call_function(
                         torch.ops.prims.convert_element_type.default,
                         args=(node, dequant_type),
@@ -613,7 +624,7 @@ def quantize_activation_bw(graph: torch.fx.Graph) -> None:
                     activation_node.meta["tensor_meta"] = extract_tensor_metadata(
                         activation_node.meta["val"]
                     )
-                with graph.inserting_after(scale_node):
+                with graph.inserting_after(activation_node):
                     divided_target_node_32 = graph.call_function(
                         torch.ops.aten.div.Tensor,
                         args=(activation_node, scale_node),
@@ -725,11 +736,22 @@ def enable_activation_quantization(
         ),
     )
 
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "before_activation_quantization_bwd_aten_pass",
+            "encoding": "string",
+        },
+        payload_fn=lambda: bwd_module.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        ),
+    )
+
     quant_fwd_module_outputs = fwd_module.graph.find_nodes(op="output")[0].args[0]
     # update the corresponding bwd_inputs due to the fwd_outputs quantization
     for fwd_node in quant_fwd_module_outputs:
-        if "quant_" in fwd_node.name:
-            bwd_input = bwd_module_inputs[fwd_node.name.replace("quant_", "")]
+        if "fp8_quant_" in fwd_node.name:
+            bwd_input = bwd_module_inputs[fwd_node.name.replace("fp8_quant_", "")]
             with bwd_module.graph.inserting_after(bwd_input):
                 quant_bwd_input = bwd_module.graph.placeholder(name=fwd_node.name)
             dequant_type = bwd_input.meta["dequant_type"]
@@ -741,33 +763,23 @@ def enable_activation_quantization(
     # update the bwd_inputs if quantization with scaling is used
     if torch._inductor.config.post_grad_fusion_options[
         "activation_quantization_aten_pass"
-    ].get("use_scaling", False):
+    ].get("use_scaling", True):
+        quant_bwd_module_inputs = list(bwd_module.graph.find_nodes(op="placeholder"))
         # update the corresponding bwd input nodes find the last non-tangent node
-        bwd_input_loc = list(bwd_module_inputs.values())[-1]
-        for bw_input in reversed(bwd_module_inputs.values()):
+        bwd_input_loc = quant_bwd_module_inputs[-1]
+        for bw_input in reversed(quant_bwd_module_inputs):
             if not _is_tangent(bw_input):
                 bwd_input_loc = bw_input
                 break
 
         scaled_fwd_module_outputs = fwd_module.graph.find_nodes(op="output")[0].args[0]
         for fwd_node in scaled_fwd_module_outputs:
-            if "scale_" in fwd_node.name:
+            if "fp8_scale_" in fwd_node.name:
                 # fwd node is a scale node
                 with bwd_module.graph.inserting_after(bwd_input_loc):
                     scale_bwd_input = bwd_module.graph.placeholder(name=fwd_node.name)
                 scale_bwd_input.meta.update(fwd_node.meta)
                 bwd_input_loc = scale_bwd_input
-
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "before_activation_quantization_bwd_aten_pass",
-            "encoding": "string",
-        },
-        payload_fn=lambda: bwd_module.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        ),
-    )
 
     quantize_activation_bw(bwd_module.graph)
 
@@ -1037,10 +1049,10 @@ def _count_ops(graph: fx.Graph):
     for node in graph.nodes:
         if node.op == "call_function":
             cnt[node.target.__name__] += 1
-    log.info("%s", sorted(cnt.items(), key=lambda x: x[1], reverse=True))
+    log.info("%s", sorted(cnt.items(), key=operator.itemgetter(1), reverse=True))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def pointwise_ops():
     ops = []
     for attr_name in dir(torch.ops.aten):
@@ -1062,7 +1074,7 @@ def sort_depths(args, depth_map: dict[fx.Node, int]) -> list[tuple[fx.Node, int]
     arg_depths = {
         arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)
     }
-    return sorted(arg_depths.items(), key=lambda x: x[1], reverse=True)
+    return sorted(arg_depths.items(), key=operator.itemgetter(1), reverse=True)
 
 
 def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
@@ -1129,6 +1141,11 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
         return gm
 
     # Build the graph op-by-op by starting from the node all the way to the end
+    # copy_ can be not using tangents at all, we must copy it.
+    for node in list(gm.graph.nodes)[: order[first_node_in_bwd]]:
+        if node.op == "call_function" and node.target == torch.ops.aten.copy_.default:
+            insert_node_in_graph(node)
+
     for node in list(gm.graph.nodes)[order[first_node_in_bwd] :]:
         insert_node_in_graph(node)
 
@@ -1897,16 +1914,16 @@ def visualize_min_cut_graph(nx_graph):
     import pydot
 
     dot_format = nx.nx_pydot.to_pydot(nx_graph).to_string()
-    dot_graph = pydot.graph_from_dot_data(dot_format)[0]
+    dot_graph = pydot.graph_from_dot_data(dot_format)[0]  # type: ignore[index]
     for edge in dot_graph.get_edges():
         weight = nx_graph[edge.get_source()][edge.get_destination()]["capacity"]
         # Set edge label to weight
-        edge.set_label(str(weight))
+        edge.set_label(str(weight))  # type: ignore[union-attr]
         # Color edges with weight 'inf' as red
         if weight == float("inf"):
-            edge.set_color("red")
+            edge.set_color("red")  # type: ignore[union-attr]
     log.info("Visualizing the failed graph to min_cut_failed.svg")
-    dot_graph.write_svg("min_cut_failed.svg")
+    dot_graph.write_svg("min_cut_failed.svg")  # type: ignore[union-attr]
 
 
 def get_default_op_list() -> OpTypes:
@@ -2657,7 +2674,9 @@ def min_cut_rematerialization_partition(
             len(fw_module_nodes),
             len(bw_module_nodes),
         )
-        rematerialized_ops = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+        rematerialized_ops = sorted(
+            counts.items(), key=operator.itemgetter(1), reverse=True
+        )
         log.info("Count of Ops Rematerialized: %s", rematerialized_ops)
     return fw_module, bw_module
 

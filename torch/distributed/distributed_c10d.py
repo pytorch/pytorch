@@ -340,7 +340,7 @@ class Backend(str):  # noqa: SLOT000
 
         if devices is not None:
             for device in devices:
-                if device != "cpu" and device != "cuda":
+                if device not in Backend.default_device_backend_map:
                     Backend.default_device_backend_map[device] = name.lower()
         Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
 
@@ -1074,17 +1074,18 @@ def _get_global_rank(group, rank) -> int:
     return get_global_rank(group, rank)
 
 
-def get_process_group_ranks(group: ProcessGroup) -> list[int]:
+def get_process_group_ranks(group: Optional[ProcessGroup]) -> list[int]:
     """
     Get all ranks associated with ``group``.
 
     Args:
-        group (ProcessGroup): ProcessGroup to get all ranks from.
+        group (Optional[ProcessGroup]): ProcessGroup to get all ranks from.
+            If None, the default process group will be used.
 
     Returns:
         List of global ranks ordered by group rank.
     """
-    return list(_world.pg_group_ranks[group].keys())
+    return list(_world.pg_group_ranks[group or _get_default_group()].keys())
 
 
 def _get_group_size(group) -> int:
@@ -1949,9 +1950,13 @@ def _new_process_group_helper(
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
+            if not is_gloo_available():
+                raise RuntimeError("Distributed package doesn't have Gloo built in")
             backend_class = ProcessGroupGloo(
                 backend_prefix_store, group_rank, group_size, timeout=timeout
             )
+            backend_class.options.global_ranks_in_group = global_ranks_in_group
+            backend_class.options.group_name = group_name
             backend_type = ProcessGroup.BackendType.GLOO
         elif backend_str == Backend.NCCL:
             if not is_nccl_available():
@@ -5438,10 +5443,12 @@ def new_subgroups(
             f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})"
         )
     if world_size % group_size != 0:
-        raise ValueError("The world size must be divisible by 'group_size'")
+        raise ValueError(
+            f"The world size ({world_size}) must be divisible by '{group_size=}'"
+        )
 
     # TODO: Use itertools.batched(get_process_group_ranks(group=group), group_size) instead when Python 3.12 is supported.
-    ranks = get_process_group_ranks(group=group or _get_default_group())
+    ranks = get_process_group_ranks(group=group)
     ranks_per_subgroup_list = [
         ranks[i : i + group_size] for i in range(0, len(ranks), group_size)
     ]
