@@ -1049,8 +1049,7 @@ def _try_get_metadata_from_dynamo(
     for i, name in enumerate(param_keys):
         assert name in param_name_to_source, f"{name} not found."
         source = param_name_to_source[name]
-        # TODO: provide source to submodule placeholders in ddp optimizer
-        assert source is None or source not in seen_sources, source
+        assert source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
@@ -1062,7 +1061,9 @@ def _try_get_metadata_from_dynamo(
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
         assert hasattr(node, "_dynamo_source")
         source = node._dynamo_source
-        # TODO: provide source to submodule placeholders in ddp optimizer
+        # `source`` specifies the source from user code. ddp optimizer may have
+        # intermediate values becoming submodule placeholders which does not
+        # have a source
         assert source is None or source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
