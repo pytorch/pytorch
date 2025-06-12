@@ -1,5 +1,6 @@
-.. role:: hidden
+:::{role} hidden
     :class: hidden-section
+::: 
 
 Tensor Parallelism - torch.distributed.tensor.parallel
 ======================================================
