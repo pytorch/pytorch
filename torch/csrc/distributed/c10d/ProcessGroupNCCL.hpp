@@ -319,7 +319,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         bool isP2P = false,
         const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputs = std::nullopt,
-        bool desyncDebug = false,
         bool enableTiming = false,
         bool cudaEventCacheEnabled = false,
         DebugLevel distDebugLevel = DebugLevel::Off);
@@ -707,8 +706,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // timeout.
     void runLoop();
 
-    // Set the terminal flag and notify the heartbeat monitor thread to stop.
-    void stop();
+    // Notify the loop inside watchdog.
+    void notify();
 
     void checkAndSetRemoteError();
 
@@ -719,6 +718,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         const std::string& signal);
 
     uint64_t getHeartbt() const;
+
+    void setDesyncDebug(bool desyncDebug);
 
   private:
     // Monitor thread which checks the heartbeat of Watchdog thread.
@@ -746,6 +747,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Whether or not to propagate detected errors to all ranks in the same PG
     // through TCPStore.
     bool propagatePgError_;
+
+    // Whether or not to enable timeout root cause analysis.
+    bool desyncDebug_;
 
     DesyncDebugger desyncDebugger_;
   };
@@ -1392,9 +1396,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   ErrorType error_ = ErrorType::SUCCESS;
 
   std::mutex errorMutex_;
-
-  // Whether or not to enable timeout root cause analysis.
-  bool desyncDebug_;
 
   // Whether or not to sleep after an exception is thrown in the watchdog.
   bool sleepAfterException_{};

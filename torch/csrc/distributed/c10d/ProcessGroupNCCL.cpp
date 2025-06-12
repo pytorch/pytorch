@@ -511,7 +511,6 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     bool isP2P,
     const char* profilingTitle,
     const std::optional<std::vector<at::Tensor>>& inputs,
-    bool desyncDebug,
     bool enableTiming,
     bool cudaEventCacheEnabled,
     DebugLevel distDebugLevel)
@@ -952,8 +951,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
-  desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
-      (dist_debug_level_ >= DebugLevel::Detail);
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, true));
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
@@ -965,9 +962,11 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
   globalStore_ =
       prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
+  auto desyncDebug = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
+      (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
+      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug);
 #endif // ENABLE_NCCL_ERROR_CHECKING
   if (getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false)) {
     TORCH_WARN_ONCE(
@@ -979,7 +978,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         << logPrefix()
         << "TORCH_NCCL_BLOCKING_WAIT is enabled, NO watchdog thread is created.";
   } else {
-    if (desyncDebug_ && asyncErrorHandling_ == NoHandling) {
+    if (desyncDebug && asyncErrorHandling_ == NoHandling) {
       LOG(INFO)
           << logPrefix()
           << "TORCH_NCCL_DESYNC_DEBUG and TORCH_NCCL_ASYNC_ERROR_HANDLING "
@@ -1019,7 +1018,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
             << "NCCL version: " << ncclVersion
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
             << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
@@ -1414,7 +1412,7 @@ void ProcessGroupNCCL::abort() {
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
-  watchdog_->stop();
+  watchdog_->notify();
 
   // lauch abort asynchrounously and wait for it to complete or timeout
   LOG(INFO) << logPrefix()
@@ -1469,7 +1467,7 @@ void ProcessGroupNCCL::shutdown() {
   // anymore because I am going to destroy them now
   LOG(INFO) << logPrefix() << "Operations flushed, joining watchdog thread.";
   terminateProcessGroup_.store(true);
-  watchdog_->stop();
+  watchdog_->notify();
   watchdog_->join();
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
@@ -1529,7 +1527,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   // Make sure we've told threads to stop; doesn't hurt if we'd done so before.
   // Tell watchdog and onCompletionHook:
   terminateProcessGroup_.store(true);
-  watchdog_->stop();
+  watchdog_->notify();
   // Tell heartbeat thread:
   heartbeatMonitor_->stop();
 
@@ -1962,19 +1960,23 @@ ProcessGroupNCCL::Watchdog::Watchdog(ProcessGroupNCCL* pg) {
   heartbeat_ = 1ULL;
   rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
   propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
+  desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
+    (pg_->dist_debug_level_ >= DebugLevel::Detail);
 
   // print out ENV settings for the watchdog thread.
   LOG(INFO)
     << pg_->logPrefix() << "PGNCCL Watchdog environments: "
-    << "TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_;
+    << "TORCH_NCCL_RETHROW_CUDA_ERRORS: " << rethrowCUDAErrors_
+    << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
+    << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_;
 
   // Enable Desync Debugger per user setting
-  if (pg_->desyncDebug_) {
+  if (desyncDebug_) {
     desyncDebugger_.init(pg_->getRank(), pg_->getSize(), pg_->globalRank(), pg_->getUid(), pg_->store_);
   }
 }
 
-void ProcessGroupNCCL::Watchdog::stop() {
+void ProcessGroupNCCL::Watchdog::notify() {
   workMetaListCV_.notify_one();
 }
 
@@ -2276,6 +2278,10 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
 
 uint64_t ProcessGroupNCCL::Watchdog::getHeartbt() const {
   return heartbeat_.load();
+}
+
+void ProcessGroupNCCL::Watchdog::setDesyncDebug(bool desyncDebug) {
+  desyncDebug_ = desyncDebug;
 }
 
 // Initialize and enable DesyncDebugger
@@ -3236,7 +3242,6 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       profilingTitle,
       profilingTitle != nullptr ? std::optional<std::vector<at::Tensor>>(inputs)
                                 : std::nullopt,
-      desyncDebug_,
       enableTiming_.load(),
       cudaEventCacheEnabled_.load(),
       dist_debug_level_);
