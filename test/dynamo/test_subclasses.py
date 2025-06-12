@@ -2285,8 +2285,8 @@ class GraphModule(torch.nn.Module):
         clone_1: "f32[s47, s16]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
 
         view: "f32[s16, s47]" = torch.ops.aten.view.default(clone, [primals_2, primals_1]);  clone = None
-        view_1: "f32[s16, s47]" = torch.ops.aten.view.default(clone_1, [primals_2, primals_1]);  clone_1 = primals_1 = None
-        return (view, view_1, primals_2, primals_5, primals_5, primals_5, primals_7)
+        view_1: "f32[s16, s47]" = torch.ops.aten.view.default(clone_1, [primals_2, primals_1]);  clone_1 = None
+        return (view, view_1, primals_2, primals_1, primals_5, primals_5, primals_7)
 """,  # noqa: B950
         )
 
