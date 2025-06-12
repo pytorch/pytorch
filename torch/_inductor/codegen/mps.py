@@ -880,6 +880,13 @@ class MetalKernel(SIMDKernel):
         arg_types = [arg_name_to_type[arg] for arg in args]
         expr_printer = self.cexpr if V.graph.cpp_wrapper else self.pexpr
 
+        def format_threads(threads: list[str], kwarg: str) -> str:
+            if V.graph.cpp_wrapper:
+                threads = [f"static_cast<uint64_t>({t})" for t in threads]
+                return f"{{{', '.join(threads)}}}"
+            else:
+                return f"{kwarg}=[{', '.join(threads)}]"
+
         # For reduction kernels, limit the maximum size over reduction dimentions to
         # a maximum threadgroup size
         if len(self.active_range_trees()) > 0:
@@ -892,16 +899,8 @@ class MetalKernel(SIMDKernel):
                 for v in self.active_range_trees()
             ]
 
-            if V.graph.cpp_wrapper:
-                threads = [f"static_cast<uint64_t>({t})" for t in threads]
-                if len(threads) == 1:
-                    args.append(threads[0])
-                    arg_types.append(int)
-                else:
-                    args.append(f"{{{', '.join(threads)}}}")
-                    arg_types.append(list)
-            else:
-                args.append(f"threads=[{', '.join(threads)}]")
+            args.append(format_threads(threads, "threads"))
+            arg_types.append(list)
         else:
             if V.graph.cpp_wrapper:
                 raise RuntimeError("We should always have threads?")
@@ -913,16 +912,8 @@ class MetalKernel(SIMDKernel):
                 else "1"
                 for v in self.active_range_trees()
             ]
-            if V.graph.cpp_wrapper:
-                threads = [f"static_cast<uint64_t>({t})" for t in threads]
-                if len(threads) == 1:
-                    args.append(threads[0])
-                    arg_types.append(int)
-                else:
-                    args.append(f"{{{', '.join(threads)}}}")
-                    arg_types.append(list)
-            else:
-                args.append(f"group_size=[{', '.join(threads)}]")
+            args.append(format_threads(threads, "group_size"))
+            arg_types.append(list)
         else:
             if V.graph.cpp_wrapper:
                 # Add a None so that we always have a group_size in the
