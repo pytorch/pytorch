@@ -578,6 +578,16 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
   exception_ = w.exception_;
 }
 
+ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {
+  if (!stashed_for_allocator_safety_->empty() && isP2P_) {
+    TORCH_WARN_ONCE("TORCH_NCCL_AVOID_RECORD_STREAMS=1 is experimental for point-to-point "
+                    "collectives. To ensure safety, .wait() must be called on all "
+	            "returned handles before they fall out of scope, including for isend() "
+	            "calls.")
+    this->wait();
+  }
+}
+
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   if (!ncclComm_->isAborted()) {
     checkAndSetException();
@@ -974,7 +984,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
 #endif // ENABLE_NCCL_ERROR_CHECKING
-  if (getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false)) {
+  avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
+  if (avoidRecordStreams_) {
     TORCH_WARN_ONCE(
         "TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated.");
   }
@@ -3995,8 +4006,20 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // prevent being freed before the collective finishes.
   //
   // See [Sync Streams].
-  c10::cuda::CUDACachingAllocator::recordStream(
-      tensor.storage().data_ptr(), ncclStream);
+  // TODO(eqy): can this also be done on the current stream?
+  // If so then batch-p2p can also avoid recordStream in most cases as we don't
+  // need stashing anymore
+  if (!avoidRecordStreams_ || coalescing_state_) {
+    if (avoidRecordStreams_) {
+        TORCH_WARN_ONCE("TORCH_NCCL_AVOID_RECORD_STREAMS=1 is not supported for batch P2P. "
+			"Consider switching to non-batched isend/irecv for better memory usage.");
+    }
+    c10::cuda::CUDACachingAllocator::recordStream(
+        tensor.storage().data_ptr(), ncclStream);
+  } else {
+    auto tostash = std::vector<at::Tensor>({tensor});
+    work->stashed_for_allocator_safety_->stash(tostash);
+  }
 
   // This part seems common to both p2p and coalesced-p2p usage?
   ncclComm_t comm_ = ncclComm->getNcclComm();
