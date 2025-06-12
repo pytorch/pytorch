@@ -1301,10 +1301,7 @@ static PyObject* THPModule_setCheckSparseTensorInvariants(
 static PyObject* THPModule_checkSparseTensorInvariants(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().checkSparseTensorInvariants())
     Py_RETURN_TRUE;
-  else
-    Py_RETURN_FALSE;
 }
 
 static PyObject* THPModule_willEngineExecuteNode(
