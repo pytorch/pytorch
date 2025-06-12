@@ -293,16 +293,15 @@ class TestExportAPIDynamo(common_utils.TestCase):
         input = torch.randn(2)
         self.assert_export(Model(), (input))
 
-    def test_export_success_when_dynamic_dimension_is_one(self):
+    def test_export_successful_when_dynamic_dimension_is_one(self):
         self.assert_export(
             SampleModelForDimOne(),
             (torch.randn(1, 3), torch.randn(1, 5), torch.randn(1, 8)),
-            dynamic_shapes={
-                "x": {0: "batch", 1: "sequence"},
-                "y": {0: "batch", 1: "sequence"},
-                "z": {0: "batch", 1: "sequence"},
-            },
-            input_names=["x", "y", "z"],
+            dynamic_shapes=(
+                {0: "batch", 1: "sequence"},
+                {0: "batch", 1: "sequence"},
+                {0: "batch", 1: "sequence"},
+            ),
         )
 
 
