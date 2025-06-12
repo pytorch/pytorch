@@ -1,3 +1,4 @@
+#include <ATen/detail/MAIAHooksInterface.h>
 #include <torch/extension.h>
 #include <torch/library.h>
 
@@ -116,15 +117,18 @@ struct MAIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const Stream& stream,
     const DeviceIndex device_index,
     const EventFlag flag) const override {
-    TORCH_CHECK(false, "MAIA backend doesn't support events.");
+    // TORCH_CHECK(false, "MAIA backend doesn't support events.");
+    return;
   }
   void block(
     void* event,
     const Stream& stream) const override {
-    TORCH_CHECK(false, "MAIA backend doesn't support events.");
+    // TORCH_CHECK(false, "MAIA backend doesn't support events.");
+    return;
   }
   bool queryEvent(void* event) const override {
-    TORCH_CHECK(false, "MAIA backend doesn't support events.");
+    // TORCH_CHECK(false, "MAIA backend doesn't support events.");
+    return true;
   }
   void destroyEvent(
     void* event,
@@ -132,6 +136,35 @@ struct MAIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 };
 
 constexpr DeviceType MAIAGuardImpl::static_type;
+
+class MAIAHooks final : public at::MAIAHooksInterface {
+ public:
+  explicit MAIAHooks(at::MAIAHooksArgs) {}
+
+  void init() const override {}
+
+  std::string showConfig() const override {
+    return "MAIA";
+  }
+
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
+    return true;
+  }
+
+  bool hasMAIA() const override {
+    return true;
+  }
+
+  bool isBuilt() const override {
+    return true;
+  }
+
+  DeviceIndex deviceCount() const override {
+    return 1;
+  }
+};
+
+REGISTER_MAIA_HOOKS(MAIAHooks);
 C10_REGISTER_GUARD_IMPL(MAIA, MAIAGuardImpl);
 
 int get_test_int() {
