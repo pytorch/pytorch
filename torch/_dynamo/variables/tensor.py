@@ -1040,7 +1040,7 @@ class TensorVariable(VariableTracker):
         return wrap_fx_proxy(tx, proxy)
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _warn_capture_scalar_outputs():
         user_stack = torch._guards.TracingContext.extract_stack()
         user_stack_formatted = "".join(traceback.format_list(user_stack))
