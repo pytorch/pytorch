@@ -41,6 +41,14 @@ device_count = device_module.device_count()
 BACKEND = dist.get_default_backend_for_device(DEVICE)
 
 
+class TestObject:
+    def __init__(self, value=None, device=torch.device("cpu")):
+        self.string_attr = f"string_{value}" if value is not None else None
+        self.tensor_attr = (
+            torch.tensor([value], device=device) if value is not None else None
+        )
+
+
 def with_comms(func=None):
     if func is None:
         return partial(
@@ -105,6 +113,22 @@ class TestObjectCollectives(DistributedTestBase):
         self.assertEqual(99, object_list[0])
 
     @with_comms()
+    def test_new_broadcast_object_list(self, device):
+        import fbvscode
+
+        fbvscode.attach_debugger()
+
+        if self.rank == 0:
+            object_list = [TestObject(i) for i in range(dist.get_world_size())]
+        else:
+            object_list = [None] * dist.get_world_size()
+        torch.distributed.distributed_c10d.broadcast_object_list2(
+            object_list=object_list
+        )
+
+        self.assertEqual(TestObject(0), object_list[0])
+
+    @with_comms()
     def test_scatter_object_list(self, device):
         input_list = list(range(dist.get_world_size())) if self.rank == 0 else None
         output_list = [None]
@@ -161,5 +185,6 @@ class TestObjectCollectives(DistributedTestBase):
 
 devices = ("cpu", "cuda", "hpu")
 instantiate_device_type_tests(TestObjectCollectives, globals(), only_for=devices)
+
 if __name__ == "__main__":
     run_tests()
