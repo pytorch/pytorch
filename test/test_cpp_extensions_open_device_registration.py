@@ -74,6 +74,10 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
 
+    @unittest.skipIf(
+        common.IS_MACOS,
+        "Hangs on shutdown, see https://github.com/pytorch/pytorch/issues/155759",
+    )
     def test_base_device_registration(self):
         self.assertFalse(self.module.custom_add_called())
         # create a tensor using our custom device object

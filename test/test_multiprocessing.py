@@ -413,6 +413,10 @@ class TestMultiprocessing(TestCase):
         TEST_WITH_ASAN,
         "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326",
     )
+    @unittest.skipIf(
+        IS_MACOS,
+        "seems to hang after completion on MacOS",
+    )
     def test_fs_sharing(self):
         with fs_sharing():
             # The test works but is very slow on MacOS, see https://github.com/pytorch/pytorch/pull/93183,
