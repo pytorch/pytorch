@@ -39,7 +39,6 @@
 ```
 
 % These are missing documentation. Adding them here until a better place
-
 % is made in this file.
 
 ```{eval-rst}
