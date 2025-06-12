@@ -18,7 +18,8 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses import FakeTensorMode
+from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.proxy_tensor import (
     make_fx,
     ProxyTorchDispatchMode,
@@ -164,6 +165,29 @@ def _math_attention_inner(
     mask_mod_other_buffers: tuple = (),
 ) -> tuple[torch.Tensor, torch.Tensor]:
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
+    flat_args, _ = pytree.tree_flatten(
+        (
+            query,
+            key,
+            value,
+            score_mod,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
+    )
+    # For tensor subclasses, give the subclass a chance to run first
+    if any(
+        isinstance(a, torch.Tensor)
+        and type(a) is not torch.Tensor
+        and not isinstance(a, FakeTensor)
+        and not isinstance(a, FunctionalTensor)
+        for a in flat_args
+    ):
+        return NotImplemented
 
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
 
@@ -478,6 +502,28 @@ def flex_attention_fake_tensor_mode(
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    flat_args, _ = pytree.tree_flatten(
+        (
+            query,
+            key,
+            value,
+            score_mod,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
+    )
+    # For tensor subclasses, give the subclass a chance to run first
+    if any(
+        isinstance(a, torch.Tensor)
+        and type(a) is not torch.Tensor
+        and not isinstance(a, FakeTensor)
+        for a in flat_args
+    ):
+        return NotImplemented
+
     with mode:
         out, logsumexp = flex_attention_fake_impl(query, value)
         return out, logsumexp
@@ -1097,6 +1143,32 @@ def flex_attention_backward_functionalize(
     since we know that the forward score mod function is assured to be free of mutations
     to the other_buffers, we skip that mutate check and go straight to redispatching.
     """
+    flat_args, _ = pytree.tree_flatten(
+        (
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            grad_logsumexp,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
+    )
+    # For tensor subclasses, give the subclass a chance to run first
+    if any(
+        isinstance(a, torch.Tensor)
+        and type(a) is not torch.Tensor
+        and not isinstance(a, FakeTensor)
+        and not isinstance(a, FunctionalTensor)
+        for a in flat_args
+    ):
+        return NotImplemented
+
     query_unwrapped = ctx.unwrap_tensors(query)
     key_unwrapped = ctx.unwrap_tensors(key)
     value_unwrapped = ctx.unwrap_tensors(value)
@@ -1169,6 +1241,31 @@ def flex_attention_backward_fake_tensor_mode(
 ) -> tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
+    flat_args, _ = pytree.tree_flatten(
+        (
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            grad_logsumexp,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
+    )
+    # For tensor subclasses, give the subclass a chance to run first
+    if any(
+        isinstance(a, torch.Tensor)
+        and type(a) is not torch.Tensor
+        and not isinstance(a, FakeTensor)
+        for a in flat_args
+    ):
+        return NotImplemented
+
     with mode:
         Bq, _, _, qk_head_dim = query.shape
         Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
@@ -1177,9 +1274,11 @@ def flex_attention_backward_fake_tensor_mode(
         # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
         grad_score_mod_captured = tuple(
             [
-                torch.empty_like(buffer, memory_format=torch.contiguous_format)
-                if isinstance(buffer, torch.Tensor) and buffer.requires_grad
-                else None
+                (
+                    torch.empty_like(buffer, memory_format=torch.contiguous_format)
+                    if isinstance(buffer, torch.Tensor) and buffer.requires_grad
+                    else None
+                )
                 for buffer in score_mod_other_buffers
             ]
         )

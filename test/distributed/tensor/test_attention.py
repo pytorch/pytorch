@@ -564,7 +564,6 @@ class RingFlexAttentionTest(DTensorTestBase):
 
 @flex_attention_hop.py_impl(DTensor)
 def cp_flex_attention(
-    mode,
     query: DTensor,
     key: DTensor,
     value: DTensor,
