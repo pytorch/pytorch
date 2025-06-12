@@ -21,6 +21,7 @@ from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Uni
 from typing_extensions import override
 
 import torch
+from torch._dynamo.precompile_context import PrecompileCacheArtifact, PrecompileContext
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import (
     chromium_event_log_active,
@@ -916,6 +917,21 @@ class AOTAutogradCacheArtifact(CacheArtifact):
         return "aot_autograd"
 
 
+@CacheArtifactFactory.register
+class BundledAOTAutogradCacheArtifact(
+    PrecompileCacheArtifact[BundledAOTAutogradCacheEntry]
+):
+    @override
+    @staticmethod
+    def type():
+        return "precompile_aot_autograd"
+
+    @override
+    def after_deserialization(self) -> BundledAOTAutogradCacheEntry:
+        entry = pickle.loads(self.content)
+        return entry
+
+
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
     """
     Caches the results of running AOTAutograd. This class mostly handles the save and load logic, whereas
@@ -1167,6 +1183,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 CacheArtifactManager.record_artifact(
                     AOTAutogradCacheArtifact.type(), key, pickled_content
                 )
+                if config.bundled_autograd_cache:
+                    PrecompileContext.record_artifact(
+                        BundledAOTAutogradCacheArtifact.type(), key, pickled_content
+                    )
         except Exception as e:
             log.info("AOTAutograd cache unable to load compiled graph: %s", e)
             if config.strict_autograd_cache:
@@ -1196,6 +1216,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             CacheArtifactManager.record_artifact(
                 AOTAutogradCacheArtifact.type(), key, content
             )
+            if config.bundled_autograd_cache:
+                # TODO: the key here isn't correct
+                PrecompileContext.record_artifact(
+                    BundledAOTAutogradCacheArtifact.type(), key, content
+                )
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
