@@ -564,6 +564,8 @@ class ProcessGroupGloo(Backend):
     class Options(Backend.Options):
         devices: list[ProcessGroupGloo.Device]
         threads: int
+        global_ranks_in_group: list[int]
+        group_name: str
 
         def __init__(self): ...
 
@@ -579,6 +581,8 @@ class ProcessGroupGloo(Backend):
     @staticmethod
     def create_default_device(lazy_init=None) -> Device: ...
     def _set_default_timeout(self, timeout) -> None: ...
+    @property
+    def options(self) -> Options: ...  # type: ignore[override]
 
 class _ProcessGroupWrapper(Backend):
     def __init__(self, pg: Backend, gloo_pg: ProcessGroupGloo) -> None: ...
@@ -682,6 +686,11 @@ def _set_allow_inflight_collective_as_graph_input(
 def _allow_inflight_collective_as_graph_input() -> bool: ...
 def _unregister_all_process_groups() -> None: ...
 def _unregister_process_group(group_name: str) -> None: ...
+
+# Intializes the device state in CUmodule so that it’s able to perform NVSHMEM
+# operations.  CUmodule is a pointer to a CUDA module, carried by a int64 in
+# Python. At C++ interface, it is converted to a uintptr_t.
+def _nvshmemx_cumodule_init(module: int) -> None: ...
 
 class _SymmetricMemory:
     @staticmethod
