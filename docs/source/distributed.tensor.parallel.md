@@ -8,30 +8,43 @@ Tensor Parallelism(TP) is built on top of the PyTorch DistributedTensor
 (`DTensor <https://github.com/pytorch/pytorch/blob/main/torch/distributed/tensor/README.md>`__)
 and provides different parallelism styles: Colwise, Rowwise, and Sequence Parallelism.
 
-.. warning ::
-    Tensor Parallelism APIs are experimental and subject to change.
+:::{warning}
+Tensor Parallelism APIs are experimental and subject to change.
+:::
 
-The entrypoint to parallelize your ``nn.Module`` using Tensor Parallelism is:
+The entrypoint to parallelize your `nn.Module` using Tensor Parallelism is:
 
+```{eval-rst}
 .. automodule:: torch.distributed.tensor.parallel
+```
 
+```{eval-rst}
 .. currentmodule:: torch.distributed.tensor.parallel
+```
 
+```{eval-rst}
 .. autofunction::  parallelize_module
+```
 
 Tensor Parallelism supports the following parallel styles:
 
+```{eval-rst}
 .. autoclass:: torch.distributed.tensor.parallel.ColwiseParallel
   :members:
   :undoc-members:
+```
 
+```{eval-rst}
 .. autoclass:: torch.distributed.tensor.parallel.RowwiseParallel
   :members:
   :undoc-members:
+```
 
+```{eval-rst}
 .. autoclass:: torch.distributed.tensor.parallel.SequenceParallel
   :members:
   :undoc-members:
+```
 
 To simply configure the nn.Module's inputs and outputs with DTensor layouts
 and perform necessary layout redistributions, without distribute the module
