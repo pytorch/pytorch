@@ -2302,7 +2302,6 @@ torch.cuda.synchronize()
         end_event = torch.cuda.Event(external=True)
 
         signalling_graph = torch.cuda.CUDAGraph()
-        # print("signalling_graph capture")
         with torch.cuda.graph(signalling_graph, capture_error_mode="relaxed"):
             spin_wait_kernel(grid=(1, 1, 1), block=(1, 1, 1), args=[flag_cpu])
             start_event.record()
@@ -2322,7 +2321,6 @@ torch.cuda.synchronize()
         )
 
         work_graph = torch.cuda.CUDAGraph()
-        # print("work_graph capture")
         with torch.cuda.graph(work_graph, capture_error_mode="relaxed"):
             start_event.wait()
             x_cpu.copy_(x, non_blocking=True)

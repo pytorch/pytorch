@@ -152,8 +152,8 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   void block(const CUDAStream& stream) {
     if (is_created_) {
       CUDAGuard guard(stream.device_index());
-      // it is an error to use cudaEventWaitExternal when not doing stream capture
 #ifndef USE_ROCM
+      // it is an error to use cudaEventWaitExternal when not doing stream capture
       unsigned int flags = (c10::cuda::currentStreamCaptureStatusMayInitCtx() != c10::cuda::CaptureStatus::None && external_) ? cudaEventWaitExternal : cudaEventWaitDefault;
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, flags));
 #else
