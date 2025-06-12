@@ -31,7 +31,7 @@ import sympy
 
 import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where, Identity
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .ops_handler import DefaultHandler
@@ -65,7 +65,11 @@ class TypedExpr:
 
     def __post_init__(self):
         if _is_constant(self.expr):
-            self.expr = dtype_to_type(self.dtype)(self.expr)
+            if isinstance(self.expr, Identity):
+                wrapped_value = self.expr.args[0]
+                self.expr = dtype_to_type(self.dtype)(wrapped_value)
+            else:
+                self.expr = dtype_to_type(self.dtype)(self.expr)
 
 
 class SymPyOps:
