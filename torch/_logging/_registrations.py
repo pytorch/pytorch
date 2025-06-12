@@ -26,10 +26,6 @@ register_artifact(
     "cudagraphs",
     "Logs information from wrapping inductor generated code with cudagraphs.",
 )
-register_artifact(
-    "codecache",
-    "Logs information about inductor's code cache",
-)
 
 register_log("dynamic", DYNAMIC)
 register_log("torch", "torch")
@@ -191,6 +187,12 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "loop_tiling",
+    "Logs related to loop ordering",
+    off_by_default=True,
+)
+
+register_artifact(
     "overlap",
     "Detailed Inductor compute/comm overlap decisions",
     off_by_default=True,
@@ -231,5 +233,9 @@ register_artifact(
     "Logs Inductor metrics, such as num_bytes, nodes_num_elem, node_runtimes",
     off_by_default=True,
 )
-
+register_artifact(
+    "hierarchical_compile",
+    "Logs debug info for hierarchical compilation",
+    off_by_default=True,
+)
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
