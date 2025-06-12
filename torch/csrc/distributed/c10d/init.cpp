@@ -48,6 +48,7 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -1003,6 +1004,15 @@ This class does not support ``__members__`` property.)");
   module.def("_unregister_all_process_groups", []() {
     return ::c10d::unregister_all_process_groups();
   });
+
+  // Intializes the device state in CUmodule so that it’s able to perform
+  // NVSHMEM operations.
+#ifdef USE_NVSHMEM
+  module.def(
+      "_nvshmemx_cumodule_init",
+      ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
+      py::arg("module"));
+#endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
@@ -3197,10 +3207,7 @@ ncclConfig_t data type for configuring NCCL communicators.
 See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
 for details.
 )")
-      .def(py::init([]() {
-        ncclConfig_t defaultCfg = NCCL_CONFIG_INITIALIZER;
-        return std::make_unique<ncclConfig_t>(defaultCfg);
-      }))
+      .def(py::init<>())
       .def_readwrite("blocking", &ncclConfig_t::blocking)
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
@@ -3211,8 +3218,14 @@ for details.
 #ifdef NCCL_HAS_QOS
       .def_readwrite("traffic_class", &ncclConfig_t::trafficClass)
 #endif
-#ifdef NCCL_HAS_COLLNET_ENABLE
+#ifdef NCCL_HAS_COLLNET
       .def_readwrite("collnet_enable", &ncclConfig_t::collnetEnable)
+#endif
+#ifdef NCCL_HAS_CTA_POLICY
+      .def_readwrite("cta_policy", &ncclConfig_t::CTAPolicy)
+#endif
+#ifdef NCCL_HAS_NVLS_CTAS
+      .def_readwrite("nvls_ctas", &ncclConfig_t::nvlsCTAs)
 #endif
       .def_property(
           "net_name",
@@ -3222,16 +3235,7 @@ for details.
           // shouldn't leak because of allocation in strdup.
           [](ncclConfig_t& self, const char* tmp) {
             self.netName = strdup(tmp);
-          })
-      .def(
-          "__copy__",
-          [](const ncclConfig_t& self) { return ncclConfig_t(self); })
-      .def(
-          "__deepcopy__",
-          [](const ncclConfig_t& self, const py::dict& memo) {
-            return ncclConfig_t(self);
-          },
-          py::arg("memo"));
+          });
 #endif // NCCL_HAS_CONFIG
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
@@ -3282,20 +3286,7 @@ Example::
           "global_ranks_in_group",
           &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
       .def_readwrite(
-          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name)
-      .def(
-          "__copy__",
-          [](const ::c10d::ProcessGroupNCCL::Options& self) {
-            return ::c10d::ProcessGroupNCCL::Options(self);
-          })
-      .def(
-          "__deepcopy__",
-          [](const ::c10d::ProcessGroupNCCL::Options& self,
-             const py::dict& memo) {
-            return ::c10d::ProcessGroupNCCL::Options(self);
-          },
-          py::arg("memo"));
-
+          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name);
 #endif
 
 #ifdef USE_C10D_MPI
