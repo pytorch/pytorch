@@ -146,7 +146,7 @@ Failed to trace einops function 'reduce'.
 
 
 from user code:
-   File "test_einops.py", line N, in fn
+   File "test_einops_interop.py", line N, in fn
     y = einops.reduce(x, "a b -> a", "min")""",  # noqa: B950
         )
 
