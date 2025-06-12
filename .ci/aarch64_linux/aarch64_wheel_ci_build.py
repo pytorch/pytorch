@@ -108,9 +108,9 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
         "/usr/local/lib/libnvpl_blas_core.so.0",
     ]
 
-    if "128" in desired_cuda:
+    if "129" in desired_cuda:
         libs_to_copy += [
-            "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.8",
+            "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.9",
             "/usr/local/cuda/lib64/libcufile.so.0",
             "/usr/local/cuda/lib64/libcufile_rdma.so.1",
         ]
