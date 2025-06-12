@@ -24,7 +24,7 @@ For Intel Client GPU
 +-------------------------------------+---------------------------------------------------------------------------------------------------+
 | Supported OS                        | Validated Hardware                                                                                |
 +=====================================+===================================================================================================+
-|| Windows 11 & Ubuntu 24.10          || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                               |
+|| Windows 11 & Ubuntu 24.10          || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                                |
 ||                                    || Intel® Arc B-Series Graphics (CodeName: Battlemage)                                               |
 ||                                    || Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)                 |
 ||                                    || Intel® Core™ Ultra Desktop Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
