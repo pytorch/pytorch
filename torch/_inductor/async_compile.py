@@ -318,7 +318,7 @@ class AsyncCompile:
     @classmethod
     def quiesce(cls) -> None:
         """
-        If using a SubprocPool, shut down the sidecar processe's internal
+        If using a SubprocPool, signal the sidecar process to shut down its
         ProcessPoolExecutor.
         """
         # Don't inadvertently create a process pool if it doesn't already exist:
@@ -330,8 +330,8 @@ class AsyncCompile:
     @classmethod
     def wakeup(cls) -> None:
         """
-        If using a SubprocPool, signal the side car process to start up its
-        internal ProcessPoolExecutor.
+        If using a SubprocPool, signal the sidecar process to start up its
+        ProcessPoolExecutor.
         """
         if get_compile_threads() > 1:
             pool = cls.process_pool()
