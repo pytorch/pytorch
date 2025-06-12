@@ -530,17 +530,15 @@ class _QueueStats:
     pool_count: int = 0
 
 
-_queue_stats_lock = threading.Lock()
+# The queue statistics tracked by TrackedProcessPoolExecutor. Always grab
+# _queue_stats_lock before touching.
 _queue_stats = _QueueStats()
+_queue_stats_lock = threading.Lock()
 
 
 class TrackedProcessPoolExecutor(ProcessPoolExecutor):
-    # NOTE: Use self._shutdown_lock to control access to this data
-    _queue_stats: _QueueStats
-
     def __init__(self, *args, **kwargs) -> None:
         with _queue_stats_lock:
-            print("*** ADDING TO POOL", flush=True)
             _queue_stats.pool_count += 1
         super().__init__(*args, **kwargs)
 
