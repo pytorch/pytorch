@@ -123,11 +123,16 @@ class TritonSplitScanKernel(TritonKernel):
         scratch_base: Union[str, TritonCSEVariable]
         scratch_base, offset = self.args.workspace(nbytes=nbytes, zero_fill=True)
         if offset != 0:
-            scratch_base = cse_load(f"{scratch_base} + {self.index_to_str(offset)}")
-        runtime_rblocks = cse_load(f"tl.num_programs({self.range_trees[-1].index})")
+            scratch_base = cse_load(
+                f"{scratch_base} + {self.index_to_str(offset)}", shape=()
+            )
+        runtime_rblocks = cse_load(
+            f"tl.num_programs({self.range_trees[-1].index})", shape=()
+        )
         scratch_base = cse_load(
             f"{scratch_base}.to(tl.pointer_type({scratch_type})) + xoffset * "
-            f"{scratch_elems_per_block} * {runtime_rblocks}"
+            f"{scratch_elems_per_block} * {runtime_rblocks}",
+            shape=(),
         )
 
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
@@ -145,7 +150,7 @@ class TritonSplitScanKernel(TritonKernel):
             shape=self.dense_size_list(),
         )
 
-        combine_helper_fn = self._lift_helper(combine_fn, 1, (dtype,))
+        combine_helper_fn = self._lift_helper(combine_fn, (value,), (dtype,))
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
         shape = list(self.dense_size_list())
@@ -158,6 +163,7 @@ class TritonSplitScanKernel(TritonKernel):
         )
         exclusive_prefix = self.cse.newvar(
             dtype=dtype,
+            shape=shape,
         )
         if element_nbits == 64:
             self.compute.splice(

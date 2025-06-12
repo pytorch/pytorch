@@ -62,6 +62,8 @@ def broadcast_shapes_for_args(args: Sequence[ShapeArg]) -> ShapeType:
         elif isinstance(arg, (int, float)):
             if result_shape is None:
                 result_shape = ()
+        elif isinstance(arg, torch.dtype):
+            continue
         else:
             return None
 
@@ -104,8 +106,21 @@ class ShapePropagationOpsHandler:
         return None
 
     @staticmethod
+    def to_dtype(
+        value: ShapeVar,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types: bool = True,
+    ) -> ShapeType:
+        return value.shape
+
+    @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> ShapeType:
-        # TODO: fix me
+        # shape is implicitly embedded in expr.
+        return None
+
+    @staticmethod
+    def load_seed(name: str, offset: int) -> ShapeType:
         return ()
 
     @staticmethod

@@ -1854,6 +1854,10 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
             assert isinstance(expr, str)
             cache_key = expr
         var = self.try_get(cache_key)
+        if shape is None and not assignment:
+            # since there's no assignment to a variable, use any shape here
+            # other than None to avoid the unknown shape failures
+            shape = ()
         if not var:
             var = self.newvar(bounds, dtype, shape)
             self.put(cache_key, var)

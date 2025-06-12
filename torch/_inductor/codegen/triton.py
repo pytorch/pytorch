@@ -759,6 +759,7 @@ class TritonCSEVariable(CSEVariable):
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
         assert dtype is not None, "TritonCSEVariable must have dtype"
+        assert shape is not None, "TritonCSEVariable must have shape"
 
     def update_on_args(self, name, args, kwargs):
         for arg in args:
@@ -3028,11 +3029,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def online_softmax_reduce_final_reduction(
         self, buffer, result_max, result_sum, peer_max, peer_sum, dim, dtype
     ):
-        values = self._online_softmax_reduce(buffer, peer_max, peer_sum, dim, dtype)
-        result_exprs = [result_max, result_sum]
-        for result_expr, value in zip(result_exprs, values):
-            buffer.splice(f"{result_expr} = {value}")
-
+        accumulator_max = self.reduction_collapse_dims(buffer, peer_max, dtype)
+        accumulator_sum = self.reduction_collapse_dims(buffer, peer_sum, dtype)
+        buffer.splice(
+            f"""
+            {result_max}, {result_sum} = triton_helpers.online_softmax_reduce(
+                {accumulator_max}, {accumulator_sum}, {dim}, {config.use_fast_math})
+            {result_max} = {self.reduction_resize(f"{result_max}")}
+            {result_sum} = {self.reduction_resize(f"{result_sum}")}
+            """
+        )
         return result_max, result_sum
 
     def max_rsplit(self):
@@ -3115,7 +3121,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         exit_stack.close()
 
-    def _lift_helper(self, fn, num_args, dtypes: tuple[torch.dtype, ...]) -> str:
+    def _lift_helper(
+        self, fn, values: tuple[CSEVariable, ...], dtypes: tuple[torch.dtype, ...]
+    ) -> str:
         # Lift IR function for scan operations into a triton function
         # in the global namespace
         helper = IndentedBuffer()
@@ -3123,7 +3131,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         cse = CSE()
 
         args = [
-            tuple(cse.namedvar(f"arg{i}_{n}", dtype=dtypes[n]) for n in range(num_args))
+            tuple(
+                cse.namedvar(f"arg{i}_{n}", dtype=dtype, shape=value.shape)
+                for n, (value, dtype) in enumerate(zip(values, dtypes))
+            )
             for i in range(2)
         ]
         signature = ", ".join(str(x) for x in itertools.chain.from_iterable(args))
@@ -3197,7 +3208,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
         cse_compute = functools.partial(self.cse.generate, self.compute)
-        combine_helper_fn = self._lift_helper(combine_fn, len(values), dtypes)
+        combine_helper_fn = self._lift_helper(combine_fn, values, dtypes)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
 
         for value, dtype in zip(values, dtypes):
