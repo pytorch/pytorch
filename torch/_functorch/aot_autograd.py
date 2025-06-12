@@ -1029,14 +1029,10 @@ def _try_get_metadata_from_dynamo(
     # be propagated in order to be recognized as a dynamo graph
 
     if not (isinstance(mod, torch.fx.GraphModule) and "dynamo_compile_id" in mod.meta):
-        print(
-            f"_try_get_metadata_from_dynamo. early exit due to not captured by dynamo. mod.meta:{mod.meta}"
-        )
         # graph was not captured by dynamo
         return None, []
 
     if not hasattr(mod, "_param_name_to_source"):
-        print("_try_get_metadata_from_dynamo. early exit due to export")
         # is from export
         return None, []
 
@@ -1088,9 +1084,6 @@ def _try_get_metadata_from_dynamo(
                 "Non-static input pos %s for source %s", actual_pos, source_name
             )
 
-    print(f"_try_get_metadata_from_dynamo. static_input_indices:{static_input_indices}")
-
-    aot_autograd_arg_pos_to_source = [""] * full_args_num
     assert full_args_num == len(aot_autograd_arg_pos_to_source)
     return aot_autograd_arg_pos_to_source, static_input_indices
 
