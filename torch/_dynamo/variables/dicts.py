@@ -586,6 +586,9 @@ class ConstDictVariable(VariableTracker):
             args[0].install_dict_keys_match_guard()
             new_dict_vt.items.update(args[0].items)
             return new_dict_vt
+        elif name == "__ior__":
+            self.call_method(tx, "update", args, kwargs)
+            return self
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -907,6 +910,37 @@ class SetVariable(ConstDictVariable):
             return variables.BuiltinVariable(op.get(name)).call_function(
                 tx, [self, other], {}
             )
+        elif name in ("__iand__", "__ior__", "__ixor__", "__isub__"):
+            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+                msg = ConstantVariable.create(
+                    f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
+            m = {
+                "__iand__": "intersection_update",
+                "__ior__": "update",
+                "__ixor__": "symmetric_difference_update",
+                "__isub__": "difference_update",
+            }.get(name)
+            self.call_method(tx, m, args, kwargs)
+            return self
+        elif name == "__eq__":
+            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+                return ConstantVariable.create(False)
+            r = self.call_method(tx, "symmetric_difference", args, kwargs)
+            return ConstantVariable.create(len(r.set_items) == 0)
+        elif name == "__sub__":
+            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        ConstantVariable.create(
+                            f"unsupported operand type(s) for -: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
+                        )
+                    ],
+                )
+            return self.call_method(tx, "difference", args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
@@ -1103,6 +1137,20 @@ class DictKeysVariable(DictViewVariable):
     ) -> "VariableTracker":
         if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
+        elif name in (
+            "__and__",
+            "__iand__",
+            "__or__",
+            "__ior__",
+            "__sub__",
+            "__isub__",
+            "__xor__",
+            "__ixor__",
+        ):
+            # These methods always returns a set
+            m = getattr(self.set_items, name)
+            r = m(args[0].set_items)
+            return SetVariable(r)
         if name in cmp_name_to_op_mapping:
             if not isinstance(args[0], (SetVariable, DictKeysVariable)):
                 return ConstantVariable.create(NotImplemented)
