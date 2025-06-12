@@ -1319,6 +1319,24 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._warn",
         "torch._C._will_engine_execute_node",
         "torch._C._wrap_tensor_impl",
+        "torch._C._xpu_emptyCache",
+        "torch._C._xpu_getArchFlags",
+        "torch._C._xpu_getCurrentStream",
+        "torch._C._xpu_getCurrentRawStream",
+        "torch._C._xpu_exchangeDevice",
+        "torch._C._xpu_getDeviceCount",
+        "torch._C._xpu_getDevice",
+        "torch._C._xpu_getMemoryInfo",
+        "torch._C._xpu_getStreamFromExternal",
+        "torch._C._xpu_isInBadFork",
+        "torch._C._xpu_init",
+        "torch._C._xpu_maybeExchangeDevice",
+        "torch._C._xpu_memoryStats",
+        "torch._C._xpu_resetAccumulatedMemoryStats",
+        "torch._C._xpu_resetPeakMemoryStats",
+        "torch._C._xpu_setDevice",
+        "torch._C._xpu_setStream",
+        "torch._C._xpu_synchronize",
         "torch._C.fork",
         "torch._C.get_autocast_cpu_dtype",
         "torch._C.get_autocast_dtype",
@@ -2240,12 +2258,13 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.slice_inverse",
         "torch._assert_scalar",
         "torch._functional_assert_scalar",
+        "torch.xpu._get_device_properties",
     ],
     TorchInGraphFunctionVariable,
 )
 
 
-if sys.version_info >= (3, 11):
+if sys.version_info >= (3, 11):""
     torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
     torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
 
