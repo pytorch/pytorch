@@ -47,34 +47,29 @@ class CUDAGraph(torch._C._CUDAGraph):
     r"""Wrapper around a CUDA graph.
 
     Arguments:
-        keep_graph (bool, optional): if False, a
-        cudaGraphExec_t will be created at the end of capture_end(),
-        which is the default behavior.
+        keep_graph (bool, optional):
 
-            Previously, the graph would always and immediately be
-            instantiated at the end of capture_end(). Then, the
-            cudaGraph_t would be destroyed. However, that prevents
-            users from modifying the cudaGraph_t before the
-            cudaGraphExec_t is made. We now always retain the
-            cudaGraph_t so that it can be modified. If a user does
-            modify a cudaGraph_t, we would like to allow them to opt
-            out of having to instantiate twice. If
-            keep_graph=False, on the first call to replay(),
-            instantiate() will be called if it hasn't been called
-            already. Since replay() is expected to be run on
-            performance-critical paths, we want to retain the prior
-            behavior of instantiating at the end of graph capture to
-            prevent a latency spike on the first call of replay() in
-            existing latency-sensitive code in the common case where
-            the user is not modifying the cudaGraph_t. If a user knows
-            that they will be modifying the cudaGraph_t after graph
-            capture is done, they should set keep_graph to
-            false to avoid the overhead of instantiating twice. They
-            can call instantiate() manually before replay() to prevent
-            increased latency on the first call to replay()
+        If keep_graph=False, a the cudaGraphExec_t will be
+        instantiated on GPU at the end of capture_end() and the
+        underlying cudaGraph_t will be destroyed. Users who want to
+        query or otherwise modify the underlying cudaGraph_t before
+        instantiatiation can set keep_graph=True and access it via
+        raw_cuda_graph() after capture_end(). Note that the
+        cudaGraphExec_t will not be instantiated at the end of
+        capture_end() in this case. Instead, it wil be instantiated
+        via an explicit called to instantiate() or automatically on
+        the first call to replay() if instantiate() was not already
+        called. Calling instantiate() manually before replay() is
+        recommended to prevent increased latency on the first call to
+        replay(). It is allowed to modify the raw cudaGraph_t after
+        first calling instantiate(), but the user must call
+        instantiate() again manually to make sure the instantiated
+        graph has these changes. Pytorch has no means of tracking
+        these changes.
 
     .. warning::
         This API is in beta and may change in future releases.
+
     """
 
     def __new__(cls, keep_graph=False):
@@ -112,9 +107,10 @@ class CUDAGraph(torch._C._CUDAGraph):
 
     def instantiate(self):
         r"""Instantiate the CUDA graph. Will be called by
-        capture_end() if eagerly_instantiate=True, or by replay() if
-        eagerly_instantiate=False and instantiate() has not already
-        been explicitly called.
+        capture_end() if keep_graph=False, or by replay() if
+        keep_graph=True and instantiate() has not already been
+        explicitly called. Does not destroy the cudaGraph_t returned
+        by raw_cuda_graph().
         """
         super().instantiate()
 
@@ -147,6 +143,9 @@ class CUDAGraph(torch._C._CUDAGraph):
         enabled via CUDAGraph.enable_debug_mode()
         """
         return super().debug_dump(debug_path)
+
+    def raw_cuda_graph(self):
+        return super().raw_cuda_graph()
 
 
 class graph:
