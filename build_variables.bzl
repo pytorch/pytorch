@@ -595,12 +595,14 @@ libtorch_nativert_sources = [
     "torch/nativert/graph/GraphSignature.cpp",
     "torch/nativert/graph/Serialization.cpp",
     "torch/nativert/graph/TensorMeta.cpp",
+    "torch/nativert/executor/DelegateExecutor.cpp",
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/ExecutionPlanner.cpp",
     "torch/nativert/executor/PlacementUtils.cpp",
     "torch/nativert/executor/Weights.cpp",
     "torch/nativert/executor/memory/FunctionSchema.cpp",
     "torch/nativert/common/FileUtil.cpp",
+    "torch/nativert/detail/ITree.cpp",
 ]
 
 torch_mobile_tracer_sources = [
