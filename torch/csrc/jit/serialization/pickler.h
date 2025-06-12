@@ -115,9 +115,6 @@ struct WriteableTensorData {
   uint64_t size_;
 };
 
-void setTypeTags(bool state);
-bool getTypeTags();
-
 class TORCH_API Pickler {
   AT_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
@@ -285,9 +282,6 @@ class TORCH_API Pickler {
 // if it was CUDA and to_cpu is True.
 TORCH_API WriteableTensorData
 getWriteableTensorData(const at::Tensor& tensor, bool to_cpu = true);
-
-// return the value of the tensor's storage pointer
-uint64_t getStorageKey(const at::Tensor& tensor);
 
 // if the cls has __getstate__/__setstate__
 // assert they have the right schema and return true,
