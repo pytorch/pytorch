@@ -1,13 +1,13 @@
 .. currentmodule:: torch.distributed.tensor
 
 torch.distributed.tensor
-===========================
 
-.. note::
-  ``torch.distributed.tensor`` is currently in alpha state and under
-  development, we are committing backward compatibility for the most APIs listed
-  in the doc, but there might be API changes if necessary.
 
+:::{note}
+`torch.distributed.tensor` is currently in alpha state and under
+development, we are committing backward compatibility for the most APIs listed
+in the doc, but there might be API changes if necessary.
+:::
 
 PyTorch DTensor (Distributed Tensor)
 ---------------------------------------
