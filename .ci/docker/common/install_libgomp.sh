@@ -15,7 +15,7 @@ mkdir -p gcc-11.4.0/build-gomp
 cd gcc-11.4.0/build-gomp
 
 # configure gcc build
-# I got these flags by by:
+# I got these flags by:
 # 1. downloading the source rpm for gcc-11 on AlmaLinux 8 container
 #    dnf install -y dnf-plugins-core rpmdevtools
 #   dnf download --source libgomp
@@ -32,11 +32,12 @@ cd gcc-11.4.0/build-gomp
 #
 # I added -march=armv8-a -mtune=generic to make them explicit. I don't think they're strictly needed.
 
-OPT_FLAGS='-O2 -march=armv8-a -mtune=generic \ 
-  -fexceptions -g -grecord-gcc-switches -pipe -Wall \
-  -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS \
-  -fstack-protector-strong -fasynchronous-unwind-tables \
-  -fstack-clash-protection'
+OPT_FLAGS='-O2 -march=armv8-a -mtune=generic'\
+' -fexceptions -g -grecord-gcc-switches -pipe -Wall'\
+' -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS'\
+' -fstack-protector-strong -fasynchronous-unwind-tables'\
+' -fstack-clash-protection'
+
 LDFLAGS='-Wl,-z,relro -Wl,--as-needed -Wl,-z,now'
 
 CFLAGS="$OPT_FLAGS" \
