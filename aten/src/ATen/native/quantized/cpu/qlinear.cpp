@@ -972,9 +972,6 @@ static at::Tensor fp8_qlinear_onednn_ref(
       TORCH_CHECK(
           unary_post_op_algorithm == "none" || unary_post_op_algorithm == "tanh",
           "onednn qlinear: algorithm for post op gelu must be none or tanh but got ", unary_post_op_algorithm);
-      auto post_algorithm = unary_post_op_algorithm == "none" ?
-        dnnl::algorithm::eltwise_gelu_erf :
-        dnnl::algorithm::eltwise_gelu_tanh;
       at::gelu_(y_f32, unary_post_op_algorithm);
     } else if (unary_post_op == "hardtanh") {
       TORCH_CHECK(
