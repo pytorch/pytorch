@@ -7,6 +7,9 @@ param(
     [string]$PyTorchBuildNumber
 )
 
+# Abort on first error (similar to set -e)
+$ErrorActionPreference = "Stop"
+
 # Set environment variables from parameters if not already set
 if ([string]::IsNullOrEmpty($env:CUDA_VERSION) -or
     [string]::IsNullOrEmpty($env:PYTORCH_BUILD_VERSION) -or
@@ -31,7 +34,7 @@ if ($env:CUDA_VERSION -eq "cpu") { $CUDA_PREFIX = "cpu" }
 if ($env:CUDA_VERSION -eq "xpu") { $CUDA_PREFIX = "xpu" }
 
 if ([string]::IsNullOrEmpty($env:DESIRED_PYTHON)) {
-    $env:DESIRED_PYTHON = "3.5;3.6;3.7" 
+    $env:DESIRED_PYTHON = "3.5;3.6;3.7"
 }
 
 $DESIRED_PYTHON_PREFIX = $env:DESIRED_PYTHON -replace '\.', ''
@@ -152,11 +155,7 @@ foreach ($pythonVersion in $pythonVersions) {
 
     Write-Host "Calling arch build script"
     $buildScript = "$CUDA_PREFIX.ps1"
-    & .\$buildScript
-
-    if ($LASTEXITCODE -ne 0) {
-        exit 1
-    }
+    . .\$buildScript
 }
 
 $env:PATH = $ORIG_PATH
