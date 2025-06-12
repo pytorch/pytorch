@@ -3517,21 +3517,17 @@ exit(2)
         with torch.cuda.graph(graph, capture_error_mode="relaxed"):
             z = x + y
 
-        with self.assertRaises(RuntimeError) as context:
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"instantiate\(\) is intended to be called by the user only when keep_graph=true",
+        ):
             raw_pointer = graph.instantiate()
 
-        self.assertTrue(
-            "instantiate() is intended to be called by the user only when keep_graph=true"
-            in str(context.exception)
-        )
-
-        with self.assertRaises(RuntimeError) as context:
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"You cannot access the raw cudaGraph_t instance unless CUDAGraph was initialized with keep_graph=true",
+        ):
             raw_pointer = graph.raw_cuda_graph()
-
-        self.assertTrue(
-            "You cannot access the raw cudaGraph_t instance unless CUDAGraph was initialized with keep_graph=true"
-            in str(context.exception)
-        )
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON,
