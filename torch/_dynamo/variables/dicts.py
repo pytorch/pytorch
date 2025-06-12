@@ -610,6 +610,19 @@ class ConstDictVariable(VariableTracker):
             self.items.pop(key)
             self.items[key] = val
             return ConstantVariable.create(None)
+        elif name == "__eq__" and istype(
+            self, ConstDictVariable
+        ):  # don't let Set use this function
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
+
+            return variables.UserFunctionVariable(polyfills.dict___eq__).call_function(
+                tx, [self, args[0]], {}
+            )
+        elif name == "__ne__":
+            return ConstantVariable.create(
+                not self.call_method(tx, "__eq__", args, kwargs).value
+            )
         elif name == "__or__":
             assert len(args) == 1
             if not isinstance(
