@@ -1,16 +1,24 @@
+```{eval-rst}
 .. currentmodule:: torch.fx.experimental
+```
 
-torch.fx.experimental
-=====================
+# torch.fx.experimental
 
-.. warning::
-   These APIs are experimental and subject to change without notice.
+:::{warning}
+These APIs are experimental and subject to change without notice.
+:::
 
-torch.fx.experimental.symbolic_shapes
--------------------------------------
+## torch.fx.experimental.symbolic_shapes
+
+```{eval-rst}
 .. currentmodule:: torch.fx.experimental.symbolic_shapes
-.. automodule:: torch.fx.experimental.symbolic_shapes
+```
 
+```{eval-rst}
+.. automodule:: torch.fx.experimental.symbolic_shapes
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -57,13 +65,19 @@ torch.fx.experimental.symbolic_shapes
     rebind_unbacked
     resolve_unbacked_bindings
     is_accessor_node
+```
 
-torch.fx.experimental.proxy_tensor
--------------------------------------
+## torch.fx.experimental.proxy_tensor
 
+```{eval-rst}
 .. currentmodule:: torch.fx.experimental.proxy_tensor
-.. automodule:: torch.fx.experimental.proxy_tensor
+```
 
+```{eval-rst}
+.. automodule:: torch.fx.experimental.proxy_tensor
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -73,3 +87,4 @@ torch.fx.experimental.proxy_tensor
     get_proxy_mode
     maybe_enable_thunkify
     maybe_disable_thunkify
+```
