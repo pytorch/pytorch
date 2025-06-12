@@ -633,9 +633,17 @@ class ConstDictVariable(VariableTracker):
                 )
                 raise_observed_exception(TypeError, tx, args=[msg])
 
+            ts = {self.user_cls, args[0].user_cls}
+            user_cls = (
+                collections.OrderedDict if collections.OrderedDict in ts else dict
+            )
+
             self.install_dict_keys_match_guard()
             new_dict_vt = self.clone(
-                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+                items=self.items.copy(),
+                mutation_type=ValueMutationNew(),
+                source=None,
+                user_cls=user_cls,
             )
 
             # NB - Guard on all the keys of the other dict to ensure
@@ -643,6 +651,10 @@ class ConstDictVariable(VariableTracker):
             args[0].install_dict_keys_match_guard()
             new_dict_vt.items.update(args[0].items)
             return new_dict_vt
+        elif name == "__ior__":
+            r = self.call_method(tx, "__or__", args, kwargs)
+            self.call_method(tx, "update", [r], {})
+            return self
         else:
             return super().call_method(tx, name, args, kwargs)
 

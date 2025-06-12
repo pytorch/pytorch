@@ -1662,6 +1662,10 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         return side_effects.is_modified(self._dict_vt)
 
     @property
+    def user_cls(self):
+        return self._dict_vt.user_cls
+
+    @property
     def items(self):
         return self._dict_vt.items
 
