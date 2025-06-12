@@ -7,7 +7,7 @@ using namespace c10::metal;
 struct hardshrink_functor {
   template <typename T>
   inline T operator()(const T x, const T lambda) {
-    return abs(float(x) <= float(lambda)) ? T(0) : x;
+    return abs(float(x)) <= float(lambda) ? T(0) : x;
   }
 };
 
@@ -27,7 +27,7 @@ struct softshrink_functor {
 struct shrink_backward_functor {
   template <typename T>
   inline T operator()(const T grad_output, const T x, const T lambda) {
-    return abs(float(x) <= float(lambda)) ? T(0) : grad_output;
+    return abs(float(x)) <= float(lambda) ? T(0) : grad_output;
   }
 };
 
