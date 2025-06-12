@@ -283,26 +283,19 @@ operators, see {ref}`name_inference_reference-doc`.
 ```{eval-rst}
 .. class:: Tensor()
    :noindex:
-```
-```{eval-rst}
+
    .. autoattribute:: names
-```
-```{eval-rst}
+
    .. automethod:: rename
-```
-```{eval-rst}
+
    .. automethod:: rename_
-```
-```{eval-rst}
+
    .. automethod:: refine_names
-```
-```{eval-rst}
+
    .. automethod:: align_as
-```
-```{eval-rst}
+
    .. automethod:: align_to
-```
-```{eval-rst}
+
    .. py:method:: flatten(dims, out_dim) -> Tensor
       :noindex:
 

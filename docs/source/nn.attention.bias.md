@@ -2,7 +2,7 @@
 .. role:: hidden
     :class: hidden-section
 ```
-## torch.nn.attention.bias
+# torch.nn.attention.bias
 
 ```{eval-rst}
 .. automodule:: torch.nn.attention.bias
