@@ -1489,7 +1489,8 @@ class cuda:
     )
 
     # Specify which operations should use CUTLASS backend
-    # Comma-separated list like "mm,addmm,bmm" or "all" for all operations
+    # Comma-separated list like "mm,addmm,bmm", "all" for all operations, and "" for none.
+    # Acceptable operations: mm, int_mm, addmm, sparse_semi_structured_mm, bmm, scaled_mm
     cutlass_enabled_ops: str = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_ENABLED_OPS", "all"
     )
