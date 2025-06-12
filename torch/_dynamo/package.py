@@ -165,6 +165,8 @@ class CompilePackage:
         self._cached_backends: dict[_BackendId, Any] = {}
 
         self._initialize(fn, dynamo)
+        # Always go back to a clean state after initialization.
+        self.uninstall()
         self.validate()
 
     def _initialize(self, fn: Any, dynamo: Optional[_DynamoCacheEntry] = None) -> None:
@@ -357,8 +359,11 @@ class EagerCacheArtifact(PrecompileCacheArtifact[Any]):
 
 
 class DynamoStore:
+    """
+    A DynamoStore tracks active CompilePackages, and provides methods to store and retrieve them.
+    """
     def record_package(self, package: CompilePackage) -> None:
-        # records a package to PrecompileContext
+        """Records a package to PrecompileContext, so that it can be serialized later."""
         cache_entry = package.cache_entry()
         pickled_result = pickle.dumps(cache_entry)
         PrecompileContext.record_artifact(
@@ -366,14 +371,14 @@ class DynamoStore:
         )
 
     def record_eager_backend(self, backend_id: _BackendId, backend: Any) -> None:
-        # Records eager fx graphs to PrecompileContext for testing
+        """Records eager fx graphs to PrecompileContext for testing purposes. """
         pickled_result = pickle.dumps(backend)
         PrecompileContext.record_artifact(
             EagerCacheArtifact.type(), key=backend_id, content=pickled_result
         )
 
     def save_package(self, package: CompilePackage, path: str) -> None:
-        # saves a package to a given path
+        """Saves a package to a given path. Grabs backends from PrecompileContext."""
         backend_content = {}
         cache_entry = package.cache_entry()
         for backend_id in cache_entry.backend_ids:
@@ -391,7 +396,7 @@ class DynamoStore:
     def load_package(
         self, fn: Any, path: str
     ) -> tuple[CompilePackage, dict[_BackendId, Any]]:
-        # loads a package from a given path and returns it plus a list of deserialized backends
+        """Loads a package from a given path and returns it plus a list of deserialized backends"""
         try:
             with open(os.path.join(path, "dynamo"), "rb") as dynamo_path:
                 cache_entry = pickle.load(dynamo_path)
