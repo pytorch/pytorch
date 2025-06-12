@@ -1577,6 +1577,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
             return False
     return res
 
+
 def _use_cutlass_for_op(op_name: str) -> bool:
     """Check if CUTLASS should be used for the given operation."""
     enabled_ops = config.cuda.cutlass_enabled_ops.upper()

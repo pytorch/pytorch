@@ -38,6 +38,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    _use_cutlass_for_op,
     get_k_splits,
     get_tma_workspace_arg,
     use_aten_gemm_kernels,
@@ -49,7 +50,6 @@ from ..utils import (
     use_max_autotune,
     use_triton_template,
     use_triton_tma_template,
-    _use_cutlass_for_op,
 )
 from .mm_common import (
     _is_static_problem,
@@ -773,7 +773,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     layout=layout,
                 )
 
-    if is_nonzero and use_cutlass_template(layout, m, n, k) and _use_cutlass_for_op("mm"):
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("mm")
+    ):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
@@ -992,7 +996,11 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 )
 
-    if is_nonzero and use_cutlass_template(layout, m, n, k) and _use_cutlass_for_op("addmm"):
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("addmm")
+    ):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
@@ -1062,7 +1070,11 @@ def tuned_sparse_semi_structured_mm(
         else []
     )
 
-    if m * n != 0 and use_cutlass_template(layout, m, n, k) and _use_cutlass_for_op("sparse_semi_structured_mm"):
+    if (
+        m * n != 0
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("sparse_semi_structured_mm")
+    ):
         CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2, mat1_meta], fuseable=True, non_fuseable=True
         )
@@ -1214,7 +1226,11 @@ def tuned_scaled_mm(
                 epilogue_fn_hash="scale_mm_epilogue",
             )
 
-    if is_nonzero and use_cutlass_template(layout, m, n, k) and _use_cutlass_for_op("scaled_mm"):
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("scaled_mm")
+    ):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
