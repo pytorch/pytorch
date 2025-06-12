@@ -2402,6 +2402,10 @@ def is_int_specialization_case(value, source):
             source.guard_source().is_unspecialized_builtin_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
+        or (
+            source.guard_source().is_unspecialized_nn_module()
+            and not config.allow_unspec_int_on_nn_module
+        )
         or is_from_defaults(source)
         # TODO: Delete this condition when rollout is done.  NB: this
         # condition never evaluates True in open source
@@ -4491,38 +4495,22 @@ def does_not_override_dict_iter_methods(user_cls):
     )
 
 
-# Helper functions below are to prevent __torch_function__
-# calls from happening in the middle of __torch_function__
-# compiled bytecode
-# They will be skipped which is the desired result
+# Helper functions below are to prevent TorchDynamo to prevent tracing of
+# __torch_function__ calls triggered on tensor properties in the pre graph
+# bytecode.
+@torch._disable_dynamo
 def call_size(x, i):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x, i):
-        return x.size(i)
-
-    return fn(x, i)
+    return x.size(i)
 
 
+@torch._disable_dynamo
 def call_stride(x, i):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x, i):
-        return x.stride(i)
-
-    return fn(x, i)
+    return x.stride(i)
 
 
+@torch._disable_dynamo
 def call_storage_offset(x):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x):
-        return x.storage_offset()
-
-    return fn(x)
+    return x.storage_offset()
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
