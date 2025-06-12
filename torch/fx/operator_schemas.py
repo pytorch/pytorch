@@ -194,7 +194,7 @@ def get_op_schema(
             return None
 
 
-def is_mutable_operator(
+def _is_mutable_operator(
     target: Callable,
     args: tuple["Argument", ...],
     kwargs: dict[str, "Argument"],

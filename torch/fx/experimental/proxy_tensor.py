@@ -56,7 +56,7 @@ from torch.fx.node import (
     Argument,
     Target,
 )
-from torch.fx.operator_schemas import is_mutable_operator
+from torch.fx.operator_schemas import _is_mutable_operator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn import Module
 from torch.overrides import TorchFunctionMode
@@ -916,7 +916,7 @@ def proxy_call(
         proxy_kwargs,
         name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
     )
-    is_mutable, maybe_mutable_schema = is_mutable_operator(
+    is_mutable, maybe_mutable_schema = _is_mutable_operator(
         func, args, kwargs, return_schema=True  # type: ignore[arg-type]
     )
     if is_mutable:

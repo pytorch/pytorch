@@ -5936,9 +5936,9 @@ class GraphModule(torch.nn.Module):
 
         _new_zeros_with_same_feature_meta_default: "f32[3, 3, 3]" = torch.ops.aten._new_zeros_with_same_feature_meta.default(l_flat_tangents_1_, l_self_modules_fx_const_folded_attrs_parameters_0_);  l_self_modules_fx_const_folded_attrs_parameters_0_ = None
 
-        copy__default: "f32[3, 3, 3]" = torch.ops.aten.copy_.default(_new_zeros_with_same_feature_meta_default, l_flat_tangents_1_);  _new_zeros_with_same_feature_meta_default = l_flat_tangents_1_ = None
+        copy__default: "f32[3, 3, 3]" = torch.ops.aten.copy_.default(_new_zeros_with_same_feature_meta_default, l_flat_tangents_1_);  l_flat_tangents_1_ = copy__default = None
 
-        mul_tensor: "f32[3, 3, 3]" = torch.ops.aten.mul.Tensor(copy__default, l_self_modules_fx_const_folded_attrs_parameters_1_);  copy__default = l_self_modules_fx_const_folded_attrs_parameters_1_ = None
+        mul_tensor: "f32[3, 3, 3]" = torch.ops.aten.mul.Tensor(_new_zeros_with_same_feature_meta_default, l_self_modules_fx_const_folded_attrs_parameters_1_);  _new_zeros_with_same_feature_meta_default = l_self_modules_fx_const_folded_attrs_parameters_1_ = None
         return (mul_tensor,)
 """,
         )
