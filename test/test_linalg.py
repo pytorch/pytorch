@@ -2818,7 +2818,7 @@ class TestLinalg(TestCase):
             Q = torch.linalg.eigh(A).eigenvectors
             Q.sum().abs().backward()
 
-    @serialTest()  # OOMs on cuda 12.8
+    @largeTensorTest("4GB", device="cuda")  # I don't actually know how much memory this test uses, but on complex64 it needs at least 4GB
     @skipCUDAIfNoCusolver  # MAGMA backend doesn't work in this case
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     @skipCPUIfNoLapack
