@@ -99,7 +99,7 @@ class _KeyPathTrie:
         node = self.root
         while not isinstance(node, Source):
             assert len(kp) > 0
-            k, *kp = kp
+            k, *kp = kp  # type: ignore[assignment]
             node = node[k]
         return node, kp
 
@@ -107,34 +107,36 @@ class _KeyPathTrie:
 def make_sourced_prefixes(nn_module, args, kwargs) -> _KeyPathTrie:
     kp_args, kp_kwargs = tree_map_with_path(
         lambda kp, _: _KeyPath(kp),
-        (tuple(None for _ in args), {k: None for k in kwargs}),
+        (tuple(None for _ in args), {k: None for k in kwargs}),  # noqa: C420
     )
     kp_combined_args = _combine_args(nn_module, kp_args, kp_kwargs)
 
     sourced_prefixes = _KeyPathTrie()
-    for name, prefix in kp_combined_args.items():
+    for name, struct in kp_combined_args.items():
         src = LocalSource(name)
 
-        if isinstance(prefix, _KeyPath):
-            sourced_prefixes.add(prefix.kp, src)
-        elif isinstance(prefix, tuple):
-            for i, prefix in enumerate(prefix):
+        if isinstance(struct, _KeyPath):
+            sourced_prefixes.add(struct.kp, src)
+        elif isinstance(struct, tuple):
+            for i, prefix in enumerate(struct):
                 assert isinstance(prefix, _KeyPath)
                 sourced_prefixes.add(prefix.kp, GetItemSource(src, i))
-        elif isinstance(prefix, dict):
-            for k, prefix in prefix.items():
+        elif isinstance(struct, dict):
+            for k, prefix in struct.items():
                 assert isinstance(prefix, _KeyPath)
                 sourced_prefixes.add(prefix.kp, GetItemSource(src, k))
 
     return sourced_prefixes
 
 
-def key_path_to_source(kp: KeyPath, sourced_prefixes: Optional[_KeyPathTrie] = None) -> Source:
+def key_path_to_source(
+    kp: KeyPath, sourced_prefixes: Optional[_KeyPathTrie] = None
+) -> Source:
     """
     Given a key path, return the source for the key path.
     """
     if sourced_prefixes is None:
-        source = LocalSource("args")
+        source: Source = LocalSource("args")
     else:
         source, kp = sourced_prefixes.get(kp)
     for k in kp:
@@ -160,7 +162,7 @@ def fakify(
     t: Any,
     t_constraints: dict[int, dict[int, Constraint]],
     sources: dict[tuple[int, int], list[Source]],
-    sourced_prefixes: Optional[dict[str, KeyPath]] = None,
+    sourced_prefixes: Optional[_KeyPathTrie] = None,
 ):
     source = key_path_to_source(kp, sourced_prefixes=sourced_prefixes)
     if _is_constant_argument(t) or isinstance(t, (torch.ScriptObject, torch.nn.Module)):

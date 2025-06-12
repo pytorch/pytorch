@@ -10660,7 +10660,7 @@ graph():
             torch._dynamo.exc.UserError,
             r"Constraints violated.*\n.*"
             r"You marked L\['y'\].size\(\)\[0\] as dynamic but your code specialized it to be a constant \(3\).*"
-            r"If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO."
+            r"If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO.",
         ):
             export(m, (x, y, zs), dynamic_shapes=dynamic_shapes)
 
