@@ -71,6 +71,14 @@ jobs:
           { config: "numpy_2_x", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
     secrets: inherit
+    steps:
+      - name: Get changed files
+        if: ${{ matrix.config == 'check_unimplemented_calls' }}
+        id: changed-files
+        run: |
+          echo "files=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" | grep '\.py$' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          echo "GITHUB_BASE_SHA=${{ github.event.pull_request.base.sha }}" >> $GITHUB_ENV
+          echo "GITHUB_SHA=${{ github.sha }}" >> $GITHUB_ENV
 
   linux-jammy-py3_9-gcc11-test:
     name: linux-jammy-py3.9-gcc11
