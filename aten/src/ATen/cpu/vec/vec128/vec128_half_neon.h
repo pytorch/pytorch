@@ -220,8 +220,27 @@ class Vectorized<c10::Half> : public Vectorized16<
       std::memcpy(ptr, tmp_values, count * sizeof(float16_t));
     }
   }
-  // For boolean version where we want to if any 1/all zero
-  // etc. can be done faster in a different way.
+  int zero_mask() const {
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+    uint16x8_t is_zero_vec = vceqzq_f16(values);
+    const int16x8_t shift = vcombine_u16(
+        vcreate_s16(0x0 | (int64_t(0x1) << 16) | (int64_t(0x2) << 32) | (int64_t(0x3) << 48)),
+        vcreate_s16(0x4 | (int64_t(0x5) << 16) | (int64_t(0x6) << 32) | (int64_t(0x7) << 48)));
+    uint32x4_t bits_vec = vshlq_u16(vandq_u16(is_zero_vec, vdupq_n_u16(1)), shift);
+    return vaddvq_u16(bits_vec);
+#else // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+    // use known working implmentation.
+    __at_align__ value_type tmp[size()];
+    static_cast<const Derived*>(this)->store(tmp);
+    int mask = 0;
+    for (int i = 0; i < size(); ++i) {
+      if (tmp[i] == 0) {
+        mask |= (1 << i);
+      }
+    }
+    return mask;
+#endif // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+  }
   Vectorized<c10::Half> isnan() const {
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return vreinterpretq_f16_u16(vmvnq_u16(vceqq_f16(values, values)));
