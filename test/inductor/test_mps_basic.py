@@ -223,6 +223,20 @@ class MPSBasicTestsAOTI(TestCase):
         m = M().to("mps")
         self.check_model(m, inp)
 
+    def test_two_const(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.y = torch.ones(3, 3, device="mps")
+                self.z = torch.full((3, 3), 2, device="mps")
+
+            def forward(self, x):
+                return x + self.y + self.z
+
+        inp = (torch.ones(3, 3, device="mps"),)
+        m = Model().to(device="mps")
+        self.check_model(m, inp)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
