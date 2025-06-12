@@ -50,7 +50,7 @@ BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def has_dot() -> bool:
     return shutil.which("dot") is not None
 
