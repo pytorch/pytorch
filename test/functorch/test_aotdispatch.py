@@ -1148,8 +1148,8 @@ def forward(self, primals_1, primals_2, primals_3):
             """\
 def forward(self, arg0_1, arg1_1):
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-    copy_ = torch.ops.aten.copy_.default(arg1_1, sin);  arg1_1 = sin = None
-    return (copy_,)""",
+    copy_ = torch.ops.aten.copy_.default(arg1_1, sin);  sin = copy_ = None
+    return (arg1_1,)""",
         )
 
     def test_input_mutation_metadata(self):
@@ -7850,7 +7850,7 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
             )
             return dummy, inplace_tensor
 
-        for _inps in [inps]: # [inps, sc_inps]:
+        for _inps in [inps, sc_inps]:
             dummy, inplace = _inps()
             y = fn(dummy, inplace)
             ref0 = inplace.clone().detach()

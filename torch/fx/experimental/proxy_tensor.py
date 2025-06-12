@@ -11,7 +11,6 @@ import functools
 import inspect
 import logging
 import operator
-import threading
 import traceback
 import typing
 import typing_extensions
@@ -57,6 +56,7 @@ from torch.fx.node import (
     Argument,
     Target,
 )
+from torch.fx.operator_schemas import is_mutable_operator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn import Module
 from torch.overrides import TorchFunctionMode
@@ -199,38 +199,6 @@ def set_proxy_slot(
     obj: PySymType, tracer: _ProxyTracer, proxy: _PySymProxyType
 ) -> None:
     ...
-
-
-# class _DisableUpdateTensorTracker(threading.local):
-#     value: bool = False
-# 
-# 
-# _disable_update_tensor_tracker_tls = _DisableUpdateTensorTracker()
-# 
-# 
-# def _is_proxy_tensor_update_tensor_tracker_disabled() -> bool:
-#     """
-#     Returns current state of disabling update tensor tracker.
-#     """
-#     return False
-#     # return _disable_update_tensor_tracker_tls.value
-# 
-# 
-# @contextmanager
-# def _proxy_tensor_disable_update_tensor_tracker() -> Generator[None, None, None]:
-#     """
-#     By default tensor_tracker is updated every time.
-#     This leads to chaining every operation on the FakeTensor.
-#     For some cases of non-functional code, e.g. mutations in aotdispatch,
-#     we want emitted nodes to be disconnected that partitioner will be able
-#     to separate them into different subgraphs.
-#     """
-#     orig_value = _disable_update_tensor_tracker_tls.value
-#     _disable_update_tensor_tracker_tls.value = True
-#     try:
-#         yield
-#     finally:
-#         _disable_update_tensor_tracker_tls.value = orig_value
 
 
 def set_proxy_slot(  # type: ignore[no-redef]
@@ -948,15 +916,33 @@ def proxy_call(
         proxy_kwargs,
         name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
     )
-
-    # XXX For mutable ops we want proxy_out to be a proxy of mutated argument.
-    # TODO: Do proper check of schema and get the idx of mutated arg.
-    if func is torch.ops.aten.copy_.default:
-        proxy_out = proxy_args[0]
+    is_mutable, maybe_mutable_schema = is_mutable_operator(
+        func, args, kwargs, return_schema=True  # type: ignore[arg-type]
+    )
+    if is_mutable:
+        # For consequent inplace ops on the same Tensor
+        # we want them to be applied only on original tensor.
+        #
+        # def fn(primal, primal1, primal2):
+        #     primal = torch.ops.aten.copy_(primal, primal1)
+        #     primal = torch.ops.aten.copy_(primal, primal2)
+        #
+        # This is important for joint graph, where inplace mutations
+        # can be in forward and backward.
+        # In this case we want them to be independent,
+        # that partitioner can split them.
+        s = maybe_mutable_schema
+        # Support for now only ops with 1 return
+        if len(s.returns) == 1 and (r_alias_info := s.returns[0].alias_info):
+            for idx, s_arg in enumerate(s.arguments):
+                if not s_arg.alias_info:
+                    continue
+                if r_alias_info.after_set == s_arg.alias_info.after_set:
+                    proxy_out = proxy_args[idx]
+                    break
 
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
-
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
