@@ -1306,10 +1306,8 @@ static void apply_syevd_batched_rocsolver(const Tensor& values, const Tensor& ve
   // rocsolver will manage the workspace size automatically
    if(!rocblas_is_managing_device_memory(handle))
         TORCH_ROCBLAS_CHECK(rocblas_set_workspace(handle, nullptr, 0));
-  
+
   TORCH_ROCBLAS_CHECK(_rocsolver_syevd_strided_batched<scalar_t>(
-    // static_cast<rocblas_handle>(at::cuda::getCurrentCUDABlasHandle()), // getCurrentCUDASolverDnHandle() can't be used
-    // static_cast<rocblas_handle>(getCurrentCUDASolverDnHandle()),
     handle,
     evect,
     uplo,
