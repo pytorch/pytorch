@@ -20,7 +20,6 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.tensor import DTensor
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
-
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
     requires_nccl,

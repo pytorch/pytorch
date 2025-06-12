@@ -294,7 +294,7 @@ class PGTransport:
                 storage_offset=v.storage_offset,
             )
 
-        values = []
+        values: list[object] = []
         for path, v in zip(meta.paths, meta.non_tensor_leaves):
             if isinstance(v, _TensorMeta):
                 values.append(recv(path, v))
