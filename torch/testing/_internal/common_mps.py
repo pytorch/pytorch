@@ -77,6 +77,7 @@ if torch.backends.mps.is_available():
             "linalg.diagonal",
             "linalg.svd",
             "log10",
+            "log1p",
             "log2",
             "log",
             "mH",
@@ -106,6 +107,7 @@ if torch.backends.mps.is_available():
             "nn.functional.unfold",
             "nonzero",
             "ones",
+            "ones_like",
             "outer",
             "permute",
             "permute_copy",
@@ -123,6 +125,7 @@ if torch.backends.mps.is_available():
             "scalar_tensor",
             "select",
             "sgn",
+            "sigmoid",
             "sin",
             "sinc",
             "slice",
@@ -165,6 +168,7 @@ if torch.backends.mps.is_available():
             "vsplit",
             "zero_",
             "zeros",
+            "zeros_like",
         }
 
         AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
@@ -237,7 +241,6 @@ if torch.backends.mps.is_available():
             "linalg.pinv",
             "linspace",
             "linspacetensor_overload",
-            "log1p",
             "logical_and",
             "logical_not",
             "logical_or",
@@ -267,7 +270,6 @@ if torch.backends.mps.is_available():
             "roll",
             "rot90",
             "short",
-            "sigmoid",
             "sinh",
             "sqrt",
             "square",
@@ -385,7 +387,6 @@ if torch.backends.mps.is_available():
             "cholesky_solve": None,
             "cummax": None,
             "cummin": None,
-            "erfc": None,
             "frexp": None,
             "gcd": None,
             "geqrf": None,
@@ -498,9 +499,6 @@ if torch.backends.mps.is_available():
             # MPS: input sizes must be divisible by output sizes
             "nn.functional.adaptive_avg_pool1d": None,
             "nn.functional.adaptive_avg_pool2d": None,
-            # Unsupported dtypes
-            "ones_like": None,
-            "zeros_like": None,
             # Convolution for integral types is not supported on MPS
             "nn.functional.conv1d": [torch.int64],
             "nn.functional.conv2d": [torch.int64],
@@ -516,55 +514,6 @@ if torch.backends.mps.is_available():
             "dot": [torch.int64] if MACOS_VERSION < 14.0 else [],
             "histc": [torch.float16, torch.bfloat16],
             "index_add": [torch.int64],
-            # Operations not supported for integral types
-            "special.xlog1py": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.zeta": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.chebyshev_polynomial_t": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.chebyshev_polynomial_u": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.hermite_polynomial_h": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.hermite_polynomial_he": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
             # GEMM on MPS is not supported for integral types
             "nn.functional.linear": [
                 torch.int16,

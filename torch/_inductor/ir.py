@@ -3160,7 +3160,7 @@ class ReinterpretView(BaseView):
 
     __repr__ = __str__
 
-    def get_name(self) -> str:
+    def get_name(self):  # type: ignore[no-untyped-def]
         return self.data.get_name()
 
     def get_device(self) -> Optional[torch.device]:
@@ -4709,6 +4709,13 @@ class ChoiceCaller:
     def to_callable(self):  # type: ignore[no-untyped-def]
         raise NotImplementedError
 
+    def kernel_hash_key(self) -> str:
+        """
+        Hash key for the underlying kernel. By default, we assume there are no
+        runtime params, so kernel hash key defaults to choice caller's hash key.
+        """
+        return self.hash_key()
+
     def hash_key(self) -> str:
         raise NotImplementedError
 
@@ -5179,8 +5186,6 @@ class ExternKernel(InputsKernel):
             self.schema_kwargs = [
                 x for x in self.op_overload._schema.arguments if x.kwarg_only
             ]
-        else:
-            self.schema_kwargs = []
 
     def decide_layout(self):  # type: ignore[no-untyped-def]
         if isinstance(self.layout, FlexibleLayout):
@@ -5811,6 +5816,17 @@ class ExternKernel(InputsKernel):
             ]
         return kwargs
 
+    def get_op_name(self) -> str:
+        if self.fx_node is not None:
+            target = self.fx_node.target
+            op_namespace = getattr(target, "__module__", "unknown_namespace")
+            op_namespace = op_namespace.replace("._ops.", ".ops.")
+            op_namespace = op_namespace.rsplit(".", 1)[0]
+            op_name = f"{op_namespace}.{target}"
+        else:
+            op_name = "unknown_op"
+        return op_name
+
     def codegen_size_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if config.size_asserts and not V.graph.cpp_wrapper:
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
@@ -5818,19 +5834,24 @@ class ExternKernel(InputsKernel):
                 return
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-
+            op_name = self.get_op_name()
             wrapper.writeline(
-                f"assert_size_stride({self.get_name()}, {size}, {stride})"
+                f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
             )
 
     def codegen_alignment_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if config.alignment_asserts and not V.graph.cpp_wrapper:
             name = self.get_name()
             aligned = name not in V.graph.unaligned_buffers
+            op_name = self.get_op_name()
             if aligned:
-                wrapper.writeline(f"assert_alignment({name}, {GPU_ALIGN_BYTES})")
+                wrapper.writeline(
+                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
+                )
             else:
-                wrapper.writeline(f"# buffer {name} is assumed to be not aligned")
+                wrapper.writeline(
+                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
+                )
 
     def get_group_stride(self):  # type: ignore[no-untyped-def]
         """
@@ -6015,7 +6036,7 @@ class MutationOutput(Buffer):
     def get_defining_op(self) -> Operation:
         return self.mutating_node
 
-    def get_mutation_names(self) -> Sequence[str]:
+    def get_mutation_names(self):  # type: ignore[no-untyped-def]
         return self.mutation_names
 
     def should_allocate(self) -> bool:
@@ -6350,7 +6371,7 @@ class InplaceBernoulliFallback(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self) -> Sequence[str]:
+    def get_mutation_names(self):  # type: ignore[no-untyped-def]
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6382,7 +6403,7 @@ class InplaceCopyFallback(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self) -> Sequence[str]:
+    def get_mutation_names(self):  # type: ignore[no-untyped-def]
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6435,7 +6456,7 @@ class MutatingFirstArgExternKernel(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self) -> Sequence[str]:
+    def get_mutation_names(self):  # type: ignore[no-untyped-def]
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6517,7 +6538,7 @@ class ScatterFallback(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self) -> Sequence[str]:
+    def get_mutation_names(self):  # type: ignore[no-untyped-def]
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6581,7 +6602,7 @@ class IndexPutFallback(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self) -> Sequence[str]:
+    def get_mutation_names(self):  # type: ignore[no-untyped-def]
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6732,6 +6753,12 @@ class ExternKernelNode:
 
 
 class FallbackKernel(ExternKernelAlloc):
+    """
+    A class that represents a fallback kernel for handling operators that are not
+    directly support by inductor. It currently supports functional ops, view ops,
+    implace aten ops, and mutating ops that are auto-functionalizable.
+    """
+
     def __init__(  # type: ignore[no-untyped-def]
         self,
         layout,
@@ -6924,7 +6951,7 @@ class FallbackKernel(ExternKernelAlloc):
     def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
         return self.alias_names
 
-    def get_mutation_names(self) -> Sequence[str]:
+    def get_mutation_names(self):  # type: ignore[no-untyped-def]
         assert len(self.mutation_names) <= 1
         return self.mutation_names
 
@@ -7002,6 +7029,8 @@ class FallbackKernel(ExternKernelAlloc):
                             )
                         )
                     )
+            elif isinstance(return_type, torch.IntType):
+                return export_schema.Argument.create(as_int=output)
             else:
                 raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
@@ -7063,41 +7092,51 @@ class FallbackKernel(ExternKernelAlloc):
                 kernel not in config.aot_inductor.custom_ops_to_c_shims
             )
 
-        def is_number(t: torch.JitType) -> bool:
-            if isinstance(t, torch.OptionalType):
-                return is_number(t.getElementType())
-            return isinstance(t, torch.NumberType)
-
-        self.codegen_comment(wrapper)
-        args = [*self.codegen_args(), *self.codegen_kwargs()]
-        if self.use_runtime_dispatch or (
-            # Handle the special case where a complex number is input to a
-            # cpp_wrapper C-shim kernel.  If the corresponding argument is a number,
-            # the torchgen-created shim API will use type "double", which cannot be
-            # converted to from a c10::complex.  In these cases, fallback to runtime
-            # dispatch.
-            V.graph.cpp_wrapper
-            and isinstance(kernel, torch._ops.OpOverload)
-            and any(
-                "c10::complex" in arg_str and is_number(op_arg.real_type)
-                for arg_str, op_arg in zip(args, kernel._schema.arguments)
-            )
-        ):
+        def do_runtime_dispatch() -> None:
+            args = None
             exported_args = self.export_extern_kernel_node()
+
             wrapper.generate_fallback_kernel_with_runtime_lookup(
                 self.get_name(),
                 self.python_kernel_name,
+                self.cpp_kernel_name,
                 args,
                 self.op_overload,
                 exported_args,
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
                 self.outputs if self.outputs else self.mutation_outputs,
             )
+
+        def is_number(t: torch.JitType) -> bool:
+            return isinstance(t, torch.NumberType) or (
+                isinstance(t, torch.OptionalType)
+                and isinstance(t.getElementType(), torch.NumberType)
+            )
+
+        self.codegen_comment(wrapper)
+        if self.use_runtime_dispatch:
+            do_runtime_dispatch()
         else:
-            wrapper.generate_fallback_kernel(self)
-            if isinstance(self.layout, Layout):
-                self.codegen_size_asserts(wrapper)
-                self.codegen_alignment_asserts(wrapper)
+            args = [*self.codegen_args(), *self.codegen_kwargs()]
+            if (
+                V.graph.cpp_wrapper
+                and isinstance(kernel, torch._ops.OpOverload)
+                and any(
+                    "c10::complex" in arg_str and is_number(op_arg.real_type)
+                    for arg_str, op_arg in zip(args, kernel._schema.arguments)
+                )
+            ):
+                # Handle the special case where a complex number is input to a
+                # cpp_wrapper C-shim kernel.  If the corresponding argument is a number,
+                # the torchgen-created shim API will use type "double", which cannot be
+                # converted to from a c10::complex.  In these cases, fallback to runtime
+                # dispatch.
+                do_runtime_dispatch()
+            else:
+                wrapper.generate_fallback_kernel(self)
+                if isinstance(self.layout, Layout):
+                    self.codegen_size_asserts(wrapper)
+                    self.codegen_alignment_asserts(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
 
@@ -8056,7 +8095,7 @@ class TorchBindObject(NonTensorObj):
     name: str
     value: Union[FakeScriptObject, torch.ScriptObject]
 
-    def get_name(self) -> str:
+    def get_name(self):  # type: ignore[no-untyped-def]
         return self.name
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
@@ -8089,7 +8128,7 @@ class GeneratorState(NonTensorObj):
     name: str
     device: torch.device
 
-    def get_name(self) -> str:
+    def get_name(self):  # type: ignore[no-untyped-def]
         return self.name
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
