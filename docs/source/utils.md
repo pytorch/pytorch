@@ -3,6 +3,9 @@
 .. automodule:: torch.utils
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.utils
+```
 The `torch.utils` module provides essential utility functions and classes that can be utilized for several aplications such as
 data loading, model monitoring and memory extension.
 
@@ -19,10 +22,6 @@ torch.utils.flop_counter
     _offsets_to_lengths
     _unpack_flash_attention_nested_shapes
     _unpack_efficient_attention_nested_shapes
-
-```{eval-rst}
-.. currentmodule:: torch.utils
-```
 
 ```{eval-rst}
 .. autosummary::
