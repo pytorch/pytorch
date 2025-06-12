@@ -11,6 +11,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
+    _has_gen_schema,
     call_op,
     HopInstance,
     materialize_callable_in_args,
@@ -411,12 +412,6 @@ def can_auto_functionalize(
 ) -> bool:
     if isinstance(op, HopInstance):
         # HOPs that implement gen_schema and schema is not functional are auto_functionalizable.
-        def _has_gen_schema(op: HigherOrderOperator):
-            method = "gen_schema"
-            return hasattr(type(op), method) and getattr(
-                type(op), method
-            ) is not getattr(HigherOrderOperator, method)
-
         if not _has_gen_schema(op._op):
             return False
 
@@ -577,7 +572,7 @@ def do_auto_functionalize(
 
 def do_auto_functionalize_v2(
     mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
-    op: _MutableOpType,
+    op: Union[OpOverload, HopInstance],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
@@ -589,12 +584,9 @@ def do_auto_functionalize_v2(
     # args come from the schema. This makes it easier for us to work with them.
     normalized_kwargs = {}
 
+    schema = op._schema
+    op = op._op if isinstance(op, HopInstance) else op
     assert isinstance(op, get_args(_MutableOpType))
-    schema = (
-        op.gen_schema(*args, **kwargs)
-        if isinstance(op, HigherOrderOperator)
-        else op._schema
-    )
 
     def _functionalize_callable(arg: Any):
         if callable(arg):
