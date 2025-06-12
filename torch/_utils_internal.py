@@ -286,7 +286,7 @@ def profiler_allow_cudagraph_cupti_lazy_reinit_cuda12():
 
 
 def deprecated():
-    """When we deprecate a funciton, we make it internal by adding a leading underscore.
+    """When we deprecate a function that might still be in use, we make it internal by adding a leading underscore.
     This decorator is used with a private function, and creates a public alias without the leading underscore, but has a deprecation warning.
     This tells users "THIS FUNCTION IS DEPRECATED, please use something else" without breaking them, however, 
     if they still really really want to use the deprecated function without the warning, they can do so by using the internal function name.
