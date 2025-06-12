@@ -2308,6 +2308,10 @@ class BuiltinVariable(VariableTracker):
             list_var.call_method(tx, "sort", [], kwargs)
             return list_var
 
+    def call_bool(self, tx: "InstructionTranslator", obj: VariableTracker):
+        if isinstance(obj, (ConstDictVariable, UserDefinedDictVariable)):
+            return ConstantVariable.create(len(obj.items) > 0)
+
     # neg is a constant fold function, so we only get here if constant fold is not valid
     def call_neg(self, tx: "InstructionTranslator", a):
         if isinstance(a, SymNodeVariable):
@@ -2534,7 +2538,7 @@ class BuiltinVariable(VariableTracker):
         # Unwrap the underlying ConstDictVariable
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
-        if isinstance(a, (ListVariable, ConstDictVariable)):
+        if isinstance(a, (ListVariable, ConstDictVariable, UserDefinedDictVariable)):
             return ConstantVariable.create(len(a.items) == 0)
 
         return None

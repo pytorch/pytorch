@@ -741,7 +741,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     x = None
 
             # __bool__ or __len__ is function
-            if isinstance(x, UserMethodVariable):
+            if isinstance(x, (GetAttrVariable, UserMethodVariable)):
                 result = x.call_function(self, [], {})  # type: ignore[arg-type, assignment]
                 if isinstance(result, ConstantVariable) and isinstance(
                     result.value, (bool, int)
