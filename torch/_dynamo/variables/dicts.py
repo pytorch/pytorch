@@ -101,8 +101,9 @@ def is_hashable(x):
     elif (
         isinstance(x, variables.UserDefinedObjectVariable)
         and not was_instancecheck_override(x.value)
-        and inspect.getattr_static(x.value, "__hash__") is int.__hash__
-        and isinstance(x.value, int)
+        and inspect.getattr_static(x.value, "__hash__")
+        in (int.__hash__, object.__hash__)
+        and isinstance(x.value, (object, int))
     ):
         return isinstance(x.value, py_Hashable)
     else:
