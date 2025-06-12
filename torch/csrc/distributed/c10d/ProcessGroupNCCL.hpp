@@ -621,6 +621,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     void setLastWorkListUpdateTime(
         std::chrono::time_point<std::chrono::steady_clock> time);
 
+    int getDumpTimeout() const;
+
     // Util function to get the timeout error message
     std::string getNCCLWatchdogTimeoutErrorMsg(const std::string& extraMsg);
 
@@ -674,6 +676,78 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // The last update time of WorkList inside watchdog thread.
     std::chrono::time_point<std::chrono::steady_clock> lastWorkListUpdateTime_;
+  };
+
+  // Class that runs as a side thread to check whether the NCCL collective
+  // is timed out or errors on the cached NCCL communicators.
+  class Watchdog {
+   public:
+    Watchdog(ProcessGroupNCCL* pg);
+    virtual ~Watchdog() = default;
+
+    // Start the heartbeat monitor thread.
+    void start();
+
+    // Join the heartbeat monitor thread.
+    void join();
+
+    // Function that runs as part of a separate thread and checks for errors on
+    // NCCL communicators. We need a separate thread to check for NCCL errors
+    // since we can't rely on the user calling certain methods like wait(),
+    // isCompleted() etc. to detect and remediate errors. In addition to this, we
+    // need a mechanism to safely abort and remove NCCL communicators from our
+    // cache. This can be done cleanly by having a thread for the ProcessGroupNCCL
+    // class. Attempting to modify the communicator cache from the WorkNCCL class
+    // might run into issues with object lifetime since the ProcessGroupNCCL
+    // object might get destroyed before the WorkNCCL object.
+    virtual void run();
+
+    // Watchdog's inside loop.
+    // Takes care of cleaning up completed work, and aborting upon failure or
+    // timeout.
+    void runLoop();
+
+    // Set the terminal flag and notify the heartbeat monitor thread to stop.
+    void stop();
+
+    void checkAndSetRemoteError();
+
+    // A helper function to get the src rank of a signal from the Store. This is
+    // nonblocking function returning -1 if the signal is not available yet.
+    int getSignalSrcRank(
+        c10::intrusive_ptr<Store>& store,
+        const std::string& signal);
+
+    uint64_t getHeartbt() const;
+
+  private:
+    // Monitor thread which checks the heartbeat of Watchdog thread.
+    // If the monitor thread finds there is no heartbeat, it will dump debug
+    // info and then kill the watchdog thread to avoid hang.
+    std::thread ncclCommWatchdogThread_;
+
+    // We need to keep a reference to the PG instance so that we can access
+    // the member functions of the PG instance. We store a raw pointer on
+    // purpose because the heartbeat monitor thread now still lives within the
+    // lifetime of the PG instance.
+    ProcessGroupNCCL* pg_;
+
+    // Whether the NCCL watchdog should rethrow CUDA errors.
+    bool rethrowCUDAErrors_ = false;
+
+    std::exception_ptr watchDogException_ = nullptr;
+
+    // Condition Variable for watchdog thread sleep
+    std::condition_variable workMetaListCV_;
+
+    // Heartbeat of watchdog thread.
+    std::atomic_uint64_t heartbeat_{};
+
+    // Whether or not to propagate detected errors to all ranks in the same PG
+    // through TCPStore.
+    bool propagatePgError_;
+
+    DesyncDebugger desyncDebugger_;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -947,6 +1021,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Instance of the heartbeat monitor thread.
   std::unique_ptr<HeartbeatMonitor> heartbeatMonitor_;
 
+  // Instance of the watchdog thread.
+  std::unique_ptr<Watchdog> watchdog_;
+
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
       ncclUniqueId* ncclID,
@@ -1082,17 +1159,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   static std::exception_ptr checkForNCCLErrorsInternal(
       std::shared_ptr<NCCLComm>& ncclComm);
 
-  // Function that runs as part of a separate thread and checks for errors on
-  // NCCL communicators. We need a separate thread to check for NCCL errors
-  // since we can't rely on the user calling certain methods like wait(),
-  // isCompleted() etc. to detect and remediate errors. In addition to this, we
-  // need a mechanism to safely abort and remove NCCL communicators from our
-  // cache. This can be done cleanly by having a thread for the ProcessGroupNCCL
-  // class. Attempting to modify the communicator cache from the WorkNCCL class
-  // might run into issues with object lifetime since the ProcessGroupNCCL
-  // object might get destroyed before the WorkNCCL object.
-  void ncclCommWatchdog();
-
   // Return the CUDA device most likely associated with this backend.
   // If we aren't bound to a specific device, there is no strict
   // guarantee that this heuristic is the correct assignment of ranks
@@ -1105,11 +1171,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // key. Throws if there are no communicators to destroy. Also removes
   // communicators from the cache and clears used device indices.
   void destroyNCCLComms(const std::string& devNCCLCommMapKey);
-
-  // Watchdog's inside loop.
-  // Takes care of cleaning up completed work, and aborting upon failure or
-  // timeout.
-  void watchdogHandler();
 
   void runHookLoop();
 
@@ -1146,12 +1207,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::string& signal,
       int srcRank);
 
-  // A helper function to get the src rank of a signal from the Store. This is
-  // nonblocking function returning -1 if the signal is not available yet.
-  int getSignalSrcRank(
-      c10::intrusive_ptr<Store>& store,
-      const std::string& signal);
-
  protected:
   // Function that directly trigger std::abort so that the whole process
   // gets terminated.
@@ -1165,8 +1220,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::string& futDescription,
       ::c10d::C10dLoggingData& debugLog,
       bool throwException = false);
-
-  void checkAndSetRemoteError();
 
   // A helper function to guess the device id of the current rank, based on
   // bounded device or used device. Do not use this function if you already know
@@ -1245,19 +1298,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Mutex to guard maps like devNCCLCommMap_.
   std::mutex mutex_;
 
-  // Heartbeat of watchdog thread.
-  std::atomic_uint64_t heartbeat_{};
-
-  // timeout for the dump to finish.
-  int waitTimeoutDumpInMilSec_;
-
   // Size of ring buffer where we store NCCL Traces for debugging.
   int traceBufferSize_;
 
   // We gate the cudaEventCache so that we can roll it out gradually.
   std::atomic<bool> cudaEventCacheEnabled_{};
 
-  // Watchdog thread which looks for errors on the cached NCCL communicators.
+  
   std::thread ncclCommWatchdogThread_;
 
   std::thread onCompletionHookThread_;
@@ -1285,9 +1332,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::mutex workMetaListMutex_;
 
   bool writeDebugInfo_ = false;
-
-  // Condition Variable for watchdog thread sleep
-  std::condition_variable workMetaListCV_;
 
   // Vector to store WorkNCCL pointers
   std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
@@ -1351,11 +1395,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
-  DesyncDebugger desyncDebugger_;
-
-  // Whether or not to propagate detected errors to all ranks in the same PG
-  // through TCPStore.
-  bool propagatePgError_;
 
   // Whether or not to sleep after an exception is thrown in the watchdog.
   bool sleepAfterException_{};
@@ -1375,9 +1414,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
 
-  // Whether the NCCL watchdog should rethrow CUDA errors.
-  bool rethrowCUDAErrors_ = false;
-
   // The number of active ncclGroupStart() calls. This counter will be increased
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()
   // is called.
@@ -1394,8 +1430,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Incrementing counter for logical operations (collective or p2p) issued on
   // the ProcessGroup
   uint64_t op_id_{0};
-
-  std::exception_ptr watchDogException_ = nullptr;
 
   // The number of ProcessGroupNCCL created on the current rank.
   size_t local_id_;
