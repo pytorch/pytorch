@@ -109,6 +109,7 @@ from ..source import (
     is_from_unspecialized_nn_module_source,
     ListGetItemSource,
     LocalSource,
+    NonSerializableSetGetItemSource,
     NumpyTensorSource,
     OptimizerSource,
     RandomValueSource,
@@ -755,6 +756,23 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
+        elif istype(value, set):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # The list gives a ordering for the set items. The ordering is based
+            # on the Python hash and it is not related to object ordering inside
+            # the set object. The order being incorrect at runtime will lead to
+            # a recompilation.
+            L = list(value)
+            items = [
+                LazyVariableTracker.create(
+                    v, source=NonSerializableSetGetItemSource(self.source, i)
+                )
+                for i, v in enumerate(L)
+            ]
+            result = SetVariable(items, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.

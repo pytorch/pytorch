@@ -129,6 +129,8 @@ def is_hashable(x):
 
 
 class ConstDictVariable(VariableTracker):
+    CONTAINS_GUARD = GuardBuilder.DICT_CONTAINS
+
     _nonvar_fields = {
         "user_cls",
         *VariableTracker._nonvar_fields,
@@ -399,7 +401,7 @@ class ConstDictVariable(VariableTracker):
             install_guard(
                 self.make_guard(
                     functools.partial(
-                        GuardBuilder.DICT_CONTAINS,
+                        type(self).CONTAINS_GUARD,
                         key=args[0].value,
                         invert=not contains,
                     )
@@ -758,6 +760,8 @@ class DefaultDictVariable(ConstDictVariable):
 class SetVariable(ConstDictVariable):
     """We model a sets as dictonary with None values"""
 
+    CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
+
     def __init__(
         self,
         items: list[VariableTracker],
@@ -910,8 +914,7 @@ class SetVariable(ConstDictVariable):
         pass
 
     def install_dict_contains_guard(self, tx, args):
-        # Already EQUALS_MATCH guarded
-        pass
+        super().install_dict_contains_guard(tx, args)
 
 
 class FrozensetVariable(SetVariable):
@@ -987,6 +990,14 @@ class DictKeySetVariable(SetVariable):
                 + ",".join(k.vt.debug_repr() for k in self.items.keys())
                 + "])"
             )
+
+    def install_dict_keys_match_guard(self):
+        # Already EQUALS_MATCH guarded
+        pass
+
+    def install_dict_contains_guard(self, tx, args):
+        # Already EQUALS_MATCH guarded
+        pass
 
     @property
     def set_items(self):
