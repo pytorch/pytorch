@@ -2061,14 +2061,17 @@ class DynamoTritonHOPifier(TritonHOPifier):
         from .dicts import ConstDictVariable
 
         # as we can only pass tensors as non-const args in fx graph,
-        # here we replace TMA descriptors (TMADescriptorVariable
+        # here we replace TMA descriptors
+        # (TMADescriptorExperimentalVariable and TMADescriptorStableVariable
         # instances) with the underlying tensors, while moving the
         # TMA descriptor-related metadata to a separate argument,
         # so that we can reconstruct the TMA descriptors downstream
         tma_descriptor_metadata: TMADescriptorMetadata = {}
         for k in list(combined_args_raw.keys()):
             v = combined_args_raw[k]
-            if isinstance(v, TMADescriptorVariable):
+            if isinstance(
+                v, (TMADescriptorExperimentalVariable, TMADescriptorStableVariable)
+            ):
                 tma_descriptor_metadata[k] = v.to_metadata()
                 combined_args_raw[k] = v.get_tensor()
 
@@ -2172,18 +2175,7 @@ class TritonKernelVariable(VariableTracker):
         return arg
 
 
-class TMADescriptorVariable(VariableTracker):
-    def to_metadata(self):
-        raise NotImplementedError
-
-    def reconstruct(self, codegen: "PyCodegen"):
-        raise NotImplementedError
-
-    def get_tensor(self):
-        raise NotImplementedError
-
-
-class TMADescriptorExperimentalVariable(TMADescriptorVariable):
+class TMADescriptorExperimentalVariable(VariableTracker):
     def __init__(
         self,
         data_ptr: "variables.DataPtrVariable",
@@ -2222,7 +2214,7 @@ class TMADescriptorExperimentalVariable(TMADescriptorVariable):
         return self.data_ptr.from_tensor
 
 
-class TMADescriptorStableVariable(TMADescriptorVariable):
+class TMADescriptorStableVariable(VariableTracker):
     def __init__(
         self,
         tensor: "variables.TensorVariable",
