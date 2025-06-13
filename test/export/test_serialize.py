@@ -947,10 +947,12 @@ class TestDeserialize(TestCase):
         ep = torch.export.export(M(), (torch.ones(3, 3), None, torch.ones(3, 3)))
 
         serialized_program = ExportedProgramSerializer(None, 2).serialize(ep)
-        serialized_program.exported_program.graph_module.signature.input_specs[
-            1
-        ] = schema.InputSpec.create(
-            user_input=schema.UserInputSpec(arg=schema.Argument.create(as_none=True))
+        serialized_program.exported_program.graph_module.signature.input_specs[1] = (
+            schema.InputSpec.create(
+                user_input=schema.UserInputSpec(
+                    arg=schema.Argument.create(as_none=True)
+                )
+            )
         )
         ep = ExportedProgramDeserializer(None).deserialize(
             serialized_program.exported_program, {}, {}, {}

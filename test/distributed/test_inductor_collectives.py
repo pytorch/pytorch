@@ -519,12 +519,13 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             out = a2a / a2a.sum(dim=0)
             return out
 
-        with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size
-        ), torch._dynamo.config.patch(
-            dynamic_shapes=True,
-            capture_dynamic_output_shape_ops=True,
-            capture_scalar_outputs=True,
+        with (
+            _dynamo_dist_per_rank_init(self.rank, self.world_size),
+            torch._dynamo.config.patch(
+                dynamic_shapes=True,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+            ),
         ):
             row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
             input_split_sizes_tensor = torch.tensor(
@@ -680,15 +681,15 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
             return torch.ops.custom_ns.foo(a2a)
 
-        with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size
-        ), torch._dynamo.config.patch(
-            dynamic_shapes=True,
-            capture_dynamic_output_shape_ops=True,
-            capture_scalar_outputs=True,
-        ), torch.library._scoped_library(
-            "custom_ns", "FRAGMENT"
-        ) as lib:
+        with (
+            _dynamo_dist_per_rank_init(self.rank, self.world_size),
+            torch._dynamo.config.patch(
+                dynamic_shapes=True,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+            ),
+            torch.library._scoped_library("custom_ns", "FRAGMENT") as lib,
+        ):
             lib.define(
                 "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"  # noqa: B950
             )

@@ -115,9 +115,10 @@ class TestFullyShardFrozen(FSDPTest):
 
         torch.manual_seed(42 + self.rank + 1)
         device = device_type
-        with patch_reduce_scatter(
-            reduce_scatter
-        ), patch_register_post_backward_hook_backward(backward_with_count):
+        with (
+            patch_reduce_scatter(reduce_scatter),
+            patch_register_post_backward_hook_backward(backward_with_count),
+        ):
             for iter_idx in range(10):
                 inp = torch.randn((8, lin_dim), device=device)
                 losses: list[torch.Tensor] = []
