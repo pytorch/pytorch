@@ -18,6 +18,7 @@ from torch.distributed.tensor.placement_types import _StridedShard, Placement
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
+    _2d_chunk_with_empty,
     _chunk_with_empty,
     _from_local_no_grad,
     _get_dim_chunked_size,
@@ -357,6 +358,8 @@ class FSDPParam:
         self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
         shard_rank = self.mesh_info.shard_mesh_rank
         shard_world_size = self.mesh_info.shard_mesh_size
+        replicate_rank = self.mesh_info.replicate_mesh_rank
+        replicate_world_size = self.mesh_info.replicate_mesh_size
         if shard_dim > 0 and param_data.size(shard_dim) % shard_world_size != 0:
             # If sharding on nonzero dim, require even sharding for now because
             # the uneven sharding (1) requires extra copies before/after FSDP
@@ -367,16 +370,15 @@ class FSDPParam:
                 f"{param_data.size()} (world size: {shard_world_size})"
             )
 
-        chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
+        chunks = _2d_chunk_with_empty(
+            param_data, shard_world_size, replicate_world_size, dim=shard_dim
+        )
         sharded_param = chunks[shard_rank]
         self.sharded_size = _get_dim_chunked_size(
             sharded_param, param_data.size(), dim=shard_dim
         )
-        torch.distributed.breakpoint()
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
 
-        replicate_rank = self.mesh_info.replicate_mesh_rank
-        replicate_world_size = self.mesh_info.replicate_mesh_size
         chunks = _chunk_with_empty(
             param_data, shard_world_size * replicate_world_size, dim=shard_dim
         )
@@ -412,15 +414,15 @@ class FSDPParam:
             )
         )
         self.sharded_param_fully_shard.requires_grad_(param.requires_grad)
-
+        torch.distributed.breakpoint()
         sharded_param = torch.cat(
-            chunks[replicate_rank::replicate_world_size],
+            chunks[replicate_rank : replicate_rank + replicate_world_size],
             dim=0,
         )
         padded_sharded_param_size = torch.cat(
             chunks[::replicate_world_size],
             dim=0,
-        ).size()
+        ).size()  # issue here, should be 4 rather than 2
         padded_sharded_param = param_data.new_zeros(padded_sharded_param_size).to(
             self.mp_policy.param_dtype
         )
@@ -439,6 +441,7 @@ class FSDPParam:
                 self._sharding_spec,
             )
         )
+        torch.distributed.breakpoint()
         print(
             "each rank sharded param",
             torch.distributed.get_rank(),

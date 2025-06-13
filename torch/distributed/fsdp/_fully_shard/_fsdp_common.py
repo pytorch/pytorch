@@ -134,6 +134,21 @@ def _chunk_with_empty(
     return chunks
 
 
+def _2d_chunk_with_empty(
+    tensor: torch.Tensor, num_1d: int, num_2d: int, dim: int
+) -> list[torch.Tensor]:
+    num_chunks = num_1d * num_2d
+    chunks = list(torch.chunk(tensor, num_chunks, dim=dim))
+    while len(chunks) < num_chunks:
+        chunks.append(chunks[0].new_empty(0))
+    half_shard_chunks = []
+    for i in range(num_1d):
+        half_shard_chunks.append(
+            torch.cat(chunks[i * num_2d : (i + 1) * num_2d], dim=0)
+        )
+    return half_shard_chunks
+
+
 def _get_dim_chunked_size(
     chunk: torch.Tensor, unchunked_size: torch.Size, dim: int
 ) -> torch.Size:

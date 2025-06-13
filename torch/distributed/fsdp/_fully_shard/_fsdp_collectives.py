@@ -512,6 +512,7 @@ def foreach_reduce(
                 size = torch.Size(size)
             else:
                 size = fsdp_param.sharded_size
+            torch.distributed.breakpoint()
             new_sharded_grad = torch.as_strided(
                 reduce_output,
                 size=size,
@@ -555,7 +556,6 @@ def foreach_reduce(
                         )
                     )
                 else:
-                    torch.distributed.breakpoint()
                     fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad
                 fsdp_param._setattr_on_modules(fsdp_param.sharded_param_fully_shard)
             if not compiled_autograd_enabled():
