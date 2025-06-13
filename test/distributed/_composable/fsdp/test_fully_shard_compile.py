@@ -741,20 +741,21 @@ Unsupported Tensor.backward() call
     def _test_nested_fully_shard_backend_inductor_fullgraph_True(self):
         self.skipTestForOldSm()
         for fwd_fullgraph in [True]:
-            with self._reinplace_all_gather_with_optional_checks(
-                fwd_fullgraph
-            ), torch._inductor.config.patch(
-                post_grad_custom_post_pass=(
-                    functools.partial(
-                        self._check_fsdp_copy_and_resize_ops_count_in_graph,
-                        fwd_copy_count=0,
-                        fwd_resize_count=0,
-                        bwd_copy_count=0,
-                        bwd_resize_count=0,
+            with (
+                self._reinplace_all_gather_with_optional_checks(fwd_fullgraph),
+                torch._inductor.config.patch(
+                    post_grad_custom_post_pass=(
+                        functools.partial(
+                            self._check_fsdp_copy_and_resize_ops_count_in_graph,
+                            fwd_copy_count=0,
+                            fwd_resize_count=0,
+                            bwd_copy_count=0,
+                            bwd_resize_count=0,
+                        )
+                        if fwd_fullgraph
+                        else None
                     )
-                    if fwd_fullgraph
-                    else None
-                )
+                ),
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
@@ -983,23 +984,24 @@ Unsupported Tensor.backward() call
             log.warning(
                 f"fwd_fullgraph={fwd_fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001, B950
             )
-            with self._reinplace_all_gather_with_optional_checks(
-                fwd_fullgraph
-            ), torch._inductor.config.patch(
-                post_grad_custom_post_pass=(
-                    functools.partial(
-                        self._check_fsdp_copy_and_resize_ops_count_in_graph,
-                        # NOTE: For the root unsharded params, we don't reshard after forward since for training,
-                        # the parameters would be freed and all-gathered immediately. Hence we still have
-                        # their resize and copy ops in the graph.
-                        fwd_copy_count=4,
-                        fwd_resize_count=4,
-                        bwd_copy_count=0,
-                        bwd_resize_count=4,
+            with (
+                self._reinplace_all_gather_with_optional_checks(fwd_fullgraph),
+                torch._inductor.config.patch(
+                    post_grad_custom_post_pass=(
+                        functools.partial(
+                            self._check_fsdp_copy_and_resize_ops_count_in_graph,
+                            # NOTE: For the root unsharded params, we don't reshard after forward since for training,
+                            # the parameters would be freed and all-gathered immediately. Hence we still have
+                            # their resize and copy ops in the graph.
+                            fwd_copy_count=4,
+                            fwd_resize_count=4,
+                            bwd_copy_count=0,
+                            bwd_resize_count=4,
+                        )
+                        if fwd_fullgraph
+                        else None
                     )
-                    if fwd_fullgraph
-                    else None
-                )
+                ),
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(

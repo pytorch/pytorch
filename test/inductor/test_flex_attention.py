@@ -4023,20 +4023,20 @@ class GraphModule(torch.nn.Module):
             **keyword_args,
         )
         assert kernel_code is not None, "Failed to retrieve compiled kernel code"
-        assert (
-            "num_consumer_groups" in kernel_code[0]
-        ), "num_consumer_groups missing in kernel definition"
-        assert (
-            "num_buffers_warp_spec" in kernel_code[0]
-        ), "num_buffers_warp_spec missing in kernel definition"
+        assert "num_consumer_groups" in kernel_code[0], (
+            "num_consumer_groups missing in kernel definition"
+        )
+        assert "num_buffers_warp_spec" in kernel_code[0], (
+            "num_buffers_warp_spec missing in kernel definition"
+        )
 
         # Validate correctness
         C1 = flex_compiled(q, k, v)
         C2 = flex_attention(q, k, v)
 
-        assert torch.allclose(
-            C1, C2, atol=1e-2, rtol=1e-2
-        ), "Warp specialized kernel result differs from reference"
+        assert torch.allclose(C1, C2, atol=1e-2, rtol=1e-2), (
+            "Warp specialized kernel result differs from reference"
+        )
 
     @supported_platform
     @skip_on_cpu

@@ -829,7 +829,10 @@ class SequentialLR(LRScheduler):
         >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=20)
         >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
         >>> scheduler = SequentialLR(
-        ... optimizer, schedulers=[scheduler1, scheduler2], milestones=[20],)
+        ...     optimizer,
+        ...     schedulers=[scheduler1, scheduler2],
+        ...     milestones=[20],
+        ... )
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -1505,7 +1508,11 @@ class CyclicLR(LRScheduler):
         >>> # xdoctest: +SKIP
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> scheduler = torch.optim.lr_scheduler.CyclicLR(
-        ... optimizer, base_lr=0.01, max_lr=0.1, step_size_up=10,)
+        ...     optimizer,
+        ...     base_lr=0.01,
+        ...     max_lr=0.1,
+        ...     step_size_up=10,
+        ... )
         >>> data_loader = torch.utils.data.DataLoader(...)
         >>> for epoch in range(10):
         >>>     for batch in data_loader:
@@ -1732,7 +1739,9 @@ class CosineAnnealingWarmRestarts(LRScheduler):
     Example:
         >>> # xdoctest: +SKIP
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.05)
-        >>> scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=20)
+        >>> scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        ...     optimizer, T_0=20
+        ... )
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)

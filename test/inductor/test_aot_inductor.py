@@ -178,8 +178,7 @@ class AOTInductorTestsTemplate:
     )
     @skipIfRocm
     @common_utils.parametrize("embed_kernel_binary", [True, False])
-    @common_utils.parametrize("emit_current_arch_binary", [True, False])
-    def test_simple_multi_arch(self, embed_kernel_binary, emit_current_arch_binary):
+    def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU_TYPE")
 
@@ -200,7 +199,6 @@ class AOTInductorTestsTemplate:
             {
                 "aot_inductor.embed_kernel_binary": embed_kernel_binary,
                 "aot_inductor.emit_multi_arch_kernel": True,
-                "aot_inductor.emit_current_arch_binary": emit_current_arch_binary,
             }
         ):
             self.check_model(model, example_inputs)
@@ -312,11 +310,14 @@ class AOTInductorTestsTemplate:
                 return torch.matmul(x, w)
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
-        with torch.no_grad(), config.patch(
-            {
-                "always_keep_tensor_constants": True,
-                "aot_inductor.use_runtime_constant_folding": True,
-            }
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "always_keep_tensor_constants": True,
+                    "aot_inductor.use_runtime_constant_folding": True,
+                }
+            ),
         ):
             model = Model(self.device)
             so_path = AOTIRunnerUtil.legacy_compile(
@@ -2281,9 +2282,10 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(32, 16),)
         model = Model().eval()
-        with config.patch(
-            {"freezing": True, "aot_inductor.force_mmap_weights": True}
-        ), torch.no_grad():
+        with (
+            config.patch({"freezing": True, "aot_inductor.force_mmap_weights": True}),
+            torch.no_grad(),
+        ):
             exported_model = export_for_training(
                 model, example_inputs, strict=True
             ).module()
