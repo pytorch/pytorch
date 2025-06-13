@@ -21,20 +21,20 @@ For Intel Data Center GPU
 
 For Intel Client GPU
 
-+-------------------------------------+----------------------------------------------------------------------------------------------+
-| Supported OS                        | Validated Hardware                                                                           |
-+=====================================+==============================================================================================+
-|| Windows 10/11 & Ubuntu 24.10       || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                          |
-||                                    || Intel® Arc B-Series Graphics (CodeName: Battlemage)                                         |
-||                                    || Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake)             |
-||                                    || Intel® Core™ Ultra 200V Series with Intel® Arc™ Graphics (CodeName: Lunar Lake)             |
-||                                    || Intel® Core™ Ultra Series 2 Processors with Intel® Arc™ Graphics (CodeName: Arrow Lake)     |
-+-------------------------------------+----------------------------------------------------------------------------------------------+
-|| Ubuntu 24.04 & WSL2 (Ubuntu 24.04) || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                          |
-||                                    || Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake)             |
-||                                    || Intel® Core™ Ultra 200V Series with Intel® Arc™ Graphics (CodeName: Lunar Lake)             |
-||                                    || Intel® Core™ Ultra Series 2 Processors with Intel® Arc™ Graphics (CodeName: Arrow Lake)     |
-+-------------------------------------+----------------------------------------------------------------------------------------------+
++-------------------------------------+----------------------------------------------------------------------------------------------------+
+| Supported OS                        | Validated Hardware                                                                                 |
++=====================================+====================================================================================================+
+|| Windows 11 & Ubuntu 24.10          || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                                |
+||                                    || Intel® Arc B-Series Graphics (CodeName: Battlemage)                                               |
+||                                    || Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)                 |
+||                                    || Intel® Core™ Ultra Desktop Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
+||                                    || Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)|
++-------------------------------------+----------------------------------------------------------------------------------------------------+
+|| Ubuntu 24.04 & WSL2 (Ubuntu 24.04) || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                                |
+||                                    || Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)                 |
+||                                    || Intel® Core™ Ultra Desktop Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
+||                                    || Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)|
++-------------------------------------+----------------------------------------------------------------------------------------------------+
 
 Intel GPUs support (Prototype) is ready from PyTorch* 2.5 for Intel® Client GPUs and Intel® Data Center GPU Max Series on both Linux and Windows, which brings Intel GPUs and the SYCL* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
 
@@ -52,7 +52,7 @@ Installation
 Binaries
 ^^^^^^^^
 
-Now that we have `Intel GPU Driver <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html#driver-installation>`_ installed, use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
+Now that we have `Intel GPU Driver <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html#driver-installation>`_ installed, use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio``.
 
 For release wheels
 
@@ -87,7 +87,7 @@ To check if your Intel GPU is available, you would typically use the following c
 .. code-block::
 
    import torch
-   torch.xpu.is_available()  # torch.xpu is the API for Intel GPU support
+   print(torch.xpu.is_available())  # torch.xpu is the API for Intel GPU support
 
 If the output is ``False``, double check driver installation for Intel GPUs.
 
@@ -107,7 +107,7 @@ If you are migrating code from ``cuda``, you would change references from ``cuda
 The following points outline the support and limitations for PyTorch with Intel GPU:
 
 #. Both training and inference workflows are supported.
-#. Both eager mode and ``torch.compile`` is supported. The feature ``torch.compile`` is also supported on Windows from PyTorch* 2.7 with Intel GPU, refer to `How to Use Inductor on Windows with CPU/XPU <https://pytorch.org/tutorials/prototype/inductor_windows_cpu.html>`_.
+#. Both eager mode and ``torch.compile`` is supported. The feature ``torch.compile`` is also supported on Windows from PyTorch* 2.7 with Intel GPU, refer to `How to Use Inductor on Windows with CPU/XPU <https://pytorch.org/tutorials/prototype/inductor_windows.html>`_.
 #. Data types such as FP32, BF16, FP16, and Automatic Mixed Precision (AMP) are all supported.
 
 Examples
