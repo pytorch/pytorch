@@ -1249,16 +1249,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
        "scale_result must be a float scalar");
   TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
        " but got ", bias->numel());
-  TORCH_CHECK(
-      mat1.sizes()[1] % 16 == 0,
-      "Expected trailing dimension of mat1 to be divisible by 16 ",
-      "but got mat1 shape: (",
-      mat1.sizes()[0],
-      "x",
-      mat1.sizes()[1],
-      ").");
-  TORCH_CHECK(mat2.sizes()[0] % 16 == 0 && mat2.sizes()[1] % 16 == 0, "mat2 shape (", mat2.sizes()[0], "x",
-       mat2.sizes()[1], ") must be divisible by 16");
   // Check types
   TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
   TORCH_CHECK(isFloat8Type(mat1.scalar_type()) || mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2, "Expected mat1 to be Float8 or Float4_x2 matrix got ", mat1.scalar_type());
@@ -1481,29 +1471,44 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 }
 
 namespace {
-  c10::SmallVector<int64_t, 3> compute_grouped_gemm_output_size(const Tensor& mat_a,
+  at::Tensor create_grouped_gemm_output_tensor(const Tensor& mat_a,
   const Tensor& mat_b,
-  const std::optional<at::Tensor>& offs
+  const std::optional<at::Tensor>& offs,
+  std::optional<c10::ScalarType> out_dtype
   ) {
+    c10::SmallVector<int64_t, 3> out_size;
     const bool a_is_2d = mat_a.dim() == 2;
     const bool b_is_2d = mat_b.dim() == 2;
     if (a_is_2d) {
       if (b_is_2d) {
-        return {offs->size(0), mat_a.size(0), mat_b.size(1)};
+        out_size = {offs->size(0), mat_a.size(0), mat_b.size(1)};
       } else {
         TORCH_CHECK(offs->size(0) == mat_b.size(0), "matrix batch sizes have to match");
-        return {mat_a.size(0), mat_b.size(-1)};
+        out_size = {mat_a.size(0), mat_b.size(-1)};
       }
     } else {
       if (b_is_2d) {
         // this case is not actually encountered for MoE gemms
         TORCH_CHECK(offs->size(0) == mat_a.size(0), "matrix batch sizes have to match");
-        return {mat_a.size(1), mat_b.size(1)};
+        out_size = {mat_a.size(1), mat_b.size(1)};
       } else { // regular bmm
         TORCH_CHECK(mat_a.size(0) == mat_b.size(0), "batched dimension has to match");
-        return {mat_a.size(0), mat_a.size(1), mat_b.size(-1)};
+        out_size = {mat_a.size(0), mat_a.size(1), mat_b.size(-1)};
       }
     }
+
+    const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+    TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
+
+    // For TMA transfers, strides of output tensor have to be either
+    // 1, or aligned to 16 bytes.
+    const auto last_dim = out_size.size() - 1;
+    const auto alignment = 16 / c10::elementSize(out_dtype_);
+    const auto inner_size = out_size[last_dim];
+    out_size[last_dim] = (out_size[last_dim] + alignment - 1) / alignment * alignment;
+    Tensor out = at::empty(out_size, mat_a.options().dtype(out_dtype_)).narrow(last_dim, 0, inner_size);
+
+    return out;
   }
 
   bool check_valid_strides_and_return_transposed(const Tensor& mat) {
@@ -1615,11 +1620,7 @@ bool use_fast_accum) {
   check_scale(mat_a, scale_a, 0 ,0, scale_multiplier);
   check_scale(mat_b, scale_b, 1, 1, scale_multiplier);
 
-  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
-  TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
-  const auto out_size = compute_grouped_gemm_output_size(mat_a, mat_b, offs);
-  Tensor out = at::empty(out_size, mat_a.options().dtype(out_dtype_));
-
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
 
   at::cuda::detail::f8f8bf16_grouped_mm(
       mat_a,
@@ -1664,12 +1665,10 @@ std::optional<c10::ScalarType> out_dtype) {
     TORCH_CHECK(offs->dim() == 1, "offs has to be 1D");
     TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
   }
-  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
-  TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high output type is supported for grouped gemm");
   TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
 
-  const auto out_size = compute_grouped_gemm_output_size(mat_a, mat_b, offs);
-  Tensor out = at::empty(out_size, mat_a.options().dtype(out_dtype_));
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
+
   at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
   return out;
 #else

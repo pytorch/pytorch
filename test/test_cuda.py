@@ -1061,7 +1061,7 @@ print(t.is_pinned())
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
         with self.assertRaisesRegex(
-            RuntimeError, "device_index >= 0 && device_index < num_gpus"
+            RuntimeError, "Device index value .* is out of index range"
         ):
             torch.accelerator.current_stream(torch.accelerator.device_count())
 

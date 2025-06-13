@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import math
+import operator
 from collections.abc import Sequence
 from enum import Enum
-from functools import wraps
+from functools import reduce, wraps
 from typing import Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
@@ -16,15 +17,21 @@ from torch._decomp import (
     meta_table,
 )
 from torch._ops import OpOverload
-from torch._prims import _prim_elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
+from torch._prims import (
+    _prim_elementwise_meta,
+    ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND,
+    view_of,
+)
 from torch._prims_common import (
     BoolLike,
     corresponding_complex_dtype,
     corresponding_real_dtype,
+    definitely_contiguous,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    is_contiguous,
     make_contiguous_strides_for,
     Number,
     suggest_memory_format,
@@ -193,6 +200,151 @@ def linalg_cross(self, other, *, dim=-1):
     )
     out_shape = _broadcast_shapes(self.shape, other.shape)
     return self.new_empty(out_shape)
+
+
+# This function is python match of computeStride_impl in TensorUtils.cpp
+def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        sym_eq,
+    )
+
+    def maybe_guard_or_false(x):
+        if size_oblivious:
+            return guard_or_false(x)
+
+        return x
+
+    def maybe_guard_or_true(x):
+        if size_oblivious:
+            return guard_or_true(x)
+
+        return x
+
+    if len(old_shape) == 0:
+        return [1] * len(new_shape)
+
+    numel = reduce(operator.mul, old_shape, 1)
+    zero_numel = maybe_guard_or_false(numel == 0)
+    if zero_numel and maybe_guard_or_false(sym_eq(old_shape, new_shape)):
+        return old_stride
+
+    new_stride = [0] * len(new_shape)
+
+    if zero_numel:
+        for view_d in range(len(new_shape) - 1, -1, -1):
+            if view_d == len(new_shape) - 1:
+                new_stride[view_d] = 1
+            else:
+                new_stride[view_d] = (
+                    max(new_shape[view_d + 1], 1) * new_stride[view_d + 1]
+                )
+        return new_stride
+
+    view_d = len(new_shape) - 1
+    chunk_base_stride = old_stride[-1]
+    tensor_numel = 1
+    view_numel = 1
+
+    for tensor_d in range(len(old_shape) - 1, -1, -1):
+        tensor_numel *= old_shape[tensor_d]
+
+        if tensor_d == 0 or (
+            maybe_guard_or_true(old_shape[tensor_d - 1] != 1)
+            and maybe_guard_or_true(
+                old_stride[tensor_d - 1] != tensor_numel * chunk_base_stride
+            )
+        ):
+            while view_d >= 0 and (
+                maybe_guard_or_true(view_numel < tensor_numel)
+                or maybe_guard_or_false(new_shape[view_d] == 1)
+            ):
+                new_stride[view_d] = view_numel * chunk_base_stride
+                view_numel *= new_shape[view_d]
+                view_d -= 1
+
+            if maybe_guard_or_true(view_numel != tensor_numel):
+                return None
+
+            if tensor_d > 0:
+                chunk_base_stride = old_stride[tensor_d - 1]
+                tensor_numel = 1
+                view_numel = 1
+    if view_d != -1:
+        return None
+    return new_stride
+
+
+@register_meta(aten.view.default)
+def _view_meta(a, *shape, size_oblivious_enabled=True):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, has_hint, sym_eq
+
+    # Creates a valid shape
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
+
+    # Reshape may be given a shape with a -1 length
+    # This indicates that the dimension's length should be inferred
+    shape = utils.infer_size(shape, a.numel())
+
+    # Special-cases reshaping zero dim tensors
+    if a.ndim == 0:
+        _a = a
+        for length in shape:
+            torch._check(length == 1)
+            _a = torch._refs.unsqueeze(_a, -1)
+        if _a is a:
+            return view_of(a)
+        else:
+            return _a
+
+    # Special-cases reshaping to zero dim tensors
+    if len(shape) == 0:
+        _a = a
+        for length in a.shape:
+            torch._check(length == 1)
+            _a = torch._refs.squeeze(_a, -1)
+        if _a is a:
+            return view_of(a)
+        else:
+            return _a
+
+    shape_numel = reduce(operator.mul, shape, 1)
+
+    torch._check(
+        a.numel() == shape_numel,
+        lambda: f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
+    )
+
+    if len(shape) == len(a.shape) and guard_or_false(sym_eq(shape, a.shape)):
+        return view_of(a)
+
+    if definitely_contiguous(a) if size_oblivious_enabled else is_contiguous(a):
+        strides = utils.make_contiguous_strides_for(shape)
+        return a.as_strided(shape, strides)
+
+    new_strides = _compute_stride(
+        a.size(), a.stride(), shape, size_oblivious=size_oblivious_enabled
+    )
+
+    if new_strides is not None:
+        return a.as_strided(shape, new_strides)
+
+    # If we fail to do size oblivious view, and backed_size_oblivious was on,
+    # then we redo everything by looking at hints and guarding instead of failing.
+    # Also if the expression has unbacked symbols, then we run again with size_oblivious_enabled=False
+    # to throw a data dependent error.
+    has_unbacked = any(not has_hint(s) for s in a.shape) or any(
+        not has_hint(s) for s in shape
+    )
+
+    if size_oblivious_enabled and (
+        torch.fx.experimental._config.backed_size_oblivious or has_unbacked
+    ):
+        return _view_meta(a, shape, size_oblivious_enabled=False)
+
+    msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
+    raise ValueError(msg)
 
 
 @register_meta(aten.linalg_matrix_exp)
@@ -2378,6 +2530,7 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
+
     torch._check(
         any(x > 0 for x in ret_shape[2:]),
         lambda: f"Given input size per channel: {list(dims)}. "
@@ -4078,6 +4231,11 @@ def meta_repeat(self, repeats):
         len(repeats) >= self.dim(),
         lambda: "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor",
     )
+    for i, rep in enumerate(repeats):
+        torch._check(
+            rep >= 0,
+            lambda: f"Repeats cannot be negative, found {rep} at index {i}",
+        )
     # Add new leading dimensions to the tensor if the
     # number of target dimensions is larger than the
     # number of source dimensions.
@@ -7292,28 +7450,39 @@ def sigmoid(self: Tensor) -> Tensor:
     return torch.empty_like(self, dtype=result_dtype)
 
 
-def _compute_grouped_mm_output_size(mat1, mat2, offs):
+def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
     mat1_is_2d = mat1.dim() == 2
     mat2_is_2d = mat2.dim() == 2
 
     if mat1_is_2d:
         if mat2_is_2d:
-            return offs.size(0), mat1.size(0), mat2.size(1)
+            out_size = [offs.size(0), mat1.size(0), mat2.size(1)]
         else:
             torch._check(
                 offs.size(0) == mat2.size(0), "matrix batch sizes have to match"
             )
-            return mat1.size(0), mat2.size(-1)
+            out_size = [mat1.size(0), mat2.size(-1)]
     else:
         if mat2_is_2d:
             torch._check(
                 offs.size(0) == mat1.size(0), "matrix batch sizes have to match"
             )
-            return mat1.size(1), mat2.size(1)
+            out_size = [mat1.size(1), mat2.size(1)]
         else:
             # regular bmm
             torch._check(mat1.size(0) == mat2.size(0), "batched dimension has to match")
-            return mat1.size(0), mat1.size(1), mat2.size(-1)
+            out_size = [mat1.size(0), mat1.size(1), mat2.size(-1)]
+
+    out_dtype = out_dtype or mat1.dtype
+
+    alignment = 16 // out_dtype.itemsize
+    inner_size = out_size[-1]
+    out_size[-1] = (out_size[-1] + alignment - 1) // alignment * alignment
+    out = torch.empty(out_size, dtype=out_dtype, device=mat1.device).narrow(
+        -1, 0, inner_size
+    )
+
+    return out
 
 
 def _meta_grouped_mm_common(
@@ -7481,9 +7650,7 @@ def _meta_grouped_mm_common(
         lambda: "If output dtype provided, it must be torch.bfloat16.",
     )
 
-    out_size = _compute_grouped_mm_output_size(mat_a, mat_b, offs)
-    out_dtype = out_dtype or mat_a.dtype
-    return torch.empty(out_size, dtype=out_dtype, device=mat_a.device)
+    return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
 
 
 @register_meta(aten._grouped_mm)
