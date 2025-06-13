@@ -33,17 +33,13 @@ if TYPE_CHECKING:
     import sympy
 
     class _WorksWithInt(typing.Protocol):
-        def __add__(self, other: Any) -> typing.Self:
-            ...
+        def __add__(self, other: Any) -> typing.Self: ...
 
-        def __radd__(self, other: Any) -> typing.Self:
-            ...
+        def __radd__(self, other: Any) -> typing.Self: ...
 
-        def __mul__(self, other: Any) -> typing.Self:
-            ...
+        def __mul__(self, other: Any) -> typing.Self: ...
 
-        def __rmul__(self, other: Any) -> typing.Self:
-            ...
+        def __rmul__(self, other: Any) -> typing.Self: ...
 
     _IntLikeT = TypeVar("_IntLikeT", bound=_WorksWithInt)
 
@@ -292,9 +288,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         # can assume x is not 0 in expected_stride equation. This make the check consistent with
         # make_contiguous_strides_for. If we make a tensor and used strides from make_contiguous_strides_for
         # and then called definitely_contiguous we should get True.
-        expected_stride *= (
-            x if is_nested_int(x) else sym_max(x, 1)
-        )  # type:ignore[assignment]
+        expected_stride *= x if is_nested_int(x) else sym_max(x, 1)  # type:ignore[assignment]
 
     return True
 
@@ -912,7 +906,7 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
 # Extracts dimensions that might be passed either as a list/tuple or as varargs.
 # A typical case is Tensor.permute .
 def extract_dims_from_varargs(
-    dims: Union[DimsSequenceType, tuple[DimsSequenceType, ...]]
+    dims: Union[DimsSequenceType, tuple[DimsSequenceType, ...]],
 ) -> DimsSequenceType:
     if dims and isinstance(dims[0], Sequence):
         assert len(dims) == 1
@@ -1234,7 +1228,7 @@ def get_higher_dtype(
     assert b is None or isinstance(b, (torch.dtype, TensorLike, Number))
 
     def _extract_dtype(
-        x: Optional[Union[torch.dtype, TensorLikeType, NumberType]]
+        x: Optional[Union[torch.dtype, TensorLikeType, NumberType]],
     ) -> Optional[torch.dtype]:
         if x is None:
             return None
@@ -1452,7 +1446,7 @@ class RETURN_TYPE(Enum):
 
 # TODO: when NumberType contains the sym types, can simplify this
 def number_type(
-    x: Union[NumberType, torch.SymInt, torch.SymFloat, torch.SymBool]
+    x: Union[NumberType, torch.SymInt, torch.SymFloat, torch.SymBool],
 ) -> type:
     if isinstance(x, torch.SymInt):
         return int
@@ -1708,9 +1702,7 @@ def make_contiguous_strides_for(
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= (
-            l if is_nested_int(l) else sym_max(l, 1)
-        )  # type:ignore[assignment]
+        multiplier *= l if is_nested_int(l) else sym_max(l, 1)  # type:ignore[assignment]
 
     result = tuple(reversed(strides))
 
@@ -1860,7 +1852,9 @@ def compute_required_storage_length(
 
     >>> # xdoctest: +SKIP(failing)
     >>> t2 = torch.empty_strided((1, 2, 3), (5, 7, 11))
-    >>> size = compute_required_storage_length(t2.shape, t2.stride(), t2.storage_offset())
+    >>> size = compute_required_storage_length(
+    ...     t2.shape, t2.stride(), t2.storage_offset()
+    ... )
     >>> size == t.storage().size()
     True
 
@@ -1870,7 +1864,9 @@ def compute_required_storage_length(
     >>> slice.storage().size()
     100
 
-    >>> compute_required_storage_length(slice.shape, slice.stride(), slice.storage_offset())
+    >>> compute_required_storage_length(
+    ...     slice.shape, slice.stride(), slice.storage_offset()
+    ... )
     40
 
     """

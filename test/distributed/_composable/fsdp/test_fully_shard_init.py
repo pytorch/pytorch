@@ -910,9 +910,9 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_2d_process_group_init(self):
         shard_mesh_dim_size = 2
-        assert (
-            self.world_size % shard_mesh_dim_size == 0
-        ), f"Expects {self.world_size} to be divisible by {shard_mesh_dim_size}"
+        assert self.world_size % shard_mesh_dim_size == 0, (
+            f"Expects {self.world_size} to be divisible by {shard_mesh_dim_size}"
+        )
         replicate_mesh_dim_size = self.world_size // shard_mesh_dim_size
         mesh_dim_names = ("replicate", "shard")
         ref_mesh = init_device_mesh(

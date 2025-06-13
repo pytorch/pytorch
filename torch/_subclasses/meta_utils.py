@@ -357,7 +357,9 @@ class MetaTensorDescriber:
 
         maybe_functorch_stack = None
         if is_functorch_wrapped:
-            with torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack() as maybe_functorch_stack:
+            with (
+                torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack()
+            ) as maybe_functorch_stack:
                 pass
 
         attrs = None
@@ -517,8 +519,7 @@ class ViewFunc(Generic[_TensorT]):
         new_base: _TensorT,
         symint_visitor_fn: Optional[Callable[[int], int]] = None,
         tensor_visitor_fn: Optional[Callable[[torch.Tensor], _TensorT]] = None,
-    ) -> _TensorT:
-        ...
+    ) -> _TensorT: ...
 
     @staticmethod
     def from_tensor(t: torch.Tensor) -> ViewFunc:
@@ -574,8 +575,7 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
 class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
     def __call__(
         self, arg: Callable[[], torch.Tensor], /, *, device: Union[torch.device, str]
-    ) -> _TensorT_cov:
-        ...
+    ) -> _TensorT_cov: ...
 
 
 class _MetaTensorCallbackKwargs(TypedDict, total=False):
@@ -592,8 +592,7 @@ class _MetaTensorCallbackOptDevice(Protocol, Generic[_TensorT_cov]):
         arg: Callable[[], torch.Tensor],
         /,
         **kwargs: Unpack[_MetaTensorCallbackKwargs],
-    ) -> _TensorT_cov:
-        ...
+    ) -> _TensorT_cov: ...
 
 
 @dataclass(frozen=True)
@@ -785,9 +784,9 @@ class MetaConverter(Generic[_TensorT]):
         ] = weakref.WeakValueDictionary()
         # Maps MetaTensorId to torch.Tensor (typically a meta tensor or
         # FakeTensor)
-        self.tensor_memo: weakref.WeakValueDictionary[
-            MetaTensorId, _TensorT
-        ] = weakref.WeakValueDictionary()
+        self.tensor_memo: weakref.WeakValueDictionary[MetaTensorId, _TensorT] = (
+            weakref.WeakValueDictionary()
+        )
         self.hit = 0
         self.miss = 0
         self.del_hook = None
@@ -1772,9 +1771,9 @@ class MetaConverter(Generic[_TensorT]):
                         # subclasses.  Relevant test is
                         # DynamicShapesFunctionTests::test_add_dynamic_shapes in
                         # test/dynamo/test_dynamic_shapes.py
-                        maybe_fake_mgr: AbstractContextManager[
-                            None
-                        ] = contextlib.nullcontext()
+                        maybe_fake_mgr: AbstractContextManager[None] = (
+                            contextlib.nullcontext()
+                        )
                         from torch._subclasses.fake_tensor import (
                             in_kernel_invocation_manager,
                             maybe_get_fake_mode,
