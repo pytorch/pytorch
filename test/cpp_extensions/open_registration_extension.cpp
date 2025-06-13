@@ -24,80 +24,9 @@
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
-static c10::DeviceIndex custom_device_index = 0;
 
 static uint64_t storageImpl_counter = 0;
 static uint64_t last_storageImpl_saved_value = 0;
-
-struct CustomBackendMetadata : public c10::BackendMeta {
-  // for testing this field will mutate when clone() is called by shallow_copy_from.
-  int backend_version_format_{-1};
-  int format_number_{-1};
-  mutable bool cloned_{false};
-  // define the constructor
-  CustomBackendMetadata(int backend_version_format, int format_number) :
-      backend_version_format_(backend_version_format), format_number_(format_number) {}
-  c10::intrusive_ptr<c10::BackendMeta> clone(
-      const c10::intrusive_ptr<c10::BackendMeta>& ptr) const override {
-    cloned_ = true;
-    return c10::BackendMeta::clone(ptr);
-  }
-};
-
-// we need to register two functions for serialization
-void for_serialization(const at::Tensor& t, std::unordered_map<std::string, bool>& m) {
-  if (t.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr() == nullptr) {
-    return;
-  }
-  auto tmeta = dynamic_cast<CustomBackendMetadata*>(t.unsafeGetTensorImpl()->get_backend_meta());
-  if (tmeta->backend_version_format_ == 1) {
-    m["backend_version_format"] = true;
-  }
-  if (tmeta->format_number_ == 29) {
-    m["format_number"] = true;
-  }
-}
-
-void for_deserialization(const at::Tensor& t, std::unordered_map<std::string, bool>& m) {
-  int backend_version_format{-1};
-  int format_number{-1};
-  if (m.find("backend_version_format") != m.end()) {
-    backend_version_format = 1;
-  }
-  if (m.find("format_number") != m.end()) {
-    format_number = 29;
-  }
-  c10::intrusive_ptr<c10::BackendMeta> new_tmeta{std::unique_ptr<c10::BackendMeta>(
-      new CustomBackendMetadata(backend_version_format, format_number))};
-  t.unsafeGetTensorImpl()->set_backend_meta(new_tmeta);
-}
-
-void custom_serialization_registry() {
-  torch::jit::TensorBackendMetaRegistry(c10::DeviceType::PrivateUse1,
-                                        &for_serialization,
-                                        &for_deserialization);
-}
-
-//check if BackendMeta serialization correctly
-bool check_backend_meta(const at::Tensor& t) {
-  if (t.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr()) {
-    CustomBackendMetadata* tmeta = dynamic_cast<CustomBackendMetadata*>(
-        t.unsafeGetTensorImpl()->get_backend_meta());
-    if (tmeta->backend_version_format_==1 && tmeta->format_number_==29) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// a fake set function is exposed to the Python side
-void custom_set_backend_meta(const at::Tensor& t) {
-  int backend_version_format{1};
-  int format_number{29};
-  c10::intrusive_ptr<c10::BackendMeta> new_tmeta{std::unique_ptr<c10::BackendMeta>(
-      new CustomBackendMetadata(backend_version_format, format_number))};
-  t.unsafeGetTensorImpl()->set_backend_meta(new_tmeta);
-}
 
 // A dummy storageImpl for our custom device, that secretly uses the CPU
 c10::intrusive_ptr<c10::StorageImpl> make_custom_storage_impl(c10::StorageImpl::use_byte_size_t,
@@ -196,10 +125,6 @@ bool custom_add_called() {
   return called;
 }
 
-void set_custom_device_index(c10::DeviceIndex device_index) {
-  custom_device_index = device_index;
-}
-
 void fallback_with_undefined_tensor() {
   at::Tensor first = at::empty({2, 3}).to(at::DeviceType::PrivateUse1);
   at::Tensor second = at::Tensor();
@@ -251,12 +176,8 @@ at::Tensor custom_autograd_fn_aliasing(at::Tensor x) {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
-    m.def("set_custom_device_index", &set_custom_device_index, "set custom device index");
     m.def("custom_storage_registry", &custom_storage_registry, "set custom storageImpl creat method");
     m.def("custom_storageImpl_called", &custom_storageImpl_called, "check if our custom abs function was called");
-    m.def("custom_set_backend_meta", &custom_set_backend_meta, "a fake set tensor BackendMeta function");
-    m.def("check_backend_meta", &check_backend_meta, "check if BackendMeta serialization correctly");
-    m.def("custom_serialization_registry", &custom_serialization_registry, "register custom serialization function");
     m.def("fallback_with_undefined_tensor", &fallback_with_undefined_tensor, "fallback_with_undefined_tensor for privateuse1");
 
     // Co-opting this file to more easily test torch.compile'ing of custom autograd functions in C++
