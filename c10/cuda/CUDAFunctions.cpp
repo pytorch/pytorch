@@ -134,6 +134,10 @@ void set_device(DeviceIndex device) {
   C10_CUDA_CHECK(c10::cuda::SetDevice(device));
 }
 
+void set_device(DeviceIndex device, const bool force) {
+  C10_CUDA_CHECK(c10::cuda::SetDevice(device, force));
+}
+
 void device_synchronize() {
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
@@ -233,6 +237,20 @@ cudaError_t GetDevice(DeviceIndex* device) {
 
 cudaError_t SetDevice(DeviceIndex device) {
   TORCH_CHECK(device >= 0, "device id must be positive!", device);
+  targetDeviceIndex = -1;
+  int cur_device = -1;
+  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+  if (device == cur_device) {
+    return cudaSuccess;
+  }
+  return cudaSetDevice(device);
+}
+
+cudaError_t SetDevice(DeviceIndex device, const bool force) {
+  TORCH_CHECK(device >= 0, "device id must be positive!", device);
+  if (force) {
+    return cudaSetDevice(device);
+  }
   targetDeviceIndex = -1;
   int cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&cur_device));
