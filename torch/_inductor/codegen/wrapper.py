@@ -215,7 +215,7 @@ def user_defined_kernel_grid_fn_code(
         else:
             assert len(grids) > 1
             assert len(grids) == len(configs)
-            seen = OrderedSet[str]()
+            seen: OrderedSet[str] = OrderedSet()
             # sort the configs from the largest # of kwargs to the smallest to
             # emit the grids in the order of (approximately) decreasing specificity
             # TODO(aakhundov): the sorting below is generally not sufficient, so
@@ -450,10 +450,13 @@ class ExitDeviceContextManagerLine(WrapperLine):
 class ExternKernelAllocLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.ExternKernelAlloc
+    args: Optional[list[Any]] = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         node = self.node
-        args = [*node.codegen_args(), *node.codegen_kwargs()]
+        args = (
+            self.args if self.args else [*node.codegen_args(), *node.codegen_kwargs()]
+        )
         self.wrapper._generate_extern_kernel_alloc_helper(self.node, args)
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -857,7 +860,7 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
-        self.kernel_autotune_names = OrderedSet[str]()
+        self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Map key is the kernel argument name; value is a tuple of the resulting example
         # tensor name with the kernel where that tensor was most recently used.
         self.kernel_autotune_example_args: dict[str, tuple[str, str]] = {}
@@ -877,7 +880,9 @@ class PythonWrapperCodegen(CodeGen):
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
         self.user_defined_kernel_cache: dict[tuple[Any, ...], tuple[str, Any]] = {}
-        self.unbacked_symbol_decls = OrderedSet[str]()  # str of sympy.Symbol
+        self.unbacked_symbol_decls: OrderedSet[str] = (
+            OrderedSet()
+        )  # str of sympy.Symbol
         self.computed_sizes: OrderedSet[sympy.Symbol] = OrderedSet()
         self.launcher_fn_name = None
         # This function can be overridden to change the launcher name
@@ -913,7 +918,7 @@ class PythonWrapperCodegen(CodeGen):
             self.write_get_raw_stream
         )
 
-        @functools.lru_cache(None)
+        @functools.cache
         def add_import_once(line: str) -> None:
             self.imports.writeline(line)
             if config.triton.autotune_at_compile_time:
@@ -921,9 +926,9 @@ class PythonWrapperCodegen(CodeGen):
 
         self.add_import_once = add_import_once
         self._metas: dict[str, str] = {}
-        self._meta_vars = OrderedSet[str]()
+        self._meta_vars: OrderedSet[str] = OrderedSet()
         self.multi_kernel_state = MultiKernelState()
-        self.already_codegened_subgraphs = OrderedSet[str]()
+        self.already_codegened_subgraphs: OrderedSet[str] = OrderedSet()
         self.allocated_workspaces: dict[str, Any] = {}
 
         # intermediate tensor value printing utility
@@ -1300,8 +1305,10 @@ class PythonWrapperCodegen(CodeGen):
     def generate_end(self, result: IndentedBuffer) -> None:
         return
 
-    def generate_fallback_kernel(self, node: ir.FallbackKernel):
-        self.writeline(ExternKernelAllocLine(self, node))
+    def generate_fallback_kernel(
+        self, node: ir.FallbackKernel, args: Optional[list[Any]] = None
+    ):
+        self.writeline(ExternKernelAllocLine(self, node, args))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
@@ -1415,11 +1422,12 @@ class PythonWrapperCodegen(CodeGen):
         self,
         buf_name: str,
         python_kernel_name: str,
-        codegen_args: Sequence[str],
-        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
-        raw_args: Sequence[Any],
-        outputs: Sequence[ir.Buffer],
-    ) -> None:
+        cpp_kernel_name: str,
+        codegen_args: list[str],
+        op_overload: Optional[torch._ops.OpOverload] = None,
+        raw_args=None,
+        outputs=None,
+    ):
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
     def generate(self, is_inference):
@@ -1622,12 +1630,12 @@ class PythonWrapperCodegen(CodeGen):
     ):
         code = self.prefix
 
-        @functools.lru_cache(None)
+        @functools.cache
         def sizeof(name):
             code.writeline(f"{name}_size = {name}.size()")
             return f"{name}_size"
 
-        @functools.lru_cache(None)
+        @functools.cache
         def strideof(name):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
@@ -3282,7 +3290,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self,
     ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr]]:
         if signature := self.partition_signatures:
-            inputs = signature.input_nodes
+            inputs = signature.input_nodes | {
+                str(s): s for s in signature.symbol_inputs
+            }
         else:
             inputs = V.graph.graph_inputs
         return inputs
