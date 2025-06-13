@@ -442,7 +442,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
             if isinstance(v, TensorStorageMetadata):
                 v = torch.empty(v.size, dtype=v.properties.dtype)  # type: ignore[assignment]
-            if k in metadata.planner_data:
+            if metadata.planner_data is not None and k in metadata.planner_data:
                 set_element(state_dict, metadata.planner_data[k], v)
             else:
                 state_dict[k] = v
@@ -451,7 +451,10 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
 
 def create_default_local_load_plan(
-    state_dict: dict[str, Any], metadata: Metadata, strict: bool = True
+    state_dict: dict[str, Any],
+    metadata: Metadata,
+    strict: bool = True,
+    check_md_size: bool = True,
 ) -> LoadPlan:
     requests = []
     """
@@ -477,6 +480,7 @@ def create_default_local_load_plan(
             isinstance(md, TensorStorageMetadata)
             and getattr(obj, "size", None) is not None
             and md.size != obj.size()
+            and check_md_size
         ):
             raise ValueError(
                 f"Size mismatch between saved {md.size} and current: {obj.size()} for {fqn}",
