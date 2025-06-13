@@ -405,7 +405,7 @@ class DynamoStore(abc.ABC):
         """
         ...
 
-    def save_cache_entry(self, cache_entry: _DynamoCodeCacheEntry, key: str) -> None:
+    def save_cache_entry(self, cache_entry: _DynamoCacheEntry, key: str) -> None:
         """
         Saves a package to a given path. Grabs backends from PrecompileContext.
         """
@@ -544,5 +544,6 @@ class DiskDynamoStore(DynamoStore):
         """
         full_path = os.path.join(self.path_prefix, key) if self.path_prefix else key
         return super().load_package(fn, full_path)
+
 
 DynamoCache = DiskDynamoStore(os.path.join(cache_dir(), "dynamo"))
