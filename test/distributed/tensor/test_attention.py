@@ -6,6 +6,7 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental._attention import (
@@ -435,6 +436,133 @@ class RingAttentionTest(DTensorTestBase):
                     c10d_functional.all_to_all_single: self.world_size * args.n_layers,
                 },
             )
+
+
+class RingFlexAttentionTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_ring_flex_attention(self) -> None:
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        # Compile the flex_attention function
+        flex_attention = torch.compile(flex_attention, dynamic=False)
+        Q_BLOCK_SIZE_DEFAULT = 128
+        KV_BLOCK_SIZE_DEFAULT = Q_BLOCK_SIZE_DEFAULT
+
+        torch.cuda.manual_seed(10)
+        dtype = torch.float32
+        bs = 8
+        query_tokens = Q_BLOCK_SIZE_DEFAULT * self.world_size
+        context_tokens = KV_BLOCK_SIZE_DEFAULT * self.world_size
+        dim = 32
+        nheads = 8
+
+        q = torch.rand(
+            (bs, nheads, query_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        k = torch.rand(
+            (bs, nheads, context_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        v = torch.rand(
+            (bs, nheads, context_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+
+        block_mask = create_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            Q_LEN=query_tokens,
+            KV_LEN=context_tokens,
+            device=self.device_type,
+        )
+
+        expect_out, expect_lse = flex_attention(
+            q, k, v, block_mask=block_mask, return_lse=True
+        )
+
+        # test flex attention on DTensor
+        device_mesh = init_device_mesh(
+            device_type=self.device_type,
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("cp",),
+        )
+
+        q_local_size = list(q.shape)
+        q_local_size[2] //= self.world_size
+        k_local_size = list(k.shape)
+        k_local_size[2] //= self.world_size
+
+        # this is the block_mask created within the training step
+        # NOTE: flex_attention checks block_mask shape and input shape before
+        # calling into flex_attention_hop.
+        block_mask_post_sharding = create_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            Q_LEN=q_local_size[2],
+            KV_LEN=k_local_size[2],
+            device=self.device_type,
+        )
+
+        # NOTE: we do not test load balance here
+        _cp_options.enable_load_balance = False
+
+        # set CP context dispatch mode to use TorchDispatchMode for flex_attention
+        torch.distributed.tensor.experimental._attention._dispatch_mode = (
+            _DispatchMode.TORCH_FUNCTION
+        )
+
+        # prepare input buffer
+        cp_q = q.detach().clone()
+        cp_k = k.detach().clone()
+        cp_v = v.detach().clone()
+
+        with CommDebugMode() as comm_mode:
+            with context_parallel(
+                device_mesh,
+                buffers=[cp_q, cp_k, cp_v],
+                buffer_seq_dims=[2, 2, 2],
+            ):
+                cp_out, cp_lse = flex_attention(
+                    cp_q,
+                    cp_k,
+                    cp_v,
+                    block_mask=block_mask_post_sharding,
+                    return_lse=True,
+                )
+
+        self.assertDictEqual(
+            comm_mode.get_comm_counts(),
+            {
+                c10d_functional.all_gather_into_tensor: 2
+            },  # currently we have k and v all-gather separate
+        )
+
+        # unshard the output
+        cp_out, cp_lse = context_parallel_unshard(device_mesh, [cp_out, cp_lse], [2, 2])
+        torch.testing.assert_close(cp_out, expect_out, atol=1e-6, rtol=1e-2)
+        torch.testing.assert_close(cp_lse, expect_lse, atol=1e-6, rtol=1e-2)
+
+        # reset CP context dispatch mode to default
+        torch.distributed.tensor.experimental._attention._dispatch_mode = (
+            _DispatchMode.MONKEY_PATCH
+        )
 
 
 if __name__ == "__main__":

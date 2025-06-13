@@ -4,11 +4,12 @@ import json
 import re
 import weakref
 from collections import defaultdict
-from typing import Any
+from typing import Any, Callable
 
 import torch
 import torch.nn
 from torch._guards import detect_fake_mode
+from torch._higher_order_ops import flex_attention as flex_attention_hop
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.distributed.tensor._api import DTensor
@@ -733,3 +734,30 @@ class CommDebugMode(TorchDispatchMode):
         ].append(operation_dict)
 
         return out
+
+
+# register flex_attention HOP to CommDebugMode
+@flex_attention_hop.py_impl(CommDebugMode)
+def flex_attention_comm_debug_mode(
+    mode: CommDebugMode,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple = (),
+    mask_mod_other_buffers: tuple = (),
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return flex_attention_hop(
+        query,
+        key,
+        value,
+        score_mod,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
