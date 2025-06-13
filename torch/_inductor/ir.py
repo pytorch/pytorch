@@ -3160,7 +3160,7 @@ class ReinterpretView(BaseView):
 
     __repr__ = __str__
 
-    def get_name(self):  # type: ignore[no-untyped-def]
+    def get_name(self) -> str:
         return self.data.get_name()
 
     def get_device(self) -> Optional[torch.device]:
@@ -5186,6 +5186,8 @@ class ExternKernel(InputsKernel):
             self.schema_kwargs = [
                 x for x in self.op_overload._schema.arguments if x.kwarg_only
             ]
+        else:
+            self.schema_kwargs = []
 
     def decide_layout(self):  # type: ignore[no-untyped-def]
         if isinstance(self.layout, FlexibleLayout):
@@ -6054,7 +6056,7 @@ class MutationOutput(Buffer):
     def get_defining_op(self) -> Operation:
         return self.mutating_node
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         return self.mutation_names
 
     def should_allocate(self) -> bool:
@@ -6389,7 +6391,7 @@ class InplaceBernoulliFallback(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6421,7 +6423,7 @@ class InplaceCopyFallback(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6474,7 +6476,7 @@ class MutatingFirstArgExternKernel(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6556,7 +6558,7 @@ class ScatterFallback(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6620,7 +6622,7 @@ class IndexPutFallback(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6969,7 +6971,7 @@ class FallbackKernel(ExternKernelAlloc):
     def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
         return self.alias_names
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         assert len(self.mutation_names) <= 1
         return self.mutation_names
 
@@ -7110,51 +7112,55 @@ class FallbackKernel(ExternKernelAlloc):
                 kernel not in config.aot_inductor.custom_ops_to_c_shims
             )
 
-        def do_runtime_dispatch() -> None:
-            args = None
-            exported_args = self.export_extern_kernel_node()
+        # Handle the special case where a complex number is input to a C-shim kernel for
+        # a scalar input.  The torchgen'ed shim API will use type "double", which is
+        # incompatible with complex numbers, forcing a fallback to runtime dispatch.
+        if (
+            V.graph.cpp_wrapper
+            and isinstance(kernel, torch._ops.OpOverload)
+            and not self.use_runtime_dispatch
+        ):
 
+            def is_number(t: torch.JitType) -> bool:
+                if isinstance(t, torch.OptionalType):
+                    return is_number(t.getElementType())
+                return isinstance(t, torch.NumberType)
+
+            # Using unflatten_args is a bit of a hack, but all the complex arguments we
+            # care about are in self.constant_args, and calling unflatten_args puts them
+            # in the correct order without triggering codegen.
+            args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+            # Append kwarg values to args.  ordered_kwargs_for_cpp_kernel is guaranteed
+            # to be set, since this is an OpOverload kernel.
+            args_iter = itertools.chain(
+                args,
+                (
+                    self.get_kwargs_value(k, **kwargs)
+                    for k in self.ordered_kwargs_for_cpp_kernel
+                ),
+            )
+            self.use_runtime_dispatch = any(
+                isinstance(v, complex) and is_number(a.real_type)
+                for v, a in zip(args_iter, kernel._schema.arguments)
+            )
+
+        self.codegen_comment(wrapper)
+        if self.use_runtime_dispatch:
+            exported_args = self.export_extern_kernel_node()
             wrapper.generate_fallback_kernel_with_runtime_lookup(
                 self.get_name(),
                 self.python_kernel_name,
-                self.cpp_kernel_name,
-                args,
+                lambda: [*self.codegen_args(), *self.codegen_kwargs()],
                 self.op_overload,
                 exported_args,
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
                 self.outputs if self.outputs else self.mutation_outputs,
             )
-
-        def is_number(t: torch.JitType) -> bool:
-            return isinstance(t, torch.NumberType) or (
-                isinstance(t, torch.OptionalType)
-                and isinstance(t.getElementType(), torch.NumberType)
-            )
-
-        self.codegen_comment(wrapper)
-        if self.use_runtime_dispatch:
-            do_runtime_dispatch()
         else:
-            args = [*self.codegen_args(), *self.codegen_kwargs()]
-            if (
-                V.graph.cpp_wrapper
-                and isinstance(kernel, torch._ops.OpOverload)
-                and any(
-                    "c10::complex" in arg_str and is_number(op_arg.real_type)
-                    for arg_str, op_arg in zip(args, kernel._schema.arguments)
-                )
-            ):
-                # Handle the special case where a complex number is input to a
-                # cpp_wrapper C-shim kernel.  If the corresponding argument is a number,
-                # the torchgen-created shim API will use type "double", which cannot be
-                # converted to from a c10::complex.  In these cases, fallback to runtime
-                # dispatch.
-                do_runtime_dispatch()
-            else:
-                wrapper.generate_fallback_kernel(self, args)
-                if isinstance(self.layout, Layout):
-                    self.codegen_size_asserts(wrapper)
-                    self.codegen_alignment_asserts(wrapper)
+            wrapper.generate_fallback_kernel(self)
+            if isinstance(self.layout, Layout):
+                self.codegen_size_asserts(wrapper)
+                self.codegen_alignment_asserts(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
 
@@ -8126,7 +8132,7 @@ class TorchBindObject(NonTensorObj):
     name: str
     value: Union[FakeScriptObject, torch.ScriptObject]
 
-    def get_name(self):  # type: ignore[no-untyped-def]
+    def get_name(self) -> str:
         return self.name
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
@@ -8159,7 +8165,7 @@ class GeneratorState(NonTensorObj):
     name: str
     device: torch.device
 
-    def get_name(self):  # type: ignore[no-untyped-def]
+    def get_name(self) -> str:
         return self.name
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
