@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -29,8 +30,8 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda"))
     def test_basic_fn(self, backend, device):
-        if device == "cuda" and not torch.cuda.is_available():
-            unittest.SkipTest("Requires CUDA")
+        if device == "cuda" and not HAS_TRITON:
+            raise unittest.SkipTest("Requires CUDA/Triton")
         ctx = DynamoStore()
 
         def fn(x):
@@ -70,8 +71,8 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda"))
     def test_graph_break_bomb(self, backend, device):
-        if device == "cuda" and not torch.cuda.is_available():
-            unittest.SkipTest("Requires CUDA")
+        if device == "cuda" and not HAS_TRITON:
+            raise unittest.SkipTest("Requires CUDA/Triton")
 
         ctx = DynamoStore()
 
@@ -132,8 +133,8 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda"))
     def test_dynamic_shape(self, backend, device):
-        if device == "cuda" and not torch.cuda.is_available():
-            unittest.SkipTest("Requires CUDA")
+        if device == "cuda" and not HAS_TRITON:
+            raise unittest.SkipTest("Requires CUDA/Triton")
         ctx = DynamoStore()
 
         def fn(x):
