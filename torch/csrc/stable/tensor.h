@@ -9,25 +9,27 @@
 namespace torch::stable {
 
 using DeviceIndex =
-    int8_t; // this is from c10/core/Device.h and can be header only?
+    int8_t; // this is from c10/core/Device.h and can be header only
 
 inline void delete_tensor_object(AtenTensorHandle ath) {
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ath));
 }
 
 // The torch::stable::Tensor class is a highlevel C++ header-only wrapper around
-// the C shim Tensor APIs. There are several goals of this class over
-// AtenTensorHandle and RAIIAtenTensorHandle:
+// the C shim Tensor APIs. We've modeled this class after TensorBase, as custom
+// op kernels only really need to interact with Tensor metadata (think sizes,
+// strides, device, dtype). Other functions on Tensor (like empty_like) should
+// live like the ATen op that they are and exist outside of this struct.
+//
+// There are several goals of this class over AtenTensorHandle and
+// RAIIAtenTensorHandle:
 // 1. torch::stable::Tensor is a nicer UX much closer to torch::Tensor than the
-// C
-//    APIs with AtenTensorHandle. Under the hood we still call to these C shim
+//    C APIs with AtenTensorHandle. Under the hood we still call to these C shim
 //    APIs to preserve stability.
 // 2. RAIIAtenTensorHandle boils down to a uniq_ptr that forces the user to pass
 //    around ownership. This makes it difficult to pass one input into 2
-//    different functions, e.g., doing something like c = a(t) + b(t) if a and b
-//    both require ownership of t. Here, we use a shared_ptr accompanied with
-//    some other tricks to make our contract-based memory management much more
-//    possible.
+//    different functions, e.g., doing something like c = a(t) + b(t) for
+//    stable::Tensor t. Thus, we use a shared_ptr here.
 class Tensor {
  private:
   std::shared_ptr<AtenTensorOpaque> ath_;
@@ -35,7 +37,9 @@ class Tensor {
  public:
   Tensor() = delete;
 
-  // Wrap AtenTensorHandle
+  // Construct a stable::Tensor from an AtenTensorHandle (ATH)
+  // Steals ownership from the pointer and will be in charge of deleting the
+  // underlying at::Tensor that the ATH points to
   explicit Tensor(AtenTensorHandle ath) : ath_(ath, delete_tensor_object) {}
 
   // Copy and move constructors can be default cuz the underlying handle is a
@@ -51,9 +55,15 @@ class Tensor {
   // Destructor can be default: shared ptr has custom deletion logic
   ~Tensor() = default;
 
+  // Returns a borrowed reference to the AtenTensorHandle
   AtenTensorHandle get() const {
     return ath_.get();
   }
+
+  // =============================================================================
+  // C-shimified TensorBase APIs: the below APIs have the same signatures and
+  // semantics as their counterparts in TensorBase.h.
+  // =============================================================================
 
   void* data_ptr() const {
     void* data_ptr;
@@ -75,7 +85,6 @@ class Tensor {
     return static_cast<T*>(this->data_ptr());
   }
 
-  /// Returns a `Tensor`'s device index.
   DeviceIndex get_device() const {
     int32_t device_index;
     AOTI_TORCH_ERROR_CODE_CHECK(
@@ -96,34 +105,9 @@ class Tensor {
     return size;
   }
 
-  // the below are APIs that I plan on adding to support more custom ops
-
-  // /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
-  // /// TensorOptions.h.
-  // /// We don't have a stable def for that yet sigh
-  // TensorOptions options() const {
-  //   return ? ? ? ;
-  // }
-
-  // IntArrayRef sizes(const TensorBase& t) {
-  //   return ? ? ? ;
-  // }
-
-  // // TypeMeta and caffe2 scalar types are in DefaultDtype.h and
-  // // c10/core/ScalarType.h
-  // caffe2::TypeMeta dtype() const {
-  //   return ? ? ? ;
-  // }
-
-  // ScalarType scalar_type() const {
-  //   return ? ? ? ;
-  // }
-
-  // // I only need the API to support 0 arguments so far
-  // bool is_contiguous(
-  //     at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
-  //   return ? ? ? ;
-  // }
+  // =============================================================================
+  // END of C-shimified TensorBase APIs
+  // =============================================================================
 };
 
 } // namespace torch::stable

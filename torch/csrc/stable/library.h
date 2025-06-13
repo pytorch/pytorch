@@ -37,7 +37,7 @@ struct is_nullopt<std::nullopt_t> : std::true_type {};
 template <typename T>
 inline constexpr bool is_nullopt_v = is_nullopt<T>::value;
 
-// Combined check for all non-standard types except nullopt_t
+// Combined check for all non-standard types mentioned above
 template <typename T>
 inline constexpr bool is_special_type_v =
     is_stable_tensor_v<T> || is_optional_v<T> || is_nullopt_v<T>;
@@ -47,7 +47,7 @@ inline constexpr bool is_special_type_v =
 // FROM CONVERSIONS (T -> StableIValue)
 // =============================================================================
 
-// Specialization for general copyable types (catch-all)
+// Specialization for general copyable types (catch-all) => StableIValue
 template <typename T>
 std::enable_if_t<!detail::is_special_type_v<T>, StableIValue> from(T val) {
   static_assert(
@@ -57,7 +57,7 @@ std::enable_if_t<!detail::is_special_type_v<T>, StableIValue> from(T val) {
   // Initialization should be cheap enough; let's give people well-specified
   // reproducible behavior.
   StableIValue result = 0;
-  // NOTE [-Wclass-memaccess ]: reinterpret_cast to suppress
+  // NOTE [ -Wclass-memaccess ]: reinterpret_cast to suppress
   // overzealous -Wclass-memaccess. (see
   // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=107361) We have a
   // static_assert above that T is trivially copyable, which should be
@@ -66,13 +66,13 @@ std::enable_if_t<!detail::is_special_type_v<T>, StableIValue> from(T val) {
   return result;
 }
 
-// Specialization for std::nullopt_t
+// Specialization for std::nullopt_t => StableIValue
 template <typename T>
 std::enable_if_t<std::is_same_v<T, std::nullopt_t>, StableIValue> from(T val) {
   return from(nullptr);
 }
 
-// Specialization for std::optional
+// Specialization for std::optional => StableIValue
 // [Handling std::optional]
 // When the schema is represented by an optional type, say int?, then we
 // expect the custom extension representation to be a std::optional<int>
@@ -110,21 +110,18 @@ std::enable_if_t<detail::is_optional_v<T>, StableIValue> from(T val) {
   return from(heap_val);
 }
 
-// Specialization for torch::stable::Tensor
-// I NEED TO REDOCUMENT EVERYTHING BUT SHOULD SLEEP RN SO I'LL COME BACK TO THIS
-// I'M JUST GLAD MY TEMPLATE SPECIALIZATIONS FINALLY COMPILE AND PASS TESTS
-// The following is our way of incrementing the refcount of the underlying
-// Tensor that we point to. Why do we want this supposedly weird behavior?
-// Because! We expect users to only need a StableIValue when they are trying
-// to pass the Tensor into a stack-based API, e,g.,
-// aoti_torch_call_dispatcher.
+// Specialization for torch::stable::Tensor => StableIValue
+// Takes a new owning reference of the underlying AtenTensorHandle.
 //
-// A stack-based API is one that expects a stack of inputs converted to
-// StableIValues. Our contract with any stack-based API is that the stack
-// has ownership of its Tensor arguments. Since this torch::stable::Tensor
-// object will likely go out of scope by the end of the user extension's
-// local function and will thus delete its reference on the at::Tensor,
-// we create a new AtenTensorHandle for that use case.
+// We expect the only use case for converting a torch::stable::Tensor to
+// a StableIValue is when calling a stack-based API, e.g.,
+// aoti_torch_call_dispatcher. A stack-based API is one that takes as
+// input a stack of StableIValues. Our contract with any stack-based API
+// is that the input stack has ownership of its Tensor arguments. Since
+// the input torch::stable::Tensor object will likely go out of scope by
+// the end of the user extension's local function and will thus delete
+// its references on the at::Tensor, we create a new AtenTensorHandle
+// (and thus a new at::Tensor) for that use case.
 template <typename T>
 std::enable_if_t<detail::is_stable_tensor_v<T>, StableIValue> from(T val) {
   AtenTensorHandle new_ath;
@@ -136,7 +133,7 @@ std::enable_if_t<detail::is_stable_tensor_v<T>, StableIValue> from(T val) {
 // TO CONVERSIONS (StableIValue -> T)
 // =============================================================================
 
-// Specialization for general copyable types (catch-all)
+// Specialization for StableIValue => general copyable types (catch-all)
 template <typename T>
 std::enable_if_t<!detail::is_special_type_v<T>, T> to(StableIValue val) {
   static_assert(std::is_trivially_copyable_v<T>);
@@ -154,16 +151,16 @@ std::enable_if_t<!detail::is_special_type_v<T>, T> to(StableIValue val) {
   return result.t;
 }
 
-// Specialization for std::nullopt_t
+// Specialization for StableIValue => std::nullopt_t
 template <typename T>
 std::enable_if_t<detail::is_nullopt_v<T>, T> to(StableIValue val) {
   // val should be equivalent to from(nullptr)
   return std::nullopt;
 }
 
-// Specialization for std::optional, see [Handling std::optional] above
-// as the semantic is the same but in reverse direction as we go from
-// IValue --(from_ivalue)-> StableIValue --(to<T>)-> T in custom extension
+// Specialization for StableIValue => std::optional, see [Handling
+// std::optional] as the semantic is the same but in reverse direction as we go
+// from IValue --(from_ivalue)-> StableIValue --(to<T>)-> T in custom extension
 template <typename T>
 std::enable_if_t<detail::is_optional_v<T>, T> to(StableIValue val) {
   using V = typename T::value_type;
@@ -181,13 +178,17 @@ std::enable_if_t<detail::is_optional_v<T>, T> to(StableIValue val) {
   return std::make_optional(inner_val);
 }
 
-// Specialization for torch::stable::Tensor
+// Specialization for StableIValue => torch::stable::Tensor
+// The resulting stable::Tensor steals ownership of the input's
+// underlying AtenTensorHandle.
 template <typename T>
 std::enable_if_t<detail::is_stable_tensor_v<T>, T> to(StableIValue val) {
   return torch::stable::Tensor(to<AtenTensorHandle>(val));
 }
 
-// end to helpers for converting between StableIValue and actual IValues
+// =============================================================================
+//  end to helpers for converting between StableIValue and T
+// =============================================================================
 
 class StableLibrary final {
  private:
