@@ -1595,8 +1595,8 @@ class FakeTensorMode(TorchDispatchMode):
             if func is aten.index.Tensor:
                 _, new_kwargs = normalize_function(  # type: ignore[misc]
                     func,
-                    args=args,
-                    kwargs=kwargs,
+                    args=args,  # type: ignore[arg-type]
+                    kwargs=kwargs,  # type: ignore[arg-type]
                     normalize_to_only_use_kwargs=True,
                 )
                 for index in new_kwargs["indices"]:
