@@ -35,7 +35,7 @@ def allocate_memory(
     device: torch.device,
     group: dist.ProcessGroup,
     from_process_group: bool,
-):
+) -> torch.Tensor:
     if from_process_group:
         backend = group._get_backend(device)
         if backend.supports_tensor_alloc(device):
