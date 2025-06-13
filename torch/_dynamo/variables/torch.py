@@ -132,6 +132,7 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 )
 
 constant_fold_functions_need_guards = [
+    torch.accelerator.current_device_index,
     torch.cuda.current_device,
     torch.cuda.is_initialized,
     torch.xpu.current_device,
@@ -143,6 +144,7 @@ constant_fold_functions = [
     torch._utils._get_device_index,
     torch._C._get_cublas_allow_tf32,
     torch._C._is_any_autocast_enabled,
+    torch.accelerator.is_available,
     torch.cuda.get_device_properties,
     torch.cuda.is_available,
     torch.distributed.is_available,
