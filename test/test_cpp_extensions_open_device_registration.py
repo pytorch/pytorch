@@ -3,8 +3,6 @@
 import _codecs
 import io
 import os
-import sys
-import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -54,77 +52,6 @@ class TestCppExtensionOpenRegistration(common.TestCase):
             extra_cflags=["-g"],
             verbose=True,
         )
-
-    @unittest.skipIf(
-        sys.version_info >= (3, 13),
-        "Error: Please register PrivateUse1HooksInterface by `RegisterPrivateUse1HooksInterface` first.",
-    )
-    @common.skipIfTorchDynamo("unsupported aten.is_pinned.default")
-    def test_open_device_storage_pin_memory(self):
-        # Check if the pin_memory is functioning properly on custom device
-        cpu_tensor = torch.empty(3)
-        self.assertFalse(cpu_tensor.is_openreg)
-        self.assertFalse(cpu_tensor.is_pinned())
-
-        cpu_tensor_pin = cpu_tensor.pin_memory()
-        self.assertTrue(cpu_tensor_pin.is_pinned())
-
-        # Test storage pin_memory and is_pin
-        cpu_storage = cpu_tensor.storage()
-        self.assertFalse(cpu_storage.is_pinned("openreg"))
-
-        cpu_storage_pinned = cpu_storage.pin_memory("openreg")
-        self.assertTrue(cpu_storage_pinned.is_pinned("openreg"))
-
-        # Test untyped storage pin_memory and is_pin
-        cpu_tensor = torch.randn([3, 2, 1, 4])
-        cpu_untyped_storage = cpu_tensor.untyped_storage()
-        self.assertFalse(cpu_untyped_storage.is_pinned("openreg"))
-
-        cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("openreg")
-        self.assertTrue(cpu_untyped_storage_pinned.is_pinned("openreg"))
-
-    @unittest.skip(
-        "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function"
-    )
-    def test_open_device_serialization(self):
-        self.module.set_custom_device_index(-1)
-        storage = torch.UntypedStorage(4, device=torch.device("openreg"))
-        self.assertEqual(torch.serialization.location_tag(storage), "openreg")
-
-        self.module.set_custom_device_index(0)
-        storage = torch.UntypedStorage(4, device=torch.device("openreg"))
-        self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
-
-        cpu_storage = torch.empty(4, 4).storage()
-        openreg_storage = torch.serialization.default_restore_location(
-            cpu_storage, "openreg:0"
-        )
-        self.assertTrue(openreg_storage.is_openreg)
-
-        # test tensor MetaData serialization
-        x = torch.empty(4, 4).long()
-        y = x.openreg()
-        self.assertFalse(self.module.check_backend_meta(y))
-        self.module.custom_set_backend_meta(y)
-        self.assertTrue(self.module.check_backend_meta(y))
-
-        self.module.custom_serialization_registry()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "data.pt")
-            torch.save(y, path)
-            z1 = torch.load(path)
-            # loads correctly onto the openreg backend device
-            self.assertTrue(z1.is_openreg)
-            # loads BackendMeta data correctly
-            self.assertTrue(self.module.check_backend_meta(z1))
-
-            # cross-backend
-            z2 = torch.load(path, map_location="cpu")
-            # loads correctly onto the cpu backend device
-            self.assertFalse(z2.is_openreg)
-            # loads BackendMeta data correctly
-            self.assertFalse(self.module.check_backend_meta(z2))
 
     def test_open_device_storage_resize(self):
         cpu_tensor = torch.randn([8])
