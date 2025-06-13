@@ -3,10 +3,8 @@
 # TorchDynamo APIs for fine-grained tracing
 
 :::{note}
-In this document `torc
-FINISHED ALL! (extensions: ['colon_fence'])
-sed interchangeably. Both versions
-will work in your code.
+In this document `torch.compiler.compile` and `torch.compile` are used interchangeably. 
+Both versions will work in your code.
 :::
 
 `torch.compile` performs TorchDynamo tracing on the whole user model.
