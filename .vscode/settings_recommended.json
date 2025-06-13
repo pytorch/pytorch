@@ -2,8 +2,8 @@
     "files.associations": {
         ".clang-format": "yaml",
         ".clang-tidy": "yaml",
-        ".flake8": "properties",
-        ".coveragerc": "properties",
+        ".flake8": "ini",
+        ".coveragerc": "ini",
         "*.py.in": "python",
         "*.pyi.in": "python",
         "*requirements*.txt": "pip-requirements",

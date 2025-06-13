@@ -1146,6 +1146,13 @@ class PythonKeyTracer(Tracer):
                     stack_trace = traceback.StackSummary.from_list(stack_trace)
                     node.meta["stack_trace"] = "".join(stack_trace.format()).strip()
 
+        if kind == "get_attr":
+            assert isinstance(target, str)
+            attr = getattr(self.root, target)
+            if isinstance(attr, torch.Tensor):
+                with disable_proxy_modes_tracing():
+                    node.meta["val"] = extract_val(attr)
+
         def map_fn(v: Any) -> Optional[_ExtractValType]:
             if not isinstance(v, torch.fx.Node) or "val" not in v.meta:
                 return None
