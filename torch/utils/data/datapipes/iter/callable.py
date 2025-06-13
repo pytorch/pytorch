@@ -200,7 +200,7 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         >>> class MyIterDataPipe(torch.utils.data.IterDataPipe):
         ...     def __init__(self, start, end):
         ...         super(MyIterDataPipe).__init__()
-        ...         assert end > start, "this example only works with end >= start"
+        ...         assert end > start, "this example code only works with end >= start"
         ...         self.start = start
         ...         self.end = end
         ...
@@ -209,11 +209,13 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         ...
         ...     def __len__(self):
         ...         return self.end - self.start
+        ...
         >>> ds = MyIterDataPipe(start=3, end=7)
         >>> print(list(ds))
         [3, 4, 5, 6]
         >>> def collate_fn(batch):
         ...     return torch.tensor(batch, dtype=torch.float)
+        ...
         >>> collated_ds = CollateIterDataPipe(ds, collate_fn=collate_fn)
         >>> print(list(collated_ds))
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]
