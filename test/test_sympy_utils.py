@@ -968,6 +968,22 @@ class TestIdentity(TestCase):
         self.assertEqual(expanded.count(Identity), 0)
         self.assertEqual(expanded, arg)
 
+    def test_cast_identity_int(self):
+        num = 1
+        expr = Identity(num)
+        self.assertEqual(num, int(expr))
+    
+    def test_cast_identity_float(self):
+        num = 1.1
+        expr = Identity(num)
+        self.assertEqual(num, float(expr))
+
+    def test_cast_identity_bool(self):
+        num = True
+        expr = Identity(num)
+        self.assertEqual(num, bool(expr))
+
+
 instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)
 instantiate_parametrized_tests(TestSympySolve)
