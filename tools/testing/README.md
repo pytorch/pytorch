@@ -83,7 +83,7 @@ Some common questions are:
 * **Determine if a test was skipped**: Determine which shard the test ran on, download the log or test report artifacts for that shard/job, and look for that test in the artifacts. Artifacts can be found on HUD, either through the "Artifacts" below the job or ctrl-f job id (the second/last set of numbers in the GHA url) on the HUD commit page.
 
 
-Page maintainers: @pytorch-dev-infra
+Page maintainers: @pytorch/pytorch-dev-infra
 <br>
 Last verified: 2025-06-13
 <!-- Still need to add sections on disabled tests, slow tests, mem leak check, rerun disabled tests, cpp tests, TD -->
