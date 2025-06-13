@@ -595,7 +595,8 @@ compute_flex_attention = r"""
 
     mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
 
-    {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
+    tl.static_assert(acc.shape == [BLOCK_M, V_HEAD_DIM_ROUNDED])
+    {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask", val_shape=["BLOCK_M", "V_HEAD_DIM_ROUNDED"])}}
 
     if OUTPUT_LOGSUMEXP:
         off_hz = tl.program_id(1)
@@ -2049,7 +2050,8 @@ flex_attention_backward_template = TritonTemplate(
 
         # first compute broadcasted dk of shape [Bq, Hkv, KV_LEN, V_HEAD_DIM]
         # then reduce to dk of shape [Bkv, Hkv, KV_LEN, V_HEAD_DIM]
-        {{store_output(("off_zq", "off_hkv", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
+        tl.static_assert(dk.shape == [BLOCK_N1, QK_HEAD_DIM_ROUNDED])
+        {{store_output(("off_zq", "off_hkv", "index_n", "index_k"), "dk", "mask", val_shape=["BLOCK_N1", "QK_HEAD_DIM_ROUNDED"], indent_width=8)}}
 
 @triton.jit
 def bwd_dq_inner(

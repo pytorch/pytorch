@@ -251,11 +251,16 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
                 line += ".to(tl.float32)"
                 var_dtype = torch.float32
 
-            out = self.kernel.cse.generate(self.kernel.compute, line, dtype=var_dtype)
+            out = self.kernel.cse.generate(
+                self.kernel.compute, line, dtype=var_dtype, shape=()
+            )
             return out
 
         return self.kernel.cse.generate(
-            self.kernel.compute, f"({self.fixed_inputs[name]})", dtype=torch.float32
+            self.kernel.compute,
+            f"({self.fixed_inputs[name]})",
+            dtype=torch.float32,
+            shape=(),
         )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
@@ -946,6 +951,7 @@ class TritonTemplateKernel(TritonKernel):
         val: str,
         mask: Optional[str] = None,
         indent_width: int = 4,
+        val_shape: Optional[list[str]] = None,
     ):
         """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
 
@@ -996,7 +1002,9 @@ class TritonTemplateKernel(TritonKernel):
                 if "ACC_TYPE" in self.meta
                 else torch.float32
             )
-            epilogue_args = [V.kernel.cse.namedvar(val, dtype=acc_dtype)]
+            epilogue_args = [
+                V.kernel.cse.namedvar(val, dtype=acc_dtype, shape=val_shape)
+            ]
             for input_node in itertools.chain(
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
