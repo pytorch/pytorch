@@ -2082,7 +2082,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self,
         buf_name: str,
         python_kernel_name: str,
-        codegen_args: Sequence[str],
+        get_args: Callable[[], Sequence[str]],
         op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
@@ -2154,7 +2154,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # overhead of calling back into Python, and covers most remaining fallback ops.
         if self._compatible_with_stableivalue(op_overload):
             self.generate_fallback_kernel_with_runtime_lookup_nopython(
-                codegen_args,
+                get_args,
                 op_overload,
                 output_args,  # type: ignore[arg-type]
                 outputs,
@@ -2318,7 +2318,7 @@ if (!custom_op_wrapper) {
 
     def generate_fallback_kernel_with_runtime_lookup_nopython(
         self,
-        codegen_args: Sequence[str],
+        get_args: Callable[[], Sequence[str]],
         op_overload: torch._ops.OpOverload,
         output_args: Sequence[Optional[str]],
         raw_outputs: Sequence[ir.Buffer],
@@ -2396,6 +2396,7 @@ if (!custom_op_wrapper) {
                     return f"from({raii_var}.release())"
                 return f"from({codegen_arg})"
 
+            codegen_args = get_args()
             ivalue_args = (
                 parse_arg(a.type, c)
                 for a, c in zip(op_overload._schema.arguments, codegen_args)
