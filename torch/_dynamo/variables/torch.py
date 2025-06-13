@@ -400,27 +400,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx, args[0], args[1].as_python_constant()
             )
         elif self.value is torch.nn.attention.sdpa_kernel:
-            assert 0 <= len(args) <= 2
-            if len(args) == 0:
-                assert kwargs.keys() == {"backends"} or kwargs.keys() == {
-                    "backends",
-                    "set_priority",
-                }
-            elif len(args) == 1:
-                assert len(kwargs) == 0 or (
-                    len(kwargs) == 1 and kwargs.keys() == {"set_priority"}
-                )
-            else:
-                assert len(kwargs) == 0
+            sig = inspect.signature(torch.nn.attention.sdpa_kernel)
+            try:
+                bound_args = sig.bind(*args, **kwargs)
+                bound_args.apply_defaults()
+            except TypeError as e:
+                raise AssertionError("Invalid arguments to sdpa_kernel") from e
 
-            backends = args[0] if len(args) > 0 else kwargs["backends"]
-            set_priority = (
-                args[1]
-                if len(args) > 1
-                else kwargs["set_priority"]
-                if "set_priority" in kwargs
-                else False
-            )
+            backends = bound_args.arguments["backends"]
+            set_priority = bound_args.arguments["set_priority"]
 
             return SDPAKernelVariable.create(
                 tx, backends.as_python_constant(), set_priority

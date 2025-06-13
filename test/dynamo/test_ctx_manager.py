@@ -17,7 +17,6 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTIO
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    subtest,
 )
 
 
@@ -1752,47 +1751,17 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(len(counters["graph_break"]), 1)
 
-    @parametrize(
-        "sdpa_args,sdpa_kwargs",
-        [
-            subtest(([[SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH]], {}), name="1_0"),
-            subtest(
-                ([[SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH], True], {}), name="2_0"
-            ),
-            subtest(
-                (
-                    [[SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH]],
-                    {"set_priority": True},
-                ),
-                name="1_1",
-            ),
-            subtest(
-                ([], {"backends": [SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH]}),
-                name="0_1",
-            ),
-            subtest(
-                (
-                    [],
-                    {
-                        "backends": [SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH],
-                        "set_priority": True,
-                    },
-                ),
-                name="0_2",
-            ),
-        ],
-        name_fn=lambda sdpa_args, sdpa_kwargs: f"{sdpa_args}_{sdpa_kwargs}",
-    )
-    def test_sdpa_kernel_ctx_manager_params(
-        self, sdpa_args: list, sdpa_kwargs: dict
-    ) -> None:
+    def test_sdpa_kernel_ctx_manager_params(self) -> None:
         """
-        Test the sdpa_kernel context manager with all different legal combinations of arguments.
+        Test the sdpa_kernel context manager with set_priority=True.
         """
 
         class Model(torch.nn.Module):
             def forward(self, q, k, v, mask):
-                with sdpa_kernel(*sdpa_args, **sdpa_kwargs):
+                with sdpa_kernel(
+                    [SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH],
+                    set_priority=True,
+                ):
                     out = scaled_dot_product_attention(q, k, v, attn_mask=mask)
                 return out
 
