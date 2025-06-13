@@ -213,17 +213,11 @@ class _HuggingFaceStorageReader(FsspecReader):
 
         for file_name, reqs in per_file.items():
             with self.fs.create_stream(file_name, "rb") as stream:
-                # TODO: make this more efficient by doing offset reads instead of a
-                # full deserialization of the file
-                deserialized = deserialize(stream.read())
-                deserialized_dict: dict[str, dict[str, Any]] = {
-                    tensor_info[0]: tensor_info[1] for tensor_info in deserialized
-                }
-
                 for req in reqs:
                     item_md: _HFStorageInfo = self.storage_data[req.storage_index]
 
-                    tensor_bytes = deserialized_dict[req.dest_index.fqn][DATA_KEY]
+                    stream.seek(item_md.offset)
+                    tensor_bytes = stream.read(item_md.length)
 
                     tensor = torch.frombuffer(
                         tensor_bytes,
@@ -316,7 +310,7 @@ class _HuggingFaceStorageReader(FsspecReader):
                         )
                     storage_data[metadata_index] = _HFStorageInfo(
                         relative_path=safetensor_file,
-                        offset=val[DATA_OFFSETS_KEY][0],
+                        offset=val[DATA_OFFSETS_KEY][0] + metadata_size,
                         length=val[DATA_OFFSETS_KEY][1] - val[DATA_OFFSETS_KEY][0],
                         shape=torch.Size(val[SHAPE_KEY]),
                         dtype=_get_dtype(val[DTYPE_KEY]),

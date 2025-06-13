@@ -53,18 +53,25 @@ class _HFStorageInfo:
         return {k: v for k, v in self.__dict__.items() if v is not None}
 
 
-def _gen_file_name(index: int, largest_index: int, shard_index: Optional[int] = None) -> str:
-        if shard_index is not None:
-            return SHARDED_FILE_NAME.format(
-                shard_idx=f"{shard_index}".zfill(5), cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
-            ) + SUFFIX
-        else:
-            return (
-                FILE_NAME.format(
-                cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
-                )
-                + SUFFIX
+def _gen_file_name(
+    index: int, largest_index: int, shard_index: Optional[int] = None
+) -> str:
+    if shard_index is not None:
+        return (
+            SHARDED_FILE_NAME.format(
+                shard_idx=f"{shard_index}".zfill(5),
+                cpt_idx=f"{index}".zfill(5),
+                num_files=f"{largest_index}".zfill(5),
             )
+            + SUFFIX
+        )
+    else:
+        return (
+            FILE_NAME.format(
+                cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
+            )
+            + SUFFIX
+        )
 
 
 def _get_safetensors_file_metadata(file_bytes: io.IOBase) -> tuple[Any, int]:
@@ -88,6 +95,7 @@ def _get_dtype(dtype_str: str) -> torch.dtype:
         dtype = torch.get_default_dtype()
 
     return dtype
+
 
 def _get_dcp_custom_metadata(metadata: Any) -> Optional[Any]:
     if DEFAULT_EXTRA_METADATA_KEY in metadata:
