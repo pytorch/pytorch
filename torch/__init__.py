@@ -1028,7 +1028,7 @@ except ImportError:
                         $ python setup.py install && python -c "import torch"
 
                     This error can generally be solved using the `develop` workflow
-                        $ python setup.py develop && python -c "import torch"  # This should succeed
+                        $ python -m pip install -e . -v --no-build-isolation && python -c "import torch"  # This should succeed
                     or by running Python from a different directory.
                 """
             ).strip()
