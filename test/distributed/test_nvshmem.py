@@ -381,5 +381,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
             out, expected_value * torch.ones(numel, dtype=dtype, device=self.device)
         )
 
+
 if __name__ == "__main__":
     run_tests()
