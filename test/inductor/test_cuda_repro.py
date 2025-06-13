@@ -2123,6 +2123,24 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         out_eager = interpolate_chunked(x)
         out_compiled = torch.compile(interpolate_chunked)(x)
         self.assertEqual(out_eager, out_compiled)
+    
+    def test_sdpa_set_priority(self):
+        from torch.nn.functional import scaled_dot_product_attention
+        from torch.nn.attention import SDPBackend, sdpa_kernel
+        class Model(torch.nn.Module):
+            def forward(self, q, k, v, mask):
+                with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH], set_priority=True):
+                    out = scaled_dot_product_attention(q,k,v,m)
+                return out
+
+        device = torch.device('cuda')
+        # device = torch.device('cpu')
+        model = Model().to(device)
+
+        q = k = v = torch.randn(2, 4, 16, device=device)
+        m = None
+        model = torch.compile(model, backend="eager")
+        model(q, k, v, m)
 
 
 if __name__ == "__main__":
