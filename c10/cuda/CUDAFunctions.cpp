@@ -337,6 +337,19 @@ cudaError_t SetDevice(DeviceIndex device) {
   return cudaSetDevice(device);
 }
 
+cudaError_t SetDevice(DeviceIndex device, const bool force) {
+  TORCH_CHECK(device >= 0, "device id must be positive!", device);
+  if (force) {
+    return cudaSetDevice(device);
+  }
+  int cur_device = -1;
+  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+  if (device == cur_device) {
+    return cudaSuccess;
+  }
+  return cudaSetDevice(device);
+}
+
 cudaError_t MaybeSetDevice(DeviceIndex device) {
   return c10::cuda::SetDevice(device);
 }
