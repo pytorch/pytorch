@@ -49,6 +49,8 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+    PLATFORM_SUPPORTS_CK_SDPA,
+    SM90OrLater,
     tf32_on_and_off,
     tf32_enabled,
 )
@@ -85,7 +87,8 @@ isSM120Device = torch.cuda.is_available() and torch.cuda.get_device_capability()
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
 isLessThanSM80Device = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8
 
-TEST_WITH_CK = TEST_WITH_ROCM and torch.backends.cuda.preferred_rocm_fa_library() == torch.backends.cuda._ROCmFABackends['ck']
+# this is probably not needed and will happen on a test by test bases
+#TEST_WITH_CK = TEST_WITH_ROCM and torch.backends.cuda.preferred_rocm_fa_library() == torch.backends.cuda._ROCmFABackends['ck']
 
 def _check_equal(
     golden: torch.Tensor,
@@ -3594,13 +3597,14 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("scale", [None, "l1"])
     @parametrize("enable_gqa", [True, False])
     @parametrize("n_heads", [[16, 8], [10, 2]])
+    @parametrize("sdpa_backend", ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["default"])
     @tf32_enabled()
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                scale: str, enable_gqa: bool, n_heads: list[int]):
 
 
-        torch.backends.cuda.preferred_rocm_fa_library("ck")
+        #torch.backends.cuda.preferred_rocm_fa_library("ck")
         if isSM8XDevice or isSM120Device and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
@@ -3610,8 +3614,12 @@ class TestSDPACudaOnly(NNTestCase):
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
-        #if TEST_WITH_CK and dropout_p != 0:
-        #    self.skipTest("CK does not support tensor format dropout masks")
+        TEST_WITH_CK = False
+        if TEST_WITH_ROCM:
+            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
+            # When no args are given to preferred_rocm_fa_library, it acts as a getter
+            TEST_WITH_CK = torch.backends.cuda.preferred_rocm_fa_library()
+
         if TEST_WITH_CK and head_dim > 128:
             self.skipTest("CK does not support head dims over 128")
         #print("TEST_WITH_CK: ", TEST_WITH_CK)
@@ -3627,13 +3635,6 @@ class TestSDPACudaOnly(NNTestCase):
                          dtype=dtype, requires_grad=True)
         value = torch.rand(batch_size, num_heads_kv, seq_len_k, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
-        
-        #ck_dropout = _get_ck_dropout_mask(batch_size, num_heads_q, seq_len_q, seq_len_k, dropout_p, device)
-        #print("q size: ", query.size())
-        #print("k size: ", key.size())
-        #print("v size: ", value.size())
-        #print("OUTERMOST ck_dropout: ")
-        #print(ck_dropout)
 
         higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
         query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
@@ -3674,24 +3675,17 @@ class TestSDPACudaOnly(NNTestCase):
             softmax_mask = self.convert_flash_attn_S_to_softmax(
                 dbug_mask, seq_len_q, seq_len_k, query_padding_mask, key_padding_mask,
                 causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
-            #print("MATH RETURNED DROPOUT_MASK")
-            #print(softmax_mask)
 
-            #dropout_mask = softmax_mask >= 0
-            #dropout_mask = ck_dropout >= 0
-            #TODO_ANDY: only on rocm
-            dropout_mask = (softmax_mask <=int((1.0 - dropout_p) * 255.0)).to(torch.float32)
-            #dropout_mask = dropout_mask.reshape(batch_size, seq_len_q, seq_len_k)
-            #print("PYTHON SIDE DROPOUT_MASK")
-            #print("dropout_mask size: ", dropout_mask.size())
-            #print(dropout_mask)
+            # This is the default implementation for the mask but we need to match CK if we are using it
+            dropout_mask = softmax_mask >= 0
+
+            if TEST_WITH_CK:
+                dropout_mask = (softmax_mask <=int((1.0 - dropout_p) * 255.0)).to(torch.float32)
+
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal,
                 scale=scale, dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
-            #out_ref = torch.ops.aten._scaled_dot_product_attention_math(
-            #    query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal,
-            #    scale=scale, dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query, key, value, dropout_mask=dropout_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)[0]
@@ -3725,23 +3719,6 @@ class TestSDPACudaOnly(NNTestCase):
                     fudge_factors['grad_query'] = 1100.0
             if dtype == torch.float32:
                 fudge_factors['grad_key'] = 90.0
-        print("FUDGEY FUDGE")
-        print(fudge_factors)
-        torch.set_printoptions(profile="full")
-        #print("REFERENCE OUT")
-        #print(out_ref)
-        #print("REFERENCE LP OUT" )
-        #print(out_lp_ref)
-        #print("ACTUAL CK OUT")
-        #print(out)
-        """
-        print("bwd REFERENCE OUT")
-        print(grads_ref)
-        print("bwd REFERENCE LP OUT" )
-        print(grads_ref_lp)
-        print("bwd ACTUAL CK OUT")
-        print(grads)
-        """
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
