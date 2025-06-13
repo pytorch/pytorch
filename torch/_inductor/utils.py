@@ -2760,7 +2760,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
     # Otherwise, the hint MUST exist and be in range
-    return has_hint(e) and size_hint(e) <= int_max
+    return has_hint(e) and size_hint(e, fallback=1) <= int_max
 
 
 def set_tracing_context_output_strides(
