@@ -4,7 +4,7 @@ import subprocess
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, cast, Optional, Union, NamedTuple
+from typing import Any, cast, Optional, Union
 
 import requests
 
@@ -364,9 +364,12 @@ if __name__ == "__main__":
         unzip_artifact_and_replace_files()
         set_output()
 
-    emit_metric("reuse_old_whl", {
-        "reuse_whl": reuse_whl,
-        "reason": reason,
-        "build_environment": args.build_environment,
-        "merge_base": get_merge_base(),
-    })
+    emit_metric(
+        "reuse_old_whl",
+        {
+            "reuse_whl": reuse_whl,
+            "reason": reason,
+            "build_environment": args.build_environment,
+            "merge_base": get_merge_base(),
+        },
+    )
