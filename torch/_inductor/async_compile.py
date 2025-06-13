@@ -227,28 +227,30 @@ class AsyncCompilePoolManager:
     """
 
     def __init__(self):
-        self._ready = False
+        self._awake = False
 
     def __enter__(self):
         global _ASYNC_COMPILE_POOL_MANAGER
-        _ASYNC_COMPILE_POOL_MANAGER = self
+        if config.quiesce_async_compile_pool:
+            _ASYNC_COMPILE_POOL_MANAGER = self
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         global _ASYNC_COMPILE_POOL_MANAGER
-        AsyncCompile.quiesce()
+        if _ASYNC_COMPILE_POOL_MANAGER is not None:
+            AsyncCompile.quiesce()
         _ASYNC_COMPILE_POOL_MANAGER = None
-
-    def _wakeup(self):
-        if not self._ready:
-            AsyncCompile.wakeup()
-            self._ready = True
 
     @staticmethod
     def wakeup():
         global _ASYNC_COMPILE_POOL_MANAGER
         if _ASYNC_COMPILE_POOL_MANAGER is not None:
             _ASYNC_COMPILE_POOL_MANAGER._wakeup()
+
+    def _wakeup(self):
+        if not self._awake:
+            AsyncCompile.wakeup()
+            self._awake = True
 
 
 class AsyncCompile:

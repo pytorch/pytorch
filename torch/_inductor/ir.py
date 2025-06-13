@@ -633,7 +633,7 @@ class IRNode:
         return sympy_product(self.get_size())
 
     def is_zero_elements(self) -> bool:
-        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
+        return V.graph.sizevars.statically_known_true(sympy.Eq(self.get_numel(), 0))
 
     def realize(self) -> Optional[str]:
         """
@@ -1664,7 +1664,7 @@ class Reduction(Loops):
         reindex = View.dynamic_reshape_indexer(
             reduction_ranges, [reduction_numel], dense_index
         )
-        need_mask = not V.graph.sizevars.is_expr_static_and_true(
+        need_mask = not V.graph.sizevars.statically_known_true(
             sympy.Eq(reduction_numel % split, 0)
         )
 
@@ -2113,7 +2113,7 @@ class WelfordReduction(MultiOutputReduction):
         recursively
         """
         reduction_numel = sympy_product(reduction_ranges)
-        need_mask = not V.graph.sizevars.is_expr_static_and_true(
+        need_mask = not V.graph.sizevars.statically_known_true(
             sympy.Eq(reduction_numel % split, 0)
         )
 
@@ -2296,7 +2296,7 @@ class Scan(Loops):
         assert len(dtypes) == len(inner_fns)
 
         # Scan with a single element is just a copy
-        if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):
+        if sizevars.statically_known_true(sympy.Le(scan_numel, 1)):
             return [
                 Pointwise.create(
                     device=device,
@@ -2496,7 +2496,7 @@ class Sort(Loops):
         max_rblock = 512
         is_persistent_kernel = (
             config.triton.persistent_reductions
-            and sizevars.is_expr_static_and_true(sympy.Le(sort_numel, max_rblock))
+            and sizevars.statically_known_true(sympy.Le(sort_numel, max_rblock))
         )
         if not is_persistent_kernel:
             # We only support persistent triton kernels
@@ -2505,7 +2505,7 @@ class Sort(Loops):
         assert len(dtypes) == len(inner_fns)
 
         # Sort with a single element is just a copy
-        if sizevars.is_expr_static_and_true(sympy.Le(sort_numel, 1)):
+        if sizevars.statically_known_true(sympy.Le(sort_numel, 1)):
             return [
                 Pointwise.create(
                     device=device,
@@ -4057,7 +4057,7 @@ class Buffer(IRNode, CodegenSymbol):
         )
 
     def is_zero_elements(self):  # type: ignore[no-untyped-def]
-        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
+        return V.graph.sizevars.statically_known_true(sympy.Eq(self.get_numel(), 0))
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         # Loading from a zero-element buffer is a no-op

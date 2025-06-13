@@ -48,6 +48,7 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -1003,6 +1004,15 @@ This class does not support ``__members__`` property.)");
   module.def("_unregister_all_process_groups", []() {
     return ::c10d::unregister_all_process_groups();
   });
+
+  // Intializes the device state in CUmodule so that it’s able to perform
+  // NVSHMEM operations.
+#ifdef USE_NVSHMEM
+  module.def(
+      "_nvshmemx_cumodule_init",
+      ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
+      py::arg("module"));
+#endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
@@ -3207,6 +3217,15 @@ for details.
 #endif
 #ifdef NCCL_HAS_QOS
       .def_readwrite("traffic_class", &ncclConfig_t::trafficClass)
+#endif
+#ifdef NCCL_HAS_COLLNET
+      .def_readwrite("collnet_enable", &ncclConfig_t::collnetEnable)
+#endif
+#ifdef NCCL_HAS_CTA_POLICY
+      .def_readwrite("cta_policy", &ncclConfig_t::CTAPolicy)
+#endif
+#ifdef NCCL_HAS_NVLS_CTAS
+      .def_readwrite("nvls_ctas", &ncclConfig_t::nvlsCTAs)
 #endif
       .def_property(
           "net_name",
