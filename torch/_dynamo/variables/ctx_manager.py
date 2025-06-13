@@ -200,14 +200,10 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
     def __init__(self, ctx_manager_vt, mod):
         self.cm_vt = ctx_manager_vt
         self.mod = mod
-
-    def module_name(self):
-        return self.cm_vt.module_name()
-
-    def fn_name(self):
-        return self.cm_vt.fn_name()
+        # We don't call super().__init__() because we're delegating most methods to cm_vt
 
     def enter(self, tx: "InstructionTranslator"):
+        # Custom enter implementation with side effects
         self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
         self.old_bufferer_var = self.mod.var_getattr(tx, "_buffers").realize()
         tx.output.side_effects.allow_mutation_in_hop_subgraph(self.old_parameters_var)
@@ -244,6 +240,7 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         )
 
     def exit(self, tx: "InstructionTranslator", *args):
+        # Custom exit implementation with side effects
         x = self.cm_vt.exit(tx, *args)
         tx.output.side_effects.disallow_mutation_in_hop_subgraph(self.old_bufferer_var)
         tx.output.side_effects.disallow_mutation_in_hop_subgraph(
@@ -252,11 +249,10 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         self._check_param_restored(tx)
         return x
 
-    def supports_graph_breaks(self):
-        return False
-
-    def exit_on_graph_break(self):
-        return True
+    # Forward all other method calls to self.cm_vt
+    def __getattr__(self, name):
+        # This will be called for any attribute not explicitly defined in this class
+        return getattr(self.cm_vt, name)
 
 
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
