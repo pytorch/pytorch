@@ -10,7 +10,10 @@
         "*.cpp.in": "cpp",
         "*.h.in": "cpp",
         "*.cmake.in": "cmake",
-        "Makefile.*": "makefile"
+        "Makefile.*": "makefile",
+        "*.Makefile": "makefile",
+        "BUCK": "starlark",
+        "BUCK.*": "starlark"
     },
     "files.eol": "\n",
     "files.insertFinalNewline": true,
