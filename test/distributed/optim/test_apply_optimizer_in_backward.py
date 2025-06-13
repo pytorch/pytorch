@@ -16,6 +16,7 @@ from torch.distributed.optim import (
     _apply_optimizer_in_backward,
     _get_in_backward_optimizers,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 # TODO (rohan-varma): Add FSDP & DDP tests once supported
@@ -45,10 +46,10 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
             for opt in optimizers:
                 opt.zero_grad(set_to_none=True)
 
-    def _test_apply_optimizer_in_backward(self, share_params) -> None:
+    def _test_apply_optimizer_in_backward(self, device, share_params) -> None:
         weight_optimizer_kwargs = {"lr": 1.0}
         bias_optimizer_kwargs = {"lr": 0.5}
-        model = nn.Sequential(nn.Linear(10, 10), nn.Linear(10, 10))
+        model = nn.Sequential(nn.Linear(10, 10), nn.Linear(10, 10)).to(device)
         if share_params:
             model[0].weight = model[1].weight
 
@@ -81,19 +82,19 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
         )
 
         self._run_training_loop_and_validate(
-            torch.randn(4, 10),
+            torch.randn(4, 10, device=device),
             [model, model_with_opt_in_bwd],
             [optim_weight, optim_bias],
         )
 
-    def test_apply_optimizer_in_backward(self) -> None:
-        self._test_apply_optimizer_in_backward(share_params=False)
+    def test_apply_optimizer_in_backward(self, device) -> None:
+        self._test_apply_optimizer_in_backward(device=device, share_params=False)
 
-    def test_apply_optimizer_in_backward_shared_params(self) -> None:
-        self._test_apply_optimizer_in_backward(share_params=True)
+    def test_apply_optimizer_in_backward_shared_params(self, device) -> None:
+        self._test_apply_optimizer_in_backward(device=device, share_params=True)
 
-    def test_no_register_hook(self):
-        model_with_hook = nn.Sequential(nn.Linear(10, 10), nn.Linear(10, 10))
+    def test_no_register_hook(self, device):
+        model_with_hook = nn.Sequential(nn.Linear(10, 10), nn.Linear(10, 10)).to(device)
         initial_model = deepcopy(model_with_hook)
         model_no_hook = deepcopy(model_with_hook)
         _apply_optimizer_in_backward(
@@ -107,7 +108,7 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
             optimizer_kwargs={"lr": 0.03},
             register_hook=False,
         )
-        inp = torch.randn(4, 10)
+        inp = torch.randn(4, 10, device=device)
         model_with_hook(inp).sum().backward()
         model_no_hook(inp).sum().backward()
 
@@ -118,8 +119,8 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
         for p1, p2 in zip(model_no_hook.parameters(), initial_model.parameters()):
             torch.testing.assert_allclose(p1, p2)
 
-    def test_multiple_optim_for_params(self) -> None:
-        model = nn.Sequential(nn.Linear(10, 10), nn.Linear(10, 10))
+    def test_multiple_optim_for_params(self, device) -> None:
+        model = nn.Sequential(nn.Linear(10, 10), nn.Linear(10, 10)).to(device)
         opt_0_kwargs = {"lr": 0.03}
         opt_1_kwargs = {"lr": 0.01}
         opt_0 = torch.optim.SGD(model.parameters(), **opt_0_kwargs)
@@ -136,12 +137,12 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
             optimizer_kwargs=opt_1_kwargs,
         )
         self._run_training_loop_and_validate(
-            torch.randn(4, 10),
+            torch.randn(4, 10, device=device),
             [model, model_with_opt_in_bwd],
             [opt_0, opt_1],
         )
 
-    def test_get_optimizers_in_backward(self):
+    def test_get_optimizers_in_backward(self, device):
         # Create a simple test model
         class TestModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -149,7 +150,7 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
                 self.linear1 = torch.nn.Linear(10, 5)
                 self.linear2 = torch.nn.Linear(5, 2)
 
-        model = TestModel()
+        model = TestModel().to(device)
 
         # Apply optimizers in backward
         _apply_optimizer_in_backward(torch.optim.SGD, model.parameters(), {"lr": 0.01})
@@ -160,3 +161,8 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
             optim for p in model.parameters() for optim in p._in_backward_optimizers
         }
         self.assertEqual(result, expected)
+
+
+device = ["cpu", "cuda", "hpu", "xpu"]
+
+instantiate_device_type_tests(ApplyOverlappedOptimizerTest, globals(), only_for=device)
