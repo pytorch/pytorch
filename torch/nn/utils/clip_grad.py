@@ -150,9 +150,7 @@ def _clip_grads_with_norm_(
         return
     grouped_grads: dict[
         tuple[torch.device, torch.dtype], tuple[list[list[Tensor]], list[int]]
-    ] = _group_tensors_by_device_and_dtype(
-        [grads]
-    )  # type: ignore[assignment]
+    ] = _group_tensors_by_device_and_dtype([grads])  # type: ignore[assignment]
 
     clip_coef = max_norm / (total_norm + 1e-6)
     # Note: multiplying by the clamped coef is redundant when the coef is clamped to 1, but doing so
