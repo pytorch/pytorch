@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 import torch
 from torch import Tensor
@@ -138,7 +138,7 @@ class RelaxedBernoulli(TransformedDistribution):
     """
 
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
-    support = constraints.unit_interval
+    support: ClassVar[constraints.UnitInterval] = constraints.unit_interval  # type: ignore[assignment]
     has_rsample = True
     base_dist: LogitRelaxedBernoulli
 

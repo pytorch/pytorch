@@ -6823,17 +6823,15 @@ class TestJit(DistributionsTestCase):
                 yield Dist, keys, values, sample
 
     def _perturb_tensor(self, value, constraint):
-        if isinstance(constraint, constraints._IntegerGreaterThan):
+        if isinstance(constraint, constraints.IntegerGreaterThan):
             return value + 1
-        if isinstance(constraint, constraints._LessThan):
+        if isinstance(constraint, constraints.LessThan):
             return value - torch.rand(value.shape)
-        if isinstance(
-            constraint, (constraints._GreaterThan, constraints._GreaterThanEq)
-        ):
+        if isinstance(constraint, (constraints.GreaterThan, constraints.GreaterThanEq)):
             return value + torch.rand(value.shape)
         if isinstance(
             constraint,
-            (constraints._PositiveDefinite, constraints._PositiveSemidefinite),
+            (constraints.PositiveDefinite, constraints.PositiveSemidefinite),
         ):
             return value + torch.eye(value.shape[-1])
         if value.dtype in [torch.float, torch.double]:
