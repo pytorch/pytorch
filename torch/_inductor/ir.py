@@ -1508,7 +1508,7 @@ class Reduction(Loops):
         )
 
         def _maybe_increase_split(split: int) -> int:
-            if split > 1 and config.min_num_split > 1:
+            if split > 1:
                 return max(split, config.min_num_split)
             else:
                 return split
