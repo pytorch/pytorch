@@ -117,11 +117,9 @@ class OptimStateKeyType(Enum):
 class FullyShardedDataParallel(nn.Module, _FSDPState):
     """A wrapper for sharding module parameters across data parallel workers.
 
-    This is inspired by `Xu et al.`_ as well as the ZeRO Stage 3 from DeepSpeed_.
+    This is inspired by `Xu et al. <https://arxiv.org/abs/2004.13336>`_ as
+    well as the ZeRO Stage 3 from `DeepSpeed <https://www.deepspeed.ai/>`_.
     FullyShardedDataParallel is commonly shortened to FSDP.
-
-    .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
-    .. _DeepSpeed: https://www.deepspeed.ai/
 
     To understand FSDP internals, refer to the
     :ref:`fsdp_notes`.
