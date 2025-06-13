@@ -1,16 +1,16 @@
+```{eval-rst}
 .. currentmodule:: torch.profiler
+```
 
-torch.profiler
-==============
+# torch.profiler
 
-Overview
---------
+## Overview
+```{eval-rst}
 .. automodule:: torch.profiler
+```
 
-
-API Reference
--------------
-
+## API Reference
+```{eval-rst}
 .. autoclass:: torch.profiler._KinetoProfile
   :members:
 
@@ -26,10 +26,11 @@ API Reference
 .. autofunction:: torch.profiler.schedule
 
 .. autofunction:: torch.profiler.tensorboard_trace_handler
+```
 
-Intel Instrumentation and Tracing Technology APIs
--------------------------------------------------
+## Intel Instrumentation and Tracing Technology APIs
 
+```{eval-rst}
 .. autofunction:: torch.profiler.itt.is_available
 
 .. autofunction:: torch.profiler.itt.mark
@@ -37,9 +38,12 @@ Intel Instrumentation and Tracing Technology APIs
 .. autofunction:: torch.profiler.itt.range_push
 
 .. autofunction:: torch.profiler.itt.range_pop
+```
 
-.. This module needs to be documented. Adding here in the meantime
-.. for tracking purposes
+<!-- This module needs to be documented. Adding here in the meantime
+for tracking purposes -->
+```{eval-rst}
 .. py:module:: torch.profiler.itt
 .. py:module:: torch.profiler.profiler
 .. py:module:: torch.profiler.python_tracer
+```
