@@ -164,7 +164,7 @@ class SideEffects:
         output_graph = self.output_graph_weakref()
 
         return (
-            output_graph
+            bool(output_graph)
             and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
