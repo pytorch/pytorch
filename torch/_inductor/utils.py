@@ -1506,7 +1506,7 @@ def use_triton_template(
 
 
 def use_triton_tma_template(*matrices: IRNode) -> bool:
-    from torch.utils._triton import has_triton_tma_device
+    from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
     from .virtualized import V
 
@@ -1534,6 +1534,10 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
 
         inner_bytes = inner_dim * dtype.itemsize
         return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
+
+    if has_triton_stable_tma_api() and config.cpp_wrapper:
+        # TODO(dberard) remove this when we get AOTI support for new TMA APIs (#155047)
+        return False
 
     return (
         config.triton.enable_persistent_tma_matmul
@@ -1589,7 +1593,7 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     from torch._inductor.virtualized import V
 
     return (
-        V.graph.sizevars.is_expr_static_and_true(
+        V.graph.sizevars.statically_known_true(
             sympy.And(
                 sympy.Ge(k, decompose_k_threshold * m),
                 sympy.Ge(k, decompose_k_threshold * n),
@@ -1806,9 +1810,9 @@ def use_cpp_gemm_template(
         use_4x2_dim=is_woq_int4,
     )
 
-    # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
+
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
 
@@ -2753,7 +2757,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
 
     # Allow for unhinted e as long as we can still statically prove
     # (e.g., via ValueRanges) that it is still in bounds
-    if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
+    if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
     # Otherwise, the hint MUST exist and be in range
     return has_hint(e) and size_hint(e) <= int_max
