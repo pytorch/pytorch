@@ -2,7 +2,8 @@
 setuptools>=70.1.0
 cmake>=3.27
 ninja
-numpy==2.1.2
+numpy==2.0.2 ; python_version == "3.9""
+numpy==2.1.2 ; python_version > "3.9"
 packaging
 pyyaml
 requests
