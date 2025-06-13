@@ -1,14 +1,14 @@
+```{eval-rst}
 .. currentmodule:: torch.compiler
-
 .. automodule:: torch.compiler
+```
 
-.. _torch.compiler_api:
+(torch.compiler_api)=
+# torch.compiler API reference
 
-torch.compiler API reference
-============================
+For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
-For a quick overview of ``torch.compiler``, see :ref:`torch.compiler_overview`.
-
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -25,3 +25,4 @@ For a quick overview of ``torch.compiler``, see :ref:`torch.compiler_overview`.
      is_compiling
      is_dynamo_compiling
      is_exporting
+```
