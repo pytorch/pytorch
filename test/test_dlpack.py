@@ -410,6 +410,55 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(t, res)
         self.assertEqual(t.data_ptr(), res.data_ptr())
 
+    def _test_from_dlpack(self, device, out_device=None, copy=None):
+        if isinstance(device, str):
+            device = torch.device(device)
+
+        inp = make_tensor((5,), dtype=torch.float32, device=device)
+        out = torch.from_dlpack(inp, device=out_device, copy=copy)
+
+        if out_device is None:
+            out_device = device
+        if isinstance(out_device, str):
+            out_device = torch.device(out_device)
+
+        self.assertEqual(inp, out)
+        self.assertEqual(out.device, out_device)
+
+        # They should be moved (i.e. not copied) only if:
+        #   (a) we are forcing move, i.e. copy=False
+        #   (b) the output device is the same as the input one AND copy is None
+        if copy is False or (copy is None and device == out_device):
+            self.assertEqual(inp.data_ptr(), out.data_ptr())
+        else:
+            # Otherwise, inp should be copied.
+            self.assertNotEqual(inp.data_ptr(), out.data_ptr())
+
+    @skipMeta
+    @onlyCUDA
+    def test_copy(self, device):
+        # Force-copy same device tensor.
+        self._test_from_dlpack(device, copy=True)
+        self._test_from_dlpack(device, out_device=device, copy=True)
+        # Output should be in a different device, i.e. should have been copied.
+        self._test_from_dlpack(device, out_device="cpu")
+        self._test_from_dlpack(device, out_device="cpu", copy=True)
+
+    @skipMeta
+    @onlyCUDA
+    def test_no_copy(self, device):
+        # No copy, since tensor lives in the same device.
+        self._test_from_dlpack(device)
+        self._test_from_dlpack(device, copy=False)
+        self._test_from_dlpack(device, out_device=device)
+        self._test_from_dlpack(device, out_device=device, copy=False)
+
+    @skipMeta
+    @onlyCUDA
+    def test_needs_copy_error(self, device):
+        with self.assertRaisesRegex(ValueError, r"cannot move .* tensor from .*"):
+            self._test_from_dlpack(device, out_device="cpu", copy=False)
+
 
 instantiate_device_type_tests(TestTorchDlPack, globals())
 

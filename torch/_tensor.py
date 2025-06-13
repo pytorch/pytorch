@@ -1675,7 +1675,14 @@ class Tensor(torch._C.TensorBase):
 
     __torch_dispatch__ = _C._disabled_torch_dispatch_impl
 
-    def __dlpack__(self, *, stream=None, max_version=None):
+    def __dlpack__(
+        self,
+        *,
+        stream: Optional[Any] = None,
+        max_version: Optional[tuple[int, int]] = None,
+        dl_device: Optional[tuple[enum.IntEnum, int]] = None,
+        copy: Optional[bool] = None,
+    ):
         """
         Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
         of the current tensor to be exported to other libraries.
@@ -1686,22 +1693,31 @@ class Tensor(torch._C.TensorBase):
 
         Args:
             stream (integer or None): An optional Python integer representing a
-            pointer to a CUDA stream. The current stream is synchronized with
-            this stream before the capsule is created, and since the capsule
-            shares its storage with the tensor this make it safe to access from
-            both streams.  If None or -1 is passed then no synchronization is performed.
-            If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
-            synchronization.
+                pointer to a CUDA stream. The current stream is synchronized with
+                this stream before the capsule is created, and since the capsule
+                shares its storage with the tensor this make it safe to access from
+                both streams.  If None or -1 is passed then no synchronization is performed.
+                If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
+                synchronization.
 
             max_version (tuple[int, int] or None): An optional Python tuple with
-            2 integers, representing the maximum version the caller supports. If
-            None (default), PyTorch will fallback to DLPack 0.8.
+                2 integers, representing the maximum version the caller supports. If
+                None (default), PyTorch will fallback to DLPack 0.8.
+
+            dl_device (tuple[DLDeviceType, int] or None): An optional tuple specifying
+                in which device the exported DLPack capsule should be on. If None (default),
+                the exported DLPack capsule will be on the same device as ``self``.
+
+            copy (bool or None): An optional boolean indicating whether or not to copy
+                ``self``. If None, PyTorch will copy only if necessary.
         """
         if has_torch_function_unary(self):
             args = (self,)
             kwargs = {
                 "stream": stream,
                 "max_version": max_version,
+                "dl_device": dl_device,
+                "copy": copy,
             }
             return handle_torch_function(Tensor.__dlpack__, (self,), *args, **kwargs)
 
@@ -1779,9 +1795,9 @@ class Tensor(torch._C.TensorBase):
 
         if max_version is None or max_version[0] < 1:
             # Fallback to the old, unversioned variant.
-            return torch.to_dlpack(self)
+            return _C._to_dlpack(self, dl_device=dl_device, copy=copy)
 
-        return _C._to_dlpack_versioned(self)
+        return _C._to_dlpack_versioned(self, dl_device=dl_device, copy=copy)
 
     def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):
