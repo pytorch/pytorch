@@ -735,7 +735,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
 
-    def test_user_overidden_method_unsupported(self):
+    def test_user_overridden_method_unsupported(self):
         class LocalSubclass(torch.Tensor):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -755,7 +755,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
 
-    def test_user_overidden_attr_unsupported(self):
+    def test_user_overridden_attr_unsupported(self):
         class LocalSubclass(torch.Tensor):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -769,12 +769,12 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.ndim
 
-        msg = "`torch.compile` only support tracing certain types of overriden tensor subclass attributes"
+        msg = "`torch.compile` only support tracing certain types of overridden tensor subclass attributes"
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
-    def test_user_overidden_property_unsupported(self):
+    def test_user_overridden_property_unsupported(self):
         class LocalSubclass(torch.Tensor):
             def __init__(self, *args, **kwargs) -> None:
                 self._ndim = 10
@@ -988,8 +988,8 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x0, x1)
         self.assertEqual(x0.tensor_shape, x1.tensor_shape)
 
-    def test_subclass_dont_invoke_torch_function_on_overriden_method(self):
-        # We shouldn't fire `__torch_function__` for overriden tensor methods.
+    def test_subclass_dont_invoke_torch_function_on_overridden_method(self):
+        # We shouldn't fire `__torch_function__` for overridden tensor methods.
         class MySubclass(torch.Tensor):
             def to(self, device):
                 return self * len(device)
@@ -1011,10 +1011,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
 
-    def test_subclass_dont_invoke_torch_function_on_overriden_attr(self):
+    def test_subclass_dont_invoke_torch_function_on_overridden_attr(self):
         from types import MethodWrapperType
 
-        # We shouldn't fire `__torch_function__` for overriden tensor attrs.
+        # We shouldn't fire `__torch_function__` for overridden tensor attrs.
         class MySubclass(torch.Tensor):
             def ndim(self):
                 return 42
@@ -1204,7 +1204,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     def test_nontraceable_tensor_subclass(self):
         # This will error if Dynamo tries to wrap it as a tensor variable,
         # because that involves calling certain methods to inspect the tensor
-        # property, which will blow up in the overriden `__torch_function__`.
+        # property, which will blow up in the overridden `__torch_function__`.
         class MySubclass(torch.Tensor):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
