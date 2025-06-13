@@ -329,7 +329,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
 
     ndim = cat_node.meta["example_value"].dim()
 
-    def is_empty_tensor(x):
+    def is_empty_tensor(x) -> bool:
         # special case where torch.cat supports cat'ing with an empty tensor
         x_shape = x.meta["example_value"].shape
         return len(x_shape) == 1 and guard_size_oblivious(x_shape[0] == 0)

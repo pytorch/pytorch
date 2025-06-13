@@ -2219,7 +2219,7 @@ class CppKernel(Kernel):
                     stack.enter_context(code.indent())
 
             def gen_kernel(_loop_nest: LoopNest):
-                def is_parallel_reduction():
+                def is_parallel_reduction() -> bool:
                     assert _loop_nest.loops
                     root = _loop_nest.loops[par_depth.start_depth]
                     return root.is_reduction and root.parallel
@@ -3812,7 +3812,7 @@ class CppKernelProxy(CppKernel):
             DataTypePropagation.propagate_scheduler_node(_node)
 
     # Check if all the nodes of a given fx graph can support BF16/FP16
-    def is_lowp_fp_scheduler(self, scheduler_node: SchedulerNode):
+    def is_lowp_fp_scheduler(self, scheduler_node: SchedulerNode) -> bool:
         if not isinstance(scheduler_node._body, LoopBody):
             return True
         # Propagate the dtype to check if all the fx node is bf16/fp16
@@ -3850,12 +3850,12 @@ class CppKernelProxy(CppKernel):
                 else:
                     return None
 
-            def is_lowp_fp_source(node: torch.fx.Node, dt: torch.dtype):
+            def is_lowp_fp_source(node: torch.fx.Node, dt: torch.dtype) -> bool:
                 """Check if the given node produces output with expected low precision floating point data type."""
                 assert dt in DTYPE_LOWP_FP
                 return get_output_dtype(node) == dt
 
-            def is_lowp_fp_sink(node: torch.fx.Node, dt: torch.dtype):
+            def is_lowp_fp_sink(node: torch.fx.Node, dt: torch.dtype) -> bool:
                 """Check if the given node accept input with expected low precision floating point data type."""
                 assert dt in DTYPE_LOWP_FP
                 if input_dtype := get_input_dtype(node):
@@ -3866,7 +3866,9 @@ class CppKernelProxy(CppKernel):
                 else:
                     return False
 
-            def is_lowp_fp_source_no_promote(node: torch.fx.Node, dt: torch.dtype):
+            def is_lowp_fp_source_no_promote(
+                node: torch.fx.Node, dt: torch.dtype
+            ) -> bool:
                 """Check if the node is a lowp fp sources which are all directly fed to ops that accepts lowp fp input
                 thus no need to promote to float
                 """
@@ -4919,7 +4921,7 @@ class CppScheduling(BaseScheduling):
                             get_call_ranges(scheduler_node)
                         )
 
-                        def is_all_write_read_contiguous():
+                        def is_all_write_read_contiguous() -> bool:
                             contiguous_index_expr = 0
                             stride = 1
                             for var, range in reversed(
@@ -4931,7 +4933,7 @@ class CppScheduling(BaseScheduling):
                                 scheduler_buffer.get_name()
                             )
 
-                            def is_contiguous_index(x):
+                            def is_contiguous_index(x) -> bool:
                                 return x == contiguous_index_expr
 
                             return is_contiguous_index(write_index_expr) and all(

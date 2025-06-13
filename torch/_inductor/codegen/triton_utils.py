@@ -143,7 +143,7 @@ def signature_to_meta(
     }
 
 
-def is_unaligned_buffer(arg: TensorArg):
+def is_unaligned_buffer(arg: TensorArg) -> bool:
     buf_name = arg.buffer
     if buf_name in V.graph.unaligned_buffers:
         return True

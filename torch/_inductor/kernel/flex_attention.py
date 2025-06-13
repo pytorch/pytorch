@@ -1350,7 +1350,7 @@ def lower_cpu(
     return (res,)
 
 
-def is_power_of_2(n):
+def is_power_of_2(n) -> bool:
     return n != 0 and ((n & (n - 1)) == 0)
 
 
