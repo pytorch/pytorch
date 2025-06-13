@@ -2243,6 +2243,12 @@ class SubgraphTracer(fx.Tracer):
         # Only safe if we know for sure that *NOT* replaying these side-effects during
         # backward recomputation of the checkpoint region doesn't affect its correctness.
         self.allow_side_effects_under_checkpoint = False
+        # True if we want to allow side-effects (doesn't throw error on their existence)
+        # during this tracer's tracing. Unlike the above flag, this is not specific
+        # to torch.utils.checkpoint. You can flip this on by calling your function through
+        # `torch._dynamo.utils.allow_side_effects(fn, *args, **kwargs)`. Note: Side-effects
+        # are allowed if this flag OR the above flag is True.
+        self.allow_side_effects = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
         self.is_reconstructing_generator = False
