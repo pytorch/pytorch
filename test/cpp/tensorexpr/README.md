@@ -41,7 +41,7 @@ have to edit it every time you add a test. Unfortunately, this means that in
 order to get the build to pick up your new test file, you need to re-run
 cmake:
 ```
-python setup.py build --cmake
+python -m pip install -e . -v --no-build-isolation -C--build-option=--cmake
 ```
 
 ## How do I run the tests?

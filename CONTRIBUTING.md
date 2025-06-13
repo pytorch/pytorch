@@ -88,7 +88,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
 * If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
 
-* When installing with `python -m pip install -e . -v --no-build-isolation` (in contrast to `python setup.py install`) Python runtime will use
+* When installing with `python -m pip install -e . -v --no-build-isolation` (in contrast to `python -m pip install . -v --no-build-isolation`) Python runtime will use
   the current local source-tree when importing `torch` package. (This is done by creating [`.egg-link`](https://wiki.python.org/moin/PythonPackagingTerminology#egg-link) file in `site-packages` folder)
   This way you do not need to repeatedly install after modifying Python files (`.py`).
   However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or
