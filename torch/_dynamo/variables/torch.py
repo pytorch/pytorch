@@ -408,14 +408,18 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 }
             elif len(args) == 1:
                 assert len(kwargs) == 0 or (
-                    len(kwargs) == 1 and kwargs.keys() == {"backends"}
+                    len(kwargs) == 1 and kwargs.keys() == {"set_priority"}
                 )
             else:
                 assert len(kwargs) == 0
 
             backends = args[0] if len(args) > 0 else kwargs["backends"]
             set_priority = (
-                args[1] if len(args) > 1 else kwargs.get("set_priority", False)
+                args[1]
+                if len(args) > 1
+                else kwargs["set_priority"]
+                if "set_priority" in kwargs
+                else False
             )
 
             return SDPAKernelVariable.create(
