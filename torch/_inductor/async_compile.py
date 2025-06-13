@@ -458,7 +458,8 @@ class AsyncCompile:
 
         def task():
             if aot_compile:
-                _ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+                output_path, *_ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+                ROCmCodeCache.aot_kernels_o.append(output_path)
             if config.rocm.generate_test_runner:
                 _ = ROCmCodeCache.compile(source_code, dst_file_ext="exe")
             return ROCmCodeCache.load(source_code, dst_file_ext)[0]

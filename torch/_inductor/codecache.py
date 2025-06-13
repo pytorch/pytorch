@@ -156,7 +156,10 @@ log = logging.getLogger(__name__)
 
 
 def use_re_build() -> bool:
-    if config.is_fbcode():
+    """
+    Use for CUTLASS compilation only right now.
+    """
+    if config.is_fbcode() and not cuda_env.nvcc_exist():
         from triton.fb.re_build_helper import should_build_locally
 
         return not should_build_locally()
@@ -2080,17 +2083,12 @@ class AotCodeCompiler:
                     f.write(json.dumps(qual_name_to_id))
                 generated_files.append(constants_config_json)
 
-            gpu_kernels_o = []
-            if torch.version.hip:
-                gpu_kernels_o.extend(
-                    entry.output_path
-                    for entry in ROCmCodeCache.cache.values()
-                    if entry.output_path.endswith(".o")
-                )
-            else:
-                gpu_kernels_o.extend(CUDACodeCache.aot_kernels_o)
-                # clear the list of aot kernels after each linking
-                CUDACodeCache.aot_kernels_o.clear()
+            gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
+                ROCmCodeCache() if torch.version.hip else CUDACodeCache()
+            )
+            gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
+            # clear the list of aot kernels after each linking
+            gpu_codecache.aot_kernels_o.clear()
 
             if gpu_kernels_o:
                 assert not config.aot_inductor.emit_multi_arch_kernel, (
@@ -3633,10 +3631,12 @@ class CUDACodeCache:
 
     cache: dict[str, CacheEntry] = {}
     aot_kernels_o: list[str] = []
-    cache_clear = staticmethod(
-        lambda: (CUDACodeCache.cache.clear(), CUDACodeCache.aot_kernels_o.clear())
-    )
     _SOURCE_CODE_SUFFIX = "cu"
+
+    @staticmethod
+    def cache_clear() -> None:
+        CUDACodeCache.cache.clear()
+        CUDACodeCache.aot_kernels_o.clear()
 
     @classmethod
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
@@ -3789,9 +3789,14 @@ class ROCmCodeCache:
         output_path: str
 
     cache: dict[str, CacheEntry] = {}
-    cache_clear = staticmethod(cache.clear)
+    aot_kernels_o: list[str] = []
     _SOURCE_CODE_SUFFIX = "cpp"
     _logged_compiler_version = False
+
+    @staticmethod
+    def cache_clear() -> None:
+        ROCmCodeCache.cache.clear()
+        ROCmCodeCache.aot_kernels_o.clear()
 
     @classmethod
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
