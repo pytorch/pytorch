@@ -107,20 +107,19 @@ TORCH_IMPL_FUNC(topk_out_mps)
       MPSDataType dataType = getMPSDataType(self);
       bool is_macos_14_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
       if (is_macos_14_0_or_newer) {
+        MPSGraphTensor* constMinusOne;
         if (!largest) {
+          constMinusOne = [mpsGraph constantWithScalar:-1.0 dataType:dataType];
           // Get bottom k computation through multiplication with -1.0
           castInputTensor = [mpsGraph multiplicationWithPrimaryTensor:castInputTensor
-                                                      secondaryTensor:[mpsGraph constantWithScalar:-1.0
-                                                                                          dataType:dataType]
+                                                      secondaryTensor:constMinusOne
                                                                  name:nil];
         }
         auto topk = [mpsGraph topKWithSourceTensor:castInputTensor axis:(NSUInteger)dim k:k name:nil];
         auto outputValues = topk[0];
         if (!largest) {
           // invert the multiplication with -1.0
-          outputValues = [mpsGraph multiplicationWithPrimaryTensor:outputValues
-                                                   secondaryTensor:[mpsGraph constantWithScalar:-1.0 dataType:dataType]
-                                                              name:nil];
+          outputValues = [mpsGraph multiplicationWithPrimaryTensor:outputValues secondaryTensor:constMinusOne name:nil];
         }
         newCachedGraph->valuesTensor = outputValues;
         newCachedGraph->indicesTensor = topk[1];
