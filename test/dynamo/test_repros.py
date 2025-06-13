@@ -1280,7 +1280,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertExpectedInline(cnt.op_count, """4""")
         else:
             self.assertExpectedInline(cnt.frame_count, """2""")
-            self.assertExpectedInline(cnt.op_count, """20""")
+            self.assertExpectedInline(cnt.op_count, """19""")
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -4994,7 +4994,10 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = opt_fn(x_weak, y)
         self.assertEqual(ref, res)
 
-    # NOTE these tests demonstrate aspects of weakref callback semantics in Dynamo
+    # The programming model around (weak)references is that we DO NOT guarantee
+    # any behavior that depends on deallocation order. We do guarantee "eventual consistency",
+    # that is, after the torch.compile'd function is finished running (including any graph breaks),
+    # refcount semantics will match eager's.
     def test_weakref_callback(self):
         called1 = False
 
@@ -5040,7 +5043,10 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             raise RuntimeError("callback3 should not be called")
 
         # The callback will NOT be called if both the weakref and the referrent are
-        # deleted in the same compiled region (graph breaks make things tricky)
+        # deleted in the same compiled region (graph breaks act like a "memory sync"
+        # and thus make things tricky - the callback is actually expected to be called).
+        # This test does NOT mean that this behavior is part of the (weak)ref programming
+        # model, but rather reminds us that this is an intentionally allowed weakref-Dynamo behavior.
         @torch.compile(backend="eager")
         def hn(x):
             y = x + 1
@@ -6899,12 +6905,12 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = torch.compile(f, backend="aot_eager")()
         self.assertEqual(ref, res)
 
-    def test_delete_local(self):
+    def test_delete_local_error(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             y = x + 1
             del y
-            z = y + 1
+            z = y + 1  # noqa: F821
             return z
 
         with self.assertRaises(torch._dynamo.exc.Unsupported):
