@@ -7,7 +7,6 @@ from collections.abc import Sequence
 from typing import Optional
 
 import torch
-import torch.nn as nn
 from torch._dynamo.utils import counters, detect_fake_mode
 from torch._logging import trace_structured
 from torch.fx.experimental.optimization import (
@@ -407,11 +406,11 @@ def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
     class IdentityRemover(torch.fx.Transformer):
         def call_module(self, target, args, kwargs):
-            if isinstance(self.submodules[target], nn.Identity):
+            assert isinstance(target, str)
+            if isinstance(self.submodules[target], torch.nn.Identity):
                 assert len(args) == 1
                 return args[0]
-            else:
-                return super().call_module(target, args, kwargs)
+            return super().call_module(target, args, kwargs)
 
     return IdentityRemover(gm).transform()
 

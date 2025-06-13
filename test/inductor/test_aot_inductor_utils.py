@@ -5,7 +5,8 @@ import os
 import shutil
 import tempfile
 import types
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._export
@@ -19,6 +20,10 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests
 from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.utils import _pytree as pytree
+
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
 class WrapperModule(torch.nn.Module):
@@ -142,7 +147,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def compile(
         model: Union[torch.nn.Module, types.FunctionType],
-        example_inputs: list[torch.Tensor],
+        example_inputs: tuple[torch.Tensor, ...],
         inductor_configs: Optional[dict[str, Any]] = None,
         dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
@@ -163,7 +168,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def run(
         model: Union[torch.nn.Module, types.FunctionType],
-        example_inputs: list[torch.Tensor],
+        example_inputs: tuple[torch.Tensor, ...],
         inductor_configs: Optional[dict[str, Any]] = None,
         dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
@@ -179,7 +184,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def run_multiple(
         model: Union[torch.nn.Module, types.FunctionType],
-        list_example_inputs: list[list[torch.Tensor]],
+        list_example_inputs: list[tuple[torch.Tensor, ...]],
         inductor_configs: Optional[dict[str, Any]] = None,
         dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
@@ -299,6 +304,20 @@ def code_check_count(
             target_count,
             exactly=True,
         ).run(src_code)
+
+
+def disable_constant_renaming(func: Callable[_P, _T]) -> Callable[_P, _T]:
+    """Disable configuration parameters that can result in constants being folded or
+    renamed, or in additional kernel fusions post-folding.  This is useful when specific
+    constants are being queried for."""
+
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        with config.patch(
+            {"freezing": False, "aot_inductor.use_runtime_constant_folding": False}
+        ):
+            return func(*args, **kwargs)
+
+    return wrapper
 
 
 if __name__ == "__main__":
