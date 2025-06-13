@@ -11,7 +11,6 @@ import torch.fx as fx
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten
 
 
@@ -172,46 +171,23 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     return new_graph
 
 
-def raise_getitems(gm: fx.GraphModule):
-    def _reorder_fx_graph(
-        gm: fx.GraphModule,
-        new_order: list[fx.Node]
-    ) -> fx.GraphModule:
-        """Reorder the nodes in the FX graph to match the order in new_order."""
-        assert len(new_order) == len(gm.graph.nodes)
-
-        new_graph = fx.Graph()
-        env: dict[fx.Node, fx.Node] = {}
-
-        for node in new_order:
-            env[node] = new_graph.node_copy(node, lambda x: env[x])
-
-        new_gm = fx.GraphModule(gm, new_graph)
-        return new_gm
-
+def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
     def _is_getitem(node: fx.Node) -> bool:
         return node.target is operator.getitem
 
-    new_order: list[fx.Node] = []
-    nodes_raised: OrderedSet[fx.Node] = OrderedSet()
-    for node in gm.graph.nodes:
-        if any(_is_getitem(user) for user in node.users):
-            # for nodes that are the source of getitems, we want to have
-            # all of their `getitem` users to immediately follow them
-            assert all(_is_getitem(user) for user in node.users)
-            new_order.append(node)
-            for user in node.users:
-                new_order.append(user)
-                nodes_raised.add(user)
-        elif _is_getitem(node):
-            # for getitems, they should already be added to the new_order
-            assert node in nodes_raised
-        else:
-            # for the rest of the nodes, simply add them to the new_order
-            new_order.append(node)
+    # Pre-create a list of nodes to iterate over, as modifying the node order
+    # during the loop can lead to infinite loops if not handled properly.
+    nodes = list(gm.graph.nodes)
 
-    new_gm = _reorder_fx_graph(gm, new_order)
-    return new_gm
+    # loop through all nodes in the graph and raise getitems to the parent node
+    for node in nodes:
+        if _is_getitem(node):
+            assert len(node.all_input_nodes) == 1
+            parent = node.all_input_nodes[0]
+            parent.append(node)
+
+    gm.recompile()
+    return gm
 
 
 def strip_overloads(gm):
