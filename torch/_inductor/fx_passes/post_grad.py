@@ -1569,6 +1569,7 @@ class ConstructorMoverPass:
             and node.target.namespace in ("prims", "aten")
         ):
             return True
+
         if is_index_put_and_requires_h2d_sync_for_gpu_value(node):
             return True
 
@@ -1648,7 +1649,24 @@ class ConstructorMoverPass:
                     gpu_node = graph.call_function(
                         torch.ops.prims.device_put.default, (node, target_device)
                     )
-                    node.replace_all_uses_with(gpu_node, lambda x: x != gpu_node)
+                node.replace_all_uses_with(
+                    gpu_node,
+                    lambda x: x != gpu_node
+                    and x.target != torch.ops.aten.copy_.default,
+                )
+
+                # noop elimination if there are other device_put for gpu_node to
+                # target device. Alternatively, we could just move the other device_put
+                # earlier in the graph, but that is not supported in fx graph yet.
+                noop_device_puts = [
+                    user
+                    for user in gpu_node.users
+                    if user.target == torch.ops.prims.device_put.default
+                    and user.args[1] == target_device
+                ]
+                for noop in noop_device_puts:
+                    noop.replace_all_uses_with(gpu_node)
+                    graph.erase_node(noop)
             else:
                 kwargs = node.kwargs.copy()
                 kwargs["device"] = target_device
@@ -1705,7 +1723,10 @@ class ConstructorMoverPass:
                 # tensor. we can convert its cpu input to gpu without making further changes
                 if self.allow_cpu_device(user) and self.is_on_target_device(user):
                     del cpu_indeg[user]
-                elif self.all_inputs_are_cpu_scalar_or_on_target_device(user):
+                elif (
+                    self.allow_inputs
+                    and self.all_inputs_are_cpu_scalar_or_on_target_device(user)
+                ):
                     # this node takes only cpu scalar tensors or gpu tensors as inputs
                     # and outputs a gpu tensor. we can convert its cpu scalar inputs to gpu
                     # without making further changes
