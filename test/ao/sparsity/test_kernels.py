@@ -19,14 +19,16 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_x86,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 # TODO: Once more test files are created, move the contents to a ao folder.
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+logger = logging.getLogger(__name__)
 
 
 class TestQuantizedSparseKernels(TestCase):
@@ -78,10 +80,10 @@ class TestQuantizedSparseKernels(TestCase):
 
             for use_channelwise, dynamic_mode in product([True, False], [True, False]):
                 if qengine_is_fbgemm() and dynamic_mode:
-                    logging.info("dynamic sparse qlinear is only available in qnnpack")
+                    logger.info("dynamic sparse qlinear is only available in qnnpack")
                     continue
                 if qengine_is_qnnpack() and not dynamic_mode:
-                    logging.info("static sparse qlinear is only available in fbgemm")
+                    logger.info("static sparse qlinear is only available in fbgemm")
                     continue
                 if use_channelwise:
                     W_q = torch.quantize_per_channel(
@@ -325,4 +327,4 @@ class TestQuantizedSparseLayers(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise_on_run_directly("test/test_ao_sparsity.py")

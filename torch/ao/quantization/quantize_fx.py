@@ -1,4 +1,5 @@
 import copy
+import typing_extensions
 import warnings
 from typing import Any, Optional, Union
 
@@ -18,6 +19,7 @@ from .fx.utils import (  # noqa: F401
     get_skipped_module_name_and_classes,
 )
 from .qconfig_mapping import QConfigMapping
+from .utils import DEPRECATION_WARNING
 
 
 def attach_preserved_attrs_to_model(
@@ -82,9 +84,7 @@ def _fuse_fx(
         model: GraphModule object from symbolic tracing (torch.fx.symbolic_trace)
     """
     _check_is_graph_module(model)
-    return fuse(
-        model, is_qat, fuse_custom_config, backend_config
-    )  # type: ignore[operator]
+    return fuse(model, is_qat, fuse_custom_config, backend_config)  # type: ignore[operator]
 
 
 def _prepare_fx(
@@ -217,6 +217,7 @@ def fuse_fx(
     Example::
 
         from torch.ao.quantization import fuse_fx
+
         m = Model().eval()
         m = fuse_fx(m)
 
@@ -249,6 +250,7 @@ def fuse_fx(
     return graph_module
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def prepare_fx(
     model: torch.nn.Module,
     qconfig_mapping: Union[QConfigMapping, dict[str, Any]],
@@ -400,6 +402,7 @@ def prepare_fx(
     )
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def prepare_qat_fx(
     model: torch.nn.Module,
     qconfig_mapping: Union[QConfigMapping, dict[str, Any]],
@@ -426,13 +429,16 @@ def prepare_qat_fx(
         from torch.ao.quantization import get_default_qat_qconfig_mapping
         from torch.ao.quantization.quantize_fx import prepare_qat_fx
 
+
         class Submodule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
+
             def forward(self, x):
                 x = self.linear(x)
                 return x
+
 
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -445,16 +451,19 @@ def prepare_qat_fx(
                 x = self.sub(x) + x
                 return x
 
+
         # initialize a floating point model
         float_model = M().train()
         # (optional, but preferred) load the weights from pretrained model
         # float_model.load_weights(...)
+
 
         # define the training loop for quantization aware training
         def train_loop(model, train_data):
             model.train()
             for image, target in data_loader:
                 ...
+
 
         # qconfig is the configuration for how we insert observers for a particular
         # operator
@@ -470,7 +479,7 @@ def prepare_qat_fx(
         # in the model through qconfig_mapping
         # the following call will get the qconfig_mapping that works best for models
         # that target "fbgemm" backend
-        qconfig_mapping = get_default_qat_qconfig("fbgemm")
+        qconfig_mapping = get_default_qat_qconfig_mapping("fbgemm")
 
         # We can customize qconfig_mapping in different ways, please take a look at
         # the docstring for :func:`~torch.ao.quantization.prepare_fx` for different ways
@@ -554,6 +563,7 @@ def _convert_fx(
     return quantized
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def convert_fx(
     graph_module: GraphModule,
     convert_custom_config: Union[ConvertCustomConfig, dict[str, Any], None] = None,

@@ -6,7 +6,6 @@ import os
 import sys
 import tempfile
 import unittest
-from typing import Union
 from unittest.mock import patch
 
 import numpy as np
@@ -16,18 +15,7 @@ import torch
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.serialization import safe_globals
-from torch.testing._internal.common_utils import (
-    IS_ARM64,
-    skipIfTorchDynamo,
-    TemporaryFileName,
-    TEST_CUDA,
-    TEST_XPU,
-)
-from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-
-
-TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
-TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
+from torch.testing._internal.common_utils import TemporaryFileName
 
 
 def generate_faked_module():
@@ -37,40 +25,9 @@ def generate_faked_module():
     return _OpenRegMod()
 
 
-def generate_faked_module_methods():
-    def device_count() -> int:
-        return 1
-
-    def get_rng_state(
-        device: Union[int, str, torch.device] = "openreg",
-    ) -> torch.Tensor:
-        # create a tensor using our custom device object.
-        return torch.empty(4, 4, device="openreg")
-
-    def set_rng_state(
-        new_state: torch.Tensor, device: Union[int, str, torch.device] = "openreg"
-    ) -> None:
-        pass
-
-    def is_available():
-        return True
-
-    def current_device():
-        return 0
-
-    torch.openreg.device_count = device_count
-    torch.openreg.get_rng_state = get_rng_state
-    torch.openreg.set_rng_state = set_rng_state
-    torch.openreg.is_available = is_available
-    torch.openreg.current_device = current_device
-    torch.openreg._lazy_init = lambda: None
-    torch.openreg.is_initialized = lambda: True
-
-
-@unittest.skipIf(IS_ARM64, "Does not work on arm")
-@unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
-@torch.testing._internal.common_utils.markDynamoStrictTest
-class TestCppExtensionOpenRgistration(common.TestCase):
+@unittest.skipIf(common.TEST_XPU, "XPU does not support cppextension currently")
+@common.markDynamoStrictTest
+class TestCppExtensionOpenRegistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions."""
 
     module = None
@@ -93,7 +50,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+        common.remove_cpp_extensions_build_root()
 
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
@@ -106,7 +63,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         )
 
         torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
-        generate_faked_module_methods()
 
     def test_base_device_registration(self):
         self.assertFalse(self.module.custom_add_called())
@@ -151,7 +107,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         # check whether torch.openreg have been registered correctly
         self.assertTrue(
-            torch.utils.backend_registration._get_custom_mod_func("device_count")() == 1
+            torch.utils.backend_registration._get_custom_mod_func("device_count")() == 2
         )
         with self.assertRaisesRegex(RuntimeError, "Try to call torch.openreg"):
             torch.utils.backend_registration._get_custom_mod_func("func_name_")
@@ -321,7 +277,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         sys.version_info >= (3, 13),
         "Error: Please register PrivateUse1HooksInterface by `RegisterPrivateUse1HooksInterface` first.",
     )
-    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
+    @common.skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_open_device_storage_pin_memory(self):
         # Check if the pin_memory is functioning properly on custom device
         cpu_tensor = torch.empty(3)
@@ -459,7 +415,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     # Not an open registration test - this file is just very convenient
     # for testing torch.compile on custom C++ operators
-    @skipIfTorchDynamo("Temporary disabled due to torch._ops.OpOverloadPacket")
+    @common.skipIfTorchDynamo("Temporary disabled due to torch._ops.OpOverloadPacket")
     def test_compile_autograd_function_aliasing(self):
         x_ref = torch.randn(4, requires_grad=True)
         out_ref = torch.ops._test_funcs.custom_autograd_fn_aliasing(x_ref)
@@ -520,7 +476,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # call _fused_adamw_ with undefined tensor.
         self.module.fallback_with_undefined_tensor()
 
-    @skipIfTorchDynamo()
+    @common.skipIfTorchDynamo()
     @unittest.skipIf(
         np.__version__ < "1.25",
         "versions < 1.25 serialize dtypes differently from how it's serialized in data_legacy_numpy",
