@@ -9,13 +9,13 @@ from unittest.mock import MagicMock
 
 import torch
 from torch.distributed.checkpoint import DefaultLoadPlanner
-from torch.distributed.checkpoint._hf_storage import (
-    _HuggingFaceStorageReader,
-    _HuggingFaceStorageWriter,
-    _metadata_fn,
-)
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.filesystem import _StorageInfo, FileSystem
+from torch.distributed.checkpoint.hf_storage import (
+    _metadata_fn,
+    HuggingFaceStorageReader,
+    HuggingFaceStorageWriter,
+)
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
@@ -42,7 +42,7 @@ class TestHfStorage(TestCase):
         sys.modules["safetensors.torch"] = mock_module
 
         with tempfile.TemporaryDirectory() as path:
-            writer = _HuggingFaceStorageWriter(
+            writer = HuggingFaceStorageWriter(
                 path=path,
                 fqn_to_index_mapping={"tensor_0": 1, "tensor_1": 2},
             )
@@ -103,7 +103,7 @@ class TestHfStorage(TestCase):
         sys.modules["safetensors.torch"] = mock_module
 
         with tempfile.TemporaryDirectory() as path:
-            writer = _HuggingFaceStorageWriter(
+            writer = HuggingFaceStorageWriter(
                 path=path,
                 save_sharded=True,
             )
@@ -176,7 +176,7 @@ class TestHfStorage(TestCase):
 
         with tempfile.TemporaryDirectory() as path:
             # Create the reader
-            reader = _HuggingFaceStorageReader(path=path)
+            reader = HuggingFaceStorageReader(path=path)
             reader.fs = FileSystem()
 
             # Create test file
@@ -269,7 +269,7 @@ class TestHfStorage(TestCase):
                 ),
             ]
 
-            writer = _HuggingFaceStorageWriter(
+            writer = HuggingFaceStorageWriter(
                 path=path,
             )
             writer.fs = FileSystem()
@@ -297,7 +297,7 @@ class TestHfStorage(TestCase):
 
     def test_read_metadata_hf(self):
         with tempfile.TemporaryDirectory() as path:
-            reader = _HuggingFaceStorageReader(path=path)
+            reader = HuggingFaceStorageReader(path=path)
 
             key = "tensor_0"
             file_name = "test.safetensors"
