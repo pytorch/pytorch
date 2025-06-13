@@ -100,11 +100,12 @@ Nones are essentially a special "wildcard" name.
 It returns the more *specific* of the two names, if they match. If the names do not match,
 then it errors.
 
-```{note}
-    In practice, when working with named tensors, one should avoid having unnamed
-    dimensions because their handling can be complicated. It is recommended to lift
-    all unnamed dimensions to be named dimensions by using {meth}`~Tensor.refine_names`.
-```
+Note
+
+In practice, when working with named tensors, one should avoid having unnamed
+dimensions because their handling can be complicated. It is recommended to lift
+all unnamed dimensions to be named dimensions by using {meth}`~Tensor.refine_names`.
+
 
 ### Basic name inference rules
 

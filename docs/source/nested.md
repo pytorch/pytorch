@@ -467,7 +467,6 @@ NJT support may be incomplete.
 
 (contributions)=
 ## Contributions
-+++++++++++++
 
 If you'd like to contribute to nested tensor development, one of the most impactful ways to do
 so is to add nested tensor support for a currently-unsupported PyTorch op. This process generally
