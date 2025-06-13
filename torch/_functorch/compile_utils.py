@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 
 
+import operator
 from typing import Callable
 
 import sympy
@@ -168,6 +169,25 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
                 token_map[hash_val] = token
 
     return new_graph
+
+
+def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
+    def _is_getitem(node: fx.Node) -> bool:
+        return node.target is operator.getitem
+
+    # Pre-create a list of nodes to iterate over, as modifying the node order
+    # during the loop can lead to infinite loops if not handled properly.
+    nodes = list(gm.graph.nodes)
+
+    # loop through all nodes in the graph and raise getitems to the parent node
+    for node in nodes:
+        if any(_is_getitem(user) for user in node.users):
+            for user in reversed(node.users):
+                assert _is_getitem(user)
+                node.append(user)
+
+    gm.recompile()
+    return gm
 
 
 def strip_overloads(gm):
