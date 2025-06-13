@@ -1506,6 +1506,15 @@ class Reduction(Loops):
             reduction_numel,
             input_node,
         )
+
+        def _maybe_increase_split(split: int) -> int:
+            if split > 1 and config.min_num_split > 1:
+                return max(split, config.min_num_split)
+            else:
+                return split
+
+        split = _maybe_increase_split(split)
+
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
         # reuse the passed hint if available

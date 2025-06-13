@@ -13539,6 +13539,30 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ignore_empty_lines=True,
         )
 
+    def test_split_reduction_dynamic_shape(self):
+        from torch._dynamo.decorators import mark_dynamic
+
+        def f(x):
+            # outer reduction
+            return x.sum(dim=0)
+
+        N = 512
+        x_small = torch.randn(4096, N, device=self.device)
+
+        mark_dynamic(x_small, 0)
+        expect = f(x_small)
+        opt_f = torch.compile(f, dynamic=True)
+        actual = opt_f(x_small)
+        self.assertTrue(torch.allclose(expect, actual, atol=1e-3, rtol=1e-3))
+
+        if DO_PERF_TEST:
+            from triton.testing import do_bench
+
+            # benchmark for a much larger input
+            x_large = torch.randn(4096 * 1000, N, device=self.device)
+            ms = do_bench(lambda: opt_f(x_large))
+            print(f"{ms=:.3f}")
+
     @expectedFailureCodegenDynamic
     def test_special_polygamma(self):
         fn = torch.special.polygamma
