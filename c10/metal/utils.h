@@ -285,7 +285,8 @@ template <
         is_scalar_integral_v<T> && is_scalar_integral_v<U>,
         bool> = true>
 inline common_dtype<T, U> remainder(const T x, const U y) {
-  return x % y;
+  auto rc = x % y;
+  return (x ^ y) >= 0 ? rc : rc + y;
 }
 
 // Based on algorithm described in
