@@ -5391,6 +5391,32 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(bw_graph), (6, 3))
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_raise_getitems(self):
+        def f(x):
+            y = torch.split(x, x.size(0) // 2, dim=0)
+            a = y[0].sin()
+            b = y[1].cos()
+            return a + b
+
+        _, bw_graph = get_fw_bw_graph(f, [torch.randn(4, 4, requires_grad=True)])
+
+        self.assertExpectedInline(
+            bw_graph.code.strip(),
+            """\
+def forward(self, primals_1, tangents_1):
+    split = torch.ops.aten.split.Tensor(primals_1, 2);  primals_1 = None
+    getitem_1 = split[1]
+    getitem = split[0];  split = None
+    sin_1 = torch.ops.aten.sin.default(getitem_1);  getitem_1 = None
+    neg = torch.ops.aten.neg.default(sin_1);  sin_1 = None
+    mul = torch.ops.aten.mul.Tensor(tangents_1, neg);  neg = None
+    cos_1 = torch.ops.aten.cos.default(getitem);  getitem = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, cos_1);  tangents_1 = cos_1 = None
+    cat = torch.ops.aten.cat.default([mul_1, mul]);  mul_1 = mul = None
+    return (cat,)""",
+        )
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_save_shape(self):
         def f(x):
             s = x.sum(dim=1)
