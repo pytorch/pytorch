@@ -4704,7 +4704,7 @@ class TestQuantizedLinear(TestCase):
             dqt = dqt * scale_reshape
         return dqt
 
-    def _test_qlinear_fp8_pt2e_helper(
+    def _test_qlinear_fp8_helper(
         self,
         qlinear_op,
         post_op="none",
@@ -4815,46 +4815,46 @@ class TestQuantizedLinear(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
-    def test_qlinear_fp8_pt2e(self):
+    def test_qlinear_fp8(self):
         qlinear = torch.ops.onednn.qlinear_pointwise
-        self._test_qlinear_fp8_pt2e_helper(qlinear, "none")
+        self._test_qlinear_fp8_helper(qlinear, "none")
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
-    def test_qlinear_relu_fp8_pt2e(self):
+    def test_qlinear_relu_fp8(self):
         qlinear = torch.ops.onednn.qlinear_pointwise
-        self._test_qlinear_fp8_pt2e_helper(qlinear, "relu")
+        self._test_qlinear_fp8_helper(qlinear, "relu")
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
-    def test_qlinear_gelu_fp8_pt2e(self):
+    def test_qlinear_gelu_fp8(self):
         qlinear = torch.ops.onednn.qlinear_pointwise
         post_op_algorithms = ['none', 'tanh']
-        self._test_qlinear_fp8_pt2e_helper(qlinear, "gelu", post_op_algorithms=post_op_algorithms)
+        self._test_qlinear_fp8_helper(qlinear, "gelu", post_op_algorithms=post_op_algorithms)
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
-    def test_qlinear_sum_fp8_pt2e(self):
+    def test_qlinear_sum_fp8(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
-        self._test_qlinear_fp8_pt2e_helper(qlinear, "sum")
+        self._test_qlinear_fp8_helper(qlinear, "sum")
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
-    def test_qlinear_sum_relu_fp8_pt2e(self):
+    def test_qlinear_sum_relu_fp8(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
-        self._test_qlinear_fp8_pt2e_helper(qlinear, "sum_relu")
+        self._test_qlinear_fp8_helper(qlinear, "sum_relu")
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
-    def test_qlinear_add_fp8_pt2e(self):
+    def test_qlinear_add_fp8(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
-        self._test_qlinear_fp8_pt2e_helper(qlinear, "add")
+        self._test_qlinear_fp8_helper(qlinear, "add")
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
-    def test_qlinear_add_relu_fp8_pt2e(self):
+    def test_qlinear_add_relu_fp8(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
-        self._test_qlinear_fp8_pt2e_helper(qlinear, "add_relu")
+        self._test_qlinear_fp8_helper(qlinear, "add_relu")
 
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
