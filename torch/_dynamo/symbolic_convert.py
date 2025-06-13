@@ -44,7 +44,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, NoReturn, Optional, Union
+from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import torch
@@ -170,6 +170,9 @@ from .variables.user_defined import (
     UserDefinedObjectVariable,
 )
 
+
+if TYPE_CHECKING:
+    from .package import CompilePackage
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
@@ -344,7 +347,7 @@ class TensorifyState:
         return len(cls.force_specializations) == 0
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
 
@@ -1107,6 +1110,7 @@ class InstructionTranslatorBase(
     is_leaf_tracer: bool
     parent: Optional["InstructionTranslatorBase"]
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
+    package: Optional["CompilePackage"]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1573,6 +1577,9 @@ class InstructionTranslatorBase(
         else:
             value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
+
+        if self.package is not None:
+            self.package.add_import_source(alias, module_name)
         f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
@@ -3206,6 +3213,7 @@ class InstructionTranslatorBase(
         distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
         closure: Optional[tuple[types.CellType]] = None,
+        package: Optional["CompilePackage"] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -3273,6 +3281,8 @@ class InstructionTranslatorBase(
         self.parent = None
         self.debug_locals = []
 
+        self.package = package
+
         if sys.version_info >= (3, 10):
             from .resume_execution import (
                 CO_ASYNC_GENERATOR,
@@ -3333,6 +3343,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         speculation_log: SpeculationLog,
         exn_vt_stack: ExceptionStack,
         distributed_state: Optional[DistributedState],
+        package: Optional["CompilePackage"],
     ) -> None:
         _step_logger()(
             logging.INFO,
@@ -3350,6 +3361,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 global_scope=f_globals,
                 f_code=f_code,
                 torch_function_mode_stack=torch_function_mode_stack,
+                package=package,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -3367,6 +3379,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             speculation_log=speculation_log,
             exn_vt_stack=exn_vt_stack,
             distributed_state=distributed_state,
+            package=package,
         )
 
         self._throw_if_in_functorch()
@@ -3605,12 +3618,19 @@ class InstructionTranslator(InstructionTranslatorBase):
             # expose code object for debugging purposes
             self.output.install_global_unsafe(name, new_code)
             cg.make_function_with_closure(name, new_code, True, stack_len)
+            package_name = None
         else:
             # This is safe: we pre-generate a unique name
             self.output.install_global_unsafe(
                 name, types.FunctionType(new_code, self.f_globals, name)
             )
             cg.extend_output(cg.load_function_name(name, True, stack_len))
+            package_name = name
+
+        if self.package is not None:
+            self.package.add_resume_function(
+                new_code, self.f_globals["__name__"], package_name
+            )
 
         cg.extend_output([cg.create_load(k) for k in argnames])
         cg.extend_output(create_call_function(nargs, False))
@@ -4010,6 +4030,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             speculation_log=parent.speculation_log,
             exn_vt_stack=parent.exn_vt_stack,
             distributed_state=parent.distributed_state,
+            package=parent.package,
         )
         self.funcvar = funcvar
         self.parent = parent
