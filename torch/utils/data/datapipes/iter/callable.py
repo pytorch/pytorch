@@ -54,7 +54,8 @@ class MapperIterDataPipe(IterDataPipe[_T_co]):
         >>> def add_one(x):
         ...     return x + 1
         >>> dp = IterableWrapper(range(10))
-        >>> map_dp_1 = dp.map(add_one)  # Invocation via functional form is preferred
+        >>> # Invocation via functional form is preferred
+        ... map_dp_1 = dp.map(add_one)
         >>> list(map_dp_1)
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         >>> # We discourage the usage of `lambda` functions as they are not serializable with `pickle`
