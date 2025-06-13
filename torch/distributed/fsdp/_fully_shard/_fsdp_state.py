@@ -81,6 +81,9 @@ class FSDPState(_State):
         self._states_to_forward_prefetch: list[FSDPState] = []
         self._states_to_backward_prefetch: list[FSDPState] = []
         self._modules_to_run_forward: set[nn.Module] = set()
+        # ``False`` when user set reshard_after_forward
+        # through ``fully_shard`` or ``set_reshard_after_forward``
+        self._auto_reshard_after_forward: Optional[bool] = True
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -88,6 +91,7 @@ class FSDPState(_State):
         modules: tuple[nn.Module, ...],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
+        auto_reshard_after_forward: bool,
     ) -> None:
         for module in modules:
             _insert_module_state(module, self)
@@ -95,6 +99,7 @@ class FSDPState(_State):
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
+        self._auto_reshard_after_forward = auto_reshard_after_forward
         if len(modules) == 1:
             self._pre_forward_hook_handle = modules[0].register_forward_pre_hook(
                 self._pre_forward, prepend=True, with_kwargs=True
@@ -175,6 +180,10 @@ class FSDPState(_State):
                 state._is_root = False
             self._state_ctx.all_states.append(state)
             visited_states.add(state)
+        if self._fsdp_param_group and self._auto_reshard_after_forward:
+            # For the root, do not reshard after forward since for training,
+            # the parameters would be freed and all-gathered immediately
+            self._fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
         # Run parameter group lazy inits after initializing FQNs for improved

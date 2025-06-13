@@ -416,7 +416,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.code_hash: Optional[str] = None
 
         # define this in a closure to make cache local to object
-        @functools.lru_cache(None)
+        @functools.cache
         def simplify_indexing(index: sympy.Expr):
             index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
             for tree in self.range_trees:

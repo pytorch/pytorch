@@ -1,4 +1,6 @@
 import dataclasses
+import functools
+import logging
 import operator
 import textwrap
 from collections import Counter
@@ -19,9 +21,10 @@ from torch._inductor.utils import sympy_product
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
+from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv
 
-from .. import ir
+from .. import config, ir
 from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
 from .common import (
     CodegenSymbol,
@@ -58,6 +61,7 @@ from .wrapper import (
 
 
 aten = torch.ops.aten
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -508,10 +512,47 @@ class FxConverter:
         call_args = self._lookup_args(line.call_args)
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
-        config = tuner.compile_results[0].config
-        call_args, grid = tuner._interpret_args_grid(call_args, config)
+
+        # Optionally autotune the kernels.
+        # The FX backend currently only supports compile-time tuning.
+        kernel_name = tuner.fn.__name__
+        if config.triton.autotune_at_compile_time:
+            from triton.runtime import driver
+
+            log.info("Autotuning Triton kernel %s at compile time.", kernel_name)
+            device = driver.active.get_current_device()
+            stream = driver.active.get_current_stream(device)
+
+            def node_to_tuning_arg(arg: Any) -> Any:
+                """
+                Create real tensors for autotuning arguments, substituting size hints
+                for dynamic shapes.
+                """
+                to_size_hint = functools.partial(
+                    pytree.tree_map, V.graph.sizevars.size_hint
+                )
+                if not isinstance(arg, torch.fx.Node):
+                    return to_size_hint(arg)
+
+                fake = arg.meta["val"]
+                return torch.empty_strided(
+                    to_size_hint(fake.shape),
+                    to_size_hint(fake.stride()),
+                    device=device,
+                ).zero_()
+
+            arg_values = [node_to_tuning_arg(arg) for arg in call_args]
+            tuner.run(*arg_values, stream=stream)
+        else:
+            log.info(
+                "Skipping autotuning for kernel %s. Set config.triton.autotune_at_compile_time = True to enable.",
+                kernel_name,
+            )
+
+        kernel_config = tuner.compile_results[0].config
+        call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)
         call_kwargs = dict(zip(tuner.triton_meta["signature"], call_args))
-        call_kwargs.update(config.kwargs)
+        call_kwargs.update(kernel_config.kwargs)
 
         def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
             """

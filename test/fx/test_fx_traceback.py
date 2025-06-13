@@ -102,7 +102,7 @@ class TestFXNodeSource(TestCase):
         )
 
         # Check node "linear" is created from node "x" in PropagateUnbackedSymInts
-        key_provenance = provenance["linear"]
+        key_provenance = provenance["linear"][0]["from_node"]
         self.assertEqual(len(key_provenance), 1)
         key_provenance = key_provenance[0]
         check_node_source(
@@ -151,7 +151,9 @@ class TestFXNodeSource(TestCase):
             )
 
             # Check node "linear" is then created from node "x" in PropagateUnbackedSymInts
-            key_provenance = get_first_node_source_and_check(key_provenance)
+            key_provenance = get_first_node_source_and_check(key_provenance)[
+                "from_node"
+            ][0]
             check_node_source(
                 key_provenance,
                 "x",
