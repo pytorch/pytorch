@@ -125,13 +125,10 @@ class SideEffects:
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var = None
 
-        # A set of VariableTracker objects that are explicitly allowed to be mutated
-        # during symbolic execution, even when mutations would normally be disallowed
-        # e.g. in HigherOrderOp subgraph.
-        # This is primarily used for controlled mutations in specific contexts like
-        # torch.func.functional_call, where we need to temporarily allow
-        # mutations to module parameters and buffers since they'll be restored after
-        # the context manager.
+        # Tracks VariableTracker objects that can be safely mutated in contexts where
+        # mutations are normally forbidden (e.g., HigherOrderOp subgraphs). Used for
+        # temporary controlled mutations in contexts like torch.func.functional_call,
+        # where module parameters/buffers are modified but later restored.
         self.mutation_allowed_variables = set()
 
     def allow_mutation_in_hop_subgraph(self, var):
