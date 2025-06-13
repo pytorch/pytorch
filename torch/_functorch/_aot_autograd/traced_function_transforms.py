@@ -25,7 +25,6 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
-    _proxy_tensor_disable_update_tensor_tracker,
     maybe_disable_thunkify,
     maybe_enable_thunkify,
 )
@@ -728,7 +727,6 @@ def create_functionalized_fn(
                             with (
                                 torch.fx.traceback.preserve_node_meta(),
                                 set_partitioner_tag_must_be_in_forward(),
-                                _proxy_tensor_disable_update_tensor_tracker(),
                             ):
                                 apply_in_graph_mutations(
                                     inpt_info,

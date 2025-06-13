@@ -11,7 +11,6 @@ import functools
 import inspect
 import logging
 import operator
-import threading
 import traceback
 import typing
 import typing_extensions
@@ -57,6 +56,7 @@ from torch.fx.node import (
     Argument,
     Target,
 )
+from torch.fx.operator_schemas import _is_mutable_operator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn import Module
 from torch.overrides import TorchFunctionMode
@@ -201,37 +201,6 @@ def set_proxy_slot(
     ...
 
 
-class _DisableUpdateTensorTracker(threading.local):
-    value: bool = False
-
-
-_disable_update_tensor_tracker_tls = _DisableUpdateTensorTracker()
-
-
-def _is_proxy_tensor_update_tensor_tracker_disabled() -> bool:
-    """
-    Returns current state of disabling update tensor tracker.
-    """
-    return _disable_update_tensor_tracker_tls.value
-
-
-@contextmanager
-def _proxy_tensor_disable_update_tensor_tracker() -> Generator[None, None, None]:
-    """
-    By default tensor_tracker is updated every time.
-    This leads to chaining every operation on the FakeTensor.
-    For some cases of non-functional code, e.g. mutations in aotdispatch,
-    we want emitted nodes to be disconnected that partitioner will be able
-    to separate them into different subgraphs.
-    """
-    orig_value = _disable_update_tensor_tracker_tls.value
-    _disable_update_tensor_tracker_tls.value = True
-    try:
-        yield
-    finally:
-        _disable_update_tensor_tracker_tls.value = orig_value
-
-
 def set_proxy_slot(  # type: ignore[no-redef]
     obj: Union[PySymType, _AnyScriptObjectType, Tensor],
     tracer: _ProxyTracer,
@@ -239,11 +208,8 @@ def set_proxy_slot(  # type: ignore[no-redef]
 ) -> None:
     log.debug("set_proxy_slot %s (%s) %s", obj, id(obj), proxy)
     if isinstance(obj, Tensor):
-        # We DO want to clobber proxies whenever we run an inplace operation
-        # on a tensor, and it affects the metadata on the proxy.
         assert isinstance(proxy, _ProxyTensor)
-        if not _is_proxy_tensor_update_tensor_tracker_disabled():
-            tracer.tensor_tracker[obj] = proxy
+        tracer.tensor_tracker[obj] = proxy
     elif isinstance(obj, (_AnyScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
         assert isinstance(proxy, Proxy)
@@ -659,6 +625,9 @@ def track_tensor_tree(
         e: object, proxy: _NestedProxys, constant: Optional[_NestedTensors]
     ) -> None:
         if isinstance(e, Tensor):
+            if not isinstance(proxy, Proxy):
+                breakpoint()
+
             assert isinstance(proxy, Proxy)
             assert constant is None or isinstance(constant, Tensor)
             track_tensor(e, proxy, tracer=tracer, constant=constant)
@@ -942,13 +911,43 @@ def proxy_call(
     # This is what the overload modification does.
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
+    proxy_arg_inplace_self = None
+    is_mutable, maybe_mutable_schema = _is_mutable_operator(
+        func, args, kwargs, return_schema=True  # type: ignore[arg-type]
+    )
+    if is_mutable:
+        # For consequent inplace ops on the same Tensor
+        # we want them to be applied only on original tensor.
+        #
+        # def fn(primal, primal1, primal2):
+        #     primal = torch.ops.aten.copy_(primal, primal1)
+        #     primal = torch.ops.aten.copy_(primal, primal2)
+        #
+        # This is important for joint graph, where inplace mutations
+        # can be in forward and backward.
+        # In this case we want them to be independent,
+        # that partitioner can split them.
+        s = maybe_mutable_schema
+        # Support for now only ops with 1 return
+        if len(s.returns) == 1 and (r_alias_info := s.returns[0].alias_info):
+            for idx, s_arg in enumerate(s.arguments):
+                if not s_arg.alias_info:
+                    continue
+                if idx >= len(proxy_args):
+                    # Ignore parsing proxy_kwargs for now
+                    break
+                if r_alias_info.after_set == s_arg.alias_info.after_set:
+                    proxy_arg_inplace_self = proxy_args[idx]
+                    break
 
     proxy_out = proxy_mode.tracer.create_proxy(
         "call_function",
         func,
         proxy_args,
         proxy_kwargs,
-        name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
+        name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__)
+        if proxy_arg_inplace_self is None
+        else "_",
     )
 
     with _enable_thunkify(proxy_mode.tracer):
@@ -1014,6 +1013,11 @@ def proxy_call(
             constant = func(*const_args, **const_kwargs)
     else:
         constant = None
+
+    if proxy_arg_inplace_self is not None:
+        # Argument can be a real Tensor
+        if isinstance(proxy_arg_inplace_self, Proxy):
+            proxy_out = proxy_arg_inplace_self
 
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     _maybe_record_pointwise_barrier(func, proxy_mode)

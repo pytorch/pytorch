@@ -1148,8 +1148,8 @@ def forward(self, primals_1, primals_2, primals_3):
             """\
 def forward(self, arg0_1, arg1_1):
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-    copy_ = torch.ops.aten.copy_.default(arg1_1, sin);  arg1_1 = sin = None
-    return (copy_,)""",
+    copy_ = torch.ops.aten.copy_.default(arg1_1, sin);  sin = copy_ = None
+    return (arg1_1,)""",
         )
 
     def test_input_mutation_metadata(self):
@@ -7862,6 +7862,19 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
             self.assertEqual(ref0, inplace)
             y.sum().backward()
             self.assertEqual(ref, inplace)
+
+    def test_serial_input_mutations(self):
+        def fn(x):
+            y = x.add_(1)
+            # y.mul_(2)
+            return x, y
+
+        def inps():
+            return torch.ones(2, 3),
+
+        ref_y = fn(*inps())
+        y = torch.compile(fn, backend="aot_eager", fullgraph=True)(*inps())
+        self.assertEqual(ref_y, y)
 
 
 class MockFXGraphCache:
