@@ -158,7 +158,7 @@ def call_delegate_functionalize(
         res = aoti_call_delegate(
             lowered_module,
             original_gm,
-            unwrapped_weight_args,
+            unwrapped_weight_args,  # type: ignore[arg-type]
             unwrapped_input_args,  # type: ignore[arg-type]
         )
         return ctx.wrap_tensors(res)
