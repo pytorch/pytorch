@@ -1,11 +1,9 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
-import sys
+import importlib
 
 import torch
 import torch.distributed.checkpoint as dist_cp
-from torch.distributed.checkpoint import _HuggingFaceLoadPlanner
-from torch.distributed.checkpoint.default_planner import _EmptyStateDictLoadPlanner
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Replicate, Shard, zeros
@@ -32,6 +30,7 @@ class MyTestModule(torch.nn.Module):
         self.linear_2 = torch.nn.Linear(5, 1)
         self.emb = torch.nn.EmbeddingBag(5, 10)
 
+
 class TestSingleRankSaveLoad(TestCase):
     @with_temp_dir
     def test_save(self) -> None:
@@ -39,22 +38,26 @@ class TestSingleRankSaveLoad(TestCase):
             from safetensors.torch import load_file
         except ImportError:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
 
         state_dict_to_save = MyTestModule().state_dict()
         dist_cp.save(
             state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(
-                    path=CHECKPOINT_DIR
-                ),
-            )
+            storage_writer=dist_cp._HuggingFaceStorageWriter(path=CHECKPOINT_DIR),
+        )
 
-        state_dict_loaded = load_file(CHECKPOINT_DIR + "/model-00001-of-00001.safetensors")
-        self.assertEqual(sorted(state_dict_to_save.keys()), sorted(state_dict_loaded.keys()))
+        state_dict_loaded = load_file(
+            CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
+        )
+        self.assertEqual(
+            sorted(state_dict_to_save.keys()), sorted(state_dict_loaded.keys())
+        )
         for key in state_dict_to_save.keys():
-            self.assertTrue(torch.equal(state_dict_to_save[key], state_dict_loaded[key]))
+            self.assertTrue(
+                torch.equal(state_dict_to_save[key], state_dict_loaded[key])
+            )
 
     @with_temp_dir
     def test_load(self) -> None:
@@ -62,24 +65,28 @@ class TestSingleRankSaveLoad(TestCase):
             from safetensors.torch import save_file
         except ImportError:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
 
         state_dict_to_save = MyTestModule().state_dict()
         state_dict_to_load = MyTestModule().state_dict()
-        save_file(state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors")
+        save_file(
+            state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
+        )
 
         dist_cp.load(
             state_dict=state_dict_to_load,
-                storage_reader=dist_cp._HuggingFaceStorageReader(
-                    path=CHECKPOINT_DIR
-                ),
-            )
+            storage_reader=dist_cp._HuggingFaceStorageReader(path=CHECKPOINT_DIR),
+        )
 
-        self.assertEqual(sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys()))
+        self.assertEqual(
+            sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys())
+        )
         for key in state_dict_to_save.keys():
-            self.assertTrue(torch.equal(state_dict_to_save[key], state_dict_to_load[key]))
+            self.assertTrue(
+                torch.equal(state_dict_to_save[key], state_dict_to_load[key])
+            )
 
     @with_temp_dir
     def test_load_into_empty_dict(self) -> None:
@@ -87,51 +94,27 @@ class TestSingleRankSaveLoad(TestCase):
             from safetensors.torch import save_file
         except ImportError:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
 
         state_dict_to_save = MyTestModule().state_dict()
-        save_file(state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors")
+        save_file(
+            state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
+        )
 
         state_dict_loaded = _load_state_dict_from_keys(
-                storage_reader=dist_cp._HuggingFaceStorageReader(
-                    path=CHECKPOINT_DIR
-                ),
+            storage_reader=dist_cp._HuggingFaceStorageReader(path=CHECKPOINT_DIR),
+        )
+
+        self.assertEqual(
+            sorted(state_dict_to_save.keys()), sorted(state_dict_loaded.keys())
+        )
+        for key in state_dict_to_save.keys():
+            self.assertTrue(
+                torch.equal(state_dict_to_save[key], state_dict_loaded[key])
             )
 
-        self.assertEqual(sorted(state_dict_to_save.keys()), sorted(state_dict_loaded.keys()))
-        for key in state_dict_to_save.keys():
-            self.assertTrue(torch.equal(state_dict_to_save[key], state_dict_loaded[key]))
-
-    @with_temp_dir
-    def test_load_allowing_resize(self) -> None:
-        try:
-            from safetensors.torch import save_file
-        except ImportError:
-            print("safetensors not installed")
-            sys.exit(0)
-
-        CHECKPOINT_DIR = self.temp_dir
-
-        state_dict_to_save = MyTestModule().state_dict()
-        save_file(state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors")
-
-        state_dict_to_load= {}
-        for key in state_dict_to_save.keys():
-            state_dict_to_load[key] = torch.zeros(1)
-
-        dist_cp.load(
-            state_dict=state_dict_to_load,
-                storage_reader=dist_cp._HuggingFaceStorageReader(
-                    path=CHECKPOINT_DIR
-                ),
-                planner=_HuggingFaceLoadPlanner(allow_tensor_resize=True),
-            )
-
-        self.assertEqual(sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys()))
-        for key in state_dict_to_save.keys():
-            self.assertTrue(torch.equal(state_dict_to_save[key], state_dict_to_load[key]))
 
 ONE_D_PLACEMENTS = [
     [Shard(0)],
@@ -165,11 +148,9 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
     def test_1d_to_1d_reshard_placement_change(self) -> None:
-        try:
-            import safetensors
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
 
@@ -225,11 +206,9 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
     def test_2d_to_2d_reshard_placement_change(self) -> None:
-        try:
-            import safetensors
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
         for two_d_to_two_d_placements in TWO_D_TO_TWO_D_PLACEMENTS:
@@ -247,7 +226,9 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(path=CHECKPOINT_DIR, save_sharded=True),
+                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                    path=CHECKPOINT_DIR, save_sharded=True
+                ),
                 planner=dist_cp.DefaultSavePlanner(),
             )
 
@@ -284,11 +265,9 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
     def test_1d_to_2d_reshard_mesh_change(self) -> None:
-        try:
-            import safetensors
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
         for placements_1d in ONE_D_PLACEMENTS:
@@ -302,7 +281,9 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(path=CHECKPOINT_DIR, save_sharded=True),
+                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                    path=CHECKPOINT_DIR, save_sharded=True
+                ),
             )
 
             for placements_2d in TWO_D_PLACEMENTS:
@@ -335,11 +316,9 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
     @with_temp_dir
     @skip_if_lt_x_gpu(4)
     def test_2d_to_1d_reshard_mesh_change(self) -> None:
-        try:
-            import safetensors
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         CHECKPOINT_DIR = self.temp_dir
         for placements_2d in TWO_D_PLACEMENTS:
@@ -353,7 +332,9 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(path=CHECKPOINT_DIR, save_sharded=True),
+                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                    path=CHECKPOINT_DIR, save_sharded=True
+                ),
                 planner=dist_cp.DefaultSavePlanner(),
             )
 
@@ -390,11 +371,9 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
         """
         Test dtensor checkpoint resharding with dtensor containing empty shards.
         """
-        try:
-            import safetensors
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
-            sys.exit(0)
+            return
 
         tensor = torch.rand(1).cuda()
         mesh = init_device_mesh(self.device_type, (self.world_size,))
@@ -403,7 +382,9 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
         dist_cp.save(
             state_dict=ref_state_dict,
-            storage_writer=dist_cp._HuggingFaceStorageWriter(path=self.temp_dir, save_sharded=True),
+            storage_writer=dist_cp._HuggingFaceStorageWriter(
+                path=self.temp_dir, save_sharded=True
+            ),
         )
 
         tensor = torch.rand(1).cuda()
