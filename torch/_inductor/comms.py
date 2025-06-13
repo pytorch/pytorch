@@ -165,7 +165,6 @@ class ReorderInfo:
 
     @property
     def improvement(self):
-        assert self.initial_exposed >= self.final_exposed > 0
         return self.initial_exposed - self.final_exposed
 
 
@@ -522,7 +521,9 @@ def reorder_compute_and_comm_for_overlap(
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
-
+        assert callable(p), (
+            f"Invalid reorder_compute_and_comm_for_overlap pass: {p} is not callable"
+        )
         peak_memory, _ = estimate_peak_memory(
             snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
         )
@@ -530,7 +531,10 @@ def reorder_compute_and_comm_for_overlap(
             overlap_log.debug(
                 f"==== Visualize overlap before reordering pass {p}, {peak_memory=} ===="  # noqa: G004
             )
-            visualize_overlap(order)
+            try:
+                visualize_overlap(order)
+            except Exception as e:
+                overlap_log.debug("", exc_info=e)
         t0 = time.time()
         order = p(order)  # type: ignore[operator]
         t = time.time() - t0
@@ -541,7 +545,7 @@ def reorder_compute_and_comm_for_overlap(
             try:
                 visualize_overlap(order)
             except Exception as e:
-                overlap_log.debug(str(e))
+                overlap_log.debug("", exc_info=e)
         peak_memory, _ = estimate_peak_memory(
             snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
         )

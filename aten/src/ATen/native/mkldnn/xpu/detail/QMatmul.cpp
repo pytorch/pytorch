@@ -273,7 +273,7 @@ void quantized_matmul(
 
   int scratchpad_size = matmul_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor =
-      at::empty({scratchpad_size}, m1.options().dtype(at::kByte), c10::nullopt);
+      at::empty({scratchpad_size}, m1.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
       matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});

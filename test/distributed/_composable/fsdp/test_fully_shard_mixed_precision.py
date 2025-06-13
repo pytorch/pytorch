@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import dataclasses
 import functools
 from typing import Optional, Union
 
@@ -22,17 +23,21 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     FSDPTest,
     FSDPTestMultiThread,
+    get_devtype,
     MLP,
     patch_reduce_scatter,
     reduce_scatter_with_assert,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm, TEST_HPU
+
+
+device_type = torch.device(get_devtype())
 
 
 class TestFullyShardMixedPrecisionTraining(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+        return min(4, torch.get_device_module(device_type).device_count())
 
     def _init_models_and_optims(
         self,
@@ -43,7 +48,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     ):
         torch.manual_seed(42)
         model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
-        ref_model = copy.deepcopy(model).cuda()
+        ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
@@ -81,6 +86,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             use_shard_placement_fn_vals.append(True)
         return use_shard_placement_fn_vals
 
+    @skipIfRocm  # regressed in ROCm 6.4, but ROCm 6.5 fixes it
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_compute_dtype(self):
@@ -122,7 +128,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         )
 
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, 16), device="cuda", dtype=param_dtype)
+        inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
         for iter_idx in range(10):
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             fsdp_loss = model(inp).sum()
@@ -160,6 +166,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             self.assertEqual(fsdp_loss, ref_loss)
             check_sharded_parity(self, ref_model, model)
 
+    @skipIfRocm  # regressed in ROCm 6.4, but ROCm 6.5 fixes it
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_reduce_dtype(self):
@@ -207,7 +214,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, 16), device="cuda", dtype=param_dtype)
+        inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
         for iter_idx in range(10):
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             fsdp_loss = model(inp).sum()
@@ -256,7 +263,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, 16), device="cuda", dtype=param_dtype)
+        inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
         for iter_idx in range(10):
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             fsdp_loss = model(inp).sum()
@@ -307,7 +314,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         # To emulate the mixed precision implementation where forward/backward
         # compute use bf16 and optimizer uses fp32, we maintain both an fp32
         # and a bf16 copy of the reference model
-        ref_model = copy.deepcopy(model).cuda()
+        ref_model = copy.deepcopy(model).to(device_type)
         ref_model_compute = copy.deepcopy(ref_model).to(param_dtype)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for mlp in model:
@@ -327,7 +334,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         torch.manual_seed(42 + self.rank + 1)
-        device = torch.device("cuda")
+        device = device_type
         # Train on the same input to avoid loss explosion
         num_microbatches = 4
         inp = torch.randn((2 * num_microbatches, 16), device=device, dtype=param_dtype)
@@ -387,7 +394,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_float16_on_one_submodule(self):
-        x = torch.zeros(2, 100, device="cuda")
+        x = torch.zeros(2, 100, device=device_type)
 
         # Subtest 1: use fp16 on the second child submodule -- does not require
         # any additional casting logic
@@ -395,7 +402,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         model = SaveForwardInputsModel(
             forward_inputs,
             cast_forward_inputs=False,
-        ).cuda()
+        ).to(device_type)
         fully_shard(model.c2, mp_policy=MixedPrecisionPolicy(param_dtype=torch.float16))
         fully_shard(model)
         model(x).sum().backward()
@@ -408,7 +415,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         forward_inputs: dict[nn.Module, torch.Tensor] = {}
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs, cast_forward_inputs=True
-        ).cuda()
+        ).to(device_type)
         fully_shard(
             model.c2,
             mp_policy=MixedPrecisionPolicy(
@@ -426,7 +433,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         forward_inputs: dict[nn.Module, torch.Tensor] = {}
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs, cast_forward_inputs=False
-        ).cuda()
+        ).to(device_type)
         fully_shard(
             model.c1,
             mp_policy=MixedPrecisionPolicy(
@@ -468,13 +475,13 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 self.forward_inputs["model_input_x"] = x
                 y = torch.ones(
-                    2, 100, device="cuda", dtype=torch.float32
+                    2, 100, device=device_type.type, dtype=torch.float32
                 )  # external input
                 return self.l2(self.l1(x), y)
 
         forward_inputs: dict[str, torch.Tensor] = {}
-        model = ToyModel(forward_inputs).cuda()
-        x = torch.zeros(2, 100, device="cuda", dtype=torch.float32)
+        model = ToyModel(forward_inputs).to(device_type)
+        x = torch.zeros(2, 100, device=device_type.type, dtype=torch.float32)
         fully_shard(
             model.l2,
             mp_policy=MixedPrecisionPolicy(
@@ -527,9 +534,15 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
         for module in (model[0], model[1], model[2], model):
             fully_shard(module, mp_policy=mp_policy)
-        with self.assertRaisesRegex(RuntimeError, "Expected running_mean to have type"):
-            # Errors in batch norm 2D backward
+        if TEST_HPU:
             inner(model, torch.randn((3, 1, 9, 9)))
+        else:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Expected running_mean to have type",  # Error not seen on HPUs and hence it can be skipped
+            ):
+                # Errors in batch norm 2D backward
+                inner(model, torch.randn((3, 1, 9, 9)))
 
         # Batch norm 2D: cast buffers down to lower precision
         model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
@@ -555,7 +568,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         model = nn.Sequential(
             nn.Linear(32, 32, dtype=init_dtype),
             nn.Linear(32, 32, dtype=init_dtype),
-        )
+        ).to(device_type.type)
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
         )
@@ -577,9 +590,33 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         with patch_reduce_scatter(reduce_scatter):
-            inp = torch.randn((4, 32), device="cuda")
+            inp = torch.randn((4, 32), device=device_type.type)
             loss = model(inp).sum()
             loss.backward()
+
+    @skip_if_lt_x_gpu(1)
+    def test_dataclass_input(self):
+        @dataclasses.dataclass
+        class Input:
+            x: torch.Tensor
+
+        class Model(nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self._layer = nn.Linear(10, 10)
+
+            def forward(self, input: Input):
+                return self._layer(input.x)
+
+        mp_policy = MixedPrecisionPolicy(
+            torch.bfloat16, torch.bfloat16, torch.bfloat16, True
+        )
+        model = Model()
+        inp = Input(torch.randn(2, 10).cuda())
+
+        fully_shard(model, mp_policy=mp_policy)
+        loss = model(inp).sum()
+        loss.backward()
 
 
 if __name__ == "__main__":
