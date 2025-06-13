@@ -103,20 +103,18 @@ def higher_order_scan(
     additional_inputs: Sequence[ir.Value] | None,
     reverse: bool = False,
 ) -> Sequence[ir.Value]:
-    node_inputs = [
-        *[
-            # inputs are clone to make sure they have different names
-            # from additional inputs which could be the same:
-            # one input can be a scanned input and an additional input
-            ir.Node("", "Identity", [i]).outputs[0]
-            for i in [*scan_inits, *scan_inputs]
-        ],
-        *(additional_inputs or []),
+    subgraph_inputs = [
+        ir.Value(name=f"{inp.name}_{body_func.name}", shape=inp.shape, dtype=inp.dtype)
+        for inp in [*scan_inits, *scan_inputs]
     ]
+    # The one and only node in the Scan subgraph that calls the body_func
     body_node = ir.Node(
         body_func.domain,
         body_func.name,
-        node_inputs,
+        [
+            *subgraph_inputs,
+            *(additional_inputs or []),
+        ],
         num_outputs=len(body_func.outputs),
     )
 
@@ -125,7 +123,6 @@ def higher_order_scan(
     for func_out, out in zip(body_func.outputs, body_node.outputs):
         out.name = f"{func_out.name}_{body_func.name}"
 
-    n_inputs = len(scan_inits) + len(scan_inputs)
     n_outputs = len(body_func.outputs) - len(scan_inits)
     return call_op(
         "Scan",
@@ -133,7 +130,7 @@ def higher_order_scan(
         *scan_inputs,
         _num_outputs=len(body_func.outputs),
         body=ir.Graph(
-            node_inputs[:n_inputs],
+            subgraph_inputs,
             body_node.outputs,
             nodes=[body_node],
             name=body_func.name,
