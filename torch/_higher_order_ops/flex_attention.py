@@ -35,9 +35,9 @@ def _construct_strides(
 ) -> Sequence[int]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
-    assert len(sizes) == len(
-        fill_order
-    ), "Length of sizes must match the length of the fill order"
+    assert len(sizes) == len(fill_order), (
+        "Length of sizes must match the length of the fill order"
+    )
     strides = [0] * len(sizes)
 
     # Start with stride 1 for the innermost dimension
@@ -517,7 +517,7 @@ def create_fw_bw_graph(
         with disable_proxy_modes_tracing():
 
             def _from_fun(
-                t: Union[Tensor, torch.SymInt, int]
+                t: Union[Tensor, torch.SymInt, int],
             ) -> Union[Tensor, torch.SymInt, int]:
                 if isinstance(t, torch.Tensor):
                     return torch.empty_strided(
@@ -568,7 +568,7 @@ def create_fw_bw_graph(
             *other_buffers: tuple[Tensor, ...],
         ) -> tuple[Tensor, ...]:
             def fw_with_masks(
-                *args: tuple[Tensor, ...]
+                *args: tuple[Tensor, ...],
             ) -> tuple[tuple[Tensor], tuple[bool]]:
                 fw_out = score_mod(*args)
                 out_requires_grad = fw_out.requires_grad
@@ -607,9 +607,9 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             for buffer in mask_mod_other_buffers
             if isinstance(buffer, torch.Tensor)
         )
-        assert (
-            not any_buffer_requires_grad
-        ), "Captured buffers from mask mod that require grad are not supported."
+        assert not any_buffer_requires_grad, (
+            "Captured buffers from mask mod that require grad are not supported."
+        )
         ctx._fw_graph = fw_graph
         ctx._joint_graph = joint_graph
         ctx._mask_graph = block_mask[-1]
@@ -645,7 +645,11 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         return out, logsumexp
 
     @staticmethod
-    def backward(ctx: Any, grad_out: Tensor, grad_logsumexp: Tensor) -> tuple[Optional[Tensor], ...]:  # type: ignore[override]
+    def backward(  # type: ignore[override]
+        ctx: Any,
+        grad_out: Tensor,
+        grad_logsumexp: Tensor,
+    ) -> tuple[Optional[Tensor], ...]:
         fw_args = saved_tensors_and_symints(ctx)
         (
             query,
@@ -805,7 +809,7 @@ def sdpa_dense_backward(
     actual_grad_value = _permute_strides(actual_grad_value, value.stride())
 
     def _maybe_new_buffer(
-        buffer: Union[torch.Tensor, torch.SymInt, int]
+        buffer: Union[torch.Tensor, torch.SymInt, int],
     ) -> Optional[Union[torch.Tensor, torch.SymInt, int]]:
         if isinstance(buffer, torch.Tensor):
             return (
@@ -913,9 +917,9 @@ def sdpa_dense_backward(
     actual_grad_value.copy_(grad_value)
 
     if Bq != Bkv:
-        assert (
-            Bq > 1 and Bkv == 1
-        ), f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
+        assert Bq > 1 and Bkv == 1, (
+            f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
+        )
 
         actual_grad_key = torch.sum(actual_grad_key, 0, keepdim=True)
         actual_grad_value = torch.sum(actual_grad_value, 0, keepdim=True)

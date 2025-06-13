@@ -342,9 +342,9 @@ def register_graphsafe_run_with_rng_state_op():
     @graphsafe_run_with_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(op, *args, rng_state=None, **kwargs):
         device = get_device(args, kwargs)
-        assert (
-            device == "cuda"
-        ), f"GraphSafe RNG operations only supported for CUDA, got {device}"
+        assert device == "cuda", (
+            f"GraphSafe RNG operations only supported for CUDA, got {device}"
+        )
         return impl_cuda(op, *args, rng_state=rng_state, **kwargs)
 
     @graphsafe_run_with_rng_state.py_impl(FakeTensorMode)

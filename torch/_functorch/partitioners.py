@@ -228,9 +228,9 @@ def _extract_graph_with_inputs_outputs(
         if isinstance(x, fx.Node):
             if x not in env:
                 raise RuntimeError(f"Node {x} couldn't be found in env")
-            assert not isinstance(
-                env[x], InvalidNodeBase
-            ), f"Node {x} was invalid, but is output"
+            assert not isinstance(env[x], InvalidNodeBase), (
+                f"Node {x} was invalid, but is output"
+            )
             output_values.append(env[x])
         else:
             output_values.append(x)
@@ -448,10 +448,10 @@ def perform_quantization(
             args=(clamp_max_scaled_node, quant_type),
             name="fp8_quant_" + str(node.name),
         )
-        quant_activation_node.meta[
-            "val"
-        ] = torch.ops.prims.convert_element_type.default(
-            clamp_max_scaled_node.meta["val"], quant_type
+        quant_activation_node.meta["val"] = (
+            torch.ops.prims.convert_element_type.default(
+                clamp_max_scaled_node.meta["val"], quant_type
+            )
         )
         quant_activation_node.meta["tensor_meta"] = extract_tensor_metadata(
             quant_activation_node.meta["val"]
@@ -566,10 +566,10 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
                         args=(node, quant_type),
                         name="fp8_quant_" + str(node.name),
                     )
-                    quant_node.meta[
-                        "val"
-                    ] = torch.ops.prims.convert_element_type.default(
-                        node.meta["val"], quant_type
+                    quant_node.meta["val"] = (
+                        torch.ops.prims.convert_element_type.default(
+                            node.meta["val"], quant_type
+                        )
                     )
                     quant_node.meta["tensor_meta"] = extract_tensor_metadata(
                         quant_node.meta["val"]
@@ -577,7 +577,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
             node_to_quant[node] = quant_node
     # only update the return node args, and remain all other users unchanged
     output_updated_args = [
-        node_to_quant[node] if node in node_to_quant else node for node in fwd_outputs  # type: ignore[union-attr]
+        node_to_quant[node] if node in node_to_quant else node for node in fwd_outputs
     ]
     # add the scale nodes to the ouput find the first sym_node in the output
     idx = find_first_sym_node(output_updated_args)
@@ -616,10 +616,10 @@ def quantize_activation_bw(graph: torch.fx.Graph) -> None:
                         torch.ops.prims.convert_element_type.default,
                         args=(node, dequant_type),
                     )
-                    activation_node.meta[
-                        "val"
-                    ] = torch.ops.prims.convert_element_type.default(
-                        node.meta["val"], dequant_type
+                    activation_node.meta["val"] = (
+                        torch.ops.prims.convert_element_type.default(
+                            node.meta["val"], dequant_type
+                        )
                     )
                     activation_node.meta["tensor_meta"] = extract_tensor_metadata(
                         activation_node.meta["val"]
@@ -632,18 +632,18 @@ def quantize_activation_bw(graph: torch.fx.Graph) -> None:
                     divided_target_node_32.meta["val"] = torch.ops.aten.div.Tensor(
                         activation_node.meta["val"], scale_node.meta["val"]
                     )
-                    divided_target_node_32.meta[
-                        "tensor_meta"
-                    ] = extract_tensor_metadata(divided_target_node_32.meta["val"])
+                    divided_target_node_32.meta["tensor_meta"] = (
+                        extract_tensor_metadata(divided_target_node_32.meta["val"])
+                    )
                 with graph.inserting_after(divided_target_node_32):
                     dequant_node = graph.call_function(
                         torch.ops.prims.convert_element_type.default,
                         args=(divided_target_node_32, dequant_type),
                     )
-                    dequant_node.meta[
-                        "val"
-                    ] = torch.ops.prims.convert_element_type.default(
-                        divided_target_node_32.meta["val"], dequant_type
+                    dequant_node.meta["val"] = (
+                        torch.ops.prims.convert_element_type.default(
+                            divided_target_node_32.meta["val"], dequant_type
+                        )
                     )
                     dequant_node.meta["tensor_meta"] = extract_tensor_metadata(
                         dequant_node.meta["val"]
@@ -655,10 +655,10 @@ def quantize_activation_bw(graph: torch.fx.Graph) -> None:
                         args=(node, dequant_type),
                         name="dequant_" + str(node.name),
                     )
-                    dequant_node.meta[
-                        "val"
-                    ] = torch.ops.prims.convert_element_type.default(
-                        node.meta["val"], dequant_type
+                    dequant_node.meta["val"] = (
+                        torch.ops.prims.convert_element_type.default(
+                            node.meta["val"], dequant_type
+                        )
                     )
                     dequant_node.meta["tensor_meta"] = extract_tensor_metadata(
                         dequant_node.meta["val"]

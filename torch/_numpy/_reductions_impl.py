@@ -1,10 +1,11 @@
 # mypy: ignore-errors
 
-""" Implementation of reduction operations, to be wrapped into arrays, dtypes etc
+"""Implementation of reduction operations, to be wrapped into arrays, dtypes etc
 in the 'public' layer.
 
 Anything here only deals with torch objects, e.g. "dtype" is a torch.dtype instance etc
 """
+
 from __future__ import annotations
 
 import functools

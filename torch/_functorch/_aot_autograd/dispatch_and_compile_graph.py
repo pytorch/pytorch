@@ -46,11 +46,14 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
     # FunctionalTensorMode must be enabled here.
     # See Note [Accessing .grad_fn on FunctionalTensor]
-    with enable_python_dispatcher(), FunctionalTensorMode(
-        pre_dispatch=aot_config.pre_dispatch,
-        export=aot_config.is_export,
-        # Allow token discovery for joint fn tracing as tokens can be used in backward.
-        _allow_token_discovery=True,
+    with (
+        enable_python_dispatcher(),
+        FunctionalTensorMode(
+            pre_dispatch=aot_config.pre_dispatch,
+            export=aot_config.is_export,
+            # Allow token discovery for joint fn tracing as tokens can be used in backward.
+            _allow_token_discovery=True,
+        ),
     ):
         fx_g = make_fx(
             f,
@@ -238,9 +241,9 @@ def aot_dispatch_base_graph(
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.
     if aot_config.is_export:
-        assert (
-            maybe_subclass_meta is None
-        ), "aot_export_module does not support tensor subclass inputs for now."
+        assert maybe_subclass_meta is None, (
+            "aot_export_module does not support tensor subclass inputs for now."
+        )
     return fw_module, saved_updated_flat_args_subclasses_desugared, maybe_subclass_meta
 
 
@@ -332,7 +335,7 @@ def aot_dispatch_autograd_graph(
     # when we need to manually detach() some inputs in the forward.
     # Higher order ops might eventually need to do the same.
     if aot_config.is_export:
-        assert (
-            maybe_subclass_meta is None
-        ), "aot_export_module does not support tensor subclass inputs for now."
+        assert maybe_subclass_meta is None, (
+            "aot_export_module does not support tensor subclass inputs for now."
+        )
     return fx_g, saved_updated_joint_inputs, maybe_subclass_meta
