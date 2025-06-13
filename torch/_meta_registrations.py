@@ -276,8 +276,7 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
     return new_stride
 
 
-@register_meta(aten.view.default)
-def _view_meta(a, *shape, size_oblivious_enabled=True):
+def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
     from torch.fx.experimental.symbolic_shapes import guard_or_false, has_hint, sym_eq
 
     # Creates a valid shape
@@ -341,10 +340,31 @@ def _view_meta(a, *shape, size_oblivious_enabled=True):
     if size_oblivious_enabled and (
         torch.fx.experimental._config.backed_size_oblivious or has_unbacked
     ):
-        return _view_meta(a, shape, size_oblivious_enabled=False)
+        return _view_unbacked_meta(a, shape, size_oblivious_enabled=False)
 
     msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
     raise ValueError(msg)
+
+
+@register_meta(aten.view.default)
+def _view_meta(a, *shape):
+    all_hinted = True
+
+    def update_all_hinted(all_hinted, ls):
+        for x in ls:
+            all_hinted = all_hinted and (
+                not isinstance(x, torch.SymInt) or x.node.has_hint()
+            )
+        return all_hinted
+
+    all_hinted = update_all_hinted(all_hinted, shape)
+    all_hinted = update_all_hinted(all_hinted, a.size())
+    all_hinted = update_all_hinted(all_hinted, a.stride())
+
+    if all_hinted:
+        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
+    else:
+        return _view_unbacked_meta(a, shape)
 
 
 @register_meta(aten.linalg_matrix_exp)

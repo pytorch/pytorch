@@ -2674,18 +2674,13 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     def test_bmm_with_pointwise_with_reshape_dynamic_shapes(
         self, bs, Mdim, Kdim, Ndim, dtype
     ):
-        from torch.fx.experimental.symbolic_shapes import guard_scalar
-
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.epilogue = torch.nn.ReLU()
 
             def forward(self, x, other, noise):
-                # we do not want to to have Mdim, Kdim and Ndim dynamic so we force specialize them.
-                result = x.reshape(
-                    -1, guard_scalar(Mdim), guard_scalar(Kdim)
-                ) @ other.reshape(-1, guard_scalar(Kdim), guard_scalar(Ndim))
+                result = x.reshape(-1, Mdim, Kdim) @ other.reshape(-1, Kdim, Ndim)
                 return self.epilogue(result) + noise
 
         counters.clear()
