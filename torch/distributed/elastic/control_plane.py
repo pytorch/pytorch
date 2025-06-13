@@ -23,8 +23,8 @@ def _worker_server(socket_path: str) -> Generator[None, None, None]:
         server.shutdown()
 
 
-@contextmanager
 @record
+@contextmanager
 def worker_main() -> Generator[None, None, None]:
     """
     This is a context manager that wraps your main entry function. This combines

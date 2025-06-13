@@ -23,6 +23,7 @@ from torch._C._profiler import (
     _remove_execution_trace_observer,
 )
 from torch._environment import is_fbcode
+from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
@@ -156,6 +157,7 @@ class _KinetoProfile:
         self.acc_events = acc_events
         self.custom_trace_id_callback = custom_trace_id_callback
         self.profiler: Optional[prof.profile] = None
+        self.has_cudagraphs = False
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
         if ProfilerActivity.CUDA in self.activities:
@@ -180,6 +182,10 @@ class _KinetoProfile:
         self.stop_trace()
 
     def prepare_trace(self):
+        if hasattr(torch, "_inductor"):
+            import torch._inductor.config as inductor_config
+
+            self.has_cudagraphs = inductor_config.triton.cudagraphs
         if (self.profiler is None) or (not self.acc_events):
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
@@ -220,17 +226,23 @@ class _KinetoProfile:
                     "distributedInfo", json.dumps(dist_info, cls=_NumpyEncoder)
                 )
 
-            if hasattr(torch, "_inductor"):
-                import torch._inductor.config as inductor_config
+            cuda_version = None
+            if hasattr(torch, "version"):
+                from torch.torch_version import TorchVersion
 
-                if inductor_config.triton.cudagraphs:
-                    os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
-                    self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
-                    # FIXME: CUDA Graph does not work well with CUPTI teardown.
-                    #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
-                    #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
-                    # Workaround: turn off CUPTI teardown when using CUDA Graphs.
-                    os.environ["TEARDOWN_CUPTI"] = "0"
+                cuda_version = TorchVersion(getattr(torch.version, "cuda", "0.0"))
+
+            if self.has_cudagraphs and (
+                (cuda_version and cuda_version < "12.6")
+                or not profiler_allow_cudagraph_cupti_lazy_reinit_cuda12()
+            ):
+                os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+                self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
+                # FIXME: CUDA Graph does not work well with CUPTI teardown.
+                #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
+                #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
+                # Workaround: turn off CUPTI teardown when using CUDA Graphs.
+                os.environ["TEARDOWN_CUPTI"] = "0"
 
             # Insert the preset user metadata to the trace
             for k, v in self.preset_metadata.items():
@@ -612,8 +624,7 @@ class profile(_KinetoProfile):
             ]
         ) as p:
             code_to_profile()
-        print(p.key_averages().table(
-            sort_by="self_cuda_time_total", row_limit=-1))
+        print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 
     Using the profiler's ``schedule``, ``on_trace_ready`` and ``step`` functions:
 
@@ -623,16 +634,17 @@ class profile(_KinetoProfile):
         # on different iterations of the training loop;
         # trace_handler is called every time a new trace becomes available
         def trace_handler(prof):
-            print(prof.key_averages().table(
-                sort_by="self_cuda_time_total", row_limit=-1))
+            print(
+                prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1)
+            )
             # prof.export_chrome_trace("/tmp/test_trace_" + str(prof.step_num) + ".json")
+
 
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA,
             ],
-
             # In this example with wait=1, warmup=1, active=2, repeat=1,
             # profiler will skip the first step/iteration,
             # start warming up on the second, record
@@ -640,20 +652,15 @@ class profile(_KinetoProfile):
             # after which the trace will become available
             # and on_trace_ready (when set) is called;
             # the cycle repeats starting with the next step
-
-            schedule=torch.profiler.schedule(
-                wait=1,
-                warmup=1,
-                active=2,
-                repeat=1),
-            on_trace_ready=trace_handler
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=2, repeat=1),
+            on_trace_ready=trace_handler,
             # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
             # used when outputting for tensorboard
-            ) as p:
-                for iter in range(N):
-                    code_iteration_to_profile(iter)
-                    # send a signal to the profiler that the next iteration has started
-                    p.step()
+        ) as p:
+            for iter in range(N):
+                code_iteration_to_profile(iter)
+                # send a signal to the profiler that the next iteration has started
+                p.step()
 
     The following sample shows how to setup up an Execution Trace Observer (`execution_trace_observer`)
 

@@ -91,7 +91,8 @@ Tensor& addmm_out(
     // if result and self are the same tensor, we use post op sum.
     bias = self;
   } else {
-    Tensor binary = self.dim() == 1 ? self.unsqueeze(0) : self;
+    Tensor binary = self.dim() < 1 ? self.unsqueeze(0) : self;
+    binary = binary.dim() == 1 ? binary.unsqueeze(0) : binary;
     bool inplace = binary.is_same(result);
     if (inplace) {
       attr.append_post_eltwise(
@@ -154,7 +155,7 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
       ")");
   TORCH_CHECK(
       self.dtype() == mat2.dtype(),
-      "expected self and mat2 to have the same dtype, but got: ",
+      "expected mat1 and mat2 to have the same dtype, but got: ",
       self.dtype(),
       " != ",
       mat2.dtype())
@@ -219,7 +220,8 @@ Tensor& baddbmm_out(
   if (beta_ == 0.f) {
     attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
   } else {
-    binary = input.dim() < 3 ? input.unsqueeze(0) : input;
+    Tensor binary = input.dim() < 1 ? input.unsqueeze(0) : input;
+    binary = binary.dim() < 3 ? binary.unsqueeze(0) : binary;
     // If input is a 1d tensor need be broadcasted, we need unsqueeze twice.
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
     bool inplace = binary.is_same(result);
@@ -418,4 +420,53 @@ TORCH_IMPL_FUNC(addmv_out_xpu)
   xpu::addmv_out(self, mat, vec, beta, alpha, const_cast<Tensor&>(result));
 }
 
+Tensor _weight_int4pack_mm_xpu(
+    const Tensor& A,
+    const Tensor& B,
+    int64_t qGroupSize,
+    const Tensor& qScale,
+    const Tensor& qZeros) {
+  auto M = A.size(0); // M
+  auto N = B.size(0); // N1=LCM(N, K)
+  TORCH_CHECK(
+      A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
+      __func__,
+      " : expect A to be either 32-bit or 16-bit float tensor.");
+  TORCH_CHECK(A.is_contiguous(), __func__, " : expect A to be contiguous.");
+  TORCH_CHECK(A.dim() == 2, __func__, " : expect A to be 2D tensor.");
+
+  TORCH_CHECK(B.dtype() == kInt, __func__, " : expect B to be int32 tensor.");
+  TORCH_CHECK(
+      qZeros.dtype() == kChar,
+      __func__,
+      " : expect qZeros to be int8 tensor currently.");
+  TORCH_CHECK(B.dim() == 2, __func__, " : expect B to 2d tensor.");
+
+  TORCH_CHECK(
+      qGroupSize > 1 && qGroupSize % 32 == 0,
+      __func__,
+      " : expect qGroupSize to be multiple of 32 and greater than 1, got ",
+      qGroupSize);
+
+  TORCH_CHECK(
+      qScale.dim() == 2 && qScale.size(1) == N,
+      __func__,
+      ": expect qScale to be 2d tensor with sizes [:, ",
+      N,
+      "]");
+  TORCH_CHECK(
+      qZeros.dim() == 2 && qZeros.size(1) == N,
+      __func__,
+      ": expect qZeros to be 2d tensor with sizes [:, ",
+      N,
+      "]");
+
+  auto C = at::empty({M, N}, A.options());
+
+  // qscale:[K/qGroupSize, N]
+  // qzp:[K/qGroupSize, N]
+  at::native::onednn::woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize);
+
+  return C;
+}
 } // namespace at::native
