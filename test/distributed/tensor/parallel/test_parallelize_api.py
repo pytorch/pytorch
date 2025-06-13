@@ -3,12 +3,13 @@ from collections import OrderedDict
 from copy import deepcopy
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PrepareModuleInput,
+    PrepareModuleInputOutput,
     PrepareModuleOutput,
     RowwiseParallel,
 )
@@ -199,6 +200,29 @@ class TensorParallelAPITests(DTensorTestBase):
         dtensor = DTensor.from_local(inp, device_mesh, [Replicate()], run_check=False)
         output = module(dtensor)
         inp = dtensor.redistribute(device_mesh, [Shard(0)]).to_local()
+        self.assertEqual(inp, output)
+
+    @with_comms
+    def test_prepare_module_input_output(self):
+        module = DummyModule()
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        parallelize_module(
+            module,
+            device_mesh,
+            PrepareModuleInputOutput(
+                input_layouts=Shard(0),
+                desired_input_layouts=Replicate(),
+                output_layouts=Replicate(),
+                desired_output_layouts=Shard(1),
+            ),
+        )
+        inp = torch.rand(5, 7, device=self.device_type)
+        output = module(inp)
+        inp = (
+            DTensor.from_local(inp, device_mesh, [Shard(0)], run_check=False)
+            .redistribute(device_mesh, [Shard(1)])
+            .to_local()
+        )
         self.assertEqual(inp, output)
 
     @with_comms

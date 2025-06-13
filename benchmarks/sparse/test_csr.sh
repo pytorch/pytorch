@@ -8,7 +8,6 @@ echo "----- USE_MKL=1 -----" >> $OUTFILE
 rm -rf build
 
 export USE_MKL=1
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 

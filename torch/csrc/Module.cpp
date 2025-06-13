@@ -133,6 +133,10 @@
 #include <callgrind.h>
 #endif
 
+#ifdef USE_ITT
+#include <torch/csrc/itt.h>
+#endif
+
 namespace py = pybind11;
 
 static PyObject* module;
@@ -965,10 +969,14 @@ static PyObject* THPModule_setAllowTF32OneDNN(
 static PyObject* THPModule_allowTF32OneDNN(
     PyObject* _unused,
     PyObject* noargs) {
+#ifdef USE_XPU
   if (at::globalContext().allowTF32OneDNN())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
+#else
+  Py_RETURN_NONE;
+#endif
 }
 
 static PyObject* THPModule_deterministicAlgorithms(
@@ -1753,12 +1761,6 @@ void initModule(PyObject* module);
 } // namespace torch::xpu
 #endif
 
-#ifdef USE_ITT
-namespace torch::profiler {
-void initIttBindings(PyObject* module);
-} // namespace torch::profiler
-#endif
-
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -2010,6 +2012,12 @@ Call this whenever a new thread is created in order to propagate values from
     return at::caching::is_cached_tensor(t);
   });
 
+  py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
+  });
+
   ASSERT_TRUE(
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
@@ -2243,6 +2251,7 @@ Call this whenever a new thread is created in order to propagate values from
   });
 
   py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
+      .value("Default", at::BlasBackend::Default)
       .value("Cublas", at::BlasBackend::Cublas)
       .value("Cublaslt", at::BlasBackend::Cublaslt)
       .value("Ck", at::BlasBackend::Ck);

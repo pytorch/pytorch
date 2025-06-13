@@ -6,6 +6,7 @@ import operator
 import types
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 from torch._C import _fx_map_aggregate, _fx_map_arg, _NodeBase
@@ -58,6 +59,8 @@ Argument = Optional[
     ]
 ]
 ArgumentT = TypeVar("ArgumentT", bound=Argument)
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 _legal_ops = dict.fromkeys(
     [
@@ -102,7 +105,7 @@ if hasattr(_ops.inductor, "resize_storage_bytes_"):
 
 
 @compatibility(is_backward_compatible=False)
-def has_side_effect(fn: Callable) -> Callable:
+def has_side_effect(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     _side_effectful_functions.add(fn)
     return fn
 
@@ -375,7 +378,41 @@ class Node(_NodeBase):
         Args:
             x (Node): The node to put before this node. Must be a member of the same graph.
         """
-        self._prepend(x)
+        assert self.graph == x.graph, "Attempting to move a Node into a different Graph"
+        if self == x:
+            log.debug(
+                "Trying to prepend a node to itself. This behavior has no effect on the graph."
+            )
+            return
+        x._remove_from_list()
+        p = self._prev
+        p._next, x._prev = x, p
+        x._next, self._prev = self, x
+
+        # compute x._sort_key
+        psk = x._prev._sort_key
+        nsk = x._next._sort_key
+        if len(psk) > len(nsk):
+            idx: int
+            *prefix, idx = psk[: len(nsk) + 1]
+            x._sort_key = (*prefix, idx + 1)
+        elif len(psk) < len(nsk):
+            *prefix, idx = nsk[: len(psk) + 1]
+            x._sort_key = (*prefix, idx - 1)
+        else:  # same length, increase length by 1
+            x._sort_key = (*psk, 0)
+
+    def __gt__(self, other: "Node") -> bool:
+        return self._sort_key > other._sort_key
+
+    def __lt__(self, other: "Node") -> bool:
+        return self._sort_key < other._sort_key
+
+    def __ge__(self, other: "Node") -> bool:
+        return self > other or self == other
+
+    def __le__(self, other: "Node") -> bool:
+        return self < other or self == other
 
     @compatibility(is_backward_compatible=True)
     def append(self, x: "Node") -> None:
@@ -386,7 +423,11 @@ class Node(_NodeBase):
         Args:
             x (Node): The node to put after this node. Must be a member of the same graph.
         """
-        self._next._prepend(x)
+        self._next.prepend(x)
+
+    def _remove_from_list(self) -> None:
+        p, n = self._prev, self._next
+        p._next, n._prev = n, p
 
     @property
     def args(self) -> tuple[Argument, ...]:
@@ -676,10 +717,13 @@ class Node(_NodeBase):
         return [n for n in to_process if n not in skipped]
 
     @compatibility(is_backward_compatible=False)
-    def is_impure(self) -> bool:
+    def is_impure(self, impure_random: bool = True) -> bool:
         """
         Returns whether this op is impure, i.e. if its op is a placeholder or
         output, or if a call_function or call_module which is impure.
+
+        Args:
+            impure_random (bool): Whether to treat rand op as impure.
 
         Returns:
 
@@ -694,9 +738,10 @@ class Node(_NodeBase):
                 # impure since it mutates inputs
                 return True
 
-            if getattr(self.target, "_nondeterministic_seeded", False):
-                # impure since it mutates RNG state
-                return True
+            if impure_random:
+                if getattr(self.target, "_nondeterministic_seeded", False):
+                    # impure since it mutates RNG state
+                    return True
 
             return self.target in _side_effectful_functions
 
@@ -751,10 +796,17 @@ class Node(_NodeBase):
                 self.kwargs,
                 arg_types,
                 kwarg_types,
+                normalize_to_only_use_kwargs=normalize_to_only_use_kwargs,
             )
         elif self.op == "call_module":
             assert isinstance(self.target, str)
-            return normalize_module(root, self.target, self.args, self.kwargs)  # type: ignore[arg-type]
+            return normalize_module(
+                root,
+                self.target,
+                self.args,  # type: ignore[arg-type]
+                self.kwargs,
+                normalize_to_only_use_kwargs=normalize_to_only_use_kwargs,
+            )
 
         return None
 

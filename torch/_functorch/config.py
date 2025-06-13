@@ -9,7 +9,7 @@ Global flags for aot autograd
 """
 import os
 import sys
-from typing import Optional, TYPE_CHECKING
+from typing import Literal, Optional, TYPE_CHECKING
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -41,7 +41,7 @@ treat_parameters_as_free_to_save = True
 # Applies CSE to the graph before partitioning
 cse = True
 
-from torch._inductor.config import is_fbcode
+from torch._environment import is_fbcode
 
 
 enable_autograd_cache: bool = Config(
@@ -53,6 +53,12 @@ enable_autograd_cache: bool = Config(
 autograd_cache_allow_custom_autograd_functions: bool = Config(
     env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE_ALLOW_CUSTOM_AUTOGRAD", default=False
 )
+
+# For now, this is just for enabling unit testing in test_aot_autograd_cache.py
+# We will either make this the default with AOTAutogradCache, or
+# we'll just use it in the precompile flow. So there's no
+# need to add env vars or make it configurable
+bundled_autograd_cache: bool = False
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
@@ -174,6 +180,20 @@ fake_tensor_allow_unsafe_data_ptr_access = True
 # tokens.
 unlift_effect_tokens = False
 
+# NOTE: [The default layout constraint for custom operators.]
+# This must be the name of one of the layout constraint tags
+# (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
+# If the custom op does not have a layout constraint tag already
+# then we assume the following applies.
+#
+# This config is respected by Inductor and we recommend other backends also
+# respect it.
+# This config is in torch._functorch and not torch._inductor because it affects
+# ProxyTensor tracing.
+custom_op_default_layout_constraint: Literal[
+    "needs_exact_strides", "needs_fixed_stride_order", "flexible_layout"
+] = "needs_exact_strides"
+
 
 # Run aot eager decomp partition with CrossRefFakeMode
 # options = False, "all", "custom_ops"
@@ -265,6 +285,23 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 # This config changes this guess for tangents strides to be the same as outputs.
 # TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
 guess_tangent_strides_as_outputs = False
+
+# This is a temporary config to ensure all ranks take the same decision in the partitioner
+# it will untimately be removed once we share size_hints across ranks through compiler collectives
+_broadcast_rank0_decision = False
+
+# By default apply inlined saved_tensors_hooks only for "donated" buffers.
+# "donated" buffers are invisible to the user, they are intermediates of the forward graph.
+# Applying saved tensors hooks for memory optimizations only for intermediates
+# guarantees that original saved tensors could be deallocated.
+# This config enables saved_tensors_hooks are applied for **all** saved tensors,
+# that could include inputs, parameters, outputs.
+# "donated" - applied only to saved intermediates of the graph
+# "no_static" - applied to all saved but not "static"
+# (this includes parameters and user marked as static)
+# "all" - no filtering, everything saved for backward.
+saved_tensors_hooks_filtering_mode = "donated"
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

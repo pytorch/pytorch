@@ -97,7 +97,7 @@ TORCH_META_FUNC(clamp)
   }
   // Manual type promotion, since scalars have to participate in it
   ScalarType result_type = self.scalar_type();
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       !isComplexType(result_type), "clamp is not supported for complex types");
   // Floating is the highest supported
   if (!isFloatingType(result_type)) {
@@ -122,7 +122,7 @@ TORCH_META_FUNC(clamp)
         self.dtype());
   }
   // make sure scalars weren't complex
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       !isComplexType(result_type), "clamp is not supported for complex types");
   build_unary_op(maybe_get_output(), self.to(result_type));
 }
@@ -132,7 +132,7 @@ TORCH_META_FUNC2(clamp, Tensor)
   TORCH_CHECK(
       min || max,
       "torch.clamp: At least one of 'min' or 'max' must not be None");
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       !isComplexType(self.scalar_type()),
       "clamp is not supported for complex types");
 #define CLAMP_CONFIG()                      \
@@ -158,9 +158,10 @@ TORCH_META_FUNC(clamp_max)(const Tensor& self, const Scalar& max) {
   // but relu is implemented via clamp_min, so for perf an uniformity reasons
   // do a faster but correct thing
   ScalarType result_type = self.scalar_type();
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       !isComplexType(result_type), "clamp is not supported for complex types");
-  TORCH_CHECK(!max.isComplex(), "clamp is not supported for complex types");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !max.isComplex(), "clamp is not supported for complex types");
   // Floating is the highest supported
   if (!isFloatingType(result_type)) {
     auto result_type = at::native::result_type(self, max);
@@ -184,9 +185,10 @@ TORCH_META_FUNC2(clamp_max, Tensor)(const Tensor& self, const Tensor& max) {
 
 TORCH_META_FUNC(clamp_min)(const Tensor& self, const Scalar& min) {
   ScalarType result_type = self.scalar_type();
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       !isComplexType(result_type), "clamp is not supported for complex types");
-  TORCH_CHECK(!min.isComplex(), "clamp is not supported for complex types");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !min.isComplex(), "clamp is not supported for complex types");
   // Floating is the highest supported
   if (!isFloatingType(result_type)) {
     auto result_type = at::native::result_type(self, min);
@@ -485,13 +487,13 @@ void _assert_async_cpu(const Tensor& self) {
 void _assert_async_msg_cpu(const Tensor& self, std::string_view assert_msg) {
   TORCH_CHECK(
       native::is_nonzero(self),
-      assert_msg != "" ? assert_msg : "Assertion is failed");
+      !assert_msg.empty() ? assert_msg : "Assertion is failed");
 }
 
 void _assert_scalar(const Scalar& scalar, std::string_view assert_msg) {
   TORCH_SYM_CHECK(
       scalar.toSymBool(),
-      assert_msg != "" ? assert_msg : "Assertion is failed");
+      !assert_msg.empty() ? assert_msg : "Assertion is failed");
 }
 
 Tensor _functional_assert_scalar(
@@ -569,7 +571,7 @@ static void isin_sorting(
 }
 
 template <typename... Args>
-Device out_device(Args&... inps) {
+static Device out_device(Args&... inps) {
   for (const auto& i : {inps...}) {
     if (i.device() != at::kCPU) {
       return i.device();
@@ -739,7 +741,7 @@ std::tuple<Tensor&, Tensor&> mode_out(
 }
 
 template <class Stub>
-void minmax_out_impl(
+static void minmax_out_impl(
     const Tensor& self,
     int64_t dim,
     bool keepdim,

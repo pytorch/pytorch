@@ -3,6 +3,7 @@
 #include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
+#include <ATen/native/quantized/library.h>
 #include <torch/library.h>
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
@@ -27,8 +28,6 @@
 #ifdef __aarch64__
 #include <arm_neon.h>
 #endif
-
-int register_embedding_params();
 
 namespace {
 
