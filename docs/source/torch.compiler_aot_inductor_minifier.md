@@ -1,4 +1,4 @@
-# AOTInductor Minifier`
+# AOTInductor Minifier
 
 If you encounter an error while using AOT Inductor APIs such as
 `torch._inductor.aoti_compile_and_package`, `torch._indcutor.aoti_load_package`,
@@ -11,7 +11,7 @@ One a high-level, there are two steps in using the minifier:
 
 - Run the `minifier_launcher.py` script. If the minifier runs successfully, it generates runnable python code in `repro.py` which reproduces the exact error.
 
-## Example Code`
+## Example Code
 
 Here is sample code which will generate an error because we injected an error on relu with
 `torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY = "compile_error"`.
@@ -86,7 +86,7 @@ W1031 16:21:08.612000 2861654 pytorch/torch/_dynamo/debug_utils.py:279] /data/us
 ```
 
 
-## Minifier Launcher`
+## Minifier Launcher
 
 The `minifier_launcher.py` file has the following code. The `exported_program` contains the inputs to `torch._inductor.aoti_compile_and_package`.
 The `command='minify'` parameter means the script will run the minifier to create a minimal graph module that reproduce the error. Alternatively, you set
@@ -149,7 +149,7 @@ Wrote minimal repro out to repro.py
 
 If you get an `AOTIMinifierError` when running `minifier_launcher.py`, please report a bug [here](https://github.com/pytorch/pytorch/issues/new?assignees=&labels=&projects=&template=bug-report.yml).
 
-## Minified Result`
+## Minified Result
 
 The `repro.py` looks like this. Notice that the exported program is printed at the top of the file, and it contains only the relu node. The minifier successfully reduced the graph to the op that raises the error.
 
