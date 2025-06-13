@@ -134,6 +134,8 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 constant_fold_functions_need_guards = [
     torch.cuda.current_device,
     torch.cuda.is_initialized,
+    torch.xpu.current_device,
+    torch.xpu.is_initialized,
 ]
 
 constant_fold_functions = [
@@ -156,6 +158,8 @@ constant_fold_functions = [
     torch.promote_types,
     torch._C._get_privateuse1_backend_name,
     torch.autograd._is_checkpoint_valid,
+    torch.xpu.get_device_properties,
+    torch.xpu.is_available,
 ] + constant_fold_functions_need_guards
 if torch.distributed.is_available():
     constant_fold_functions.extend(
