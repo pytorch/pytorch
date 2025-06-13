@@ -1,6 +1,3 @@
-# Raw Sphinx Markdown Format
-
-
 # AOTInductor: Ahead-Of-Time Compilation for Torch.Export-ed Models
 
 ```{warning}
