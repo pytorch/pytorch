@@ -139,9 +139,12 @@ class TestCompiledAutograd(TestCase):
             torch.manual_seed(123)
             expected = list(fn())
             torch.manual_seed(123)
-            with compiled_autograd._enable(compiler_fn), mock.patch(
-                "torch._functorch.aot_autograd.AOT_COUNTER",
-                new_callable=itertools.count,
+            with (
+                compiled_autograd._enable(compiler_fn),
+                mock.patch(
+                    "torch._functorch.aot_autograd.AOT_COUNTER",
+                    new_callable=itertools.count,
+                ),
             ):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
@@ -1696,9 +1699,9 @@ main()
         def my_compiler_fn(gm):
             for node in gm.graph.nodes:
                 if isinstance(node.target, torch._ops.OpOverload):
-                    assert (
-                        node.target._name != "aten::_to_copy"
-                    ), "there should be no implicit copies (e.g. dtype casting)"
+                    assert node.target._name != "aten::_to_copy", (
+                        "there should be no implicit copies (e.g. dtype casting)"
+                    )
 
             def inner_compiler(gm_, example_inputs_):
                 counters["compiled_autograd"]["compiles"] += 1
@@ -2900,8 +2903,9 @@ main()
         loss = reduce_to_scalar_loss(out)
 
         stderr_msgs = io.StringIO()
-        with mock.patch("sys.stderr", stderr_msgs), compiled_autograd._enable(
-            compiler_fn
+        with (
+            mock.patch("sys.stderr", stderr_msgs),
+            compiled_autograd._enable(compiler_fn),
         ):
             torch._inductor.config.triton.cudagraphs = True
             loss.backward()
@@ -2938,8 +2942,9 @@ main()
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
         out = torch.nn.functional.scaled_dot_product_attention(query, key, value)
 
-        with config.patch(compiled_autograd=True), inductor_config.patch(
-            "triton.cudagraphs", True
+        with (
+            config.patch(compiled_autograd=True),
+            inductor_config.patch("triton.cudagraphs", True),
         ):
             opt_bwd = torch.compile(lambda: out.sum().backward())
             opt_bwd()
@@ -2968,8 +2973,9 @@ main()
 
         x = torch.randn(10, requires_grad=True, device="cuda")
         out = MyFn.apply(x)
-        with config.patch(compiled_autograd=True), inductor_config.patch(
-            "triton.cudagraphs", True
+        with (
+            config.patch(compiled_autograd=True),
+            inductor_config.patch("triton.cudagraphs", True),
         ):
             opt_bwd = torch.compile(lambda: out.backward())
             opt_bwd()
@@ -3027,8 +3033,9 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         )
 
         x = torch.randn(2, 2, requires_grad=True, device="cuda")
-        with config.patch(compiled_autograd=True), inductor_config.patch(
-            "triton.cudagraphs", True
+        with (
+            config.patch(compiled_autograd=True),
+            inductor_config.patch("triton.cudagraphs", True),
         ):
             out = torch.ops.test_cudagraphs_cpu_scalar_used_in_cpp_custom_op.custom_op_backed_by_autograd_fn(
                 x
@@ -3418,9 +3425,12 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 graphs.append(gm)
                 return inner_compiler_fn(gm)
 
-            with compiled_autograd._enable(compiler_fn), mock.patch(
-                "torch._functorch.aot_autograd.AOT_COUNTER",
-                new_callable=itertools.count,
+            with (
+                compiled_autograd._enable(compiler_fn),
+                mock.patch(
+                    "torch._functorch.aot_autograd.AOT_COUNTER",
+                    new_callable=itertools.count,
+                ),
             ):
                 res = fn(x)
                 res.sum().backward()
@@ -3652,9 +3662,10 @@ class CompiledAutograd0(torch.nn.Module):
 
         x = torch.ones(4, requires_grad=True)
         y = torch.ones(4, requires_grad=False)
-        with torch.autograd.graph.saved_tensors_hooks(
-            pack_hook, unpack_hook
-        ), compiled_autograd._enable(make_compiler_fn(fullgraph=False)):
+        with (
+            torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook),
+            compiled_autograd._enable(make_compiler_fn(fullgraph=False)),
+        ):
             out_test = f(x, y)
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 0)
@@ -4235,11 +4246,14 @@ class CompiledAutograd1(torch.nn.Module):
             model = DDP(model)
             inputs = torch.randn(10, 10)
             loss = model(inputs).sum()
-            with compiled_autograd._enable(compiler_fn), self.assertRaisesRegex(
-                RuntimeError,
-                (
-                    r"Compiled autograd is not compatible with C\+\+ DDP Reducer, "
-                    r'please use torch._dynamo.config.optimize_ddp="python_reducer"'
+            with (
+                compiled_autograd._enable(compiler_fn),
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    (
+                        r"Compiled autograd is not compatible with C\+\+ DDP Reducer, "
+                        r'please use torch._dynamo.config.optimize_ddp="python_reducer"'
+                    ),
                 ),
             ):
                 loss.backward()
@@ -4296,15 +4310,15 @@ class CompiledAutograd1(torch.nn.Module):
             output.backward(torch.ones_like(output))
 
             assert var.grad is not None, "Grad should be defined"
-            assert torch.equal(
-                var.grad, torch.ones_like(var) * 5
-            ), "Grad content should be as returned by backward"
-            assert (
-                var.grad.requires_grad is False
-            ), "Detached grad should not require grad"
-            assert (
-                id(var.grad.untyped_storage()) == pre_hook_storage_id
-            ), "Should be stolen"
+            assert torch.equal(var.grad, torch.ones_like(var) * 5), (
+                "Grad content should be as returned by backward"
+            )
+            assert var.grad.requires_grad is False, (
+                "Detached grad should not require grad"
+            )
+            assert id(var.grad.untyped_storage()) == pre_hook_storage_id, (
+                "Should be stolen"
+            )
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4350,12 +4364,12 @@ class CompiledAutograd1(torch.nn.Module):
             assert var.grad is not None, "Grad should be defined"
             assert var.grad.is_sparse, "Grad should be sparse"
             expected_dense_grad = torch.tensor([[5.0, 0.0], [0.0, 5.0]])
-            assert torch.equal(
-                var.grad.to_dense(), expected_dense_grad
-            ), "Content should be equal after shallow copy"
-            assert (
-                var.grad.requires_grad is False
-            ), "Detached grad should not require grad"
+            assert torch.equal(var.grad.to_dense(), expected_dense_grad), (
+                "Content should be equal after shallow copy"
+            )
+            assert var.grad.requires_grad is False, (
+                "Detached grad should not require grad"
+            )
             assert (
                 id(var.grad._indices().untyped_storage()) == pre_hook_storages_id[0]
             ), "Should be stolen"
@@ -4408,12 +4422,12 @@ class CompiledAutograd1(torch.nn.Module):
             assert var.grad is not None, "Grad should be defined"
             assert var.grad.is_sparse, "Grad should be sparse"
             expected_dense_grad = torch.tensor([[5.0, 0.0], [0.0, 5.0]])
-            assert torch.equal(
-                var.grad.to_dense(), expected_dense_grad
-            ), "Content should be equal after clone"
-            assert (
-                var.grad.requires_grad
-            ), "Grad should require grad for double backward"
+            assert torch.equal(var.grad.to_dense(), expected_dense_grad), (
+                "Content should be equal after clone"
+            )
+            assert var.grad.requires_grad, (
+                "Grad should require grad for double backward"
+            )
             assert (
                 id(var.grad._indices().untyped_storage()) != pre_hook_storages_id[0]
             ), "Should be copied"
@@ -4458,9 +4472,9 @@ class CompiledAutograd1(torch.nn.Module):
             output.backward(torch.ones_like(output))
 
             assert var.grad is not None, "Grad should be defined"
-            assert torch.equal(
-                var.grad, torch.ones_like(var) * 10.0
-            ), "Grad content should be as returned by backward"
+            assert torch.equal(var.grad, torch.ones_like(var) * 10.0), (
+                "Grad content should be as returned by backward"
+            )
             assert (
                 grad_ref_holder[0].untyped_storage() is not var.grad.untyped_storage()
             ), "Should be copied"
@@ -4488,9 +4502,9 @@ class CompiledAutograd1(torch.nn.Module):
             # Create a non-contiguous variable
             base_tensor = torch.randn(4, 4)
             var = base_tensor[::2, ::2]
-            assert (
-                not var.is_contiguous()
-            ), "Variable should be non-contiguous for this test"
+            assert not var.is_contiguous(), (
+                "Variable should be non-contiguous for this test"
+            )
             var.requires_grad_(True)
 
             grad_ref_holder = [None]
@@ -4507,12 +4521,12 @@ class CompiledAutograd1(torch.nn.Module):
             assert var.grad is not None, "Grad should be defined"
             # The `clone_obey_contract` branch 2 (`new_grad.clone(at::MemoryFormat::Contiguous)`)
             # will make the resulting grad contiguous.
-            assert (
-                var.grad.is_contiguous()
-            ), "Resulting grad should be contiguous due to branch 2 of clone_obey_contract"
-            assert torch.equal(
-                var.grad, torch.ones_like(var) * 7.0
-            ), "Grad content should be as returned by backward"
+            assert var.grad.is_contiguous(), (
+                "Resulting grad should be contiguous due to branch 2 of clone_obey_contract"
+            )
+            assert torch.equal(var.grad, torch.ones_like(var) * 7.0), (
+                "Grad content should be as returned by backward"
+            )
             assert (
                 grad_ref_holder[0].untyped_storage() is not var.grad.untyped_storage()
             ), "Should be copied"
@@ -4548,9 +4562,9 @@ class CompiledAutograd1(torch.nn.Module):
             assert var.grad is not None, "Grad should be defined"
             assert not var.grad.is_sparse, "Resulting grad should be dense"
             assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
-            assert (
-                var.grad is not initial_grad_ref
-            ), "Grad object should be replaced (out-of-place)"
+            assert var.grad is not initial_grad_ref, (
+                "Grad object should be replaced (out-of-place)"
+            )
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4581,9 +4595,9 @@ class CompiledAutograd1(torch.nn.Module):
             assert var.grad is not None, "Grad should be defined"
             assert not var.grad.is_sparse, "Resulting grad should be dense"
             assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
-            assert (
-                var.grad is initial_grad_ref
-            ), "Grad object should be modified in-place (same object)"
+            assert var.grad is initial_grad_ref, (
+                "Grad object should be modified in-place (same object)"
+            )
             yield var.grad
 
         self.check_output_and_recompiles(fn)
@@ -4628,12 +4642,12 @@ class CompiledAutograd1(torch.nn.Module):
 
             assert var.grad is not None, "Grad should be defined"
             assert var.grad.is_sparse, "Resulting grad should remain sparse"
-            assert torch.equal(
-                var.grad.to_dense(), expected_sum_dense
-            ), "Grad content should be the sum of sparse grads"
-            assert (
-                var.grad is initial_grad_ref
-            ), "Grad object should be modified in-place (same object)"
+            assert torch.equal(var.grad.to_dense(), expected_sum_dense), (
+                "Grad content should be the sum of sparse grads"
+            )
+            assert var.grad is initial_grad_ref, (
+                "Grad object should be modified in-place (same object)"
+            )
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4676,9 +4690,9 @@ class CompiledAutograd1(torch.nn.Module):
             assert var.grad is not None, "Grad should be defined"
             assert not var.grad.is_sparse, "Resulting grad should be dense"
             assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
-            assert (
-                var.grad is initial_grad_ref
-            ), "Grad object should be modified in-place (same object)"
+            assert var.grad is initial_grad_ref, (
+                "Grad object should be modified in-place (same object)"
+            )
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4720,12 +4734,12 @@ class CompiledAutograd1(torch.nn.Module):
             assert var.grad is not None, "Grad should be defined"
             assert not var.grad.is_sparse, "Resulting grad should be dense"
             assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
-            assert (
-                var.grad is not initial_grad_ref
-            ), "Grad object should be replaced (out-of-place)"
-            assert (
-                var.grad.requires_grad
-            ), "Resulting grad should track history for double backward"
+            assert var.grad is not initial_grad_ref, (
+                "Grad object should be replaced (out-of-place)"
+            )
+            assert var.grad.requires_grad, (
+                "Resulting grad should track history for double backward"
+            )
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4764,12 +4778,12 @@ class CompiledAutograd1(torch.nn.Module):
             assert var.grad is not None, "Grad should be defined"
             assert not var.grad.is_sparse, "Resulting grad should be dense"
             assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
-            assert (
-                var.grad is not initial_grad_ref
-            ), "Grad object should be replaced (out-of-place)"
-            assert (
-                var.grad.requires_grad
-            ), "Resulting grad should track history for double backward"
+            assert var.grad is not initial_grad_ref, (
+                "Grad object should be replaced (out-of-place)"
+            )
+            assert var.grad.requires_grad, (
+                "Resulting grad should track history for double backward"
+            )
             yield var.grad
 
         self.check_output_and_recompiles(
