@@ -22,8 +22,10 @@ def assert_onnx_program(
     atol: float | None = None,
     args: tuple[Any, ...] | None = None,
     kwargs: dict[str, Any] | None = None,
+    strategy: str | None = "TorchExportNonStrictStrategy",
 ) -> None:
     """Assert that the ONNX model produces the same output as the PyTorch ExportedProgram.
+
     Args:
         program: The ``ONNXProgram`` to verify.
         rtol: Relative tolerance.
@@ -32,7 +34,16 @@ def assert_onnx_program(
             If None, the default example inputs in the ExportedProgram will be used.
         kwargs: The keyword arguments to pass to the program.
             If None, the default example inputs in the ExportedProgram will be used.
+        strategy: Assert the capture strategy used to export the program. Values can be
+            class names like "TorchExportNonStrictStrategy".
+            If None, the strategy is not asserted.
     """
+    if strategy is not None:
+        if program._capture_strategy != strategy:
+            raise ValueError(
+                f"Expected strategy '{strategy}' is used to capture the exported program, "
+                f"but got '{program._capture_strategy}'."
+            )
     exported_program = program.exported_program
     if exported_program is None:
         raise ValueError(
@@ -55,15 +66,19 @@ def assert_onnx_program(
     torch_module = exported_program.module()
     torch_outputs, _ = _pytree.tree_flatten(torch_module(*args, **kwargs))
     # ONNX outputs are always real, so we need to convert torch complex outputs to real representations
-    torch_outputs = [
-        torch.view_as_real(output) if torch.is_complex(output) else output
-        for output in torch_outputs
-    ]
+    torch_outputs_adapted = []
+    for output in torch_outputs:
+        if not isinstance(output, torch.Tensor):
+            torch_outputs_adapted.append(torch.tensor(output))
+        elif torch.is_complex(output):
+            torch_outputs_adapted.append(torch.view_as_real(output))
+        else:
+            torch_outputs_adapted.append(output)
     onnx_outputs = program(*args, **kwargs)
     # TODO(justinchuby): Include output names in the error message
     torch.testing.assert_close(
         tuple(onnx_outputs),
-        tuple(torch_outputs),
+        tuple(torch_outputs_adapted),
         rtol=rtol,
         atol=atol,
         equal_nan=True,

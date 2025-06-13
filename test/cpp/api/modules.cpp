@@ -127,9 +127,7 @@ TEST_F(ModulesTest, Conv2dSameStrided) {
       [&] { Conv2d model_invalid(options.stride(2)); }(),
       "padding='same' is not supported for strided convolutions");
   ASSERT_THROWS_WITH(
-      [&] {
-        Conv2d model_invalid(options.stride({1, 2}));
-      }(),
+      [&] { Conv2d model_invalid(options.stride({1, 2})); }(),
       "padding='same' is not supported for strided convolutions");
 }
 
@@ -181,9 +179,7 @@ TEST_F(ModulesTest, Conv3dSameStrided) {
       [&] { Conv3d model_invalid(options.stride(2)); }(),
       "padding='same' is not supported for strided convolutions");
   ASSERT_THROWS_WITH(
-      [&] {
-        Conv3d model_invalid(options.stride({1, 2, 1}));
-      }(),
+      [&] { Conv3d model_invalid(options.stride({1, 2, 1})); }(),
       "padding='same' is not supported for strided convolutions");
 }
 
@@ -2432,8 +2428,7 @@ TEST_F(ModulesTest, ELU) {
       ASSERT_EQ(y.ndimension(), 3);
       ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       auto y_exp = torch::max(torch::zeros_like(x_orig), x_orig) +
-          torch::min(torch::zeros_like(x_orig),
-                     alpha * (torch::exp(x_orig) - 1.0));
+          torch::min(torch::zeros_like(x_orig), alpha * (torch::expm1(x_orig)));
       ASSERT_TRUE(torch::allclose(y, y_exp));
       if (inplace) {
         ASSERT_TRUE(torch::allclose(x, y_exp));
@@ -2458,7 +2453,7 @@ TEST_F(ModulesTest, SELU) {
     auto zero = torch::zeros_like(input);
     auto expected = scale *
         (torch::max(zero, input_orig) +
-         torch::min(zero, alpha * (torch::exp(input_orig) - 1)));
+         torch::min(zero, alpha * (torch::expm1(input_orig))));
     auto s = output.sum();
 
     ASSERT_EQ(s.ndimension(), 0);
@@ -2848,7 +2843,7 @@ TEST_F(ModulesTest, CELU) {
       ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       auto y_exp = torch::max(torch::zeros_like(x_orig), x_orig) +
           torch::min(torch::zeros_like(x_orig),
-                     alpha * (torch::exp(x_orig / alpha) - 1.0));
+                     alpha * (torch::expm1(x_orig / alpha)));
       ASSERT_TRUE(torch::allclose(y, y_exp));
       if (inplace) {
         ASSERT_TRUE(torch::allclose(x, y_exp));
@@ -4592,6 +4587,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
   ASSERT_EQ(
       c10::str(Conv1d(3, 4, 5)),
       "torch::nn::Conv1d(3, 4, kernel_size=5, stride=1)");
+  {
+    auto options = Conv1dOptions(3, 4, 5);
+    ASSERT_EQ(
+        c10::str(Conv1d(options.padding(torch::kSame))),
+        "torch::nn::Conv1d(3, 4, kernel_size=5, stride=1, padding='same')");
+    ASSERT_EQ(
+        c10::str(Conv1d(options.padding(torch::kValid))),
+        "torch::nn::Conv1d(3, 4, kernel_size=5, stride=1, padding='valid')");
+  }
 
   ASSERT_EQ(
       c10::str(Conv2d(3, 4, 5)),
@@ -4605,6 +4609,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
     ASSERT_EQ(
         c10::str(Conv2d(options)),
         "torch::nn::Conv2d(3, 4, kernel_size=[5, 6], stride=[1, 2])");
+  }
+  {
+    auto options = Conv2dOptions(3, 4, std::vector<int64_t>{5, 6});
+    ASSERT_EQ(
+        c10::str(Conv2d(options.padding(torch::kSame))),
+        "torch::nn::Conv2d(3, 4, kernel_size=[5, 6], stride=[1, 1], padding='same')");
+    ASSERT_EQ(
+        c10::str(Conv2d(options.padding(torch::kValid))),
+        "torch::nn::Conv2d(3, 4, kernel_size=[5, 6], stride=[1, 1], padding='valid')");
   }
 
   ASSERT_EQ(
@@ -4630,6 +4643,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
         "groups=2, "
         "bias=false, "
         "padding_mode=kCircular)");
+  }
+  {
+    auto options = Conv3dOptions(3, 4, std::vector<int64_t>{5, 6, 7});
+    ASSERT_EQ(
+        c10::str(Conv3d(options.padding(torch::kSame))),
+        "torch::nn::Conv3d(3, 4, kernel_size=[5, 6, 7], stride=[1, 1, 1], padding='same')");
+    ASSERT_EQ(
+        c10::str(Conv3d(options.padding(torch::kValid))),
+        "torch::nn::Conv3d(3, 4, kernel_size=[5, 6, 7], stride=[1, 1, 1], padding='valid')");
   }
 }
 

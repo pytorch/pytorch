@@ -12,7 +12,6 @@ import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import replicate
-from torch.distributed._tensor import DTensor, init_device_mesh, Replicate, Shard
 from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
     get_optimizer_state_dict,
@@ -20,7 +19,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
     StateDictOptions,
 )
-from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     fully_shard,
@@ -31,6 +30,7 @@ from torch.distributed.fsdp._common_utils import (
     clean_tensor_name,
 )
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
+from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -115,15 +115,6 @@ class TestFullyShard2DTraining(FSDPTest):
             "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
         )
 
-    # TODO: remove this test when uneven sharding is supported for FSDP+TP
-    @skip_if_lt_x_gpu(2)
-    def test_2d_uneven_shard_raise_error(self):
-        global_mesh = self.init_global_mesh()
-        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
-        model = MLPStack(3)
-        with self.assertRaisesRegex(NotImplementedError, "uneven sharding"):
-            model.parallelize(tp_mesh, dp_mesh, False)
-
     @skip_if_lt_x_gpu(2)
     @skipIfRocm
     def test_train_parity_2d_mlp(self):
@@ -132,9 +123,7 @@ class TestFullyShard2DTraining(FSDPTest):
             {
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
-                # TODO: change "mlp_dim" back to [3, 16, 17] when uneven sharding
-                # is supported for FSDP+TP
-                "mlp_dim": [4, 16, 20],
+                "mlp_dim": [3, 16, 17],
             },
             functools.partial(self._test_train_parity_2d_mlp, global_mesh),
         )

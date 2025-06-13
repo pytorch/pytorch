@@ -5,6 +5,9 @@ import operator
 from typing import Any, TYPE_CHECKING
 
 import torch
+
+# NOTE: other files rely on the imports below
+from torch._dynamo import callback as compilation_callback  # noqa: F401
 from torch._inductor.runtime.cache_dir_utils import (  # noqa: F401
     cache_dir,
     default_cache_dir,
@@ -176,6 +179,6 @@ def compile_mps_shader(source: str) -> Any:
     Compiles shader source but raise more actionable error message when needed
     """
     try:
-        return torch.mps._compile_shader(source)
+        return torch.mps.compile_shader(source)
     except SyntaxError as err:
         raise SyntaxError(f"failed to compile {source} with {err.msg}") from err

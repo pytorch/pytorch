@@ -22,9 +22,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
   ~CUDAGraph();
 
-  static void inc_pending_event_queries();
-  static void dec_pending_event_queries();
-  static int num_pending_event_queries();
   // See Note [Explicit Registration of Generators to the CUDA Graph]
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
   void register_generator_state(const at::Generator& generator);
@@ -41,8 +38,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
  protected:
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
-
-  static std::atomic<int> pending_event_queries;
 
   // internal states so reset() can do its best cleaning up
   // Set to true in capture_end if cudaStreamEndCapture succeeded

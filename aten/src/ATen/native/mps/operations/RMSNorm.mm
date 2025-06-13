@@ -4,13 +4,14 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_fused_rms_norm_native.h>
 #include <ATen/ops/empty_like.h>
 #endif
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/native/mps/operations/RMSNorm.h>
 #include <fmt/format.h>
 
-namespace at::native::mps {
+namespace at::native {
+using namespace mps;
 
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
@@ -18,13 +19,9 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/RMSNorm_metallib.h>
 #endif
 
-Tensor rms_norm_mps_kernel(const Tensor& input,
-                           c10::SymIntArrayRef normalized_shape,
-                           const Tensor& weight,
-                           const double eps) {
+Tensor _fused_rms_norm_mps(const Tensor& input, const int64_t normalized_ndim, const Tensor& weight, const double eps) {
   TORCH_CHECK(input.is_contiguous() && weight.is_contiguous(), "Expected contiguous input and weight tensors");
   auto output = at::empty_like(input);
-  const int normalized_ndim = normalized_shape.size();
   const auto input_shape = input.sizes();
   const auto input_ndim = input.dim();
   const int axis = input_ndim - normalized_ndim;
@@ -64,4 +61,4 @@ Tensor rms_norm_mps_kernel(const Tensor& input,
   return output;
 }
 
-} // namespace at::native::mps
+} // namespace at::native

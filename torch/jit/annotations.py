@@ -331,7 +331,7 @@ def try_real_annotations(fn, loc):
     try:
         # Note: anything annotated as `Optional[T]` will automatically
         # be returned as `Union[T, None]` per
-        # https://github.com/python/typing/blob/master/src/typing.py#L850
+        # https://github.com/python/cpython/blob/main/Lib/typing.py#L732
         sig = inspect.signature(fn)
     except ValueError:
         return None
@@ -486,6 +486,9 @@ def try_ann_to_type(ann, loc, rcb=None):
         return StreamObjType.get()
     if ann is torch.dtype:
         return IntType.get()  # dtype not yet bound in as its own type
+    if ann is torch.qscheme:
+        return IntType.get()  # qscheme not yet bound in as its own type
+
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
         if _get_script_class(ann) is None:
             scripted_class = torch.jit._script._recursive_compile_class(ann, loc)

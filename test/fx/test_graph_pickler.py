@@ -14,8 +14,7 @@ import torch
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 # Make the helper files in test/ importable
@@ -25,13 +24,17 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model,
     CommonTemplate,
     copy_tests,
+    TestFailure,
 )
 
 
 importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
-test_failures = {}
+test_failures = {
+    # TypeError: cannot pickle 'generator' object
+    "test_layer_norm_graph_pickler": TestFailure(("cpu"), is_skip=True),
+}
 
 
 def make_test_cls(cls, xfail_prop="_expected_failure_graph_pickler"):
@@ -89,8 +92,7 @@ class TestGraphPickler(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._inductor.test_case import run_tests
-
-    # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
-        run_tests(needs="filelock")
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

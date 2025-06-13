@@ -18,7 +18,12 @@ from torch.utils._sympy.symbol import SymT
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .ops_handler import DefaultHandler, OpsHandler, WrapperHandler
-from .utils import cache_on_self, sympy_index_symbol_with_prefix, sympy_subs
+from .utils import (
+    cache_on_self,
+    reduction_num_outputs,
+    sympy_index_symbol_with_prefix,
+    sympy_subs,
+)
 from .virtualized import ops, V
 
 
@@ -31,7 +36,7 @@ T = TypeVar("T")
 
 class InterpreterShim(torch.fx.Interpreter):
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _dummy_gm():
         return torch.fx.symbolic_trace(identity)
 
@@ -243,7 +248,7 @@ class LoopBody:
         inverse_order = [inverse_order[i] for i in range(len(new_order))]
 
         def new_body(*indices: Sequence[sympy.Expr]) -> Any:
-            index = list(itertools.chain(*indices))
+            index = [*itertools.chain.from_iterable(indices)]
             assert len(index) == len(iter_size) + len(reduce_size)
             iter_idx = index[: len(iter_size)]
             reduce_idx = index[len(iter_size) :]
@@ -307,6 +312,14 @@ class LoopBody:
             for entry in self.memory_usage[MemoryUsageType.LOAD]
         ]
 
+    def get_all_read_expr(self, buffer_name):
+        # reversed to match old behavior
+        out = []
+        for entry in reversed(self.memory_usage[MemoryUsageType.LOAD]):
+            if entry.buffer_name == buffer_name:
+                out.append(self.indexing_exprs[entry.index_name])
+        return out
+
     def get_write_exprs(self):
         return [
             self.indexing_exprs[entry.index_name]
@@ -315,6 +328,16 @@ class LoopBody:
                 self.memory_usage[MemoryUsageType.STORE_REDUCTION],
             )
         ]
+
+    def get_all_write_expr(self, buffer_name):
+        out = []
+        for entry in itertools.chain(
+            self.memory_usage[MemoryUsageType.STORE],
+            self.memory_usage[MemoryUsageType.STORE_REDUCTION],
+        ):
+            if entry.buffer_name == buffer_name:
+                out.append(self.indexing_exprs[entry.index_name])
+        return out
 
     def debug_str(self):
         lines = [f"var_ranges = {dict(self.var_ranges)}"]
@@ -437,12 +460,13 @@ class LoopBodyBlock:
     """
     Captures the body of a Loops subclass into an FX graph.
     In normal cases there will be a 1:1 mapping between LoopBody and
-    LoopBodyBlock, hower in the case of ops.masked() the masked out
+    LoopBodyBlock, however in the case of ops.masked() the masked out
     operations will manifest as an extra LoopBodyBlock.
     """
 
     def __init__(self, body: LoopBody, fn: Callable[..., Any], args: list[Any]):
         self.body = body
+
         tracer = LightTracer()
         proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
 
@@ -553,8 +577,9 @@ class CaptureIndexing(WrapperHandler):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         result = self._inner.reduction(dtype, src_dtype, reduction_type, value)
-        if "welford" in reduction_type:
-            return tuple(result[i] for i in range(3))
+        num_outputs = reduction_num_outputs(reduction_type)
+        if num_outputs > 1:
+            return tuple(result[i] for i in range(num_outputs))
         return result
 
     def index_expr(self, index, dtype):

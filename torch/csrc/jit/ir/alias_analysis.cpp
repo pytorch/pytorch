@@ -197,8 +197,6 @@ const AliasTypeSet* AliasDb::mapTypeToAliasTypeSetPtr(
   return helper.mapTypeToBorrowedAliasTypeSet(type);
 }
 
-AliasDb::~AliasDb() = default;
-
 // Structure used during analysis to keep track of all writes at a high
 // level. When the analysis is completed, this will be used to construct
 // a more efficient WriteIndex
@@ -279,13 +277,14 @@ AliasDb::AliasDb(
   // Now that we've built the write index, we can null out the WriteRegistry to
   // make future access an error. In this way we prevent the index from getting
   // out of sync (since we have no way of registering new writes)
-  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   writeRegistry_ = nullptr;
 
   // Initialize the write cache
   buildWrittenToLocationsIndex();
   GRAPH_DEBUG(toString());
 }
+
+AliasDb::~AliasDb() = default;
 
 bool AliasDb::isMutable(Node* n) const {
   ValueSet vs;
@@ -395,6 +394,14 @@ MemoryLocations AliasDb::getReads(Node* n) const {
   MemoryLocations reads;
   getReadsImpl(n, reads);
   return reads;
+}
+
+MemoryLocations AliasDb::getMemoryLocations(Value* v) const {
+  auto it = elementMap_.find(v);
+  if (it != elementMap_.end()) {
+    return memoryDAG_->getMemoryLocations(it->second);
+  }
+  return MemoryLocations();
 }
 
 std::string AliasDb::getElementName(const Element* e) const {
@@ -2013,6 +2020,29 @@ void Lint(const AliasDb* db) {
   // fully developed.
   // - Every mutable value in the aliasdb belongs to the graph
   // - All container values have contained elements
+}
+
+ValueAndMemoryLocationSet AliasDb::getValueAndMemoryLocationSet() const {
+  return ValueAndMemoryLocationSet(this);
+}
+
+bool AliasDb::writesToAlias(Node* n, const ValueAndMemoryLocationSet& vls)
+    const {
+  const auto writtenTo = getWrites(n);
+  if (writtenTo.empty()) {
+    return false;
+  }
+
+  return writtenTo.intersects(vls.memoryLocations_);
+}
+
+void ValueAndMemoryLocationSet::insert(Value* v) {
+  valueSet_.insert(v);
+  memoryLocations_ |= aliasDb_->getMemoryLocations(v);
+}
+
+ValueSet& ValueAndMemoryLocationSet::getValueSet() {
+  return valueSet_;
 }
 
 } // namespace torch::jit

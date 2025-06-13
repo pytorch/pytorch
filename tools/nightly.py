@@ -9,6 +9,11 @@ You can use this script to check out a new nightly branch with the following::
     $ ./tools/nightly.py checkout -b my-nightly-branch
     $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
+Or if you would like to check out the nightly commit in detached HEAD mode::
+
+    $ ./tools/nightly.py checkout
+    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+
 Or if you would like to re-use an existing virtual environment, you can pass in
 the prefix argument (--prefix)::
 
@@ -50,6 +55,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import uuid
 from ast import literal_eval
@@ -122,27 +128,29 @@ PIP_SOURCES = {
         supported_platforms={"Linux", "macOS", "Windows"},
         accelerator="cpu",
     ),
-    "cuda-11.8": PipSource(
-        name="cuda-11.8",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu118",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
-    "cuda-12.4": PipSource(
-        name="cuda-12.4",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu124",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
+    # NOTE: Sync with CUDA_ARCHES in .github/scripts/generate_binary_build_matrix.py
     "cuda-12.6": PipSource(
         name="cuda-12.6",
         index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu126",
         supported_platforms={"Linux", "Windows"},
         accelerator="cuda",
     ),
-    "rocm-6.2.4": PipSource(
-        name="rocm-6.2.4",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.2.4",
+    "cuda-12.8": PipSource(
+        name="cuda-12.8",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu128",
+        supported_platforms={"Linux", "Windows"},
+        accelerator="cuda",
+    ),
+    # NOTE: Sync with ROCM_ARCHES in .github/scripts/generate_binary_build_matrix.py
+    "rocm-6.3": PipSource(
+        name="rocm-6.3",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.3",
+        supported_platforms={"Linux"},
+        accelerator="rocm",
+    ),
+    "rocm-6.4": PipSource(
+        name="rocm-6.4",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.4",
         supported_platforms={"Linux"},
         accelerator="rocm",
     ),
@@ -340,6 +348,44 @@ class Venv:
         self.base_python("-m", "venv", str(self.prefix))
         assert self.is_venv(), "Failed to create virtual environment."
         (self.prefix / ".gitignore").write_text("*\n", encoding="utf-8")
+
+        if LINUX:
+            activate_script = self.activate_script
+            st_mode = activate_script.stat().st_mode
+            # The activate script may be read-only and we need to add write permissions
+            activate_script.chmod(st_mode | 0o200)
+            with activate_script.open(mode="a", encoding="utf-8") as f:
+                f.write(
+                    "\n"
+                    + textwrap.dedent(
+                        f"""
+                        # Add NVIDIA PyPI packages to LD_LIBRARY_PATH
+                        export LD_LIBRARY_PATH="$(
+                            {self.executable.name} - <<EOS
+                        import glob
+                        import itertools
+                        import os
+                        import site
+
+                        nvidia_libs = [
+                            p.rstrip("/")
+                            for p in itertools.chain.from_iterable(
+                                glob.iglob(f"{{site_dir}}/{{pattern}}/", recursive=True)
+                                for site_dir in site.getsitepackages()
+                                for pattern in ("nvidia/**/lib", "cu*/**/lib")
+                            )
+                        ]
+                        ld_library_path = os.getenv("LD_LIBRARY_PATH", "").split(os.pathsep)
+                        print(os.pathsep.join(dict.fromkeys(nvidia_libs + ld_library_path)))
+                        EOS
+                        )"
+                        """
+                    ).strip()
+                    + "\n"
+                )
+            # Change the file mode back
+            activate_script.chmod(st_mode)
+
         return self.ensure()
 
     def ensure(self) -> Path:
@@ -556,7 +602,7 @@ def logging_manager(*, debug: bool = False) -> Generator[logging.Logger, None, N
         print(f"log file: {log_file}")
         yield root_logger
     except Exception as e:
-        logging.exception("Fatal exception")
+        logging.exception("Fatal exception")  # noqa: LOG015
         logging_record_exception(e)
         print(f"log file: {log_file}")
         sys.exit(1)
@@ -564,7 +610,7 @@ def logging_manager(*, debug: bool = False) -> Generator[logging.Logger, None, N
         # You could logging.debug here to suppress the backtrace
         # entirely, but there is no reason to hide it from technically
         # savvy users.
-        logging.info("", exc_info=True)
+        logging.info("", exc_info=True)  # noqa: LOG015
         logging_record_exception(e)
         print(f"log file: {log_file}")
         sys.exit(1)
@@ -574,19 +620,17 @@ def check_branch(subcommand: str, branch: str | None) -> str | None:
     """Checks that the branch name can be checked out."""
     if subcommand != "checkout":
         return None
-    # first make sure actual branch name was given
-    if branch is None:
-        return "Branch name to checkout must be supplied with '-b' option"
     # next check that the local repo is clean
     cmd = git("status", "--untracked-files=no", "--porcelain")
     stdout = subprocess.check_output(cmd, text=True, encoding="utf-8")
     if stdout.strip():
         return "Need to have clean working tree to checkout!\n\n" + stdout
-    # next check that the branch name doesn't already exist
-    cmd = git("show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
-    p = subprocess.run(cmd, capture_output=True, check=False)  # type: ignore[assignment]
-    if not p.returncode:
-        return f"Branch {branch!r} already exists"
+    # next check that the branch name doesn't already exist (if a branch name is provided)
+    if branch is not None:
+        cmd = git("show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
+        p = subprocess.run(cmd, capture_output=True, check=False)  # type: ignore[assignment]
+        if not p.returncode:
+            return f"Branch {branch!r} already exists"
     return None
 
 
@@ -641,10 +685,15 @@ def _nightly_version(site_dir: Path) -> str:
 
 
 @timed("Checking out nightly PyTorch")
-def checkout_nightly_version(branch: str, site_dir: Path) -> None:
+def checkout_nightly_version(branch: str | None, site_dir: Path) -> None:
     """Get's the nightly version and then checks it out."""
     nightly_version = _nightly_version(site_dir)
-    cmd = git("checkout", "-b", branch, nightly_version)
+    if branch is None:
+        # Detached mode - explicitly use --detach flag
+        cmd = git("checkout", "--detach", nightly_version)
+    else:
+        # Branch mode
+        cmd = git("checkout", "-b", branch, nightly_version)
     subprocess.check_call(cmd)
 
 
@@ -821,7 +870,7 @@ def install(
 
     with venv.extracted_wheel(torch_wheel) as wheel_site_dir:
         if subcommand == "checkout":
-            checkout_nightly_version(cast(str, branch), wheel_site_dir)
+            checkout_nightly_version(branch, wheel_site_dir)
         elif subcommand == "pull":
             pull_nightly_version(wheel_site_dir)
         else:
@@ -854,7 +903,7 @@ def make_parser() -> argparse.ArgumentParser:
     checkout.add_argument(
         "-b",
         "--branch",
-        help="Branch name to checkout",
+        help="Branch name to checkout (if omitted, checks out in detached HEAD mode)",
         dest="branch",
         default=None,
         metavar="NAME",

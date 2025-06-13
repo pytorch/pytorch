@@ -1510,7 +1510,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
     ):
         dynamic_shapes = _tree_map_with_path(
             lambda path, x: (
-                [Dim.AUTO] * x.dim() if isinstance(x, torch.Tensor) else None  # type: ignore[attr-defined]
+                [Dim.AUTO] * x.dim() if isinstance(x, torch.Tensor) else None
             ),
             self.sample_args,
         )
@@ -1545,6 +1545,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
                     f"{type(name_to_constant[spec.target])} has been erroneously marked as buffer"
                 )
                 spec.kind = InputKind.CONSTANT_TENSOR
+                spec.persistent = None
         ep.verifier().check(ep)
 
         return ep

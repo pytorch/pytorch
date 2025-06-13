@@ -35,6 +35,7 @@ Scalar item(const Tensor& self) {
 #endif
 
 Scalar _local_scalar_dense_cpu(const Tensor& self) {
+  TORCH_CHECK(self.numel() > 0, "_local_scalar_dense: Empty tensor not supported");
   // Don't use bool*, since it may take out-of-range byte as bool.
   // Instead, we cast explicitly to avoid ASAN error.
   if (self.scalar_type() == kBool) {

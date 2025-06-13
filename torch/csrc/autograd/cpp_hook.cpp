@@ -64,4 +64,9 @@ variable_list CppFunctionSingleTensorPreHook::operator()(
   return results;
 }
 
+void CppFunctionSingleTensorPreHook::compiled_args(
+    torch::dynamo::autograd::CompiledNodeArgs& args) const {
+  args.add_cpp_single_tensor_pre_hook(hook_, value_idx_);
+}
+
 } // namespace torch::autograd

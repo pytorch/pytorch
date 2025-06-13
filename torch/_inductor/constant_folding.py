@@ -16,6 +16,18 @@ META_TAG = "MODULE_TYPE"
 MODULE_TAG = "_MAIN_MODULE"
 CONST_MODULE_TAG = "_CONST_MODULE"
 
+_dont_constant_fold: list[torch.fx.node.Target] = []
+
+
+def add_dont_constant_fold(op: torch.fx.node.Target) -> None:
+    global _dont_constant_fold
+    _dont_constant_fold.append(op)
+
+
+def clear_dont_constant_fold() -> None:
+    global _dont_constant_fold
+    _dont_constant_fold.clear()
+
 
 def replace_node_with_constant(
     gm: torch.fx.GraphModule,
@@ -146,6 +158,9 @@ class ConstantFolder(torch.fx.Interpreter):
             # We only folding fp32_weight -> q
             # int8_weight and leave dq in graph to be fused
             return True
+
+        if node.target in _dont_constant_fold:
+            return True
         return False
 
     def node_to_last_non_output_use(self) -> dict[torch.fx.Node, list[torch.fx.Node]]:
@@ -233,6 +248,10 @@ class ConstantFolder(torch.fx.Interpreter):
             return self.unknown_value
 
         out = self._deduce_value(node)
+
+        if isinstance(out, torch._C.ScriptObject):
+            return out
+
         if out == self.unknown_value:
             return self.unknown_value
 
@@ -370,7 +389,7 @@ def run_and_get_constant_graph(
     # We rewrite the tags, if it's a constant being directly consumed, without
     # any folding opportunity, we keep it in main gm.
     for node in gm.graph.nodes:
-        if node.op == "getattr" or (node.name in (lifted_constant_names or ())):
+        if node.op == "get_attr" or (node.name in (lifted_constant_names or ())):
             untag(node)
 
     new_graph = torch.fx.Graph()

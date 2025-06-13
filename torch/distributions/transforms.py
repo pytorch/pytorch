@@ -3,11 +3,14 @@ import functools
 import math
 import operator
 import weakref
-from typing import Optional
+from collections.abc import Sequence
+from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
+from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.distribution import Distribution
 from torch.distributions.utils import (
     _sum_rightmost,
     broadcast_all,
@@ -92,7 +95,7 @@ class Transform:
     domain: constraints.Constraint
     codomain: constraints.Constraint
 
-    def __init__(self, cache_size=0):
+    def __init__(self, cache_size: int = 0) -> None:
         self._cache_size = cache_size
         self._inv: Optional[weakref.ReferenceType[Transform]] = None
         if cache_size == 0:
@@ -218,7 +221,7 @@ class _InverseTransform(Transform):
     This class is private; please instead use the ``Transform.inv`` property.
     """
 
-    def __init__(self, transform: Transform):
+    def __init__(self, transform: Transform) -> None:
         super().__init__(cache_size=transform._cache_size)
         self._inv: Transform = transform  # type: ignore[assignment]
 
@@ -285,7 +288,7 @@ class ComposeTransform(Transform):
             the latest single value is cached. Only 0 and 1 are supported.
     """
 
-    def __init__(self, parts: list[Transform], cache_size=0):
+    def __init__(self, parts: list[Transform], cache_size: int = 0) -> None:
         if cache_size:
             parts = [part.with_cache(cache_size) for part in parts]
         super().__init__(cache_size=cache_size)
@@ -413,7 +416,12 @@ class IndependentTransform(Transform):
             dimensions to treat as dependent.
     """
 
-    def __init__(self, base_transform, reinterpreted_batch_ndims, cache_size=0):
+    def __init__(
+        self,
+        base_transform: Transform,
+        reinterpreted_batch_ndims: int,
+        cache_size: int = 0,
+    ) -> None:
         super().__init__(cache_size=cache_size)
         self.base_transform = base_transform.with_cache(cache_size)
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
@@ -442,7 +450,7 @@ class IndependentTransform(Transform):
         return self.base_transform.bijective
 
     @property
-    def sign(self) -> int:  # type: ignore[override]
+    def sign(self) -> int:
         return self.base_transform.sign
 
     def _call(self, x):
@@ -486,7 +494,12 @@ class ReshapeTransform(Transform):
 
     bijective = True
 
-    def __init__(self, in_shape, out_shape, cache_size=0):
+    def __init__(
+        self,
+        in_shape: torch.Size,
+        out_shape: torch.Size,
+        cache_size: int = 0,
+    ) -> None:
         self.in_shape = torch.Size(in_shape)
         self.out_shape = torch.Size(out_shape)
         if self.in_shape.numel() != self.out_shape.numel():
@@ -571,7 +584,7 @@ class PowerTransform(Transform):
     codomain = constraints.positive
     bijective = True
 
-    def __init__(self, exponent, cache_size=0):
+    def __init__(self, exponent: Tensor, cache_size: int = 0) -> None:
         super().__init__(cache_size=cache_size)
         (self.exponent,) = broadcast_all(exponent)
 
@@ -582,7 +595,7 @@ class PowerTransform(Transform):
 
     @lazy_property
     def sign(self) -> int:  # type: ignore[override]
-        return self.exponent.sign()
+        return self.exponent.sign()  # type: ignore[return-value]
 
     def __eq__(self, other):
         if not isinstance(other, PowerTransform):
@@ -734,7 +747,13 @@ class AffineTransform(Transform):
 
     bijective = True
 
-    def __init__(self, loc, scale, event_dim=0, cache_size=0):
+    def __init__(
+        self,
+        loc: Union[Tensor, float],
+        scale: Union[Tensor, float],
+        event_dim: int = 0,
+        cache_size: int = 0,
+    ) -> None:
         super().__init__(cache_size=cache_size)
         self.loc = loc
         self.scale = scale
@@ -771,20 +790,20 @@ class AffineTransform(Transform):
             if self.loc != other.loc:
                 return False
         else:
-            if not (self.loc == other.loc).all().item():
+            if not (self.loc == other.loc).all().item():  # type: ignore[union-attr]
                 return False
 
         if isinstance(self.scale, _Number) and isinstance(other.scale, _Number):
             if self.scale != other.scale:
                 return False
         else:
-            if not (self.scale == other.scale).all().item():
+            if not (self.scale == other.scale).all().item():  # type: ignore[union-attr]
                 return False
 
         return True
 
     @property
-    def sign(self) -> int:
+    def sign(self) -> Union[Tensor, int]:  # type: ignore[override]
         if isinstance(self.scale, _Number):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
         return self.scale.sign()
@@ -1022,7 +1041,7 @@ class PositiveDefiniteTransform(Transform):
     """
 
     domain = constraints.independent(constraints.real, 2)
-    codomain = constraints.positive_definite  # type: ignore[assignment]
+    codomain = constraints.positive_definite
 
     def __eq__(self, other):
         return isinstance(other, PositiveDefiniteTransform)
@@ -1053,7 +1072,13 @@ class CatTransform(Transform):
 
     transforms: list[Transform]
 
-    def __init__(self, tseq, dim=0, lengths=None, cache_size=0):
+    def __init__(
+        self,
+        tseq: Sequence[Transform],
+        dim: int = 0,
+        lengths: Optional[Sequence[int]] = None,
+        cache_size: int = 0,
+    ) -> None:
         assert all(isinstance(t, Transform) for t in tseq)
         if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
@@ -1157,7 +1182,9 @@ class StackTransform(Transform):
 
     transforms: list[Transform]
 
-    def __init__(self, tseq, dim=0, cache_size=0):
+    def __init__(
+        self, tseq: Sequence[Transform], dim: int = 0, cache_size: int = 0
+    ) -> None:
         assert all(isinstance(t, Transform) for t in tseq)
         if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
@@ -1237,12 +1264,12 @@ class CumulativeDistributionTransform(Transform):
     codomain = constraints.unit_interval
     sign = +1
 
-    def __init__(self, distribution, cache_size=0):
+    def __init__(self, distribution: Distribution, cache_size: int = 0) -> None:
         super().__init__(cache_size=cache_size)
         self.distribution = distribution
 
     @property
-    def domain(self) -> constraints.Constraint:  # type: ignore[override]
+    def domain(self) -> Optional[constraints.Constraint]:  # type: ignore[override]
         return self.distribution.support
 
     def _call(self, x):

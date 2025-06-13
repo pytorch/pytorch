@@ -10,7 +10,7 @@ seamlessly optimize PyTorch programs, including those using modern Python featur
 
 import torch
 
-from . import convert_frame, eval_frame, resume_execution
+from . import config, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, lookup_backend, register_backend
 from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
@@ -20,6 +20,7 @@ from .decorators import (
     assume_constant_result,
     disable,
     disallow_in_graph,
+    dont_skip_tracing,
     forbid_in_graph,
     graph_break,
     mark_dynamic,
@@ -27,8 +28,10 @@ from .decorators import (
     mark_static_address,
     maybe_mark_dynamic,
     nonstrict_trace,
+    patch_dynamo_config,
     run,
     set_stance,
+    skip_frame,
     substitute_in_graph,
 )
 from .eval_frame import (
@@ -57,6 +60,7 @@ __all__ = [
     "allow_in_graph",
     "assume_constant_result",
     "disallow_in_graph",
+    "dont_skip_tracing",
     "forbid_in_graph",
     "substitute_in_graph",
     "graph_break",
@@ -67,6 +71,8 @@ __all__ = [
     "nonstrict_trace",
     "optimize",
     "optimize_assert",
+    "patch_dynamo_config",
+    "skip_frame",
     "export",
     "explain",
     "run",
@@ -79,6 +85,7 @@ __all__ = [
     "register_backend",
     "list_backends",
     "lookup_backend",
+    "config",
 ]
 
 # allowlist this for weights_only load of NJTs

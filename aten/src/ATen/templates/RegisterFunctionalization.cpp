@@ -8,6 +8,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <torch/library.h>
 
+#include <c10/util/env.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Operators.h>
 #include <ATen/NativeFunctions.h>
@@ -92,6 +93,11 @@ inline c10::List<::std::optional<Tensor>> to_meta(const c10::List<::std::optiona
     outputs.push_back(to_meta(t_list[i]));
   }
   return outputs;
+}
+
+static bool disable_meta_reference() {
+  static auto env = c10::utils::get_env("TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE");
+  return env == "1";
 }
 
 

@@ -27,6 +27,7 @@ from ..pattern_matcher import (
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
+    SymbolicGridFn,
     TritonTemplate,
     TritonTemplateCaller,
 )
@@ -38,8 +39,9 @@ B2B_GEMM_PASS = PatternMatcherPass(
 )
 
 
-def b2b_gemm_grid(M, P, meta):
-    return (ceildiv(M, meta["BLOCK_SIZE_M"]) * ceildiv(P, meta["BLOCK_SIZE_P"]), 1, 1)
+@SymbolicGridFn
+def b2b_gemm_grid(M, P, meta, *, cdiv):
+    return (cdiv(M, meta["BLOCK_SIZE_M"]) * cdiv(P, meta["BLOCK_SIZE_P"]), 1, 1)
 
 
 b2b_gemm_left_template = TritonTemplate(
