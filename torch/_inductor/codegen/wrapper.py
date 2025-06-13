@@ -450,10 +450,15 @@ class ExitDeviceContextManagerLine(WrapperLine):
 class ExternKernelAllocLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.ExternKernelAlloc
+    get_args: Optional[Callable[[], Sequence[str]]] = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         node = self.node
-        args = [*node.codegen_args(), *node.codegen_kwargs()]
+        args = (
+            self.get_args()
+            if self.get_args
+            else [*node.codegen_args(), *node.codegen_kwargs()]
+        )
         self.wrapper._generate_extern_kernel_alloc_helper(self.node, args)
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1302,8 +1307,12 @@ class PythonWrapperCodegen(CodeGen):
     def generate_end(self, result: IndentedBuffer) -> None:
         return
 
-    def generate_fallback_kernel(self, node: ir.FallbackKernel):
-        self.writeline(ExternKernelAllocLine(self, node))
+    def generate_fallback_kernel(
+        self,
+        node: ir.FallbackKernel,
+        get_args: Callable[[], Sequence[str]],
+    ):
+        self.writeline(ExternKernelAllocLine(self, node, get_args))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
@@ -1417,12 +1426,12 @@ class PythonWrapperCodegen(CodeGen):
         self,
         buf_name: str,
         python_kernel_name: str,
-        codegen_args: Sequence[str],
+        get_args: Callable[[], Sequence[str]],
         op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
     ) -> None:
-        self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
+        self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(get_args())})")
 
     def generate(self, is_inference):
         with dynamo_timed("PythonWrapperCodegen.generate"):
