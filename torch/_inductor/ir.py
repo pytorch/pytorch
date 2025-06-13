@@ -4056,7 +4056,7 @@ class Buffer(IRNode, CodegenSymbol):
             exact_strides, allow_padding=allow_padding
         )
 
-    def is_zero_elements(self) -> bool:
+    def is_zero_elements(self) -> bool:  # type: ignore[no-untyped-def]
         return V.graph.sizevars.statically_known_true(sympy.Eq(self.get_numel(), 0))
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
@@ -5669,7 +5669,7 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_contiguous(cls, x):  # type: ignore[no-untyped-def]
-        def is_mkldnn_tensor(x):  # type: ignore[no-untyped-def]
+        def is_mkldnn_tensor(x) -> bool:  # type: ignore[no-untyped-def]
             def safe_get_name(x):  # type: ignore[no-untyped-def]
                 try:
                     return x.get_name()
