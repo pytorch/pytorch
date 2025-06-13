@@ -17,7 +17,7 @@ class ShapeVar(Protocol):
     def shape(self) -> ShapeType: ...
 
 
-ShapeArg = Union[ShapeVar, torch.types.Number, str, OpsValue]
+ShapeArg = Union[ShapeVar, torch.types.Number, str, OpsValue, torch.dtype]
 
 # Inputs need to be cacheable (e.g., not a CSEVar) in order for the cache to be effective
 # So first decompose CSEVars -> tuple before calling this
