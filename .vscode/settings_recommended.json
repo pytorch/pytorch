@@ -37,6 +37,7 @@
         "editor.tabSize": 4,
         "editor.defaultFormatter": "charliermarsh.ruff"
     },
+    "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
     "python.analysis.inlayHints.functionReturnTypes": true,
     "flake8.importStrategy": "fromEnvironment",
     "flake8.args": [
