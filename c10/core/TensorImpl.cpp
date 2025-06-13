@@ -218,7 +218,7 @@ void TensorImpl::HandleResize() {
   }
 }
 
-bool TensorImpl::compute_contiguous(identity<bool>) const {
+bool TensorImpl::compute_contiguous() const {
   if (is_sparse()) {
     return false;
   }
@@ -228,7 +228,7 @@ bool TensorImpl::compute_contiguous(identity<bool>) const {
       numel_);
 }
 
-bool TensorImpl::compute_channels_last_contiguous_2d(identity<bool>) const {
+bool TensorImpl::compute_channels_last_contiguous_2d() const {
   if (is_sparse()) {
     return false;
   }
@@ -237,7 +237,7 @@ bool TensorImpl::compute_channels_last_contiguous_2d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
+bool TensorImpl::compute_channels_last_contiguous_3d() const {
   if (is_sparse()) {
     return false;
   }
@@ -246,7 +246,7 @@ bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
+bool TensorImpl::compute_strides_like_channels_last_2d() const {
   if (is_sparse()) {
     return false;
   }
@@ -255,7 +255,7 @@ bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
+bool TensorImpl::compute_strides_like_channels_last_3d() const {
   if (is_sparse()) {
     return false;
   }
@@ -264,7 +264,7 @@ bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_non_overlapping_and_dense(identity<bool>) const {
+bool TensorImpl::compute_non_overlapping_and_dense() const {
   if (is_sparse()) {
     return false;
   }

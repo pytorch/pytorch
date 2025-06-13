@@ -31,7 +31,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("device", ("cpu", "cuda"))
     def test_basic_fn(self, backend, device):
         if device == "cuda" and not HAS_CUDA:
-            unittest.skip("Requires CUDA")
+            unittest.skipTest("Requires CUDA")
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -72,7 +72,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("device", ("cpu", "cuda"))
     def test_graph_break_bomb(self, backend, device):
         if device == "cuda" and not HAS_CUDA:
-            unittest.skip("Requires CUDA")
+            unittest.skipTest("Requires CUDA")
 
         ctx = DiskDynamoStore()
 
@@ -134,7 +134,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("device", ("cpu", "cuda"))
     def test_dynamic_shape(self, backend, device):
         if device == "cuda" and not HAS_CUDA:
-            unittest.skip("Requires CUDA")
+            unittest.skipTest("Requires CUDA")
         ctx = DiskDynamoStore()
 
         def fn(x):

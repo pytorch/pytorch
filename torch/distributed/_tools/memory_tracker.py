@@ -81,7 +81,8 @@ class MemoryTracker:
         self._markers: dict[str, int] = defaultdict(int)
         self._cur_module_name: str = ""
         self._op_index: int = 0
-        self._num_cuda_retries: int = 0
+        self._num_alloc_retries: int = 0
+        self._device_module = torch.get_device_module()
 
     @no_type_check
     def start_monitor(self, root_module: nn.Module) -> None:
@@ -106,7 +107,7 @@ class MemoryTracker:
             # clear and remove it for now as it does not really capture important info.
             # h3 = m.register_backward_hook(self._create_backward_hook(name))
             self._hooks.extend([h1, h2])
-        torch.cuda.empty_cache()
+        self._device_module.empty_cache()
         assert getattr(self, "profile_mode", None) is None
         self.profile_mode = MemoryProfileDispatchMode(self)
         self.profile_mode.__enter__()
@@ -116,9 +117,11 @@ class MemoryTracker:
         """
         Remove module hooks and exit ``MemoryProfileDispatchMode`` to stop tracking memory stats at operator level.
 
-        Get some aggregated stats when the memory_tracker() is enabled, like cuda ``num_alloc_retries``.
+        Get some aggregated stats when the memory_tracker() is enabled, like ``num_alloc_retries``.
         """
-        self._num_cuda_retries = torch.cuda.memory_stats().get("num_alloc_retries", 0)
+        self._num_alloc_retries = self._device_module.memory_stats().get(
+            "num_alloc_retries", 0
+        )
 
         for h in self._hooks:
             h.remove()
@@ -142,7 +145,7 @@ class MemoryTracker:
             previous_allocated_memory = current_allocated_memory
 
         print("------------------------------------------------")
-        print(f"The number of cuda retries are: {self._num_cuda_retries}")
+        print(f"The number of alloc retries are: {self._num_alloc_retries}")
         print(f"Top {top} ops that generates memory are:")
         for k, v in sorted(op_diff.items(), key=operator.itemgetter(1), reverse=True)[
             :top
@@ -206,7 +209,7 @@ class MemoryTracker:
             "memories_active": self.memories_active,
             "memories_reserved": self.memories_reserved,
             "markers": self._markers,
-            "num_alloc_retries": self._num_cuda_retries,
+            "num_alloc_retries": self._num_alloc_retries,
         }
 
         with open(path, "wb") as f:
@@ -221,7 +224,7 @@ class MemoryTracker:
         self.memories_active = stats["memories_active"]
         self.memories_reserved = stats["memories_reserved"]
         self._markers = stats["markers"]
-        self._num_cuda_retries = stats["num_alloc_retries"]
+        self._num_alloc_retries = stats["num_alloc_retries"]
 
     def _create_pre_forward_hook(self, name: str) -> Callable:
         """Prefix operator name with current module and 'forward', and insert 'fw_start' marker at forward pass start."""
@@ -269,10 +272,11 @@ class MemoryTracker:
 
         The memory stats dict is indexed with ``self._op_index``.
         """
-        memory_allocated: float = torch.cuda.memory_allocated() / BYTES_PER_MB
-        memory_reserved: float = torch.cuda.memory_reserved() / BYTES_PER_MB
+        memory_allocated: float = self._device_module.memory_allocated() / BYTES_PER_MB
+        memory_reserved: float = self._device_module.memory_reserved() / BYTES_PER_MB
         memory_active: float = (
-            torch.cuda.memory_stats().get("active_bytes.all.current", 0) / BYTES_PER_MB
+            self._device_module.memory_stats().get("active_bytes.all.current", 0)
+            / BYTES_PER_MB
         )
         self.memories_allocated[self._op_index] = (fn_name, memory_allocated)
         self.memories_reserved[self._op_index] = (fn_name, memory_reserved)
@@ -293,4 +297,4 @@ class MemoryTracker:
         self._markers.clear()
         self._cur_module_name = ""
         self._op_index = 0
-        self._num_cuda_retries = 0
+        self._num_alloc_retries = 0

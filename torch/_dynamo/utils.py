@@ -2369,7 +2369,7 @@ def is_safe_constant(v):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def common_constants():
     return {
         # We zero-one specialize shapes, so specialize these constants
@@ -3111,7 +3111,7 @@ seen_code_map = ExactWeakKeyDictionary()
 
 
 # return same dir unless user changes config between calls
-@functools.lru_cache(None)
+@functools.cache
 def _get_debug_dir(root_dir):
     dir_name = (
         "run_"

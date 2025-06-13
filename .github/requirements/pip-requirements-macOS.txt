@@ -26,6 +26,7 @@ pytest-xdist==3.3.1
 pytest==7.3.2
 pyyaml==6.0.2
 scipy==1.12.0
+setuptools==72.1.0
 sympy==1.13.3
 tlparse==0.3.30
 tensorboard==2.13.0
