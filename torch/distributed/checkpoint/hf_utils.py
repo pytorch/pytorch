@@ -35,7 +35,7 @@ DCP_SHARDING_INFO_KEY = "DCP_SHARDING_INFO"
 
 
 @dataclass
-class _StorageInfo:
+class _HFStorageInfo:
     """This is the per entry storage info."""
 
     relative_path: str
