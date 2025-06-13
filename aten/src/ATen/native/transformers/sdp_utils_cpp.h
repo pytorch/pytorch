@@ -505,8 +505,6 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
   }
   if (!qkv_strides_equal_1) {
     if (debug) {
-      std::ostringstream epilogue_message;
-      epilogue_message << " instead.";
       TORCH_WARN(
           "All fused kernels require the last dimension of the input to have stride 1. ",
           "Got Query.stride(-1): ",
@@ -515,7 +513,7 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
           params.key.sym_stride(-1),
           ", Value.stride(-1): ",
           params.value.sym_stride(-1),
-          epilogue_message.str());
+          " instead.");
     }
 
     return false;
