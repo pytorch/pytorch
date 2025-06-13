@@ -643,7 +643,7 @@ def register_lowering_pattern(
 ################################################################################
 
 
-def is_valid_mm_plus_mm(match: Match):
+def is_valid_mm_plus_mm(match: Match) -> bool:
     if not torch._inductor.utils.use_max_autotune():
         return False
 
@@ -856,7 +856,7 @@ def cat_slice_cat(match, cat_input, size, dim=1):
         )
 
 
-def is_valid_splitwithsizes_cat(match):
+def is_valid_splitwithsizes_cat(match) -> bool:
     split_nodes = filter_nodes(match.nodes, aten.split_with_sizes)
     cat_nodes = filter_nodes(match.nodes, aten.cat)
     get_item_nodes = filter_nodes(match.nodes, operator.getitem)
@@ -1267,7 +1267,7 @@ def splitwithsizes_cat_replace(match, input_):
     return input_
 
 
-def is_valid_cat_splitwithsizes(match):
+def is_valid_cat_splitwithsizes(match) -> bool:
     cat_nodes = filter_nodes(match.nodes, aten.cat)
     split_nodes = filter_nodes(match.nodes, aten.split_with_sizes)
     if len(split_nodes) != 1 or len(cat_nodes) != 1:
@@ -1360,7 +1360,7 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     match.replace_by_example(repl, [inp, mat1, mat2])
 
 
-def is_valid_addmm_fusion(match):
+def is_valid_addmm_fusion(match) -> bool:
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
 
@@ -1451,7 +1451,7 @@ def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
     )
 
 
-def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
+def is_index_put_and_requires_h2d_sync_for_gpu_value(node) -> bool:
     from torch.fx.operator_schemas import normalize_function
 
     if node.target not in [

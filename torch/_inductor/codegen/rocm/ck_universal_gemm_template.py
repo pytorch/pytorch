@@ -50,7 +50,7 @@ padding_lookup = {
 }
 
 
-def is_static_int(number):
+def is_static_int(number) -> bool:
     return isinstance(number, (int, sympy.Integer))
 
 
@@ -857,7 +857,7 @@ class CKGemmTemplate(CKTemplate):
 
         return res
 
-    def _is_rcr_f16(self):
+    def _is_rcr_f16(self) -> bool:
         X_meta, W_meta, Y_meta = (
             T.get_layout() for T in [*self.input_nodes, self.output_node]
         )
