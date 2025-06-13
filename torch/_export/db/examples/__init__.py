@@ -16,6 +16,8 @@ from torch._export.db.case import (
 
 
 def _collect_examples():
+    # manually set seed to ensure reproducibility
+    torch.manual_seed(0)
     case_names = glob.glob(join(dirname(__file__), "*.py"))
     case_names = [
         basename(f)[:-3] for f in case_names if isfile(f) and not f.endswith("__init__.py")
