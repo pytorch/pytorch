@@ -8,11 +8,13 @@ from pickle import (  # type: ignore[attr-defined]
 )
 from types import ModuleType
 from typing import Any, Optional
+import logging
 
 from ._mangling import demangle, get_mangle_prefix, is_mangled
 
 
 __all__ = ["ObjNotFoundError", "ObjMismatchError", "Importer", "OrderedImporter"]
+log = logging.getLogger(__name__)
 
 
 class ObjNotFoundError(Exception):
@@ -203,6 +205,14 @@ class OrderedImporter(Importer):
         if not hasattr(module, "__file__"):
             return True
         return module.__file__ is None
+
+    def get_name(self, obj: Any, name: Optional[str] = None) -> tuple[str, str]:
+        for importer in self._importers:
+            try:
+                return importer.get_name(obj, name)
+            except (ObjNotFoundError, ObjMismatchError) as e:
+                log.warning(f"Tried to call get_name with obj {obj} and name {name} on {importer} and got {e}")
+        raise ObjNotFoundError(f"Could not find obj {obj} and name {name} in any of the importers {self._importers}")
 
     def import_module(self, module_name: str) -> ModuleType:
         last_err = None
