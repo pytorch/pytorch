@@ -154,7 +154,6 @@ class _StateDictInfo(StateDictOptions):
     fsdp_modules: list[nn.Module] = field(default_factory=list)
 
 
-@functools.cache
 def _get_fqns(
     model: nn.Module,
     name: str,
@@ -530,10 +529,6 @@ def _get_model_state_dict(
             fqns = _get_fqns(model, key)
             for fqn in fqns:
                 state_dict.pop(fqn)
-
-    for key, p in list(state_dict.items()):
-        if torch.is_tensor(p) and p.is_meta:
-            state_dict.pop(key)
 
     return _maybe_full_or_cpu_state_dict(state_dict, info)
 

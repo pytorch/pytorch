@@ -8,7 +8,7 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
-from ..codecache import code_hash, CodeCacheFuture, get_path
+from ..codecache import code_hash, CodeCacheFuture, get_path, write_atomic
 from ..runtime.benchmarking import benchmarker
 from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
@@ -87,6 +87,7 @@ class MultiKernelState:
 
     def __init__(self):
         self.subkernel_to_kernel_name = {}
+        self.kernel_defs = IndentedBuffer()
 
     def define_kernel(self, kernels):
         """
@@ -116,7 +117,7 @@ class MultiKernelState:
             # the second pass of cpp-wrapper.
             return multi_kernel_name
 
-        buf = IndentedBuffer()
+        buf = self.kernel_defs
         buf.writeline("")
         buf.writeline(
             f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
@@ -126,12 +127,10 @@ class MultiKernelState:
                 buf.writeline(f"{name},")
         buf.writeline("])")
 
-        wrapper = V.graph.wrapper_code
         if config.triton.autotune_at_compile_time:
-            wrapper.kernel_autotune_defs.splice(buf)
-            wrapper.src_to_kernel["\n".join(kernel_names)] = multi_kernel_name
-        else:
-            wrapper.header.splice(buf)
+            V.graph.wrapper_code.src_to_kernel["\n".join(kernel_names)] = (
+                multi_kernel_name
+            )
 
         return multi_kernel_name
 
@@ -225,7 +224,7 @@ class MultiKernel:
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        seen = OrderedSet[str]()
+        seen: OrderedSet[str] = OrderedSet()
         for k in self.kernels:
             _, call_args, precompile_args, _ = k.args.python_argdefs()
             for arg, precompile_arg in zip(call_args, precompile_args):
@@ -315,8 +314,7 @@ class MultiKernelCall:
         path = self.cache_file_path()
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        with path.open("w") as fd:
-            fd.write(str(self.picked_kernel))
+        write_atomic(path, str(self.picked_kernel))
         log.debug("Store picked kernel %d to cache file %s", self.picked_kernel, path)
 
     @property

@@ -69,5 +69,9 @@ TORCH_API bool isSupported(Node* node);
 /// @return Reference of the custome operator set
 ///
 TORCH_API OperatorSet& getCustomOperatorSet();
+
 } // namespace tensorexpr
 } // namespace torch::jit
+
+C10_DECLARE_bool(torch_jit_disable_cat);
+C10_DECLARE_bool(torch_jit_enable_dynamic_shape_fusion);

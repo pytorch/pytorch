@@ -823,7 +823,7 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(input.sym_sizes().size()));
+  dim = at::maybe_wrap_dim(dim, input.dim());
   if (!keepdim) {
     // `prod` reduces the dimension at `dim`,
     // so, unsqueeze `grad` and `result` at dim.
@@ -876,8 +876,8 @@ Tensor logsumexp_backward(
     IntArrayRef dim,
     bool keepdim) {
   if (!keepdim && self.dim() != 0) {
-    grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
-    result = unsqueeze_multiple(result, dim, self.sym_sizes().size());
+    grad = unsqueeze_multiple(grad, dim, self.dim());
+    result = unsqueeze_multiple(result, dim, self.dim());
   }
   return grad * (self - result).exp().conj();
 }
@@ -891,8 +891,8 @@ Tensor logcumsumexp_backward(
     return grad;
   }
 
-  // Reference: https://github.com/tensorflow/tensorflow/blob/
-  // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
+  // Reference:
+  // https://github.com/tensorflow/tensorflow/blob/2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
 
   auto scalar_min = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
       at::ScalarType::BFloat16,
@@ -1450,6 +1450,62 @@ Tensor mm_mat2_backward(
   return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
 }
 
+Tensor _grouped_mm_mat1_backward(
+    const Tensor& grad,
+    const Tensor& mat2,
+    at::SymIntArrayRef mat1_sizes,
+    at::SymIntArrayRef mat1_strides,
+    c10::Layout mat1_layout,
+    std::optional<Tensor> offs,
+    const Scalar& alpha) {
+  TORCH_CHECK(
+      grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
+          mat1_layout == c10::kStrided,
+      "only strided layout supported for grouped mm");
+  // if input was column-major, return grad as column-order for efficiency
+  if (offs.has_value() && !offs->defined()) {
+    offs = std::nullopt;
+  }
+  auto mat1_dim = mat1_sizes.size();
+  if (mat1_strides[mat1_dim - 2] == 1 &&
+      mat1_strides[mat1_dim - 1] == mat1_sizes[mat1_dim - 2]) {
+    auto grad_inp =
+        (at::_grouped_mm(mat2, grad.transpose(-2, -1), offs)).transpose(-2, -1);
+    return maybe_multiply(grad_inp, alpha.conj());
+  } else {
+    auto grad_inp = (at::_grouped_mm(grad, mat2.transpose(-2, -1), offs));
+    return maybe_multiply(grad_inp, alpha.conj());
+  }
+}
+
+Tensor _grouped_mm_mat2_backward(
+    const Tensor& grad,
+    const Tensor& mat1,
+    at::SymIntArrayRef mat2_sizes,
+    at::SymIntArrayRef mat2_strides,
+    c10::Layout mat2_layout,
+    std::optional<Tensor> offs,
+    const Scalar& alpha) {
+  TORCH_CHECK(
+      grad.layout() == c10::kStrided && mat1.layout() == c10::kStrided &&
+          mat2_layout == c10::kStrided,
+      "only strided layout supported for grouped mm");
+  // if input was column-major, return grad as column-order for efficiency
+  auto mat2_dim = mat2_sizes.size();
+  if (offs.has_value() && !offs->defined()) {
+    offs = std::nullopt;
+  }
+  if (mat2_strides[mat2_dim - 2] == 1 &&
+      mat2_strides[mat2_dim - 1] == mat2_sizes[mat2_dim - 2]) {
+    auto grad_inp =
+        at::_grouped_mm(grad.transpose(-2, -1), mat1, offs).transpose(-2, -1);
+    return maybe_multiply(grad_inp, alpha.conj());
+  } else {
+    auto grad_inp = at::_grouped_mm(mat1.transpose(-2, -1), grad, offs);
+    return maybe_multiply(grad_inp, alpha.conj());
+  }
+}
+
 Tensor mm_mat1_sparse_backward(
     const Tensor& grad,
     const Tensor& mat1,
@@ -1832,7 +1888,7 @@ Tensor var_backward(
   }
   auto dim = dim_opt.value();
   if (!keepdim && self.dim() > 1) {
-    grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
+    grad = unsqueeze_multiple(grad, dim, self.dim());
   }
   const c10::SymFloat rnumel(_safe_size(self.sym_sizes(), dim));
   return (c10::SymFloat(2.0) / (rnumel - correction)) * grad *
@@ -4662,10 +4718,10 @@ static Tensor sum_exclude_dim1(const Tensor& to_sum, bool keepdim = true) {
 // reductions were done with keepdim=True
 static Tensor unsqueeze_dim1(const Tensor& src, const Tensor& target) {
   auto src_expanded = src;
-  while (src_expanded.sizes().size() < target.sizes().size() - 1) {
+  while (src_expanded.dim() < target.dim() - 1) {
     src_expanded = src_expanded.unsqueeze(1);
   }
-  if (src_expanded.sizes().size() == target.sizes().size() - 1) {
+  if (src_expanded.dim() == target.dim() - 1) {
     src_expanded = src_expanded.unsqueeze(0);
   }
   return src_expanded;
@@ -4676,7 +4732,7 @@ static Tensor unsqueeze_dim1(const Tensor& src, const Tensor& target) {
 // do a straight expansion because it won't follow the broadcasting rules.
 static Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
   auto src_expanded = src;
-  while (src_expanded.sizes().size() < target.sizes().size() - 1) {
+  while (src_expanded.dim() < target.dim() - 1) {
     src_expanded = src_expanded.unsqueeze(1);
   }
   return src_expanded.expand_as(target);

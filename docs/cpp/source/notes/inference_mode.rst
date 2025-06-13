@@ -6,7 +6,7 @@ to be used when you are certain your operations will have no interactions
 with autograd (e.g. model training). Compared to ``NoGradMode``, code run
 under this mode gets better performance by disabling autograd related work like
 view tracking and version counter bumps. However, tensors created inside
-``c10::InferenceMode`` has more limitation when interacting with autograd system as well.
+``c10::InferenceMode`` have more limitations when interacting with autograd system as well.
 
 ``InferenceMode`` can be enabled for a given block of code. Inside ``InferenceMode``
 all newly allocated (non-view) tensors are marked as inference tensors. Inference tensors:
@@ -19,7 +19,7 @@ all newly allocated (non-view) tensors are marked as inference tensors. Inferenc
   To work around you can make a clone outside ``InferenceMode`` to get a normal tensor before mutating.
 
 A non-view tensor is an inference tensor if and only if it was allocated inside ``InferenceMode``.
-A view tensor is an inference tensor if and only if the tensor it is a view of is an inference tensor.
+A view tensor is an inference tensor if and only if it is a view of an inference tensor.
 
 Inside an ``InferenceMode`` block, we make the following performance guarantees:
 
@@ -66,7 +66,7 @@ users should pay additional attention to:
     also affects tensor creation while ``AutoNonVariableTypeMode`` doesn't. In other words, tensors created
     inside ``InferenceMode`` are marked as inference tensors so that certain limitation can be applied after
     exiting ``InferenceMode``.
-  - Enabled/disabled ``InferenceMode`` states can be nested while ``AutoNonVariableTypeMode`` only allows enabled state..
+  - Enabled/disabled ``InferenceMode`` states can be nested while ``AutoNonVariableTypeMode`` only allows enabled state.
 
 .. code-block:: cpp
 
@@ -82,7 +82,7 @@ users should pay additional attention to:
   // InferenceMode is off
 
 
-2. Users trying to implement a customized kernel who wants to redispatch under ``Autograd`` dispatch
+2. Users trying to implement a customized kernel who want to redispatch under ``Autograd`` dispatch
    keys should use ``AutoDispatchBelowADInplaceOrView`` instead. Note ``AutoDispatchBelowADInplaceOrView`` is just a new name
    of ``AutoNonVariableTypeMode`` since it explains the guard's functionality better. We're deprecating
    ``AutoNonVariableTypeMode`` and it'll be removed in 1.10 release. See customized kernel

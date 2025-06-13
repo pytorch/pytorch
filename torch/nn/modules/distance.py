@@ -34,7 +34,7 @@ class PairwiseDistance(Module):
         - Output: :math:`(N)` or :math:`()` based on input dimension.
           If :attr:`keepdim` is ``True``, then :math:`(N, 1)` or :math:`(1)` based on input dimension.
 
-    Examples::
+    Examples:
         >>> pdist = nn.PairwiseDistance(p=2)
         >>> input1 = torch.randn(100, 128)
         >>> input2 = torch.randn(100, 128)
@@ -71,9 +71,10 @@ class CosineSimilarity(Module):
     Shape:
         - Input1: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`
         - Input2: :math:`(\ast_1, D, \ast_2)`, same number of dimensions as x1, matching x1 size at dimension `dim`,
-              and broadcastable with x1 at other dimensions.
+          and broadcastable with x1 at other dimensions.
         - Output: :math:`(\ast_1, \ast_2)`
-    Examples::
+
+    Examples:
         >>> input1 = torch.randn(100, 128)
         >>> input2 = torch.randn(100, 128)
         >>> cos = nn.CosineSimilarity(dim=1, eps=1e-6)
