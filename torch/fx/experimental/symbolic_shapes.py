@@ -4404,7 +4404,11 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-    ) -> tuple[tuple[IntLikeType, ...], tuple[IntLikeType, ...], IntLikeType,]:
+    ) -> tuple[
+        tuple[IntLikeType, ...],
+        tuple[IntLikeType, ...],
+        IntLikeType,
+    ]:
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
@@ -4487,7 +4491,11 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-    ) -> tuple[tuple[IntLikeType, ...], tuple[IntLikeType, ...], IntLikeType,]:
+    ) -> tuple[
+        tuple[IntLikeType, ...],
+        tuple[IntLikeType, ...],
+        IntLikeType,
+    ]:
         dim = len(ex_size)
 
         # Reimplement the legacy behavior
@@ -6756,9 +6764,9 @@ class ShapeEnv:
             for source in self.var_to_sources.get(a, []):
                 if user_tb:
                     self.user_specialization_stacks[source] = user_tb
-                self.framework_specialization_stacks[
-                    source
-                ] = CapturedTraceback.extract(cpp=True)
+                self.framework_specialization_stacks[source] = (
+                    CapturedTraceback.extract(cpp=True)
+                )
 
             if config.print_specializations:
                 self.log.warning(

@@ -93,7 +93,6 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch.fx.graph_module import _get_attr
 from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
@@ -269,9 +268,9 @@ def _extract_fake_inputs(gm, args, kwargs):
 
     if detected_fake_mode:
         if detected_shape_env:
-            assert (
-                detected_shape_env is detected_fake_mode.shape_env
-            ), "Detected shape env does not match fake mode's shape env"
+            assert detected_shape_env is detected_fake_mode.shape_env, (
+                "Detected shape env does not match fake mode's shape env"
+            )
         fake_mode = detected_fake_mode
     elif detected_shape_env:
         fake_mode = FakeTensorMode(shape_env=detected_shape_env, export=True)
@@ -1820,7 +1819,6 @@ def set_missing_meta_vals(gm, flat_args, num_params_buffers):
     #    need to have their metadata set before lifting them because it is needed
     #    for computing the exported program's signature.
     index = 0
-    fake_mode = detect_fake_mode(flat_args)
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             if index >= num_params_buffers:
@@ -1828,16 +1826,6 @@ def set_missing_meta_vals(gm, flat_args, num_params_buffers):
                 if not isinstance(user_arg, torch.Tensor):
                     node.meta["val"] = user_arg
             index += 1
-        if node.op == "get_attr":
-            val = _get_attr(gm, node.target)
-            if isinstance(val, torch.Tensor):
-                assert "val" not in node.meta, (
-                    f"Found attribute {node.target} that has already been fakified "
-                    "but not yet lifted as an input. This should be impossible because "
-                    "(1) we should have already fakified AND lifted params/buffers "
-                    "(2) we should have NOT yet fakified OR lifted tensor constants. "
-                )
-                node.meta["val"] = fake_mode.from_tensor(val, static_shapes=True)
 
 
 def _find_node(gm: torch.fx.GraphModule, name: str) -> torch.fx.Node:
@@ -1967,22 +1955,27 @@ def _non_strict_export(
     # We also need to attach dynamo configs as these will be used in HOOs that
     # use torch.compile, like cond
     dynamo_config = dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
-    dynamo_config[
-        "do_not_emit_runtime_asserts"
-    ] = False  # We want to emit runtime asserts
+    dynamo_config["do_not_emit_runtime_asserts"] = (
+        False  # We want to emit runtime asserts
+    )
 
-    with fake_mode, _NonStrictTorchFunctionHandler(), tracing(
-        tx
-    ), torch._dynamo.config.patch(dynamo_config):
-        with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
-            patched_mod,
-            new_fake_args,
-            new_fake_kwargs,
-            new_fake_constant_attrs,
-            map_fake_to_real,
-        ), _fakify_module_inputs(
-            fake_args, fake_kwargs, fake_mode
-        ), _override_builtin_ops():
+    with (
+        fake_mode,
+        _NonStrictTorchFunctionHandler(),
+        tracing(tx),
+        torch._dynamo.config.patch(dynamo_config),
+    ):
+        with (
+            _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
+                patched_mod,
+                new_fake_args,
+                new_fake_kwargs,
+                new_fake_constant_attrs,
+                map_fake_to_real,
+            ),
+            _fakify_module_inputs(fake_args, fake_kwargs, fake_mode),
+            _override_builtin_ops(),
+        ):
             aten_export_artifact = _to_aten_func(  # type: ignore[operator]
                 patched_mod,
                 new_fake_args,

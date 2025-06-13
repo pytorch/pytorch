@@ -471,11 +471,11 @@ def pad_sequence(
 
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
-    return torch._C._nn.pad_sequence(  # type: ignore[arg-type]
-        sequences,  # type: ignore[arg-type]
+    return torch._C._nn.pad_sequence(
+        sequences,
         batch_first,
         padding_value,
-        padding_side,
+        padding_side,  # type: ignore[arg-type]
     )
 
 
