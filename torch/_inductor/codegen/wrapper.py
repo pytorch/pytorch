@@ -450,15 +450,10 @@ class ExitDeviceContextManagerLine(WrapperLine):
 class ExternKernelAllocLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.ExternKernelAlloc
-    get_args: Optional[Callable[[], Sequence[str]]] = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         node = self.node
-        args = (
-            self.get_args()
-            if self.get_args
-            else [*node.codegen_args(), *node.codegen_kwargs()]
-        )
+        args = [*node.codegen_args(), *node.codegen_kwargs()]
         self.wrapper._generate_extern_kernel_alloc_helper(self.node, args)
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1307,12 +1302,8 @@ class PythonWrapperCodegen(CodeGen):
     def generate_end(self, result: IndentedBuffer) -> None:
         return
 
-    def generate_fallback_kernel(
-        self,
-        node: ir.FallbackKernel,
-        get_args: Callable[[], Sequence[str]],
-    ):
-        self.writeline(ExternKernelAllocLine(self, node, get_args))
+    def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
+        self.writeline(ExternKernelAllocLine(self, node))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
