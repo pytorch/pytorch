@@ -265,6 +265,16 @@ class GraphRegionTracker:
         if mutated_arg_positions:
             self.node_to_mutated_arg_positions[node] = mutated_arg_positions
 
+    def add_node_mutation(
+        self,
+        node: Node,
+        arg_pos: int,
+    ) -> None:
+        if node in self.node_to_mutated_arg_positions:
+            self.node_to_mutated_arg_positions[node].add(arg_pos)
+        else:
+            self.node_to_mutated_arg_positions[node] = OrderedSet([arg_pos])
+
     def get_identical_regions(self, graph: torch.fx.Graph) -> list[list[Region]]:
         """
         This function is responsible for extracting the largest regions of identical nodes from the given graph.
