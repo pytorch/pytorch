@@ -1113,9 +1113,9 @@ build_update_message = """
     To install:
       $ python setup.py install
     To develop locally:
-      $ python setup.py develop
+      $ python -m pip install -e . -v --no-build-isolation
     To force cmake to re-generate native build files (off by default):
-      $ python setup.py develop --cmake
+      $ python -m pip install -e . -v --no-build-isolation -C--global-option=--cmake
 """
 
 
