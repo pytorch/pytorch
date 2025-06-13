@@ -160,6 +160,13 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
         )
 
+    def should_allow_side_effects(self):
+        output_graph = self.output_graph_weakref()
+        return (
+            output_graph
+            and output_graph.current_tx.output.current_tracer.allow_side_effects
+        )
+
     def is_reconstructing_generator(self):
         output_graph = self.output_graph_weakref()
 
@@ -174,6 +181,8 @@ class SideEffects:
         # People do things like self.dim = dim inside autograd.Function.
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
+            return True
+        if self.should_allow_side_effects():
             return True
         if self.should_allow_side_effects_under_checkpoint():
             return True
@@ -1067,6 +1076,15 @@ def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):
         yield
     finally:
         tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val
+
+@contextlib.contextmanager
+def allow_side_effects(tx: "InstructionTranslator"):
+    orig_val = tx.output.current_tracer.allow_side_effects
+    try:
+        tx.output.current_tracer.allow_side_effects = True
+        yield
+    finally:
+        tx.output.current_tracer.allow_side_effects = orig_val
 
 
 @contextlib.contextmanager
