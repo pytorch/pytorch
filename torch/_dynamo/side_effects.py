@@ -160,7 +160,7 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
         )
 
-    def is_reconstructing_generator(self):
+    def is_reconstructing_generator(self) -> bool:
         output_graph = self.output_graph_weakref()
 
         return (
@@ -259,7 +259,7 @@ class SideEffects:
             BaseException.__getattribute__,
         )
 
-    def is_attribute_mutation(self, item):
+    def is_attribute_mutation(self, item) -> bool:
         return isinstance(item.mutation_type, AttributeMutation)
 
     def has_pending_mutation(self, item):
@@ -272,7 +272,7 @@ class SideEffects:
             item
         ) and name in self.store_attr_mutations.get(item, ())
 
-    def is_modified(self, item):
+    def is_modified(self, item) -> bool:
         if item.is_immutable():
             return False
         if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
@@ -513,7 +513,7 @@ class SideEffects:
                     self.store_attr_mutations[var],
                 )
 
-        def is_live(var: VariableTracker):
+        def is_live(var: VariableTracker) -> bool:
             if isinstance(var.mutation_type, AttributeMutationNew):
                 return var in live_new_objects
             return True
@@ -1045,7 +1045,7 @@ class SideEffects:
         for suffix in reversed(suffixes):
             cg.extend_output(suffix)
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
         return not (
             any(map(self.is_modified, self.id_to_variable.values()))
             or self.tensor_hooks

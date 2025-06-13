@@ -860,7 +860,7 @@ class AutogradCompilerInstance:
 
         return []
 
-    def is_sym_node(self, node):
+    def is_sym_node(self, node) -> bool:
         return (
             isinstance(node, torch.fx.Node)
             and node.op == "call_function"
@@ -878,7 +878,7 @@ class AutogradCompilerInstance:
             unpack_nodes.update(node.users.keys())
         assert i == len(_graph_placeholders) - 1
 
-        def is_impure(node):
+        def is_impure(node) -> bool:
             if node in unpack_nodes or (
                 node.op == "call_function" and node.target in _impure_targets
             ):
@@ -1053,7 +1053,7 @@ class AutogradCompilerInstance:
         return nodes
 
     @staticmethod
-    def is_placeholder(node):
+    def is_placeholder(node) -> bool:
         if node.op == "placeholder" or (
             node.op == "call_function"
             and node.target == operator.getitem

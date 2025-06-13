@@ -523,7 +523,7 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         self.fn = fn
 
     @staticmethod
-    def is_supported_builtin_method(obj):
+    def is_supported_builtin_method(obj) -> bool:
         method_self = obj.__self__
         method_name = obj.__name__
 
@@ -671,10 +671,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # exception is raised again.
             tracer.exception_handler(e)
 
-    def _is_generator_just_started(self):
+    def _is_generator_just_started(self) -> bool:
         return self.inline_tracer is None or self.inline_tracer.instruction_pointer == 0
 
-    def _is_generator_exhausted(self):
+    def _is_generator_exhausted(self) -> bool:
         return getattr(self.inline_tracer, "generator_exhausted", False)
 
     def call_method(

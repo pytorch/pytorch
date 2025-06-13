@@ -95,7 +95,7 @@ _GUARD_SOURCE_FSDP_MODULE = {
 }
 
 
-def is_constant_source(source):
+def is_constant_source(source) -> bool:
     if isinstance(source, ConstantSource):
         return True
     try:
@@ -339,7 +339,7 @@ class EphemeralSource(Source):
     def make_guard(self, fn):
         raise NotImplementedError
 
-    def is_ephemeral(self):
+    def is_ephemeral(self) -> bool:
         return True
 
 
@@ -582,7 +582,7 @@ class ConstDictKeySource(ChainedSource):
         # The list creation will be CSE'd by PyExprCSEPass
         return f"list(dict.keys({self.base.name()}))[{self.index!r}]"
 
-    def is_dict_key(self):
+    def is_dict_key(self) -> bool:
         return True
 
 
@@ -859,7 +859,7 @@ class BackwardStateSource(Source):
         return GuardSource.BACKWARD_STATE
 
 
-def is_from_local_source(source: Source, *, only_allow_input=False):
+def is_from_local_source(source: Source, *, only_allow_input=False) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_local_source(source.base, only_allow_input=only_allow_input)
     if not isinstance(source, LocalSource):
@@ -881,7 +881,7 @@ def get_global_source_name(source: Source) -> Optional[str]:
     return source.global_name
 
 
-def is_from_nonlocal_source(source: Source):
+def is_from_nonlocal_source(source: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_nonlocal_source(source.base)
     return (
@@ -891,13 +891,13 @@ def is_from_nonlocal_source(source: Source):
     )
 
 
-def is_from_source(source: Source, target: Source):
+def is_from_source(source: Source, target: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)
     return source == target
 
 
-def is_from_unspecialized_nn_module_source(source: Source):
+def is_from_unspecialized_nn_module_source(source: Source) -> bool:
     if isinstance(source, UnspecializedNNModuleSource):
         return True
     if isinstance(source, ChainedSource):
@@ -905,7 +905,7 @@ def is_from_unspecialized_nn_module_source(source: Source):
     return False
 
 
-def is_from_unspecialized_param_buffer_source(source: Source):
+def is_from_unspecialized_param_buffer_source(source: Source) -> bool:
     if isinstance(source, UnspecializedParamBufferSource):
         return True
     if isinstance(source, ChainedSource):
@@ -913,7 +913,7 @@ def is_from_unspecialized_param_buffer_source(source: Source):
     return False
 
 
-def is_from_flatten_script_object_source(source: Source):
+def is_from_flatten_script_object_source(source: Source) -> bool:
     if isinstance(source, FlattenScriptObjectSource):
         return True
     elif isinstance(source, ChainedSource):
@@ -921,7 +921,7 @@ def is_from_flatten_script_object_source(source: Source):
     return False
 
 
-def is_from_optimizer_source(source: Source):
+def is_from_optimizer_source(source: Source) -> bool:
     if isinstance(source, OptimizerSource):
         return True
     if isinstance(source, ChainedSource):
@@ -931,7 +931,7 @@ def is_from_optimizer_source(source: Source):
 
 # TODO: can probably write a generic "test this on everything in the chain"
 # helper
-def is_from_defaults(source: Source):
+def is_from_defaults(source: Source) -> bool:
     if isinstance(source, DefaultsSource):
         return True
 
