@@ -301,9 +301,9 @@ class profile:
             )
             self.kineto_activities.add(ProfilerActivity.MTIA)
         elif self.use_device == "hpu":
-            assert (
-                use_kineto and ProfilerActivity.HPU in _supported_activities()
-            ), "Legacy HPU profiling is not supported. Requires use_kineto=True on HPU devices."
+            assert use_kineto and ProfilerActivity.HPU in _supported_activities(), (
+                "Legacy HPU profiling is not supported. Requires use_kineto=True on HPU devices."
+            )
             self.kineto_activities.add(ProfilerActivity.HPU)
         elif self.use_device is not None and self.use_device != "privateuseone":
             if (
