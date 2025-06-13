@@ -9,7 +9,6 @@ import sys
 import unittest
 
 import torch
-import torch.utils.checkpoint as checkpoint
 import torch._dynamo.config as dynamo_config
 import torch.backends.cuda
 import torch.nn.functional as F
