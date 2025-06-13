@@ -13,22 +13,12 @@ import torch
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.serialization import safe_globals
-from torch.testing._internal.common_utils import (
-    skipIfTorchDynamo,
-    TemporaryFileName,
-    TEST_CUDA,
-    TEST_XPU,
-)
-from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
+from torch.testing._internal.common_utils import TemporaryFileName
 
 
-TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
-TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
-
-
-@unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
-@torch.testing._internal.common_utils.markDynamoStrictTest
-class TestCppExtensionOpenRgistration(common.TestCase):
+@unittest.skipIf(common.TEST_XPU, "XPU does not support cppextension currently")
+@common.markDynamoStrictTest
+class TestCppExtensionOpenRegistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions."""
 
     module = None
@@ -51,7 +41,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+        common.remove_cpp_extensions_build_root()
 
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
@@ -134,7 +124,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     # Not an open registration test - this file is just very convenient
     # for testing torch.compile on custom C++ operators
-    @skipIfTorchDynamo("Temporary disabled due to torch._ops.OpOverloadPacket")
+    @common.skipIfTorchDynamo("Temporary disabled due to torch._ops.OpOverloadPacket")
     def test_compile_autograd_function_aliasing(self):
         x_ref = torch.randn(4, requires_grad=True)
         out_ref = torch.ops._test_funcs.custom_autograd_fn_aliasing(x_ref)
@@ -195,7 +185,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # call _fused_adamw_ with undefined tensor.
         self.module.fallback_with_undefined_tensor()
 
-    @skipIfTorchDynamo()
+    @common.skipIfTorchDynamo()
     @unittest.skipIf(
         np.__version__ < "1.25",
         "versions < 1.25 serialize dtypes differently from how it's serialized in data_legacy_numpy",
