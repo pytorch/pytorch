@@ -3183,6 +3183,7 @@ class TestHelperModules:
             x = self.adaptive_avg_pool2d(x)
             return x
 
+
     class ConvWithBNRelu(torch.nn.Module):
         def __init__(self, relu, dim=2, bn=True, bias=True, padding=0):
             super().__init__()

@@ -178,11 +178,12 @@ THIRD_PARTY_LIBS = {
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
     "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
     "pthreadpool_header": ["//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
+    "moodycamel": ["//third-party/moodycamel:moodycamel", "//third_party:moodycamel"],
     "pyyaml": ["//third-party/pypi/pyyaml:pyyaml", "//third_party:pyyaml"],
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
     "nlohmann-json": ["fbsource//third-party/nlohmann-json:nlohmann-json", "//third_party:nlohmann-json"],
-    "sleef_arm": ["//third-party/sleef:sleef_arm", "//third_party:sleef_arm"],
+    "sleef_arm": ["//third-party/sleef:sleef", "//third_party:sleef_arm"],
 }
 
 def third_party(name):
@@ -737,7 +738,6 @@ def vulkan_spv_shader_library(name, spv_filegroup):
         },
         cmd = " ".join(genrule_cmd),
         default_outs = ["."],
-        labels = ["uses_dotslash"],
     )
 
     fb_xplat_cxx_library(
@@ -944,6 +944,7 @@ def define_buck_targets(
             [
                 ("torch/csrc/api/include", "torch/**/*.h"),
                 ("", "torch/csrc/**/*.h"),
+                ("", "torch/standalone/**/*.h"),
                 ("", "torch/script.h"),
                 ("", "torch/library.h"),
                 ("", "torch/custom_class.h"),
