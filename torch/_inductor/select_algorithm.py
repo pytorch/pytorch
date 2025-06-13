@@ -481,7 +481,7 @@ class TritonTemplateKernel(TritonKernel):
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
-            size = V.graph.sizevars.size_hints(inp.get_size())
+            size = V.graph.sizevars.size_hints(inp.get_size(), fallback=1)
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
@@ -1119,7 +1119,7 @@ class TritonTemplateKernel(TritonKernel):
         return [
             str(x)
             for x in self.grid_fn(
-                *V.graph.sizevars.size_hints(self.call_sizes), self.meta
+                *V.graph.sizevars.size_hints(self.call_sizes, fallback=1), self.meta
             )
         ]
 

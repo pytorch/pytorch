@@ -612,8 +612,8 @@ class DebugFormatter:
                     static_layout = FixedLayout(
                         layout.device,
                         dtype=layout.dtype,
-                        size=[*V.graph.sizevars.size_hints(layout.size)],
-                        stride=[*V.graph.sizevars.size_hints(layout.stride)],
+                        size=[*V.graph.sizevars.size_hints(layout.size, fallback=1)],
+                        stride=[*V.graph.sizevars.size_hints(layout.stride, fallback=1)],
                         offset=offset,
                     )
                     node_info["layout"] = str(static_layout)
@@ -631,12 +631,12 @@ class DebugFormatter:
                 pass
             try:
                 node_info["stride"] = str(
-                    V.graph.sizevars.size_hints(node.get_stride())
+                    V.graph.sizevars.size_hints(node.get_stride(), fallback=1)
                 )
             except Exception:
                 pass
             try:
-                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))  # type: ignore[arg-type]
+                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size(), fallback=1))  # type: ignore[arg-type]
             except Exception:
                 pass
             try:
