@@ -2086,11 +2086,10 @@ class AotCodeCompiler:
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
             )
-            gpu_kernels_o = [
-                entry.output_path
-                for entry in gpu_codecache.cache.values()
-                if entry.output_path.endswith(".o")
-            ]
+            gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
+            # clear the list of aot kernels after each linking
+            gpu_codecache.aot_kernels_o.clear()
+
             if gpu_kernels_o:
                 assert not config.aot_inductor.emit_multi_arch_kernel, (
                     "TODO: add emit_multi_arch_kernel support for cutlass kernels"
@@ -3631,8 +3630,13 @@ class CUDACodeCache:
         error_json: Optional[str] = None
 
     cache: dict[str, CacheEntry] = {}
-    cache_clear = staticmethod(cache.clear)
+    aot_kernels_o: list[str] = []
     _SOURCE_CODE_SUFFIX = "cu"
+
+    @staticmethod
+    def cache_clear() -> None:
+        CUDACodeCache.cache.clear()
+        CUDACodeCache.aot_kernels_o.clear()
 
     @classmethod
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
@@ -3785,9 +3789,14 @@ class ROCmCodeCache:
         output_path: str
 
     cache: dict[str, CacheEntry] = {}
-    cache_clear = staticmethod(cache.clear)
+    aot_kernels_o: list[str] = []
     _SOURCE_CODE_SUFFIX = "cpp"
     _logged_compiler_version = False
+
+    @staticmethod
+    def cache_clear() -> None:
+        ROCmCodeCache.cache.clear()
+        ROCmCodeCache.aot_kernels_o.clear()
 
     @classmethod
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:

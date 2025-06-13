@@ -442,7 +442,8 @@ class AsyncCompile:
             if aot_compile:
                 # We rely on JITInductor to compile the CUDA code,
                 # so that we can load it into AOTInductor.
-                CUDACodeCache.compile(source_code, "o")
+                output_path, *_ = CUDACodeCache.compile(source_code, "o")
+                CUDACodeCache.aot_kernels_o.append(output_path)
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
@@ -457,7 +458,8 @@ class AsyncCompile:
 
         def task():
             if aot_compile:
-                _ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+                output_path, *_ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+                ROCmCodeCache.aot_kernels_o.append(output_path)
             if config.rocm.generate_test_runner:
                 _ = ROCmCodeCache.compile(source_code, dst_file_ext="exe")
             return ROCmCodeCache.load(source_code, dst_file_ext)[0]
