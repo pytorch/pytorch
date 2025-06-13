@@ -1,4 +1,3 @@
-import os
 from itertools import chain
 from typing import Callable, cast, NamedTuple, Optional, Union
 
@@ -608,13 +607,8 @@ def _get_gradient_divide_factors(
 ) -> Union[tuple[None, None], tuple[float, float]]:
     # For fp32/bf16, we do not need to worry about overflow/underflow, so we
     # use NCCL's built-in division to avoid separate div kernels
-    prefer_avg = (
-        reduce_dtype in (torch.float32, torch.bfloat16) and device_type != "mtia"
-    )
-    op_to_use = os.getenv("TORCH_FSDP2_REDUCE_OP", "AVG" if prefer_avg else "SUM")
-    if op_to_use == "AVG":
+    if reduce_dtype in (torch.float32, torch.bfloat16) and device_type != "mtia":
         return None, None
-    assert op_to_use == "SUM"
     data_parallel_size = reduce_scatter_group.size()
     if all_reduce_group is not None:
         data_parallel_size *= all_reduce_group.size()

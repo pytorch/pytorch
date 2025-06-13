@@ -124,7 +124,6 @@ class FSDPParamGroup:
         shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]],
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
-        allocate_memory_from_process_group: bool = False,
     ):
         self.modules = modules  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, modules)
@@ -148,7 +147,6 @@ class FSDPParamGroup:
         self.device_handle = _get_device_handle(device.type)
         self.mp_policy = mp_policy
         self.offload_policy = offload_policy
-        self.allocate_memory_from_process_group = allocate_memory_from_process_group
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
         self._sharded_state = ShardedState.SHARDED
@@ -189,6 +187,9 @@ class FSDPParamGroup:
         # Whether to unshard in backward: can be overridden by the user if the
         # parameters in this group are not needed for backward (e.g. embedding)
         self.unshard_in_backward: bool = True
+        # Whether to (try to) use the ProcessGroup's allocate_tensor method for
+        # the staging buffers for collective comms.
+        self.allocate_memory_from_process_group = False
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
