@@ -770,9 +770,9 @@ class _MinimizerBase:
             node_name = node.name
             if node_name is not None and isinstance(node_name, tuple):
                 node_name = node_name[0]
-            assert node_name is not None and isinstance(
-                node_name, str
-            ), f"minimize: node_name: {node_name}"
+            assert node_name is not None and isinstance(node_name, str), (
+                f"minimize: node_name: {node_name}"
+            )
 
             report.append(f"Add node: {node_name}")
 
