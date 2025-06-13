@@ -3,6 +3,7 @@
         ".clang-format": "yaml",
         ".clang-tidy": "yaml",
         ".flake8": "properties",
+        ".coveragerc": "properties",
         "*.py.in": "python",
         "*.pyi.in": "python",
         "*requirements*.txt": "pip-requirements",
