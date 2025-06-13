@@ -475,13 +475,16 @@ class TestCutlassBackend(TestCase):
             else None
         )
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
-            }
-        ), dynamo_config.patch({"error_on_recompile": dynamic}):
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                    "cuda.cutlass_max_profiling_configs": 2,
+                }
+            ),
+            dynamo_config.patch({"error_on_recompile": dynamic}),
+        ):
             expected = [model(*input) for input in inputs]
             if use_aoti:
                 actual = AOTIRunnerUtil.run_multiple(
@@ -562,15 +565,18 @@ class TestCutlassBackend(TestCase):
         )
         model = MyModel().cuda()
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
-                "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-                "cuda.cutlass_tma_only": True,
-            }
-        ), dynamo_config.patch({"error_on_recompile": dynamic}):
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                    "cuda.cutlass_max_profiling_configs": 2,
+                    "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+                    "cuda.cutlass_tma_only": True,
+                }
+            ),
+            dynamo_config.patch({"error_on_recompile": dynamic}),
+        ):
             expected = [model(*input) for input in inputs]
             if use_aoti:
                 actual = AOTIRunnerUtil.run_multiple(
@@ -641,13 +647,16 @@ class TestCutlassBackend(TestCase):
                 if dynamic
                 else None
             )
-            with config.patch(
-                {
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                    "cuda.cutlass_max_profiling_configs": 2,
-                }
-            ), dynamo_config.patch({"error_on_recompile": dynamic}):
+            with (
+                config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                        "cuda.cutlass_max_profiling_configs": 2,
+                    }
+                ),
+                dynamo_config.patch({"error_on_recompile": dynamic}),
+            ):
                 expected = [model(*input) for input in inputs]
                 if use_aoti:
                     actual = AOTIRunnerUtil.run_multiple(
@@ -1220,13 +1229,13 @@ class TestCutlassBackend(TestCase):
                                 op_conf_name = choice_info.get("op_conf_name", "")
                                 assert isinstance(op_conf_name, str)
                                 if use_fast_accum:
-                                    assert (
-                                        "fastaccum" in op_conf_name
-                                    ), "Only fastaccum Kernels should have been allowed"
+                                    assert "fastaccum" in op_conf_name, (
+                                        "Only fastaccum Kernels should have been allowed"
+                                    )
                                 else:
-                                    assert (
-                                        "fastaccum" not in op_conf_name
-                                    ), "fastaccum Kernels should have been filtered"
+                                    assert "fastaccum" not in op_conf_name, (
+                                        "fastaccum Kernels should have been filtered"
+                                    )
                                 cuda_template_count += 1
                         assert cuda_template_count > 0, "No CUDATemplateCaller choices"
 
@@ -1266,16 +1275,20 @@ class TestCutlassBackend(TestCase):
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
 
-        with fresh_inductor_cache(), config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
-            }
-        ), mock.patch(
-            "torch._inductor.kernel.mm.autotune_select_algorithm",
-            wraps=select_no_algorithm,
-        ) as sa:
+        with (
+            fresh_inductor_cache(),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "cuda.cutlass_max_profiling_configs": 2,
+                }
+            ),
+            mock.patch(
+                "torch._inductor.kernel.mm.autotune_select_algorithm",
+                wraps=select_no_algorithm,
+            ) as sa,
+        ):
             for input in inputs:
                 A, B = input
                 M, K = A.shape
@@ -1324,17 +1337,21 @@ class TestCutlassBackend(TestCase):
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
 
-        with fresh_inductor_cache(), config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
-                "cuda.cutlass_presets": presets,
-            }
-        ), mock.patch(
-            "torch._inductor.kernel.mm.autotune_select_algorithm",
-            wraps=select_no_algorithm,
-        ) as sa:
+        with (
+            fresh_inductor_cache(),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cuda.cutlass_presets": presets,
+                }
+            ),
+            mock.patch(
+                "torch._inductor.kernel.mm.autotune_select_algorithm",
+                wraps=select_no_algorithm,
+            ) as sa,
+        ):
             with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
                 torch.compile(torch.mm)(A, B)
 

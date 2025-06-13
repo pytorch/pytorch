@@ -160,12 +160,15 @@ class TestMaxAutotune(TestCase):
         a = torch.randn(M, K).to(torch.float16).cuda()
         b = torch.randn(K, N).to(torch.float16).cuda()
 
-        with self.assertRaises(BackendCompilerFailed) as context, config.patch(
-            {
-                "max_autotune": True,
-                "triton.enable_persistent_tma_matmul": "1",
-                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
-            }
+        with (
+            self.assertRaises(BackendCompilerFailed) as context,
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "triton.enable_persistent_tma_matmul": "1",
+                    "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                }
+            ),
         ):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
@@ -278,12 +281,15 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N).to(torch.float16).cuda()
         x = torch.randn(N).to(torch.float16).cuda()
 
-        with self.assertRaises(BackendCompilerFailed) as context, config.patch(
-            {
-                "max_autotune": True,
-                "triton.enable_persistent_tma_matmul": "1",
-                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
-            }
+        with (
+            self.assertRaises(BackendCompilerFailed) as context,
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "triton.enable_persistent_tma_matmul": "1",
+                    "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                }
+            ),
         ):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
@@ -704,16 +710,22 @@ class TestMaxAutotune(TestCase):
         inps = (t(3, 3), t(3, 3), t(3, 3), t(3))
         fn = torch.compile(f, mode="max-autotune-no-cudagraphs")
         (
-            pre_fusion_tream,
-            post_fusion_stream,
-        ), ctx = multiple_logs_to_string(
+            (
+                pre_fusion_tream,
+                post_fusion_stream,
+            ),
+            ctx,
+        ) = multiple_logs_to_string(
             "torch._inductor.debug", "ir_pre_fusion", "ir_post_fusion"
         )
 
         with config.patch({"trace.debug_dir": tempfile.mkdtemp()}):
-            with self.assertLogs(
-                logging.getLogger("torch._inductor.debug"), level=logging.INFO
-            ) as cm, ctx():
+            with (
+                self.assertLogs(
+                    logging.getLogger("torch._inductor.debug"), level=logging.INFO
+                ) as cm,
+                ctx(),
+            ):
                 out = fn(*inps)
 
         self.assertEqual(f(*inps), out)
@@ -1076,11 +1088,7 @@ class TestMaxAutotune(TestCase):
                 "triton_.*_fused_0.run"
             ).check("decompose_k").check_regex("s[0-9]+ = primals_1").check_regex(
                 "2*s[0-9]+"
-            ).check(
-                "primals_1 = 32"
-            ).run(
-                code[0]
-            )
+            ).check("primals_1 = 32").run(code[0])
             torch.testing.assert_close(
                 out,
                 f(a, b),
@@ -1108,11 +1116,14 @@ class TestMaxAutotune(TestCase):
         b = b[:, :1096]
 
         # Force only decomposeK choice
-        with mock.patch(
-            "torch._inductor.kernel.mm.V.choices.get_base_mm_configs"
-        ) as base_mm_mock, mock.patch(
-            "torch._inductor.kernel.mm.use_decompose_k_choice"
-        ) as decompose_mock:
+        with (
+            mock.patch(
+                "torch._inductor.kernel.mm.V.choices.get_base_mm_configs"
+            ) as base_mm_mock,
+            mock.patch(
+                "torch._inductor.kernel.mm.use_decompose_k_choice"
+            ) as decompose_mock,
+        ):
             mm_configs_mock = MagicMock()
             mm_configs_mock.return_value = []
             base_mm_mock.return_value = mm_configs_mock
@@ -1517,12 +1528,12 @@ class TestMaxAutotunePrecompile(TestCase):
                     ):
                         asc("test_call", fake_choices, [], Mock())
             for fake_choice in fake_choices:
-                assert (
-                    fake_choice.thread_id is not None
-                ), "Expected all ChoiceCaller's precompile method to have been called"
-                assert (
-                    fake_choice.thread_id != main_thread_id
-                ), "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+                assert fake_choice.thread_id is not None, (
+                    "Expected all ChoiceCaller's precompile method to have been called"
+                )
+                assert fake_choice.thread_id != main_thread_id, (
+                    "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+                )
         finally:
             V.set_debug_handler(old_debug_handler)
 

@@ -220,9 +220,10 @@ class TestAOTInductorPackage(TestCase):
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=options
             )
-            with tempfile.TemporaryDirectory() as tmp_dir, zipfile.ZipFile(
-                package_path, "r"
-            ) as zip_ref:
+            with (
+                tempfile.TemporaryDirectory() as tmp_dir,
+                zipfile.ZipFile(package_path, "r") as zip_ref,
+            ):
                 filenames = zip_ref.namelist()
                 prefix = filenames[0].split("/")[0]
                 zip_ref.extractall(tmp_dir)
@@ -295,9 +296,10 @@ class TestAOTInductorPackage(TestCase):
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=options
             )
-            with tempfile.TemporaryDirectory() as tmp_dir, zipfile.ZipFile(
-                package_path, "r"
-            ) as zip_ref:
+            with (
+                tempfile.TemporaryDirectory() as tmp_dir,
+                zipfile.ZipFile(package_path, "r") as zip_ref,
+            ):
                 filenames = zip_ref.namelist()
                 prefix = filenames[0].split("/")[0]
                 zip_ref.extractall(tmp_dir)
