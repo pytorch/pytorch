@@ -247,19 +247,19 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
 }
 
 Tensor divide_neg_exp(Tensor t) {
-  StableIValue stack1[1];
-  stack1[0] = from(t);
+  StableIValue stack_neg[1];
+  stack_neg[0] = from(t);
 
-  StableIValue stack2[1];
-  stack2[0] = from(t);
-  aoti_torch_call_dispatcher("aten::exp", "", stack2);
-  aoti_torch_call_dispatcher("aten::neg", "", stack1);
+  StableIValue stack_exp[1];
+  stack_exp[0] = from(t);
+  aoti_torch_call_dispatcher("aten::exp", "", stack_exp);
+  aoti_torch_call_dispatcher("aten::neg", "", stack_neg);
 
-  StableIValue stack3[2];
-  stack3[0] = stack1[0];
-  stack3[1] = stack2[0];
-  aoti_torch_call_dispatcher("aten::divide", "Tensor", stack3);
-  return to<Tensor>(stack3[0]);
+  StableIValue stack_div[2];
+  stack_div[0] = stack_neg[0];
+  stack_div[1] = stack_exp[0];
+  aoti_torch_call_dispatcher("aten::divide", "Tensor", stack_div);
+  return to<Tensor>(stack_div[0]);
 }
 
 void boxed_divide_neg_exp(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {

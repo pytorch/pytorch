@@ -1,7 +1,7 @@
 #pragma once
 
-// THIS FILE SHOULD BE HEADER ONLY BUT ISN'T ENFORCED
-// I only need it for AOTI_TORCH_ERROR_CODE_CHECK
+// TODO ASAP: THIS FILE SHOULD BE HEADER ONLY BUT ISN'T ENFORCED:
+// I only need it for AOTI_TORCH_ERROR_CODE_CHECK, see #154908
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>

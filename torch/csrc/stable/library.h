@@ -12,36 +12,17 @@
 // versions of this file that may be included by different sources
 namespace {
 
+// =============================================================================
+//  helpers for converting between StableIValue and T
+// =============================================================================
+
+// forward declare so that from/to() calls in detail work
+template <typename T>
+StableIValue from(T val);
+template <typename T>
+T to(StableIValue val);
+
 namespace detail {
-/// Utility to detect optional types
-template <typename T>
-struct is_optional : std::false_type {};
-template <typename T>
-struct is_optional<std::optional<T>> : std::true_type {};
-template <typename T>
-inline constexpr bool is_optional_v = is_optional<T>::value;
-
-// Utility to detect if type is torch::stable::Tensor
-template <typename T>
-struct is_stable_tensor : std::false_type {};
-template <>
-struct is_stable_tensor<torch::stable::Tensor> : std::true_type {};
-template <typename T>
-inline constexpr bool is_stable_tensor_v = is_stable_tensor<T>::value;
-
-// Utility to detect nullopt_t
-template <typename T>
-struct is_nullopt : std::false_type {};
-template <>
-struct is_nullopt<std::nullopt_t> : std::true_type {};
-template <typename T>
-inline constexpr bool is_nullopt_v = is_nullopt<T>::value;
-
-// Combined check for all non-standard types mentioned above
-template <typename T>
-inline constexpr bool is_special_type_v =
-    is_stable_tensor_v<T> || is_optional_v<T> || is_nullopt_v<T>;
-} // namespace detail
 
 // =============================================================================
 // FROM CONVERSIONS (T -> StableIValue)
@@ -49,28 +30,32 @@ inline constexpr bool is_special_type_v =
 
 // Specialization for general copyable types (catch-all) => StableIValue
 template <typename T>
-std::enable_if_t<!detail::is_special_type_v<T>, StableIValue> from(T val) {
-  static_assert(
-      sizeof(T) <= sizeof(StableIValue),
-      "StableLibrary stack does not support parameter types larger than 64 bits.");
-  static_assert(std::is_trivially_copyable_v<T>);
-  // Initialization should be cheap enough; let's give people well-specified
-  // reproducible behavior.
-  StableIValue result = 0;
-  // NOTE [ -Wclass-memaccess ]: reinterpret_cast to suppress
-  // overzealous -Wclass-memaccess. (see
-  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=107361) We have a
-  // static_assert above that T is trivially copyable, which should be
-  // enough.
-  std::memcpy(&result, reinterpret_cast<void*>(&val), sizeof(val));
-  return result;
-}
+struct FromImpl {
+  static StableIValue call(T val) {
+    static_assert(
+        sizeof(T) <= sizeof(StableIValue),
+        "StableLibrary stack does not support parameter types larger than 64 bits.");
+    static_assert(std::is_trivially_copyable_v<T>);
+    // Initialization should be cheap enough; let's give people well-specified
+    // reproducible behavior.
+    StableIValue result = 0;
+    // NOTE [ -Wclass-memaccess ]: reinterpret_cast to suppress
+    // overzealous -Wclass-memaccess. (see
+    // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=107361) We have a
+    // static_assert above that T is trivially copyable, which should be
+    // enough.
+    std::memcpy(&result, reinterpret_cast<void*>(&val), sizeof(val));
+    return result;
+  }
+};
 
 // Specialization for std::nullopt_t => StableIValue
-template <typename T>
-std::enable_if_t<std::is_same_v<T, std::nullopt_t>, StableIValue> from(T val) {
-  return from(nullptr);
-}
+template <>
+struct FromImpl<std::nullopt_t> {
+  static StableIValue call(std::nullopt_t val) {
+    return from(nullptr);
+  }
+};
 
 // Specialization for std::optional => StableIValue
 // [Handling std::optional]
@@ -102,32 +87,26 @@ std::enable_if_t<std::is_same_v<T, std::nullopt_t>, StableIValue> from(T val) {
 // The schema requests an optional (T?) so I must call `from` on a
 // std::optional<T> or a std::nullopt.
 template <typename T>
-std::enable_if_t<detail::is_optional_v<T>, StableIValue> from(T val) {
-  if (!val.has_value()) {
-    return from(std::nullopt);
+struct FromImpl<std::optional<T>> {
+  static StableIValue call(std::optional<T> val) {
+    if (!val.has_value()) {
+      return from(std::nullopt);
+    }
+    StableIValue* heap_val = new StableIValue(from(val.value()));
+    return from(heap_val);
   }
-  StableIValue* heap_val = new StableIValue(from(val.value()));
-  return from(heap_val);
-}
+};
 
 // Specialization for torch::stable::Tensor => StableIValue
-// Takes a new owning reference of the underlying AtenTensorHandle.
-//
-// We expect the only use case for converting a torch::stable::Tensor to
-// a StableIValue is when calling a stack-based API, e.g.,
-// aoti_torch_call_dispatcher. A stack-based API is one that takes as
-// input a stack of StableIValues. Our contract with any stack-based API
-// is that the input stack has ownership of its Tensor arguments. Since
-// the input torch::stable::Tensor object will likely go out of scope by
-// the end of the user extension's local function and will thus delete
-// its references on the at::Tensor, we create a new AtenTensorHandle
-// (and thus a new at::Tensor) for that use case.
-template <typename T>
-std::enable_if_t<detail::is_stable_tensor_v<T>, StableIValue> from(T val) {
-  AtenTensorHandle new_ath;
-  aoti_torch_new_tensor_handle(val.get(), &new_ath);
-  return from(new_ath);
-}
+// Returns a new owning reference of the underlying Tensor.
+template <>
+struct FromImpl<torch::stable::Tensor> {
+  static StableIValue call(torch::stable::Tensor val) {
+    AtenTensorHandle new_ath;
+    aoti_torch_new_tensor_handle(val.get(), &new_ath);
+    return from(new_ath);
+  }
+};
 
 // =============================================================================
 // TO CONVERSIONS (StableIValue -> T)
@@ -135,55 +114,75 @@ std::enable_if_t<detail::is_stable_tensor_v<T>, StableIValue> from(T val) {
 
 // Specialization for StableIValue => general copyable types (catch-all)
 template <typename T>
-std::enable_if_t<!detail::is_special_type_v<T>, T> to(StableIValue val) {
-  static_assert(std::is_trivially_copyable_v<T>);
-  // T may not have a default constructor. (For example, it might be
-  // c10::Device.) However, std::memcpy implicitly creates a T at the
-  // destination. So, we can use a union to work around this lack of
-  // default constructor.
-  union Result {
-    Result() {}
-    T t;
-  };
-  Result result;
-  // See NOTE[ -Wclass-memaccess ] above.
-  std::memcpy(reinterpret_cast<void*>(&result.t), &val, sizeof(result));
-  return result.t;
-}
+struct ToImpl {
+  static T call(StableIValue val) {
+    static_assert(std::is_trivially_copyable_v<T>);
+    // T may not have a default constructor. (For example, it might be
+    // c10::Device.) However, std::memcpy implicitly creates a T at the
+    // destination. So, we can use a union to work around this lack of
+    // default constructor.
+    union Result {
+      Result() {}
+      T t;
+    };
+    Result result;
+    // See NOTE[ -Wclass-memaccess ] above.
+    std::memcpy(reinterpret_cast<void*>(&result.t), &val, sizeof(result));
+    return result.t;
+  }
+};
 
 // Specialization for StableIValue => std::nullopt_t
-template <typename T>
-std::enable_if_t<detail::is_nullopt_v<T>, T> to(StableIValue val) {
-  // val should be equivalent to from(nullptr)
-  return std::nullopt;
-}
+template <>
+struct ToImpl<std::nullopt_t> {
+  static std::nullopt_t call(StableIValue val) {
+    // val should be equivalent to from(nullptr)
+    return std::nullopt;
+  }
+};
 
 // Specialization for StableIValue => std::optional, see [Handling
 // std::optional] as the semantic is the same but in reverse direction as we go
 // from IValue --(from_ivalue)-> StableIValue --(to<T>)-> T in custom extension
 template <typename T>
-std::enable_if_t<detail::is_optional_v<T>, T> to(StableIValue val) {
-  using V = typename T::value_type;
-  auto sivp = to<StableIValue*>(val);
+struct ToImpl<std::optional<T>> {
+  static std::optional<T> call(StableIValue val) {
+    auto sivp = to<StableIValue*>(val);
 
-  // sivp is either nullptr or a pointer to a StableIValue
-  if (sivp == nullptr) {
-    return {};
+    // sivp is either nullptr or a pointer to a StableIValue
+    if (sivp == nullptr) {
+      return {};
+    }
+    auto inner_val = to<T>(*sivp);
+
+    // free the memory associated with StableIValue* sivp
+    delete sivp;
+
+    return std::make_optional(inner_val);
   }
-  auto inner_val = to<V>(*sivp);
-
-  // free the memory associated with StableIValue* sivp
-  delete sivp;
-
-  return std::make_optional(inner_val);
-}
+};
 
 // Specialization for StableIValue => torch::stable::Tensor
 // The resulting stable::Tensor steals ownership of the input's
 // underlying AtenTensorHandle.
+template <>
+struct ToImpl<torch::stable::Tensor> {
+  static torch::stable::Tensor call(StableIValue val) {
+    return torch::stable::Tensor(to<AtenTensorHandle>(val));
+  }
+};
+
+} // namespace detail
+
+// Expose the partially templated class functions through single functions
 template <typename T>
-std::enable_if_t<detail::is_stable_tensor_v<T>, T> to(StableIValue val) {
-  return torch::stable::Tensor(to<AtenTensorHandle>(val));
+StableIValue from(T val) {
+  return detail::FromImpl<T>::call(val);
+}
+
+template <typename T>
+T to(StableIValue val) {
+  return detail::ToImpl<T>::call(val);
 }
 
 // =============================================================================
