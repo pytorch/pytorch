@@ -268,9 +268,9 @@ def _extract_fake_inputs(gm, args, kwargs):
 
     if detected_fake_mode:
         if detected_shape_env:
-            assert (
-                detected_shape_env is detected_fake_mode.shape_env
-            ), "Detected shape env does not match fake mode's shape env"
+            assert detected_shape_env is detected_fake_mode.shape_env, (
+                "Detected shape env does not match fake mode's shape env"
+            )
         fake_mode = detected_fake_mode
     elif detected_shape_env:
         fake_mode = FakeTensorMode(shape_env=detected_shape_env, export=True)
@@ -864,13 +864,19 @@ def _export_to_aten_ir(
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
-    with torch.nn.utils.stateless._reparametrize_module(
-        mod,
-        fake_params_buffers,
-        tie_weights=True,
-        strict=True,
-        stack_weights=True,
-    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context(), custom_triton_ops_decomposition_ctx():  # type: ignore[attr-defined]
+    with (
+        torch.nn.utils.stateless._reparametrize_module(
+            mod,
+            fake_params_buffers,
+            tie_weights=True,
+            strict=True,
+            stack_weights=True,
+        ),
+        grad_safe_guard,
+        _ignore_backend_decomps(),
+        _compiling_state_context(),
+        custom_triton_ops_decomposition_ctx(),
+    ):
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_args,
@@ -1229,9 +1235,9 @@ def _get_module_call_graph(
     """
     gm: torch.fx.GraphModule = export_artifact.aten.gm
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
-    module_call_specs: dict[
-        str, dict[str, TreeSpec]
-    ] = export_artifact.module_call_specs
+    module_call_specs: dict[str, dict[str, TreeSpec]] = (
+        export_artifact.module_call_specs
+    )
     in_spec: TreeSpec = export_artifact.in_spec
     out_spec: TreeSpec = export_artifact.out_spec
 
@@ -1365,7 +1371,8 @@ def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
             ).module()
 
         elif isinstance(traced_callable, torch.ScriptMethod) and isinstance(
-            traced_callable.owner(), (torch._C.ScriptModule, torch.nn.Module)  # type: ignore[operator]
+            traced_callable.owner(),  # type: ignore[operator]
+            (torch._C.ScriptModule, torch.nn.Module),
         ):
             with patch_forward(traced_callable.owner(), traced_callable):  # type: ignore[operator]
                 return _export(
@@ -1430,9 +1437,9 @@ def _strict_export(
             attr = getattr(gm_torch_level, node.target)
             # Checks if it is not a HigherOrderOp branch or a module
             if not isinstance(attr, torch.nn.Module):
-                assert (
-                    dynamo_fake_mode is not None
-                ), "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."
+                assert dynamo_fake_mode is not None, (
+                    "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."
+                )
                 node.meta["val"] = dynamo_fake_mode.from_tensor(
                     attr, static_shapes=True
                 )
@@ -1749,13 +1756,17 @@ def _export_to_aten_ir_make_fx(
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
-    with torch.nn.utils.stateless._reparametrize_module(
-        mod,
-        fake_params_buffers,
-        tie_weights=True,
-        strict=True,
-        stack_weights=True,
-    ), _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+    with (
+        torch.nn.utils.stateless._reparametrize_module(
+            mod,
+            fake_params_buffers,
+            tie_weights=True,
+            strict=True,
+            stack_weights=True,
+        ),
+        _ignore_backend_decomps(),
+        _compiling_state_context(),
+    ):
         gm, graph_signature = transform(_make_fx_helper)(
             mod,
             fake_args,
@@ -1944,22 +1955,27 @@ def _non_strict_export(
     # We also need to attach dynamo configs as these will be used in HOOs that
     # use torch.compile, like cond
     dynamo_config = dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
-    dynamo_config[
-        "do_not_emit_runtime_asserts"
-    ] = False  # We want to emit runtime asserts
+    dynamo_config["do_not_emit_runtime_asserts"] = (
+        False  # We want to emit runtime asserts
+    )
 
-    with fake_mode, _NonStrictTorchFunctionHandler(), tracing(
-        tx
-    ), torch._dynamo.config.patch(dynamo_config):
-        with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
-            patched_mod,
-            new_fake_args,
-            new_fake_kwargs,
-            new_fake_constant_attrs,
-            map_fake_to_real,
-        ), _fakify_module_inputs(
-            fake_args, fake_kwargs, fake_mode
-        ), _override_builtin_ops():
+    with (
+        fake_mode,
+        _NonStrictTorchFunctionHandler(),
+        tracing(tx),
+        torch._dynamo.config.patch(dynamo_config),
+    ):
+        with (
+            _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
+                patched_mod,
+                new_fake_args,
+                new_fake_kwargs,
+                new_fake_constant_attrs,
+                map_fake_to_real,
+            ),
+            _fakify_module_inputs(fake_args, fake_kwargs, fake_mode),
+            _override_builtin_ops(),
+        ):
             aten_export_artifact = _to_aten_func(  # type: ignore[operator]
                 patched_mod,
                 new_fake_args,

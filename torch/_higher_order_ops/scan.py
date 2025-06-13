@@ -36,9 +36,9 @@ aten = torch._ops.ops.aten
 def wrap_combine_fn_flat(
     *args, combine_fn, spec_init, spec_xs, num_init_leaves, num_inp_leaves
 ):
-    assert len(args) == (
-        num_init_leaves + num_inp_leaves
-    ), f"Combin_fn received wrong number of arguments, expected {num_init_leaves + num_inp_leaves}, but got {len(args)}"
+    assert len(args) == (num_init_leaves + num_inp_leaves), (
+        f"Combin_fn received wrong number of arguments, expected {num_init_leaves + num_inp_leaves}, but got {len(args)}"
+    )
     carry = pytree.tree_unflatten(args[:num_init_leaves], spec_init)
     xs = pytree.tree_unflatten(args[num_init_leaves:], spec_xs)
     return combine_fn(carry, xs)
@@ -73,13 +73,13 @@ def mask_list(
     # If other is None, then the elements of the `inp` list where the mask is False are removed
     # If other is not None, then the elements of the `inp` list where the mask is False are
     # replaced with the elements of the `other` list
-    assert len(mask) == len(
-        inp
-    ), "The length of the mask needs to be identical to the length of the input"
+    assert len(mask) == len(inp), (
+        "The length of the mask needs to be identical to the length of the input"
+    )
     if other is not None:
-        assert len(inp) == len(
-            other
-        ), "If an input and an other list is provided, they need to have the same length"
+        assert len(inp) == len(other), (
+            "If an input and an other list is provided, they need to have the same length"
+        )
         return [i if m else o for m, i, o in zip(mask, inp, other)]
     else:
         return [i for m, i in zip(mask, inp) if m]
@@ -97,9 +97,9 @@ def first_slice_copy_with_grad(li: list[Any]) -> list[Any]:
 
 def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
     it = iter(iterable)
-    assert sum(chunk_sizes) == len(
-        iterable
-    ), "the sum of all chunks needs to match the length of the iterable."
+    assert sum(chunk_sizes) == len(iterable), (
+        "the sum of all chunks needs to match the length of the iterable."
+    )
     return [list(itertools.islice(it, size)) for size in chunk_sizes]
 
 
@@ -165,6 +165,7 @@ def scan(
             next_carry = y = x + y
             # clone the output to avoid output-output aliasing
             return next_carry, y.clone()
+
 
         i0 = torch.zeros(1)
         xs = torch.arange(5)
@@ -262,9 +263,9 @@ class ScanOp(HigherOrderOperator):
         # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
         # Once this issue is resolved, the assertion should only allow tuples
         # and the tuple cast should be removed
-        assert isinstance(
-            additional_inputs, (tuple, list)
-        ), "additional_inputs must be a tuple."
+        assert isinstance(additional_inputs, (tuple, list)), (
+            "additional_inputs must be a tuple."
+        )
         additional_inputs = (
             tuple(additional_inputs)
             if isinstance(additional_inputs, list)

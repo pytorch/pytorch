@@ -284,9 +284,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 )  # bf16 reduction
                 param.grad = funcol.all_gather_tensor(
                     sharded_grad, gather_dim=0, group=group
-                ).to(
-                    param.dtype
-                )  # upcast to fp32
+                ).to(param.dtype)  # upcast to fp32
             ref_optim.step()  # fp32 optimizer step
 
             self.assertEqual(fsdp_loss, ref_loss)

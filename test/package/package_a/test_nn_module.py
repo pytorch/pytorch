@@ -25,7 +25,7 @@ class TestNnModule(torch.nn.Module):
             torch.nn.ReLU(True),
             # state size. (ngf) x 32 x 32
             torch.nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
-            torch.nn.Tanh()
+            torch.nn.Tanh(),
             # state size. (nc) x 64 x 64
         )
 

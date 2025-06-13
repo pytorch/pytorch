@@ -6,6 +6,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 3. handle functionalized randomness
 4. deduplicate inputs and consolidate views into their bases (see input_output_analysis)
 """
+
 import builtins
 import collections
 import contextlib
@@ -338,9 +339,10 @@ def _create_runtime_wrapper(
             # It's possible to have trace_joint inside user specified with no_grad() region,
             # if there is a nested with enable_grad(), that forces some outputs to require gradients.
             # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
-            with torch.autograd._force_original_view_tracking(
-                True
-            ), torch.enable_grad():
+            with (
+                torch.autograd._force_original_view_tracking(True),
+                torch.enable_grad(),
+            ):
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
@@ -923,9 +925,9 @@ class AOTDedupeWrapper(CompilerWrapper):
             keep_arg_mask.append(True)
             add_dupe_map.append(j)
             j += 1
-        assert (
-            len(add_dupe_map) == duped_arg_len
-        ), f"Expects add_dupe_map to have length {duped_arg_len} but got {len(add_dupe_map)}"
+        assert len(add_dupe_map) == duped_arg_len, (
+            f"Expects add_dupe_map to have length {duped_arg_len} but got {len(add_dupe_map)}"
+        )
 
         self.keep_arg_mask = keep_arg_mask
         self.add_dupe_map = add_dupe_map
@@ -969,9 +971,9 @@ class AOTDedupeWrapper(CompilerWrapper):
                 keep_input_mutations=fw_metadata.keep_input_mutations,
                 is_train=fw_metadata.is_train,
             )(*deduped_flat_args)
-            assert (
-                ref_fw_metadata == updated_fw_metadata
-            ), f"ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}"
+            assert ref_fw_metadata == updated_fw_metadata, (
+                f"ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}"
+            )
 
         return wrapped_flat_fn, deduped_flat_args, updated_fw_metadata
 
@@ -1370,14 +1372,14 @@ def merge_view_inputs(
             # The "inputs that are aliased but have different differentiable bases" case
             # is more complicated and hopefully pretty rare. Not currently handled.
             if not is_inference:
-                assert _are_differentiable_views(
-                    view1, view2
-                ), "aot_autograd() does not yet handle non-differentiable view input mutations."
+                assert _are_differentiable_views(view1, view2), (
+                    "aot_autograd() does not yet handle non-differentiable view input mutations."
+                )
             # Regenerating views when reinterpreting complex / real tensors seems non-trivial,
             # not handling for now
-            assert _same_dtype_views(
-                view1, view2
-            ), "aot_autograd() does not yet handle input mutations on views with different dtypes."
+            assert _same_dtype_views(view1, view2), (
+                "aot_autograd() does not yet handle input mutations on views with different dtypes."
+            )
         non_none_bases = [
             fwd_inputs[i]._base
             for i in aliased_input_indices
@@ -1424,13 +1426,13 @@ def merge_view_inputs(
             # Case where all of the aliases require gradients, and have the same _base.
             synthetic_base = non_none_bases[0]
             for other_base in non_none_bases[1:]:
-                assert (
-                    other_base is synthetic_base
-                ), "aot_autograd() does not yet handle non-differentiable view input mutations."
+                assert other_base is synthetic_base, (
+                    "aot_autograd() does not yet handle non-differentiable view input mutations."
+                )
             for alias in aliases_with_none_bases:
-                assert (
-                    alias is synthetic_base
-                ), "aot_autograd() does not yet handle non-differentiable view input mutations."
+                assert alias is synthetic_base, (
+                    "aot_autograd() does not yet handle non-differentiable view input mutations."
+                )
         base_args.append(synthetic_base)
         for curr_view_idx in aliased_input_indices:
             curr_view = fwd_inputs[curr_view_idx]
@@ -2246,9 +2248,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             @staticmethod
             def _backward_impl(ctx, all_args):
                 # compiled autograd reimplements this function at proxy_call_aot_backward
-                assert (
-                    not backward_state_indices
-                ), "BackwardState requires CompiledAutograd"
+                assert not backward_state_indices, (
+                    "BackwardState requires CompiledAutograd"
+                )
                 ctx.maybe_clear_saved_tensors()
 
                 saved_tensors_use_once = (
@@ -2280,20 +2282,24 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
                     metrics_context = get_metrics_context()
-                    with tracing(saved_context), compile_context(
-                        saved_compile_context
-                    ), context(), track_graph_compiling(
-                        aot_config, "backward"
-                    ), metrics_context, dynamo_timed(
-                        "backward._backward_impl",
-                        phase_name="entire_backward_compile",
-                        log_pt2_compile_event=True,
-                        dynamo_compile_column_us="backward_cumulative_compile_time_us",
-                        log_waitcounter=True,
-                        waitcounter_name_override="entire_backward_compile",
-                    ), callback_handler.install_callbacks(
-                        CallbackTrigger.LAZY_BACKWARD,
-                        str(CompileContext.current_compile_id()),
+                    with (
+                        tracing(saved_context),
+                        compile_context(saved_compile_context),
+                        context(),
+                        track_graph_compiling(aot_config, "backward"),
+                        metrics_context,
+                        dynamo_timed(
+                            "backward._backward_impl",
+                            phase_name="entire_backward_compile",
+                            log_pt2_compile_event=True,
+                            dynamo_compile_column_us="backward_cumulative_compile_time_us",
+                            log_waitcounter=True,
+                            waitcounter_name_override="entire_backward_compile",
+                        ),
+                        callback_handler.install_callbacks(
+                            CallbackTrigger.LAZY_BACKWARD,
+                            str(CompileContext.current_compile_id()),
+                        ),
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
                         # See Note: [Backward graph lazy lowering]

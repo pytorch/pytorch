@@ -277,9 +277,9 @@ class PT2EQATTestCase(QuantizationTestCase):
 
         # Verify: conv literal args
         if expected_conv_literal_args is not None:
-            assert (
-                len(expected_conv_literal_args) == 6
-            ), "wrong num conv args, bad test setup"
+            assert len(expected_conv_literal_args) == 6, (
+                "wrong num conv args, bad test setup"
+            )
             for i in range(6):
                 if i + 3 < len(conv_node.args):
                     self.assertEqual(
