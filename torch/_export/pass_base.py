@@ -438,9 +438,9 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         )
         self.tracer.fake_tensor_mode = prev_tracer.fake_tensor_mode
         interpreter = self.ExportInterpreter(self, graph_module)
-        prev_interpreter, self.interpreter = (  # type: ignore[assignment]
+        prev_interpreter, self.interpreter = (
             self.interpreter,
-            torch.fx.Interpreter(
+            torch.fx.Interpreter(  # type: ignore[assignment]
                 torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
             ),
         )
