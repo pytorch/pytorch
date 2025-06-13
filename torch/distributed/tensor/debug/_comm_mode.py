@@ -4,15 +4,19 @@ import json
 import re
 import weakref
 from collections import defaultdict
-from typing import Any, Callable
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.nn
 from torch._guards import detect_fake_mode
-from torch._higher_order_ops import flex_attention as flex_attention_hop
+from torch._higher_order_ops.flex_attention import (
+    flex_attention as flex_attention_hop,
+    flex_attention_backward as flex_attention_backward_hop,
+)
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.distributed.tensor._api import DTensor
+from torch.fx.graph_module import GraphModule
 from torch.nn.modules.module import (
     register_module_forward_hook,
     register_module_forward_pre_hook,
@@ -713,16 +717,23 @@ class CommDebugMode(TorchDispatchMode):
             ] += 1
 
             # adds collective count to parent modules
-            for par in self.advanced_module_tracker.module_parents_dict[
-                self.advanced_module_tracker.name
-            ]:
-                # makes sure we aren't double counting when current sub-module hasn't been removed from parents
-                if par != self.advanced_module_tracker.name:
-                    if par not in self.comm_module_counts:
-                        self.comm_module_counts[par] = {}
-                        self.comm_module_counts[par]["forward"] = defaultdict(int)
-                        self.comm_module_counts[par]["backward"] = defaultdict(int)
-                    self.comm_module_counts[par][key][func_packet] += 1
+            # TODO (xilunwu): this is a temporary hack to unblock the issue
+            # in tracking flex_attention_backward. Need to fix it later on.
+            # The issue happens when we call flex_attention_backward which
+            # sets ``self.advanced_module_tracker.name`` to "<lambda>" and
+            # ``self.advanced_module_tracker.module_parents_dict["<lambda>"]``
+            # results in KeyError.
+            if self.advanced_module_tracker.name != "<lambda>":
+                for par in self.advanced_module_tracker.module_parents_dict[
+                    self.advanced_module_tracker.name
+                ]:
+                    # makes sure we aren't double counting when current sub-module hasn't been removed from parents
+                    if par != self.advanced_module_tracker.name:
+                        if par not in self.comm_module_counts:
+                            self.comm_module_counts[par] = {}
+                            self.comm_module_counts[par]["forward"] = defaultdict(int)
+                            self.comm_module_counts[par]["backward"] = defaultdict(int)
+                        self.comm_module_counts[par][key][func_packet] += 1
 
         # if tensor op uses fake tensors, return
         if detect_fake_mode(args):
@@ -755,6 +766,45 @@ def flex_attention_comm_debug_mode(
         key,
         value,
         score_mod,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
+
+
+# register flex_attention_backward HOP to CommDebugMode
+@flex_attention_backward_hop.py_impl(CommDebugMode)
+def flex_attention_backward_comm_debug_mode(
+    mode: CommDebugMode,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    logsumexp: torch.Tensor,
+    grad_out: torch.Tensor,
+    grad_logsumexp: torch.Tensor,
+    fw_graph: Union[Callable, GraphModule],
+    joint_graph: GraphModule,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple = (),
+    mask_mod_other_buffers: tuple = (),
+) -> tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
+]:
+    return flex_attention_backward_hop(
+        query,
+        key,
+        value,
+        out,
+        logsumexp,
+        grad_out,
+        grad_logsumexp,
+        fw_graph,
+        joint_graph,
         block_mask,
         scale,
         kernel_options,
