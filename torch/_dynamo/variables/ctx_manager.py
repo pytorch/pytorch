@@ -204,10 +204,17 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
 
     def enter(self, tx: "InstructionTranslator"):
         # Custom enter implementation with side effects
+        from torch._dynamo.variables.higher_order_ops import _make_inlined
+        from torch.utils import _pytree as pytree
+
         self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
-        self.old_bufferer_var = self.mod.var_getattr(tx, "_buffers").realize()
+        self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
+        # Snapshot the flattened parameters and bufers
+        self.old_flattened_and_spec = _make_inlined(tx, pytree.tree_flatten)(
+            (self.old_parameters_var, self.old_buffer_var)
+        )
         tx.output.side_effects.allow_mutation_in_hop_subgraph(self.old_parameters_var)
-        tx.output.side_effects.allow_mutation_in_hop_subgraph(self.old_bufferer_var)
+        tx.output.side_effects.allow_mutation_in_hop_subgraph(self.old_buffer_var)
         return self.cm_vt.enter(tx)
 
     def _check_param_restored(self, tx):
@@ -219,11 +226,8 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         new_spec_and_flattened = _make_inlined(tx, pytree.tree_flatten)(
             (new_parameters_var, new_buffer_var)
         )
-        old_spec_and_flattened = _make_inlined(tx, pytree.tree_flatten)(
-            (self.old_parameters_var, self.old_bufferer_var)
-        )
-        old_flat_params_buffers, old_spec = old_spec_and_flattened.unpack_var_sequence(
-            tx
+        old_flat_params_buffers, old_spec = (
+            self.old_flattened_and_spec.unpack_var_sequence(tx)
         )
         new_flat_params_buffers, new_spec = new_spec_and_flattened.unpack_var_sequence(
             tx
@@ -242,7 +246,7 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
     def exit(self, tx: "InstructionTranslator", *args):
         # Custom exit implementation with side effects
         x = self.cm_vt.exit(tx, *args)
-        tx.output.side_effects.disallow_mutation_in_hop_subgraph(self.old_bufferer_var)
+        tx.output.side_effects.disallow_mutation_in_hop_subgraph(self.old_buffer_var)
         tx.output.side_effects.disallow_mutation_in_hop_subgraph(
             self.old_parameters_var
         )

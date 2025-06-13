@@ -135,7 +135,7 @@ class SideEffects:
         self.mutation_allowed_variables = set()
 
     def allow_mutation_in_hop_subgraph(self, var):
-        """Mark a variable as allowed for mutation during symbolic execution."""
+        """Mark a variable as allowed for mutation during speculating higher order op subgraph"""
         self.mutation_allowed_variables.add(var)
 
     def disallow_mutation_in_hop_subgraph(self, var):
