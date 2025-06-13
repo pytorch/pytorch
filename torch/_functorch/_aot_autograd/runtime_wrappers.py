@@ -8,6 +8,8 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 import builtins
 import collections
+import contextlib
+import copy
 import itertools
 import pprint
 from contextlib import nullcontext
@@ -18,6 +20,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
+from torch._dynamo.callback import callback_handler, CallbackTrigger
 from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
 from torch._guards import (
     compile_context,
@@ -45,6 +48,7 @@ from .logging_utils import describe_input, format_guard_bug_msg, track_graph_com
 from .schemas import (
     AOTConfig,
     InputAliasInfo,
+    MemoryFormatMeta,
     MutationType,
     OutputType,
     PlainTensorMeta,
@@ -246,6 +250,31 @@ def make_output_handler(info, runtime_metadata, trace_joint):
     return handler_type(info, runtime_metadata, trace_joint)
 
 
+# not sure why AOTDispatcher needs to manually set this
+def maybe_mark_dynamic_helper(t: torch.Tensor, dims: set[int]):
+    if hasattr(t, "_dynamo_weak_dynamic_indices"):
+        t._dynamo_weak_dynamic_indices |= dims
+    else:
+        t._dynamo_weak_dynamic_indices = dims.copy()  # type: ignore[attr-defined]
+
+
+def _should_disable_saved_tensors_hooks():
+    # Compiled autograd is not supported yet, to be added in future.
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        return False
+
+    get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
+    are_inline_hooks = (
+        torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
+    )
+
+    hooks = get_hooks()
+    if are_inline_hooks(hooks):
+        return True
+
+    return False
+
+
 def _create_runtime_wrapper(
     compiled_fn,
     *,
@@ -255,7 +284,7 @@ def _create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ):
-    if not hasattr(compiled_fn, "_boxed_call"):
+    if not getattr(compiled_fn, "_boxed_call", False):
         compiled_fn = make_boxed_func(compiled_fn)
 
     # Note [Inputs needed in runtime epilogue after list clearing]
@@ -431,15 +460,20 @@ def _create_runtime_wrapper(
             for t, o in zip(ret_outs, runtime_metadata.output_info):
                 if o.dynamic_dims is None:
                     continue
-                if hasattr(t, "_dynamo_weak_dynamic_indices"):
-                    t._dynamo_weak_dynamic_indices |= o.dynamic_dims
-                else:
-                    t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
+                maybe_mark_dynamic_helper(t, o.dynamic_dims)
         if runtime_metadata.grad_enabled_mutation is not None:
             torch._C._set_grad_enabled(runtime_metadata.grad_enabled_mutation)
         return ret_outs
 
-    return runtime_wrapper
+    if not (trace_joint and _should_disable_saved_tensors_hooks()):
+        return runtime_wrapper
+
+    # Disabling saved tensors hooks
+    def _runtime_wrapper(*args, **kwargs):
+        with _disable_saved_tensors_hooks():
+            return runtime_wrapper(*args, **kwargs)
+
+    return _runtime_wrapper
 
 
 @dataclass
@@ -850,42 +884,26 @@ class AOTDedupeWrapper(CompilerWrapper):
             """
             )
 
-        # Strategy 2: Duplicate specialize.
+        # Strategy 2: Duplicate specialization
         #
-        # In Haskell types, suppose you have:
+        # When we have duplicate arguments in a function call, we need to handle them specially.
+        # For example, if we have a function call f(a, b, a, c), we need to:
         #
-        #   add_dupe_args :: DedupedArgs -> Args
-        #   remove_dupe_args :: Args -> DedupedArgs
+        # 1. Remove duplicates to get a deduplicated list [a, b, c]
+        # 2. Compile our function to work with this deduplicated list
+        # 3. At runtime, convert incoming arguments with duplicates to the deduplicated form
+        # 4. Pass the deduplicated arguments to our compiled function
         #
-        #   compiler_fn
-        #       :: (DedupedArgs -> R) -> DedupedArgs -> AOTConfig -> (DedupedArgs -> R)
-        #   deped_compiler_fn
-        #       :: (Args -> R) -> Args -> AOTConfig -> (Args -> R)
+        # To do this, we need two helper functions:
         #
-        # Then the code below can be written in point-free style as:
+        # - remove_dupe_args: Converts [a, b, a, c] -> [a, b, c]
+        # - add_dupe_args: Converts [a, b, c] -> [a, b, a, c]
         #
-        #   deduped_compiler_fn f a c =
-        #       compiler_fn (f . add_dupe_args) (remove_dupe_args a) c . remove_dupe_args
+        # For our example [a, b, a, c], we track:
         #
-        # Suppose you have:
-        #
-        #   [a, b, a, c]
-        #
-        # We want:
-        #
-        #   remove_dupe_args([a, b, a, c]) == [a, b, c]
-        #   add_dupe_args([a, b, c]) == [a, b, a, c]
-        #
-        # This is done via (respectively):
-        #
-        #   seen_args = {a: 0, b: 1, c: 2}
-        #   enumerate(add_dupe_map) = [  # how to get args from the deduped list
-        #       (0, 0),
-        #       (1, 1),
-        #       (2, 0),
-        #       (3, 2),
-        #   ]
-        #   keep_arg_mask = [True, True, False, True]
+        # - seen_args = {a: 0, b: 1, c: 2} (maps each unique arg to its first position)
+        # - add_dupe_map = [0, 1, 0, 2] (tells us how to reconstruct the original list)
+        # - keep_arg_mask = [True, True, False, True] (tells us which args to keep when deduplicating)
 
         seen_args: dict[Tensor, int] = {}
         # Implicitly map duped arg position (list index) to de-duped arg position
@@ -1439,13 +1457,23 @@ def merge_view_inputs(
         # (2) Metadata telling functionalization how to generate the inner argument list given the outer calling convention.
         #     We post-process it into a list, where meta[i] tells you info about the i'th argument in the inner calling convention.
         args_to_functionalization = base_args + other_args
-        arg_to_old_idx_map = {
-            make_hashable(arg): i for (i, arg) in enumerate(fwd_inputs)
-        }
+
+        # Map each argument into its old index.
+        # There may be some repeated arguments, so we collect their indices in a list.
+        arg_to_old_idx_map = collections.defaultdict(list)
+        for i, arg in enumerate(fwd_inputs):
+            arg_to_old_idx_map[make_hashable(arg)].append(i)
+        # Reverse the list of each argument, so that we can easily pop them one-after-the-other in order.
+        for hashable_arg in arg_to_old_idx_map:
+            arg_to_old_idx_map[hashable_arg] = list(
+                reversed(arg_to_old_idx_map[hashable_arg])
+            )
+
         for i, other_arg in enumerate(other_args):
             new_idx = len(base_args) + i
-            old_idx = arg_to_old_idx_map[make_hashable(other_arg)]
+            old_idx = arg_to_old_idx_map[make_hashable(other_arg)].pop()
             inner_calling_convention_meta[old_idx] = new_idx
+
         # post process into a list
         post_processed_calling_convention_meta: list[
             Union[int, tuple[int, torch.Tensor]]
@@ -1458,6 +1486,13 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
+# Note: [Backward graph lazy lowering]
+# After AOTDispatch traces the backward for graphs requiring autograd, we will lower the graph lazily,
+# unless we suspect that inductor might specialize and insert additional guards. When we do lazy
+# lowering, we stash the AOT backward graph (bw_module) in this class.
+#
+# Lowering passes are performed on a deepcopy of this bw_module due to compatbility
+# with compiled autograd. See: https://github.com/pytorch/pytorch/pull/149229#discussion_r2002122645.
 @dataclass
 class AutogradLazyBackwardCompileInfo:
     bw_module: Callable
@@ -1752,6 +1787,68 @@ def _backward_epilogue_functional(
     return out
 
 
+def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryFormatMeta):
+    if memory_format.memory_format is not None:
+        # Coerce to torch.memory_format
+        if not x.is_contiguous(memory_format=memory_format.memory_format):
+            x = x.contiguous(memory_format=memory_format.memory_format)
+        return x
+
+    expected_size = memory_format.size
+    assert expected_size is not None
+    expected_stride = memory_format.stride
+    assert expected_stride is not None
+    # Expected size and stride are static ints
+    # ok to use == to compare runtime tensor strides and shapes
+
+    if x.shape == expected_size and x.stride() == expected_stride:
+        # Runtime tangent size and stride are the same as expected, no need to coerce
+        return x
+
+    # Empty_strided creates a raw Tensor.
+    # We are guranteed that only raw Tensors has expected size and stride.
+    # Subclasses have only expected memory_format.
+    restrided = torch.empty_strided(
+        size=expected_size,
+        stride=expected_stride,
+        dtype=x.dtype,
+        device=x.device,
+        layout=x.layout,
+        requires_grad=x.requires_grad,
+    )
+    restrided.copy_(x)
+    return restrided
+
+
+@contextlib.contextmanager
+def _disable_saved_tensors_hooks():
+    error_message = (
+        "Saved tensors hooks were specialized as GraphModules."
+        "In this case aot_autograd inlines them in forward and backward graph "
+        "and disables them during runtime of aot_autograd compiled region."
+        "If you see this error, that means that there is some unexpected push or pop manipulation "
+        "during aot_autograd compiled region runtime."
+        "Compilation with different hooks must result in recompilation."
+    )
+    fail_if_non_empty = False
+    maybe_prev_message = None
+    try:
+        maybe_prev_message = (
+            torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
+        )
+        torch._C._autograd._saved_tensors_hooks_disable(
+            error_message, fail_if_non_empty
+        )
+        yield
+    finally:
+        if maybe_prev_message is None:
+            torch._C._autograd._saved_tensors_hooks_enable()
+        else:
+            torch._C._autograd._saved_tensors_hooks_disable(
+                maybe_prev_message, fail_if_non_empty
+            )
+
+
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
@@ -1761,8 +1858,8 @@ class AOTDispatchAutograd:
             return x, [x]
 
         if isinstance(x, FakeTensor):
-            if not x.is_contiguous(memory_format=meta.memory_format):
-                x = x.contiguous(memory_format=meta.memory_format)
+            assert meta.memory_format
+            x = coerce_to_expected_memory_format(x, meta.memory_format)
             return x, [x]
 
         expected_type: Optional[type] = torch.Tensor
@@ -1820,8 +1917,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             )
 
         # Coerce to expected memory format
-        if not x.is_contiguous(memory_format=meta.memory_format):
-            x = x.contiguous(memory_format=meta.memory_format)
+        assert meta.memory_format
+        x = coerce_to_expected_memory_format(x, meta.memory_format)
 
         if not is_traceable_wrapper_subclass(x):
             return x, [x]
@@ -1954,11 +2051,22 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 assert all(
                     isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
                 )
+
+                def mark_dynamic_activations(activations: list[torch.Tensor]):
+                    for (
+                        idx,
+                        dims,
+                    ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
+                        maybe_mark_dynamic_helper(activations[idx], dims)
+                    return activations
+
                 # See Note [Detaching saved tensors in AOTAutograd]
                 ctx.save_for_backward(
-                    *(
-                        x.detach() if x._is_view() else x
-                        for x in tensors_saved_for_backwards
+                    *mark_dynamic_activations(
+                        [
+                            x.detach() if x._is_view() else x
+                            for x in tensors_saved_for_backwards
+                        ]
                     )
                 )
                 symint_outs = fw_outs[
@@ -2181,16 +2289,19 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         phase_name="entire_backward_compile",
                         log_pt2_compile_event=True,
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
+                        log_waitcounter=True,
+                        waitcounter_name_override="entire_backward_compile",
+                    ), callback_handler.install_callbacks(
+                        CallbackTrigger.LAZY_BACKWARD,
+                        str(CompileContext.current_compile_id()),
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
+                        # See Note: [Backward graph lazy lowering]
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
+                            copy.deepcopy(bw_module), placeholder_list
                         )
                         # Maybe save cache entry
                         if try_save_cache_entry is not None:
-                            # CompiledFunction.metadata
-                            # CompiledFunction.maybe_subclass_metadata
-                            # bw_module
                             try_save_cache_entry(
                                 CompiledFunction.compiled_bw,
                                 fw_metadata,

@@ -469,7 +469,7 @@ private:
   bool duplicate_inputs_{false};
 };
 
-template <typename T>
+template <typename T, typename C_Dtype = T>
 struct GemmStridedBatchedParams : OpParams {
   std::string BLASSignature() const override {
     std::string alpha_str = to_string_opmath<T>(alpha);
@@ -477,7 +477,7 @@ struct GemmStridedBatchedParams : OpParams {
     return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: %ld, stride_b: %ld, stride_c: %ld, stride_d: %ld, "
       "alpha: %s, beta: %s, transA: %c, transB: %c, batch_count: %ld, a_type: %s, b_type: %s, c_type: %s, d_type: %s, scale_type: %s, compute_type: %s }",
       m, n, k, lda, ldb, ldc, ldc, stride_a, stride_b, stride_c, stride_c, alpha_str, beta_str, transa, transb, batch,
-      BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), ComputeTypeFor<T>(), ComputeTypeFor<T>());
+      BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<C_Dtype>(C_Dtype{}), BLASTypeName<T>(T{}), ComputeTypeFor<T>(), ComputeTypeFor<T>());
   }
 
   std::string Signature() const override {
@@ -517,7 +517,7 @@ struct GemmStridedBatchedParams : OpParams {
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();
-    copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
+    copy->c = static_cast<C_Dtype*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
     AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
         copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
     if (duplicate_inputs) {
@@ -544,7 +544,7 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmStridedBatchedParams<T> *other) {
-    auto c_dtype = c10::CppTypeToScalarType<T>::value;
+    auto c_dtype = c10::CppTypeToScalarType<C_Dtype>::value;
     return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
   }
 
@@ -561,7 +561,7 @@ struct GemmStridedBatchedParams : OpParams {
   int64_t ldb{};
   int64_t stride_b{};
   at::opmath_type<T> beta;
-  T* c{};
+  C_Dtype* c{};
   int64_t ldc{};
   int64_t stride_c{};
   int64_t batch{};
@@ -575,11 +575,20 @@ struct ScaledGemmParams : OpParams {
 
   std::string BLASSignature() const override {
     // Excluding use_fast_accum and use_rowise booleans for now
-    return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, "
-      "transA: %c, transB: %c, batch_count: 1, scaleA: f32_r, scaleB: f32_r, a_type: %s, b_type: %s, c_type: %s, d_type: %s, bias_type: %s, scale_type: %s, compute_type: %s }",
-      m, n, k, lda, ldb, ldc, ldc, transa, transb,
-      ScalarTypeToBLASType(a_dtype), ScalarTypeToBLASType(b_dtype), ScalarTypeToBLASType(c_dtype), ScalarTypeToBLASType(c_dtype), ScalarTypeToBLASType(bias_dtype),
-      ComputeTypeFor<T>(), ComputeTypeFor<T>());
+    if (bias_ptr == nullptr) {
+      return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, "
+        "transA: %c, transB: %c, batch_count: 1, scaleA: f32_r, scaleB: f32_r, a_type: %s, b_type: %s, c_type: %s, d_type: %s, scale_type: %s, compute_type: %s }",
+        m, n, k, lda, ldb, ldc, ldc, transa, transb,
+        ScalarTypeToBLASType(a_dtype), ScalarTypeToBLASType(b_dtype), ScalarTypeToBLASType(c_dtype), ScalarTypeToBLASType(c_dtype),
+        ComputeTypeFor<T>(), ComputeTypeFor<T>());
+    }
+    else {
+      return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, "
+        "transA: %c, transB: %c, batch_count: 1, scaleA: f32_r, scaleB: f32_r, a_type: %s, b_type: %s, c_type: %s, d_type: %s, bias_type: %s, scale_type: %s, compute_type: %s }",
+        m, n, k, lda, ldb, ldc, ldc, transa, transb,
+        ScalarTypeToBLASType(a_dtype), ScalarTypeToBLASType(b_dtype), ScalarTypeToBLASType(c_dtype), ScalarTypeToBLASType(c_dtype), ScalarTypeToBLASType(bias_dtype),
+        ComputeTypeFor<T>(), ComputeTypeFor<T>());
+    }
   }
 
   std::string Signature() const override {

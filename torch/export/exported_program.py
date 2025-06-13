@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Callable, final, Optional, TYPE_CHECKING, Union
 
+from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_impls import (
@@ -20,6 +21,7 @@ from torch._subclasses.fake_impls import (
     register_op_impl,
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -186,7 +188,7 @@ _BACKEND_KEYS_TO_OVERRIDE = [
 
 
 @contextmanager
-def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
+def _override_composite_implicit_decomp(cia_ops_to_callable):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
     # ALL composite ops but today's C++ functinalization relies on
@@ -194,13 +196,6 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
     # Hence we can only do it for functional ops. One caveat is that
     # there are some composite ops that lie about their schema (claimed to be
     # functional but not really aka dropout), for these cases, we just decompose.
-
-    # When safe=False, we will assume that ops_to_preserve can be mutating/aliasing
-    # and their usual decompositions need to be shadowed rather than overridden.
-    # Thus we will avoid asserting that they are valid to preserve, and will not
-    # replace their CompositeImplicitAutograd kernels with NotImplemented.
-    # The only current users of this mode are variants of aten::to that we will
-    # replace with aten::_to_copy in FunctionalTensorMode.__torch_dispatch__.
     saved_tables = {}
     patched_ops = set()
     for op_overload, decomp_callable in cia_ops_to_callable.items():
@@ -218,10 +213,9 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
         if torch._C.DispatchKey.CompositeImplicitAutograd in op_overload.py_kernels:
             del op_overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
 
-        if safe:
-            op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(
-                decomp_callable
-            )
+        op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(
+            decomp_callable
+        )
 
         # [NOTE] Directly registering fake tensor rule to CIA ops
         # The problem we are facing here is if your CIA custom rule
@@ -275,21 +269,6 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
             _deregister_op_impl(op)
-
-
-@contextmanager
-def _override_decomp_aten_to_variants():
-    # Preserve variants of aten::to understanding that they are mutating/aliasing
-    # and their CompositeImplicitAutograd kernels will not become NotImplemented.
-    # We will later replace them with aten._to_copy when functionalizing.
-    with _override_composite_implicit_decomp(
-        {
-            torch.ops.aten.to.dtype_layout: _special_op_to_preserve_cia,
-            torch.ops.aten.to.dtype: _special_op_to_preserve_cia,
-        },
-        safe=False,
-    ):
-        yield
 
 
 def _split_decomp_table_to_cia_and_python_decomp(
@@ -462,13 +441,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 else:
                     retracing_args.append(node.meta["val"])
 
-        with (
-            fake_mode
-        ), _override_decomp_aten_to_variants(), _override_composite_implicit_decomp(
+        tx = TracingContext(fake_mode)
+
+        with fake_mode, _override_composite_implicit_decomp(
             cia_to_decomp,
-        ), _enable_graph_inputs_of_type_nn_module(
-            ep.example_inputs
-        ):
+        ), _enable_graph_inputs_of_type_nn_module(ep.example_inputs), tracing(tx):
             retracing_args_unwrapped = pytree.tree_unflatten(
                 retracing_args, mod._in_spec
             )
@@ -559,20 +536,25 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # the state dict of ep.module but ep.module only stores params
         # buffers that participate in forward. If we undo this behaviour,
         # it would break some downstream users.
-        for name, p in unwrapped_params_buffers.items():
-            if name not in wrapped_params_buffers:
-                ep.state_dict[name] = p
+        new_state_dict = {
+            **ep.state_dict,
+            **{
+                name: p
+                for name, p in unwrapped_params_buffers.items()
+                if name not in wrapped_params_buffers
+            },
+        }
 
         for name, p in wrapped_params_buffers.items():
             # Buffers can be persistent/non-persistent
-            if name not in ep.state_dict:
+            if name not in new_state_dict:
                 assert not isinstance(p, torch.nn.Parameter)
 
-            if name in ep.state_dict:
+            if name in new_state_dict:
                 if name not in unwrapped_params_buffers:
-                    ep.state_dict.pop(name)
+                    new_state_dict.pop(name)
 
-        return gm, new_graph_signature, ep.state_dict
+        return gm, new_graph_signature, new_state_dict
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -934,9 +916,7 @@ class ExportedProgram:
         range_constraints: "dict[sympy.Symbol, Any]",
         module_call_graph: list[ModuleCallEntry],
         example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]] = None,
-        constants: Optional[
-            dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
-        ] = None,
+        constants: Optional[dict[str, _ConstantAttributeType]] = None,
         *,
         verifiers: Optional[list[type[Verifier]]] = None,
     ):
@@ -1303,10 +1283,11 @@ class ExportedProgram:
         graph_module = self.graph_module.print_readable(
             print_output=False, colored=False
         ).replace("\n", "\n    ")
+        graph_signature = str(self.graph_signature).replace("\n", "\n    ")
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph signature: {self.graph_signature}\n"
+            f"Graph signature: {graph_signature}\n"
             f"Range constraints: {self.range_constraints}\n"
         )
         return string

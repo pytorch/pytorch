@@ -13,13 +13,7 @@ import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._op_schema import (
-    _is_inplace_op,
-    _is_out_variant_op,
-    OpInfo,
-    OpSchema,
-    OutputSpecType,
-)
+from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
 from torch.distributed.tensor._random import is_rng_supported_mesh
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
@@ -38,22 +32,6 @@ except ImportError:
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
-
-
-def decompose_handler(
-    op_call: torch._ops.OpOverload,
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-) -> object:
-    """
-    Decomposes a op to core ATen op, this handler is mostly here
-    for inference mode usage where the ops are not core aten ops.
-    """
-    r = op_call.decompose(*args, **kwargs)
-    if r is not NotImplemented:
-        return r
-    else:
-        raise RuntimeError("Decomposition failed")
 
 
 def is_same_size_handler(
@@ -136,8 +114,6 @@ class OpDispatcher:
             aten.bernoulli_.float,
         }
         self._custom_op_handlers = {
-            aten.linear.default: decompose_handler,
-            aten.matmul.default: decompose_handler,
             aten.is_same_size.default: is_same_size_handler,
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
@@ -160,6 +136,14 @@ class OpDispatcher:
         Main dispatching logic
         """
         # operators that does not need to go through sharding propagation
+        if torch._C._dispatch_has_kernel_for_dispatch_key(
+            op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+        ):
+            # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
+            # so we manually decompose them, here
+            out = op_call.decompose(*args, **kwargs)
+            assert out is not NotImplemented
+            return out
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
@@ -270,13 +254,13 @@ class OpDispatcher:
                 # perform reduce on the collection with AND op
                 local_results = functools.reduce(operator.and_, obj_list, True)
 
-        if _is_inplace_op(op_call):
+        if op_info.schema.is_inplace_op():
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
                 return args[0]
             else:
                 return None
-        elif _is_out_variant_op(op_call):
+        elif op_info.schema.is_out_variant_op():
             # out variant could possibly have multiple out args (i.e. lu_unpack.out)
             output_specs = (
                 (output_sharding.output_spec,)

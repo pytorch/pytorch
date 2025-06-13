@@ -589,7 +589,10 @@ static PyObject* set_skip_guard_eval_unsafe(
 }
 
 static PyObject* get_eval_frame_callback_py(PyObject* dummy, PyObject* args) {
-  return eval_frame_callback_get();
+  // New reference
+  PyObject* callback = eval_frame_callback_get();
+  Py_INCREF(callback);
+  return callback;
 }
 
 static PyObject* reset_code(PyObject* dummy, PyObject* code) {

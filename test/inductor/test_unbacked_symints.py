@@ -299,6 +299,26 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_unbacked_repeat(self, device):
+        def fn(x, a, b):
+            u0, u1 = a.item(), b.item()
+            torch._check_is_size(u0)
+            torch._check_is_size(u1)
+
+            return x.repeat(u0, 2).repeat(2, u1)
+
+        example_inputs = (
+            make_tensor(1, 16, dtype=torch.float32, device=device),
+            torch.scalar_tensor(2, dtype=torch.int32, device=device),
+            torch.scalar_tensor(4, dtype=torch.int32, device=device),
+        )
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
     @parametrize("dynamic", [False, True, None])
     def test_unbacked_slice_on_subclass(self, device, dynamic):
         from torch.testing._internal.common_subclass import WrapperTensor
@@ -441,6 +461,33 @@ class TestUnbackedSymints(InductorTestCase):
         )
         model = Model()
         self.assertEqual(torch.compile(model)(*example_inputs), model(*example_inputs))
+
+    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_einsum(self, device):
+        def fn(q, k, vector, scalar):
+            unbacked = scalar.item()
+            q = q.repeat(1, unbacked, 1, 1)
+            k = k.repeat(1, unbacked, 1, 1)
+
+            qk = torch.einsum("bcxd,bcyd->bcxy", (q, k))
+            qk2 = torch.einsum("b...,b...->b...", (q, k))
+            qvec = torch.einsum("b...,b->b...", (q, vector))
+            return qk, qk2, qvec
+
+        example_inputs = (
+            torch.empty_strided(
+                (12, 1, 512, 64), (64, 196608, 768, 1), device=device
+            ).uniform_(0, 1),
+            torch.empty_strided(
+                (12, 1, 512, 64), (64, 196608, 768, 1), device=device
+            ).uniform_(0, 1),
+            torch.randn((12,), device=device),
+            torch.scalar_tensor(10, device=device, dtype=torch.int8),
+        )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
 
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)

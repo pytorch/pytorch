@@ -808,56 +808,58 @@ void generateForwardBackwardLink(
 
 void generateForwardBackwardLinks(
     std::unique_ptr<torch::profiler::impl::kineto::trace_t>& cpu_trace,
-    const std::vector<std::shared_ptr<Result>>& results){
+    const std::vector<std::shared_ptr<Result>>& results) {
 #ifndef USE_KINETO
 }
 #else // USE_KINETO
-    TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == results.size());
+  TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == results.size());
 
-// startThreadId_seqNum to pointer of activity.
-// Low-16bits of startThreadId and low-48bits seqNum are concatenated into
-// one uint64_t variable as key.
+  // startThreadId_seqNum to pointer of activity.
+  // Low-16bits of startThreadId and low-48bits seqNum are concatenated into
+  // one uint64_t variable as key.
 
-std::unordered_map<uint64_t, libkineto::GenericTraceActivity*> tidSeq2activity;
-uint64_t fwd_bwd_link_id = 1;
+  std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>
+      tidSeq2activity;
+  uint64_t fwd_bwd_link_id = 1;
 
-using result_activity_t = std::pair<Result*, libkineto::GenericTraceActivity*>;
-std::vector<result_activity_t> torch_events;
+  using result_activity_t =
+      std::pair<Result*, libkineto::GenericTraceActivity*>;
+  std::vector<result_activity_t> torch_events;
 
-for (const auto idx : c10::irange(cpu_trace->activities.size())) {
-  auto& profiler_result = results[idx];
-  auto& activity = cpu_trace->activities[idx];
+  for (const auto idx : c10::irange(cpu_trace->activities.size())) {
+    auto& profiler_result = results[idx];
+    auto& activity = cpu_trace->activities[idx];
 
-  // add information about an associated forward op, if a sequence number
-  // is available (e.g. during training)
+    // add information about an associated forward op, if a sequence number
+    // is available (e.g. during training)
 
-  profiler_result->visit_if_base<ExtraFields<EventType::TorchOp>>(
-      [&](const auto& e) {
-        if (e.sequence_number_ >= 0) {
-          torch_events.emplace_back(profiler_result.get(), activity.get());
-        }
+    profiler_result->visit_if_base<ExtraFields<EventType::TorchOp>>(
+        [&](const auto& e) {
+          if (e.sequence_number_ >= 0) {
+            torch_events.emplace_back(profiler_result.get(), activity.get());
+          }
+        });
+  }
+
+  // We need to visit the events in chronological order.
+  // So we sort them by end_time_ns_ before processing.
+  std::sort(
+      torch_events.begin(),
+      torch_events.end(),
+      [](const result_activity_t& left, const result_activity_t& right) {
+        auto left_end_time =
+            std::get<ExtraFields<EventType::TorchOp>>(left.first->extra_fields_)
+                .end_time_ns_;
+        auto right_end_time = std::get<ExtraFields<EventType::TorchOp>>(
+                                  right.first->extra_fields_)
+                                  .end_time_ns_;
+        return left_end_time < right_end_time;
       });
-}
 
-// We need to visit the events in chronological order.
-// So we sort them by end_time_ns_ before processing.
-std::sort(
-    torch_events.begin(),
-    torch_events.end(),
-    [](const result_activity_t& left, const result_activity_t& right) {
-      auto left_end_time =
-          std::get<ExtraFields<EventType::TorchOp>>(left.first->extra_fields_)
-              .end_time_ns_;
-      auto right_end_time =
-          std::get<ExtraFields<EventType::TorchOp>>(right.first->extra_fields_)
-              .end_time_ns_;
-      return left_end_time < right_end_time;
-    });
-
-for (auto& [profiler_result, activity] : torch_events) {
-  generateForwardBackwardLink(
-      *profiler_result, fwd_bwd_link_id, *activity, tidSeq2activity);
-}
+  for (auto& [profiler_result, activity] : torch_events) {
+    generateForwardBackwardLink(
+        *profiler_result, fwd_bwd_link_id, *activity, tidSeq2activity);
+  }
 }
 #endif // USE_KINETO
 
@@ -875,13 +877,17 @@ void passEventsToKineto(
   // Generate Kineto events for each event recorded by the PyTorch profiler.
   for (const auto i : c10::irange(results.size())) {
     const auto& e = results[i];
-    // (TODO): This is a temporary fix for async traces to make sure that we do
-    // not use int64 MIN as end time in Kineto. If we use that value, the
-    // duration will overflow and become a very large positive number. For a
-    // long term solution, add guards in kineto for each activity type
-    int64_t act_end_time = std::max(e->endTimeNS(), e->start_time_ns_);
+    // Here we are essentially setting the duration to -1 if the event never
+    // ends. This way Kineto will extend the event to the end of the trace. This
+    // is useful so that we can still have 0 duration events if necessary
+    // without extension
+    int64_t act_end_time = std::max(e->endTimeNS(), e->start_time_ns_ - 1);
+    std::string name = e->name();
+    if (!e->overload_name().empty()) {
+      name = fmt::format("{}.{}", e->name(), e->overload_name());
+    }
     auto* activity = cpu_trace.addCPUActivity(
-        e->name(),
+        name,
         e->kinetoType(),
         e->kineto_info_,
         e->correlationID(),

@@ -9,6 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_upsample_bicubic2d_aa_native.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_backward_native.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_native.h>
 #include <ATen/ops/_upsample_nearest_exact1d.h>
@@ -102,7 +103,7 @@ static void upsample_out_template(const Tensor& input,
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "upsample_" + std::string(resize_mode_str) + (align_corners ? "_aligned_corners" : "") +
+    std::string key = "upsample_" + std::string(resize_mode_str) + (align_corners ? "_aligned_corners" : "") +
         getTensorsStringKey({input}) + ":[" + std::to_string(scale_h) + "," + std::to_string(scale_w) + "]:[" +
         (is_backward_pass ? getArrayRefString(input_size) : "Undefined") + "]";
 
@@ -258,7 +259,7 @@ static void upsample_kernel_out_template(const Tensor& input,
                                          std::optional<double> scale_h_opt,
                                          std::optional<double> scale_w_opt,
                                          const Tensor& output,
-                                         const std::string name) {
+                                         const std::string& name) {
   if (output.numel() == 0) {
     return;
   }
@@ -465,6 +466,18 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_out_mps)
   TORCH_CHECK(at::isFloatingType(input.scalar_type()),
               "_upsample_bilineard2d_aa_out_mps only supports floating-point dtypes");
   mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bilinear2d_aa");
+}
+
+TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_mps)
+(const Tensor& input,
+ IntArrayRef output_size,
+ bool align_corners,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
+ const Tensor& output) {
+  TORCH_CHECK(at::isFloatingType(input.scalar_type()),
+              "_upsample_bicubic2d_aa_out_mps only supports floating-point dtypes");
+  mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bicubic2d_aa");
 }
 
 } // namespace at::native
