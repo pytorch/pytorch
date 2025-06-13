@@ -2,6 +2,7 @@ import os
 import subprocess
 from pathlib import Path
 
+
 repo_root = Path(__file__).absolute().parent.parent
 third_party_path = os.path.join(repo_root, "third_party")
 
