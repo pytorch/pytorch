@@ -156,7 +156,10 @@ log = logging.getLogger(__name__)
 
 
 def use_re_build() -> bool:
-    if config.is_fbcode():
+    """
+    Use for CUTLASS compilation only right now.
+    """
+    if config.is_fbcode() and not cuda_env.nvcc_exist():
         from triton.fb.re_build_helper import should_build_locally
 
         return not should_build_locally()
@@ -2105,14 +2108,11 @@ class AotCodeCompiler:
                     current_arch = _nvcc_arch_as_compile_option()
                     cmd = (
                         f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
-                        # Include PTX with the minimum arch as SM80
-                        "-gencode arch=compute_80,code=compute_80 "
+                        # Triton only allows generating PTX version as same as the current arch
+                        f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
+                        # Include SASS for the current specific arch
+                        f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                     )
-                    if config.aot_inductor.emit_current_arch_binary:
-                        # Include SASS for the current specific arch, to avoid
-                        # CUDA JIT compilation overhead. In theory, we could do
-                        # this for all archs that are newer than the current arch.
-                        cmd += f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                     subprocess.run(
                         cmd.split(), capture_output=True, text=True, check=True
                     )
