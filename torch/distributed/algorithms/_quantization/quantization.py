@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import functools
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 
 if TYPE_CHECKING:
@@ -10,6 +11,10 @@ if TYPE_CHECKING:
 
 import torch
 import torch.distributed as dist
+
+
+P = ParamSpec("P")
+T = TypeVar("T")
 
 
 TORCH_HALF_MIN = torch.finfo(torch.float16).min
@@ -101,8 +106,8 @@ def _dequantize_tensor_list(
 
 
 def auto_quantize(
-    func: Callable[..., Any], qtype: DQuantType, quant_loss: float | None = None
-) -> Callable[..., Any]:
+    func: Callable[P, T], qtype: DQuantType, quant_loss: float | None = None
+) -> Callable[P, T]:
     """
     Quantize the input tensors, choose the precision types, and pass other necessary arguments and then dequantizes the output.
 
@@ -119,7 +124,7 @@ def auto_quantize(
     """
 
     @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> None:
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
         group = kwargs.get("group", None)
         async_op = kwargs.get("async_op", False)
         if async_op is True:
