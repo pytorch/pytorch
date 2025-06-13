@@ -604,8 +604,9 @@ def _sfdp_replacement_21(query, key, value, attention_mask):
         query,
         key,
         value,
-        attn_mask=None,
-        is_causal=True,
+        attn_mask=attention_mask.to(dtype=query.dtype),
+        is_causal=False,
+        scale=1
     )
 
 
