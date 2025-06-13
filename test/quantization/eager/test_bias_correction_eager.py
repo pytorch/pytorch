@@ -18,6 +18,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skipIfNoFBGEMM,
 )
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 class TestBiasCorrectionEager(QuantizationTestCase):
@@ -119,3 +120,7 @@ class TestBiasCorrectionEager(QuantizationTestCase):
             for _ in range(50)
         ]
         self.correct_artificial_bias_quantize(float_model, img_data)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")
