@@ -202,12 +202,12 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
     while pred := cond_fn(*carried_vals, *additional_inputs):
         _validate_cond_output(pred)
         out = body_fn(*carried_vals, *additional_inputs)
-        assert isinstance(
-            out, tuple
-        ), f"body_fn should return a tuple but got {type(out)}"
-        assert len(out) == len(
-            carried_inputs
-        ), "body_fn should return the same number of elements as carried_inputs"
+        assert isinstance(out, tuple), (
+            f"body_fn should return a tuple but got {type(out)}"
+        )
+        assert len(out) == len(carried_inputs), (
+            "body_fn should return the same number of elements as carried_inputs"
+        )
         carried_vals = out
     return carried_vals
 
@@ -230,9 +230,9 @@ def _find_or_create_fake_mode() -> FakeTensorMode:
 def _create_unbacked_symint(
     fake_mode: FakeTensorMode, ignore_fresh_unbacked_symbols: bool
 ) -> torch.SymInt:
-    assert (
-        fake_mode is not None and fake_mode.shape_env is not None
-    ), "Must provide a fake_mode with shape_env."
+    assert fake_mode is not None and fake_mode.shape_env is not None, (
+        "Must provide a fake_mode with shape_env."
+    )
     ctx = (
         contextlib.nullcontext()
         if not ignore_fresh_unbacked_symbols

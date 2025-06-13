@@ -2,6 +2,7 @@
 """
 Utils for caching the outputs of AOTAutograd
 """
+
 from __future__ import annotations
 
 import base64
@@ -423,16 +424,13 @@ class InductorOutput(Generic[TOut], ABC):
     """
 
     @abstractmethod
-    def pre_save(self) -> None:
-        ...
+    def pre_save(self) -> None: ...
 
     @abstractmethod
-    def load(self, example_inputs) -> TOut:
-        ...
+    def load(self, example_inputs) -> TOut: ...
 
     @abstractmethod
-    def post_compile(self, result: TOut, fx_config: _CompileFxKwargs) -> TOut:
-        ...
+    def post_compile(self, result: TOut, fx_config: _CompileFxKwargs) -> TOut: ...
 
 
 @dataclass
@@ -596,7 +594,9 @@ class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoa
         # See note [Wrapping bw_compiler in disable]
         # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
         # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
-        return torch._dynamo.disable(compiled_bw, reason="do not trace generated backwards pass")  # type: ignore[return-value]
+        return torch._dynamo.disable(  # type: ignore[return-value]
+            compiled_bw, reason="do not trace generated backwards pass"
+        )
 
 
 # Forward types don't have any extra parameters, so this is just a TypeAlias, in essence
@@ -615,7 +615,9 @@ class BundledCompiledBackward(
         # See note [Wrapping bw_compiler in disable]
         # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
         # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
-        return torch._dynamo.disable(compiled_bw, reason="do not trace generated backwards pass")  # type: ignore[return-value]
+        return torch._dynamo.disable(  # type: ignore[return-value]
+            compiled_bw, reason="do not trace generated backwards pass"
+        )
 
 
 TForward = TypeVar("TForward", bound=InductorOutput)
@@ -990,9 +992,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config
                 )
-                entry: Optional[
-                    GenericAOTAutogradCacheEntry
-                ] = AOTAutogradCache._lookup(cache_key, local, remote, args, cache_info)
+                entry: Optional[GenericAOTAutogradCacheEntry] = (
+                    AOTAutogradCache._lookup(cache_key, local, remote, args, cache_info)
+                )
                 if entry is not None:
                     compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                     log.info("AOTAutograd cache hit for key %s", cache_key)
@@ -1016,9 +1018,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                     # FXGraphCache and AOTAutogradCache?
                     # get_metrics_context().increment(...)
                     if (
-                        ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
-                            time_saved_ns
-                        )
+                        ephemeral_increase
+                        := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
                     ) != 0:
                         cache_info["ephemeral_timeout_increase"] = ephemeral_increase
 
@@ -1215,9 +1216,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             return None
 
         if remote:
-            remote_cache: Optional[
-                RemoteCache[JsonDataTy]
-            ] = AOTAutogradCache.get_remote_cache()
+            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
+                AOTAutogradCache.get_remote_cache()
+            )
             if remote_cache is not None:
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6

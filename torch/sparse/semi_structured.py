@@ -465,14 +465,26 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
         The equivalent PyTorch code to create the same five outputs from the dense tensor can be found below:
         ```
         from torch.sparse import SparseSemiStructuredTensorCUTLASS
-        from torch.sparse._semi_structured_conversions import _sparse_semi_structured_tile, _compute_compressed_swizzled_bitmask
+        from torch.sparse._semi_structured_conversions import (
+            _sparse_semi_structured_tile,
+            _compute_compressed_swizzled_bitmask,
+        )
 
         pruned = _sparse_semi_structured_tile(dense)
         packed_cutlass, meta_cutlass = sparse_semi_structured_from_dense_cutlass(pruned)
-        packed_t_cutlass, meta_t_cutlass = sparse_semi_structured_from_dense_cutlass(pruned.t().contiguous())
+        packed_t_cutlass, meta_t_cutlass = sparse_semi_structured_from_dense_cutlass(
+            pruned.t().contiguous()
+        )
         bitmask = _compute_compressed_swizzled_bitmask(pruned)
 
-        SparseSemiStructuredTensorCUTLASS(dense.shape, packed_cutlass, meta_cutlass, packed_t_cutlass, meta_t_cutlass, bitmask)
+        SparseSemiStructuredTensorCUTLASS(
+            dense.shape,
+            packed_cutlass,
+            meta_cutlass,
+            packed_t_cutlass,
+            meta_t_cutlass,
+            bitmask,
+        )
         ```
         """
         # We can either pack to the CUTLASS or cuSPARSELt representation, depending on the use_cutlass flag.
@@ -583,14 +595,19 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
         The equivalent PyTorch code to create the same three outputs from the dense tensor can be found below:
         ```
         from torch.sparse import SparseSemiStructuredTensorCUSPARSELT
-        from torch.sparse._semi_structured_conversions import _sparse_semi_structured_tile, _compute_compressed_swizzled_bitmask
+        from torch.sparse._semi_structured_conversions import (
+            _sparse_semi_structured_tile,
+            _compute_compressed_swizzled_bitmask,
+        )
 
         pruned = _sparse_semi_structured_tile(dense)
         packed_cusparselt = torch._cslt_compress(pruned)
         packed_t_cusparselt = torch._cslt_compress(pruned.t().contiguous())
         bitmask = _compute_compressed_swizzled_bitmask(pruned)
 
-        SparseSemiStructuredTensorCUSPARSELT(dense.shape, packed_cutlass, None, packed_t_cutlass, None, bitmask)
+        SparseSemiStructuredTensorCUSPARSELT(
+            dense.shape, packed_cutlass, None, packed_t_cutlass, None, bitmask
+        )
         ```
         """
         (
