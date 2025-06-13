@@ -443,7 +443,8 @@ class FSDPParamGroup:
             ):
                 # self.reduce_scatter_reduce_op set by set_reduce_scatter_divide_factor
                 # uses NCCL's PreMulSum, which only allows data type half, float,
-                # or double.
+                # or double. Set reduce_dtype as orig_dtype so that if won't be cast by
+                # mp_policy.
                 self._reduce_dtype = self._orig_dtype
             self._wait_for_post_backward()
             (
