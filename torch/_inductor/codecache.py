@@ -3663,12 +3663,9 @@ class CUDACodeCache:
                     cutlass_key(),
                     # hack to deal with AOTI .o compilation
                 ]
-                + [dst_file_ext]
-                if dst_file_ext == "o"
-                else []
             )
         key, input_path = write(source_code, cls._SOURCE_CODE_SUFFIX, extra=extra)
-        return key, input_path
+        return key + dst_file_ext, input_path
 
     @classmethod
     def compile(
@@ -3676,9 +3673,20 @@ class CUDACodeCache:
     ) -> tuple[str, str, str]:
         """
         Compiles CUDA source_code into a file with dst_file_ext extension.
+        If dst_file_ext is "so", first compiles to ".o" and then links to ".so".
         Returns a tuple of dst_file_path, hash_key, source_code_path
         """
-        key, input_path = cls.write(source_code, dst_file_ext)
+        if dst_file_ext == "so":
+            # Two-step compilation: first compile to .o, then link to .so
+            obj_path, _, _ = cls.compile(source_code, "o", extra_args)
+            key, input_path = cls.write(source_code, dst_file_ext)
+            src_files, operation_name = [obj_path], "Linking"
+        else:
+            # Regular compilation for non-.so files
+            key, input_path = cls.write(source_code, dst_file_ext)
+            src_files, operation_name = [input_path], "Compilation"
+
+        # Common compilation logic
         if key not in cls.cache:
             from torch.utils._filelock import FileLock
 
@@ -3696,13 +3704,13 @@ class CUDACodeCache:
                     raise exc.CUDACompileError(cmd_parts, error_output)
                 if not os.path.exists(output_path):
                     cmd = cuda_compile_command(
-                        [input_path], output_path, dst_file_ext, extra_args
+                        src_files, output_path, dst_file_ext, extra_args
                     )
                     with open(input_path, "a") as f:
                         f.write("\n")
-                        f.write(f"// CUDA Compile cmd\n// {cmd}\n")
+                        f.write(f"// CUDA {operation_name} cmd\n// {cmd}\n")
                     start_time = time()
-                    log.debug("CUDA Compilation: %s", cmd)
+                    log.debug("CUDA %s: %s", operation_name, cmd)
                     cmd_parts = cmd.split(" ")
                     try:
                         if use_re_build():
@@ -3734,17 +3742,19 @@ class CUDACodeCache:
                             raise exc.CUDACompileError(cmd_parts, str(error)) from error
                         raise error
                     end_time = time()
-                    log_duration_msg = f"CUDA Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
+                    log_duration_msg = f"CUDA {operation_name} took {end_time - start_time} seconds. Command: {cmd}"
                     log.info(log_duration_msg)
                 else:
                     log.debug(
-                        "CUDA Compilation skipped: %s since output already exists",
-                        input_path,
+                        "CUDA %s skipped: %s since output already exists",
+                        operation_name,
+                        output_path,
                     )
                 cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path, None)
+
+        # Common error handling and return logic
         cache_entry: CUDACodeCache.CacheEntry = cls.cache[key]
         if cache_entry.error_json is not None:
-            # Restore cached Exception and raise it as if we had compiled
             cmd_parts, error_output = json.loads(cache_entry.error_json)
             raise exc.CUDACompileError(cmd_parts, error_output.encode("utf-8"))
         return (cls.cache[key].output_path, key, input_path)
