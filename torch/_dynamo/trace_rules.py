@@ -350,6 +350,8 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch.sparse_csr_tensor": SkipFunctionVariable,
     "torch.sparse_compressed_tensor": SkipFunctionVariable,
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
+    "torch.xpu.get_rng_state": SkipFunctionVariable,
+    "torch.xpu.set_rng_state": SkipFunctionVariable,
     # avoid skipping user defined modules in distributed unit tests
     "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_fsdp.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
@@ -2288,7 +2290,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
 )
 
 
-if sys.version_info >= (3, 11):""
+if sys.version_info >= (3, 11):
     torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
     torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
 
@@ -2907,6 +2909,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.xpu._set_rng_state_offset",
         "torch.xpu._set_stream_by_id",
         "torch.xpu._utils._get_device_index",
+        "torch.xpu.current_device",
         "torch.xpu.current_stream",
         "torch.xpu.device_count",
         "torch.xpu.get_arch_list",
