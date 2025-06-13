@@ -31,7 +31,7 @@ def get_config_request_key(
     """
     hash_target = "-".join(
         [
-            cutlass_key().decode(),
+            cutlass_key().hex(),
             arch,
             cuda_version,
             instantiation_level,
@@ -48,7 +48,7 @@ def _generate_config_filename(request_key: str) -> str:
 
 
 @clear_on_fresh_inductor_cache
-@functools.lru_cache(None)
+@functools.cache
 def maybe_fetch_ops() -> Optional[list[Any]]:
     """
     Fetch ops from databases.
