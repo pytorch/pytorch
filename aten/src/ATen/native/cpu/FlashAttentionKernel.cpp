@@ -201,7 +201,7 @@ void reshape_attn_mask_to_4d(
   attn_mask = attn_mask
                 .view({attn_mask_size_0, attn_mask_size_1, attn_mask.size(-2), attn_mask.size(-1)})
                 .expand({attn_mask_size_0, attn_mask_size_1, qSize, kvSize});
-  if (attn_mask.sym_stride(-1) != 1) {
+  if (attn_mask.sym_stride(-1) != 1 && attn_mask.sym_stride(-1) != 0) {
     attn_mask = attn_mask.contiguous();
   }
 }
