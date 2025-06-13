@@ -467,6 +467,39 @@ class FxirTestCase(InductorTestCase):
         ), self.assertRaisesRegex(BackendCompilerFailed, "Triton"):
             self._compile_and_check(foo, args)
 
+    @parametrize("enable_tuning", (False, True))
+    @parametrize("use_dynamic_shapes", (False, True))
+    def test_autotune(self, use_dynamic_shapes: bool, enable_tuning: bool):
+        orig_run = torch._inductor.runtime.triton_heuristics.CachingAutotuner.run
+        called = False
+
+        def run(*args, **kwargs):
+            nonlocal called
+            called = True
+            return orig_run(*args, **kwargs)
+
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+
+        with config.patch(
+            "triton.autotune_at_compile_time", enable_tuning
+        ), unittest.mock.patch.object(
+            torch._inductor.runtime.triton_heuristics.CachingAutotuner, "run", run
+        ):
+            # Compile and check that the tuner was called.
+            self.assertFalse(called)
+            (gm,) = self._compile_and_check(
+                torch.mul, args, compile_kwargs={"dynamic": use_dynamic_shapes}
+            )
+            self.assertEqual(called, enable_tuning)
+
+        # Check for a symbolic output shape.
+        (empty_strided,) = gm.graph.find_nodes(
+            op="call_function", target=torch.empty_strided
+        )
+        (shape, stride) = empty_strided.args
+        output_is_symbolic = any(isinstance(dim, torch.SymInt) for dim in shape)
+        self.assertEqual(output_is_symbolic, use_dynamic_shapes)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
