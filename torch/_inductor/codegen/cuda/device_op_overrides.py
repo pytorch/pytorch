@@ -329,9 +329,13 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     def cpp_device_ptr(self) -> str:
         return "CUdeviceptr"
 
-    def cpp_global_scratch(self, idx: int) -> Optional[tuple[str, str]]:
+    def cpp_global_scratch(self, idx: int, workspace: Optional[str]) -> Optional[tuple[str, str]]:
+        # TODO actually allocate the scratch...
         if triton_version_uses_attrs_dict():
-            return f"CUdeviceptr global_scratch_{idx} = 0;", f"global_scratch_{idx}"
+            if workspace:
+                return "", workspace
+            else:
+                return f"CUdeviceptr global_scratch_{idx} = 0;", f"global_scratch_{idx}"
         return None
 
 
