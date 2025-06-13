@@ -38,7 +38,7 @@ if torch._C._has_mkldnn:
     _linear_args = [Arg() for _ in range(6)]
     _conv_transpose_args = [Arg() for _ in range(11)]
 
-    def _is_valid_grouped_gemm_fusion(computation_nodes):
+    def _is_valid_grouped_gemm_fusion(computation_nodes) -> bool:
         """
         Here we check:
         1. More than 1 GEMM nodes has been found.
@@ -267,7 +267,7 @@ if torch._C._has_mkldnn:
     def _binary_fusion_v2(computation_call, binary_fn):
         return CallFunction(binary_fn, computation_call, KeywordArg("other"))
 
-    def _is_single_computation_op(computation_op, lowp_dtype=None):
+    def _is_single_computation_op(computation_op, lowp_dtype=None) -> bool:
         def fn(match):
             computation_nodes = filter_nodes(match.nodes, computation_op)
 
@@ -284,7 +284,7 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _is_valid_computation_unary_fusion(computation_op, lowp_dtype=None):
+    def _is_valid_computation_unary_fusion(computation_op, lowp_dtype=None) -> bool:
         def fn(match):
             matched = _is_single_computation_op(computation_op, lowp_dtype)(match)
             computation_node = filter_nodes(match.nodes, computation_op)[0]
@@ -425,7 +425,7 @@ if torch._C._has_mkldnn:
         ops.sub: "sub",
     }
 
-    def _is_valid_binary(match, computation_op, binary_op):
+    def _is_valid_binary(match, computation_op, binary_op) -> bool:
         binary_nodes = filter_nodes(match.nodes, binary_op)
         if len(binary_nodes) < 1:
             return False
@@ -500,7 +500,9 @@ if torch._C._has_mkldnn:
             return False
         return True
 
-    def _is_valid_computation_binary(computation_op, binary_op, other_index=None):
+    def _is_valid_computation_binary(
+        computation_op, binary_op, other_index=None
+    ) -> bool:
         def fn(match):
             if not _is_single_computation_op(computation_op)(match):
                 return False
@@ -528,7 +530,7 @@ if torch._C._has_mkldnn:
         # * compute_node: Conv2
         # _get_remaining_users will return the users of extra_input_node which are not
         # ancestor node of compute_node.
-        def _is_ancestor_node(_current_node, _ancestor_node):
+        def _is_ancestor_node(_current_node, _ancestor_node) -> bool:
             # Check whether _ancestor_node is the ancestor node of _current_node
             _node_list = [_current_node]
             _visited_nodes = OrderedSet[torch.fx.Node]()
@@ -551,7 +553,9 @@ if torch._C._has_mkldnn:
             if not _is_ancestor_node(compute_node, user)
         ]
 
-    def _is_valid_computation_binary_inplace(computation_op, binary_op, other_index):
+    def _is_valid_computation_binary_inplace(
+        computation_op, binary_op, other_index
+    ) -> bool:
         def fn(match):
             if not _is_valid_computation_binary(computation_op, binary_op)(match):
                 return False
@@ -920,7 +924,7 @@ if torch._C._has_mkldnn:
                 match.nodes
             )
 
-        def is_linear_add_bias(match):
+        def is_linear_add_bias(match) -> bool:
             add_node = match.output_node()
             linear_node = add_node.args[0]
             packed_weight_node = linear_node.args[1]
@@ -972,7 +976,7 @@ if torch._C._has_mkldnn:
             counters["inductor"]["mkldnn_linear_bias_matcher_count"] += 1
             counters["inductor"]["mkldnn_linear_bias_matcher_nodes"] += len(match.nodes)
 
-    def _is_packable_mkldnn_rnn_layer(match):
+    def _is_packable_mkldnn_rnn_layer(match) -> bool:
         lstm_node = match.output_node()
         POS_WEIGHTS = [1, 2]
         POS_INPUTS = [0, 5, 6]
@@ -1010,7 +1014,7 @@ if torch._C._has_mkldnn:
 
         return True
 
-    def _is_packable_convolution(match):
+    def _is_packable_convolution(match) -> bool:
         """
         Check if the node is supported for MKLDNN convolution.
         """
@@ -1061,12 +1065,12 @@ if torch._C._has_mkldnn:
                 return False
         return True
 
-    def _is_packable_linear(match):
+    def _is_packable_linear(match) -> bool:
         """
         Check if the node is supported for MKLDNN linear.
         """
 
-        def is_const_or_cat_by_const(weight):
+        def is_const_or_cat_by_const(weight) -> bool:
             if weight.op == "get_attr":
                 return True
             if weight.target != aten.cat.default:

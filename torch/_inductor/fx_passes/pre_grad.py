@@ -73,7 +73,7 @@ def save_inductor_dict(pass_to_compare=None):
     return {p: dict(counters["inductor"]).get(p, 0) for p in pass_to_compare}
 
 
-def is_same_dict(inductor_dict, optimus_dict):
+def is_same_dict(inductor_dict, optimus_dict) -> bool:
     for pass_name, count in optimus_dict.items():
         if count != dict(inductor_dict).get(pass_name, 0):
             return False
@@ -462,7 +462,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
         def disable_fusion(self):
             self.fusion_enabled = False
 
-        def is_fusion_enabled(self):
+        def is_fusion_enabled(self) -> bool:
             return self.fusion_enabled
 
     conv_bn_to_fuse: dict[int, ConvBNFusion] = {}
@@ -668,10 +668,10 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
         users = list(node.users)
         return users[0] if len(users) == 1 else None
 
-    def is_view(node):
+    def is_view(node) -> bool:
         return node.op == "call_method" and node.target == "view"
 
-    def is_pointwise_unary(node):
+    def is_pointwise_unary(node) -> bool:
         ops = "call_function", "call_method"
         pointwise = torch.relu, torch.tanh, "relu", "tanh"
         return node.op in ops and node.target in pointwise
