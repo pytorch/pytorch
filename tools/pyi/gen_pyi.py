@@ -261,7 +261,7 @@ def sig_for_ops(opname: str) -> list[str]:
             ]
         return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
     elif name in logic_ops:
-        return [f"def {opname}(self, other: Tensor | _bool) -> Tensor: ..."]
+        return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
     elif name in shift_ops:
         return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
     elif name in symmetric_comparison_ops:
@@ -414,7 +414,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                 ],
                 f"adaptive_avg_pool{d}d": [
                     f"def adaptive_avg_pool{d}d({{}}) -> Tensor: ...".format(
-                        ", ".join([f"{INPUT}", "output_size: Union[_int, _size]"])
+                        ", ".join([INPUT, "output_size: Union[_int, _size]"])
                     )
                 ],
             }
@@ -525,7 +525,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                 "def binary_cross_entropy({}) -> Tensor: ...".format(
                     ", ".join(
                         [
-                            f"{INPUT}",
+                            INPUT,
                             "target: Tensor",
                             "weight: Optional[Tensor] = None",
                             "reduction: str = ...",
@@ -537,11 +537,11 @@ def gen_nn_functional(fm: FileManager) -> None:
                 "def col2im({}) -> Tensor: ...".format(
                     ", ".join(
                         [
-                            f"{INPUT}",
+                            INPUT,
                             "output_size: Union[_int, _size]",
-                            f"{KERNEL_SIZE}",
+                            KERNEL_SIZE,
                             "dilation: Union[_int, _size]",
-                            f"{STRIDE_PADDING}",
+                            *STRIDE_PADDING,
                         ]
                     )
                 )
