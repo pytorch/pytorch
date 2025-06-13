@@ -5,7 +5,6 @@
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/stable/library.h>
 
 namespace torch::stable {
 
@@ -39,10 +38,6 @@ class Tensor {
   // Wrap AtenTensorHandle
   explicit Tensor(AtenTensorHandle ath) : ath_(ath, delete_tensor_object) {}
 
-  // Wrap StableIValue
-  explicit Tensor(StableIValue siv)
-      : ath_(to<AtenTensorHandle>(siv), delete_tensor_object) {}
-
   // Copy and move constructors can be default cuz the underlying handle is a
   // shared_ptr
   Tensor(const Tensor& other) = default;
@@ -58,27 +53,6 @@ class Tensor {
 
   AtenTensorHandle get() const {
     return ath_.get();
-  }
-
-  StableIValue get_StableIValue() const {
-    AtenTensorHandle handle = ath_.get();
-
-    // The following is our way of incrementing the refcount of the underlying
-    // Tensor that we point to. Why do we want this supposedly weird behavior?
-    // Because! We expect users to only need a StableIValue when they are trying
-    // to pass the Tensor into a stack-based API, e,g.,
-    // aoti_torch_call_dispatcher.
-    //
-    // A stack-based API is one that expects a stack of inputs converted to
-    // StableIValues. Our contract with any stack-based API is that the stack
-    // has ownership of its Tensor arguments. Since this torch::stable::Tensor
-    // object will likely go out of scope by the end of the user extension's
-    // local function and will thus delete its reference on the at::Tensor,
-    // we create a new AtenTensorHandle for that use case.
-    AtenTensorHandle new_ath;
-    aoti_torch_new_tensor_handle(handle, &new_ath);
-
-    return from(new_ath);
   }
 
   void* data_ptr() const {

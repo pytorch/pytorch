@@ -4,6 +4,7 @@
 // code for better UX.
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/stable/tensor.h>
 
 #include <optional>
 
@@ -12,17 +13,43 @@
 namespace {
 
 namespace detail {
-// utility functions to detect optional
-template <typename V>
+/// Utility to detect optional types
+template <typename T>
 struct is_optional : std::false_type {};
-template <typename V>
-struct is_optional<std::optional<V>> : std::true_type {};
+template <typename T>
+struct is_optional<std::optional<T>> : std::true_type {};
+template <typename T>
+inline constexpr bool is_optional_v = is_optional<T>::value;
+
+// Utility to detect if type is torch::stable::Tensor
+template <typename T>
+struct is_stable_tensor : std::false_type {};
+template <>
+struct is_stable_tensor<torch::stable::Tensor> : std::true_type {};
+template <typename T>
+inline constexpr bool is_stable_tensor_v = is_stable_tensor<T>::value;
+
+// Utility to detect nullopt_t
+template <typename T>
+struct is_nullopt : std::false_type {};
+template <>
+struct is_nullopt<std::nullopt_t> : std::true_type {};
+template <typename T>
+inline constexpr bool is_nullopt_v = is_nullopt<T>::value;
+
+// Combined check for all non-standard types except nullopt_t
+template <typename T>
+inline constexpr bool is_special_type_v =
+    is_stable_tensor_v<T> || is_optional_v<T> || is_nullopt_v<T>;
 } // namespace detail
 
-template <
-    typename T,
-    std::enable_if_t<!detail::is_optional<T>::value, bool> = true>
-StableIValue from(T val) {
+// =============================================================================
+// FROM CONVERSIONS (T -> StableIValue)
+// =============================================================================
+
+// Specialization for general copyable types (catch-all)
+template <typename T>
+std::enable_if_t<!detail::is_special_type_v<T>, StableIValue> from(T val) {
   static_assert(
       sizeof(T) <= sizeof(StableIValue),
       "StableLibrary stack does not support parameter types larger than 64 bits.");
@@ -40,8 +67,8 @@ StableIValue from(T val) {
 }
 
 // Specialization for std::nullopt_t
-template <>
-StableIValue from(std::nullopt_t val) {
+template <typename T>
+std::enable_if_t<std::is_same_v<T, std::nullopt_t>, StableIValue> from(T val) {
   return from(nullptr);
 }
 
@@ -75,7 +102,7 @@ StableIValue from(std::nullopt_t val) {
 // The schema requests an optional (T?) so I must call `from` on a
 // std::optional<T> or a std::nullopt.
 template <typename T>
-StableIValue from(std::optional<T> val) {
+std::enable_if_t<detail::is_optional_v<T>, StableIValue> from(T val) {
   if (!val.has_value()) {
     return from(std::nullopt);
   }
@@ -83,10 +110,35 @@ StableIValue from(std::optional<T> val) {
   return from(heap_val);
 }
 
-template <
-    typename T,
-    std::enable_if_t<!detail::is_optional<T>::value, bool> = true>
-T to(StableIValue val) {
+// Specialization for torch::stable::Tensor
+// I NEED TO REDOCUMENT EVERYTHING BUT SHOULD SLEEP RN SO I'LL COME BACK TO THIS
+// I'M JUST GLAD MY TEMPLATE SPECIALIZATIONS FINALLY COMPILE AND PASS TESTS
+// The following is our way of incrementing the refcount of the underlying
+// Tensor that we point to. Why do we want this supposedly weird behavior?
+// Because! We expect users to only need a StableIValue when they are trying
+// to pass the Tensor into a stack-based API, e,g.,
+// aoti_torch_call_dispatcher.
+//
+// A stack-based API is one that expects a stack of inputs converted to
+// StableIValues. Our contract with any stack-based API is that the stack
+// has ownership of its Tensor arguments. Since this torch::stable::Tensor
+// object will likely go out of scope by the end of the user extension's
+// local function and will thus delete its reference on the at::Tensor,
+// we create a new AtenTensorHandle for that use case.
+template <typename T>
+std::enable_if_t<detail::is_stable_tensor_v<T>, StableIValue> from(T val) {
+  AtenTensorHandle new_ath;
+  aoti_torch_new_tensor_handle(val.get(), &new_ath);
+  return from(new_ath);
+}
+
+// =============================================================================
+// TO CONVERSIONS (StableIValue -> T)
+// =============================================================================
+
+// Specialization for general copyable types (catch-all)
+template <typename T>
+std::enable_if_t<!detail::is_special_type_v<T>, T> to(StableIValue val) {
   static_assert(std::is_trivially_copyable_v<T>);
   // T may not have a default constructor. (For example, it might be
   // c10::Device.) However, std::memcpy implicitly creates a T at the
@@ -102,10 +154,9 @@ T to(StableIValue val) {
   return result.t;
 }
 
-template <
-    typename T,
-    std::enable_if_t<std::is_same_v<T, std::nullopt_t>, bool> = true>
-T to(StableIValue val) {
+// Specialization for std::nullopt_t
+template <typename T>
+std::enable_if_t<detail::is_nullopt_v<T>, T> to(StableIValue val) {
   // val should be equivalent to from(nullptr)
   return std::nullopt;
 }
@@ -113,10 +164,8 @@ T to(StableIValue val) {
 // Specialization for std::optional, see [Handling std::optional] above
 // as the semantic is the same but in reverse direction as we go from
 // IValue --(from_ivalue)-> StableIValue --(to<T>)-> T in custom extension
-template <
-    typename T,
-    std::enable_if_t<detail::is_optional<T>::value, bool> = true>
-T to(StableIValue val) {
+template <typename T>
+std::enable_if_t<detail::is_optional_v<T>, T> to(StableIValue val) {
   using V = typename T::value_type;
   auto sivp = to<StableIValue*>(val);
 
@@ -131,6 +180,13 @@ T to(StableIValue val) {
 
   return std::make_optional(inner_val);
 }
+
+// Specialization for torch::stable::Tensor
+template <typename T>
+std::enable_if_t<detail::is_stable_tensor_v<T>, T> to(StableIValue val) {
+  return torch::stable::Tensor(to<AtenTensorHandle>(val));
+}
+
 // end to helpers for converting between StableIValue and actual IValues
 
 class StableLibrary final {
