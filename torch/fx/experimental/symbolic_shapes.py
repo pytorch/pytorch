@@ -1335,6 +1335,7 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
+# Note [guard_or_]
 # The following two functions are common utilities used while defining unbacked semantics
 # of various framework code. Those would be used in situations you prefer to guard and know
 # the result of the expression over not guarding, but in case you hit a data dependent error
@@ -5520,8 +5521,9 @@ class ShapeEnv:
                     )
                     msg = (
                         f"You marked {self._debug_name(source)} as dynamic but your code "
-                        f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
-                        f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        f"specialized it to be a constant ({val}). If you're using mark_dynamic, "
+                        f"either remove it or use maybe_mark_dynamic. If you're using Dim.DYNAMIC, "
+                        f"replace it with either Dim.STATIC or Dim.AUTO."
                         + (
                             "\n\nFramework stack:\n" + "".join(framework_stack.format())
                             if framework_stack
