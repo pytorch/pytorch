@@ -310,7 +310,6 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
 
             struct StableTMADescriptor {
                 CUtensorMap m;
-                int rank;
                 uint32_t block_shape[5];
                 uint64_t global_shape[5];
                 uint64_t strides[5];

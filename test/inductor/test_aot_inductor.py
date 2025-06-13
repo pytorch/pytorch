@@ -461,6 +461,12 @@ class AOTInductorTestsTemplate:
         b = torch.randn((32, 32), device=self.device)
         example_inputs = (a, b)
 
+        triton.set_allocator(
+            lambda size, align, stream: torch.empty(
+                size, dtype=torch.int8, device="cuda"
+            )
+        )
+
         dynamic_shapes = None
         if dynamic:
             dim0_ab = Dim("s0", min=2, max=1024)
