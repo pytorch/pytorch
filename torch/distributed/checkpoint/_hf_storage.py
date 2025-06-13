@@ -1,9 +1,7 @@
 # mypy: allow-untyped-defs
 import dataclasses
-import io
 import json
 import queue
-import struct
 from typing import Any, Optional
 
 import torch
@@ -12,18 +10,18 @@ from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, Fsspec
 from torch.distributed.checkpoint.filesystem import SerializationFormat
 from torch.distributed.checkpoint.hf_utils import (
     _metadata_fn,
-    _StorageInfo,
+    _HFStorageInfo,
     CUSTOM_METADATA_KEY,
     DATA_KEY,
     DATA_OFFSETS_KEY,
     DEFAULT_EXTRA_METADATA_KEY,
     DTYPE_KEY,
-    DTYPE_MAP,
-    FILE_NAME,
     SAVED_OFFSETS_KEY,
     SHAPE_KEY,
-    SHARDED_FILE_NAME,
     SUFFIX,
+    _gen_file_name,
+    _get_safetensors_file_metadata,
+    _get_dtype,
 )
 from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
@@ -209,7 +207,7 @@ class _HuggingFaceStorageReader(FsspecReader):
         per_file: dict[str, list[ReadItem]] = {}
 
         for read_item in plan.items:
-            item_md: _StorageInfo = self.storage_data[read_item.storage_index]
+            item_md: _HFStorageInfo = self.storage_data[read_item.storage_index]
             file_name = item_md.relative_path
             per_file.setdefault(file_name, []).append(read_item)
 
@@ -223,7 +221,7 @@ class _HuggingFaceStorageReader(FsspecReader):
                 }
 
                 for req in reqs:
-                    item_md: _StorageInfo = self.storage_data[req.storage_index]
+                    item_md: _HFStorageInfo = self.storage_data[req.storage_index]
 
                     tensor_bytes = deserialized_dict[req.dest_index.fqn][DATA_KEY]
 
@@ -250,7 +248,7 @@ class _HuggingFaceStorageReader(FsspecReader):
 
     def read_metadata(self) -> Metadata:
         state_dict_metadata: dict[str, TensorStorageMetadata] = {}
-        storage_data: dict[MetadataIndex, _StorageInfo] = {}
+        storage_data: dict[MetadataIndex, _HFStorageInfo] = {}
 
         safetensors_files = []
         for file in self.fs.ls(self.path):
@@ -316,11 +314,11 @@ class _HuggingFaceStorageReader(FsspecReader):
                         metadata_index = MetadataIndex(
                             fqn=key, offset=[0] * len(val[SHAPE_KEY])
                         )
-                    storage_data[metadata_index] = _StorageInfo(
+                    storage_data[metadata_index] = _HFStorageInfo(
                         relative_path=safetensor_file,
                         offset=val[DATA_OFFSETS_KEY][0],
                         length=val[DATA_OFFSETS_KEY][1] - val[DATA_OFFSETS_KEY][0],
-                        shape=val[SHAPE_KEY],
+                        shape=torch.Size(val[SHAPE_KEY]),
                         dtype=_get_dtype(val[DTYPE_KEY]),
                     )
 
@@ -334,46 +332,3 @@ class _HuggingFaceStorageReader(FsspecReader):
         metadata.storage_meta.load_id = self.load_id  # type: ignore[union-attr]
 
         return metadata
-
-def _gen_file_name(index: int, largest_index: int, shard_index: Optional[int] = None) -> str:
-        if shard_index is not None:
-            return SHARDED_FILE_NAME.format(
-                shard_idx=f"{shard_index}".zfill(5), cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
-            ) + SUFFIX
-        else:
-            return (
-                FILE_NAME.format(
-                cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
-                )
-                + SUFFIX
-            )
-
-
-def _get_safetensors_file_metadata(file_bytes: io.IOBase) -> tuple[Any, int]:
-    # this uses the same logic that's done in HF code base
-    # https://github.com/2404589803/huggingface_hub/blob/main/src/huggingface_hub/hf_api.py#L5308
-    # and follows their documentation on how their files are serialized
-    # https://huggingface.co/docs/safetensors/index#format
-
-    num_bytes_for_header_len = 8
-    header_len_bytes = file_bytes.read(num_bytes_for_header_len)
-    header_len = struct.unpack("<Q", header_len_bytes)[0]
-    header_json = file_bytes.read(header_len)
-    metadata = json.loads(header_json)
-    return (metadata, header_len + num_bytes_for_header_len)
-
-
-def _get_dtype(dtype_str: str) -> torch.dtype:
-    try:
-        dtype = DTYPE_MAP[dtype_str]
-    except KeyError:
-        dtype = torch.get_default_dtype()
-
-    return dtype
-
-def _get_dcp_custom_metadata(metadata: Any) -> Optional[Any]:
-    if DEFAULT_EXTRA_METADATA_KEY in metadata:
-        custom_metadata = metadata[DEFAULT_EXTRA_METADATA_KEY]
-        if CUSTOM_METADATA_KEY in custom_metadata:
-            return json.loads(custom_metadata[CUSTOM_METADATA_KEY])
-    return None

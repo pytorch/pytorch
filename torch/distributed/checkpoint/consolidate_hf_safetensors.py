@@ -14,7 +14,7 @@ import fsspec
 import torch
 
 from fsspec.core import url_to_fs
-from torch.distributed.checkpoint._hf_storage import (
+from torch.distributed.checkpoint.hf_utils import (
     _metadata_fn,
     _gen_file_name,
     _get_dcp_custom_metadata,
