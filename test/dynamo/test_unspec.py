@@ -23,8 +23,12 @@ from torch.testing._internal.logging_utils import logs_to_string
 # test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
 
 
-device_type = torch.accelerator.current_accelerator().type if torch.accelerator.current_accelerator() \
-    is not None else 'cpu'
+device_type = (
+    torch.accelerator.current_accelerator().type
+    if torch.accelerator.current_accelerator() is not None
+    else "cpu"
+)
+
 
 @torch._dynamo.config.patch(assume_static_by_default=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
@@ -887,7 +891,9 @@ class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
 
 
 devices = ["cuda", "hpu", "xpu"]
-instantiate_device_type_tests(UnspecTestsDevice, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(
+    UnspecTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
