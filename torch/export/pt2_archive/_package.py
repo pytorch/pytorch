@@ -156,9 +156,9 @@ class PT2ArchiveReader:
 
     def __init__(self, archive_path_or_buffer: FileLike):
         self.archive_file = torch._C.PyTorchFileReader(archive_path_or_buffer)  # type: ignore[arg-type]
-        assert (
-            self.read_string(ARCHIVE_FORMAT_PATH) == ARCHIVE_FORMAT_VALUE
-        ), "Invalid archive format"
+        assert self.read_string(ARCHIVE_FORMAT_PATH) == ARCHIVE_FORMAT_VALUE, (
+            "Invalid archive format"
+        )
 
     def __enter__(self) -> "PT2ArchiveReader":
         return self

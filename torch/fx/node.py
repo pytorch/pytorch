@@ -514,9 +514,9 @@ class Node(_NodeBase):
             idx (int): The index of the element in ``self.args`` to be inserted before.
             arg (Argument): The new argument value to insert into ``args``
         """
-        assert (
-            0 <= idx <= len(self.args)
-        ), "insert_args index must be between 0 and len(self.args)"
+        assert 0 <= idx <= len(self.args), (
+            "insert_args index must be between 0 and len(self.args)"
+        )
         args_left = self.args[:idx]
         args_right = self.args[idx:]
 
@@ -747,13 +747,13 @@ class Node(_NodeBase):
 
         # Check if an impure module.
         if self.op == "call_module":
-            assert (
-                self.graph.owning_module is not None
-            ), "self.graph.owning_module not set for purity check"
+            assert self.graph.owning_module is not None, (
+                "self.graph.owning_module not set for purity check"
+            )
             target_mod = self.graph.owning_module.get_submodule(self.target)
-            assert (
-                target_mod is not None
-            ), f"Did not find expected submodule target {self.target}"
+            assert target_mod is not None, (
+                f"Did not find expected submodule target {self.target}"
+            )
             return getattr(target_mod, "_is_impure", False)
 
         return False
