@@ -803,9 +803,9 @@ def proxy_call(
     if func is torch.ops.aten.is_nonzero.default:
         with proxy_mode:
             torch._check(
-                args[0].numel() == 1,
+                args[0].numel() == 1,  # type: ignore[attr-defined]
                 lambda: "Boolean value of Tensor with more than one value is ambiguous",
-            )  # type: ignore[attr-defined]
+            )
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 
     tracer = proxy_mode.tracer
