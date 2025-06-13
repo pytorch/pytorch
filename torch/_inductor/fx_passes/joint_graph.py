@@ -761,7 +761,7 @@ def definitely_equal(
 
 @register_graph_pattern(
     CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
-    pass_dict=patterns,
+    pass_dict=early_patterns,
 )
 def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
