@@ -52,6 +52,7 @@ from .hints import (
 )
 from .runtime_utils import (
     ceildiv,
+    compilation_callback,
     conditional_product,
     create_bandwidth_info_str,
     dynamo_timed,
@@ -914,15 +915,21 @@ class CachingAutotuner(KernelInterface):
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
-        with dynamo_timed(
-            "CachingAutotuner.benchmark_all_configs",
-            log_pt2_compile_event=True,
-            metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-            dynamo_compile_column_us="runtime_triton_autotune_time_us",
-            compile_id=self.compile_id,
-            is_backward=self.is_backward,
-            log_waitcounter=True,
-            waitcounter_name_override="triton_autotuner",
+        with (
+            dynamo_timed(
+                "CachingAutotuner.benchmark_all_configs",
+                log_pt2_compile_event=True,
+                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
+                dynamo_compile_column_us="runtime_triton_autotune_time_us",
+                compile_id=self.compile_id,
+                is_backward=self.is_backward,
+                log_waitcounter=True,
+                waitcounter_name_override="triton_autotuner",
+            ),
+            compilation_callback.callback_handler.install_callbacks(
+                compilation_callback.CallbackTrigger.TRITON_AUTOTUNING,
+                str(self.compile_id),
+            ),
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
@@ -1099,6 +1106,15 @@ class CachingAutotuner(KernelInterface):
         benchmark_run=False,
         **kwargs,
     ):  # type:ignore[override]
+        if hasattr(triton, "set_allocator"):
+
+            def alloc_fn(size: int, align: int, stream: Optional[int]):
+                return torch.empty(
+                    size, dtype=torch.int8, device=self.device_props.type
+                )
+
+            triton.set_allocator(alloc_fn)
+
         if self.triton_interpret:
             args, grid = self._interpret_args_grid(args, self.configs[0])
             return self.fn[grid](
@@ -1549,6 +1565,10 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             launch_enter = knobs.runtime.launch_enter_hook
             launch_exit = knobs.runtime.launch_exit_hook
 
+        import math as math_lib
+
+        import torch as torch_lib
+
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
@@ -1579,6 +1599,8 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             ),
             "function": get_first_attr(binary, "function", "cu_function"),
             "runner": get_first_attr(binary, "run", "c_wrapper"),
+            "math": math_lib,
+            "torch": torch_lib,
         }
 
         if not hasattr(binary, "launch_metadata"):
