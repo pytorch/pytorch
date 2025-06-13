@@ -1397,9 +1397,9 @@ class SIMDScheduling(BaseScheduling):
 
         # Only install guards for 32-bit indexing as there is no correctness
         # issue with using 64-bit for everything
-        V.graph.sizevars.guard_leq(numel, int_max)  # type: ignore[arg-type]
+        V.graph.sizevars.check_leq(numel, int_max)  # type: ignore[arg-type]
         for size in buf_sizes:
-            V.graph.sizevars.guard_leq(size, int_max)  # type: ignore[arg-type]
+            V.graph.sizevars.check_leq(size, int_max)  # type: ignore[arg-type]
         return True
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
