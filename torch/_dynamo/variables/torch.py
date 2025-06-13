@@ -400,9 +400,24 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx, args[0], args[1].as_python_constant()
             )
         elif self.value is torch.nn.attention.sdpa_kernel:
-            assert len(args) == 1 or (len(kwargs) == 1 and "backends" in kwargs)
-            backends = args[0] if len(args) == 1 else kwargs["backends"]
-            set_priority = kwargs["set_priority"] if "set_priority" in kwargs else False
+            assert 0 <= len(args) <= 2
+            if len(args) == 0:
+                assert kwargs.keys() == {"backends"} or kwargs.keys() == {
+                    "backends",
+                    "set_priority",
+                }
+            elif len(args) == 1:
+                assert len(kwargs) == 0 or (
+                    len(kwargs) == 1 and kwargs.keys() == {"backends"}
+                )
+            else:
+                assert len(kwargs) == 0
+
+            backends = args[0] if len(args) > 0 else kwargs["backends"]
+            set_priority = (
+                args[1] if len(args) > 1 else kwargs.get("set_priority", False)
+            )
+
             return SDPAKernelVariable.create(
                 tx, backends.as_python_constant(), set_priority
             )
