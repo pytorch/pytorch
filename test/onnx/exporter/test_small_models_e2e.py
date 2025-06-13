@@ -553,7 +553,7 @@ class DynamoExporterTest(common_utils.TestCase):
             {0: dz, 1: 3},
         )
         onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
-        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        onnx_testing.assert_onnx_program(onnx_program)
         # make sre the naming is working
         self.assertEqual(onnx_program.model.graph.inputs[0].shape[0], "dx")
 
@@ -565,7 +565,7 @@ class DynamoExporterTest(common_utils.TestCase):
         inputs = (torch.zeros((2, 3)),)
         dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
         onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
-        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        onnx_testing.assert_onnx_program(onnx_program)
         self.assertIn(
             "Max",
             [node.op_type for node in onnx_program.model.graph],
@@ -579,7 +579,7 @@ class DynamoExporterTest(common_utils.TestCase):
         inputs = (torch.zeros((2, 3)),)
         dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
         onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
-        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        onnx_testing.assert_onnx_program(onnx_program)
         self.assertIn(
             "Min",
             [node.op_type for node in onnx_program.model.graph],
@@ -594,7 +594,7 @@ class DynamoExporterTest(common_utils.TestCase):
         inputs = (torch.zeros((2, 2)),)
         dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
         onnx_program = self.export(SymNotModel(), inputs, dynamic_shapes=dynamic_shapes)
-        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        onnx_testing.assert_onnx_program(onnx_program)
         self.assertIn(
             "Not",
             [node.op_type for node in onnx_program.model.graph],
@@ -611,7 +611,7 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_program = self.export(
             SymFloatModel(), inputs, dynamic_shapes=dynamic_shapes
         )
-        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        onnx_testing.assert_onnx_program(onnx_program)
         self.assertIn(
             "Cast",
             [node.op_type for node in onnx_program.model.graph],
@@ -651,7 +651,7 @@ class DynamoExporterTest(common_utils.TestCase):
             ),
         )
         onnx_program = self.export(ScanModel(), inputs)
-        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_scan_cdist_dynamic_shapes(self):
         def dist(y: torch.Tensor, scanned_x: torch.Tensor):
@@ -672,7 +672,7 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_program = self.export(
             ScanModel(), inputs, dynamic_shapes=({0: x_rows, 1: dim}, {0: y_rows, 1: dim})
         )
-        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_scan_loop_inplace(self):
         def dummy_loop(padded: torch.Tensor, pos: torch.Tensor):
@@ -714,9 +714,8 @@ class DynamoExporterTest(common_utils.TestCase):
             dynamic_shapes={"images": {0: DYN, 1: DYN}, "position": {0: DYN}},
             strict=False,
         )
-        # https://github.com/pytorch/pytorch/issues/153705
         onnx_program = self.export(ep)
-        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_graph_attention_opset_23(self):
         class Model(torch.nn.Module):
