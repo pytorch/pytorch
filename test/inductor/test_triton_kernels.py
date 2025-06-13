@@ -3271,7 +3271,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         a = torch.randn(1024, 1024)
         b = torch.randn(1024, 1024)
         c = torch.empty(1024, 1024)
-        workspace = torch.empty(512, dtype=torch.int8)
+        workspace = torch.empty(128 * 3, dtype=torch.int8)
         return (
             add_kernel_on_device_tma_old_api,
             {
@@ -3297,7 +3297,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         b = torch.randn(1024, 1024)
         c = torch.empty(1024, 1024)
         workspace = torch.empty(
-            512, dtype=torch.int8
+            128 * 3, dtype=torch.int8
         )  # Not used by the new API but kept for consistency
         return (
             add_kernel_on_device_tma_new_api,
