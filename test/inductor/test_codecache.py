@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import logging
 import os
 import pickle
 import shutil
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from typing import Optional, Union
 from typing_extensions import override
 from unittest import mock
@@ -68,6 +70,36 @@ torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 
+class LogCaptureHandler(logging.Handler):
+    def __init__(self, level):
+        super().__init__(level)
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record)
+
+
+@contextmanager
+def capture_logs(log_name, log_level):
+    try:
+        logger = logging.getLogger(log_name)
+        old_level = logger.level
+        handler = logging.Handler()
+        logger.setLevel(log_level)
+        log_records = []
+
+        def emit(record):
+            log_records.append(record)
+
+        handler.emit = emit
+        logger.addHandler(handler)
+
+        yield log_records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(old_level)
+
+
 class MyModelConv2d(torch.nn.Module):
     def __init__(self, dim=512):
         super().__init__()
@@ -79,6 +111,16 @@ class MyModelConv2d(torch.nn.Module):
         torch._dynamo.graph_break()
         x = self.conv2(x)
         return x
+
+
+class TestPyCodeCache(TestCase):
+    def test_linemaps_empty(self):
+        src = """import torch"""
+        (key, path) = PyCodeCache.write(src, "")
+        # Load with an empty linemap
+        PyCodeCache.load_by_key_path(key, path, linemap=[])
+        stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
+        self.assertEqual(stack_frames, None)
 
 
 @instantiate_parametrized_tests
@@ -162,13 +204,25 @@ class TestFxGraphCache(TestCase):
             )
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
-            # "cuda" has .ptx and .cubin file, but xpu only has .spv file
-            save_kernel_count = 6 if device == "xpu" else 7
-            read_and_emit_kernel_count = 6 if device == "xpu" else 7
+
+            # we expect:
+            #  .ttir
+            #  .ttgir
+            #  .llir
+            #  .ptx (cuda) or .spv (xpu)
+            #  .json
+            #  __grp__.*.json
+            # optionally, we can also get
+            #  .cubin (CUDA only)
+            #  .source (new versions of triton only, triton-lang/triton#6992)
+
+            # to avoid depending on the device and triton version, just assert that
+            # we have at least 6 kernels.
+            save_and_read_min_artifact_count = 6
             if bundle_triton and device != "cpu":
-                self.assertEqual(
+                self.assertGreaterEqual(
                     counters["inductor"]["triton_bundler_save_kernel"],
-                    grad_multiplier * save_kernel_count,
+                    grad_multiplier * save_and_read_min_artifact_count,
                 )
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"], 0
@@ -213,13 +267,13 @@ class TestFxGraphCache(TestCase):
             )
 
             if bundle_triton and device != "cpu":
-                self.assertEqual(
+                self.assertGreaterEqual(
                     counters["inductor"]["triton_bundler_save_kernel"],
-                    grad_multiplier * save_kernel_count,
+                    grad_multiplier * save_and_read_min_artifact_count,
                 )
-                self.assertEqual(
+                self.assertGreaterEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"],
-                    grad_multiplier * read_and_emit_kernel_count,
+                    grad_multiplier * save_and_read_min_artifact_count,
                 )
                 if use_static_cuda_launcher:
                     self.assertEqual(
@@ -261,13 +315,13 @@ class TestFxGraphCache(TestCase):
             )
 
             if bundle_triton and device != "cpu":
-                self.assertEqual(
+                self.assertGreaterEqual(
                     counters["inductor"]["triton_bundler_save_kernel"],
-                    grad_multiplier * save_kernel_count * 2,
+                    grad_multiplier * save_and_read_min_artifact_count * 2,
                 )
-                self.assertEqual(
+                self.assertGreaterEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"],
-                    grad_multiplier * read_and_emit_kernel_count,
+                    grad_multiplier * save_and_read_min_artifact_count,
                 )
                 if use_static_cuda_launcher:
                     self.assertEqual(
@@ -1553,7 +1607,10 @@ class TestStandaloneCompile(TestCase):
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("format", ("binary", "unpacked"))
     @parametrize("dynamic", (False, True))
-    def test_basic(self, device: str, format: str, dynamic: bool) -> None:
+    @parametrize("graph_partition", (False, True))
+    def test_basic(
+        self, device: str, format: str, dynamic: bool, graph_partition: bool
+    ) -> None:
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
@@ -1568,7 +1625,9 @@ class TestStandaloneCompile(TestCase):
 
         eager_out = f(x)
 
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir, config.patch(
+            graph_partition=graph_partition
+        ):
             path = (
                 temp_dir
                 if format == "unpacked"
@@ -2119,6 +2178,91 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps(details1),
             pickler.dumps(details3),
         )
+
+    def test_hash_private_config_changes(self):
+        """
+        Test that private config settings affect hashes.
+        """
+        with config.patch({"_micro_pipeline_tp": False}):
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+        with config.patch({"_micro_pipeline_tp": True}):
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+
+    def test_non_serializable_custom_passes_causes_cache_miss(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 4))
+
+            def forward(self, x):
+                return x @ self.param
+
+        mod1 = Mod()
+        mod_compiled = torch.compile(mod1)
+        with torch.no_grad():
+            x = torch.rand(4, 4)
+            # miss
+            mod_compiled(x)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            # hit
+            torch._dynamo.reset()
+            mod_compiled(x)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            torch._dynamo.reset()
+            counters.clear()
+
+            # hit
+            mod_compiled(x)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            with config.patch({"_fuse_ddp_communication_passes": ["new_pass_foo_bar"]}):
+                # miss (private config changed)
+                torch._dynamo.reset()
+                mod_compiled(x)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+                torch._dynamo.reset()
+                counters.clear()
+
+            with capture_logs(
+                "torch._inductor.codecache", logging.INFO
+            ) as logs, config.patch(
+                {"_fuse_ddp_communication_passes": [lambda *args: None]}
+            ):
+                # bypass (custom pass is not serializable)
+                mod_compiled(x)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 1)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+                counters.clear()
+            # assert that our bypass is explicit
+            self.assertTrue(
+                any(
+                    x.getMessage()
+                    == "Bypassing FX Graph Cache because 'Unsupported _fuse_ddp_communication_pass'"
+                    for x in logs
+                )
+            )
 
     def test_hash_custom_passes(self):
         """
