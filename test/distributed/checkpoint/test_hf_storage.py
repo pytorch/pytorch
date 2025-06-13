@@ -186,7 +186,9 @@ class TestHfStorage(TestCase):
 
             # Set up storage data with _StorageInfo objects
             storage_data = {
-                "tensor_0": _StorageInfo(
+                MetadataIndex(
+                    fqn="tensor_0", offset=torch.Size([0]), index=None
+                ): _StorageInfo(
                     file_path, 0, tensor_0.numel() * tensor_0.element_size()
                 ),
             }
@@ -334,7 +336,9 @@ class TestHfStorage(TestCase):
             self.assertEqual(
                 metadata.storage_data,
                 {
-                    key: _StorageInfo(
+                    MetadataIndex(
+                        fqn=key, offset=torch.Size([0, 0]), index=None
+                    ): _StorageInfo(
                         os.path.join(path, file_name),
                         0,
                         200,
