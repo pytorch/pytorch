@@ -126,9 +126,9 @@ class EventList(list):
                         current_events.pop()
                     else:
                         parent.append_cpu_child(event)
-                        assert (
-                            event.cpu_parent is None
-                        ), f"There is already a CPU parent event for {event.key}"
+                        assert event.cpu_parent is None, (
+                            f"There is already a CPU parent event for {event.key}"
+                        )
                         event.set_cpu_parent(parent)
                         break
 
@@ -609,6 +609,7 @@ class FunctionEvent(FormattedTimesMixin):
                 DeviceType.CUDA,
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
+                DeviceType.HPU,
             ]
             return self.time_range.elapsed_us()
 
@@ -633,6 +634,7 @@ class FunctionEvent(FormattedTimesMixin):
                 DeviceType.CUDA,
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
+                DeviceType.HPU,
             ]
             return self.device_time_total
 

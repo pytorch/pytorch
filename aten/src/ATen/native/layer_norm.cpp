@@ -16,6 +16,7 @@
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/layer_norm_native.h>
+#include <ATen/ops/_fused_rms_norm.h>
 #include <ATen/ops/native_batch_norm.h>
 #include <ATen/ops/native_layer_norm.h>
 #include <ATen/ops/native_layer_norm_backward_native.h>
@@ -27,7 +28,6 @@
 #endif
 
 #ifdef USE_MPS
-#include <ATen/native/mps/operations/RMSNorm.h>
 #include <c10/core/GradMode.h>
 #endif
 
@@ -281,7 +281,7 @@ Tensor rms_norm_symint(
 
     if (!(GradMode::is_enabled() && any_inputs_require_grad) && !any_nested && is_input_fp && is_weight_fp) {
       auto eps_val = eps.value_or(std::numeric_limits<double>::epsilon());
-      return mps::rms_norm_mps_kernel(input.contiguous(), normalized_shape, weight.contiguous(), eps_val);
+      return at::_fused_rms_norm(input.contiguous(), normalized_shape.size(), weight.contiguous(), eps_val);
     }
   }
 #endif

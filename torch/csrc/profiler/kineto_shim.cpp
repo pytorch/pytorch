@@ -7,6 +7,7 @@
 #endif
 
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 
 namespace torch {
 
@@ -49,7 +50,6 @@ const std::set<libkineto::ActivityType> kXpuTypes = {
 const std::set<libkineto::ActivityType> kMtiaTypes = {
     libkineto::ActivityType::MTIA_CCP_EVENTS,
     libkineto::ActivityType::MTIA_RUNTIME,
-    libkineto::ActivityType::MTIA_WORKLOADD,
 };
 const std::set<libkineto::ActivityType> hpuTypes = {
     libkineto::ActivityType::HPU_OP,
@@ -177,13 +177,15 @@ class ExperimentalConfigWrapper {
     return !config_.profiler_metrics.empty();
   }
 
-  void prepareTraceWithExperimentalOptions(bool add_cpu_activity) {
+  void prepareTraceWithExperimentalOptions(
+      std::set<libkineto::ActivityType>&& enabled_activities) {
+    std::set<libkineto::ActivityType> k_activities =
+        std::move(enabled_activities);
 #ifdef USE_KINETO
-    std::set<libkineto::ActivityType> k_activities{
-        libkineto::ActivityType::CUDA_PROFILER_RANGE};
+    k_activities.insert(libkineto::ActivityType::CUDA_PROFILER_RANGE);
 
-    // Only add CPU activities if we are measuring per kernel ranges
-    if (add_cpu_activity && config_.profiler_measure_per_kernel) {
+    // Add CPU activities if we are measuring per kernel ranges
+    if (config_.profiler_measure_per_kernel) {
       k_activities.insert(kCpuTypes.begin(), kCpuTypes.end());
     }
 
@@ -221,11 +223,9 @@ bool collectivesProfilerExists() {
 #if defined(KINETO_HAS_HCCL_PROFILER)
   return true;
 #endif
-  const char* val = std::getenv("TORCH_PROFILER_ENABLE_COLLECTIVE_PROFILING");
-  if (val == nullptr) {
-    return false;
-  }
-  return std::strcmp(val, "1") == 0;
+  const auto val =
+      c10::utils::get_env("TORCH_PROFILER_ENABLE_COLLECTIVE_PROFILING");
+  return val == "1";
 }
 
 #ifdef USE_KINETO
@@ -290,7 +290,7 @@ void prepareTrace(
 
   // Experimental Configuration options are present
   if (config && configWrap.assertValid()) {
-    configWrap.prepareTraceWithExperimentalOptions(has_cpu_activity);
+    configWrap.prepareTraceWithExperimentalOptions(std::move(k_activities));
     return;
   }
 
@@ -394,7 +394,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     }
     // TODO: T151322015
     case libkineto::ActivityType::MTIA_CCP_EVENTS:
-    case libkineto::ActivityType::MTIA_WORKLOADD: {
+    case libkineto::ActivityType::MTIA_INSIGHT: {
       // PrivateUse1 kineto backend reuse above ActivityTypes,
       // If PrivateUse1 backend enabled, this should return
       // c10::DeviceType::PrivateUse1.
