@@ -136,8 +136,7 @@ def from_dlpack(
             assert isinstance(device, torch.device), (
                 f"from_dlpack: unsupported device type: {type(device)}"
             )
-            device = torch._C._torchDeviceToDLDevice(device)
-            kwargs["dl_device"] = device
+            kwargs["dl_device"] = torch._C._torchDeviceToDLDevice(device)
 
         ext_device = ext_tensor.__dlpack_device__()
         # ext_device is either CUDA or ROCm, we need to pass the current
