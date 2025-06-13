@@ -6073,7 +6073,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: tanh_out
+    CPU, CUDA, MPS, MTIA: tanh_out
     SparseCPU, SparseCUDA: tanh_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: tanh_sparse_csr_out
   tags: pointwise
@@ -13013,7 +13013,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: tanh_backward_out
+    CPU, CUDA, MTIA: tanh_backward_out
     MPS: tanh_backward_out_mps
   tags: pointwise
 
