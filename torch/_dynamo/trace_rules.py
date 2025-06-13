@@ -1,4 +1,26 @@
 # mypy: allow-untyped-defs
+
+"""
+Tracing rules and policies for TorchDynamo compilation decisions.
+
+This module defines the rules that govern what code TorchDynamo should trace and compile
+versus what should be executed eagerly. It contains functions and classes that determine:
+
+- Which modules, functions, and objects should be skipped during tracing
+- Which parts of the code should cause graph breaks
+- How to handle different Python libraries and third-party packages
+- Rules for determining when to inline functions vs calling them eagerly
+
+Key components:
+- Skip rules: Functions that return True if an object should be skipped during tracing
+- Inlining rules: Policies for when to inline function calls during compilation
+- Library-specific handling: Special cases for popular Python packages
+- Performance heuristics: Rules that balance compilation overhead vs runtime benefits
+
+These rules are critical for TorchDynamo's ability to automatically determine
+compilation boundaries and optimize PyTorch programs effectively.
+"""
+
 import abc
 import builtins
 import collections
@@ -316,6 +338,9 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch.fx.experimental.symbolic_shapes.guard_or_false": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.statically_known_true": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.statically_known_false": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.sym_and": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.sym_or": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.guard_scalar": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.has_static_value": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
@@ -1515,6 +1540,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._fused_sdp_choice",
         "torch._fw_primal_copy",
         "torch._grid_sampler_2d_cpu_fallback",
+        "torch._grouped_mm",
         "torch._has_compatible_shallow_copy_type",
         "torch._histogramdd_bin_edges",
         "torch._histogramdd_from_bin_cts",
@@ -2872,7 +2898,7 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 """
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
     d: dict[Any, type[VariableTracker]] = {}
     for m in torch_name_rule_map:
@@ -2921,7 +2947,7 @@ Get all torch.Tensor methods which are allowed to be in graph functions.
 """
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_tensor_method():
     disallowed_tensor_methods = {"__new__", "_make_wrapper_subclass", "_make_subclass"}
     s = set()
@@ -3443,7 +3469,7 @@ assert sorted(set(MOD_SKIPLIST)) == MOD_SKIPLIST
 MOD_SKIPLIST = set(MOD_SKIPLIST)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_legacy_mod_inlinelist():
     inlinelist = {
         _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
@@ -3452,7 +3478,7 @@ def get_legacy_mod_inlinelist():
     return inlinelist
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_mod_inlinelist():
     inlinelist = {
         _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
@@ -3461,7 +3487,7 @@ def get_mod_inlinelist():
     return inlinelist
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_mod_skiplist():
     skiplist = {
         _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
@@ -3715,7 +3741,7 @@ def is_torch_inline_allowed(filename):
     return any(filename.startswith(d) for d in get_mod_inlinelist())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def dynamo_dir():
     import torch._dynamo
 
