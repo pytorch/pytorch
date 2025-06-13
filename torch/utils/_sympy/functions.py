@@ -1300,10 +1300,10 @@ class Identity(sympy.Function):
         # Removes the identity op.
         return self.args[0]
 
-    def __int__(self):
+    def __int__(self) -> int:
         return int(self.args[0])
 
-    def __float__(self):
+    def __float__(self) -> float:
         return float(self.args[0])
 
 
