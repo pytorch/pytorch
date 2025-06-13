@@ -7297,28 +7297,39 @@ def sigmoid(self: Tensor) -> Tensor:
     return torch.empty_like(self, dtype=result_dtype)
 
 
-def _compute_grouped_mm_output_size(mat1, mat2, offs):
+def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
     mat1_is_2d = mat1.dim() == 2
     mat2_is_2d = mat2.dim() == 2
 
     if mat1_is_2d:
         if mat2_is_2d:
-            return offs.size(0), mat1.size(0), mat2.size(1)
+            out_size = [offs.size(0), mat1.size(0), mat2.size(1)]
         else:
             torch._check(
                 offs.size(0) == mat2.size(0), "matrix batch sizes have to match"
             )
-            return mat1.size(0), mat2.size(-1)
+            out_size = [mat1.size(0), mat2.size(-1)]
     else:
         if mat2_is_2d:
             torch._check(
                 offs.size(0) == mat1.size(0), "matrix batch sizes have to match"
             )
-            return mat1.size(1), mat2.size(1)
+            out_size = [mat1.size(1), mat2.size(1)]
         else:
             # regular bmm
             torch._check(mat1.size(0) == mat2.size(0), "batched dimension has to match")
-            return mat1.size(0), mat1.size(1), mat2.size(-1)
+            out_size = [mat1.size(0), mat1.size(1), mat2.size(-1)]
+
+    out_dtype = out_dtype or mat1.dtype
+
+    alignment = 16 // out_dtype.itemsize
+    inner_size = out_size[-1]
+    out_size[-1] = (out_size[-1] + alignment - 1) // alignment * alignment
+    out = torch.empty(out_size, dtype=out_dtype, device=mat1.device).narrow(
+        -1, 0, inner_size
+    )
+
+    return out
 
 
 def _meta_grouped_mm_common(
@@ -7360,15 +7371,6 @@ def _meta_grouped_mm_common(
 
     mat_a_is_2d = mat_a.dim() == 2
     mat_b_is_2d = mat_b.dim() == 2
-
-    torch._check(
-        mat_a.shape[-1] % 16 == 0,
-        lambda: f"Expected mat_a.shape[-1] to be divisible by 16, but got mat_a.shape[-1]={mat_a.shape[1]}",
-    )
-    torch._check(
-        mat_b.shape[-2] % 16 == 0 and mat_b.shape[-1] % 16 == 0,
-        lambda: f"Expected mat_b.shape[-2] and mat_b.shape[-1] to be both divisble by 16 but got {mat_b.shape[-2]} and {mat_b.shape[-1]}",  # noqa: B950
-    )
 
     if scaled:
 
@@ -7495,9 +7497,7 @@ def _meta_grouped_mm_common(
         lambda: "If output dtype provided, it must be torch.bfloat16.",
     )
 
-    out_size = _compute_grouped_mm_output_size(mat_a, mat_b, offs)
-    out_dtype = out_dtype or mat_a.dtype
-    return torch.empty(out_size, dtype=out_dtype, device=mat_a.device)
+    return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
 
 
 @register_meta(aten._grouped_mm)
