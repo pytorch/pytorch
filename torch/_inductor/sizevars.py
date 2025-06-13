@@ -383,11 +383,23 @@ class SizeVarAllocator:
     # condition holds. They are similar to expect_true in symbolic_shapes.py and
     # torch.check but operates on sympy expressions instead of symnodes.
     def expect_true(self, expr: Expr) -> bool:
+        """
+        Use it when you already know that expr is true or should be true and want to
+        ensure that guards/runtime assertions are in place to ensure this in compiled
+        function. Unlike check, this WON'T raise an error if expr isn't actually true.
+        check Note [expect_true].
+        """
         if not self.statically_known_true(expr):
             return self.shape_env.defer_runtime_assert(expr, "sizevars.expect_true")
         return True
 
     def check(self, expr: Expr) -> None:
+        """
+        Use it when you already know that expr is true or should be true and want to
+        ensure that guards/runtime assertions are in place to ensure this in compiled
+        function. Unlike expect_true, this WILL raise an error if expr isn't actually true.
+        check Note [expect_true].
+        """
         assert self.expect_true(expr)
 
     def check_equals(self, left: Expr, right: Expr) -> Expr:
