@@ -11,9 +11,9 @@ from torch.nn.parallel import comm
 class Broadcast(Function):
     @staticmethod
     def forward(ctx, target_gpus, *inputs):
-        assert all(
-            i.device.type != "cpu" for i in inputs
-        ), "Broadcast function not implemented for CPU tensors"
+        assert all(i.device.type != "cpu" for i in inputs), (
+            "Broadcast function not implemented for CPU tensors"
+        )
         target_gpus = [_get_device_index(x, True) for x in target_gpus]
         ctx.target_gpus = target_gpus
         if len(inputs) == 0:
@@ -56,9 +56,9 @@ class ReduceAddCoalesced(Function):
 class Gather(Function):
     @staticmethod
     def forward(ctx, target_device, dim, *inputs):
-        assert all(
-            i.device.type != "cpu" for i in inputs
-        ), "Gather function not implemented for CPU tensors"
+        assert all(i.device.type != "cpu" for i in inputs), (
+            "Gather function not implemented for CPU tensors"
+        )
         if target_device == "cpu":
             ctx.target_device = "cpu"
         else:

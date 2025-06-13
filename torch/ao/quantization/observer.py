@@ -1873,9 +1873,9 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
 
         with model.graph.inserting_before(observer_node):
             assert self.block_size is not None, "Expecting block_size to be populated"
-            assert self.original_dtype is not None, (
-                "Expecting original_dtype to be populated"
-            )
+            assert (
+                self.original_dtype is not None
+            ), "Expecting original_dtype to be populated"
             if hasattr(self, "is_dynamic") and self.is_dynamic:
                 choose_qparams_affine = model.graph.call_function(
                     torch.ops.pt2e_quant.choose_qparams_affine,

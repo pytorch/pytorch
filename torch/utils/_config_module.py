@@ -112,7 +112,7 @@ class _Config(Generic[T]):
 
     @staticmethod
     def string_or_list_of_string_to_list(
-        val: Optional[Union[str, list[str]]]
+        val: Optional[Union[str, list[str]]],
     ) -> Optional[list[str]]:
         if val is None:
             return None
@@ -135,8 +135,7 @@ if TYPE_CHECKING:
         env_name_force: Optional[Union[str, list[str]]] = None,
         value_type: Optional[type] = None,
         alias: Optional[str] = None,
-    ) -> T:
-        ...
+    ) -> T: ...
 
 else:
 
@@ -323,9 +322,9 @@ class _ConfigEntry:
 
         # Ensure justknobs and envvars are allowlisted types
         if self.justknob is not None and self.default is not None:
-            assert isinstance(
-                self.default, bool
-            ), f"justknobs only support booleans, {self.default} is not a boolean"
+            assert isinstance(self.default, bool), (
+                f"justknobs only support booleans, {self.default} is not a boolean"
+            )
         if self.value_type is not None and (
             config.env_name_default is not None or config.env_name_force is not None
         ):
@@ -334,7 +333,9 @@ class _ConfigEntry:
                 str,
                 Optional[bool],
                 Optional[str],
-            ), f"envvar configs only support (optional) booleans or strings, {self.value_type} is neither"
+            ), (
+                f"envvar configs only support (optional) booleans or strings, {self.value_type} is neither"
+            )
 
 
 class ConfigModule(ModuleType):
@@ -508,9 +509,13 @@ class ConfigModule(ModuleType):
             protocol=2,
         )
 
-    def save_config_portable(self) -> dict[str, Any]:
+    def save_config_portable(
+        self, *, ignore_private_configs: bool = True
+    ) -> dict[str, Any]:
         """Convert config to portable format"""
-        prefixes = ["_"]
+        prefixes = []
+        if ignore_private_configs:
+            prefixes.append("_")
         prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
         return self._get_dict(ignored_prefixes=prefixes)
 
