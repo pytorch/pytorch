@@ -4257,7 +4257,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 class NCCLTraceTest(NCCLTraceTestBase):
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.7")
+        self.assertEqual(ver, "2.8")
         nccl_version = t["nccl_version"]
         torch_nccl_version = torch.cuda.nccl.version()
         self.assertEqual(nccl_version, ".".join(str(v) for v in torch_nccl_version))
