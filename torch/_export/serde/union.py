@@ -18,9 +18,9 @@ class _UnionTag(str):
     def __eq__(self, cmp) -> bool:
         assert isinstance(cmp, str)
         other = str(cmp)
-        assert other in _get_field_names(
-            self._cls
-        ), f"{other} is not a valid tag for {self._cls}. Available tags: {_get_field_names(self._cls)}"
+        assert other in _get_field_names(self._cls), (
+            f"{other} is not a valid tag for {self._cls}. Available tags: {_get_field_names(self._cls)}"
+        )
         return str(self) == other
 
     def __hash__(self):
@@ -43,7 +43,10 @@ class _Union:
         return obj
 
     def __post_init__(self):
-        assert not any(f.name in ("type", "_type", "create", "value") for f in fields(self))  # type: ignore[arg-type, misc]
+        assert not any(
+            f.name in ("type", "_type", "create", "value")
+            for f in fields(self)  # type: ignore[arg-type, misc]
+        )
 
     @property
     def type(self) -> str:

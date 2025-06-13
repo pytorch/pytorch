@@ -363,10 +363,6 @@ class ModularIndexing(sympy.Function):
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
 
-    def _eval_is_positive(self) -> Optional[bool]:
-        p, q = self.args[:2]
-        return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
-
 
 class Where(sympy.Function):
     """
@@ -1324,6 +1320,7 @@ def make_opaque_unary_fn(name):
         """
 
         _torch_handler_name = name
+        _torch_unpickler = make_opaque_unary_fn
 
         @classmethod
         def eval(cls, a):
@@ -1384,6 +1381,9 @@ def make_opaque_bitwise_fn(name, real_op_name):
     class BitwiseFn(sympy.Function):
         _torch_handler_name = name
         precedence: int = prec
+        _torch_unpickler = functools.partial(
+            make_opaque_bitwise_fn, real_op_name=real_op_name
+        )
 
         @classmethod
         def eval(cls, a, b):
