@@ -671,7 +671,7 @@ def _tuned_grouped_mm_common(
     )
 
 
-@register_lowering(aten._grouped_mm, type_promotion_kind=None)
+@register_lowering(aten._grouped_mm.default, type_promotion_kind=None)
 def tuned_grouped_mm(
     mat_a: TensorBox,
     mat_b: TensorBox,
@@ -683,7 +683,7 @@ def tuned_grouped_mm(
     """Auto-tuning for _grouped_mm() operator."""
 
     return _tuned_grouped_mm_common(
-        "aten._grouped_mm",
+        "aten._grouped_mm.default",
         "grouped_mm",
         aten__grouped_mm,
         triton_grouped_mm_template,
