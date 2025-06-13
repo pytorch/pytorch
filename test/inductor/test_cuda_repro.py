@@ -2126,26 +2126,26 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(out_eager, out_compiled)
 
     def test_max_autotune_nograd(self):
-        class MyModel(nn.Module):
-            def __init__(self, in_features=2, out_features=2, max_parameters=50, increment=1, final_bias=True):
-                super(MyModel, self).__init__()
-                self.in_features = in_features
-                self.out_features = out_features
-                self.max_parameters = max_parameters
-                self.increment = increment
-                self.final_bias = final_bias
+        """
+        https://github.com/pytorch/pytorch/issues/155688
+        Smallest repro for max-autotune not working with no_grad
+        Before adding __int__ function to torch.utils._sympy.functions.Identity, 
+        running the max_autotune mode would raise an error:
+        TypeError: Expected a number but got Identity
+        """
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super(ToyModel, self).__init__()
 
-                self.linear_layers = nn.ModuleList()
-                total_parameters = 0
-                dim = self.in_features
-                bias = False
-                while total_parameters < self.max_parameters:
-                    if total_parameters + dim * self.increment + (dim + self.increment) * self.out_features >= self.max_parameters:
-                        break
-                    self.linear_layers.append(nn.Linear(dim, self.increment, bias=bias))
-                    total_parameters += dim * self.increment
-                    dim += self.increment
-                self.final_layer = nn.Linear(dim, self.out_features, bias=self.final_bias)
+                self.linear_layers = nn.ModuleList(
+                    [
+                        nn.Linear(4, 1, bias=True),
+                        nn.Linear(5, 1, bias=True),
+                        nn.Linear(6, 1, bias=True),
+                        nn.Linear(7, 1, bias=True),
+                        nn.Linear(8, 1, bias=True),
+                    ]
+                )
 
             def forward(self, x):
                 for layer in self.linear_layers:
@@ -2153,26 +2153,20 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     x2 = F.relu(x2)
                     x = torch.cat((x, x2), dim=1)
 
-                def custom_forward(x_):
-                    return self.final_layer(x_)
-
-                x = checkpoint.checkpoint(custom_forward, x)
                 return x
 
-        def GetInput():
-            return torch.randn((16, 2))
 
-        model = MyModel().to("cuda")
-        input_tensor = GetInput().to("cuda")
+        model = ToyModel().to("cuda")
+        input_tensor = torch.randn((2, 4)).to("cuda")
 
-        # compile_default = torch.compile(model, mode="default")
+        compile_default = torch.compile(model, mode="default")
         compile_max_autotune = torch.compile(model, mode="max-autotune")
 
-        # with torch.no_grad():
-            # default_output = compile_default(input_tensor)
-        max_autotune_output = compile_max_autotune(input_tensor)
+        with torch.no_grad():
+            default_output = compile_default(input_tensor)
+            max_autotune_output = compile_max_autotune(input_tensor)
 
-        # self.assertEqual(default_output, max_autotune_output)
+        self.assertEqual(default_output, max_autotune_output)
 
     
 
