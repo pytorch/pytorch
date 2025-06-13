@@ -873,9 +873,9 @@ class {module_name}(torch.nn.Module):
             for node in self.graph.nodes
             if "stack_trace" in node.meta
         }
-        dict_without_graph[
-            "_graphmodule_graph_node_meta_stack_trace"
-        ] = node_meta_stack_trace
+        dict_without_graph["_graphmodule_graph_node_meta_stack_trace"] = (
+            node_meta_stack_trace
+        )
 
         generated_module_name = f"fx-generated._{exporter.get_unique_id()}"
         python_code = self.recompile()

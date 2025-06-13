@@ -2248,9 +2248,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             @staticmethod
             def _backward_impl(ctx, all_args):
                 # compiled autograd reimplements this function at proxy_call_aot_backward
-                assert (
-                    not backward_state_indices
-                ), "BackwardState requires CompiledAutograd"
+                assert not backward_state_indices, (
+                    "BackwardState requires CompiledAutograd"
+                )
                 ctx.maybe_clear_saved_tensors()
 
                 saved_tensors_use_once = (
@@ -2282,20 +2282,24 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
                     metrics_context = get_metrics_context()
-                    with tracing(saved_context), compile_context(
-                        saved_compile_context
-                    ), context(), track_graph_compiling(
-                        aot_config, "backward"
-                    ), metrics_context, dynamo_timed(
-                        "backward._backward_impl",
-                        phase_name="entire_backward_compile",
-                        log_pt2_compile_event=True,
-                        dynamo_compile_column_us="backward_cumulative_compile_time_us",
-                        log_waitcounter=True,
-                        waitcounter_name_override="entire_backward_compile",
-                    ), callback_handler.install_callbacks(
-                        CallbackTrigger.LAZY_BACKWARD,
-                        str(CompileContext.current_compile_id()),
+                    with (
+                        tracing(saved_context),
+                        compile_context(saved_compile_context),
+                        context(),
+                        track_graph_compiling(aot_config, "backward"),
+                        metrics_context,
+                        dynamo_timed(
+                            "backward._backward_impl",
+                            phase_name="entire_backward_compile",
+                            log_pt2_compile_event=True,
+                            dynamo_compile_column_us="backward_cumulative_compile_time_us",
+                            log_waitcounter=True,
+                            waitcounter_name_override="entire_backward_compile",
+                        ),
+                        callback_handler.install_callbacks(
+                            CallbackTrigger.LAZY_BACKWARD,
+                            str(CompileContext.current_compile_id()),
+                        ),
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
                         # See Note: [Backward graph lazy lowering]

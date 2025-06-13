@@ -644,11 +644,14 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
                 continue
 
             if (tensor_val := node.args[0].meta.get("val")) is not None:
-                with gm.graph.inserting_before(node), _set_node_metadata_hook(
-                    gm,
-                    functools.partial(
-                        _node_metadata_hook,
-                        stack_trace=node.meta.get("stack_trace"),
+                with (
+                    gm.graph.inserting_before(node),
+                    _set_node_metadata_hook(
+                        gm,
+                        functools.partial(
+                            _node_metadata_hook,
+                            stack_trace=node.meta.get("stack_trace"),
+                        ),
                     ),
                 ):
                     gm.graph.call_function(
