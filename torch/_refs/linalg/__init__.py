@@ -165,6 +165,9 @@ def vector_norm(
         reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
         is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
+        if dim == []:
+            dim = None
+
         if (dim is None and x.numel() == 1) or (
             dim is not None
             and (x.ndim > 0 and all(guard_size_oblivious(x.shape[d] == 1) for d in dim))

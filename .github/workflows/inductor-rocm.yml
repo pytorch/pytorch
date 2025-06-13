@@ -28,6 +28,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
 
   linux-jammy-rocm-py3_10-inductor-build:
     name: rocm-py3.10-inductor
@@ -36,7 +37,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-rocm-py3.10
-      docker-image-name: pytorch-linux-jammy-rocm-n-py3
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
           { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },

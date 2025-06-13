@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-# flake8: noqa C101
 import itertools
 from collections.abc import Iterable, Iterator
 from typing import Union

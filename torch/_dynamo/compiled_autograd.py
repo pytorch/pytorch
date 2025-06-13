@@ -64,6 +64,12 @@ if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
 
 
+TURN_OFF_MSG = """Turn off compiled autograd by either:
+1. Moving the unsupported autograd calls outside of the torch.compile'd region.
+2. Wrapping the unsupported in the torch._dynamo.compiled_autograd._disable() context manager.
+3. Setting torch._dynamo.config.compiled_autograd to False for the torch.compile call containing the unsupported autograd call.
+4. Setting torch._dynamo.config.compiled_autograd to False at the start of the program."""
+
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
 
@@ -307,11 +313,16 @@ class AutogradCompilerInstance:
 
         self.stack.enter_context(preserve_node_meta())
         inputs_origins, sizes_origins, scalars_origins = origins
+
         # tensor inputs to fake tensors
-        inputs = [
-            self.wrap_fake(x, self.source("inputs", idx))
-            for idx, x in enumerate(inputs)
-        ]
+        x = inputs[0]  # mypy will complain about unbound x
+        try:
+            for idx, x in enumerate(inputs):
+                inputs[idx] = self.wrap_fake(x, self.source("inputs", idx))
+        except Exception as e:
+            raise NotImplementedError(
+                f"Found tensor of type {type(x)}, which is not supported by FakeTensorMode. {TURN_OFF_MSG}"
+            ) from e
         self.bind_objects_to_proxies(inputs, args_proxy, inputs_origins)
 
         # size inputs to symints
@@ -421,11 +432,14 @@ class AutogradCompilerInstance:
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         aot_id = CompiledFunction._aot_id
-        bw_module = ctx._bw_module
-        aot_symints = ctx.symints
-        symints = ctx._get_compiled_autograd_symints()
         del CompiledFunction
-        del ctx
+
+        if torch.is_grad_enabled():
+            for output_alias_info in metadata.output_info:
+                if output_alias_info.requires_grad:
+                    raise RuntimeError(
+                        "torch.compile does not currently support higher order gradients."
+                    )
 
         @torch._dynamo.allow_in_graph  # type: ignore[misc]
         def call_aot_bwd_prologue(ctx_saved_tensors, ctx_symints, *flat_args):
@@ -467,12 +481,13 @@ class AutogradCompilerInstance:
 
             # set up the proxy inputs to ctx._bw_module
             # the calling convention is: [*symints, *args (primals and tangents), backward_state]
-            num_args = num_inputs(bw_module.graph)
+            num_args = num_inputs(ctx._bw_module.graph)
             pall_args = [
                 pgrads[i] for i in range(num_args - int(pbackward_state is not None))
             ]
             # replace the symints with our symints
-            assert len(symints) == len(aot_symints)
+            symints = ctx._get_compiled_autograd_symints()
+            assert len(symints) == len(ctx.symints)
             psymints = [self.to_proxy(e) for e in symints]
             pall_args[: len(symints)] = psymints
             # Add backward_state
@@ -496,7 +511,7 @@ class AutogradCompilerInstance:
                 # make it both informative and unique
                 return f"aot{deduped_aot_id}_{node_name}"
 
-            for node in bw_module.graph.nodes:
+            for node in ctx._bw_module.graph.nodes:
                 if node.op == "placeholder":
                     ph = pall_args[args_idx].node
                     ph.name = make_unique(node.name)
@@ -513,7 +528,9 @@ class AutogradCompilerInstance:
                 elif node.op == "get_attr":
                     name = node.target
                     qualname = self.fx_tracer.get_fresh_qualname(name)
-                    setattr(self.fx_tracer.root, qualname, getattr(bw_module, name))
+                    setattr(
+                        self.fx_tracer.root, qualname, getattr(ctx._bw_module, name)
+                    )
                     result = self.fx_tracer.create_node("get_attr", qualname, (), {})
                     result.name = make_unique(node.name)
                     value_remap[node] = result
@@ -527,6 +544,17 @@ class AutogradCompilerInstance:
                         node, lambda n: value_remap[n]
                     )
                     result.name = make_unique(node.name)
+                    value_remap[node] = result
+                elif node.op == "call_module":
+                    name = node.target
+                    qualname = self.fx_tracer.get_fresh_qualname(name)
+                    setattr(
+                        self.fx_tracer.root, qualname, getattr(ctx._bw_module, name)
+                    )
+                    result = self.fx_tracer.graph.node_copy(
+                        node, lambda n: value_remap[n]
+                    )
+                    result.target = qualname
                     value_remap[node] = result
                 else:
                     raise AssertionError("shouldn't get here")
@@ -1333,6 +1361,11 @@ class AutogradCompilerInstance:
             forward_cls = pyobj._forward_cls  # type: ignore[attr-defined]
             if hasattr(forward_cls, "_aot_id"):
                 # backward was created by AOT Dispatcher
+                if forward_cls._lazy_backward_info is None:
+                    raise RuntimeError(
+                        """This compiled backward function was saved by AOTAutogradCache, which does not support
+                    compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
+                    )
                 maybe_aot_id = forward_cls._aot_id
         new_code = f"{node_name}{maybe_aot_id} (NodeCall {nodecall_index})"
         raw_stack_trace = CapturedTraceback.extract().format()[-1]
@@ -1351,9 +1384,11 @@ compiled_autograd_enabled_force_eager = False
 # global flag to check if we are processing graphs produced from a compiled autograd graph
 in_compiled_autograd_region = False
 
+active_disable_ctx = False
+
 
 @contextlib.contextmanager
-def _enable(compiler_fn, dynamic: bool = True):
+def _enable(compiler_fn, dynamic: bool = True, ignore_active_disable_ctx=True):
     # The entrypoint to enable CA.
     # It is recommended to enable via `torch._dynamo.config.compiled_autograd = True` rather
     # than using this context manager directly. If you are torch.compiling the corresponding
@@ -1374,44 +1409,47 @@ def _enable(compiler_fn, dynamic: bool = True):
     # - dynamic: Whether compiled autograd will treat tensors in the autograd graph (params, activations) as dynamic.
     #   This doesn't affect the dynamic configuration of the compilation wrapper.
 
-    if dynamic:
-        assert type(dynamic) is bool
-
-    from torch._dynamo import eval_frame
-
-    if eval_frame._stance.stance == "force_eager":
-        # If user explicitly sets Dynamo stance to "force_eager", we want Compiled Autograd
-        # to fall back to eager as well.
-        global compiled_autograd_enabled_force_eager
-        compiled_autograd_enabled_force_eager = True
-        try:
-            yield
-        finally:
-            compiled_autograd_enabled_force_eager = False
+    if not ignore_active_disable_ctx and active_disable_ctx:
+        yield
     else:
-        # we need to import this, because user might not have imported it if they directly use this context manager
-        # we need to lazily import it, because of circular dependencies
-        import torch._inductor.cudagraph_trees
+        if dynamic:
+            assert type(dynamic) is bool
 
-        (
-            prior_compiler,
-            prior_dynamic,
-        ) = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-            functools.partial(AutogradCompilerInstance, compiler_fn), dynamic
-        )
-        if snapshot_verbose_logging_enabled():
-            torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)
-        global compiled_autograd_enabled
-        compiled_autograd_enabled = True
-        try:
-            with torch.autograd.set_multithreading_enabled(False):
+        from torch._dynamo import eval_frame
+
+        if eval_frame._stance.stance == "force_eager":
+            # If user explicitly sets Dynamo stance to "force_eager", we want Compiled Autograd
+            # to fall back to eager as well.
+            global compiled_autograd_enabled_force_eager
+            compiled_autograd_enabled_force_eager = True
+            try:
                 yield
-        finally:
-            if not prior_compiler:
-                compiled_autograd_enabled = False
-            torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-                prior_compiler, prior_dynamic
+            finally:
+                compiled_autograd_enabled_force_eager = False
+        else:
+            # we need to import this, because user might not have imported it if they directly use this context manager
+            # we need to lazily import it, because of circular dependencies
+            import torch._inductor.cudagraph_trees
+
+            (
+                prior_compiler,
+                prior_dynamic,
+            ) = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+                functools.partial(AutogradCompilerInstance, compiler_fn), dynamic
             )
+            if snapshot_verbose_logging_enabled():
+                torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)  # type:ignore[arg-type]
+            global compiled_autograd_enabled
+            compiled_autograd_enabled = True
+            try:
+                with torch.autograd.set_multithreading_enabled(False):
+                    yield
+            finally:
+                if not prior_compiler:
+                    compiled_autograd_enabled = False
+                torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+                    prior_compiler, prior_dynamic
+                )
 
 
 @contextlib.contextmanager
@@ -1422,11 +1460,15 @@ def _disable():
     ) = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
     global compiled_autograd_enabled
     compiled_autograd_enabled = False
+    global active_disable_ctx
+    if not active_disable_ctx:
+        active_disable_ctx = True
     try:
         yield
     finally:
         if prior_compiler:
             compiled_autograd_enabled = True
+        active_disable_ctx = False
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(
             prior_compiler, prior_dynamic
         )

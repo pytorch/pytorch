@@ -48,7 +48,6 @@ from ..source import (
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
-    UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
 )
 from ..utils import (
@@ -247,7 +246,7 @@ class NNModuleVariable(VariableTracker):
 
         if object_has_getattribute(base):
             unimplemented_v2(
-                gb_type="torch.nn.Module with a custom __getattribute__ defined",
+                gb_type="Custom __getattribute__ in nn.Module dict key check",
                 context=f"has_key_in_generic_dict {self} {key}",
                 explanation="Dynamo does not support checking key existence "
                 "on `nn.Module` instances that have a custom "
@@ -269,7 +268,7 @@ class NNModuleVariable(VariableTracker):
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
             unimplemented_v2(
-                gb_type="torch.nn.Module with a custom __getattribute__ defined",
+                gb_type="Custom __getattribute__ in nn.Module attribute access",
                 context=f"var_getattr {self} {name}",
                 explanation="Dynamo does not support checking key existence "
                 "on `nn.Module` instances that have a custom "
@@ -891,8 +890,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self.nn_module_stack_source = self.source
 
     def _wrap_source(self, attr_source):
-        if not isinstance(attr_source, UnspecializedNNModuleSource):
-            return UnspecializedNNModuleSource(attr_source)
+        # the vt is already wrapped with UnspecializedNNModuleSource
         return attr_source
 
     def get_nn_module_stack_source(self):
@@ -902,7 +900,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self.nn_module_stack_source = source
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _nn_module_method_ids():
         # Allow __setattr__ to fall through to base class handler
         supported = {torch.nn.Module.__setattr__, torch.nn.Module.__init__}
@@ -1193,8 +1191,7 @@ class UnspecializedBuiltinNNModuleVariable(UnspecializedNNModuleVariable):
     """
 
     def _wrap_source(self, attr_source):
-        if not isinstance(attr_source, UnspecializedBuiltinNNModuleSource):
-            return UnspecializedBuiltinNNModuleSource(attr_source)
+        # vt is already wrapped with the UnspecializedBuiltinNNModuleSource
         return attr_source
 
 
