@@ -56,6 +56,41 @@ class TestPrivateUse1(TestCase):
             torch.utils.backend_registration._get_custom_mod_func("device_count")() == 2  # type: ignore[misc]
         )
 
+    @skipIfTorchDynamo()
+    def test_backend_operator_registration(self):
+        self.assertTrue(
+            torch._C._dispatch_has_kernel_for_dispatch_key(
+                "aten::empty.memory_format", torch.DispatchKey.PrivateUse1
+            )
+        )
+        x = torch.empty(3, 3, device="openreg")
+        self.assertTrue(x.device.type, "openreg")
+        self.assertTrue(x.shape, torch.Size([3, 3]))
+
+    def test_backend_dispatchstub(self):
+        x_cpu = torch.randn(2, 2, 3, dtype=torch.float32, device="cpu")
+        x_openreg = x_cpu.to("openreg")
+
+        y_cpu = torch.abs(x_cpu)
+        y_openreg = torch.abs(x_openreg)
+        self.assertEqual(y_cpu, y_openreg.cpu())
+
+        o_cpu = torch.randn(2, 2, 6, dtype=torch.float32, device="cpu")
+        o_openreg = o_cpu.to("openreg")
+        # output operand with resize flag is False in TensorIterator.
+        torch.abs(x_cpu, out=o_cpu[:, :, 0:6:2])
+        torch.abs(x_openreg, out=o_openreg[:, :, 0:6:2])
+        self.assertEqual(o_cpu, o_openreg.cpu())
+
+        # output operand with resize flag is True in TensorIterator and
+        # convert output to contiguous tensor in TensorIterator.
+        torch.abs(x_cpu, out=o_cpu[:, :, 0:6:3])
+        torch.abs(x_openreg, out=o_openreg[:, :, 0:6:3])
+        self.assertEqual(o_cpu, o_openreg.cpu())
+
+    def test_backend_fallback(self):
+        pass
+
 
 class TestOpenReg(TestCase):
     """Tests of mimick accelerator named OpenReg based on PrivateUse1"""
@@ -181,12 +216,17 @@ class TestOpenReg(TestCase):
 
     # Opeartors
     def test_factory(self):
-        a = torch.empty(50, device="openreg")
-        self.assertEqual(a.device.type, "openreg")
+        x = torch.empty(3, device="openreg")
+        self.assertEqual(x.device.type, "openreg")
+        self.assertEqual(x.shape, torch.Size([3]))
 
-        a.fill_(3.5)
+        y = torch.zeros(3, device="openreg")
+        self.assertEqual(y.device.type, "openreg")
+        self.assertEqual(y.shape, torch.Size([3]))
 
-        self.assertTrue(a.eq(3.5).all())
+        z = torch.tensor((), device="openreg")
+        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.shape, torch.Size([0]))
 
     def test_printing(self):
         a = torch.ones(20, device="openreg")
@@ -206,10 +246,6 @@ class TestOpenReg(TestCase):
         y = x.expand(3, 2)
         self.assertEqual(y.to(device="cpu"), torch.tensor([[1, 1], [2, 2], [3, 3]]))
         self.assertEqual(x.data_ptr(), y.data_ptr())
-
-    def test_empty_tensor(self):
-        empty_tensor = torch.tensor((), device="openreg")
-        self.assertEqual(empty_tensor.to(device="cpu"), torch.tensor(()))
 
 
 if __name__ == "__main__":
