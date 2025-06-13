@@ -267,16 +267,16 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
   void free(void* ptr) override {
     // TODO: thread safety
-    ptr_to_symm_mem_.erase(ptr);
+    allocations_.erase(ptr);
   };
 
   size_t get_alloc_size(void* ptr) override {
-    auto it = ptr_to_symm_mem_.find(ptr);
-    if (it == ptr_to_symm_mem_.end()) {
+    auto it = allocations_.find(ptr);
+    if (it == allocations_.end()) {
       TORCH_CHECK(
           false, ptr, " is not allocated with NVSHMEMSymmetricMemoryAllocator");
     }
-    return it->second->get_buffer_size();
+    return it->second->buffer_size;
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
@@ -304,9 +304,6 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
  private:
-  std::unordered_map<void*, c10::intrusive_ptr<SymmetricMemory>>
-      ptr_to_symm_mem_;
-
   std::unordered_map<void*, std::shared_ptr<NVSHMEMAllocation>> allocations_;
   std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
       symm_mems_;
