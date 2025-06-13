@@ -1,9 +1,10 @@
-# mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
 from torch.distributions.utils import broadcast_all
@@ -29,9 +30,15 @@ class FisherSnedecor(Distribution):
         df2 (float or Tensor): degrees of freedom parameter 2
     """
 
-    arg_constraints = {"df1": constraints.positive, "df2": constraints.positive}
-    support = constraints.positive
-    has_rsample = True
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
+        "df1": constraints.positive,
+        "df2": constraints.positive,
+    }
+    support: ClassVar[constraints.Positive] = constraints.positive
+    has_rsample: bool = True
+
+    df1: Tensor
+    df2: Tensor
 
     def __init__(
         self,
@@ -49,7 +56,7 @@ class FisherSnedecor(Distribution):
             batch_shape = self.df1.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(FisherSnedecor, _instance)
         batch_shape = torch.Size(batch_shape)
         new.df1 = self.df1.expand(batch_shape)
@@ -95,7 +102,7 @@ class FisherSnedecor(Distribution):
         Y.clamp_(min=tiny)
         return Y
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         ct1 = self.df1 * 0.5
