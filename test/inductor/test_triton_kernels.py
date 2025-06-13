@@ -1647,9 +1647,8 @@ def forward(self, x_1, output_1):
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
     @common_utils.parametrize("tma_version", ["new", "old"])
-    def test_on_device_tma(self, dynamic, backend, tma_version):
+    def test_on_device_tma(self, dynamic, tma_version):
         if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
@@ -1687,17 +1686,17 @@ def forward(self, x_1, output_1):
 
             return out
 
-        a = torch.randn((64, 64), device=GPU_TYPE)
-        b = torch.randn((64, 64), device=GPU_TYPE)
+        a = torch.randn((32, 32), device=GPU_TYPE)
+        b = torch.randn((32, 32), device=GPU_TYPE)
 
         expected_out = a + b
+        triton.set_allocator(
+            lambda size, align, stream: torch.empty(
+                size, dtype=torch.int8, device=GPU_TYPE
+            )
+        )
         eager_out = f(a, b)
-        compiled_out = torch.compile(
-            f,
-            fullgraph=True,
-            backend=backend,
-            dynamic=dynamic,
-        )(a, b)
+        compiled_out = torch.compile(f, fullgraph=True, dynamic=dynamic)(a, b)
 
         self.assertEqual(eager_out, expected_out)
         self.assertEqual(compiled_out, expected_out)
