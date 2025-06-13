@@ -7130,10 +7130,13 @@ class FallbackKernel(ExternKernelAlloc):
                 # Append kwarg values, in the correct order, to args.
                 # ordered_kwargs_for_cpp_kernel is guaranteed to be set, since this is
                 # an OpOverload kernel.
-                args.extend(
-                    self.get_kwargs_value(k, **kwargs)
-                    for k in self.ordered_kwargs_for_cpp_kernel
-                )
+                args = [
+                    *args,
+                    *(
+                        self.get_kwargs_value(k, **kwargs)
+                        for k in self.ordered_kwargs_for_cpp_kernel
+                    ),
+                ]
                 return any(
                     isinstance(v, complex) and is_number(a.real_type)
                     for v, a in zip(args, kernel._schema.arguments)
@@ -7143,23 +7146,20 @@ class FallbackKernel(ExternKernelAlloc):
                 self.use_runtime_dispatch or has_complex_scalar_input()
             )
 
-        def get_args() -> list[str]:
-            return [*self.codegen_args(), *self.codegen_kwargs()]
-
         self.codegen_comment(wrapper)
         if self.use_runtime_dispatch:
             exported_args = self.export_extern_kernel_node()
             wrapper.generate_fallback_kernel_with_runtime_lookup(
                 self.get_name(),
                 self.python_kernel_name,
-                get_args,
+                lambda: [*self.codegen_args(), *self.codegen_kwargs()],
                 self.op_overload,
                 exported_args,
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
                 self.outputs if self.outputs else self.mutation_outputs,
             )
         else:
-            wrapper.generate_fallback_kernel(self, get_args)
+            wrapper.generate_fallback_kernel(self)
             if isinstance(self.layout, Layout):
                 self.codegen_size_asserts(wrapper)
                 self.codegen_alignment_asserts(wrapper)
