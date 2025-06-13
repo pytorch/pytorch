@@ -2036,15 +2036,15 @@ def gradcheck(
         ``True`` if all differences satisfy allclose condition
 
     """
-    assert (
-        check_forward_ad or check_backward_ad
-    ), "Expected at least one of check_forward_ad or check_backward_ad to be True"
-    assert not (
-        check_batched_grad and not check_backward_ad
-    ), "Setting check_batched_grad=True requires check_backward_ad to be True"
-    assert not (
-        check_batched_forward_grad and not check_forward_ad
-    ), "Setting check_batched_forward_grad=True requires check_forward_ad to be True"
+    assert check_forward_ad or check_backward_ad, (
+        "Expected at least one of check_forward_ad or check_backward_ad to be True"
+    )
+    assert not (check_batched_grad and not check_backward_ad), (
+        "Setting check_batched_grad=True requires check_backward_ad to be True"
+    )
+    assert not (check_batched_forward_grad and not check_forward_ad), (
+        "Setting check_batched_forward_grad=True requires check_forward_ad to be True"
+    )
     args = locals().copy()
     args.pop("raise_exception")
     if not raise_exception:
@@ -2189,15 +2189,15 @@ def gradgradcheck(
     Returns:
         True if all differences satisfy allclose condition
     """
-    assert (
-        check_fwd_over_rev or check_rev_over_rev
-    ), "Expected at least one of check_fwd_over_rev or check_rev_over_rev to be True"
-    assert not (
-        check_undefined_grad and not check_rev_over_rev
-    ), "Setting check_undefined_grad=True requires check_rev_over_rev to be True"
-    assert not (
-        check_batched_grad and not check_rev_over_rev
-    ), "Setting check_batched_grad=True requires check_rev_over_rev to be True"
+    assert check_fwd_over_rev or check_rev_over_rev, (
+        "Expected at least one of check_fwd_over_rev or check_rev_over_rev to be True"
+    )
+    assert not (check_undefined_grad and not check_rev_over_rev), (
+        "Setting check_undefined_grad=True requires check_rev_over_rev to be True"
+    )
+    assert not (check_batched_grad and not check_rev_over_rev), (
+        "Setting check_batched_grad=True requires check_rev_over_rev to be True"
+    )
     # TODO: do we want to test this too?
     # assert not (check_batched_forward_grad and not check_fwd_over_rev), (
     #     "Setting check_batched_forward_grad=True requires check_fwd_over_rev to be True")
