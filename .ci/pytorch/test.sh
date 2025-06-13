@@ -328,6 +328,26 @@ test_h100_distributed() {
   assert_git_not_dirty
 }
 
+test_check_unimplemented_calls() {
+  # Get the changed files from the PR that match torch/_dynamo/**/*.py pattern
+  DYNAMO_PY_FILES=$(find torch/_dynamo/ -name "*.py" | tr '\n' ' ')
+
+  echo "Checking unimplemented_v2 calls in: $DYNAMO_PY_FILES"
+
+  if ! python tools/dynamo/gb_id_mapping.py check --files "$DYNAMO_PY_FILES" --registry-path tools/dynamo/graph_break_registry.json; then
+    echo "::error::Found unimplemented_v2 calls that don't match the registry."
+    echo "::error::Please update the registry using one of these commands:"
+    echo "::error::- Add new entry: python tools/dynamo/gb_id_mapping.py add \"GB_TYPE\" PATH_TO_FILE [--additional-info \"INFO\"]"
+    echo "::error::- Update existing: python tools/dynamo/gb_id_mapping.py update \"GB_TYPE\" PATH_TO_FILE [--new_gb_type \"NEW_NAME\"] [--additional-info \"INFO\"]"
+    echo "::error::- Recreate registry: python tools/dynamo/gb_id_mapping.py create"
+    echo "::error::Note: If you've reset the entire registry file, you can force push to bypass this check."
+    exit 1
+  fi
+
+  echo "All unimplemented_v2 calls match the registry."
+}
+
+
 test_lazy_tensor_meta_reference_disabled() {
   export TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE=1
   echo "Testing lazy tensor operations without meta reference"
@@ -1731,6 +1751,9 @@ elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
+
+elif [[ "${TEST_CONFIG}" == "check_unimplemented_calls" ]]; then
+  test_check_unimplemented_calls
 else
   install_torchvision
   install_monkeytype
