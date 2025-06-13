@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import itertools
@@ -189,13 +190,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
     ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
-    print("before decomposing")
-    gm.print_readable()
     GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
         decompose_auto_functionalized
     )
-    print("after decomposing")
-    gm.print_readable()
     if not torch._dynamo.config.skip_fsdp_hooks:
         GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
             comms.reinplace_fsdp_all_gather

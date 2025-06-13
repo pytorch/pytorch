@@ -851,7 +851,6 @@ def auto_functionalized_v2_dense(
         _all_bases,
         _only_clone_these_bases,
     )
-    print("only_clone_these bases", _only_clone_these_bases, _all_bases)
 
     out = call_op(
         _mutable_op,

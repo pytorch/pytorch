@@ -7713,6 +7713,10 @@ class InvokeSubgraph(ExternKernel):
 
 @ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
+    """The IR node for torch.cond. It first lowers the subgraph then output the
+    final subgraph output.
+    """
+
     predicate: Optional[IRNode] = None
     operands: Optional[list[Union[TensorBox, ShapeAsConstantBuffer]]] = None
     true_subgraph: Optional[Subgraph] = None
@@ -7755,11 +7759,12 @@ class Conditional(ExternKernel):
         false_fn: Subgraph,
         operands: list[Union[TensorBox, ShapeAsConstantBuffer]],
     ):
+        """The classmethod that's used to create Conditional IR node. Input mutation is allowed."""
         predicate = cls.realize_input(predicate)
         operands = [cls.realize_input(x) for x in operands]
         fx_operands = V.graph.current_node.args[-1]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
-        fake_predicate = V.graph.current_node.args[0].meta["val"]
+        fake_predicate = V.graph.current_node.args[0].meta["val"]  # type: ignore[union-attr]
 
         for subgraph in (true_fn, false_fn):
             if subgraph.graph is None:
@@ -7836,11 +7841,16 @@ class Conditional(ExternKernel):
         ]
 
         conditional.outputs = outputs  # type: ignore[assignment]
-        def _compute_mutated_inputs(schema, args, kwargs):
+
+        def _compute_mutated_inputs(
+            schema: torch._higher_order_ops.schema.HopSchema, args: Any, kwargs: Any
+        ) -> list[Any]:
             flattened_args, spec = pytree.tree_flatten((args, kwargs))
-            assert spec == schema.tree_spec, f"schema doesn't match {spec} vs {schema.tree_spec}"
+            assert spec == schema.tree_spec, (
+                f"schema doesn't match {spec} vs {schema.tree_spec}"
+            )
             mutation_output = []
-            for arg_spec, arg_node in  zip(schema.arguments, flattened_args):
+            for arg_spec, arg_node in zip(schema.arguments, flattened_args):
                 if arg_spec.is_write:
                     mutation_output.append(arg_node)
             return mutation_output

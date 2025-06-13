@@ -263,6 +263,12 @@ def _set_compilation_env():
 def _get_fake_mode_from_fake_args(
     args: list[Any],
 ) -> Optional[torch._subclasses.FakeTensorMode]:
+    args = [
+        torch._from_functional_tensor(arg)
+        if isinstance(arg, torch.Tensor) and torch._is_functional_tensor(arg)
+        else arg
+        for arg in args
+    ]
     fake_modes = [arg.fake_mode for arg in args if isinstance(arg, FakeTensor)]
     if len(fake_modes) == 0:
         return None
@@ -833,19 +839,6 @@ def check_input_alias_and_mutation_return_outputs(
             allow_dynamic_output_shape_ops=True,
         )
 
-    def _empty_like_unwrap_functional(t: torch.Tensor) -> torch.Tensor:
-        ret = torch.empty_strided(
-            t.size(),
-            t.stride(),
-            dtype=t.dtype,
-            requires_grad=t.requires_grad,
-            device=t.device,
-        )
-        if torch._is_functional_tensor(ret):
-            ret = torch._from_functional_tensor(ret)
-            assert not torch._is_functional_tensor(ret)
-        return ret
-
     # We need to re-use prev_fake_mode's shape env to resolve
     # the runtime assertions for unbacked symbols.
     new_fake_mode = torch._subclasses.FakeTensorMode(
@@ -875,9 +868,22 @@ def check_input_alias_and_mutation_return_outputs(
             return None
 
         new_fake_args = [
-            _empty_like_unwrap_functional(arg) if isinstance(arg, torch.Tensor) else arg
+            torch.empty_strided(
+                arg.size(),
+                arg.stride(),
+                dtype=arg.dtype,
+                requires_grad=arg.requires_grad,
+                device=arg.device,
+            )
+            if isinstance(arg, torch.Tensor)
+            else arg
             for arg in fake_args
         ]
+        assert all(
+            not isinstance(t, FunctionalTensor) and not torch._is_functional_tensor(t)
+            for t in new_fake_args
+            if isinstance(t, torch.Tensor)
+        )
         before = [_tensor_version(arg) for arg in new_fake_args]
         outputs = gm(*new_fake_args)
         outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs

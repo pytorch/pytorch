@@ -2,8 +2,8 @@
 import contextlib
 import functools
 import unittest
-from unittest.mock import patch
 from typing import Callable
+from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
@@ -8759,9 +8759,13 @@ class TestHopSchema(TestCase):
 
 
 class TestAutoFunctionalizeControlFlow(TestCase):
-    def check(self, gen_fn: Callable, args) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+    def check(
+        self, gen_fn: Callable, args
+    ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
         def _clone(args):
-            return [arg.clone() if isinstance(arg, torch.Tensor) else arg for arg in args]
+            return [
+                arg.clone() if isinstance(arg, torch.Tensor) else arg for arg in args
+            ]
 
         with patch.object(
             torch._dynamo.variables.higher_order_ops.CondHigherOrderVariable,
@@ -8774,10 +8778,14 @@ class TestAutoFunctionalizeControlFlow(TestCase):
             backend = AotEagerAndRecordGraphs()
             torch._dynamo.reset()
             with torch.no_grad():
-                eager_out = torch.compile(gen_fn(), backend=backend, fullgraph=True)(*_clone(args))
+                eager_out = torch.compile(gen_fn(), backend=backend, fullgraph=True)(
+                    *_clone(args)
+                )
             torch._dynamo.reset()
             with torch.no_grad():
-                inductor_out = torch.compile(gen_fn(), backend="inductor", fullgraph=True)(*_clone(args))
+                inductor_out = torch.compile(
+                    gen_fn(), backend="inductor", fullgraph=True
+                )(*_clone(args))
 
         self.assertEqual(exp, eager_out)
         self.assertEqual(exp, inductor_out)
@@ -8836,10 +8844,13 @@ class <lambda>(torch.nn.Module):
 
     def test_cond_auto_functionalize_buffer_mutation(self):
         device = "cuda"
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(8, requires_grad=False, device=device))
+                self.register_buffer(
+                    "buf", torch.ones(8, requires_grad=False, device=device)
+                )
 
             def forward(self, p, x):
                 def true_fn(x):
@@ -8850,7 +8861,9 @@ class <lambda>(torch.nn.Module):
                 out = torch.cond(p, true_fn, true_fn, (x,))
                 return x + self.buf + out
 
-        p, x = torch.tensor(True, device=device), torch.randn(1, requires_grad=True, device=device)
+        p, x = torch.tensor(True, device=device), torch.randn(
+            1, requires_grad=True, device=device
+        )
         fw_gm = self.check(M, (p, x))
         if not TEST_WITH_CROSSREF:
             self.assertExpectedInline(
