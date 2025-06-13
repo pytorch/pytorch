@@ -622,10 +622,10 @@ class Tensor(torch._C.TensorBase):
             gradient (Tensor, optional): The gradient of the function
                 being differentiated w.r.t. ``self``.
                 This argument can be omitted if ``self`` is a scalar. Defaults to ``None``.
-            retain_graph (bool, optional): If ``False``, the graph used to compute
-                the grads will be freed. Note that in nearly all cases setting
-                this option to True is not needed and often can be worked around
-                in a much more efficient way. Defaults to ``None``, represents the value of ``create_graph``.
+            retain_graph (bool, optional): If ``False``, the graph used to compute the grads will be freed;
+                If ``True``, it will be retained. The default is ``None``, in which case the value is inferred from ``create_graph``
+                (i.e., the graph is retained only when higher-order derivative tracking is requested). Note that in nearly all cases
+                setting this option to True is not needed and often can be worked around in a much more efficient way.
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
