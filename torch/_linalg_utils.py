@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch import Tensor
@@ -136,8 +136,8 @@ def eig(
     self: Tensor,
     eigenvectors: bool = False,
     *,
-    e: Any = None,
-    v: Any = None,
+    e: Optional[Any] = None,
+    v: Optional[Any] = None,
 ) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "

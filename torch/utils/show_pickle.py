@@ -8,11 +8,14 @@ import struct
 import sys
 import zipfile
 from typing import Any, IO
+from typing_extensions import TypeVarTuple, Unpack
 
 __all__ = ["FakeObject", "FakeClass", "DumpUnpickler", "main"]
 
+Ts = TypeVarTuple("Ts")
+
 class FakeObject:
-    def __init__(self, module: str, name: str, args: tuple[Any, ...]) -> None:
+    def __init__(self, module: str, name: str, *args: Unpack[Ts]) -> None:
         self.module = module
         self.name = name
         self.args = args
