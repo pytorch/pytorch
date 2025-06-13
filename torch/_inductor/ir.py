@@ -5526,7 +5526,7 @@ class ExternKernel(InputsKernel):
                         want_contiguous=False,
                         stride_order=(
                             get_stride_order(
-                                V.graph.sizevars.size_hints(x.get_layout().stride)
+                                V.graph.sizevars.size_hints(x.get_layout().stride, fallback=1)
                             )
                             if is_stride_order_storage_and_layout(x, order)
                             else order
