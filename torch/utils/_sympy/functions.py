@@ -1300,6 +1300,15 @@ class Identity(sympy.Function):
         # Removes the identity op.
         return self.args[0]
 
+    def __int__(self):
+        return int(self.args[0])
+
+    def __float__(self):
+        return float(self.args[0])
+
+    def __bool__(self):
+        return bool(self.args[0])
+
 
 def make_opaque_unary_fn(name):
     class OpaqueUnaryFn(sympy.Function):
