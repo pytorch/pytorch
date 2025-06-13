@@ -137,16 +137,11 @@ class _ExportPackage:
             "decoder": ExportMethod(
                 overloads={
                     "prefill": ExportedProgram(...),
-                    "decode": ExportedProgram(...)
+                    "decode": ExportedProgram(...),
                 },
-                fallbacks=[]
+                fallbacks=[],
             ),
-            "encoder": ExportMethod(
-                overloads={},
-                fallbacks=[
-                    ExportedProgram(...)
-                ]
-            )
+            "encoder": ExportMethod(overloads={}, fallbacks=[ExportedProgram(...)]),
         },
     )
     ```
@@ -212,14 +207,17 @@ class _ExportPackage:
         ```
         package = ExportPackage()
 
+
         def prefill(x, xa, kv_cache):
             assert x.shape[1] == 3
             assert kv_cache == {}
+
 
         def decode(x, xa, kv_cache):
             assert x.shape[1] > 1
             assert len(kv_cache) > 0
             return {...}  # dynamic shape specs here
+
 
         exporter = (
             package.exporter(decoder)

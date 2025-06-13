@@ -573,7 +573,7 @@ class CodeGen:
                             summary_str = parsed_stack_trace.get_summary_str()
                         else:
                             summary_str = ""
-                        body.append(f'\n {dim(f"# {summary_str}")}\n')
+                        body.append(f"\n {dim(f'# {summary_str}')}\n")
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
                     no_stacktrace_msg = "# No stacktrace found for following nodes"
@@ -1918,7 +1918,7 @@ class Graph:
 
 @contextmanager
 def _override_sym_repr(
-    override: Callable[["torch.types.PySymType"], str]
+    override: Callable[["torch.types.PySymType"], str],
 ) -> Iterator[None]:
     tmp = CodeGen._sym_repr
     try:

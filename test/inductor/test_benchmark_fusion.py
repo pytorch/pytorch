@@ -296,11 +296,7 @@ if HAS_CUDA:
                     "empty_strided", 1, exactly=True
                 ).check("triton_tem_fused_addmm_relu_0").check_count(
                     ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
-                ).check(
-                    "" if config.cpp_wrapper else "return"
-                ).run(
-                    out_code[0]
-                )
+                ).check("" if config.cpp_wrapper else "return").run(out_code[0])
 
         @fresh_inductor_cache()
         @config.patch(max_autotune_gemm_backends="ATEN")
@@ -314,11 +310,7 @@ if HAS_CUDA:
                     "empty_strided", 1, exactly=True
                 ).check("" if config.cpp_wrapper else "extern_kernels.").check_count(
                     ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
-                ).check(
-                    "" if config.cpp_wrapper else "return"
-                ).run(
-                    out_code[0]
-                )
+                ).check("" if config.cpp_wrapper else "return").run(out_code[0])
 
         def test_changed_layout(self):
             # cat addmm planning will change layout - make sure propagated
