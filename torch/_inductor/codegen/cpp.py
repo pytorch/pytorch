@@ -86,7 +86,7 @@ from .cpp_utils import (
 _IS_WINDOWS = sys.platform == "win32"
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_export_declaration():
     return "__declspec(dllexport)" if _IS_WINDOWS else ""
 
@@ -2844,7 +2844,7 @@ class CppVecKernel(CppKernel):
             # use welford_helper for vec kernel
             assert self.reduction_depth is not None
             reduction_size = functools.reduce(
-                lambda x, y: x * y, self.ranges[self.reduction_depth :]
+                operator.mul, self.ranges[self.reduction_depth :]
             )
             welford_helper_val = self.welford_helper_cse.generate(
                 self.compute, f"reduction {reduction_key}", write=False
@@ -4897,7 +4897,7 @@ class CppScheduling(BaseScheduling):
                 # https://github.com/pytorch/pytorch/blob/1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159 # noqa: B950
                 # where the buffer is with size of last dim and contiguous.
                 # Only support this typical case at first.
-                visited_scheduler_nodes = OrderedSet[str]()
+                visited_scheduler_nodes: OrderedSet[str] = OrderedSet()
                 for scheduler_node in node.get_nodes():
                     # all users inside same OuterLoopFusedSchedulerNode
                     assert isinstance(scheduler_node, SchedulerNode)
