@@ -21,6 +21,7 @@ from torch._subclasses.fake_impls import (
     register_op_impl,
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -442,12 +443,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
         tx = TracingContext(fake_mode)
 
-        with (
-            fake_mode,
-            _override_composite_implicit_decomp(cia_to_decomp),
-            _enable_graph_inputs_of_type_nn_module(ep.example_inputs),
-            tracing(tx),
-        ):
+        with fake_mode, _override_composite_implicit_decomp(
+            cia_to_decomp,
+        ), _enable_graph_inputs_of_type_nn_module(ep.example_inputs), tracing(tx):
             retracing_args_unwrapped = pytree.tree_unflatten(
                 retracing_args, mod._in_spec
             )
@@ -921,9 +919,7 @@ class ExportedProgram:
         range_constraints: "dict[sympy.Symbol, Any]",
         module_call_graph: list[ModuleCallEntry],
         example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]] = None,
-        constants: Optional[
-            dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
-        ] = None,
+        constants: Optional[dict[str, _ConstantAttributeType]] = None,
         *,
         verifiers: Optional[list[type[Verifier]]] = None,
     ):

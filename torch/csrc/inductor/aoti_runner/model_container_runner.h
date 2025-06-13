@@ -123,13 +123,13 @@ getAOTIModelRunnerRegistry();
 // To register a new external backend in AOTI one needs to create an instance of
 // this struct. It is not thread-safe. Becase it is expected to be called during
 // the initialization of the program.
-struct TORCH_API RegisterAOTIModelRunner {
-  RegisterAOTIModelRunner(
-      const std::string& name,
-      CreateAOTIModelRunnerFunc create_aoti_model_runner_fn) {
+struct TORCH_API RegisterAOTIModelRunner{RegisterAOTIModelRunner(
+    const std::string& name,
+    CreateAOTIModelRunnerFunc create_aoti_model_runner_fn){
     getAOTIModelRunnerRegistry()[name] = create_aoti_model_runner_fn;
-  }
-};
+} // namespace torch::inductor
+}
+;
 
 } // namespace torch::inductor
 #endif
