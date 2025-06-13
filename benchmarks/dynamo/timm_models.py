@@ -71,6 +71,7 @@ BATCH_SIZE_DIVISORS = {
 }
 
 REQUIRE_HIGHER_TOLERANCE = {
+    "crossvit_9_240",
     "fbnetv3_b",
     "gmixer_24_224",
     "hrnet_w18",
@@ -80,6 +81,7 @@ REQUIRE_HIGHER_TOLERANCE = {
     "sebotnet33ts_256",
     "selecsls42b",
     "convnext_base",
+    "cait_m36_384",
 }
 
 REQUIRE_HIGHER_TOLERANCE_AMP = {
@@ -128,6 +130,7 @@ REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
     "mobilenetv3_large_100",
     "cspdarknet53",
     "gluon_inception_v3",
+    "cait_m36_384",
 }
 
 

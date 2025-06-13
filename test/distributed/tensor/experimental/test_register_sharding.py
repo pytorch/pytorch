@@ -3,9 +3,9 @@
 import itertools
 
 import torch
-from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
-from torch.distributed._tensor.experimental import register_sharding
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor.experimental import register_sharding
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
