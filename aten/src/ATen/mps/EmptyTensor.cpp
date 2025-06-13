@@ -1,5 +1,5 @@
 //  Copyright © 2022 Apple Inc.
-
+#include <c10/metal/common.h>
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
@@ -35,7 +35,7 @@ TensorBase empty_mps(
         layout_or_default(layout_opt) == Layout::Strided,
         "only strided tensors are supported on MPS");
 
-    TORCH_CHECK(size.size() <= 16, "MPS supports tensors with dimensions <= 16, but got ", size.size(), ".");
+    TORCH_CHECK(size.size() <= c10::metal::max_ndim, "MPS supports tensors with dimensions <= ", c10::metal::max_ndim, ", but got ", size.size(), ".");
 
     check_size_nonnegative(size);
 

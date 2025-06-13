@@ -1,5 +1,6 @@
 # Owner(s): ["module: __torch_function__"]
 
+import sys
 import torch
 import numpy as np
 import inspect
@@ -8,9 +9,9 @@ import pprint
 import pickle
 import collections
 import unittest
-import contextlib
+import os
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -28,6 +29,14 @@ from torch.utils._mode_utils import all_same_mode
 from torch.utils._pytree import tree_map
 
 Tensor = torch.Tensor
+
+if os.getenv("ATEN_CPU_CAPABILITY") in ("default", "avx2"):
+    # This test is not supported on ARM
+    print(
+        "Skipping due to failing when cuda build runs on non cuda machine, "
+        + "see https://github.com/pytorch/pytorch/pull/150059 for example"
+    )
+    sys.exit()
 
 # The functions below simulate the pure-python torch functions in the
 # torch.functional namespace. We use examples local to this file rather
@@ -372,27 +381,6 @@ class TensorLike:
         return HANDLED_FUNCTIONS_TENSOR_LIKE[func](*args, **kwargs)
 
 class TestTorchFunctionOverride(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls._stack = contextlib.ExitStack()
-        if TEST_WITH_TORCHDYNAMO:
-            # Add classes to the wrapped tensor subclasses
-            @contextlib.contextmanager
-            def setup_subclasses():
-                old = set(torch._dynamo.config.traceable_tensor_subclasses)
-                torch._dynamo.config.traceable_tensor_subclasses.add(DiagonalTensor)
-                try:
-                    yield
-                finally:
-                    torch._dynamo.config.traceable_tensor_subclasses.clear()
-                    torch._dynamo.config.traceable_tensor_subclasses.update(old)
-
-            cls._stack.enter_context(setup_subclasses())
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._stack.close()
-
     def test_dtype_override(self):
         class MyDtype:
             def __torch_function__(self, *args, **kwargs):

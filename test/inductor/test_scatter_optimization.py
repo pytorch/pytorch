@@ -13,6 +13,9 @@ from torch._inductor.test_case import TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
+# set so that metrics appear
+torch._logging.set_logs(inductor_metrics=True)
+
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 

@@ -5,14 +5,11 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 
-#include <chrono>
 #include <cstddef>
-#include <thread>
 
 namespace at::cuda {
 
 static bool _cuda_graphs_debug = false;
-constexpr int kSynchronizeBusyWaitMillis = 10;
 
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
@@ -40,25 +37,6 @@ MempoolId_t graph_pool_handle() {
  * Note [Interaction with CUDA graph capture] in CUDACachingAllocator.cpp
  * describes memory management for captures.
  */
-
-std::atomic<int> CUDAGraph::pending_event_queries = 0;
-
-// Track any outstanding event queries that could happen e.g., in a NCCL watchdog so that they
-// can be resolved before the capture begins. Note that event queries are not allowed during a
-// graph capture in the default capture mode.
-void CUDAGraph::inc_pending_event_queries() {
-  pending_event_queries++;
-}
-
-void CUDAGraph::dec_pending_event_queries() {
-  TORCH_INTERNAL_ASSERT(pending_event_queries > 0,
-    "Attempted to decrement the number of outstanding events to be queried, but it was <= 0.");
-  pending_event_queries--;
-}
-
-int CUDAGraph::num_pending_event_queries() {
-  return pending_event_queries;
-}
 
 CUDAGraph::CUDAGraph()
   // CUDAStreams may not be default-constructed.
@@ -126,15 +104,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
       return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
   });
 
-  // At this point, any NCCL watchdogs should be aware that we are in capture mode
-  // and therefore should not enqueue any additional work that could be event-queried.
-  // We still must wait on any existing work that has not been cleaned up.
-  while (num_pending_event_queries()) {
-    TORCH_WARN_ONCE("Waiting for pending NCCL work to finish before starting graph capture.");
-    std::this_thread::sleep_for(
-      std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
-  }
-
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
@@ -170,7 +139,7 @@ void CUDAGraph::capture_end() {
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
   // cudaGraphInstantiateWithFlags
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
-#if ((defined(CUDA_VERSION) && CUDA_VERSION >= 11040) || (defined(USE_ROCM) && ROCM_VERSION >= 60200))
+#if !defined(USE_ROCM) || ROCM_VERSION >= 60200
   int version = 0;
   AT_CUDA_CHECK(cudaDriverGetVersion(&version));
   if (version < 11040) {
@@ -185,7 +154,7 @@ void CUDAGraph::capture_end() {
 #endif
 //Since ROCm 6.2, we want to go down this path as hipGraphExecDestroy in the destructor will not immediately free the memory.
 //It will wait for the next sync operation. cudaGraphInstantiateFlagAutoFreeOnLaunch will add async frees after graph launch.
-#if ((defined(CUDA_VERSION) && CUDA_VERSION >= 11040) || (defined(USE_ROCM) && ROCM_VERSION >= 60200))
+#if !defined(USE_ROCM) || ROCM_VERSION >= 60200
   } else {
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
@@ -247,7 +216,7 @@ void CUDAGraph::enable_debug_mode() {
 }
 
 void CUDAGraph::debug_dump(const std::string& debug_path) {
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11030)|| defined(USE_ROCM)
+#if defined(CUDA_VERSION) || defined(USE_ROCM)
   if (_cuda_graphs_debug) {
     TORCH_WARN("DEBUG: calling debug_dump()");
     if (has_graph_) {

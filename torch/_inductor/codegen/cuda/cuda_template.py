@@ -1,14 +1,16 @@
 # mypy: allow-untyped-defs
 import functools
+import hashlib
 import itertools
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import override
 from unittest.mock import patch
 
 import sympy
 
 import torch
+from torch._inductor.utils import Placeholder
 from torch._logging import getArtifactLogger
 
 from ...autotune_process import CUDABenchmarkRequest, TensorMeta
@@ -17,7 +19,15 @@ from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
+from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
 
+
+if TYPE_CHECKING:
+    from ...scheduler import BaseSchedulerNode  # noqa: TC004
+else:
+    BaseSchedulerNode = Any
+
+GemmOperation = Any
 
 autotuning_log = getArtifactLogger(__name__, "autotuning")
 
@@ -55,6 +65,10 @@ class CUDATemplate(KernelTemplate):
         self.input_reorder = input_reorder
         self.layout = layout
 
+    @staticmethod
+    def supports_epilogue_fusion(op: GemmOperation) -> bool:
+        return False
+
     def generate(  # type: ignore[override]
         self,
         description,
@@ -70,7 +84,7 @@ class CUDATemplate(KernelTemplate):
         Returns:
             A CUDATemplateCaller object representing the generated CUDA template caller.
         """
-        kernel_name = f"cuda_{self.name}"
+        kernel_name = str(Placeholder.KERNEL_NAME)
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)),
             CUDATemplateKernel(
@@ -84,7 +98,7 @@ class CUDATemplate(KernelTemplate):
             autotuning_log.debug("Generated Code:\n%s", code)
             autotuning_log.debug(
                 "Args: cpp_argdefs: %s, python_argdefs: %s",
-                kernel.args.cpp_argdefs(),
+                kernel.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE),
                 kernel.args.python_argdefs(),
             )
 
@@ -102,10 +116,12 @@ class CUDATemplate(KernelTemplate):
             expected_args,
         )
         V.graph.sizevars.size_hints(map(sympy.expand, call_args[len(expected_args) :]))
-        size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
+        size_args = V.graph.sizevars.size_hints(kernel.get_dynamic_shape_args())
         extra_args = tuple(list(size_args) + self.get_runtime_arg_values(**kwargs))
 
-        kernel_hash_name = f"cuda_{self.name}_{next(self.index_counter)}"
+        kernel_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:8]
+        kernel_name = f"cutlass_{kernel_hash}"
+        code = code.replace(self.name, kernel_name)
 
         # create the BenchmarkRequest
         bmreq = CUDABenchmarkRequest(
@@ -116,12 +132,23 @@ class CUDATemplate(KernelTemplate):
             source_code=code,
         )
 
+        # kwargs has "op" argument in case of CUTLASSGemmTemplate
+        op = kwargs["op"]
+        if not op:
+            supports_epilogue_fusion = False
+        else:
+            # epilogue fusion is only supported for TMA kernels
+            supports_epilogue_fusion = self.supports_epilogue_fusion(op)
+
         def make_kernel_render(
             template_node: CUDATemplateBuffer,
-            epilogue_nodes: Optional[list[IRNode]] = None,
-        ):
+            epilogue_nodes: Optional[list[BaseSchedulerNode]] = None,
+        ) -> tuple[CUDATemplateKernel, functools.partial[str]]:
+            assert supports_epilogue_fusion or not epilogue_nodes, (
+                "epilogue fusion is not supported for this kernel"
+            )
             kernel = CUDATemplateKernel(
-                kernel_name="KERNEL_NAME",
+                kernel_name=str(Placeholder.KERNEL_NAME),
                 runtime_arg_info=self.get_runtime_arg_info(),
                 runtime_arg_values=self.get_runtime_arg_values(**kwargs),
             )
@@ -135,12 +162,13 @@ class CUDATemplate(KernelTemplate):
             return kernel, render
 
         return CUDATemplateCaller(
-            kernel_hash_name,
-            self.name,
+            kernel_name,
+            "cutlass_gemm",
             self.input_nodes,
             self.output_node.get_layout(),
             make_kernel_render,
             bmreq,
+            supports_epilogue_fusion,
             self,
             kwargs,
             description,
@@ -175,7 +203,6 @@ class CUDATemplate(KernelTemplate):
                 #define PT_EXPORT
                 #endif
                 #endif
-                using bfloat16 = nv_bfloat16;
             """
         )
         return res
@@ -257,6 +284,7 @@ class CUTLASSTemplate(CUDATemplate):
         torch.uint8: "uint8_t",
         torch.bool: "bool",
         torch.bfloat16: "cutlass::bfloat16_t",
+        torch.float8_e4m3fn: "cutlass::float_e4m3_t",
     }
 
     _DTYPE_TO_CUTLASS_SPARSE_META = {

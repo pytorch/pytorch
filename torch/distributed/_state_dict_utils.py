@@ -514,35 +514,55 @@ def _broadcast_tensors(
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
 ) -> None:
-    tensors = []
+    if pg is None:
+        pg = dist.distributed_c10d._get_default_group()
+    pg_device = (
+        device
+        if device.type in {pg_device.type for pg_device in pg._device_types}
+        else pg._device_types[0]
+    )
+
+    tensors: list[torch.Tensor] = []
     for key in keys:
         if dist.get_rank() == 0:
             full_state = full_state_dict[key]
             assert isinstance(full_state, torch.Tensor)
-            full_tensor = full_state.detach().to(device)
+            full_tensor = full_state.detach().to(pg_device)
         else:
             tensor_info = full_state_dict[key]
             full_tensor = torch.empty(
                 size=tensor_info.size,
-                device=device,
+                device=pg_device,
                 dtype=tensor_info.dtype,
             )
-        tensors.append(full_tensor)
-        local_state = local_state_dict.get(key, None)
-        if local_state is None:
-            continue
-        elif isinstance(local_state, DTensor):
-            local_state_dict[key] = (local_state, full_tensor)
-        else:
-            local_state_dict[key] = full_tensor
 
-    if pg is None:
-        pg = dist.distributed_c10d._get_default_group()
+        tensors.append(full_tensor)
+
+        if (local_state := local_state_dict.get(key)) is None:
+            continue
+
+        local_state_dict[key] = (
+            (local_state, full_tensor)
+            if isinstance(local_state, DTensor)
+            else full_tensor
+        )
 
     if len(tensors) > 1:
         dist._broadcast_coalesced(pg, tensors, 500, 0)
     else:
         dist.broadcast(tensors[0], src=0, group=pg)
+
+    if pg_device != device:
+        for key, full_tensor in zip(keys, tensors):
+            if (local_state := local_state_dict.get(key)) is not None:
+                local_state_dict[key] = (
+                    (local_state[0], full_tensor.to(device))
+                    if (
+                        isinstance(local_state, tuple)
+                        and isinstance(local_state[0], DTensor)
+                    )
+                    else full_tensor.to(device)
+                )
 
     _distribute_tensors(local_state_dict, keys, device, pg)
 
@@ -572,7 +592,7 @@ def _distribute_tensors(
         ]
         if local_state.is_meta:
             # Use .clone() here rather than view to clone and return only the sliced portion, minimizing memory access and cost.
-            local_tensor = full_tensor[slices].detach().clone()
+            local_tensor = full_tensor[tuple(slices)].detach().clone()
             # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
             # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
             ret = DTensor.from_local(
@@ -585,7 +605,7 @@ def _distribute_tensors(
         else:
             ret = local_state
             # Copy full_tensor[slices] into local_state.to_local() to reduce memory footprint.
-            ret.to_local().copy_(full_tensor[slices])
+            ret.to_local().copy_(full_tensor[tuple(slices)])
         local_state_dict[key] = ret
 
 

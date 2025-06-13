@@ -1,8 +1,10 @@
 import collections
 import copy
 import dataclasses
+import functools
 import inspect
 import logging
+import operator
 import threading
 from collections import defaultdict
 from collections.abc import Sequence
@@ -24,6 +26,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import guard_scalar
+from torch.types import IntLikeType
 
 
 if TYPE_CHECKING:
@@ -70,9 +73,9 @@ log = logging.getLogger("torch._dynamo")
 TMADescriptorMetadata = dict[
     str,  # kernel parameter name
     tuple[
-        list[Union[int, SymInt]],  # dims
-        list[Union[int, SymInt]],  # block_dims
-        Union[int, SymInt],  # element_size
+        list[IntLikeType],  # dims
+        list[IntLikeType],  # block_dims
+        IntLikeType,  # element_size
     ],
 ]
 
@@ -158,6 +161,9 @@ class Op:
     ret: Intermediate = dataclasses.field(repr=False)
     # used for scf.yield: see [Note: scf.yield fix-up]
     sub_idx: Optional[int] = None
+    # used for tt.elementwise_inline_asm
+    # `is_pure = True` assumes the asm block has no side-effects
+    is_pure: bool = False
 
     def __post_init__(self) -> None:
         if self.name == "tt.call":
@@ -254,8 +260,28 @@ def generate_ttir(
                 get_triton_attrs_descriptor_version()
                 == TritonAttrsDescriptorVersion.V4_DICT
             )
+            # specialize_impl switched to create_specialize_impl in https://github.com/triton-lang/triton/pull/6099
+            if hasattr(triton.runtime.jit, "create_specialize_impl"):
+                try:
+                    # Latest versions of Triton take specialize_extra as an arg to create_specialize_impl
+                    specialize_impl = triton.runtime.jit.create_specialize_impl(
+                        specialize_extra=backend.get_arg_specialization
+                    )
+                except TypeError:  # Unknown arg `specialize_extra`
+                    # Older versions of Triton take specialize_extra as an arg to specialize_impl
+                    specialize_impl = functools.partial(
+                        triton.runtime.jit.create_specialize_impl(),
+                        specialize_extra=backend.get_arg_specialization,
+                    )
+            else:
+                from triton.runtime.jit import specialize_impl as specialize_impl_orig
+
+                specialize_impl = functools.partial(
+                    specialize_impl_orig,
+                    specialize_extra=backend.get_arg_specialization,
+                )
+
             from triton._utils import find_paths_if, get_iterable_path
-            from triton.runtime.jit import specialize_impl
 
             # logic is copied from: binder = create_function_from_signature(self.signature, self.params, backend)
             attrvals = []
@@ -265,7 +291,6 @@ def generate_ttir(
                 else:
                     spec = specialize_impl(
                         arg,
-                        specialize_extra=backend.get_arg_specialization,
                         is_const=kp.is_const,
                         specialize_value=not kp.do_not_specialize,
                         align=not kp.do_not_specialize_on_alignment,
@@ -572,14 +597,22 @@ def ttir_to_functions(
                 Intermediate(operand) for operand in operand_ids
             ]
             block_ops = op_stack[parent_block_id]
+
+            is_pure = False
+            # Handle the case for tt.elementwise_inline_asm to set `is_pure` for mutation analysis
+            if name == "tt.elementwise_inline_asm":
+                is_pure = op.get_bool_attr("pure")
+
             if result_ids:
                 for result_id in result_ids:
                     res = Intermediate(result_id)
-                    block_ops[res].append(Op(name, callee, args, res))
+                    block_ops[res].append(Op(name, callee, args, res, is_pure=is_pure))
             else:
                 next_fake_intermediate -= 1
                 fake_res = Intermediate(next_fake_intermediate)
-                block_ops[fake_res].append(Op(name, callee, args, fake_res))
+                block_ops[fake_res].append(
+                    Op(name, callee, args, fake_res, is_pure=is_pure)
+                )
 
     ttir_module.walk(mlir_to_functions)
 
@@ -588,7 +621,7 @@ def ttir_to_functions(
 
 class MemoizeWithCycleCheck:
     fn: Callable[..., Any]
-    cache: dict[tuple[str, int], Any]
+    cache: dict[tuple[Any], Any]
 
     def __init__(self, fn: Callable[..., Any]) -> None:
         self.fn = fn
@@ -598,18 +631,73 @@ class MemoizeWithCycleCheck:
         self,
         functions: dict[str, dict[Intermediate, list[Op]]],
         fn_name: str,
-        num_args: int,
+        *args: Any,
     ) -> list[bool]:
-        key = (fn_name, num_args)
+        key: tuple[Any, ...] = (fn_name, *args)
         if key not in self.cache:
             self.cache[key] = None
-            self.cache[key] = self.fn(functions, fn_name, num_args)
+            self.cache[key] = self.fn(functions, fn_name, *args)
         if self.cache[key] is None:
             raise RuntimeError("Recursion is not supported")
         return self.cache[key]
 
     def reset(self) -> None:
         self.cache = {}
+
+
+@MemoizeWithCycleCheck
+def get_tma_stores(
+    functions: dict[str, dict[Intermediate, list[Op]]], fn_name: str
+) -> set[Union[Intermediate, Param]]:
+    """
+    Identifies all intermediates and parameters that are written to by a
+    `tt.experimental_descriptor_store`. It tracks only the specific values
+    written to via experimental_descriptor_store and the input values to
+    `tt.reinterpret_tensor_descriptor` used to construct the direct inputs
+    to tt.experimental_descriptor_store - not any recursive values
+    used to construct those values.
+
+    For example: for
+      tt.reinterpret_tensor_descriptor(Intermediate(idx=0), ...)
+      Intermediate(idx=1) = tt.experimental_descriptor_store(Intermediate(idx=0), ...)
+    this function will return [Intermediate(idx=0), Intermediate(idx=1)],
+
+    However
+      Intermediate(idx=4) = arith.addptr(Intermediate(idx=2), Intermediate(idx=3))
+      Intermediate(idx=5) = tt.experimental_descriptor_store(Intermediate(idx=4), ...)
+      tt.experimental_descriptor_store(Intermediate(idx=5), ...)
+    this function will mark only idx=4 and idx=5 (but not idx=2 or idx=3)
+
+    If an intermediate/parameter is passed into a function and is written to
+    via experimental_descriptor_store within that function, the argument to the
+    function will also be marked.
+    """
+
+    result: set[Union[Intermediate, Param]] = set()
+
+    ops = functions[fn_name]
+    for op_list in ops.values():
+        for op in op_list:
+            if op.name == "tt.call":
+                assert op.fn_call_name in functions
+                tma_stores = get_tma_stores(functions, op.fn_call_name)
+                for i, inp in enumerate(op.args):
+                    if Param(idx=i) in tma_stores:
+                        result.add(inp)
+            elif op.name == "tt.experimental_descriptor_store":
+                assert len(op.args) >= 1
+                result.add(op.args[0])
+
+    for val in list(result):
+        if val in ops:
+            if not isinstance(val, Intermediate):
+                continue
+            for op in ops[val]:
+                if op.name == "tt.reinterpret_tensor_descriptor":
+                    assert len(op.args) >= 1
+                    result.add(op.args[0])
+
+    return result
 
 
 @MemoizeWithCycleCheck
@@ -631,6 +719,7 @@ def analyze_kernel_mutations(
         "tt.atomic_cas": [0],
         "tt.atomic_rmw": [0],
         "tt.experimental_descriptor_store": [0],
+        "tt.experimental_tensormap_create": [0],
     }
     # Ops that we want to bail out on
     UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
@@ -638,12 +727,34 @@ def analyze_kernel_mutations(
     stack: list[Union[Param, Intermediate]] = []
     visited = set()
     ops = functions[fn_name]
+    tma_stores = get_tma_stores(functions, fn_name)
+
     for op_list in ops.values():
         for op in op_list:
+            # If we encounter an operation with effects that cannot be reliably analyzed
+            # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
             if op.name in UNKNOWN_OPS:
+                if op.name == "tt.elementwise_inline_asm" and op.is_pure:
+                    log.warning(
+                        "TTIR mutation analysis: Skipping pure tt.elementwise_inline_asm op (is_pure=True)"
+                    )
+                    continue
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
                 )
+
+            if op.name == "tt.experimental_tensormap_create":
+                # Note: this is how we implement experimental_descriptor_store mutation analysis.
+                # for on-device TMA.
+                # experimental_tensormap_store(a, b, ...) stores b to the location specified
+                # by descriptor in the memory of a.
+                # To track this, we first find all the intermediates/params to which we store via
+                # experimental_tensormap_store (get_tma_stores, called above). Then, during this
+                # analysis we wait to find the corresponding experimental_tensormap_create (if it
+                # exists), at which point we will mark the global_ptr as mutated (as done below).
+                assert len(op.args) >= 2
+                if op.args[0] in tma_stores:
+                    stack.append(op.args[1])
 
             if op.name == "tt.call":
                 assert op.fn_call_name in functions
@@ -702,6 +813,7 @@ def identify_mutated_tensors(
         # The cache for analyze kernel mutations is mainly used for cycle
         # detection, so each top level invocation needs a clean cache
         analyze_kernel_mutations.reset()
+        get_tma_stores.reset()
         mutations = analyze_kernel_mutations(
             functions, kernel_name, len(ordered_tensor_names)
         )
@@ -1208,7 +1320,7 @@ class TritonHOPifier:
                 ]
                 configs = [
                     config[0]
-                    for config in sorted(est_timing, key=lambda x: x[1])[:top_k]
+                    for config in sorted(est_timing, key=operator.itemgetter(1))[:top_k]
                 ]
         return configs
 
@@ -1436,7 +1548,13 @@ class TritonHOPifier:
             new_var = type(variable)(new_kernel, None, variable.grid)
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
-        SPECIAL_CONFIG_NAMES = {"num_warps", "num_stages", "num_ctas"}
+        SPECIAL_CONFIG_NAMES = {
+            "num_warps",
+            "num_stages",
+            "num_ctas",
+            "num_consumer_groups",
+            "num_buffers_warp_spec",
+        }
 
         # move special config names to configs out of kwargs
         special_kwargs = {}
@@ -1706,6 +1824,27 @@ class TracingTritonHOPifier(TritonHOPifier):
         # normalize to tuple
         return tuple(grid)
 
+    def store_non_graphable_args(
+        self,
+        combined_args: dict[str, Any],
+    ) -> tuple[dict, int]:
+        """
+        Some args cannot be stored in the FX graph.
+        Put them in the side table.
+        """
+
+        def is_graphable(val: Any) -> bool:
+            return isinstance(val, (fx.node.base_types, fx.Node))
+
+        non_graphable_args = {
+            k: v for k, v in combined_args.items() if not is_graphable(v)
+        }
+        graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
+
+        constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
+
+        return graphable_args, constant_args_idx
+
     def call_HOP(
         self,
         variable: "TraceableTritonKernelWrapper",
@@ -1716,15 +1855,8 @@ class TracingTritonHOPifier(TritonHOPifier):
         assert tx is None
         assert isinstance(variable, TraceableTritonKernelWrapper)
 
-        def is_graphable(val: Any) -> bool:
-            return isinstance(val, fx.node.base_types)
+        graphable_args, constant_args_idx = self.store_non_graphable_args(combined_args)
 
-        non_graphable_args = {
-            k: v for k, v in combined_args.items() if not is_graphable(v)
-        }
-        graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
-
-        constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
         assert isinstance(variable.kernel_idx, int)
         return triton_kernel_wrapper_mutation(
             kernel_idx=variable.kernel_idx,

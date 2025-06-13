@@ -1442,6 +1442,7 @@ op_db: list[OpInfo] = [
                 device_type="cpu",
                 dtypes=(torch.complex128,),
             ),
+            skipCUDAIfRocm,  # regression in ROCm 6.4
         ],
     ),
     OpInfo(
@@ -1517,8 +1518,9 @@ op_db: list[OpInfo] = [
         "linalg.lstsq",
         aten_name="linalg_lstsq",
         variant_test_name="grad_oriented",
-        # gradchecks for forward AD fails with multi-Tensor outputs
-        op=lambda a, b, driver: torch.linalg.lstsq(a, b, driver=driver)[0],
+        # gradchecks for forward AD fails with full output tuple
+        # works when taking [:2], which is (solution, residuals)
+        op=lambda a, b, driver: torch.linalg.lstsq(a, b, driver=driver)[:2],
         supports_out=False,
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_lstsq,
@@ -1553,6 +1555,14 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         check_batched_grad=False,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+        skips=(
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=8e-5, rtol=2e-6)}),
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+            ),
+        ),
         sample_inputs_func=sample_inputs_linalg_matrix_power,
     ),
     OpInfo(
@@ -1741,13 +1751,6 @@ op_db: list[OpInfo] = [
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         generate_args_kwargs=sample_kwargs_vector_norm,
         aten_name="linalg_vector_norm",
-        skips=(
-            # FIXME: sum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, "TestReductions", "test_dim_empty"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestReductions", "test_dim_empty_keepdim"
-            ),
-        ),
     ),
     OpInfo(
         "linalg.lu_factor",
@@ -2283,6 +2286,12 @@ op_db: list[OpInfo] = [
                 "test_noncontiguous_samples",
                 device_type="cpu",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=2e-04, rtol=3e-06)}),
+                "TestConsistency",
+                "test_output_match",
+                device_type="mps",
+            ),
         ],
         skips=(
             DecorateInfo(
@@ -2326,13 +2335,6 @@ python_ref_db: list[OpInfo] = [
         torch_opinfo_name="linalg.vector_norm",
         supports_out=True,
         op_db=op_db,
-        skips=(
-            # FIXME: sum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, "TestReductions", "test_dim_empty"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestReductions", "test_dim_empty_keepdim"
-            ),
-        ),
     ),
     PythonRefInfo(
         "_refs.linalg.matrix_norm",

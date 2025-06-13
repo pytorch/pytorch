@@ -15,6 +15,7 @@ It also registers existing benchmark tests via Python module imports.
 parser = argparse.ArgumentParser(
     description="Run microbenchmarks.",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    conflict_handler="resolve",
 )
 
 
@@ -148,6 +149,20 @@ def parse_args():
         "--device",
         help="Run tests on the provided architecture (cpu, cuda)",
         default="None",
+    )
+
+    parser.add_argument(
+        "--output-csv",
+        "--output_csv",
+        help="CSV file path to store the results",
+        default="benchmark_logs",
+    )
+
+    parser.add_argument(
+        "--output-json-for-dashboard",
+        "--output_json_for_dashboard",
+        help="Save results in JSON format for display on the OSS dashboard",
+        default="False",
     )
 
     args, _ = parser.parse_known_args()

@@ -273,7 +273,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
             shard parameter info; see :class:`_ShardParamInfo` for details.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo` for details.
-        _modules (Set[nn.Module]): Modules that contain some original parameter
+        _modules (set[nn.Module]): Modules that contain some original parameter
             that is flattened into the flat parameter.
 
         _shard_numel_padded (int): Numel padded for this rank's sharded flat
@@ -592,6 +592,9 @@ class FlatParamHandle:
             use_orig_params,  # type: ignore[arg-type]
         )
         self._use_unsharded_views(as_params=False)
+
+    def __repr__(self):
+        return f"FlatParamHandle(flat_param.fqns={self.flat_param._fqns})"
 
     def _init_setattr_fns(self):
         use_unsafe_setattr = os.environ.get(_FSDP_USE_UNSAFE_SETATTR, "") == "1"

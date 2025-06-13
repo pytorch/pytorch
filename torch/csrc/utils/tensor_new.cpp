@@ -417,7 +417,7 @@ Tensor internal_new_from_data(
             " or an UntypedStorage, but got ",
             storage_scalar_type);
         tensor = at::empty(
-            sizes,
+            {0}, // sizes. Storage will be set later.
             at::initialTensorOptions()
                 .dtype(
                     is_typed_storage ? storage_scalar_type
@@ -705,7 +705,7 @@ c10::TensorOptions typeIdWithDefault(
 
 } // namespace
 
-Tensor legacy_tensor_generic_ctor_new(
+static Tensor legacy_tensor_generic_ctor_new(
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,
     PyObject* args,
@@ -1157,6 +1157,7 @@ Tensor sparse_coo_tensor_ctor(
     ARG_PIN_MEMORY,
     ARG_REQUIRES_GRAD,
     ARG_CHECK_INVARIANTS,
+    ARG_IS_COALESCED,
     ARGS_COUNT
   };
   enum {
@@ -1218,7 +1219,8 @@ Tensor sparse_coo_tensor_ctor(
     return at::sparse_coo_tensor(
                indices,
                values,
-               values.options().layout(at::kSparse).pinned_memory(pin_memory))
+               values.options().layout(at::kSparse).pinned_memory(pin_memory),
+               r.toBoolOptional(ARG_IS_COALESCED))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 1) {
     bool pin_memory = r.toBool(ARG_PIN_MEMORY1);
@@ -1360,7 +1362,7 @@ void _validate_sparse_compressed_tensor_args(
 }
 
 template <c10::Layout required_layout>
-void _validate_sparse_compressed_tensor_args_template(
+static void _validate_sparse_compressed_tensor_args_template(
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,
     PyObject* args,

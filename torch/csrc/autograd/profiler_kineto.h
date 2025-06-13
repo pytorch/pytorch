@@ -47,6 +47,7 @@ struct TORCH_API KinetoEvent {
   const c10::ArrayRef<std::string> moduleHierarchy() const;
   int64_t debugHandle() const;
   std::string name() const;
+  std::string overload_name() const;
   c10::DeviceType deviceType() const;
   int deviceIndex() const;
   int64_t nBytes() const;
@@ -183,6 +184,10 @@ TORCH_API void prepareProfiler(
 TORCH_API void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities);
+
+TORCH_API void startMemoryProfile();
+TORCH_API void stopMemoryProfile();
+TORCH_API void exportMemoryProfile(const std::string& path);
 
 /**
  * When a C++ thread really has no control over how the profiler was enabled,

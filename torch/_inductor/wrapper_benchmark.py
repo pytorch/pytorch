@@ -1,3 +1,4 @@
+import argparse
 import dataclasses
 import datetime
 import tempfile
@@ -316,11 +317,16 @@ def perf_profile(
 
 
 def ncu_analyzer(
-    benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
+    benchmark_name: str,
+    benchmark_compiled_module_fn: BenchmarkCallableType,
+    args: argparse.Namespace,
 ) -> None:
     import inspect
     import os
     import subprocess
+
+    kernel_regex = args.ncu_kernel_regex
+    metrics = args.ncu_metrics
 
     module_file = inspect.getfile(benchmark_compiled_module_fn)
     module_dir = os.path.dirname(module_file)
@@ -345,17 +351,28 @@ def ncu_analyzer(
         "function",
         "--print-units",
         "base",
-        "--set",
-        "full",
         "--import-source",
         "yes",
         "--force-overwrite",
         "--export",
         ncu_output,
-        "python",
-        "-c",
-        python_cmd,
     ]
+
+    if kernel_regex:
+        ncu_cmd.extend(["--kernel-name", f"regex:{kernel_regex}"])
+
+    if metrics:
+        ncu_cmd.extend(["--metrics", metrics])
+    else:
+        ncu_cmd.extend(["--set", "full"])
+
+    ncu_cmd.extend(
+        [
+            "python",
+            "-c",
+            python_cmd,
+        ]
+    )
 
     try:
         subprocess.run(ncu_cmd, check=True)
@@ -380,6 +397,9 @@ def collect_memory_snapshot(
     print(f"The collect memory snapshot has been written to {snapshot_path}")
 
 
+# With AOTAutograd cache, we directly call the compiled module. So prevent
+# Dynamo from reentering
+@torch.compiler.disable  # type: ignore[misc]
 def compiled_module_main(
     benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
 ) -> None:
@@ -421,6 +441,25 @@ def compiled_module_main(
         action="store_true",
         help="Whether to run ncu analysis",
     )
+    parser.add_argument(
+        "--ncu-kernel-regex",
+        type=str,
+        default=None,
+        help=(
+            "Filter kernels profiled by NCU using a regex (e.g., '^triton_.*'). "
+            "Maps to '--kernel-name regex:<regex>'. "
+            "If None, NCU will profile all kernels."
+        ),
+    )
+    parser.add_argument(
+        "--ncu-metrics",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated list of NCU metrics to collect (e.g., 'dram__bytes.sum.per_second'). "
+            "If None, NCU will use '--set full'."
+        ),
+    )
     args = parser.parse_args()
 
     if args.benchmark_kernels:
@@ -449,4 +488,8 @@ def compiled_module_main(
                 benchmark_compiled_module_fn,
             )
         if args.ncu:
-            ncu_analyzer(benchmark_name, benchmark_compiled_module_fn)
+            ncu_analyzer(
+                benchmark_name,
+                benchmark_compiled_module_fn,
+                args=args,
+            )

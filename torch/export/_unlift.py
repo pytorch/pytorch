@@ -14,7 +14,9 @@ from torch._export.non_strict_utils import (
 )
 from torch._export.utils import _check_input_constraints_for_graph
 from torch.export.unflatten import _assign_attr, _AttrKind
+from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.traceback import NodeSource, NodeSourceAction
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
 from ._tree_utils import reorder_kwargs
@@ -26,20 +28,46 @@ from .exported_program import (
 )
 
 
+def eq_spec(self: pytree.TreeSpec, other: pytree.TreeSpec) -> bool:
+    """
+    Refinement of TreeSpec.__eq__ where, e.g., torch.Size(...) matches tuple(...).
+    See _pytree_subclasses_that_lose_info in proxy_tensor.py for more details.
+    """
+
+    def _normalize_type(t):
+        return str(_pytree_subclasses_that_lose_info.get(t, t))
+
+    def _match_normalized_structure(a, b):
+        if a is b:
+            return True
+        if _normalize_type(a.type) != _normalize_type(b.type):
+            return False
+        if a.context != b.context:
+            return False
+        if len(a.children_specs) != len(b.children_specs):
+            return False
+        return all(
+            _match_normalized_structure(a, b)
+            for a, b in zip(a.children_specs, b.children_specs)
+        )
+
+    return _match_normalized_structure(self, other)
+
+
 def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> list:
     reordered_kwargs = reorder_kwargs(kwargs, in_spec)
     flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
         (args, reordered_kwargs)
     )
 
-    if received_spec != in_spec:
+    if not eq_spec(received_spec, in_spec):
         raise ValueError(  # noqa: B904
             "Trying to flatten user inputs with exported input tree spec: \n"
             f"{in_spec}\n"
             "but actually got inputs with tree spec of: \n"
             f"{received_spec}.\n"
-            "Please check that the inputs have the same number of args "
-            "and kwargs as the ones you used when tracing."
+            "Please check that the inputs have the same number and type of "
+            "args and kwargs as the ones you used when tracing."
         )
 
     return flat_args_with_path
@@ -78,11 +106,23 @@ def _unlift_inputs_as_getattr(
 
         else:
             with gm.graph.inserting_after(input_node):
-                getattr_node = gm.graph.get_attr(lifted_node)
+                # It is fine to ignore this warning because
+                # it is guaranteed that we will populate this
+                # attr later.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    getattr_node = gm.graph.get_attr(lifted_node)
                 input_node.replace_all_uses_with(getattr_node)
                 metadata = input_node.meta
                 gm.graph.erase_node(input_node)
                 getattr_node.meta = metadata
+                getattr_node.meta["from_node"] = [
+                    NodeSource(
+                        input_node,
+                        "ExportedProgram.module().unlift()",
+                        [NodeSourceAction.CREATE, NodeSourceAction.REPLACE],
+                    )
+                ]
                 unlifted_name_to_node[lifted_node] = getattr_node
 
     return unlifted_name_to_node, input_name_to_node
@@ -140,6 +180,13 @@ def _insert_copy_for_mutations(
         gm.graph.erase_node(output_node)
         new_output.name = output_node.name
         new_output.meta.update(output_node.meta)
+        new_output.meta["from_node"] = [
+            NodeSource(
+                output_node,
+                "ExportedProgram.module().unlift()",
+                [NodeSourceAction.CREATE, NodeSourceAction.REPLACE],
+            )
+        ]
 
 
 def _get_codegen(
@@ -239,7 +286,7 @@ def _register_attrs_to_new_gm(
         )
 
     # Technically this doesn't account for the aliased multiple constants but
-    # it is ok because we have a seperate pass later in the stack that populates
+    # it is ok because we have a separate pass later in the stack that populates
     # the final gm.
     for name in chain(
         graph_signature.lifted_custom_objs, graph_signature.lifted_tensor_constants
@@ -413,6 +460,11 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         )
         for out_spec in ep.graph_signature.output_specs
     ]
+
+    for node in new_gm.graph.nodes:
+        node.meta["from_node"] = [
+            NodeSource(node, "ExportedProgram.module()", NodeSourceAction.CREATE)
+        ]
 
     new_gm = _unlift(
         new_gm,

@@ -58,7 +58,7 @@ test_failures = {
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu")
     ),
-    "test_randint_distribution_dynamic_shapes": TestFailure(("cuda", "xpu")),
+    "test_randint_distribution_dynamic_shapes": TestFailure(("xpu",)),
 }
 if not torch._inductor.config.cpp_wrapper:
     test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
@@ -367,18 +367,20 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_item_to_inputs_kernel_nobreak(self, device):
-        @torch.library.custom_op("test::foo", mutates_args=())
-        def foo(x: torch.Tensor, y: int) -> torch.Tensor:
+        @torch.library.custom_op(
+            "test_inductor_dynamic_shapes::nobreak_test", mutates_args=()
+        )
+        def nobreak_test(x: torch.Tensor, y: int) -> torch.Tensor:
             return x.clone()
 
-        @foo.register_fake
+        @nobreak_test.register_fake
         def _(x: torch.Tensor, y: int) -> torch.Tensor:
             return x.clone()
 
         @torch.compile(fullgraph=True)
         def f(x, r):
             y = x.item()
-            return torch.ops.test.foo(r, y)
+            return torch.ops.test_inductor_dynamic_shapes.nobreak_test(r, y)
 
         f(torch.tensor([3], device=device), torch.randn(10, device=device))
 
@@ -591,11 +593,13 @@ class TestInductorDynamic(TestCase):
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_multi_output_unbacked_custom_op(self, device):
-        @torch.library.custom_op("test::foo", mutates_args=())
-        def foo(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        @torch.library.custom_op(
+            "test_inductor_dynamic_shapes::unbacked_test", mutates_args=()
+        )
+        def unbacked_test(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             return torch.empty(2, device=x.device), torch.empty(3, device=x.device)
 
-        @foo.register_fake
+        @unbacked_test.register_fake
         def _(x: torch.Tensor) -> torch.Tensor:
             ctx = torch.library.get_ctx()
             u0 = ctx.new_dynamic_size()
@@ -603,10 +607,20 @@ class TestInductorDynamic(TestCase):
 
         @torch.compile(fullgraph=True)
         def f(x):
-            a, b = torch.ops.test.foo(x)
+            a, b = torch.ops.test_inductor_dynamic_shapes.unbacked_test(x)
             return a.sum() + b.sum()
 
         f(torch.tensor([3], device=device))
+
+    def test_meta_dynamic_shapes(self):
+        def foobar(x, y):
+            return x * 2, y * 3
+
+        foo_c = torch.compile(dynamic=True)(foobar)
+        t = torch.empty((1, 16, 128, 128), device="meta")
+        y = torch.rand([64])
+
+        self.assertEqual(foo_c(t, y), foobar(t, y))
 
     def test_floor(self):
         def fn(x):
@@ -1045,6 +1059,19 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
         self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_unspecialized_float_dynamic(self):
+        def fn(x, y):
+            return x * y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch.compile(fn, dynamic=True, backend=cnt)
+        x = torch.randn(5, 5)
+
+        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+        self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
+        self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_fallback_symint_specialization(self):
