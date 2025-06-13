@@ -1,6 +1,7 @@
 # Owner(s): ["module: PrivateUse1"]
 
 import os
+import tempfile
 import types
 import unittest
 
@@ -307,12 +308,11 @@ class TestOpenReg(TestCase):
         storage = torch.UntypedStorage(4, device=torch.device("openreg:0"))
         self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
 
-        # Need to support torch.storage.UntypedStorage first in prepare_for_sending.convert
-        # storage_cpu = torch.empty(4, 4).storage()
-        # storage_openreg = torch.serialization.default_restore_location(
-        #     storage_cpu, "openreg:0"
-        # )
-        # self.assertTrue(storage_openreg.is_openreg)  # type: ignore[misc]
+        storage_cpu = torch.empty(4, 4).storage()
+        storage_openreg = torch.serialization.default_restore_location(
+            storage_cpu, "openreg:0"
+        )
+        self.assertTrue(storage_openreg.is_openreg)  # type: ignore[misc]
 
         tensor = torch.empty(3, 3, device="openreg")
         self.assertEqual(torch._utils.get_tensor_metadata(tensor), {})  # type: ignore[misc]
@@ -320,18 +320,17 @@ class TestOpenReg(TestCase):
         torch._utils.set_tensor_metadata(tensor, metadata)  # type: ignore[misc]
         self.assertEqual(torch._utils.get_tensor_metadata(tensor), metadata)  # type: ignore[misc]
 
-        # Need to support torch.storage.UntypedStorage first in prepare_for_sending.convert
-        # with tempfile.TemporaryDirectory() as tmpdir:
-        #     path = os.path.join(tmpdir, "data.pt")
-        #     torch.save(tensor, path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "data.pt")
+            torch.save(tensor, path)
 
-        #     tensor_openreg = torch.load(path)
-        #     self.assertTrue(tensor_openreg.is_openreg)
-        #     self.assertEqual(torch._utils.get_tensor_metadata(tensor_openreg), metadata)  # type: ignore[misc]
+            tensor_openreg = torch.load(path)
+            self.assertTrue(tensor_openreg.is_openreg)
+            self.assertEqual(torch._utils.get_tensor_metadata(tensor_openreg), metadata)  # type: ignore[misc]
 
-        #     tensor_cpu = torch.load(path, map_location="cpu")
-        #     self.assertFalse(tensor_cpu.is_openreg)
-        #     self.assertEqual(torch._utils.get_tensor_metadata(tensor), {})  # type: ignore[misc]
+            tensor_cpu = torch.load(path, map_location="cpu")
+            self.assertFalse(tensor_cpu.is_openreg)
+            self.assertEqual(torch._utils.get_tensor_metadata(tensor_cpu), {})  # type: ignore[misc]
 
     # Opeartors
     def test_factory(self):
