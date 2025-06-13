@@ -199,7 +199,7 @@ banned_attrs = [
 ]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_prev_stack_var_name():
     from ..bytecode_transformation import unique_id
 
@@ -352,7 +352,7 @@ class TorchFunctionModeStackVariable(VariableTracker):
             cls.offset -= 1
 
     @staticmethod
-    def is_device_context(var) -> bool:
+    def is_device_context(var):
         return isinstance(var.value, DeviceContext) or var.value is None
 
     @classmethod
@@ -362,7 +362,7 @@ class TorchFunctionModeStackVariable(VariableTracker):
 
 class TorchFunctionModeVariable(GenericContextWrappingVariable):
     @staticmethod
-    def is_supported_torch_function_mode(ty) -> bool:
+    def is_supported_torch_function_mode(ty):
         # Supported in this sense means we can support graph breaks under the
         # context.
         # We are able to trace custom modes but if there are graph breaks under them
@@ -487,7 +487,7 @@ def _get_subclass_type_var(tx: "InstructionTranslator", var):
         return VariableTracker.build(tx, var.python_type(), source)
 
 
-def _is_attr_overidden(tx: "InstructionTranslator", var, name) -> bool:
+def _is_attr_overidden(tx: "InstructionTranslator", var, name):
     import torch
 
     overridden = False
@@ -569,7 +569,7 @@ def dispatch_torch_function(tx: "InstructionTranslator", fn, args, kwargs):
             return res
 
     unimplemented_v2(
-        gb_type="TypeError from user code",
+        gb_type="All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
         context=f"{fn=}, {args=}, {kwargs=}",
         explanation=f"All __torch_function__ overrides for for function {fn} returned NotImplemented",
         hints=[

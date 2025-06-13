@@ -79,7 +79,7 @@ def raise_unhashable(arg, tx=None):
     )
 
 
-def is_hashable(x) -> bool:
+def is_hashable(x):
     # NB - performing isinstance check on a LazVT realizes the VT, accidentally
     # inserting the guard. To avoid this, lazyVT `is_hashable` methods looks at
     # the underlying value without realizing the VT. Consider updating the
@@ -296,24 +296,14 @@ class ConstDictVariable(VariableTracker):
             for key, value in self.items.items()
         )
 
-    def is_new_item(self, value, other) -> bool:
+    def is_new_item(self, value, other):
         # compare the id of the realized values if both values are not lazy VTs
         if value and value.is_realized() and other.is_realized():
             return id(value.realize()) != id(other.realize())
         return id(value) != id(other)
 
-    def reconstruct(self, codegen: "PyCodegen"):
-        # instructions to load collections.OrderedDict if necessary
-        if self.user_cls is collections.OrderedDict:
-            codegen.add_push_null(
-                lambda: codegen.extend_output(
-                    [
-                        codegen.create_load_python_module(collections),
-                        codegen.create_load_attr("OrderedDict"),
-                    ]
-                )
-            )
-        # instructions to build the dict keys and values
+    def reconstruct_kvs_into_new_dict(self, codegen):
+        # Build a dictionary that contains the keys and values.
         num_args = 0
         for key, value in self.items.items():
             # We can safely call realize() here as it won't introduce any new guards
@@ -322,18 +312,23 @@ class ConstDictVariable(VariableTracker):
                 codegen(key.vt)
                 codegen(value)
                 num_args += 1
+        codegen.append_output(create_instruction("BUILD_MAP", arg=num_args))
 
-        # BUILD_MAP and calling collections.OrderedDict if necessary
+    def reconstruct(self, codegen: "PyCodegen"):
         if self.user_cls is collections.OrderedDict:
-            codegen.extend_output(
-                [
-                    create_instruction("BUILD_MAP", arg=num_args),
-                    *create_call_function(1, False),
-                ]
+            # emit `OrderedDict(constructed_dict)`
+            codegen.add_push_null(
+                lambda: codegen.extend_output(
+                    [
+                        codegen.create_load_python_module(collections),
+                        codegen.create_load_attr("OrderedDict"),
+                    ]
+                )
             )
-        # BUILD_MAP only if user_cls is dict
+            self.reconstruct_kvs_into_new_dict(codegen)
+            codegen.extend_output(create_call_function(1, False))
         else:
-            codegen.append_output(create_instruction("BUILD_MAP", arg=num_args))
+            self.reconstruct_kvs_into_new_dict(codegen)
 
     def getitem_const_raise_exception_if_absent(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -699,7 +694,7 @@ class DefaultDictVariable(ConstDictVariable):
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
 
-    def is_python_constant(self) -> bool:
+    def is_python_constant(self):
         # Return false for unsupported defaults. This ensures that a bad handler
         # path is not taken in BuiltinVariable for getitem.
         if self.default_factory not in [list, tuple, dict] and not self.items:
@@ -712,7 +707,7 @@ class DefaultDictVariable(ConstDictVariable):
         )
 
     @staticmethod
-    def is_supported_arg(arg) -> bool:
+    def is_supported_arg(arg):
         if isinstance(arg, variables.BuiltinVariable):
             return arg.fn in (list, tuple, dict, set)
         else:
@@ -741,6 +736,20 @@ class DefaultDictVariable(ConstDictVariable):
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen):
+        # emit `defaultdict(default_factory, new_dict)`
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(collections),
+                    codegen.create_load_attr("defaultdict"),
+                ]
+            )
+        )
+        codegen(self.default_factory)
+        self.reconstruct_kvs_into_new_dict(codegen)
+        codegen.extend_output(create_call_function(2, False))
 
 
 # TODO: Implementing this via inheritance rather than composition is a

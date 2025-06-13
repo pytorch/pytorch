@@ -72,7 +72,7 @@ class SDPAParamsVariable(VariableTracker):
             return wrap_fx_proxy(tx=tx, proxy=proxy)
 
     @staticmethod
-    def is_sdpa_params(value) -> bool:
+    def is_sdpa_params(value):
         from torch.backends.cuda import SDPAParams
 
         return value is SDPAParams

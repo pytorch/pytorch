@@ -261,7 +261,7 @@ def sig_for_ops(opname: str) -> list[str]:
             ]
         return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
     elif name in logic_ops:
-        return [f"def {opname}(self, other: Tensor | _bool) -> Tensor: ..."]
+        return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
     elif name in shift_ops:
         return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
     elif name in symmetric_comparison_ops:
@@ -1234,6 +1234,30 @@ def gen_pyi(
                         "dispatch_strides: _bool = False",
                         "dispatch_device: _bool = False",
                         "device_for_backend_keys: _device | None = None",
+                    ],
+                    "S",
+                )
+            ],
+            "_make_wrapper_subclass": [
+                "@staticmethod\n"
+                + defs(
+                    "_make_wrapper_subclass",
+                    [
+                        "cls: type[S]",
+                        "size: Sequence[_int | SymInt]",
+                        "strides: Sequence[_int | SymInt] | None = None",
+                        "storage_offset: _int | SymInt | None = None",
+                        "memory_format: torch.memory_format | None = None",
+                        "dtype: _dtype | None = None",
+                        "layout: _layout = strided",
+                        "device: _device | None = None",
+                        "pin_memory: _bool = False",
+                        "requires_grad: _bool = False",
+                        "dispatch_sizes_strides_policy: str | None = None",
+                        "dispatch_device: _bool = False",
+                        "dispatch_layout: _bool = False",
+                        "_extra_dispatch_keys: torch.DispatchKeySet | None = None",
+                        "storage_size: _int | SymInt | None = None",
                     ],
                     "S",
                 )

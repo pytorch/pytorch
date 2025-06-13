@@ -889,12 +889,12 @@ class NamedTupleVariable(TupleVariable):
         self.tuple_cls = tuple_cls
         self.dynamic_attributes = {}
 
-    def is_namedtuple(self) -> bool:
+    def is_namedtuple(self):
         return isinstance(getattr(self.tuple_cls, "_fields", None), tuple) and callable(
             getattr(self.tuple_cls, "_make", None)
         )
 
-    def is_structseq(self) -> bool:
+    def is_structseq(self):
         return not self.is_namedtuple()
 
     def fields(self):

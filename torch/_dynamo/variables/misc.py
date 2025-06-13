@@ -1169,7 +1169,9 @@ class GetAttrVariable(VariableTracker):
         elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
             if isinstance(self.obj, variables.UserDefinedObjectVariable):
                 # Bypass any custom setattr as we are updating the `__dict__` itself
-                return self.obj.method_setattr_standard(tx, args[0], args[1])
+                return self.obj.method_setattr_standard(
+                    tx, args[0], args[1], directly_update_dict=True
+                )
             if isinstance(self.obj, variables.NNModuleVariable):
                 # This matches how `setattr` is handled for NNModuleVariable
                 self.obj.convert_to_unspecialized(tx)
@@ -1214,7 +1216,7 @@ class MethodWrapperVariable(VariableTracker):
 
         return super().call_function(tx, args, kwargs)
 
-    def is_python_constant(self) -> bool:
+    def is_python_constant(self):
         return True
 
     def as_python_constant(self):
@@ -1233,7 +1235,7 @@ class GetSetDescriptorVariable(VariableTracker):
         else:
             return super().var_getattr(tx, name)
 
-    def is_python_constant(self) -> bool:
+    def is_python_constant(self):
         return True
 
     def as_python_constant(self):
@@ -1563,7 +1565,7 @@ class DebuggingVariable(VariableTracker):
         self.value = value
 
     @staticmethod
-    def is_reorderable_logging_function(obj) -> bool:
+    def is_reorderable_logging_function(obj):
         return (
             callable(obj)
             and isinstance(obj, (types.FunctionType, types.BuiltinFunctionType))
@@ -1794,7 +1796,7 @@ class RandomVariable(VariableTracker):
         return self.random
 
     @staticmethod
-    def is_supported_random_obj(val) -> bool:
+    def is_supported_random_obj(val):
         if type(val) is not random.Random:
             return False
         for name in itertools.chain(

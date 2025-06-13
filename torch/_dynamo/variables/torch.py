@@ -133,6 +133,7 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 
 constant_fold_functions_need_guards = [
     torch.cuda.current_device,
+    torch.cuda.is_initialized,
 ]
 
 constant_fold_functions = [
@@ -169,7 +170,7 @@ constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
     # Defined as a function to avoid circular import like torch.onnx
     return {
@@ -196,7 +197,7 @@ dispatch_key_set_functions = {
 }
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_overridable_functions():
     from itertools import chain
 
@@ -260,7 +261,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         return f"TorchCtxManagerClassVariable({self.value})"
 
     @staticmethod
-    def is_matching_cls(value) -> bool:
+    def is_matching_cls(value):
         # Unwrap if it's a functools.lru_cache wrapper
         value = unwrap_if_wrapper(value)
         # We can't do isinstance(value, type) check because some ctx managers
@@ -431,7 +432,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         return self.value
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _get_handlers():
         """Build a dict from function -> method to handle it so that we are O(1)
         in terms of the number of function with special handling."""
@@ -923,6 +924,29 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             elif isinstance(expr, ConstantVariable):
                 return expr
 
+        @register(torch.fx.experimental.symbolic_shapes.statically_known_false)
+        def handle_statically_known_false(self, tx: "InstructionTranslator", expr):
+            if isinstance(expr, SymNodeVariable):
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.statically_known_false(
+                        expr.sym_num
+                    )
+                )
+            elif isinstance(expr, ConstantVariable):
+                return expr
+
+        @register(torch.fx.experimental.symbolic_shapes.guard_scalar)
+        def guard_scalar(self, tx: "InstructionTranslator", expr):
+            if isinstance(expr, SymNodeVariable):
+                val = expr.sym_num
+            elif isinstance(expr, ConstantVariable):
+                val = expr.value
+            else:
+                raise torch._dynamo.exc.Unsupported("branch not supported")
+            return variables.ConstantVariable.create(
+                torch.fx.experimental.symbolic_shapes.guard_scalar(val)
+            )
+
         @register(torch.fx.experimental.symbolic_shapes.statically_known_true)
         def handle_statically_known_true(self, tx: "InstructionTranslator", expr):
             if isinstance(expr, SymNodeVariable):
@@ -933,6 +957,28 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             elif isinstance(expr, ConstantVariable):
                 return expr
+
+        @register(torch.fx.experimental.symbolic_shapes.sym_and)
+        def handle_sym_and(self, tx: "InstructionTranslator", *terms):
+            if all(isinstance(x, SymNodeVariable) for x in terms):
+                return SymNodeVariable.create(
+                    tx,
+                    torch.fx.experimental.symbolic_shapes.sym_and(
+                        *(x.as_proxy() for x in terms)
+                    ),
+                    sym_num=None,
+                )
+
+        @register(torch.fx.experimental.symbolic_shapes.sym_or)
+        def handle_sym_or(self, tx: "InstructionTranslator", *terms):
+            if all(isinstance(x, SymNodeVariable) for x in terms):
+                return SymNodeVariable.create(
+                    tx,
+                    torch.fx.experimental.symbolic_shapes.sym_or(
+                        *(x.as_proxy() for x in terms)
+                    ),
+                    sym_num=None,
+                )
 
         @register(torch.fx.experimental.symbolic_shapes.has_static_value)
         def handle_has_static_value(self, tx: "InstructionTranslator", expr):
@@ -1509,7 +1555,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
     def call_tensor_method(self, tx, args, kwargs):
         return args[0].call_method(tx, self.get_function().__name__, args[1:], kwargs)
 
-    def is_tensor_method(self) -> bool:
+    def is_tensor_method(self):
         from ..trace_rules import get_tensor_method
 
         return (
@@ -1540,7 +1586,7 @@ class DispatchKeySetVariable(BaseTorchVariable):
         install_guard(source.make_guard(GuardBuilder.DISPATCH_KEY_SET_MATCH))
         return cls(value, source=source)
 
-    def is_constant_fold_method(self, name) -> bool:
+    def is_constant_fold_method(self, name):
         return name in ["has"]
 
     def call_method(
