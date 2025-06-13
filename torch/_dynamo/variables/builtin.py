@@ -169,7 +169,7 @@ class BuiltinVariable(VariableTracker):
         return cls(value, source=source)
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _constant_fold_functions():
         fns = {
             abs,
@@ -239,7 +239,7 @@ class BuiltinVariable(VariableTracker):
         return self.fn in self._constant_fold_functions()
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _fx_graph_functions():
         fns = {
             operator.abs,
@@ -285,7 +285,7 @@ class BuiltinVariable(VariableTracker):
         return fns
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _binops() -> dict[
         Callable[..., object], tuple[list[str], Callable[..., object]]
     ]:
@@ -324,7 +324,7 @@ class BuiltinVariable(VariableTracker):
         return fns
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _binop_handlers():
         # Multiple dispatch mechanism defining custom binop behavior for certain type
         # combinations. Handlers are attempted in order, and will be used if the type checks
@@ -1965,6 +1965,10 @@ class BuiltinVariable(VariableTracker):
 
         name = name_var.as_python_constant()
 
+        # See NOTE [Tensor "grad" and "_grad" attr]
+        if isinstance(obj, TensorVariable) and name == "_grad":
+            name = "grad"
+
         if tx.output.side_effects.is_attribute_mutation(obj):
             if isinstance(obj, variables.UnspecializedNNModuleVariable):
                 if (
@@ -2199,11 +2203,12 @@ class BuiltinVariable(VariableTracker):
                     # Step 4 - replace all reference to the current object with the new one
                     return out
                 elif name in ("_grad", "grad"):
+                    # NOTE: [Tensor "grad" and "_grad" attr]
                     # _grad and grad share the same setter/getter, see
                     # THPVariable_properties, and here we make sure setting one
-                    # enables reading `val` from the other.
-                    tx.output.side_effects.store_attr(obj, "grad", val)
-                    tx.output.side_effects.store_attr(obj, "_grad", val)
+                    # enables reading `val` from the other, by routing all
+                    # read/write to `grad`.
+                    name = "grad"
                 elif is_tensor_getset_descriptor(name):
                     # Attribute like `torch.Tensor.real` has special setters we
                     # don't yet support; it's not as simple adding an entry to

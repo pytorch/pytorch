@@ -176,7 +176,7 @@ def get_kernel_bin_format(device: str) -> str:
         return ""
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_global_cache_path_impl(global_cache_dir: str) -> Optional[Path]:
     return (
         Path(os.path.join(global_cache_dir, CacheBase.get_system()["hash"]))
@@ -187,7 +187,7 @@ def get_global_cache_path_impl(global_cache_dir: str) -> Optional[Path]:
 
 class CacheBase:
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def get_system() -> dict[str, Any]:
         try:
             from triton.compiler.compiler import triton_key
@@ -226,7 +226,7 @@ class CacheBase:
 
     @staticmethod
     @clear_on_fresh_inductor_cache
-    @functools.lru_cache(None)
+    @functools.cache
     def get_local_cache_path() -> Path:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
 
@@ -280,7 +280,7 @@ class LocalCache(CacheBase):
 
 
 class PersistentCache(CacheBase):
-    @functools.lru_cache(None)  # noqa: B019
+    @functools.cache  # noqa: B019
     def get_global_cache(self) -> dict[str, Any]:
         global_cache_path = self.get_global_cache_path()
         if global_cache_path is None or not global_cache_path.is_file():
@@ -882,7 +882,7 @@ class FxGraphHashDetails:
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
-        self.inductor_config = config.save_config_portable()
+        self.inductor_config = config.save_config_portable(ignore_private_configs=False)
         # Custom post grad passes should provide an ID to hash.
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
             config.post_grad_custom_pre_pass
@@ -890,6 +890,36 @@ class FxGraphHashDetails:
         self.post_grad_custom_post_pass = self._get_custom_pass_detail(
             config.post_grad_custom_post_pass
         )
+        self._pre_fusion_custom_pass = self._get_custom_pass_detail_unsafe(
+            config._pre_fusion_custom_pass
+        )
+        self._fuse_ddp_communication_passes = self._get_custom_pass_detail_unsafe(
+            config._fuse_ddp_communication_passes
+        )
+
+    # This is mainly added to handle these two inductor configs, which are (unfortunately)
+    # sometimes cache safe:
+    # - _pre_fusion_custom_pass
+    # - _fuse_ddp_communication_passes
+    # Their types can be found in `torch/_inductor/config.py`, but:
+    # - if they are string names, we can cache them safely (one is by default)
+    # - if any of them are set to custom callables, we will need to cache miss
+    # Future work is for someone to find any places where these functions are used
+    # and force them to be of type CustomGraphPass, so we can guarantee serialization.
+    def _get_custom_pass_detail_unsafe(self, custom_pass: Any) -> Optional[Any]:
+        if not custom_pass:
+            return None
+        if isinstance(custom_pass, list):
+            return [self._get_custom_pass_detail_unsafe(x) for x in custom_pass]
+        if isinstance(custom_pass, str):
+            return custom_pass
+        if isinstance(custom_pass, CustomGraphPass):
+            return custom_pass.uuid()
+        if callable(custom_pass):
+            # Returning None is safe here because we raise an explicit bypass error
+            # later if we detect these passes are set to callables
+            return None
+        raise AssertionError(f"unknown config type: {str(type(custom_pass))}")
 
     def _get_custom_pass_detail(
         self, custom_pass: CustomGraphPassType
@@ -1367,6 +1397,14 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
+        # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
+        # and ensure they are not passing us raw callables
+        if config._pre_fusion_custom_pass is not None:
+            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
+                raise BypassFxGraphCache("Unsupported _pre_fusion_custom_pass")
+        for p in config._fuse_ddp_communication_passes:
+            if callable(p) and not isinstance(p, CustomGraphPass):
+                raise BypassFxGraphCache("Unsupported _fuse_ddp_communication_pass")
 
         # Freezing can embed constants that wouldn't be static across runs.
         if has_frozen_params(gm) and not torch._utils_internal.justknobs_check(
@@ -1529,7 +1567,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             pass
 
 
-@functools.lru_cache(None)
+@functools.cache
 def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
     """Returns the path where the AOT Inductor compiled kernels are stored."""
     if path.endswith(".so"):
@@ -2245,7 +2283,7 @@ _HEADER_DIR = os.path.join(default_cache_dir(), "precompiled_headers")
 _HEADER_LOCK_DIR = os.path.join(_HEADER_DIR, "locks")
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _precompile_header(
     header: str,
     hashable_cmd_line: str,
@@ -2931,7 +2969,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         return glue_code
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def config_hash(cls) -> str:
         command_gen = CppBuilder(
             name="O",
@@ -2975,7 +3013,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         raise RuntimeError(errmsg)
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def find_libautoschedule(name: str) -> str:
         sofile = f"libautoschedule_{name.lower()}.so"
         if "HALIDE_LIB" in os.environ:
@@ -2988,7 +3026,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         return HalideCodeCache._search_for_file(sofile, errmsg)
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def find_header(name: str) -> str:
         if "HALIDE_INCLUDE" in os.environ:
             path = os.path.join(os.environ["HALIDE_INCLUDE"], name)
@@ -3262,7 +3300,7 @@ class PyCodeCache:
         cls.modules_no_attr.clear()
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def stack_frames_for_code(
         cls, path: str, lineno: int
     ) -> Optional[list[dict[str, Any]]]:
