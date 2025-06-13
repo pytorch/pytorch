@@ -455,9 +455,9 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
                 # Modify gradient using .data (Dangerous: Breaks autograd tracking!)
                 modified_grad = grad_output.clone()
-                modified_grad.data[
-                    input_tensor.data < 0
-                ] = 0  # Zero-out gradients for negative inputs
+                modified_grad.data[input_tensor.data < 0] = (
+                    0  # Zero-out gradients for negative inputs
+                )
 
                 return modified_grad * 3
 

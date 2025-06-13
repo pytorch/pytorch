@@ -348,9 +348,9 @@ class TestFlexDecoding(InductorTestCase):
         block_mask: Optional[BlockMask] = None,
         device="cuda",
     ):
-        assert (
-            score_mod is not None or block_mask is not None
-        ), "Must provide score_mod or block_mask"
+        assert score_mod is not None or block_mask is not None, (
+            "Must provide score_mod or block_mask"
+        )
         assert Q_H % KV_H == 0
         if device == "cpu" and dtype is torch.float16:
             dtype = torch.float32

@@ -95,6 +95,7 @@ def _run_on_profiler_stop():
 @dataclass
 class _ProfilerStats:
     "Profiler timing and stats used by developers to catch issues/regressions"
+
     profiling_window_duration_sec: float = 0
     number_of_events: int = 0
     profiler_prepare_call_duration_us: int = 0
@@ -251,9 +252,9 @@ class profile:
         self.custom_trace_id_callback = custom_trace_id_callback
         self.trace_id = ""
         if not self.use_cpu:
-            assert (
-                use_kineto
-            ), "Device-only events supported only with Kineto (use_kineto=True)"
+            assert use_kineto, (
+                "Device-only events supported only with Kineto (use_kineto=True)"
+            )
 
         if self.use_device is not None:
             VALID_DEVICE_OPTIONS = ["cuda", "xpu", "mtia", "hpu"]
@@ -290,35 +291,35 @@ class profile:
             else:
                 self.kineto_activities.add(ProfilerActivity.CUDA)
         elif self.use_device == "xpu":
-            assert (
-                use_kineto and ProfilerActivity.XPU in _supported_activities()
-            ), "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
+            assert use_kineto and ProfilerActivity.XPU in _supported_activities(), (
+                "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
+            )
             self.kineto_activities.add(ProfilerActivity.XPU)
         elif self.use_device == "mtia":
-            assert (
-                use_kineto and ProfilerActivity.MTIA in _supported_activities()
-            ), "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
+            assert use_kineto and ProfilerActivity.MTIA in _supported_activities(), (
+                "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
+            )
             self.kineto_activities.add(ProfilerActivity.MTIA)
         elif self.use_device == "hpu":
-            assert (
-                use_kineto and ProfilerActivity.HPU in _supported_activities()
-            ), "Legacy HPU profiling is not supported. Requires use_kineto=True on HPU devices."
+            assert use_kineto and ProfilerActivity.HPU in _supported_activities(), (
+                "Legacy HPU profiling is not supported. Requires use_kineto=True on HPU devices."
+            )
             self.kineto_activities.add(ProfilerActivity.HPU)
         elif self.use_device is not None and self.use_device != "privateuseone":
             if (
                 not use_kineto
                 or ProfilerActivity.PrivateUse1 not in _supported_activities()
             ):
-                assert (
-                    self.use_cpu
-                ), "Legacy custombackend profiling requires use_cpu=True"
+                assert self.use_cpu, (
+                    "Legacy custombackend profiling requires use_cpu=True"
+                )
                 self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.PrivateUse1)
 
-        assert (
-            len(self.kineto_activities) > 0
-        ), "No activities specified for the profiler"
+        assert len(self.kineto_activities) > 0, (
+            "No activities specified for the profiler"
+        )
 
     def default_trace_id(self):
         # Generate a UUID
@@ -738,11 +739,12 @@ class record_function(_ContextDecorator):
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
-        ...     y = x ** 2
-        ...     with torch.autograd.profiler.record_function("label-z"): # label the block
-        ...         z = y ** 3
+        ...     y = x**2
+        ...     with torch.autograd.profiler.record_function(
+        ...         "label-z"
+        ...     ):  # label the block
+        ...         z = y**3
         ...     y.backward()
-        ...
         >>> # xdoctest: +IGNORE_WANT
         >>> # NOTE: some columns were removed for brevity
         >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))

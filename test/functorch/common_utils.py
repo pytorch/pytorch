@@ -523,15 +523,15 @@ def decorateForModules(decorator, module_classes, device_type=None, dtypes=None)
         dtypes=dtypes,
     ):
         name_parts = fn.__qualname__.split(".")
-        assert (
-            len(name_parts) == 2
-        ), "Decorator only applies to a test function of a test class"
+        assert len(name_parts) == 2, (
+            "Decorator only applies to a test function of a test class"
+        )
         test_case_name, base_test_name = name_parts
         for module_cls in module_classes:
             matching_module_infos = [m for m in module_db if m.module_cls == module_cls]
-            assert (
-                len(matching_module_infos) == 1
-            ), f"Couldn't find single ModuleInfo for {module_cls}"
+            assert len(matching_module_infos) == 1, (
+                f"Couldn't find single ModuleInfo for {module_cls}"
+            )
             module_info = matching_module_infos[0]
             decorators = list(module_info.decorators)
             new_decorator = DecorateInfo(
