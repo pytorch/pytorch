@@ -64,6 +64,16 @@ CACHE_ALIGN #define
 #undef CHECK_WITH_FMA
 #endif
 
+template <typename scalar_t>
+struct OpMathType {
+  using type = scalar_t;
+};
+template <>
+struct OpMathType<c10::Half> {
+  using type = float;
+};
+
+
 template<typename T>
 using Complex = typename c10::complex<T>;
 
@@ -991,6 +1001,10 @@ void test_binary(
     CACHE_ALIGN VT vals0[el_count];
     CACHE_ALIGN VT vals1[el_count];
     CACHE_ALIGN VT expected[el_count];
+    [[maybe_unused]] CACHE_ALIGN VT expectedWithLeftScalar[el_count];
+    [[maybe_unused]] CACHE_ALIGN VT expectedWithRightScalar[el_count];
+    [[maybe_unused]] VT scalar0;
+    [[maybe_unused]] VT scalar1;
     bool bitwise = testCase.isBitwise();
     UVT default_start = std::is_floating_point_v<UVT> ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
@@ -1000,6 +1014,7 @@ void test_binary(
     int trialCount = getTrialCount<UVT>(test_trials, domains_size);
     TestSeed seed = testCase.getTestSeed();
     uint64_t changeSeedBy = 0;
+    constexpr bool kCanUseScalar = std::is_invocable_v<Op2, VT, T> && std::is_invocable_v<Op2, T, VT>;
     for (const CheckWithinDomains<UVT>& dmn : testCase.getDomains()) {
         size_t dmn_argc = dmn.ArgsDomain.size();
         UVT start0 = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
@@ -1012,9 +1027,23 @@ void test_binary(
           for (const auto k : c10::irange(el_count)) {
             vals0[k] = generator0.get();
             vals1[k] = generator1.get();
+            if (k == 0) {
+              scalar0 = vals0[0];
+              scalar1 = vals1[0];
+            }
             call_filter(filter, vals0[k], vals1[k]);
+            if constexpr (kCanUseScalar) {
+              call_filter(filter, vals0[k], scalar1);
+              call_filter(filter, scalar0, vals1[k]);
+            }
+          }
+          for (const auto k : c10::irange(el_count)) {
             // map operator
             expected[k] = expectedFunction(vals0[k], vals1[k]);
+            if constexpr (kCanUseScalar) {
+              expectedWithLeftScalar[k] = expectedFunction(scalar0, vals1[k]);
+              expectedWithRightScalar[k] = expectedFunction(vals0[k], scalar1);
+            }
           }
           // test
           auto input0 = vec_type::loadu(vals0);
@@ -1024,8 +1053,27 @@ void test_binary(
           AssertVectorized<vec_type> vecAssert(
               testNameInfo, seed, vec_expected, actual, input0, input1);
           if (vecAssert.check(
-                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))
+                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) {
             return;
+          }
+          if constexpr (kCanUseScalar) {
+            auto actualWithLeftScalar = actualFunction(scalar0, input1);
+            auto actualWithRightScalar = actualFunction(input0, scalar1);
+            auto vec_expectedWithLeftScalar = vec_type::loadu(expectedWithLeftScalar);
+            auto vec_expectedWithRightScalar = vec_type::loadu(expectedWithRightScalar);
+            AssertVectorized<vec_type> vecAssertWithLeftScalar(
+                testNameInfo, seed, vec_expectedWithLeftScalar, actualWithLeftScalar, scalar0, input1);
+            if (vecAssertWithLeftScalar.check(
+                    bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) {
+              return;
+            }
+            AssertVectorized<vec_type> vecAssertWithRightScalar(
+                testNameInfo, seed, vec_expectedWithRightScalar, actualWithRightScalar, input0, scalar1);
+            if (vecAssertWithRightScalar.check(
+                    bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) {
+              return;
+            }
+          }
         } // trial
         changeSeedBy += 1;
     }
@@ -1040,6 +1088,68 @@ void test_binary(
             if (vecAssert.check()) return;
         }
     }
+}
+
+template<typename Op1, typename Op2, typename scalar_t, std::enable_if_t<std::is_same_v<scalar_t, c10::Float8_e4m3fn> || std::is_same_v<scalar_t, c10::Float8_e5m2>, int> =0>
+void test_binary_fp8(
+    Op1 ScalarFunction,
+    Op2 VecFunction,
+    bool is_bit_wise = false) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+    for (const auto i : c10::irange(10)) {
+        float f_val0 = static_cast<float>(i + 0.2);
+        float f_val1 = static_cast<float>(i + 0.3);
+        scalar_t f8_0(f_val0);
+        scalar_t f8_1(f_val1);
+        at::vec::Vectorized<scalar_t> f8_vec_0(f8_0);
+        at::vec::Vectorized<scalar_t> f8_vec_1(f8_1);
+        float ref_res_scalar = ScalarFunction(f8_0, f8_1);
+        __m512 res_fp32_512;
+        at::vec::Vectorized<scalar_t> res = VecFunction(f8_vec_0, f8_vec_1);
+
+        if constexpr (std::is_same_v<scalar_t, c10::Float8_e4m3fn>) {
+            at::vec::cvtfp8e4m3_fp32(_mm512_castsi512_si128(res), res_fp32_512);
+            float res_scalar = _mm512_cvtss_f32(res_fp32_512);
+            if (is_bit_wise) {
+                EXPECT_EQ(static_cast<bool>(ref_res_scalar), static_cast<bool>(res_scalar))
+                    << "Test failed for input0: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_0.x)
+                    << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_1.x) << "\n";
+            } else {
+                EXPECT_EQ(ref_res_scalar, res_scalar)
+                    << "Test failed for input0: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_0.x)
+                    << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_1.x) << "\n";
+            }
+        } else {
+            at::vec::cvtfp8e5m2_fp32(_mm512_castsi512_si128(res), res_fp32_512);
+            float res_scalar = _mm512_cvtss_f32(res_fp32_512);
+            if (is_bit_wise) {
+                EXPECT_EQ(static_cast<bool>(ref_res_scalar), static_cast<bool>(res_scalar))
+                    << "Test failed for input0: " << c10::detail::fp8e5m2_to_fp32_value(f8_0.x)
+                    << " input1: " << c10::detail::fp8e5m2_to_fp32_value(f8_1.x) << "\n";
+            } else {
+                EXPECT_EQ(ref_res_scalar, res_scalar)
+                    << "Test failed for input0: " << c10::detail::fp8e5m2_to_fp32_value(f8_0.x)
+                    << " input1: " << c10::detail::fp8e5m2_to_fp32_value(f8_1.x) << "\n";
+            }
+        }
+      }
+    #endif
+}
+
+template<typename Op1, typename Op2>
+void test_binary_fp8_e4m3(
+    Op1 ScalarFunction,
+    Op2 VecFunction,
+    bool is_bit_wise = false) {
+    test_binary_fp8<Op1, Op2, c10::Float8_e4m3fn>(ScalarFunction, VecFunction, is_bit_wise);
+}
+
+template<typename Op1, typename Op2>
+void test_binary_fp8_e5m2(
+    Op1 ScalarFunction,
+    Op2 VecFunction,
+    bool is_bit_wise = false) {
+    test_binary_fp8<Op1, Op2, c10::Float8_e5m2>(ScalarFunction, VecFunction, is_bit_wise);
 }
 
 template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
@@ -1279,15 +1389,17 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
     PreventFma noFma;
-    T ab = a * b;
-    return noFma.add(ab, c);
+    using op_math_t = typename OpMathType<T>::type;
+    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
+    return static_cast<T>(noFma.add(ab, op_math_t(c)));
 }
 
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
     PreventFma noFma;
-    T ab = a * b;
-    return noFma.sub(ab, c);
+    using op_math_t = typename OpMathType<T>::type;
+    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
+    return static_cast<T>(noFma.sub(ab, op_math_t(c)));
 }
 
 template <typename T>

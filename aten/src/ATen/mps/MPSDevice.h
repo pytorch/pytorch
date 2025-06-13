@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #pragma once
+#include <ATen/Device.h>
 #include <c10/core/Allocator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -69,5 +70,9 @@ class TORCH_API MPSDevice {
 TORCH_API bool is_available();
 TORCH_API bool is_macos_13_or_newer(MacOSVersion version);
 TORCH_API at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
+
+inline Device getDeviceFromPtr(void* ptr) {
+  return {c10::DeviceType::MPS, 0};
+}
 
 } // namespace at::mps

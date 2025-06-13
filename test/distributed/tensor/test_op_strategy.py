@@ -3,16 +3,10 @@
 from itertools import chain
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.placement_types import (
-    DTensorSpec,
-    Partial,
-    Replicate,
-    Shard,
-    TensorMeta,
-)
+from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
 from torch.distributed.tensor._collective_utils import redistribute_cost
-from torch.distributed.tensor._op_schema import OpSchema, OpStrategy, PlacementStrategy
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._op_schema import OpSchema, OpSpec, OpStrategy
 from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
@@ -190,9 +184,9 @@ class TestCostModel(DTensorOpTestBase):
         op_schema = OpSchema(
             torch.ops.aten.addmm.default,
             (
-                OpStrategy([PlacementStrategy(shard0_spec)]),
-                OpStrategy([PlacementStrategy(partial_spec)]),
-                OpStrategy([PlacementStrategy(shard1_spec)]),
+                OpStrategy([OpSpec(shard0_spec)]),
+                OpStrategy([OpSpec(partial_spec)]),
+                OpStrategy([OpSpec(shard1_spec)]),
             ),
             {},
         )
@@ -267,8 +261,8 @@ class TestCostModel(DTensorOpTestBase):
             op_schema = OpSchema(
                 torch.ops.aten.mm.default,
                 (
-                    OpStrategy([PlacementStrategy(lhs_spec)]),
-                    OpStrategy([PlacementStrategy(rhs_spec)]),
+                    OpStrategy([OpSpec(lhs_spec)]),
+                    OpStrategy([OpSpec(rhs_spec)]),
                 ),
                 {},
             )
@@ -314,8 +308,8 @@ class TestCostModel(DTensorOpTestBase):
             op_schema = OpSchema(
                 torch.ops.aten.bmm.default,
                 (
-                    OpStrategy([PlacementStrategy(lhs_spec)]),
-                    OpStrategy([PlacementStrategy(rhs_spec)]),
+                    OpStrategy([OpSpec(lhs_spec)]),
+                    OpStrategy([OpSpec(rhs_spec)]),
                 ),
                 {},
             )
