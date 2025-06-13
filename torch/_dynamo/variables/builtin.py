@@ -39,6 +39,7 @@ from typing import Callable, TYPE_CHECKING, Union
 import torch
 from torch import sym_float, sym_int
 from torch._subclasses.meta_utils import is_sparse_any
+from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
@@ -1302,6 +1303,20 @@ class BuiltinVariable(VariableTracker):
 
     call_int = _call_int_float
     call_float = _call_int_float
+
+    def call_bool(self, tx: "InstructionTranslator", arg):
+        # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.
+        # TODO handle more cases and merge this with this with `generic_jump`.
+
+        if isinstance(arg, SymNodeVariable):
+            if isinstance(arg.sym_num, torch.SymBool):
+                res = arg.evaluate_expr()
+            else:
+                # Emulate `nb_bool` of int/float objects
+                # - https://github.com/python/cpython/blob/3.12/Objects/longobject.c#L4940-L4944
+                # - https://github.com/python/cpython/blob/3.12/Objects/floatobject.c#L878-L882
+                res = guard_bool(arg.sym_num != 0)
+            return ConstantVariable.create(res)
 
     def call_str(self, tx: "InstructionTranslator", arg):
         # Handle `str` on a user defined function or object
