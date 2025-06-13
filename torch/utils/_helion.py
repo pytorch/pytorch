@@ -3,7 +3,7 @@ import functools
 from torch.utils._triton import has_triton
 
 
-@functools.lru_cache(None)
+@functools.cache
 def has_helion_package() -> bool:
     try:
         import helion  # type: ignore[import-untyped, import-not-found]  # noqa: F401
@@ -12,6 +12,6 @@ def has_helion_package() -> bool:
     return True
 
 
-@functools.lru_cache(None)
+@functools.cache
 def has_helion() -> bool:
     return has_helion_package() and has_triton()
