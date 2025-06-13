@@ -13,6 +13,7 @@
 #include <c10/util/BFloat16.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/stable/library.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
