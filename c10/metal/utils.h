@@ -286,7 +286,7 @@ template <
         bool> = true>
 inline common_dtype<T, U> remainder(const T x, const U y) {
   auto rc = x % y;
-  return (x ^ y) >= 0 ? rc : rc + y;
+  return rc == 0 || (x ^ y) > 0 ? rc : rc + y;
 }
 
 // Based on algorithm described in
