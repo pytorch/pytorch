@@ -557,7 +557,7 @@ debug_fusion: bool = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion: bool = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 loop_ordering_after_fusion: bool = (
-    os.environ.get("TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "0") == "1"
+    os.environ.get("TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "1") == "1"
 )
 
 # If fusing two nodes only save less then score_fusion_memory_threshold memory,
