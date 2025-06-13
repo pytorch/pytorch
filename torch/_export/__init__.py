@@ -16,7 +16,7 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from functools import lru_cache
 
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import torch
@@ -47,6 +47,7 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
 from .utils import _materialize_cpp_cia_ops
+
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ def aot_compile(
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
     same_signature: bool = True,
-) -> Union[list[str], str]:
+) -> Union[list[Any], str]:
     """
     Note: this function is not stable yet
 
