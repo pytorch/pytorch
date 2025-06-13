@@ -6,6 +6,7 @@ If you are adding a new entry/functionality, please, add it to the
 `torch/ao/quantization/qconfig.py`, while adding an import statement
 here.
 """
+
 from torch.ao.quantization.qconfig import (
     _add_module_to_qconfig_obs_ctr,
     _assert_valid_qconfig,

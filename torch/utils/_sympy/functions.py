@@ -98,7 +98,7 @@ def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
 
 
 def _keep_float(
-    f: Callable[[Unpack[_Ts]], _T]
+    f: Callable[[Unpack[_Ts]], _T],
 ) -> Callable[[Unpack[_Ts]], Union[_T, sympy.Float]]:
     @functools.wraps(f)
     def inner(*args: Unpack[_Ts]) -> Union[_T, sympy.Float]:
@@ -920,10 +920,12 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
 
     _eval_is_algebraic = lambda s: _torf(i.is_algebraic for i in s.args)  # noqa: E731
     _eval_is_antihermitian = lambda s: _torf(  # noqa: E731
-        i.is_antihermitian for i in s.args  # noqa: E731
+        i.is_antihermitian
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_commutative = lambda s: _torf(  # noqa: E731
-        i.is_commutative for i in s.args  # noqa: E731
+        i.is_commutative
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_complex = lambda s: _torf(i.is_complex for i in s.args)  # noqa: E731
     _eval_is_composite = lambda s: _torf(i.is_composite for i in s.args)  # noqa: E731
@@ -937,10 +939,12 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     _eval_is_negative = lambda s: _torf(i.is_negative for i in s.args)  # noqa: E731
     _eval_is_noninteger = lambda s: _torf(i.is_noninteger for i in s.args)  # noqa: E731
     _eval_is_nonnegative = lambda s: _torf(  # noqa: E731
-        i.is_nonnegative for i in s.args  # noqa: E731
+        i.is_nonnegative
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_nonpositive = lambda s: _torf(  # noqa: E731
-        i.is_nonpositive for i in s.args  # noqa: E731
+        i.is_nonpositive
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_nonzero = lambda s: _torf(i.is_nonzero for i in s.args)  # noqa: E731
     _eval_is_odd = lambda s: _torf(i.is_odd for i in s.args)  # noqa: E731
@@ -950,10 +954,12 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     _eval_is_rational = lambda s: _torf(i.is_rational for i in s.args)  # noqa: E731
     _eval_is_real = lambda s: _torf(i.is_real for i in s.args)  # noqa: E731
     _eval_is_extended_real = lambda s: _torf(  # noqa: E731
-        i.is_extended_real for i in s.args  # noqa: E731
+        i.is_extended_real
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_transcendental = lambda s: _torf(  # noqa: E731
-        i.is_transcendental for i in s.args  # noqa: E731
+        i.is_transcendental
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_zero = lambda s: _torf(i.is_zero for i in s.args)  # noqa: E731
 
