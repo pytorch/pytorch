@@ -8,6 +8,7 @@ be provided about cache hit for a specific compiled model. Users can load the co
 from a different process or host.
 """
 
+import abc
 import contextlib
 import dataclasses
 import functools
@@ -357,13 +358,20 @@ class EagerCacheArtifact(PrecompileCacheArtifact[Any]):
         return pickle.loads(self.content)
 
 
-class DynamoStore:
+_Backends = dict[_BackendId, PrecompileCacheArtifact[Any]]
+
+
+class DynamoStore(abc.ABC):
     """
     A DynamoStore tracks active CompilePackages, and provides methods to store and retrieve them.
+
+    This is an abstract base class for different storage implementations.
     """
 
     def record_package(self, package: CompilePackage) -> None:
-        """Records a package to PrecompileContext, so that it can be serialized later."""
+        """
+        Records a package to PrecompileContext, so that it can be serialized later.
+        """
         cache_entry = package.cache_entry()
         pickled_result = pickle.dumps(cache_entry)
         PrecompileContext.record_artifact(
@@ -371,15 +379,36 @@ class DynamoStore:
         )
 
     def record_eager_backend(self, backend_id: _BackendId, backend: Any) -> None:
-        """Records eager fx graphs to PrecompileContext for testing purposes."""
+        """
+        Records eager fx graphs to PrecompileContext for testing purposes.
+        """
         pickled_result = pickle.dumps(backend)
         PrecompileContext.record_artifact(
             EagerCacheArtifact.type(), key=backend_id, content=pickled_result
         )
 
-    def save_package(self, package: CompilePackage, path: str) -> None:
-        """Saves a package to a given path. Grabs backends from PrecompileContext."""
-        backend_content = {}
+    @abc.abstractmethod
+    def write(
+        self,
+        dynamo: _DynamoCacheEntry,
+        backends: _Backends,
+        path: str,
+    ) -> None:
+        """
+        Abstract method to write dynamo cache entry and backends to storage.
+
+        Args:
+            dynamo: The dynamo cache entry to write
+            backends: Dictionary of backend content to write
+            path: Path or key to identify where to write the data
+        """
+        ...
+
+    def save_package(self, package: CompilePackage, key: str) -> None:
+        """
+        Saves a package to a given path. Grabs backends from PrecompileContext.
+        """
+        backend_content: _Backends = {}
         cache_entry = package.cache_entry()
         for backend_id in cache_entry.backend_ids:
             serialized_backend = PrecompileContext.serialize_artifact_by_key(backend_id)
@@ -387,27 +416,124 @@ class DynamoStore:
                 raise RuntimeError(
                     f"Backend {backend_id} is not found in the given backends"
                 )
+            assert isinstance(serialized_backend, PrecompileCacheArtifact)
             backend_content[backend_id] = serialized_backend
+
+        self.write(cache_entry, backend_content, key)
+
+    @abc.abstractmethod
+    def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
+        """
+        Abstract method to read dynamo cache entry and backends from storage.
+
+        Args:
+            path: Path or key to identify where to read the data from
+
+        Returns:
+            A tuple containing (dynamo_cache_entry, backend_content)
+        """
+        ...
+
+    def load_package(
+        self, fn: Any, key: str
+    ) -> tuple[CompilePackage, dict[_BackendId, Any]]:
+        """
+        Loads a package from a given path and returns it plus a list of deserialized backends
+        """
+        cache_entry, backend_content = self.read(key)
+
+        for backend_id, backend in backend_content.items():
+            backend_content[backend_id] = backend.after_deserialization()
+
+        package = CompilePackage(fn, cache_entry)
+        return package, backend_content
+
+
+class InMemoryDynamoStore(DynamoStore):
+    """
+    A DynamoStore implementation that keeps state about CompilePackages in memory.
+    """
+
+    def __init__(self) -> None:
+        self.packages: dict[str, tuple[_DynamoCacheEntry, _Backends]] = {}
+
+    def write(
+        self,
+        dynamo: _DynamoCacheEntry,
+        backends: _Backends,
+        path: str,
+    ) -> None:
+        """
+        Store the dynamo cache entry and backends in memory instead of writing to disk.
+        """
+        self.packages[path] = (dynamo, backends)
+
+    def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
+        """
+        Read dynamo cache entry and backends from memory.
+        """
+        if path not in self.packages:
+            raise RuntimeError(f"No package found with key {path}")
+
+        return self.packages[path]
+
+
+class DiskDynamoStore(DynamoStore):
+    """
+    A DynamoStore implementation that keeps state about CompilePackages on disk.
+    """
+
+    def __init__(self, path_prefix: str = ""):
+        """
+        Initialize a DiskDynamoStore with a path prefix.
+
+        Args:
+            path_prefix: Prefix directory for where to put CompilePackages on disk
+        """
+        self.path_prefix = path_prefix
+
+    def write(
+        self,
+        dynamo: _DynamoCacheEntry,
+        backends: _Backends,
+        path: str,
+    ) -> None:
+        """
+        Write dynamo cache entry and backends to disk.
+        """
         try:
             with open(os.path.join(path, "dynamo"), "wb") as dynamo_path:
-                pickle.dump(cache_entry, dynamo_path)
+                pickle.dump(dynamo, dynamo_path)
             with open(os.path.join(path, "backends"), "wb") as backend_path:
-                pickle.dump(backend_content, backend_path)
+                pickle.dump(backends, backend_path)
         except Exception as e:
             raise RuntimeError(f"Failed to save package to {path}: {e}") from e
 
-    def load_package(
-        self, fn: Any, path: str
-    ) -> tuple[CompilePackage, dict[_BackendId, Any]]:
-        """Loads a package from a given path and returns it plus a list of deserialized backends"""
+    def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
+        """
+        Read dynamo cache entry and backends from disk.
+        """
         try:
             with open(os.path.join(path, "dynamo"), "rb") as dynamo_path:
                 cache_entry = pickle.load(dynamo_path)
             with open(os.path.join(path, "backends"), "rb") as backend_path:
                 backend_content = pickle.load(backend_path)
+            return cache_entry, backend_content
         except Exception as e:
             raise RuntimeError(f"Failed to load package from path {path}: {e}") from e
-        for backend_id, backend in backend_content.items():
-            backend_content[backend_id] = backend.after_deserialization()
-        package = CompilePackage(fn, cache_entry)
-        return package, backend_content
+
+    def save_package(self, package: CompilePackage, key: str) -> None:
+        """
+        Save a package to disk using the path_prefix + key as the file path.
+        """
+        full_path = os.path.join(self.path_prefix, key) if self.path_prefix else key
+        super().save_package(package, full_path)
+
+    def load_package(
+        self, fn: Any, key: str
+    ) -> tuple[CompilePackage, dict[_BackendId, Any]]:
+        """
+        Load a package from disk using the path_prefix + key as the file path.
+        """
+        full_path = os.path.join(self.path_prefix, key) if self.path_prefix else key
+        return super().load_package(fn, full_path)
