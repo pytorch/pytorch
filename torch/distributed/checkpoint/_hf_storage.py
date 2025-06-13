@@ -12,7 +12,7 @@ from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, Fsspec
 from torch.distributed.checkpoint.filesystem import SerializationFormat
 from torch.distributed.checkpoint.hf_utils import (
     _metadata_fn,
-    _StorageInfo,
+    _HFStorageInfo,
     CUSTOM_METADATA_KEY,
     DATA_KEY,
     DATA_OFFSETS_KEY,
@@ -229,7 +229,7 @@ class _HuggingFaceStorageReader(FsspecReader):
         per_file: dict[str, list[ReadItem]] = {}
 
         for read_item in plan.items:
-            item_md: _StorageInfo = self.storage_data[read_item.storage_index]
+            item_md: _HFStorageInfo = self.storage_data[read_item.storage_index]
             file_name = item_md.relative_path
             per_file.setdefault(file_name, []).append(read_item)
 
@@ -243,7 +243,7 @@ class _HuggingFaceStorageReader(FsspecReader):
                 }
 
                 for req in reqs:
-                    item_md: _StorageInfo = self.storage_data[req.storage_index]
+                    item_md: _HFStorageInfo = self.storage_data[req.storage_index]
 
                     tensor_bytes = deserialized_dict[req.dest_index.fqn][DATA_KEY]
 
@@ -270,7 +270,7 @@ class _HuggingFaceStorageReader(FsspecReader):
 
     def read_metadata(self) -> Metadata:
         state_dict_metadata: dict[str, TensorStorageMetadata] = {}
-        storage_data: dict[MetadataIndex, _StorageInfo] = {}
+        storage_data: dict[MetadataIndex, _HFStorageInfo] = {}
 
         safetensors_files = []
         for file in self.fs.ls(self.path):
@@ -336,11 +336,11 @@ class _HuggingFaceStorageReader(FsspecReader):
                         metadata_index = MetadataIndex(
                             fqn=key, offset=[0] * len(val[SHAPE_KEY])
                         )
-                    storage_data[metadata_index] = _StorageInfo(
+                    storage_data[metadata_index] = _HFStorageInfo(
                         relative_path=safetensor_file,
                         offset=val[DATA_OFFSETS_KEY][0],
                         length=val[DATA_OFFSETS_KEY][1] - val[DATA_OFFSETS_KEY][0],
-                        shape=val[SHAPE_KEY],
+                        shape=torch.Size(val[SHAPE_KEY]),
                         dtype=_get_dtype(val[DTYPE_KEY]),
                     )
 
