@@ -91,7 +91,7 @@ T = TypeVar("T")
 
 # defines here before import torch._dynamo is for avoiding circular import
 # when get_gpu_type is imported from dynamo
-@functools.lru_cache(None)
+@functools.cache
 def get_gpu_type() -> str:
     avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
     assert len(avail_gpus) <= 1
@@ -288,6 +288,8 @@ def do_bench_using_profiling(
     for _ in range(n_warmup):
         fn()
 
+    torch.cuda.synchronize()
+
     with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CUDA,
@@ -338,7 +340,7 @@ def do_bench_using_profiling(
     return res
 
 
-@functools.lru_cache(None)
+@functools.cache
 def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
@@ -1384,7 +1386,7 @@ class DelayReplaceLine(DeferredLineBase):
         return DelayReplaceLine(self.key, self.value_fn, line)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
@@ -1504,7 +1506,7 @@ def use_triton_template(
 
 
 def use_triton_tma_template(*matrices: IRNode) -> bool:
-    from torch.utils._triton import has_triton_tma_device
+    from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
     from .virtualized import V
 
@@ -1532,6 +1534,10 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
 
         inner_bytes = inner_dim * dtype.itemsize
         return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
+
+    if has_triton_stable_tma_api() and config.cpp_wrapper:
+        # TODO(dberard) remove this when we get AOTI support for new TMA APIs (#155047)
+        return False
 
     return (
         config.triton.enable_persistent_tma_matmul
@@ -1587,7 +1593,7 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     from torch._inductor.virtualized import V
 
     return (
-        V.graph.sizevars.is_expr_static_and_true(
+        V.graph.sizevars.statically_known_true(
             sympy.And(
                 sympy.Ge(k, decompose_k_threshold * m),
                 sympy.Ge(k, decompose_k_threshold * n),
@@ -1599,7 +1605,7 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
     # If k is a sympy expression, we can't do any splitting
     if isinstance(k, sympy.Expr) and not k.is_number:
@@ -1652,12 +1658,12 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
         return best_splits[:k_splits_limit]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _rocm_native_device_arch_name(device: str) -> str:
     return torch.cuda.get_device_properties(device).gcnArchName
 
 
-@functools.lru_cache(None)
+@functools.cache
 def try_import_ck_lib() -> tuple[
     Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
 ]:
@@ -1743,6 +1749,16 @@ def use_ck_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
     )
 
 
+def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
+    from .virtualized import V
+
+    return (
+        _use_autotune_backend("CKTILE")
+        and use_ck_template(layout)
+        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+    )
+
+
 def use_ck_conv_template(layout: Layout) -> bool:
     return _use_conv_autotune_backend("CK") and use_ck_template(layout)
 
@@ -1794,9 +1810,9 @@ def use_cpp_gemm_template(
         use_4x2_dim=is_woq_int4,
     )
 
-    # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
+
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
 
@@ -2096,7 +2112,7 @@ def parallel_num_threads() -> int:
     return threads
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_backend_num_stages() -> int:
     from .runtime.triton_helpers import get_backend_options
 
@@ -2104,7 +2120,7 @@ def get_backend_num_stages() -> int:
     return options.get("num_stages", 2 if torch.version.hip else 3)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_device_tflops(dtype: torch.dtype) -> int:
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
@@ -2132,7 +2148,7 @@ def get_device_tflops(dtype: torch.dtype) -> int:
             return get_max_simd_tflops(torch.float32)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_gpu_dram_gbps() -> int:
     from triton.testing import get_dram_gbps
 
@@ -2741,7 +2757,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
 
     # Allow for unhinted e as long as we can still statically prove
     # (e.g., via ValueRanges) that it is still in bounds
-    if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
+    if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
     # Otherwise, the hint MUST exist and be in range
     return has_hint(e) and size_hint(e) <= int_max
@@ -2852,7 +2868,7 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor) -> bool:
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def boolean_ops() -> tuple[str, ...]:
     return (
         "isinf",
@@ -3041,7 +3057,7 @@ class TritonAttrsDescriptorVersion(enum.Enum):
     V4_DICT = 4  # a raw dict
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
     if importlib.util.find_spec("triton") is None:
         return TritonAttrsDescriptorVersion.V0_NO_TRITON
@@ -3110,3 +3126,14 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
         isinstance(wrapper, SubgraphPythonWrapperCodegen)
         and wrapper.partition_signatures is not None
     )
+
+
+def dtype_from_size(size: int) -> torch.dtype:
+    from .virtualized import V
+
+    if V.graph.sizevars.statically_known_lt(
+        size, 2**31
+    ) and V.graph.sizevars.statically_known_geq(size, -(2**31)):
+        return torch.int32
+    else:
+        return torch.int64
