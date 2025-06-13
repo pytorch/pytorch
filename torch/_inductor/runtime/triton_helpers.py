@@ -76,7 +76,7 @@ def remainder_integer(a, b):
 
 
 @triton.jit
-def is_floating(x):
+def is_floating(x) -> bool:
     return promote_to_tensor(x).dtype.is_floating()
 
 

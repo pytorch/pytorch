@@ -125,7 +125,7 @@ class AllocationTreeNode:
         """Called after all allocations have been made"""
         return self
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
         return False
 
 
@@ -205,7 +205,7 @@ class Empty(AllocationTreeNode):
     def get_symbolic_size(self):
         return 0
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
         return True
 
 
@@ -305,7 +305,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
             return 0  # type: ignore[return-value]
         return sympy.Max(*[x.get_symbolic_size() for x in self.allocations])
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
         return len(self.allocations) == 1 and self.allocations[0].is_empty()
 
     def finalize(self, pool, offset):

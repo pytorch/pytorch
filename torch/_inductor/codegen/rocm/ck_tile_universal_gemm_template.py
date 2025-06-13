@@ -19,7 +19,7 @@ from ...utils import IndentedBuffer
 log = logging.getLogger(__name__)
 
 
-def is_static_int(number):
+def is_static_int(number) -> bool:
     import sympy
 
     return isinstance(number, (int, sympy.Integer))

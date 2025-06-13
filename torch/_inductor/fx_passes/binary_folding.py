@@ -278,7 +278,7 @@ def binary_folding_init():
 
         return True
 
-    def _is_foldable_pattern(match):
+    def _is_foldable_pattern(match) -> bool:
         binary_node = match.output_node()
         has_reshape = False
         if binary_node.args[0].target in _computation_ops:
