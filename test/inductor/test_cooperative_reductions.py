@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
-
+from torch.testing import assert_close
 
 class TestingHeuristics(InductorChoices):
     def __init__(self, *, cooperative: bool, persistent: bool, cfg: dict[str, int]):
@@ -109,12 +109,12 @@ class CooperativeReductionTests(TestCase):
 
         # Apply assert_close with fixed tolerances for tensor comparisons
         if isinstance(result, torch.Tensor) and isinstance(expected, torch.Tensor):
-            self.assert_close(result, expected, rtol=RTOL, atol=ATOL)
+            assert_close(result, expected, rtol=RTOL, atol=ATOL)
         elif isinstance(result, (tuple, list)) and isinstance(expected, (tuple, list)):
             # Iterate through elements for comparison
             for r_item, e_item in zip(result, expected):
                 if isinstance(r_item, torch.Tensor) and isinstance(e_item, torch.Tensor):
-                    self.assert_close(r_item, e_item, rtol=RTOL, atol=ATOL)
+                    assert_close(r_item, e_item, rtol=RTOL, atol=ATOL)
                 else:
                     # Fallback to assertEqual for non-tensor elements (e.g., bool, int)
                     self.assertEqual(r_item, e_item)
