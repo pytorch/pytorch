@@ -103,7 +103,11 @@ def higher_order_scan(
     reverse: bool = False,
 ) -> Sequence[ir.Value]:
     subgraph_inputs = [
-        ir.Value(name=f"{inp.name}_{body_func.name}", shape=inp.shape, type=ir.TensorType(inp.dtype))
+        ir.Value(
+            name=f"{inp.name}_{body_func.name}",
+            shape=inp.shape,
+            type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
+        )
         for inp in [*scan_inits, *scan_inputs]
     ]
     # The one and only node in the Scan subgraph that calls the body_func
