@@ -167,10 +167,30 @@ file(GLOB native_utils_cpp "native/utils/*.cpp")
 # flash_attention sources
 file(GLOB flash_attention_cuda_kernels_cu ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
 # Flash attention C++ sources
-file(GLOB flash_attention_cuda_cpp
-    "${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp"
-    "native/transformers/cuda/flash_attn/flash_api.cpp"
+file(GLOB flash_attention_cuda_cpp ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp)
+
+message(STATUS "flash_attention sources: ${flash_attention_cuda_kernels_cu}")
+
+# Create a separate library for flash_attention that can be built independently
+add_library(flash_attention SHARED ${flash_attention_cuda_kernels_cu} ${flash_attention_cuda_cpp})
+
+target_include_directories(flash_attention PUBLIC
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/include>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/cutlass/include>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src>
+  $<INSTALL_INTERFACE:include>  # or wherever you plan to install headers
 )
+
+target_compile_definitions(flash_attention PRIVATE
+  FLASH_NAMESPACE=pytorch_flash
+  FLASHATTENTION_DISABLE_ALIBI    # Disable alibi attention as it's not currently used
+  FLASHATTENTION_DISABLE_SOFTCAP
+  UNFUSE_FMA                      # Addressing issue #121558
+  MAYBE_FORCE_FORCE_SCCACHE_MISS=2
+)
+
+set_target_properties(flash_attention PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # flash_attention hip sources
 file(GLOB flash_attention_hip_hip "native/transformers/hip/flash_attn/*.hip")
@@ -203,11 +223,8 @@ file(GLOB mem_eff_attention_cuda_kernels_cu "native/transformers/cuda/mem_eff_at
 file(GLOB mem_eff_attention_cuda_cpp "native/transformers/cuda/mem_eff_attention/*.cpp")
 
 if(USE_FLASH_ATTENTION)
-  list(APPEND native_transformers_cuda_cu ${flash_attention_cuda_cu})
-  list(APPEND native_transformers_cuda_cu ${flash_attention_cuda_kernels_cu})
-  list(APPEND native_transformers_cuda_cpp ${flash_attention_cuda_cpp})
-  list(APPEND FLASH_ATTENTION_CUDA_SOURCES ${flash_attention_cuda_cu} ${flash_attention_cuda_kernels_cu})
-  list(APPEND ATen_ATTENTION_KERNEL_SRCS ${flash_attention_cuda_kernels_cu})
+  file(GLOB tempthing_cat "native/transformers/cuda/flash_attn/flash_api.cpp")
+  list(APPEND native_transformers_cuda_cpp ${tempthing_cat})
 
   list(APPEND native_transformers_hip_hip ${flash_attention_hip_hip})
   list(APPEND native_transformers_hip_hip ${flash_attention_hip_aot_hip})
@@ -772,6 +789,5 @@ set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_XPU_DEPENDENCY_LIBS ${ATen_XPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS} PARENT_SCOPE)
-set(FLASH_ATTENTION_CUDA_SOURCES ${FLASH_ATTENTION_CUDA_SOURCES} PARENT_SCOPE)
 set(MEM_EFF_ATTENTION_CUDA_SOURCES ${MEM_EFF_ATTENTION_CUDA_SOURCES} PARENT_SCOPE)
 set(ATen_ATTENTION_KERNEL_SRCS ${ATen_ATTENTION_KERNEL_SRCS} PARENT_SCOPE)
