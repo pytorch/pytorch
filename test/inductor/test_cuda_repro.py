@@ -2128,13 +2128,14 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         """
         https://github.com/pytorch/pytorch/issues/155688
         Smallest repro for max-autotune not working with no_grad
-        Before adding __int__ function to torch.utils._sympy.functions.Identity, 
+        Before adding __int__ function to torch.utils._sympy.functions.Identity,
         running the max_autotune mode would raise an error:
         TypeError: Expected a number but got Identity
         """
+
         class ToyModel(torch.nn.Module):
             def __init__(self):
-                super(ToyModel, self).__init__()
+                super().__init__()
 
                 self.linear_layers = nn.ModuleList(
                     [
@@ -2154,7 +2155,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
                 return x
 
-
         model = ToyModel().to("cuda")
         input_tensor = torch.randn((2, 4)).to("cuda")
 
@@ -2166,8 +2166,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             max_autotune_output = compile_max_autotune(input_tensor)
 
         self.assertEqual(default_output, max_autotune_output)
-
-    
 
 
 if __name__ == "__main__":

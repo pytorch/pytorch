@@ -37,6 +37,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch._inductor.bounds import ValueRangeAnalysis
+from torch._inductor.index_propagation import TypedExpr
 
 
 UNARY_OPS = [
@@ -988,6 +989,11 @@ class TestIdentity(TestCase):
         self.assertRaises(TypeError, int, tup_I)
         self.assertRaises(TypeError, float, tup_I)
 
+class TestTypedExpr(TestCase):
+    def test_typed_expr(self):
+        I = Identity(1)
+        typed_I = TypedExpr(I, torch.int32)
+        self.assertEqual(typed_I.expr, 1)
 
 
 instantiate_parametrized_tests(TestValueRanges)
