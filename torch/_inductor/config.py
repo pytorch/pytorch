@@ -1359,10 +1359,9 @@ class aot_inductor:
     embed_kernel_binary: bool = False
 
     # Generate kernel files that support multiple archs
-    # Default it will emit multi arch kernels as asm files, e.g. PTX for CUDA.
+    # For CUDA, this means generating fatbin files for kernels, and the fatbin files
+    # contains PTX and SASS for the current architecture.
     emit_multi_arch_kernel: bool = False
-    # In addition to emit asm files, also emit binary files for current arch
-    emit_current_arch_binary: bool = False
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
@@ -1667,6 +1666,8 @@ _save_config_ignore: list[str] = [
     "aot_inductor.dump_aoti_minifier",
     "post_grad_custom_pre_pass",
     "post_grad_custom_post_pass",
+    "_fuse_ddp_communication_passes",
+    "_pre_fusion_custom_pass",
 ]
 
 _cache_config_ignore_prefix: list[str] = [
@@ -1680,6 +1681,8 @@ _cache_config_ignore_prefix: list[str] = [
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
+    "_fuse_ddp_communication_passes",
+    "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
 ]
