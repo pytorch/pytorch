@@ -7126,12 +7126,17 @@ class FallbackKernel(ExternKernelAlloc):
                 # Using unflatten_args is a bit of a hack, but all the complex arguments
                 # we care about are in self.constant_args, and calling unflatten_args
                 # puts them in the correct order without triggering codegen.
+                args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+                # Append kwarg values, in the correct order, to args.
+                # ordered_kwargs_for_cpp_kernel is guaranteed to be set, since this is
+                # an OpOverload kernel.
+                args.extend(
+                    self.get_kwargs_value(k, **kwargs)
+                    for k in self.ordered_kwargs_for_cpp_kernel
+                )
                 return any(
                     isinstance(v, complex) and is_number(a.real_type)
-                    for v, a in zip(
-                        self.unflatten_args(self.inputs, self.constant_args),
-                        kernel._schema.arguments,
-                    )
+                    for v, a in zip(args, kernel._schema.arguments)
                 )
 
             self.use_runtime_dispatch = (
