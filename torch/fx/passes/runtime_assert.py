@@ -89,6 +89,8 @@ def insert_deferred_runtime_asserts(
     information in the ShapeEnv, the ShapeEnv contains min/max bounds for each symbol,
     and we delete all previous calls, adding bound checks at the end of this pass.
     """
+    if not torch._dynamo.config.do_not_emit_runtime_asserts:
+        return
 
     # Import sympy locally
     import sympy
