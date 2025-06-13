@@ -5201,7 +5201,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: rsqrt_out
+    CPU, CUDA, MPS, MTIA: rsqrt_out
   tags: pointwise
 
 - func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
@@ -5272,7 +5272,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA: silu_out
+    CPU, CUDA, MTIA: silu_out
     MPS: silu_out_mps
   tags: pointwise
 
@@ -5385,7 +5385,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: sin_out
+    CPU, CUDA, MPS, MTIA: sin_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sin_sparse_csr_out
     SparseCPU, SparseCUDA: sin_sparse_out
   tags: pointwise
@@ -5883,7 +5883,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: sqrt_out
+    CPU, CUDA, MPS, MTIA: sqrt_out
     SparseCPU, SparseCUDA: sqrt_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sqrt_sparse_csr_out
   tags: pointwise
