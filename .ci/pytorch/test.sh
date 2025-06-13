@@ -1733,7 +1733,8 @@ elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "check_unimplemented_calls" ]]; then
   # Get the changed files from the PR that match torch/_dynamo/**/*.py pattern
-  CHANGED_FILES=$(git diff --name-only "$GITHUB_BASE_SHA" "$GITHUB_SHA" | grep -E 'torch/_dynamo/.*\.py$' | tr '\n' ' ')
+  CHANGED_FILES=$(git diff --name-only origin/main HEAD | grep -E 'torch/_dynamo/.*\.py$' | tr '\n' ' ')
+  ##CHANGED_FILES=$(git diff --name-only "$GITHUB_BASE_SHA" "$GITHUB_SHA" | grep -E 'torch/_dynamo/.*\.py$' | tr '\n' ' ')
 
   if [[ -z "$CHANGED_FILES" ]]; then
     echo "No Python files in torch/_dynamo/ directory were modified."
@@ -1753,8 +1754,6 @@ elif [[ "${TEST_CONFIG}" == "check_unimplemented_calls" ]]; then
   fi
 
   echo "All unimplemented_v2 calls match the registry."
-fi
-
 
 else
   install_torchvision
