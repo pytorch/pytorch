@@ -96,7 +96,7 @@ class IterableDataset(Dataset[_T_co], Iterable[_T_co]):
         >>> class MyIterableDataset(torch.utils.data.IterableDataset):
         ...     def __init__(self, start, end):
         ...         super(MyIterableDataset).__init__()
-        ...         assert end > start, "this example code only works with end >= start"
+        ...         assert end > start, "this example only works with end >= start"
         ...         self.start = start
         ...         self.end = end
         ...
@@ -138,7 +138,7 @@ class IterableDataset(Dataset[_T_co], Iterable[_T_co]):
         >>> class MyIterableDataset(torch.utils.data.IterableDataset):
         ...     def __init__(self, start, end):
         ...         super(MyIterableDataset).__init__()
-        ...         assert end > start, "this example code only works with end >= start"
+        ...         assert end > start, "this example only works with end >= start"
         ...         self.start = start
         ...         self.end = end
         ...
