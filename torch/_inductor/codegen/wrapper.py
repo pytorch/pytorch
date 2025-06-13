@@ -450,10 +450,13 @@ class ExitDeviceContextManagerLine(WrapperLine):
 class ExternKernelAllocLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.ExternKernelAlloc
+    args: Optional[list[Any]] = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         node = self.node
-        args = [*node.codegen_args(), *node.codegen_kwargs()]
+        args = (
+            self.args if self.args else [*node.codegen_args(), *node.codegen_kwargs()]
+        )
         self.wrapper._generate_extern_kernel_alloc_helper(self.node, args)
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -915,7 +918,7 @@ class PythonWrapperCodegen(CodeGen):
             self.write_get_raw_stream
         )
 
-        @functools.lru_cache(None)
+        @functools.cache
         def add_import_once(line: str) -> None:
             self.imports.writeline(line)
             if config.triton.autotune_at_compile_time:
@@ -1302,8 +1305,10 @@ class PythonWrapperCodegen(CodeGen):
     def generate_end(self, result: IndentedBuffer) -> None:
         return
 
-    def generate_fallback_kernel(self, node: ir.FallbackKernel):
-        self.writeline(ExternKernelAllocLine(self, node))
+    def generate_fallback_kernel(
+        self, node: ir.FallbackKernel, args: Optional[list[Any]] = None
+    ):
+        self.writeline(ExternKernelAllocLine(self, node, args))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
@@ -1625,12 +1630,12 @@ class PythonWrapperCodegen(CodeGen):
     ):
         code = self.prefix
 
-        @functools.lru_cache(None)
+        @functools.cache
         def sizeof(name):
             code.writeline(f"{name}_size = {name}.size()")
             return f"{name}_size"
 
-        @functools.lru_cache(None)
+        @functools.cache
         def strideof(name):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
