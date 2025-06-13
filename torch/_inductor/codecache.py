@@ -905,6 +905,12 @@ class FxGraphHashDetails:
             config._fuse_ddp_communication_passes
         )
 
+        # Register indcutor backends and custom passes and get their UUIDs.
+        init_backend_registration()
+        self.custom_backend_passes = tuple(
+            map(self._get_custom_pass_detail, custom_backend_passes.values())
+        )
+
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
     # - _pre_fusion_custom_pass
@@ -928,12 +934,6 @@ class FxGraphHashDetails:
             # later if we detect these passes are set to callables
             return None
         raise AssertionError(f"unknown config type: {str(type(custom_pass))}")
-
-        # Register indcutor backends and custom passes and get their UUIDs.
-        init_backend_registration()
-        self.custom_backend_passes = tuple(
-            map(self._get_custom_pass_detail, custom_backend_passes.values())
-        )
 
     def _get_custom_pass_detail(
         self, custom_pass: Union[CustomGraphPassType, CustomGraphModulePass]
