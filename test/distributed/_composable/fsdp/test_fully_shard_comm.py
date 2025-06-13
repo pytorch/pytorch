@@ -1046,8 +1046,9 @@ class TestFullyShardPrefetch(FSDPTest):
             FSDPParamGroup.post_backward, events
         )
         inp = torch.randn((2, 16), device=device_type.type)
-        with patch_unshard(unshard_with_record), patch_post_backward(
-            post_backward_with_record
+        with (
+            patch_unshard(unshard_with_record),
+            patch_post_backward(post_backward_with_record),
         ):
             for _ in range(3):
                 loss = model(inp)

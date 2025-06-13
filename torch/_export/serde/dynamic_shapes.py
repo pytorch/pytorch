@@ -149,7 +149,7 @@ def _dump_dynamic_shapes(
         return out
 
     def _track_dim_from_dims(
-        val: Union[None, int, _DimHint, Dim]
+        val: Union[None, int, _DimHint, Dim],
     ) -> Union[None, int, str]:
         """
         Tracks dims, ranges, derived dims from the standardized dynamic_shapes spec.
@@ -295,7 +295,7 @@ def _load_dynamic_shapes(
             dim_cache[_expr] = ddim  # cache derived dims
 
     def deserialize_shape(
-        val: Union[None, int, str]
+        val: Union[None, int, str],
     ) -> Union[None, int, Dim, _DimHint]:
         if val is None or isinstance(val, int):
             return val

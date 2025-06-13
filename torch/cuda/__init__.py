@@ -1747,7 +1747,7 @@ def _compile_kernel(
         >>> a = torch.randn(1024, device="cuda")
         >>> b = torch.randn(1024, device="cuda")
         >>> c = torch.empty_like(a)
-        >>> add_kernel(grid=(4,1,1), block=(256,1,1), args=[a, b, c, a.numel()])
+        >>> add_kernel(grid=(4, 1, 1), block=(256, 1, 1), args=[a, b, c, a.numel()])
     """
     import ctypes
 

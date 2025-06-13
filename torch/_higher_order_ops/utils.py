@@ -323,20 +323,22 @@ def analyze_potential_input_alias_or_mutation(name, aliases, input_mutations):
 
 def _has_potential_branch_input_mutation(gm, inputs, pre_dispatch=False):
     (
-        _,
-        _,
-        _,
-    ), inp_mutation = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
+        (_, _, _),
+        inp_mutation,
+    ) = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
 
     return len(inp_mutation) > 0
 
 
 def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     (
-        inp_inp_alias_map,
-        inp_out_alias_map,
-        out_out_alias_map,
-    ), inp_mutation = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
+        (
+            inp_inp_alias_map,
+            inp_out_alias_map,
+            out_out_alias_map,
+        ),
+        inp_mutation,
+    ) = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
     return (
         any(
             (
@@ -392,9 +394,7 @@ def _check_alias_and_mutation(graph_module, inputs_fake, name, pre_dispatch):
         graph_module, inputs_fake, pre_dispatch=pre_dispatch
     )
     if aliases:
-        raise RuntimeError(
-            f"{name} might be aliasing the input or the output!"
-        )  # noqa: F541
+        raise RuntimeError(f"{name} might be aliasing the input or the output!")  # noqa: F541
     if inp_mutation:
         raise RuntimeError(f"{name} might be modifying the input!")  # noqa: F541
 
@@ -795,7 +795,11 @@ def check_input_alias_and_mutation_return_outputs(
     # This function can be called under autograd, functional, proxy and fake tensor mode.
     # We need to return either a fake tensor or a real tensor depending on the mode.
     # to detect the input mutation/aliasing.
-    with disable_proxy_modes_tracing(), disable_functional_mode(), suspend_functionalization():
+    with (
+        disable_proxy_modes_tracing(),
+        disable_functional_mode(),
+        suspend_functionalization(),
+    ):
 
         def _from_functional_tensor(t: torch.Tensor) -> torch.Tensor:
             if isinstance(t, FunctionalTensor) or torch._is_functional_tensor(t):

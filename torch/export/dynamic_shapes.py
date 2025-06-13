@@ -682,7 +682,7 @@ class ShapesCollection:
 
     Example::
 
-        args = ({"x": tensor_x, "others": [int_x, int_y]})
+        args = {"x": tensor_x, "others": [int_x, int_y]}
         # Wrap all ints with _IntWrapper
         mapped_args = pytree.tree_map_only(int, lambda a: _IntWrapper(a), args)
 
@@ -700,18 +700,18 @@ class ShapesCollection:
         self._shapes = {}
 
     def __setitem__(self, t, shape):
-        assert isinstance(
-            t, (torch.Tensor, _IntWrapper)
-        ), f"Cannot assign shape to non-tensor or non-_IntWrapper type {type(t)}"
+        assert isinstance(t, (torch.Tensor, _IntWrapper)), (
+            f"Cannot assign shape to non-tensor or non-_IntWrapper type {type(t)}"
+        )
 
         # TODO(avik): check that shape is indeed a Shape
 
         t_id = id(t)
         if t_id in self._shapes:
             _shape = self._shapes[t_id]
-            assert (
-                shape == _shape
-            ), f"Shapes assigned to input do not match: expected {_shape}, got {shape}"
+            assert shape == _shape, (
+                f"Shapes assigned to input do not match: expected {_shape}, got {shape}"
+            )
         else:
             self._shapes[id(t)] = shape
 
@@ -766,7 +766,7 @@ class AdditionalInputs:
 
     Example::
 
-        args0, kwargs0 = ... # example inputs for export
+        args0, kwargs0 = ...  # example inputs for export
 
         # other representative inputs that the exported program will run on
         dynamic_shapes = torch.export.AdditionalInputs()
@@ -786,9 +786,9 @@ class AdditionalInputs:
         """
 
         assert type(args) is tuple, f"Representative args {args} must be a tuple"
-        assert (
-            kwargs is None or type(kwargs) is dict
-        ), f"Representative kwargs {kwargs} must be None or a dict"
+        assert kwargs is None or type(kwargs) is dict, (
+            f"Representative kwargs {kwargs} must be None or a dict"
+        )
         self._examples.append((args, kwargs))
 
     def dynamic_shapes(self, m, args, kwargs=None):

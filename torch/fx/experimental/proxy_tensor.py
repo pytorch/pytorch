@@ -802,7 +802,10 @@ def proxy_call(
 
     if func is torch.ops.aten.is_nonzero.default:
         with proxy_mode:
-            torch._check(args[0].numel() == 1, lambda: "Boolean value of Tensor with more than one value is ambiguous")  # type: ignore[attr-defined]
+            torch._check(
+                args[0].numel() == 1,
+                lambda: "Boolean value of Tensor with more than one value is ambiguous",
+            )  # type: ignore[attr-defined]
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 
     tracer = proxy_mode.tracer
@@ -1129,6 +1132,13 @@ class PythonKeyTracer(Tracer):
                 ):  # empty list for strict mode, dynamo should handle stack_trace
                     stack_trace = traceback.StackSummary.from_list(stack_trace)
                     node.meta["stack_trace"] = "".join(stack_trace.format()).strip()
+
+        if kind == "get_attr":
+            assert isinstance(target, str)
+            attr = getattr(self.root, target)
+            if isinstance(attr, torch.Tensor):
+                with disable_proxy_modes_tracing():
+                    node.meta["val"] = extract_val(attr)
 
         def map_fn(v: Any) -> Optional[_ExtractValType]:
             if not isinstance(v, torch.fx.Node) or "val" not in v.meta:
@@ -1980,9 +1990,9 @@ class _MakefxTracer:
         )
         self.fx_tracer: Optional[PythonKeyTracer] = None
         self.python_dispatcher_mode: Union[nullcontext, Any] = nullcontext()
-        self.torch_fn_metadata_mode: Union[
-            nullcontext, TorchFunctionMetadataMode
-        ] = nullcontext()
+        self.torch_fn_metadata_mode: Union[nullcontext, TorchFunctionMetadataMode] = (
+            nullcontext()
+        )
         self.stack_trace = stack_trace
 
     def _checkpoint_modes(self) -> list[Any]:
