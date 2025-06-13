@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import operator
 import sys
 from enum import Enum
 from typing import Callable, Optional
@@ -1921,6 +1922,22 @@ def create_micro_gemm(
             alpha,
         )
 
+    def skip_amx_kernel_for_woq(config, dynamic_M, micro_gemm_cls):
+        # For WoQ GEMM, AMX micro-kernel may not perform well if m is small.
+        # Exception: for dynamic shapes, we consider using the AMX micro-kernel.
+        if (
+            dynamic_M
+            or input_dtype != torch.bfloat16
+            or input2_dtype not in [torch.int8, torch.uint8]
+        ):
+            return False
+        # For WOQ INT8, use AMX for m >= block_m
+        # For WOQ INT4, use AMX for m >= 5
+        block_m, *_ = config.register_blocking
+        is_woq_int4 = micro_gemm_cls == CppMicroGemmWoQInt4Amx
+        m_threshold = 5 if is_woq_int4 else block_m
+        return m < m_threshold
+
     assert isinstance(n, int) or n.is_number, n
     assert isinstance(k, int) or k.is_number, k
     from ..utils import has_free_symbols
@@ -1963,15 +1980,9 @@ def create_micro_gemm(
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
-                if (
-                    config.vec_isa_cls == VecAMX
-                    and m < block_m
-                    and not dynamic_M
-                    and input_dtype == torch.bfloat16
-                    and input2_dtype in [torch.int8, torch.uint8]
+                if config.vec_isa_cls == VecAMX and skip_amx_kernel_for_woq(
+                    config, dynamic_M, cls
                 ):
-                    # For WoQ GEMM, AMX micro-kernel may not perform well if m < block_m.
-                    # Exception: for dynamic shapes, we consider using the AMX micro-kernel.
                     continue
                 # Criteria on the ranking of configurations
                 # 1. ISA: AMX > VEC
@@ -2015,4 +2026,4 @@ def create_micro_gemm(
         else:
             return None
     # TODO(jgong5): allow autotuning on choices of configs
-    return create_from_config(*max(matched_configs, key=lambda x: x[0])[1:])
+    return create_from_config(*max(matched_configs, key=operator.itemgetter(0))[1:])

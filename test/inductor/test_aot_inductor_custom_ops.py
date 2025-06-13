@@ -113,14 +113,18 @@ def _(x):
 class AOTInductorTestsTemplate:
     def test_custom_op_add(self) -> None:
         class M(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.ops.aoti_custom_ops.custom_add(x, y)
+            def __init__(self, device):
+                super().__init__()
+                self.device = device
+                self.w = torch.randn(3, 3, device=device)
 
-        m = M().to(device=self.device)
-        args = (
-            torch.randn(3, 3, device=self.device),
-            torch.randn(3, 3, device=self.device),
-        )
+            def forward(self, x):
+                const = torch.tensor([1], device=self.device)
+                x = torch.ops.aoti_custom_ops.custom_add(x, const)
+                return torch.ops.aoti_custom_ops.custom_add(x, self.w)
+
+        m = M(self.device).to(device=self.device)
+        args = (torch.randn(3, 3, device=self.device),)
         self.check_model(m, args)
 
     def test_custom_op_add_output_path(self) -> None:
@@ -136,6 +140,58 @@ class AOTInductorTestsTemplate:
         with config.patch("aot_inductor.output_path", "model.pt2"):
             with self.assertRaises(Exception):
                 self.check_model(m, args)
+
+    def test_fn_with_optional_tensor_output(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.fn_with_optional_tensor_output(x, y)
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        self.check_model(m, args)
+
+    def test_fn_with_optional_tensor_output_2(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.fn_with_optional_tensor_output_2(x, y)
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        self.check_model(m, args)
+
+    def test_fn_with_optional_tensor_nullopt_output(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.fn_with_optional_tensor_nullopt_output(
+                    x, y
+                )
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        self.check_model(m, args)
+
+    def test_fn_with_int_output(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                i = x.shape[0]
+                z, _, _, i1, i2 = torch.ops.aoti_custom_ops.fn_with_int_output(x, y, i)
+                return z, z * (i1 + i2 + i)
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        self.check_model(m, args)
 
     def test_custom_op_all_inputs(self) -> None:
         class MyModel(torch.nn.Module):
