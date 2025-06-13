@@ -402,7 +402,7 @@ Tensor maybeCopyTensor(
         static_cast<c10::DeviceIndex>(optional_dl_device->device_id));
 
     if (device != data.device()) {
-      TORCH_CHECK(
+      TORCH_CHECK_VALUE(
           !force_move,
           "cannot move (i.e. copy=False) tensor from ",
           data.device(),
