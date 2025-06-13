@@ -2080,14 +2080,18 @@ class AotCodeCompiler:
                     f.write(json.dumps(qual_name_to_id))
                 generated_files.append(constants_config_json)
 
-            gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
-                ROCmCodeCache() if torch.version.hip else CUDACodeCache()
-            )
-            gpu_kernels_o = [
-                entry.output_path
-                for entry in gpu_codecache.cache.values()
-                if entry.output_path.endswith(".o")
-            ]
+            gpu_kernels_o = []
+            if torch.version.hip:
+                gpu_kernels_o.extend(
+                    entry.output_path
+                    for entry in ROCmCodeCache.cache.values()
+                    if entry.output_path.endswith(".o")
+                )
+            else:
+                gpu_kernels_o.extend(CUDACodeCache.aot_kernels_o)
+                # clear the list of aot kernels after each linking
+                CUDACodeCache.aot_kernels_o.clear()
+
             if gpu_kernels_o:
                 assert not config.aot_inductor.emit_multi_arch_kernel, (
                     "TODO: add emit_multi_arch_kernel support for cutlass kernels"
@@ -3628,7 +3632,10 @@ class CUDACodeCache:
         error_json: Optional[str] = None
 
     cache: dict[str, CacheEntry] = {}
-    cache_clear = staticmethod(cache.clear)
+    aot_kernels_o: list[str] = []
+    cache_clear = staticmethod(
+        lambda: (CUDACodeCache.cache.clear(), CUDACodeCache.aot_kernels_o.clear())
+    )
     _SOURCE_CODE_SUFFIX = "cu"
 
     @classmethod
