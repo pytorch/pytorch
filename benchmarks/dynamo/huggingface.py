@@ -511,9 +511,6 @@ class HuggingfaceRunner(BenchmarkRunner):
                 return 4e-3, cosine
         return 1e-3, cosine
 
-    def compute_loss(self, pred):
-        return pred[0]
-
     def forward_pass(self, mod, inputs, collect_outputs=True):
         with self.autocast(**self.autocast_arg):
             return mod(**inputs)
@@ -522,8 +519,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
         with self.autocast(**self.autocast_arg):
-            pred = mod(**cloned_inputs)
-            loss = self.compute_loss(pred)
+            loss, *_ = mod(**cloned_inputs)
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()
         if collect_outputs:

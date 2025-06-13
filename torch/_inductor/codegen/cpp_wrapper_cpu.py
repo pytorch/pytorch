@@ -611,10 +611,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:
-                    # Weights are stored in constants_ and owned by RAIIAtenTensorHandle there.
+                    # Weights are stored in constants_ and owned by ConstantHandle there.
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     self.prefix.writeline(
-                        f"""[[maybe_unused]] auto {constants_key} = constants_->at({idx});"""
+                        f"""[[maybe_unused]] auto& {constants_key} = constants_->at({idx});"""
                     )
                 else:
                     # Append constants as inputs to the graph
