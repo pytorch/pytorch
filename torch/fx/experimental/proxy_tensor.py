@@ -625,6 +625,9 @@ def track_tensor_tree(
         e: object, proxy: _NestedProxys, constant: Optional[_NestedTensors]
     ) -> None:
         if isinstance(e, Tensor):
+            if not isinstance(proxy, Proxy):
+                breakpoint()
+
             assert isinstance(proxy, Proxy)
             assert constant is None or isinstance(constant, Tensor)
             track_tensor(e, proxy, tracer=tracer, constant=constant)
@@ -908,14 +911,7 @@ def proxy_call(
     # This is what the overload modification does.
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
-
-    proxy_out = proxy_mode.tracer.create_proxy(
-        "call_function",
-        func,
-        proxy_args,
-        proxy_kwargs,
-        name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
-    )
+    proxy_arg_inplace_self = None
     is_mutable, maybe_mutable_schema = _is_mutable_operator(
         func, args, kwargs, return_schema=True  # type: ignore[arg-type]
     )
@@ -937,9 +933,22 @@ def proxy_call(
             for idx, s_arg in enumerate(s.arguments):
                 if not s_arg.alias_info:
                     continue
-                if r_alias_info.after_set == s_arg.alias_info.after_set:
-                    proxy_out = proxy_args[idx]
+                if idx >= len(proxy_args):
+                    # Ignore parsing proxy_kwargs for now
                     break
+                if r_alias_info.after_set == s_arg.alias_info.after_set:
+                    proxy_arg_inplace_self = proxy_args[idx]
+                    break
+
+    proxy_out = proxy_mode.tracer.create_proxy(
+        "call_function",
+        func,
+        proxy_args,
+        proxy_kwargs,
+        name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__)
+        if proxy_arg_inplace_self is None
+        else "_",
+    )
 
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
@@ -1004,6 +1013,11 @@ def proxy_call(
             constant = func(*const_args, **const_kwargs)
     else:
         constant = None
+
+    if proxy_arg_inplace_self is not None:
+        # Argument can be a real Tensor
+        if isinstance(proxy_arg_inplace_self, Proxy):
+            proxy_out = proxy_arg_inplace_self
 
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     _maybe_record_pointwise_barrier(func, proxy_mode)

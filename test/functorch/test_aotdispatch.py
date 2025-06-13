@@ -7863,6 +7863,19 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
             y.sum().backward()
             self.assertEqual(ref, inplace)
 
+    def test_serial_input_mutations(self):
+        def fn(x):
+            y = x.add_(1)
+            # y.mul_(2)
+            return x, y
+
+        def inps():
+            return torch.ones(2, 3),
+
+        ref_y = fn(*inps())
+        y = torch.compile(fn, backend="aot_eager", fullgraph=True)(*inps())
+        self.assertEqual(ref_y, y)
+
 
 class MockFXGraphCache:
     """

@@ -161,7 +161,7 @@ def _torchscript_schema_to_signature(
     return res
 
 
-def get_op_schema(
+def _get_op_schema(
     target: Callable,
     args: tuple["Argument", ...],
     kwargs: dict[str, "Argument"],
@@ -200,7 +200,7 @@ def _is_mutable_operator(
     kwargs: dict[str, "Argument"],
     return_schema=False,
 ):
-    schema = get_op_schema(target, args, kwargs)
+    schema = _get_op_schema(target, args, kwargs)
     is_mutable = schema and schema.is_mutable
     if return_schema:
         return is_mutable, schema
@@ -211,7 +211,7 @@ def _is_mutable_operator(
 def check_for_mutable_operation(
     target: Callable, args: tuple["Argument", ...], kwargs: dict[str, "Argument"]
 ):
-    schema = get_op_schema(target, args, kwargs)
+    schema = _get_op_schema(target, args, kwargs)
     if schema and schema.is_mutable:
         raise RuntimeError(
             f"Tried to trace mutable operation {schema}. FX only supports functional "

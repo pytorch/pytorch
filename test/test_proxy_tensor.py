@@ -359,7 +359,7 @@ def forward(self, x_1):
 
 def forward(self, x_1):
     zeros = torch.ops.aten.zeros.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    copy_ = torch.ops.aten.copy_.default(zeros, x_1);  x_1 = copy_ = None
+    _ = torch.ops.aten.copy_.default(zeros, x_1);  x_1 = _ = None
     return zeros
     """)
 
@@ -508,11 +508,12 @@ def forward(self, x_1):
             return y
 
         traced = make_fx(f, tracing_mode=self.tracing_mode)(torch.randn(3, requires_grad=True))
+
         self.assertEqual([
             tuple(node.meta['val'].shape)
             for node in traced.graph.nodes
             if 'val' in node.meta
-        ], [(3,), (3,), (1, 3)])
+        ], [(3,), (1, 3)])
 
     def test_make_fx_overloads(self):
         def f(x):
