@@ -3,6 +3,8 @@
 import copy
 import functools
 import itertools
+import os
+import tempfile
 from typing import Callable, Optional, Union
 
 import torch
@@ -1281,6 +1283,46 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
         model.unshard()  # no lazy init yet
         for ref_param, param in zip(ref_model.parameters(), model.parameters()):
             self.assertEqual(ref_param, param)
+
+
+class TestFullyShardMempool(FSDPTest):
+    @classmethod
+    def _run(cls, *args, **kwargs):
+        cls.nccl_log_dir = tempfile.TemporaryDirectory()
+        os.environ["NCCL_DEBUG"] = "INFO"
+        os.environ["NCCL_DEBUG_SUBSYS"] = "REG"
+        os.environ["NCCL_DEBUG_FILE"] = cls.nccl_log_dir.name + "/nccl_log"
+        super()._run(*args, **kwargs)
+
+    @skip_if_lt_x_gpu(2)
+    def test_fully_shard_mempool(self):
+        torch.manual_seed(42)
+        model_args = ModelArgs()
+        model = Transformer(model_args)
+        fully_shard_fn = functools.partial(
+            fully_shard, allocate_memory_from_process_group=True
+        )
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard_fn(module)
+        fully_shard_fn(model)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        loss = model(inp)
+        loss.sum().backward()
+
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
+
+        with open(self.nccl_log_dir.name + "/nccl_log") as f:
+            logs = f.read()
+
+        # The messages might change when we move to a different NCCL version.
+        # Please update this test if it starts failing.
+        self.assertRegex(
+            logs, "NCCL INFO register comm 0x[0-9a-f]+ buffer 0x[0-9a-f]+ size [0-9]+"
+        )
 
 
 if __name__ == "__main__":
