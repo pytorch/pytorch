@@ -161,9 +161,10 @@ def _torchscript_schema_to_signature(
     return res
 
 
-@compatibility(is_backward_compatible=False)
-def check_for_mutable_operation(
-    target: Callable, args: tuple["Argument", ...], kwargs: dict[str, "Argument"]
+def _get_op_schema(
+    target: Callable,
+    args: tuple["Argument", ...],
+    kwargs: dict[str, "Argument"],
 ):
     signatures, schemas = get_signature_for_torch_op(target, return_schemas=True)
 
@@ -180,25 +181,43 @@ def check_for_mutable_operation(
             except TypeError:
                 continue
 
-        def throw_if_mutable(schema):
-            if schema.is_mutable:
-                raise RuntimeError(
-                    f"Tried to trace mutable operation {schema}. FX only supports functional "
-                    f"code, so operations that mutate operands in-place (e.g. via `out` arguments) "
-                    f"are not supported"
-                )
-
         if len(matched_schemas) == 0:
             # Did not match any schema. Cannot check for mutation
-            pass
+            return None
         elif len(matched_schemas) == 1:
             # Matched exactly one schema, unambiguous
             _, schema_to_check = matched_schemas[0]
-            throw_if_mutable(schema_to_check)
+            return schema_to_check
         else:
             # Ambiguous schema match. Since mutability checking is best effort,
             # do nothing.
-            pass
+            return None
+
+
+def _is_mutable_operator(
+    target: Callable,
+    args: tuple["Argument", ...],
+    kwargs: dict[str, "Argument"],
+    return_schema=False,
+):
+    schema = _get_op_schema(target, args, kwargs)
+    is_mutable = schema and schema.is_mutable
+    if return_schema:
+        return is_mutable, schema
+    return is_mutable
+
+
+@compatibility(is_backward_compatible=False)
+def check_for_mutable_operation(
+    target: Callable, args: tuple["Argument", ...], kwargs: dict[str, "Argument"]
+):
+    schema = _get_op_schema(target, args, kwargs)
+    if schema and schema.is_mutable:
+        raise RuntimeError(
+            f"Tried to trace mutable operation {schema}. FX only supports functional "
+            f"code, so operations that mutate operands in-place (e.g. via `out` arguments) "
+            f"are not supported"
+        )
 
 
 @compatibility(is_backward_compatible=False)
