@@ -100,7 +100,6 @@ class SideEffects:
     id_to_variable: dict[int, VariableTracker]
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     keepalive: list[Any]
-    allow_mutation_vts: set[VariableTracker]
 
     def __init__(
         self,
@@ -127,7 +126,7 @@ class SideEffects:
 
         # Tracks VariableTracker objects that can be safely mutated in contexts where
         # mutations are normally forbidden (e.g., HigherOrderOp subgraphs). Used for
-        # temporary controlled mutations in contexts like torch.func.functional_call,
+        # temporary mutations under contexts like torch.func.functional_call,
         # where module parameters/buffers are modified but later restored.
         self.mutation_allowed_variables = set()
 
