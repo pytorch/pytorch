@@ -4586,7 +4586,7 @@ def forward(self, x, b, y):
         inputs = (torch.randn(64),)
         ref = model(*inputs)
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
-            ep = torch.export.export(model, inputs)
+            ep = torch.export.export(model, inputs, strict=True)
             res = ep.module()(*inputs)
 
         self.assertEqual(ref, res)

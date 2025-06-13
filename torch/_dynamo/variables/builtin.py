@@ -39,6 +39,7 @@ from typing import Callable, TYPE_CHECKING, Union
 import torch
 from torch import sym_float, sym_int
 from torch._subclasses.meta_utils import is_sparse_any
+from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
@@ -1303,7 +1304,7 @@ class BuiltinVariable(VariableTracker):
     call_int = _call_int_float
     call_float = _call_int_float
 
-    def call_bol(self, tx: "InstructionTranslator", arg):
+    def call_bool(self, tx: "InstructionTranslator", arg):
         # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.
         # TODO handle more cases and merge this with this with `generic_jump`.
 
