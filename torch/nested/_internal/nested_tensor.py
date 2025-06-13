@@ -107,7 +107,7 @@ class NestedTensor(torch.Tensor):
         stride = values.stride()
         _strides = (ragged_size * stride[r], *stride)
 
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             _size,
             _strides,
@@ -241,7 +241,7 @@ class NestedTensor(torch.Tensor):
         )
         if self.grad_fn:
             grad_fn_str = f", grad_fn={self.grad_fn}"
-        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self._lengths is None})"
+        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self.is_contiguous()})"
 
     # TODO: Remove this in favor of the default tensor subclass serialization logic.
     # We don't do this today because of https://github.com/pytorch/pytorch/issues/125622.
@@ -529,9 +529,9 @@ def jagged_from_tensor_and_lengths(
         )
 
     # Calculate jagged offsets
-    assert (
-        len(tensor.shape) >= 2
-    ), "tensor must at least be 2D for the nested narrow op to work"
+    assert len(tensor.shape) >= 2, (
+        "tensor must at least be 2D for the nested narrow op to work"
+    )
     max_seq_len = tensor.shape[1]
     offset_lengths = max_seq_len * torch.arange(
         0, batch_size, dtype=torch.int64, device=tensor.device

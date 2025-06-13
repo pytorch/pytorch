@@ -575,7 +575,9 @@ void initFuncTorchBindings(PyObject* module) {
       .value("Different", RandomnessType::Different);
   py::class_<Interpreter>(m, "CInterpreter")
       .def("key", &Interpreter::key)
-      .def("level", &Interpreter::level);
+      .def("level", &Interpreter::level)
+      .def("serialize", &Interpreter::serialize)
+      .def_static("deserialize", &Interpreter::deserialize);
   py::class_<GradInterpreterPtr>(m, "CGradInterpreterPtr")
       .def(py::init<const Interpreter*>())
       .def("key", &GradInterpreterPtr::key)

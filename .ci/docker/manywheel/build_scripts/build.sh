@@ -97,7 +97,7 @@ find /opt/_internal -type f -print0 \
     | xargs -0 -n1 strip --strip-unneeded 2>/dev/null || true
 # We do not need the Python test suites, or indeed the precompiled .pyc and
 # .pyo files. Partially cribbed from:
-#    https://github.com/docker-library/python/blob/master/3.4/slim/Dockerfile
+#    https://github.com/docker-library/python/blob/master/3.4/slim/Dockerfile  # @lint-ignore
 find /opt/_internal \
      \( -type d -a -name test -o -name tests \) \
   -o \( -type f -a -name '*.pyc' -o -name '*.pyo' \) \
