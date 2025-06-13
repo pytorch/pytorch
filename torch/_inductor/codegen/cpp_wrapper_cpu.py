@@ -2058,7 +2058,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self,
         buf_name: str,
         python_kernel_name: str,
-        codegen_args: Sequence[str],
+        get_args: Callable[[], Sequence[str]],
         op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
