@@ -101,11 +101,11 @@ void quantized_matmul(
     std::optional<at::Tensor> other, // extra input for binary-post-op
     double other_scale,
     int64_t other_zero_point,
-    const c10::string_view& binary_post_op,
+    const std::string_view& binary_post_op,
     double binary_alpha,
-    const c10::string_view& unary_post_op,
+    const std::string_view& unary_post_op,
     torch::List<std::optional<at::Scalar>>& unary_post_op_args,
-    c10::string_view unary_post_op_algorithm,
+    std::string_view unary_post_op_algorithm,
     bool m2_trans) {
   // [Note] Quantized Matrix Multiplication at XPU
   // The following code integrates oneDNN quantized gemm. The quantization
@@ -273,7 +273,7 @@ void quantized_matmul(
 
   int scratchpad_size = matmul_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor =
-      at::empty({scratchpad_size}, m1.options().dtype(at::kByte), c10::nullopt);
+      at::empty({scratchpad_size}, m1.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
       matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});

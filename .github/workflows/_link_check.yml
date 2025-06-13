@@ -1,0 +1,60 @@
+on:
+  workflow_call:
+    inputs:
+      runner:
+        type: string
+        required: true
+      ref:
+        type: string
+        required: true
+
+jobs:
+  lint-urls:
+    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-url-lint') }}
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    with:
+      timeout: 120
+      runner: ${{ inputs.runner }}linux.2xlarge
+      docker-image: ci-image:pytorch-linux-jammy-linter
+      fetch-depth: 0
+      submodules: false
+      ref: ${{ inputs.ref }}
+      script: |
+        ./scripts/lint_urls.sh $(
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+          else
+            echo "${{ github.event.before }}" "${{ github.sha }}"
+          fi
+        ) || {
+          echo
+          echo "URL lint failed."
+          echo "If this is a transient outage, you can bypass it by adding the \`skip-url-lint\` label to your PR."
+          echo "Or add \`@lint-ignore\` somewhere on the same line as the URL you want to skip checking."
+          exit 1
+        }
+
+  lint-xrefs:
+    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-xref-lint') }}
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    with:
+      timeout: 60
+      runner: ${{ inputs.runner }}linux.2xlarge
+      docker-image: ci-image:pytorch-linux-jammy-linter
+      fetch-depth: 0
+      submodules: false
+      ref: ${{ inputs.ref }}
+      script: |
+        ./scripts/lint_xrefs.sh $(
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+          else
+            echo "${{ github.event.before }}" "${{ github.sha }}"
+          fi
+        ) || {
+          echo
+          echo "Xref lint failed."
+          echo "If this is a transient outage, you can bypass it by adding the \`skip-xref-lint\` label to your PR."
+          echo "Or add \`@lint-ignore\` somewhere on the same line as the reference you want to skip checking."
+          exit 1
+        }
