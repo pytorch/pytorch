@@ -4,12 +4,12 @@ import logging
 import os
 import sys
 import tempfile
-import typing_extensions
 from typing import Any, Callable, Optional, TypeVar
-from typing_extensions import ParamSpec
 
 import torch
+import typing_extensions
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
+from typing_extensions import ParamSpec
 
 
 _T = TypeVar("_T")
@@ -288,7 +288,7 @@ def profiler_allow_cudagraph_cupti_lazy_reinit_cuda12():
 def deprecated():
     """When we deprecate a function that might still be in use, we make it internal by adding a leading underscore.
     This decorator is used with a private function, and creates a public alias without the leading underscore, but has a deprecation warning.
-    This tells users "THIS FUNCTION IS DEPRECATED, please use something else" without breaking them, however, 
+    This tells users "THIS FUNCTION IS DEPRECATED, please use something else" without breaking them, however,
     if they still really really want to use the deprecated function without the warning, they can do so by using the internal function name.
     """
 
@@ -310,11 +310,11 @@ def deprecated():
                  Please rename it or consult a pytorch developer on what to do"
             )
 
-        warning_msg = f"{func.__name__} is DEPRECATED, please consider using an alternative API(s). "
+        warning_msg = f"{func.__name__[1:]} is DEPRECATED, please consider using an alternative API(s). "
 
         # public deprecated alias
         alias = typing_extensions.deprecated(
-            warning_msg, category=UserWarning, stacklevel=2
+            warning_msg, category=UserWarning, stacklevel=1
         )(func)
 
         alias.__name__ = public_name
