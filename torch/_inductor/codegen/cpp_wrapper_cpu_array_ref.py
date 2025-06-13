@@ -98,10 +98,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation = False
         super().generate_extern_kernel_out(*args, **kwargs)
 
-    def generate_fallback_kernel(self, *args, **kwargs):
+    def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
         # Disable stack allocation for extern kernels.
         self.allow_stack_allocation = False
-        super().generate_fallback_kernel(*args, **kwargs)
+        super().generate_fallback_kernel(node)
 
     def _generate_kernel_call_helper(
         self,
