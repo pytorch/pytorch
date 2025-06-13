@@ -4,6 +4,7 @@ on:
   pull_request:
     branches-ignore:
       - nightly
+      - main
   push:
     branches:
       - main
