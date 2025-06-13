@@ -863,6 +863,14 @@ def patch_dynamo_config(
     return DynamoConfigPatchProxy(config_patch)
 
 
+@overload
+def dont_skip_tracing(fn: None = None) -> DynamoConfigPatchProxy: ...
+
+
+@overload
+def dont_skip_tracing(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
 def dont_skip_tracing(fn=None):
     """
     Context manager/decorator to trace into functions intentionally marked by developers to be skipped
@@ -876,23 +884,11 @@ def dont_skip_tracing(fn=None):
     return ctx
 
 
-@overload
-def set_fullgraph(
-    fn: None = None, fullgraph: bool = True
-) -> DynamoConfigPatchProxy: ...
-
-
-@overload
-def set_fullgraph(fn: Callable[_P, _R], fullgraph: bool = True) -> Callable[_P, _R]: ...
-
-
-def set_fullgraph(
-    fn: Optional[Callable[_P, _R]] = None, fullgraph: bool = True
-) -> Union[Callable[_P, _R], DynamoConfigPatchProxy]:
+def set_fullgraph(fullgraph: bool) -> DynamoConfigPatchProxy:
     """
     Context manager/decorator to toggle fullgraph setting.
+
+    More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
+    or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
     """
-    ctx = patch_dynamo_config(error_on_graph_break=fullgraph)
-    if fn:
-        return ctx(fn)
-    return ctx
+    return patch_dynamo_config(error_on_graph_break=fullgraph)

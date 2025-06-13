@@ -1700,7 +1700,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         @torch.compile(backend=cnts, fullgraph=True)
         def f1(x):
             x = x + 1
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.set_fullgraph(False):
                 torch._dynamo.graph_break()
             return x + 2
 
@@ -1711,7 +1711,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         @torch.compile(backend=cnts)
         def f2(x):
             x = x + 1
-            with torch._dynamo.set_fullgraph(fullgraph=True):
+            with torch._dynamo.set_fullgraph(True):
                 torch._dynamo.graph_break()
             return x + 2
 
@@ -1721,7 +1721,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         @torch.compile(backend=cnts, fullgraph=True)
         def f3(x):
             x = x + 1
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.set_fullgraph(False):
                 torch._dynamo.graph_break()
                 x = x + 2
                 torch._dynamo.graph_break()
@@ -1739,17 +1739,169 @@ If the above doesn't work, please subtmit an issue to GitHub.
         @torch.compile(backend=cnts, fullgraph=True)
         def f4(x):
             x = x + 1
-            with torch._dynamo.set_fullgraph(fullgraph=False):
-                # cause a skipped frame
-                try:
-                    torch._dynamo.graph_break()
-                except Exception:
-                    pass
+            with torch._dynamo.set_fullgraph(False):
+                torch._dynamo.skip_frame()
                 return inner_f4(x)
 
         cnts.clear()
         self.assertEqual(f4(inp), inp + 7)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_set_fullgraph_nested(self):
+        # set_fullgraph in a nested frame
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.set_fullgraph(False)
+        def inner_f5(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f5(x):
+            x = x + 1
+            return inner_f5(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f5(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 4)
+
+        def inner_f6(x):
+            x = x + 2
+            with torch._dynamo.set_fullgraph(False):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f6(x):
+            x = x + 1
+            return inner_f6(x)
+
+        cnts.clear()
+        self.assertEqual(f6(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 3)
+
+        def inner_f7(x):
+            x = x + 2
+            with torch._dynamo.set_fullgraph(True):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch.compile(backend=cnts, fullgraph=False)
+        def f7(x):
+            x = x + 1
+            return inner_f7(x)
+
+        with self.assertRaises(Unsupported):
+            f7(inp)
+
+    def test_set_fullgraph_nested_with_skip(self):
+        # set_fullgraph in a nested frame with a skipped frame in between
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.set_fullgraph(False)
+        def inner2_f8(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        def inner1_f8(x):
+            with torch._dynamo.set_fullgraph(False):
+                torch._dynamo.skip_frame()
+            return inner2_f8(x)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f8(x):
+            x = x + 1
+            return inner1_f8(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f8(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 4)
+
+        def inner2_f9(x):
+            x = x + 2
+            with torch._dynamo.set_fullgraph(True):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch._dynamo.disable(recursive=False)
+        def inner1_f9(x):
+            return inner2_f9(x)
+
+        @torch.compile(backend=cnts, fullgraph=False)
+        def f9(x):
+            x = x + 1
+            return inner1_f9(x)
+
+        with self.assertRaises(Unsupported):
+            f9(inp)
+
+        # test export with set_fullgraph(False) still errors
+
+    def test_set_fullgraph_export(self):
+        @torch._dynamo.set_fullgraph(False)
+        def inner(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        def f(x):
+            x = x + 1
+            return inner(x)
+
+        with self.assertRaises(Unsupported):
+            torch._dynamo.export(f)(torch.ones(3))
+
+    def test_set_fullgraph_nested_deep(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def inner1_f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def inner2_f1(x):
+            return inner1_f1(x)
+
+        def inner3_f1(x):
+            with torch._dynamo.set_fullgraph(False):
+                return inner2_f1(x)
+
+        def inner4_f1(x):
+            return inner3_f1(x)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f1(x):
+            x = x + 4
+            return inner4_f1(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f1(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 4)
+
+        def inner1_f2(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def inner2_f2(x):
+            return inner1_f2(x)
+
+        def inner3_f2(x):
+            with torch._dynamo.set_fullgraph(True):
+                return inner2_f2(x)
+
+        def inner4_f2(x):
+            return inner3_f2(x)
+
+        @torch.compile(backend=cnts, fullgraph=False)
+        def f2(x):
+            x = x + 4
+            return inner4_f2(x)
+
+        with self.assertRaises(Unsupported):
+            f2(inp)
 
 
 if __name__ == "__main__":
