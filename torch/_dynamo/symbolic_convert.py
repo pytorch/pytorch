@@ -3243,6 +3243,9 @@ class InstructionTranslatorBase(
         self.num_calls: dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
+        # NOTE: one_graph is used for export/debugging to always force errors on graph breaks.
+        # For allow for fullgraph toggle during normal compile, config.error_on_graph_break
+        # is used instead.
         self.one_graph = False
 
         self.current_speculation = None
@@ -3507,6 +3510,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return (
             all(b.can_restore() for b in self.block_stack)
             and not self.one_graph
+            and not config.error_on_graph_break
             and not self.active_generic_context_managers
         )
 
@@ -3641,6 +3645,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.symbolic_locals_contain_module_class()
             and not self.export
             and not self.one_graph
+            and not config.error_on_graph_break
         ):
             raise exc.SkipFrame("because no content in function call")
 
