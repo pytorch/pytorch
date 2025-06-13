@@ -15,7 +15,7 @@
 ```
 ---
 
-# `torch.ao.ns.fx.utils`
+# torch.ao.ns.fx.utils
 
 
 ```{warning}
