@@ -135,7 +135,7 @@ def contains_tensor_types(type):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def non_compute_operator(op):
     schema = op._schema
 
