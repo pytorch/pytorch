@@ -18,23 +18,19 @@ using torch::dynamo::autograd::IValuePacker;
 
 namespace {
 
-variable_list AccumulateGrad_apply_functional_no_hooks(
+void AccumulateGrad_apply_impl(
     variable_list&& grads,
     at::Tensor& variable,
     at::Tensor& variable_grad,
     int64_t num_expected_refs,
-    std::mutex* mutex = nullptr,
-    bool mutate_variable = true) {
+    const std::function<void(at::Tensor&&)>& grad_update,
+    std::mutex* mutex = nullptr) {
   check_input_variables("AccumulateGrad", grads, 1, 0);
 
   if (!grads[0].defined())
-    return {};
-  // fix this
-  // if (variable.grad_fn())
-  //   throw std::logic_error(
-  //       "leaf variable has been moved into the graph interior");
+    return;
   if (!variable.requires_grad())
-    return {};
+    return;
 
   // std::move(grads[0]) to avoid bumping up refcount
   at::Tensor new_grad = std::move(grads[0]);
@@ -50,40 +46,8 @@ variable_list AccumulateGrad_apply_functional_no_hooks(
     lock.emplace(*mutex);
   }
 
-  at::Tensor& grad = variable_grad;
-  if (mutate_variable) {
-    // If the function has post hooks (for example, a DDP allreduce hook),
-    // call_function in Engine.cpp will temporarily bump the expected refcount
-    // by one, hence the addition of !post_hooks().empty() for
-    // 'num_expected_refs' in addition to the one reference that we're holding.
-    // 'num_expected_refs' is used to determine whether or not we should clone
-    // the grad or can steal the grad.
-    AccumulateGrad::accumulateGrad(
-        variable,
-        grad,
-        new_grad,
-        num_expected_refs,
-        [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
-    return {};
-  } else {
-    at::Tensor functional_grad;
-
-    AccumulateGrad::accumulateGrad(
-        variable,
-        grad,
-        new_grad,
-        num_expected_refs,
-        [&functional_grad](at::Tensor&& grad_update) {
-          functional_grad = std::move(grad_update);
-        });
-
-    if (!functional_grad.defined()) {
-      // In-place accumulation does not execute the callback
-      functional_grad = std::move(grad);
-    }
-
-    return {functional_grad};
-  }
+  AccumulateGrad::accumulateGrad(
+      variable, variable_grad, new_grad, num_expected_refs, grad_update);
 }
 
 variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
@@ -91,17 +55,33 @@ variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
     const ivalue_list& args) {
   PackedArgs r(args);
   auto variable = r.unpack<at::Tensor>();
-  auto variable_grad =
-      r.unpack<at::Tensor>(); // functional tensor missing .grad support
+  auto variable_grad = r.unpack<at::Tensor>();
   auto has_post_hooks = r.unpack<bool>();
-  return AccumulateGrad_apply_functional_no_hooks(
+
+  // Functional Tensors insert an Error node to assert that backward is never
+  // called
+  if (variable.grad_fn() &&
+      std::dynamic_pointer_cast<Error>(variable.grad_fn()) == nullptr) {
+    throw std::logic_error(
+        "leaf variable has been moved into the graph interior");
+  }
+
+  at::Tensor functional_grad;
+  AccumulateGrad_apply_impl(
       variable_list(grads),
       variable,
       variable_grad,
       1 + has_post_hooks,
-      nullptr, // no mutex needed since this is executed under a single thread
-      false // we mutate the variable in python bytecode instead
+      [&functional_grad](at::Tensor&& grad_update) {
+        functional_grad = std::move(grad_update);
+      },
+      nullptr // no mutex needed since this is executed under a single thread
   );
+  if (!functional_grad.defined()) {
+    // In-place accumulation (Case 2.3) does not execute grad_update
+    functional_grad = std::move(variable_grad);
+  }
+  return {functional_grad};
 }
 } // namespace
 
@@ -114,11 +94,27 @@ AccumulateGrad::AccumulateGrad(Variable variable_)
 
 // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
-  AccumulateGrad_apply_functional_no_hooks(
+  if (variable.grad_fn()) {
+    throw std::logic_error(
+        "leaf variable has been moved into the graph interior");
+  }
+
+  at::Tensor& variable_grad = variable.mutable_grad();
+
+  // If the function has post hooks (for example, a DDP allreduce hook),
+  // call_function in Engine.cpp will temporarily bump the expected refcount
+  // by one, hence the addition of !post_hooks().empty() for
+  // 'num_expected_refs' in addition to the one reference that we're holding.
+  // 'num_expected_refs' is used to determine whether or not we should clone
+  // the grad or can steal the grad.
+  AccumulateGrad_apply_impl(
       std::move(grads),
       variable,
-      variable.mutable_grad(),
+      variable_grad,
       1 + !post_hooks().empty() /* num_expected_refs */,
+      [&variable_grad](at::Tensor&& grad_update) {
+        variable_grad = std::move(grad_update);
+      },
       &mutex_);
 
   auto& hook = tensor_post_acc_grad_hooks();
@@ -176,8 +172,6 @@ variable_list AccumulateGrad::apply_with_saved(
   }();
 
   const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
-  // calls a python wrapper, which will call
-  // AccumulateGrad_apply_functional_no_hooks_ivalue
   interface->call_accumulate_grad(
       saved.get_py_compiler(), variable_copy, grads[0], !post_hooks().empty());
 
