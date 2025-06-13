@@ -200,7 +200,7 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         >>> class MyIterDataPipe(torch.utils.data.IterDataPipe):
         ...     def __init__(self, start, end):
         ...         super(MyIterDataPipe).__init__()
-        ...         assert end > start, "this example code only works with end >= start"
+        ...         assert end > start, "this example only works with end >= start"
         ...         self.start = start
         ...         self.end = end
         ...
