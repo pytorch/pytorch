@@ -3485,16 +3485,16 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override {
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
         0 <= fraction && fraction <= 1,
         "invalid fraction:",
         fraction,
-        ". Please set within (0, 1).");
+        ". Please set within [0, 1].");
     C10_CUDA_CHECK(c10::cuda::SetDevice(device));
     device_allocator[device]->setMemoryFraction(fraction);
   }
