@@ -1,8 +1,9 @@
+
 :::{currentmodule} torch.distributed.tensor
 :::
 
-# torch.distributed.tensor
 
+# torch.distributed.tensor
 
 :::{note}
 `torch.distributed.tensor` is currently in alpha state and under
@@ -10,31 +11,31 @@ development, we are committing backward compatibility for the most APIs listed
 in the doc, but there might be API changes if necessary.
 :::
 
-PyTorch DTensor (Distributed Tensor)
----------------------------------------
+## PyTorch DTensor (Distributed Tensor)
 
 PyTorch DTensor offers simple and flexible tensor sharding primitives that transparently handles distributed
 logic, including sharded storage, operator computation and collective communications across devices/hosts.
-``DTensor`` could be used to build different paralleism solutions and support sharded state_dict representation
+`DTensor` could be used to build different paralleism solutions and support sharded state_dict representation
 when working with multi-dimensional sharding.
 
-Please see examples from the PyTorch native parallelism solutions that are built on top of ``DTensor``:
+Please see examples from the PyTorch native parallelism solutions that are built on top of `DTensor`:
 
-* `Tensor Parallel <https://pytorch.org/docs/main/distributed.tensor.parallel.html>`__
-* `FSDP2 <https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md>`__
+- [Tensor Parallel](https://pytorch.org/docs/main/distributed.tensor.parallel.html)
+- [FSDP2](https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md)
 
+```{eval-rst}
 .. automodule:: torch.distributed.tensor
+```
 
-:class:`DTensor` follows the SPMD (single program, multiple data) programming model to empower users to
+{class}`DTensor` follows the SPMD (single program, multiple data) programming model to empower users to
 write distributed program as if it's a **single-device program with the same convergence property**. It
-provides a uniform tensor sharding layout (DTensor Layout) through specifying the :class:`DeviceMesh`
-and :class:`Placement`:
+provides a uniform tensor sharding layout (DTensor Layout) through specifying the {class}`DeviceMesh`
+and {class}`Placement`:
 
-- :class:`DeviceMesh` represents the device topology and the communicators of the cluster using
+- {class}`DeviceMesh` represents the device topology and the communicators of the cluster using
   an n-dimensional array.
-
-- :class:`Placement` describes the sharding layout of the logical tensor on the :class:`DeviceMesh`.
-  DTensor supports three types of placements: :class:`Shard`, :class:`Replicate` and :class:`Partial`.
+- {class}`Placement` describes the sharding layout of the logical tensor on the {class}`DeviceMesh`.
+  DTensor supports three types of placements: {class}`Shard`, {class}`Replicate` and {class}`Partial`.
 
 ### DTensor Class APIs
 
