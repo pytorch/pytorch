@@ -580,10 +580,11 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
 
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {
   if (!stashed_for_allocator_safety_->empty() && isP2P_) {
-    TORCH_WARN_ONCE("TORCH_NCCL_AVOID_RECORD_STREAMS=1 is experimental for point-to-point "
-                    "collectives. To ensure safety, .wait() must be called on all "
-	            "returned handles before they fall out of scope, including for isend() "
-	            "calls.")
+    TORCH_WARN_ONCE(
+        "TORCH_NCCL_AVOID_RECORD_STREAMS=1 is experimental for point-to-point "
+        "collectives. To ensure safety, .wait() must be called on all "
+	"returned handles before they fall out of scope, including for isend() "
+	"calls.");
     this->wait();
   }
 }
@@ -4011,8 +4012,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // need stashing anymore
   if (!avoidRecordStreams_ || coalescing_state_) {
     if (avoidRecordStreams_) {
-        TORCH_WARN_ONCE("TORCH_NCCL_AVOID_RECORD_STREAMS=1 is not supported for batch P2P. "
-			"Consider switching to non-batched isend/irecv for better memory usage.");
+      TORCH_WARN_ONCE(
+          "TORCH_NCCL_AVOID_RECORD_STREAMS=1 is not supported for batch P2P. "
+          "Consider switching to non-batched isend/irecv for better memory usage.");
     }
     c10::cuda::CUDACachingAllocator::recordStream(
         tensor.storage().data_ptr(), ncclStream);
