@@ -107,20 +107,20 @@ def _dump_dynamic_shapes(
     would generate the following output:
     ```
     {
-        'dynamic_shapes': (
+        "dynamic_shapes": (
             [
-                ['dx', 4],
-                ['dx + 1', 4],
+                ["dx", 4],
+                ["dx + 1", 4],
             ],
-            ['_DimHint.STATIC'],
-            ['_DimHint.STATIC', '_DimHint.STATIC'],
+            ["_DimHint.STATIC"],
+            ["_DimHint.STATIC", "_DimHint.STATIC"],
             None,
         ),
-        'dims': {
-            'dx': {
-                'min': 4,
-                'max': 16,
-                'derived': ['dx + 1'],
+        "dims": {
+            "dx": {
+                "min": 4,
+                "max": 16,
+                "derived": ["dx + 1"],
             },
         },
     }
