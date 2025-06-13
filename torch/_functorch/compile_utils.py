@@ -181,10 +181,10 @@ def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
 
     # loop through all nodes in the graph and raise getitems to the parent node
     for node in nodes:
-        if _is_getitem(node):
-            assert len(node.all_input_nodes) == 1
-            parent = node.all_input_nodes[0]
-            parent.append(node)
+        if any(_is_getitem(user) for user in node.users):
+            for user in reversed(node.users):
+                assert _is_getitem(user)
+                node.append(user)
 
     gm.recompile()
     return gm
