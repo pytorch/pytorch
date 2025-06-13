@@ -158,7 +158,8 @@ def compute_functional_name(test_params_dict):
         return test_params_dict["cpp_function_call"].split("(")[0].replace("F::", "")
     else:
         raise RuntimeError(
-            f"`cpp_options_args` or `cpp_function_call` entry must be present in test params dict:\n{pprint.pformat(test_params_dict)}"  # noqa: B950
+            "`cpp_options_args` or `cpp_function_call` entry must be present in test params dict:\n"
+            f"{pprint.pformat(test_params_dict)}"
         )
 
 
@@ -179,7 +180,8 @@ def compute_cpp_function_call(test_params_dict, arg_dict, functional_name):
         )
     else:
         raise RuntimeError(
-            f"`cpp_options_args` or `cpp_function_call` entry must be present in test params dict:\n{pprint.pformat(test_params_dict)}"  # noqa: B950
+            "`cpp_options_args` or `cpp_function_call` entry must be present in test params dict:\n"
+            f"{pprint.pformat(test_params_dict)}"
         )
 
 
@@ -217,7 +219,8 @@ def write_test_to_test_class(
         or "cpp_function_call" in test_params_dict
     ), (
         "To enable C++ API parity test, "
-        f"`cpp_options_args` or `cpp_function_call` entry must be present in test params dict:\n{pprint.pformat(test_params_dict)}. \n"  # noqa: B950
+        "`cpp_options_args` or `cpp_function_call` entry must be present in test params dict:\n"
+        f"{pprint.pformat(test_params_dict)}. \n"
         "If you are interested in adding the C++ API parity test, please see:\n"
         "NOTE [How to check NN module / functional API parity between Python and C++ frontends]. \n"
         "If not, please add `test_cpp_api_parity=False` to the test params dict and file an issue about this."
@@ -233,14 +236,16 @@ def write_test_to_test_class(
 
     functional_name = compute_functional_name(test_params_dict)
 
-    assert hasattr(
-        torch.nn.functional, functional_name
-    ), f"`torch.nn.functional` doesn't have function `{functional_name}`. (Discovered while processing\n{pprint.pformat(test_params_dict)}.)"  # noqa: B950
+    assert hasattr(torch.nn.functional, functional_name), (
+        f"`torch.nn.functional` doesn't have function `{functional_name}`. "
+        f"(Discovered while processing\n{pprint.pformat(test_params_dict)}.)"
+    )
 
     functional_full_name = "F::" + functional_name
 
     assert functional_full_name in parity_table["torch::nn::functional"], (
-        f"Please add `{functional_full_name}` entry to `torch::nn::functional` section of `test/cpp_api_parity/parity-tracker.md`. "
+        f"Please add `{functional_full_name}` entry to `torch::nn::functional` "
+        "section of `test/cpp_api_parity/parity-tracker.md`. "
         f"(Discovered while processing\n{pprint.pformat(test_params_dict)}.)"
     )
 
