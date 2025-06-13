@@ -711,7 +711,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
             return_getters_groups.append(return_getters)
 
-        assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
+        assert all(V.graph.sizevars.size_hint(s, fallback=1) == 1 for s in remaining), (
             f"failed to set ranges {remaining} {lengths}"
         )
 
@@ -979,7 +979,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # for the "cat". However, I think it might be a bit overwhelming that
         # we add such complexity only for handling some particular cases for
         # benchmarking.
-        out_numel = V.graph.sizevars.size_hint(sympy_product(self.numels.values()))
+        out_numel = V.graph.sizevars.size_hint(sympy_product(self.numels.values()), fallback=1)
         for i, arg in enumerate(call_args):
             # "buf" may be narrowed. In this case, the number of memory accesses
             # should be estimated based on the reinterpreted layout.
@@ -990,7 +990,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 nbytes.append(0)
                 continue
             arg_numel = V.graph.get_numel(arg)
-            buf_size = V.graph.sizevars.size_hint(arg_numel)
+            buf_size = V.graph.sizevars.size_hint(arg_numel, fallback=1)
             if buf_size > out_numel:
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
@@ -2357,14 +2357,14 @@ class SIMDScheduling(BaseScheduling):
 
                 if (
                     free_unbacked_symbols([a1, b1])
-                    or V.graph.sizevars.size_hint(a1 - b1) == 0
+                    or V.graph.sizevars.size_hint(a1 - b1, fallback=1) == 0
                 ):
                     return None
-                if V.graph.sizevars.size_hint(a1 - b1) < 0:
+                if V.graph.sizevars.size_hint(a1 - b1, fallback=1) < 0:
                     # swap so a0 is bigger
                     (a0, a1), (b0, b1) = (b0, b1), (a0, a1)
 
-                assert V.graph.sizevars.size_hint(a1 - b1) > 0
+                assert V.graph.sizevars.size_hint(a1 - b1, fallback=1) > 0
                 if not V.graph.sizevars.statically_known_multiple_of(a1, b1):
                     return None
 
@@ -2454,7 +2454,7 @@ class CandidateTiling:
     @staticmethod
     def is_good_size(s):
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
-        s = V.graph.sizevars.size_hint(s)
+        s = V.graph.sizevars.size_hint(s, fallback=1)
         return s >= 32 and (s % 32 == 0)
 
 

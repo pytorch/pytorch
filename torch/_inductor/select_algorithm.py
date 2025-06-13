@@ -2597,7 +2597,7 @@ class AlgorithmSelectorCache(PersistentCache):
         ]
         out = cls.benchmark_example_value(layout)
         out_extern = torch.as_strided(
-            out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
+            out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset, fallback=0)
         )
         expected = None
         if VERIFY:

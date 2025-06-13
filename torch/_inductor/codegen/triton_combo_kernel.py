@@ -90,7 +90,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         long_reduction = [
             n
             for n in reduction
-            if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048  # type: ignore[arg-type]
+            if V.graph.sizevars.size_hint(n.group[-1][-1], fallback=1) > 2048  # type: ignore[arg-type]
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
@@ -103,7 +103,7 @@ def _default_custom_combo_kernel_horizontal_partition(
             for n in not_reduction
             if not kernel_map[n].inside_reduction
             and len(kernel_map[n].numels) == 2
-            and V.graph.sizevars.size_hint(kernel_map[n].numels["x"]) > LARGE_NUMELS
+            and V.graph.sizevars.size_hint(kernel_map[n].numels["x"], fallback=1) > LARGE_NUMELS
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
@@ -485,7 +485,7 @@ class ComboKernel(Kernel):
 
     def select_heuristics(self, sub_kernel: TritonKernel) -> tuple[str, dict[str, int]]:
         size_hints = {
-            prefix: next_power_of_2(V.graph.sizevars.size_hint(numel))
+            prefix: next_power_of_2(V.graph.sizevars.size_hint(numel, fallback=1))
             for prefix, numel in sub_kernel.numels.items()
             if not prefix_is_reduction(prefix) or sub_kernel.inside_reduction
         }
@@ -726,7 +726,7 @@ class ComboKernel(Kernel):
                 if numel_name not in self.dynamic_shape_args:
                     continue
                 if not tree.is_reduction or sub_kernel.inside_reduction:
-                    extra_args.append(str(V.graph.sizevars.size_hint(tree.numel)))
+                    extra_args.append(str(V.graph.sizevars.size_hint(tree.numel, fallback=1)))
         return extra_args
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
@@ -820,7 +820,7 @@ class ComboKernel(Kernel):
                         f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
-                    symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
+                    symval_hint = V.graph.sizevars.size_hint(arg_sig.expr, fallback=1)
 
                     # Force the seed_offset to be 0 so calls to the same kernel
                     # using different seed offset will have the same benchmark harness.
@@ -830,7 +830,7 @@ class ComboKernel(Kernel):
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
                     device = V.graph.get_current_device_or_throw()
-                    count = V.graph.sizevars.size_hint(arg_sig.count)
+                    count = V.graph.sizevars.size_hint(arg_sig.count, fallback=1)
                     # for benchmark harness, we ignore arg_sig.zero_mode and always zero it
                     result.writeline(
                         f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"

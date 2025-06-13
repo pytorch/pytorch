@@ -3348,9 +3348,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if isinstance(arg, int):
                     args.append(str(arg))
                 elif isinstance(arg, SymbolicCallArg):
-                    args.append(str(V.graph.sizevars.size_hint(arg.inner_expr)))
+                    args.append(str(V.graph.sizevars.size_hint(arg.inner_expr, fallback=1)))
                 elif isinstance(arg, sympy.Expr):
-                    args.append(str(V.graph.sizevars.size_hint(arg)))
+                    args.append(str(V.graph.sizevars.size_hint(arg, fallback=1)))
                 else:
                     raise ValueError(f"Unsupported numel argument type: {type(arg)}")
         return args
@@ -3377,7 +3377,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
-                    symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
+                    symval_hint = V.graph.sizevars.size_hint(arg_sig.expr, fallback=1)
 
                     # Force the seed_offset to be 0 so calls to the same kernel
                     # using different seed offset will have the same benchmark harness.
@@ -3387,7 +3387,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
                     device = V.graph.get_current_device_or_throw()
-                    count = V.graph.sizevars.size_hint(arg_sig.count)
+                    count = V.graph.sizevars.size_hint(arg_sig.count, fallback=1)
                     result.writeline(
                         f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"
                     )
