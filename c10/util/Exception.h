@@ -267,6 +267,13 @@ class C10_API NotImplementedError : public Error {
   using Error::Error;
 };
 
+// Used in ATen for buffer-related errors, e.g. trying to create a DLPack of
+// an unsupported device.  These turn into BufferError when they cross to
+// Python.
+class C10_API BufferError : public Error {
+  using Error::Error;
+};
+
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
 class C10_API EnforceFiniteError : public Error {
@@ -640,6 +647,10 @@ namespace c10::detail {
 // Like TORCH_CHECK, but raises NotImplementedErrors instead of Errors.
 #define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
+
+// Like TORCH_CHECK, but raises BufferError instead of Errors.
+#define TORCH_CHECK_BUFFER(cond, ...) \
+  TORCH_CHECK_WITH_MSG(BufferError, cond, "TYPE", __VA_ARGS__)
 
 #define TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(cond, ...) \
   TORCH_CHECK_WITH_MSG(                                   \
