@@ -53,6 +53,7 @@ def checkout_eigen() -> None:
 
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) == 1:
         # If no arguments are given checkout all optional dependency
         checkout_nccl()
