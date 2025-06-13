@@ -13706,6 +13706,7 @@ if RUN_GPU:
 
             return kernels
 
+        @config.patch(min_num_split=1)
         def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()
 
