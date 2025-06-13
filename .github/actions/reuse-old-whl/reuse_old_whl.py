@@ -5,7 +5,6 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast, Optional, Union
-
 import requests
 
 
@@ -371,5 +370,6 @@ if __name__ == "__main__":
             "reason": reason,
             "build_environment": args.build_environment,
             "merge_base": get_merge_base(),
+            "head_sha": get_head_sha(),
         },
     )
