@@ -97,7 +97,7 @@ TORCH_META_FUNC(clamp)
   }
   // Manual type promotion, since scalars have to participate in it
   ScalarType result_type = self.scalar_type();
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       !isComplexType(result_type), "clamp is not supported for complex types");
   // Floating is the highest supported
   if (!isFloatingType(result_type)) {
@@ -122,7 +122,7 @@ TORCH_META_FUNC(clamp)
         self.dtype());
   }
   // make sure scalars weren't complex
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       !isComplexType(result_type), "clamp is not supported for complex types");
   build_unary_op(maybe_get_output(), self.to(result_type));
 }
@@ -132,7 +132,7 @@ TORCH_META_FUNC2(clamp, Tensor)
   TORCH_CHECK(
       min || max,
       "torch.clamp: At least one of 'min' or 'max' must not be None");
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       !isComplexType(self.scalar_type()),
       "clamp is not supported for complex types");
 #define CLAMP_CONFIG()                      \
@@ -158,9 +158,10 @@ TORCH_META_FUNC(clamp_max)(const Tensor& self, const Scalar& max) {
   // but relu is implemented via clamp_min, so for perf an uniformity reasons
   // do a faster but correct thing
   ScalarType result_type = self.scalar_type();
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       !isComplexType(result_type), "clamp is not supported for complex types");
-  TORCH_CHECK(!max.isComplex(), "clamp is not supported for complex types");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !max.isComplex(), "clamp is not supported for complex types");
   // Floating is the highest supported
   if (!isFloatingType(result_type)) {
     auto result_type = at::native::result_type(self, max);
@@ -184,9 +185,10 @@ TORCH_META_FUNC2(clamp_max, Tensor)(const Tensor& self, const Tensor& max) {
 
 TORCH_META_FUNC(clamp_min)(const Tensor& self, const Scalar& min) {
   ScalarType result_type = self.scalar_type();
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       !isComplexType(result_type), "clamp is not supported for complex types");
-  TORCH_CHECK(!min.isComplex(), "clamp is not supported for complex types");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !min.isComplex(), "clamp is not supported for complex types");
   // Floating is the highest supported
   if (!isFloatingType(result_type)) {
     auto result_type = at::native::result_type(self, min);
