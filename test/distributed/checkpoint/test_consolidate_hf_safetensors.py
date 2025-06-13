@@ -1,12 +1,15 @@
 # Owner(s): ["oncall: distributed_checkpointing"]
 
+import importlib
+import json
 import os
 import sys
 
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
-from torch.distributed.checkpoint.scripts._consolidate_hf_safetensors import (
+from torch.distributed.checkpoint._hf_storage import _metadata_fn
+from torch.distributed.checkpoint.consolidate_hf_safetensors import (
     consolidate_safetensors_files,
 )
 from torch.distributed.device_mesh import init_device_mesh
@@ -68,11 +71,10 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
     def test_consolidate_to_one_file(self) -> None:
-        try:
-            import safetensors
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
-            sys.exit(0)
+            return
+        import safetensors
 
         checkpoint_dir = self.temp_dir
         output_dir = os.path.join(checkpoint_dir, "consolidated")
@@ -90,17 +92,22 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
             self.assertEqual(loaded_dict.keys(), {"dtensor", "dtensor_col"})
             self.assertTrue(torch.equal(loaded_dict["dtensor"], global_tensor))
             self.assertTrue(torch.equal(loaded_dict["dtensor_col"], global_tensor))
+
+            with open(os.path.join(output_dir, _metadata_fn)) as f:
+                metadata = json.load(f)
+                self.assertEqual(metadata["metadata"]["total_size"], 16 * 4 * 2)
+                self.assertEqual(metadata["weight_map"], {"dtensor": "model-00001-of-00001.safetensors", "dtensor_col": "model-00001-of-00001.safetensors"})
+               
         dist.barrier()
 
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
     def test_consolidate_to_two_files(self):
-        try:
-            import safetensors
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
-            sys.exit(0)
+            return
+        import safetensors
 
         checkpoint_dir = self.temp_dir
         output_dir = os.path.join(checkpoint_dir, "consolidated")
@@ -112,7 +119,7 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
             
         if self.rank == 0:
             fqn_to_index_mapping = {"dtensor": 1, "dtensor_col": 2}
-            consolidate_safetensors_files(checkpoint_dir, output_dir, fqn_to_index_mapping)
+            consolidate_safetensors_files(checkpoint_dir, output_dir, fqn_to_index_mapping=fqn_to_index_mapping)
             
             file1_path = os.path.join(output_dir, "model-00001-of-00002.safetensors")
             file2_path = os.path.join(output_dir, "model-00002-of-00002.safetensors")
@@ -124,6 +131,11 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
             loaded_dict_col = safetensors.torch.load_file(file2_path)
             self.assertEqual(loaded_dict_col.keys(), {"dtensor_col"})
             self.assertTrue(torch.equal(loaded_dict_col["dtensor_col"], global_tensor))
+
+            with open(os.path.join(output_dir, _metadata_fn)) as f:
+                metadata = json.load(f)
+                self.assertEqual(metadata["metadata"]["total_size"], 16 * 4 * 2)
+                self.assertEqual(metadata["weight_map"], {"dtensor": "model-00001-of-00002.safetensors", "dtensor_col": "model-00002-of-00002.safetensors"})
         dist.barrier()
         
         
