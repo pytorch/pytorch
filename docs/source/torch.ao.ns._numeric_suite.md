@@ -1,4 +1,4 @@
-(torch.ao.ns._numeric_suite)=
+(torch_ao_ns_numeric_suite)=
 
 # torch.ao.ns._numeric_suite
 
