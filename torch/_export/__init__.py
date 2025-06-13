@@ -16,7 +16,7 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from functools import lru_cache
 
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, Union
 from unittest.mock import patch
 
 import torch
@@ -47,9 +47,6 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
 from .utils import _materialize_cpp_cia_ops
-
-if TYPE_CHECKING:
-    from torch._C._aoti import AOTIModelContainerRunner
 
 log = logging.getLogger(__name__)
 
@@ -163,23 +160,23 @@ def aot_load(so_path: str, device: str) -> Callable:
     aot_compile_warning()
 
     if device == "cpu":
-        runner: AOTIModelContainerRunner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
+        runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)  # type: ignore[call-arg]
     elif device == "cuda" or device.startswith("cuda:"):
-        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)  # type: ignore[assignment, call-arg]
     elif device == "xpu" or device.startswith("xpu:"):
-        runner = torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
+        runner = torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)  # type: ignore[assignment, call-arg]
     elif device == "mps" or device.startswith("mps:"):
-        runner = torch._C._aoti.AOTIModelContainerRunnerMps(so_path, 1)
+        runner = torch._C._aoti.AOTIModelContainerRunnerMps(so_path, 1)  # type: ignore[assignment, call-arg]
     else:
         raise RuntimeError("Unsupported device " + device)
 
     def optimized(*args, **kwargs):
-        call_spec = runner.get_call_spec()
+        call_spec = runner.get_call_spec()  # type: ignore[attr-defined]
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
         flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
-        flat_outputs = runner.run(flat_inputs)
+        flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
     return optimized

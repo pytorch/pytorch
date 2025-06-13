@@ -47,10 +47,10 @@ import uuid
 import warnings
 import weakref
 from collections import Counter, OrderedDict
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
-from types import MethodWrapperType
+from types import CodeType, MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -2369,7 +2369,7 @@ def is_safe_constant(v):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def common_constants():
     return {
         # We zero-one specialize shapes, so specialize these constants
@@ -2400,6 +2400,10 @@ def is_int_specialization_case(value, source):
         )
         or (
             source.guard_source().is_unspecialized_builtin_nn_module()
+            and not config.allow_unspec_int_on_nn_module
+        )
+        or (
+            source.guard_source().is_unspecialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or is_from_defaults(source)
@@ -3107,7 +3111,7 @@ seen_code_map = ExactWeakKeyDictionary()
 
 
 # return same dir unless user changes config between calls
-@functools.lru_cache(None)
+@functools.cache
 def _get_debug_dir(root_dir):
     dir_name = (
         "run_"
@@ -4491,38 +4495,22 @@ def does_not_override_dict_iter_methods(user_cls):
     )
 
 
-# Helper functions below are to prevent __torch_function__
-# calls from happening in the middle of __torch_function__
-# compiled bytecode
-# They will be skipped which is the desired result
+# Helper functions below are to prevent TorchDynamo to prevent tracing of
+# __torch_function__ calls triggered on tensor properties in the pre graph
+# bytecode.
+@torch._disable_dynamo
 def call_size(x, i):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x, i):
-        return x.size(i)
-
-    return fn(x, i)
+    return x.size(i)
 
 
+@torch._disable_dynamo
 def call_stride(x, i):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x, i):
-        return x.stride(i)
-
-    return fn(x, i)
+    return x.stride(i)
 
 
+@torch._disable_dynamo
 def call_storage_offset(x):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x):
-        return x.storage_offset()
-
-    return fn(x)
+    return x.storage_offset()
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
@@ -4670,3 +4658,25 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
     return node is None or "example_value" in node.meta or "val" in node.meta
+
+
+def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
+    cm: AbstractContextManager[None] = (
+        torch._C._profiler._RecordFunctionFast("Pregraph bytecode")
+        if torch.autograd.profiler._is_profiler_enabled
+        else contextlib.nullcontext()
+    )
+    cm.__enter__()
+    return cm
+
+
+def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
+    cm.__exit__(None, None, None)
+
+
+# Returns a set of code objects present traced in the current TracingContext, or None
+# if there is no current TracingContext.
+def get_traced_code() -> list[CodeType]:
+    from torch._guards import TracingContext
+
+    return TracingContext.get_traced_code()
