@@ -777,6 +777,7 @@ class OpOverload(OperatorBase):
         # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
         is_write = None
         for a in self._schema.arguments:
+            self.__annotations__[a.name] = a.type
             if a.alias_info is None:
                 continue
             if is_write is None:
@@ -785,7 +786,6 @@ class OpOverload(OperatorBase):
                 # We will conservatively call mixed mutable/non-mutable
                 # aliased inputs as NOT a view
                 is_write = a.alias_info.is_write or is_write
-            self.__annotations__[a.name] = a.type
         return_types = (
             tuple(a.type for a in self._schema.returns)
             if self._schema.returns
