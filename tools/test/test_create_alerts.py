@@ -12,7 +12,7 @@ MOCK_TEST_DATA = [
         "sha": "f02f3046571d21b48af3067e308a1e0f29b43af9",
         "id": 7819529276,
         "conclusion": "failure",
-        "htmlUrl": "https://github.com/pytorch/pytorch/runs/7819529276?check_suite_focus=true",
+        "htmlUrl": "https://github.com/pytorch/pytorch/runs/7819529276?check_suite_focus=true",  # @lint-ignore
         "logUrl": "https://ossci-raw-job-status.s3.amazonaws.com/log/7819529276",
         "durationS": 14876,
         "failureLine": "##[error]The action has timed out.",
@@ -25,7 +25,7 @@ MOCK_TEST_DATA = [
         "sha": "d0d6b1f2222bf90f478796d84a525869898f55b6",
         "id": 7818399623,
         "conclusion": "failure",
-        "htmlUrl": "https://github.com/pytorch/pytorch/runs/7818399623?check_suite_focus=true",
+        "htmlUrl": "https://github.com/pytorch/pytorch/runs/7818399623?check_suite_focus=true",  # @lint-ignore
         "logUrl": "https://ossci-raw-job-status.s3.amazonaws.com/log/7818399623",
         "durationS": 14882,
         "failureLine": "##[error]The action has timed out.",
