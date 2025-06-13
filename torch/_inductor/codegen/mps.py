@@ -211,24 +211,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> str:
-        if (
-            isinstance(b, CSEVariable)
-            and b.dtype is not None
-            and not b.dtype.is_floating_point
-        ):
-            return f"{a} % {b}"
-        # Upcast to float otherwise results of remainder op are wrong for half
-        float_a = (
-            f"static_cast<float>({a})"
-            if isinstance(a, CSEVariable) and a.dtype != torch.float
-            else a
-        )
-        float_b = (
-            f"static_cast<float>({b})"
-            if isinstance(b, CSEVariable) and b.dtype != torch.float
-            else b
-        )
-        return f"{float_a} - {float_b} * metal::floor({float_a} / {float_b})"
+        return f"c10::metal::remainder({a}, {b})"
 
     @staticmethod
     def maximum(a: CSEVariable, b: CSEVariable) -> str:

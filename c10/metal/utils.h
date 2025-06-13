@@ -265,6 +265,30 @@ inline common_dtype<T, U> div(const T x, const U y) {
   return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
 }
 
+// Remainder operator
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_floating_point_v<T> || is_scalar_floating_point_v<U>,
+        bool> = true>
+inline float remainder(const T x, const U y) {
+  const auto x_f = static_cast<float>(x);
+  const auto y_f = static_cast<float>(y);
+  return x_f - y_f * floor_divide(x_f, y_f);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline common_dtype<T, U> remainder(const T x, const U y) {
+  auto rc = x % y;
+  return rc == 0 || (x ^ y) > 0 ? rc : rc + y;
+}
+
 // Based on algorithm described in
 // https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html#1202
 inline float log1p(float x) {
