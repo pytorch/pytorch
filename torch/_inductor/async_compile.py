@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import functools
 import json
 import logging
@@ -46,7 +47,6 @@ from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch._inductor.virtualized import V
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
@@ -216,41 +216,16 @@ class CompiledTritonKernels:
             del CompiledTritonKernels._cache[key]
 
 
-_ASYNC_COMPILE_POOL_MANAGER: Optional[AsyncCompilePoolManager] = None
-
-
-class AsyncCompilePoolManager:
+@contextlib.contextmanager
+def async_compile_pool_manager():
     """
-    Context manager to help quiesce and wakeup the subproc pool. This CM can
-    be entered early during compile, i.e., in dynamo. It then handles waking
-    up the pool at most once and quiescing at exit.
+    Context manager to quiesce the subproc pool at the end of compilation, i.e.,
+    when dynamo is done.
     """
-
-    def __init__(self):
-        self._awake = False
-
-    def __enter__(self):
-        global _ASYNC_COMPILE_POOL_MANAGER
-        if config.quiesce_async_compile_pool:
-            _ASYNC_COMPILE_POOL_MANAGER = self
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        global _ASYNC_COMPILE_POOL_MANAGER
-        if _ASYNC_COMPILE_POOL_MANAGER is not None:
-            AsyncCompile.quiesce()
-        _ASYNC_COMPILE_POOL_MANAGER = None
-
-    @staticmethod
-    def wakeup():
-        global _ASYNC_COMPILE_POOL_MANAGER
-        if _ASYNC_COMPILE_POOL_MANAGER is not None:
-            _ASYNC_COMPILE_POOL_MANAGER._wakeup()
-
-    def _wakeup(self):
-        if not self._awake:
-            AsyncCompile.wakeup()
-            self._awake = True
+    try:
+        yield
+    finally:
+        AsyncCompile.quiesce()
 
 
 class AsyncCompile:
@@ -324,7 +299,7 @@ class AsyncCompile:
         ProcessPoolExecutor.
         """
         # Don't inadvertently create a process pool if it doesn't already exist:
-        if get_compile_threads() > 1 and cls.process_pool.cache_info().currsize:
+        if cls.process_pool.cache_info().currsize and config.quiesce_async_compile_pool:
             pool = cls.process_pool()
             if isinstance(pool, SubprocPool):
                 pool.quiesce()
@@ -578,19 +553,6 @@ class AsyncCompile:
                 ) from e
             pbar.update(1)
 
-
-if (
-    os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
-    or os.environ.get("TORCH_WARM_POOL", "1") != "1"
-    # The subprocess pool is only used for the Triton backend
-    or not has_triton_package()
-    # Skip for fbcode. We have internal reports of usages inside multiprocessing
-    # pools that lead a multiplicative number of compile subprocesses.
-    or config.is_fbcode()
-):
-    pass
-else:
-    AsyncCompile.warm_pool()
 
 # On exit give the workers a chance to clean themselves up. Without this the
 # resource_tracker can complain about leaked semaphores coming from the
