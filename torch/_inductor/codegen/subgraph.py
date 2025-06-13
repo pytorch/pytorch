@@ -78,7 +78,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
 
         sym_inputs = [
-            int(V.graph.sizevars.shape_env.size_hint(sym_var, fallback=1)) for sym_var in sym_inputs
+            int(V.graph.sizevars.shape_env.size_hint(sym_var)) for sym_var in sym_inputs
         ]
 
         if len(sym_inputs) == 0:
