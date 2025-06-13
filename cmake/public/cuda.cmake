@@ -26,8 +26,8 @@ if(NOT MSVC)
 endif()
 
 # Find CUDA.
-find_package(CUDA)
-if(NOT CUDA_FOUND)
+find_package(CUDAToolkit)
+if(NOT CUDAToolkit_FOUND)
   message(WARNING
     "PyTorch: CUDA cannot be found. Depending on whether you are building "
     "PyTorch or a PyTorch dependent library, the next warning / error will "
@@ -36,8 +36,6 @@ if(NOT CUDA_FOUND)
   return()
 endif()
 
-# Enable CUDA language support
-set(CUDAToolkit_ROOT "${CUDA_TOOLKIT_ROOT_DIR}")
 # Pass clang as host compiler, which according to the docs
 # Must be done before CUDA language is enabled, see
 # https://cmake.org/cmake/help/v3.15/variable/CMAKE_CUDA_HOST_COMPILER.html
@@ -56,24 +54,18 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12.0)
   cmake_policy(SET CMP0074 NEW)
 endif()
 
-find_package(CUDAToolkit REQUIRED)
+find_package(CUDAToolkit REQUIRED COMPONENTS cudart nvrtc REQUIRED)
 
 cmake_policy(POP)
 
-if(NOT CMAKE_CUDA_COMPILER_VERSION VERSION_EQUAL CUDAToolkit_VERSION)
-  message(FATAL_ERROR "Found two conflicting CUDA versions:\n"
-                      "V${CMAKE_CUDA_COMPILER_VERSION} in '${CUDA_INCLUDE_DIRS}' and\n"
-                      "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIRS}'")
-endif()
-
-message(STATUS "PyTorch: CUDA detected: " ${CUDA_VERSION})
-message(STATUS "PyTorch: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
-message(STATUS "PyTorch: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
-if(CUDA_VERSION VERSION_LESS 11.0)
+message(STATUS "PyTorch: CUDA detected: " ${CUDAToolkit_VERSION})
+message(STATUS "PyTorch: CUDA nvcc is: " ${CUDAToolkit_NVCC_EXECUTABLE})
+message(STATUS "PyTorch: CUDA toolkit directory: " ${CUDAToolkit_ROOT})
+if(CUDAToolkit_VERSION VERSION_LESS 11.0)
   message(FATAL_ERROR "PyTorch requires CUDA 11.0 or above.")
 endif()
 
-if(CUDA_FOUND)
+if(CUDAToolkit_FOUND)
   # Sometimes, we may mismatch nvcc with the CUDA headers we are
   # compiling with, e.g., if a ccache nvcc is fed to us by CUDA_NVCC_EXECUTABLE
   # but the PATH is not consistent with CUDA_HOME.  It's better safe
@@ -97,8 +89,8 @@ if(CUDA_FOUND)
     )
   if(NOT CMAKE_CROSSCOMPILING)
     try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
-      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
-      LINK_LIBRARIES ${CUDA_LIBRARIES}
+      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDAToolkit_INCLUDE_DIRS}"
+      LINK_LIBRARIES ${CUDAToolkit_LIBRARIES}
       RUN_OUTPUT_VARIABLE cuda_version_from_header
       COMPILE_OUTPUT_VARIABLE output_var
       )
@@ -106,30 +98,14 @@ if(CUDA_FOUND)
       message(FATAL_ERROR "PyTorch: Couldn't determine version from header: " ${output_var})
     endif()
     message(STATUS "PyTorch: Header version is: " ${cuda_version_from_header})
-    if(NOT cuda_version_from_header STREQUAL ${CUDA_VERSION_STRING})
-      # Force CUDA to be processed for again next time
-      # TODO: I'm not sure if this counts as an implementation detail of
-      # FindCUDA
-      set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
-      unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
-      # Not strictly necessary, but for good luck.
-      unset(CUDA_VERSION CACHE)
-      # Error out
-      message(FATAL_ERROR "FindCUDA says CUDA version is ${cuda_version_from_findcuda} (usually determined by nvcc), "
-        "but the CUDA headers say the version is ${cuda_version_from_header}.  This often occurs "
-        "when you set both CUDA_HOME and CUDA_NVCC_EXECUTABLE to "
-        "non-standard locations, without also setting PATH to point to the correct nvcc.  "
-        "Perhaps, try re-running this command again with PATH=${CUDA_TOOLKIT_ROOT_DIR}/bin:$PATH.  "
-        "See above log messages for more diagnostics, and see https://github.com/pytorch/pytorch/issues/8092 for more details.")
-    endif()
   endif()
 endif()
 
 # ---[ CUDA libraries wrapper
 
 # find lbnvrtc.so
-set(CUDA_NVRTC_LIB "${CUDA_nvrtc_LIBRARY}" CACHE FILEPATH "")
-if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
+get_target_property(CUDA_NVRTC_LIB CUDA::nvrtc INTERFACE_LINK_LIBRARIES)
+if(NOT CUDA_NVRTC_SHORTHASH)
   find_package(Python COMPONENTS Interpreter)
   execute_process(
     COMMAND Python::Interpreter -c
