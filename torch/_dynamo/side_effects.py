@@ -100,6 +100,7 @@ class SideEffects:
     id_to_variable: dict[int, VariableTracker]
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     keepalive: list[Any]
+    allow_mutation_vts: set[VariableTracker]
 
     def __init__(
         self,
@@ -123,6 +124,24 @@ class SideEffects:
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var = None
+
+        # A set of VariableTracker objects that are explicitly allowed to be mutated
+        # during symbolic execution, even when mutations would normally be disallowed
+        # e.g. in HigherOrderOp subgraph.
+        # This is primarily used for controlled mutations in specific contexts like
+        # torch.func.functional_call, where we need to temporarily allow
+        # mutations to module parameters and buffers since they'll be restored after
+        # the context manager.
+        self.mutation_allowed_variables = set()
+
+    def allow_mutation_in_hop_subgraph(self, var):
+        """Mark a variable as allowed for mutation during symbolic execution."""
+        self.mutation_allowed_variables.add(var)
+
+    def disallow_mutation_in_hop_subgraph(self, var):
+        """Remove a variable from the allowed mutation set."""
+        if var in self.mutation_allowed_variables:
+            self.mutation_allowed_variables.remove(var)
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -191,7 +210,7 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
-    def check_allowed_side_effect(self, item):
+    def check_allowed_side_effect(self, item: VariableTracker):
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
         # People do things like self.dim = dim inside autograd.Function.
@@ -208,6 +227,8 @@ class SideEffects:
                 "Dynamo needs to fully exhaust the generator, which may cause "
                 "unintended variable modifications."
             )
+        if item in self.mutation_allowed_variables:
+            return True
         if not is_side_effect_safe(item.mutation_type):
             # TODO plumb HOP information here
             unimplemented_v2(

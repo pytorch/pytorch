@@ -196,6 +196,69 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return True
 
 
+class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
+    def __init__(self, ctx_manager_vt, mod):
+        self.cm_vt = ctx_manager_vt
+        self.mod = mod
+
+    def module_name(self):
+        return self.cm_vt.module_name()
+
+    def fn_name(self):
+        return self.cm_vt.fn_name()
+
+    def enter(self, tx: "InstructionTranslator"):
+        self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
+        self.old_bufferer_var = self.mod.var_getattr(tx, "_buffers").realize()
+        tx.output.side_effects.allow_mutation_in_hop_subgraph(self.old_parameters_var)
+        tx.output.side_effects.allow_mutation_in_hop_subgraph(self.old_bufferer_var)
+        return self.cm_vt.enter(tx)
+
+    def _check_param_restored(self, tx):
+        from torch._dynamo.variables.higher_order_ops import _make_inlined
+        from torch.utils import _pytree as pytree
+
+        new_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
+        new_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
+        new_spec_and_flattened = _make_inlined(tx, pytree.tree_flatten)(
+            (new_parameters_var, new_buffer_var)
+        )
+        old_spec_and_flattened = _make_inlined(tx, pytree.tree_flatten)(
+            (self.old_parameters_var, self.old_bufferer_var)
+        )
+        old_flat_params_buffers, old_spec = old_spec_and_flattened.unpack_var_sequence(
+            tx
+        )
+        new_flat_params_buffers, new_spec = new_spec_and_flattened.unpack_var_sequence(
+            tx
+        )
+        assert _make_inlined(tx, pytree.TreeSpec.__eq__)(
+            new_spec, old_spec
+        ).as_python_constant()
+        assert all(
+            (param1 is param2)
+            for param1, param2 in zip(
+                old_flat_params_buffers.unpack_var_sequence(tx),
+                new_flat_params_buffers.unpack_var_sequence(tx),
+            )
+        )
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        x = self.cm_vt.exit(tx, *args)
+        tx.output.side_effects.disallow_mutation_in_hop_subgraph(self.old_bufferer_var)
+        tx.output.side_effects.disallow_mutation_in_hop_subgraph(
+            self.old_parameters_var
+        )
+        self._check_param_restored(tx)
+        return x
+
+    def supports_graph_breaks(self):
+        return False
+
+    def exit_on_graph_break(self):
+        return True
+
+
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
     """represents torch grad requries grad"""
 
