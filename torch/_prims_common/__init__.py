@@ -281,7 +281,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
 
     expected_stride = 1
     for x, y in reversed(tuple(zip(a.shape, a.stride()))):
-        # Skips checking strides when a dimension has length 1
+        # Skips checking strides when a dimension has length 1.
         if maybe_guard_or_false(x == 1):
             continue
 
@@ -452,7 +452,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
         return False
 
     # Short-circuits if the tensor is already contiguous or channels-last contiguous
-    if is_contiguous(a) or is_channels_last_contiguous(a):
+    if definitely_contiguous(a) or definitely_channels_last_contiguous(a):
         return True
 
     # The following is equivalent to compute_non_overlapping_and_dense in TensorImpl.cpp
