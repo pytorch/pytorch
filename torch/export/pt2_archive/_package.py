@@ -216,7 +216,6 @@ def _package_aoti_files(
 
     for model_name, files in aoti_files.items():
         num_so_files = 0
-        num_cpp_files = 0
 
         for file in files:
             if file == "":
@@ -227,14 +226,6 @@ def _package_aoti_files(
                 if num_so_files > 1:
                     raise RuntimeError(
                         f"Multiple .so files found in {files}. "
-                        "You might need to clear your cache "
-                        "directory before calling aoti_compile again."
-                    )
-            if file.endswith(".cpp"):
-                num_cpp_files += 1
-                if num_so_files > 1:
-                    raise RuntimeError(
-                        f"Multiple .cpp files found in {files}. "
                         "You might need to clear your cache "
                         "directory before calling aoti_compile again."
                     )
