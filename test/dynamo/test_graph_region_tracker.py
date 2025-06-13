@@ -338,6 +338,27 @@ class GraphRegionTrackerTests(TestCase):
             """{o0: OrderedSet([0]), sin_: OrderedSet([0])}""",
         )
 
+    def test_non_tensor_arg_hashing(self):
+        def inner(x, w, t):
+            y = x + x
+            return torch.conv2d(y, w, None, *t)
+
+        def fn(x, y):
+            o1 = inner(x, y, ((1, 1), (0, 0), (1, 1), 1))
+            o2 = inner(x, y, ((1, 1), (0, 0), (1, 1), 1))
+            o3 = inner(x, y, ((1, 1), (0, 0), (1, 1), 1))
+            o4 = inner(x, y, ((2, 2), (0, 0), (1, 1), 1))
+            return o1.sum() + o2.sum() + o3.sum() + o4.sum()
+
+        self.assertExpectedInline(
+            self.get_result(
+                fn,
+                torch.rand(32, 256, 56, 56),
+                torch.nn.Parameter(torch.rand(512, 256, 1, 1)),
+            ),
+            """[[['y', 'o1'], ['y_1', 'o2'], ['y_2', 'o3']]]""",
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
