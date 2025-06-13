@@ -1,9 +1,10 @@
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 repo_root = Path(__file__).absolute().parent.parent
 third_party_path = os.path.join(repo_root, "third_party")
+
 
 def read_nccl_pin() -> str:
     nccl_file = "nccl-cu12.txt"
@@ -38,3 +39,5 @@ def checkout_nccl() -> None:
         )
 
 
+if __name__ == "__main__":
+    checkout_nccl()

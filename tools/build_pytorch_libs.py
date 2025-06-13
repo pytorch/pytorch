@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import platform
 
+from .optional_submodules import checkout_nccl
 from .setup_helpers.cmake import CMake, USE_NINJA
 from .setup_helpers.env import (
     check_env_flag,
@@ -10,7 +11,6 @@ from .setup_helpers.env import (
     IS_64BIT,
     IS_WINDOWS,
 )
-from .optional_submodules import checkout_nccl
 
 
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
