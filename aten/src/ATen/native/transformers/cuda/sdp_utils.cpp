@@ -76,13 +76,9 @@ bool check_prefer_cudnn_attention() {
   if (!prefer_cudnn) {
     return false;
   }
-#if CUDNN_VERSION > 90000
+#if (defined(CUDNN_VERSION) && (CUDNN_VERSION > 90000))
   auto dprops = at::cuda::getCurrentDeviceProperties();
   return dprops->major >= 9 && !dprops->minor;
-#else
-  return false;
-#endif
-
 #else
   return false;
 #endif
