@@ -530,7 +530,7 @@ assert Z.device.type == "cuda"
 
 During the graph break, the intermediary tensors still need to be moved to CPU, but when the
 tracing is resumed after the graph break, the rest of the graph is still traced on CUDA.
-Given this CUDA \<> CPU and CPU \<> CUDA movement, graph breaks are fairly costly in the NumPy
+Given this CUDA <> CPU and CPU <> CUDA movement, graph breaks are fairly costly in the NumPy
 context and should be avoided, but at least they allow tracing through complex pieces of code.
 
 ### How do I debug NumPy code under `torch.compile`?
