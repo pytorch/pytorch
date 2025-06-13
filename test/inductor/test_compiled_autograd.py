@@ -1912,9 +1912,7 @@ main()
             yield model[0].weight.grad
             yield model[1].weight.grad
 
-        self.check_output_and_recompiles(
-            fn, [1, 0], compiler_fn=make_compiler_fn(backend="eager")
-        )
+        self.check_output_and_recompiles(fn, 1)
 
     def test_trace_run_with_rng_state(self):
         def sdpa(xq, xk):
