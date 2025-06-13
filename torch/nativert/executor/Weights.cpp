@@ -46,7 +46,8 @@ Weights::Weights(
     std::string_view constantPathPrefix,
     Placement placement,
     std::function<bool(const std::string&)> skipSizeCheck,
-    std::function<bool(const std::string&)> skipDtypeCheck)
+    std::function<bool(const std::string&)> skipDtypeCheck,
+    std::string (*convertOldToNewTensorName)(const std::string&))
     : graph_(graph),
       weightsMeta_(graph->weightsMeta()),
       placement_(std::move(placement)),
@@ -59,6 +60,16 @@ Weights::Weights(
           const std::unordered_map<std::string, std::string>& tensorPaths,
           bool isUsed) {
         auto pathIt = tensorPaths.find(tensorName);
+        if (pathIt == tensorPaths.end() && convertOldToNewTensorName) {
+          // Handles a special cases where we need to make some updates of the
+          // original tensor name to match new tensor name. This is only used
+          // for loading weights. The model itself still maps to original tensor
+          // name.
+          auto tensorNameToLoadWeight = convertOldToNewTensorName(tensorName);
+          LOG(INFO) << "Updating " << tensorName << " to "
+<< tensorNameToLoadWeight;
+          pathIt = tensorPaths.find(tensorNameToLoadWeight);
+        }
         TORCH_CHECK(
             pathIt != tensorPaths.end(),
             "Couldn't find ",
