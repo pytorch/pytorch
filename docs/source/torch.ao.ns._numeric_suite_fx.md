@@ -1,6 +1,6 @@
 (torch_ao_ns_numeric_suite_fx)=
 
-# `torch.ao.ns._numeric_suite_fx`
+# torch.ao.ns._numeric_suite_fx
 
 
 ```{warning}
