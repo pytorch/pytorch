@@ -650,9 +650,7 @@ class DynamoExporterTest(common_utils.TestCase):
                 [[1, 2, 3, -1], [4, 5, 6, -1], [7, 8, 9, -1]], dtype=torch.float32
             ),
         )
-        onnx_program = torch.onnx.export(
-            ScanModel(), inputs, dynamo=True, fallback=False
-        )
+        onnx_program = self.export(ScanModel(), inputs)
         onnx_testing.assert_onnx_program(onnx_program, args=inputs)
 
     def test_scan_cdist_dynamic_shapes(self):
@@ -670,10 +668,9 @@ class DynamoExporterTest(common_utils.TestCase):
         x_rows = torch.export.Dim("x_rows")
         y_rows = torch.export.Dim("y_rows")
         dim = torch.export.Dim("dim")
-        dyns = ({0: x_rows, 1: dim}, {0: y_rows, 1: dim})
         inputs = (torch.randn(3, 4), torch.randn(5, 4))
-        onnx_program = torch.onnx.export(
-            ScanModel(), inputs, dynamo=True, fallback=False, dynamic_shapes=dyns
+        onnx_program = self.export(
+            ScanModel(), inputs, dynamic_shapes=({0: x_rows, 1: dim}, {0: y_rows, 1: dim})
         )
         onnx_testing.assert_onnx_program(onnx_program, args=inputs)
 
@@ -717,13 +714,10 @@ class DynamoExporterTest(common_utils.TestCase):
             dynamic_shapes={"images": {0: DYN, 1: DYN}, "position": {0: DYN}},
             strict=False,
         )
-        try:
-            onnx_program = torch.onnx.export(ep, dynamo=True, fallback=False)
-        except torch.onnx._internal.exporter._errors.ConversionError:
-            raise unittest.SkipTest(
-                "Issue https://github.com/pytorch/pytorch/issues/153705 not fixed."
-            )
+        # https://github.com/pytorch/pytorch/issues/153705
+        onnx_program = self.export(ep)
         onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+
     def test_graph_attention_opset_23(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
