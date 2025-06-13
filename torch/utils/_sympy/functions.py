@@ -1306,9 +1306,6 @@ class Identity(sympy.Function):
     def __float__(self):
         return float(self.args[0])
 
-    def __bool__(self):
-        return bool(self.args[0])
-
 
 def make_opaque_unary_fn(name):
     class OpaqueUnaryFn(sympy.Function):

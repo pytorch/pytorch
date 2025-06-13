@@ -38,7 +38,6 @@ from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch._inductor.bounds import ValueRangeAnalysis
 
-
 UNARY_OPS = [
     "reciprocal",
     "square",
@@ -972,16 +971,22 @@ class TestIdentity(TestCase):
         num = 1
         expr = Identity(num)
         self.assertEqual(num, int(expr))
-    
+
     def test_cast_identity_float(self):
         num = 1.1
         expr = Identity(num)
         self.assertEqual(num, float(expr))
 
-    def test_cast_identity_bool(self):
-        num = True
-        expr = Identity(num)
-        self.assertEqual(num, bool(expr))
+    def test_cast_identity_illegal(self):
+        sym = Identity(sympy.Symbol("x"))
+        self.assertRaises(TypeError, int, sym)
+        self.assertRaises(TypeError, float, sym)
+
+        tup = (0, 1, 2)
+        tup_I = Identity(tup)
+        self.assertRaises(TypeError, int, tup_I)
+        self.assertRaises(TypeError, float, tup_I)
+
 
 
 instantiate_parametrized_tests(TestValueRanges)
