@@ -217,7 +217,7 @@ inconsistent 'UUID' assignment across ranks, and to prevent races during initial
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.distributed.distributed_c10d.is_xccl_available
+.. autofunction:: is_xccl_available
 ```
 
 ```{eval-rst}
