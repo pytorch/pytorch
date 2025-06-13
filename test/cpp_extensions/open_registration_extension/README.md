@@ -4,7 +4,7 @@ This folder contains a self-contained example of a PyTorch out-of-tree backend l
 
 ## How to use
 
-Install as standalone with `python setup.py develop` (or install) from this folder.
+Install as standalone with `python -m pip install -e . -v --no-build-isolation` (or install) from this folder.
 You can run test via `python {PYTORCH_ROOT_PATH}/test/test_openreg.py`.
 
 ## Design principles

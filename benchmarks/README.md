@@ -13,7 +13,7 @@ pip3 install torch torchvision
 # Install the latest pytorch master from source.
 # It should supersede the installation from the release binary.
 cd $PYTORCH_HOME
-python setup.py build develop
+python -m pip install -e . -v --no-build-isolation
 
 # Check the pytorch installation version
 python -c "import torch; print(torch.__version__)"
