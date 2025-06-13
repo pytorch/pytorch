@@ -113,7 +113,8 @@ ninja==1.11.1.3
 #Pinned versions: 1.11.1.3
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
-numba==0.61.2
+numba==0.60.0 ; python_version == "3.9"
+numba==0.61.2 ; python_version > "3.9"
 #Pinned versions: 0.54.1, 0.49.0, <=0.49.1
 #test that import: test_numba_integration.py
 #For numba issue see https://github.com/pytorch/pytorch/issues/51511
@@ -130,7 +131,8 @@ numba==0.61.2
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==2.1.2
+numpy==2.0.2 ; python_version == "3.9"
+numpy==2.1.2 ; python_version > "3.9"
 
 pandas==2.2.3
 #onnxruntime
@@ -242,8 +244,8 @@ scikit-image==0.22.0 ; python_version >= "3.10"
 #Pinned versions: 0.20.3
 #test that import:
 
-scipy==1.10.1 ; python_version <= "3.11"
-scipy==1.14.1 ; python_version >= "3.12"
+scipy==1.13.1 ; python_version == "3.9"
+scipy==1.14.1 ; python_version > "3.9"
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.10.1
