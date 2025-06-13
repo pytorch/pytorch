@@ -1594,7 +1594,10 @@ class FakeTensorMode(TorchDispatchMode):
         if torch.Tag.dynamic_output_shape in func.tags:
             if func is aten.index.Tensor:
                 _, new_kwargs = normalize_function(  # type: ignore[misc]
-                    func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
+                    func,
+                    args=args,
+                    kwargs=kwargs,
+                    normalize_to_only_use_kwargs=True,
                 )
                 for index in new_kwargs["indices"]:
                     # index calls nonzero for bool or int8 tensors, and
