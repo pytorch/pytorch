@@ -1,17 +1,23 @@
+```{eval-rst}
 .. role:: hidden
     :class: hidden-section
+```
 
-torch.fft
-=========
+# torch.fft
 
 Discrete Fourier transforms and related functions.
 
+```{eval-rst}
 .. automodule:: torch.fft
+```
+
+```{eval-rst}
 .. currentmodule:: torch.fft
+```
 
-Fast Fourier Transforms
------------------------
+## Fast Fourier Transforms
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -34,10 +40,11 @@ Fast Fourier Transforms
     ihfft2
     hfftn
     ihfftn
+```
 
-Helper Functions
-----------------
+## Helper Functions
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -46,3 +53,4 @@ Helper Functions
     rfftfreq
     fftshift
     ifftshift
+```
