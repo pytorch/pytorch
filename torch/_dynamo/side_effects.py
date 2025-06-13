@@ -124,6 +124,21 @@ class SideEffects:
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var = None
 
+        # Tracks VariableTracker objects that can be safely mutated in contexts where
+        # mutations are normally forbidden (e.g., HigherOrderOp subgraphs). Used for
+        # temporary mutations under contexts like torch.func.functional_call,
+        # where module parameters/buffers are modified but later restored.
+        self.mutation_allowed_variables = set()
+
+    def allow_mutation_in_hop_subgraph(self, var):
+        """Mark a variable as allowed for mutation during speculating higher order op subgraph"""
+        self.mutation_allowed_variables.add(var)
+
+    def disallow_mutation_in_hop_subgraph(self, var):
+        """Remove a variable from the allowed mutation set."""
+        if var in self.mutation_allowed_variables:
+            self.mutation_allowed_variables.remove(var)
+
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
         # NB: do NOT test keepalive
@@ -191,7 +206,7 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
-    def check_allowed_side_effect(self, item):
+    def check_allowed_side_effect(self, item: VariableTracker):
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
         # People do things like self.dim = dim inside autograd.Function.
@@ -208,6 +223,8 @@ class SideEffects:
                 "Dynamo needs to fully exhaust the generator, which may cause "
                 "unintended variable modifications."
             )
+        if item in self.mutation_allowed_variables:
+            return True
         if not is_side_effect_safe(item.mutation_type):
             # TODO plumb HOP information here
             unimplemented_v2(
