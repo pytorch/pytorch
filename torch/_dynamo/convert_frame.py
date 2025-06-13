@@ -48,6 +48,7 @@ from weakref import ReferenceType
 import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
+from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._guards import compile_context, CompileContext, CompileId, tracing
@@ -160,6 +161,7 @@ except ModuleNotFoundError:
 
 if typing.TYPE_CHECKING:
     from .backends.registry import CompilerFn
+    from .package import CompilePackage
     from .repro.after_dynamo import WrapBackendDebug
     from .types import BytecodeHook, CacheEntry, DynamoFrameType
     from .variables.builder import FrameStateSizeEntry
@@ -477,6 +479,7 @@ class ConvertFrameAssert:
         one_graph: bool = True,
         export: bool = False,
         export_constraints: Optional[typing.Never] = None,
+        package: Optional[CompilePackage] = None,
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
@@ -484,6 +487,7 @@ class ConvertFrameAssert:
         self._one_graph = one_graph
         self._export = export
         self._export_constraints = export_constraints
+        self._package = package
 
     @property
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
@@ -639,6 +643,7 @@ class ConvertFrameAssert:
                 frame_state=frame_state,
                 compile_id=compile_id,
                 skip=skip + 1,
+                package=self._package,
             )
 
 
@@ -647,9 +652,12 @@ def convert_frame_assert(
     one_graph: bool = True,
     export: bool = False,
     export_constraints: Optional[typing.Never] = None,
+    package: Optional[CompilePackage] = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph, raising an exception if we fail."""
-    return ConvertFrameAssert(compiler_fn, one_graph, export, export_constraints)
+    return ConvertFrameAssert(
+        compiler_fn, one_graph, export, export_constraints, package
+    )
 
 
 from collections import OrderedDict
@@ -692,6 +700,7 @@ def _compile(
     *,
     compile_id: CompileId,
     skip: int = 0,
+    package: Optional[CompilePackage] = None,
 ) -> ConvertFrameReturn:
     from torch.fx.experimental.validator import (
         bisect,
@@ -716,7 +725,7 @@ def _compile(
     ) -> None:
         nonlocal output
         nonlocal tracer
-        speculation_log.restart()
+        speculation_log.restart()  # type: ignore[has-type]
         exn_vt_stack = ExceptionStack()
         tracer = InstructionTranslator(
             instructions,
@@ -732,9 +741,10 @@ def _compile(
             export,
             export_constraints,
             frame_state=frame_state,
-            speculation_log=speculation_log,
+            speculation_log=speculation_log,  # type: ignore[has-type]
             exn_vt_stack=exn_vt_stack,
-            distributed_state=distributed_state,
+            distributed_state=distributed_state,  # type: ignore[has-type]
+            package=package,
         )
 
         try:
@@ -742,7 +752,7 @@ def _compile(
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
-            speculation_log.clear()
+            speculation_log.clear()  # type: ignore[has-type]
             raise
         except (
             exc.SpeculationRestartAnalysis,
@@ -774,7 +784,11 @@ def _compile(
         transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> ConvertFrameReturn:
         with contextlib.ExitStack() as stack:
-            stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
+            stack.enter_context(
+                torch._dynamo.callback_handler.install_callbacks(
+                    CallbackTrigger.DYNAMO, str(CompileContext.current_compile_id())
+                )
+            )
             stack.enter_context(CompileTimeInstructionCounter.record())
             return _compile_inner(code, one_graph, hooks, transform)
 
@@ -854,7 +868,7 @@ def _compile(
                     )
                 return ConvertFrameReturn()
 
-        assert distributed_state is None or distributed_state.all_states is not None, (
+        assert distributed_state is None or distributed_state.all_states is not None, (  # type: ignore[has-type]
             "compiler collective wasn't run before compilation completed"
         )
 
@@ -933,7 +947,12 @@ def _compile(
                 cache_entry,
                 hooks.guard_fail_fn if hooks else None,
                 hooks.guard_filter_fn if hooks else None,
+                guards_serialization_mode="save" if package else None,
             )
+
+        if package is not None:
+            assert check_fn.guards_state is not None
+            package.add_guarded_code(check_fn.guards_state, out_code)
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -944,21 +963,20 @@ def _compile(
             annotation_str,
         )
 
-        if not output.is_empty_graph():
-            if hooks.guard_export_fn is not None:
-                # We should not run the guard_export_fn when Dynamo does not
-                # generate any graph. This can happen in export when TorchDynamo
-                # generated bytecode has some reconstruction logic for mutated
-                # variables which can trigger TorchDynamo on the children frames but
-                # they are benign and do not generate any new graphs.
-                hooks.guard_export_fn(output.guards)
-            if hooks.frame_traced_fn is not None:
-                output.tracing_context.traced_code.append(output.f_code)
-                hooks.frame_traced_fn(output.tracing_context.traced_code)
+        if not output.is_empty_graph() and hooks.guard_export_fn is not None:
+            # We should not run the guard_export_fn when Dynamo does not
+            # generate any graph. This can happen in export when TorchDynamo
+            # generated bytecode has some reconstruction logic for mutated
+            # variables which can trigger TorchDynamo on the children frames but
+            # they are benign and do not generate any new graphs.
+            hooks.guard_export_fn(output.guards)
 
         return wrap_guarded_code(guarded_code)
 
     metrics_context = get_metrics_context()
+    code_context = (
+        package.code_context(code) if package is not None else contextlib.nullcontext()
+    )
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
         compile_context(CompileContext(compile_id)),
@@ -972,6 +990,7 @@ def _compile(
             phase_name="entire_frame_compile",
             dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
         ),
+        code_context,
     ):
         restart_reasons: set[str] = set()
         # This is shared across restarts
@@ -1229,9 +1248,12 @@ class ConvertFrame:
         compiler_fn: CompilerFn,
         hooks: Hooks,
         error_on_graph_break: bool,
+        package: Optional[CompilePackage] = None,
     ) -> None:
         self._torchdynamo_orig_callable = compiler_fn
-        self._inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+        self._inner_convert = convert_frame_assert(
+            compiler_fn, one_graph=False, package=package
+        )
         self._hooks = hooks
         self._error_on_graph_break = error_on_graph_break
 
@@ -1344,14 +1366,17 @@ class ConvertFrame:
 
 
 def convert_frame(
-    compiler_fn: CompilerFn, hooks: Hooks, error_on_graph_break: bool
+    compiler_fn: CompilerFn,
+    hooks: Hooks,
+    error_on_graph_break: bool,
+    package: Optional[CompilePackage] = None,
 ) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified
 
     If error_on_graph_break=True, graph breaks become errors (resulting in an unmodified frame).
     If error_on_graph_break=False, we will attempt to generate optimized and resume functions.
     """
-    return ConvertFrame(compiler_fn, hooks, error_on_graph_break)
+    return ConvertFrame(compiler_fn, hooks, error_on_graph_break, package=package)
 
 
 # TODO mlazos: add support for same args, or record them
