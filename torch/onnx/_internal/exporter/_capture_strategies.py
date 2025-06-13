@@ -203,7 +203,6 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
         with (
-            _patch_dynamo_unsupported_functions(),
             # Support the dynamism with 0/1 input dim
             torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
         ):
