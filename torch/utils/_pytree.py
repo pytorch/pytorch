@@ -1031,9 +1031,9 @@ def tree_is_leaf(
     False
     >>> tree_is_leaf((1, 2, 3), is_leaf=lambda x: isinstance(x, tuple))
     True
-    >>> tree_is_leaf({'a': 1, 'b': 2, 'c': 3})
+    >>> tree_is_leaf({"a": 1, "b": 2, "c": 3})
     False
-    >>> tree_is_leaf({'a': 1, 'b': 2, 'c': None})
+    >>> tree_is_leaf({"a": 1, "b": 2, "c": None})
     False
     """
     if is_leaf is not None and is_leaf(tree):

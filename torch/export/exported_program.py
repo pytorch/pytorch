@@ -443,9 +443,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
         tx = TracingContext(fake_mode)
 
-        with fake_mode, _override_composite_implicit_decomp(
-            cia_to_decomp,
-        ), _enable_graph_inputs_of_type_nn_module(ep.example_inputs), tracing(tx):
+        with (
+            fake_mode,
+            _override_composite_implicit_decomp(
+                cia_to_decomp,
+            ),
+            _enable_graph_inputs_of_type_nn_module(ep.example_inputs),
+            tracing(tx),
+        ):
             retracing_args_unwrapped = pytree.tree_unflatten(
                 retracing_args, mod._in_spec
             )

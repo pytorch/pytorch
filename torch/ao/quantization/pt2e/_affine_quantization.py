@@ -788,12 +788,12 @@ class AffineQuantizedMovingAverageMinMaxObserver(AffineQuantizedObserverBase):
             self.min_val = min_val
             self.max_val = max_val
         else:
-            assert (
-                self.min_val.shape == min_val.shape
-            ), f"Can't update existing min_val - shape mismatch, self.min_val:{self.min_val.shape} != min_val:{min_val.shape}"
-            assert (
-                self.max_val.shape == max_val.shape
-            ), f"Can't update existing max_val - shape mismatch, self.max_val {self.max_val.shape} != max_val:{max_val.shape}"
+            assert self.min_val.shape == min_val.shape, (
+                f"Can't update existing min_val - shape mismatch, self.min_val:{self.min_val.shape} != min_val:{min_val.shape}"
+            )
+            assert self.max_val.shape == max_val.shape, (
+                f"Can't update existing max_val - shape mismatch, self.max_val {self.max_val.shape} != max_val:{max_val.shape}"
+            )
             min_val = self.min_val + self.averaging_constant * (min_val - self.min_val)
             max_val = self.max_val + self.averaging_constant * (max_val - self.max_val)
             self.min_val.copy_(min_val)
@@ -803,9 +803,9 @@ class AffineQuantizedMovingAverageMinMaxObserver(AffineQuantizedObserverBase):
         return input
 
     def calculate_qparams(self) -> tuple[torch.Tensor, torch.Tensor]:
-        assert hasattr(self, "min_val") and hasattr(
-            self, "max_val"
-        ), "Expecting the observer has min_val and max_val, please run the observer before calling calculate_qparams"
+        assert hasattr(self, "min_val") and hasattr(self, "max_val"), (
+            "Expecting the observer has min_val and max_val, please run the observer before calling calculate_qparams"
+        )
 
         return choose_qparams_affine_with_min_max(
             self.min_val,

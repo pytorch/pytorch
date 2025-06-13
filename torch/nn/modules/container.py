@@ -109,8 +109,7 @@ class Sequential(Module):
     def __init__(self, *args: Module) -> None: ...
 
     @overload
-    def __init__(self, arg: OrderedDict[str, Module]) -> None:
-        ...
+    def __init__(self, arg: OrderedDict[str, Module]) -> None: ...
 
     def __init__(self, *args):
         super().__init__()
@@ -365,8 +364,7 @@ class ModuleList(Module):
         return str(idx)
 
     @overload
-    def __getitem__(self, idx: slice) -> ModuleList:
-        ...
+    def __getitem__(self, idx: slice) -> ModuleList: ...
 
     @overload
     def __getitem__(self, idx: int) -> Module: ...
