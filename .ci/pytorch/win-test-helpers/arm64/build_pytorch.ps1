@@ -71,6 +71,7 @@ sccache --show-stats
 
 # Build the wheel
 python setup.py bdist_wheel
+if ($LASTEXITCODE -ne 0) { exit 1 }
 
 # Install the wheel locally
 $whl = Get-ChildItem -Path "dist\*.whl" | Select-Object -First 1
