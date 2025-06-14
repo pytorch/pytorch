@@ -469,7 +469,7 @@ def try_match_insignificant_strides(
         return tensor
 
     if all(
-        V.graph.sizevars.statically_known_equals(s1, s2)
+        V.graph.sizevars.guard_or_false(sympy.Eq(s1, s2))
         for s1, s2 in zip(strides, tensor.get_stride())
     ):
         return tensor  # type: ignore[arg-type]
