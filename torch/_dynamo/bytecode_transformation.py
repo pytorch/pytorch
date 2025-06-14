@@ -155,7 +155,7 @@ elif sys.version_info >= (3, 11):
 
 else:
 
-    def inst_has_op_bits(name):
+    def inst_has_op_bits(name) -> bool:
         return False
 
 
@@ -273,7 +273,7 @@ def add_push_null(
         assert insts[idx].arg is not None
         return insts[idx].arg & 1 == 1
 
-    def set_inst_bit(idx):
+    def set_inst_bit(idx) -> None:
         assert insts[idx].arg is not None
         insts[idx].arg |= 1
 
@@ -465,7 +465,7 @@ def lnotab_writer(
     assert sys.version_info < (3, 10)
     lnotab: list[int] = []
 
-    def update(lineno_new, byteno_new):
+    def update(lineno_new, byteno_new) -> None:
         nonlocal byteno, lineno
         while byteno_new != byteno or lineno_new != lineno:
             byte_offset = max(0, min(byteno_new - byteno, 255))
@@ -490,7 +490,7 @@ def linetable_310_writer(first_lineno):
     lineno_delta = 0
     byteno = 0
 
-    def _update(byteno_delta, lineno_delta):
+    def _update(byteno_delta, lineno_delta) -> None:
         while byteno_delta != 0 or lineno_delta != 0:
             byte_offset = max(0, min(byteno_delta, 254))
             line_offset = max(-127, min(lineno_delta, 127))
@@ -499,7 +499,7 @@ def linetable_310_writer(first_lineno):
             lineno_delta -= line_offset
             linetable.extend((byte_offset, line_offset & 0xFF))
 
-    def update(lineno_new, byteno_new):
+    def update(lineno_new, byteno_new) -> None:
         nonlocal lineno, lineno_delta, byteno
         byteno_delta = byteno_new - byteno
         byteno = byteno_new
@@ -507,7 +507,7 @@ def linetable_310_writer(first_lineno):
         lineno_delta = lineno_new - lineno
         lineno = lineno_new
 
-    def end(total_bytes):
+    def end(total_bytes) -> None:
         _update(total_bytes - byteno, lineno_delta)
 
     return linetable, update, end
@@ -538,11 +538,11 @@ def linetable_311_writer(first_lineno: int):
     linetable = []
     lineno = first_lineno
 
-    def update(positions: "dis.Positions", inst_size):
+    def update(positions: "dis.Positions", inst_size) -> None:
         nonlocal lineno
         lineno_new = positions.lineno if positions else None
 
-        def _update(delta, size):
+        def _update(delta, size) -> None:
             assert 0 < size <= 8
             # first byte - use 13 (no column info) is positions is
             # malformed, otherwise use 14 (long form)
@@ -770,7 +770,7 @@ def _get_instruction_front(instructions: list[Instruction], idx: int):
     return target
 
 
-def devirtualize_jumps(instructions):
+def devirtualize_jumps(instructions) -> None:
     """Fill in args for virtualized jump target after instructions may have moved"""
     jumps = set(dis.hasjabs).union(set(dis.hasjrel))
 
@@ -818,7 +818,9 @@ def devirtualize_jumps(instructions):
             inst.argrepr = f"to {target.offset}"
 
 
-def virtualize_exception_table(exn_tab_bytes: bytes, instructions: list[Instruction]):
+def virtualize_exception_table(
+    exn_tab_bytes: bytes, instructions: list[Instruction]
+) -> None:
     """Replace exception table entries with pointers to make editing easier"""
     exn_tab = parse_exception_table(exn_tab_bytes)
     offset_to_inst = {cast(int, inst.offset): inst for inst in instructions}
@@ -900,7 +902,7 @@ def compute_exception_table(
     key_stack: list[tuple[int, int]] = []
     exn_tab: list[ExceptionTableEntry] = []
 
-    def pop():
+    def pop() -> None:
         """
         Pop the key_stack and append an exception table entry if possible.
         """
@@ -979,7 +981,7 @@ def propagate_inst_exn_table_entries(instructions: list[Instruction]) -> None:
             instructions[i].exn_tab_entry = copy.copy(entry)
 
 
-def check_inst_exn_tab_entries_valid(instructions: list[Instruction]):
+def check_inst_exn_tab_entries_valid(instructions: list[Instruction]) -> None:
     """
     Checks that exn_tab_entries of instructions are valid.
     An entry's start, end, and target must be in instructions.
@@ -1161,7 +1163,7 @@ def fix_extended_args(instructions: list[Instruction]) -> int:
     """Fill in correct argvals for EXTENDED_ARG ops"""
     output: list[Instruction] = []
 
-    def maybe_pop_n(n):
+    def maybe_pop_n(n) -> None:
         for _ in range(n):
             if output and output[-1].opcode == dis.EXTENDED_ARG:
                 output.pop()
@@ -1224,7 +1226,7 @@ def debug_bytes(*args) -> str:
     return "bytes mismatch\n" + "\n".join(result)
 
 
-def debug_checks(code):
+def debug_checks(code) -> None:
     """Make sure our assembler produces same bytes as we start with"""
     dode = transform_code_object(code, lambda x, y: None, safe=True)
     assert code.co_code == dode.co_code, debug_bytes(code.co_code, dode.co_code)
@@ -1249,7 +1251,9 @@ def get_const_index(code_options, val) -> int:
     return len(code_options["co_consts"]) - 1
 
 
-def fix_vars(instructions: list[Instruction], code_options, varname_from_oparg=None):
+def fix_vars(
+    instructions: list[Instruction], code_options, varname_from_oparg=None
+) -> None:
     # compute instruction arg from argval if arg is not provided
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
 
@@ -1356,7 +1360,7 @@ def fix_vars(instructions: list[Instruction], code_options, varname_from_oparg=N
                 instructions[i].arg = idx
 
 
-def clear_instruction_args(instructions):
+def clear_instruction_args(instructions) -> None:
     # Clear the instruction arg for instructions that have argvals.
     # Useful for using dis'd bytecode within generated bytecode.
     for inst in instructions:
@@ -1466,7 +1470,7 @@ def clean_and_assemble_instructions(
     return instructions, types.CodeType(*[code_options[k] for k in keys])
 
 
-def populate_kw_names_argval(instructions, consts):
+def populate_kw_names_argval(instructions, consts) -> None:
     for inst in instructions:
         if inst.opname == "KW_NAMES":
             inst.argval = consts[inst.arg]

@@ -98,7 +98,7 @@ class PyCodegen:
         # without affecting other components, e.g., guards.
         self.overridden_sources: dict[Source, Source] = overridden_sources or {}
 
-    def restore_stack(self, stack_values, *, value_from_source=True):
+    def restore_stack(self, stack_values, *, value_from_source=True) -> None:
         prev = self.value_from_source
         self.value_from_source &= value_from_source
         try:
@@ -109,11 +109,11 @@ class PyCodegen:
     def graph_output_vars(self):
         return [x.variable for x in self.graph_outputs.values()]
 
-    def call_reconstruct(self, value):
+    def call_reconstruct(self, value) -> None:
         res = value.reconstruct(self)
         assert res is None, f"reconstruct!=None {value}"
 
-    def add_push_null(self, gen_fn, call_function_ex=False):
+    def add_push_null(self, gen_fn, call_function_ex=False) -> None:
         """
         `gen_fn` generates instructions via PyCodegen methods
         that push a single callable to the stack.
@@ -297,7 +297,7 @@ class PyCodegen:
                 value.as_tensor(self.tx, torch.float64)
             )
 
-            def gen_fn():
+            def gen_fn() -> None:
                 self.load_graph_output(graph_outputs[graph_outputs_key].index)
                 output.append(self.create_load_attr("item"))
 
@@ -322,7 +322,7 @@ class PyCodegen:
                 output.extend(create_call_function(1, False))
             elif isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
 
-                def gen_fn():
+                def gen_fn() -> None:
                     self.load_graph_output(graph_outputs[graph_outputs_key].index)
                     output.append(self.create_load_attr("item"))
 
@@ -371,18 +371,18 @@ class PyCodegen:
             )
         return graph_outputs_key
 
-    def load_graph_output(self, index):
+    def load_graph_output(self, index) -> None:
         output = self._output
         output.append(self.create_load(self.graph_output_var))
         output.append(self.create_load_const(index))
         output.append(self.create_binary_subscr())
 
-    def add_cache(self, value):
+    def add_cache(self, value) -> None:
         var = self.new_var()
         self.tempvars[value] = var
         self._output.append(self.create_store(var))
 
-    def foreach(self, items):
+    def foreach(self, items) -> None:
         for i in items:
             self(i)
 
@@ -399,15 +399,15 @@ class PyCodegen:
             f_globals[name] = value
         return [self.create_load_global(name, add=True)]
 
-    def clear_tos(self):
+    def clear_tos(self) -> None:
         self.top_of_stack = None
 
-    def append_output(self, inst):
+    def append_output(self, inst) -> None:
         assert isinstance(inst, Instruction)
         self._output.append(inst)
         self.clear_tos()
 
-    def extend_output(self, insts):
+    def extend_output(self, insts) -> None:
         assert all(isinstance(x, Instruction) for x in insts)
         self._output.extend(insts)
         self.clear_tos()
@@ -448,11 +448,11 @@ class PyCodegen:
     def create_load_const_unchecked(self, value) -> Instruction:
         return create_load_const(value, checked=False)
 
-    def load_method(self, name):
+    def load_method(self, name) -> None:
         self.tx.output.update_co_names(name)
         self.append_output(create_load_method(name))
 
-    def call_method(self, nargs):
+    def call_method(self, nargs) -> None:
         self.extend_output(create_call_method(nargs))
 
     def create_load_attr(self, name) -> Instruction:
@@ -460,7 +460,7 @@ class PyCodegen:
             self.code_options["co_names"] += (name,)
         return create_instruction("LOAD_ATTR", argval=name)
 
-    def load_attr(self, name):
+    def load_attr(self, name) -> None:
         self.append_output(self.create_load_attr(name))
 
     def create_load_attrs(self, names):
@@ -471,7 +471,7 @@ class PyCodegen:
             self.code_options["co_names"] += (name,)
         return create_instruction("STORE_ATTR", argval=name)
 
-    def store_attr(self, name):
+    def store_attr(self, name) -> None:
         self.append_output(self.create_store_attr(name))
 
     def load_function_name(self, fn_name, push_null, num_on_stack=0):
@@ -508,29 +508,29 @@ class PyCodegen:
                 create_instruction("UNPACK_SEQUENCE", arg=n),
             ]
 
-    def pop_top(self):
+    def pop_top(self) -> None:
         self.append_output(create_instruction("POP_TOP"))
 
-    def call_function(self, nargs: int, push_null: bool):
+    def call_function(self, nargs: int, push_null: bool) -> None:
         self.extend_output(create_call_function(nargs, push_null=push_null))
 
-    def dup_top(self):
+    def dup_top(self) -> None:
         self.append_output(create_dup_top())
 
-    def store(self, varname):
+    def store(self, varname) -> None:
         self.append_output(self.create_store(varname))
 
-    def load_deref(self, varname):
+    def load_deref(self, varname) -> None:
         self.append_output(self.create_load_deref(varname))
 
     def make_function_with_closure(
         self, fn_name: str, code: types.CodeType, push_null: bool, num_on_stack=0
-    ):
+    ) -> None:
         freevars = code.co_freevars
         assert freevars
         output = self._output
 
-        def gen_fn():
+        def gen_fn() -> None:
             # Emitting `LOAD_FAST/LOAD_CLOSURE` with names in `co_freevars`
             # requires that in the generated bytecode, these cells would keep
             # their original local names, which we ensure via
@@ -589,7 +589,7 @@ class PyCodegen:
 
         seen_sources: OrderedSet[Source] = OrderedSet()
 
-        def collect_temp_source(source):
+        def collect_temp_source(source) -> None:
             if source in seen_sources:
                 # This source is used atleast twice, so it can be reused
                 self.mark_source_temp(source)

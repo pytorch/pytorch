@@ -229,7 +229,7 @@ def _call_function_and_unflatten_output(
     )
 
 
-def _assert_tensors_nonaliasing(inputs, outputs):
+def _assert_tensors_nonaliasing(inputs, outputs) -> None:
     input_tensor_ids = {
         id(t) for t in pytree.tree_leaves(inputs) if isinstance(t, torch.Tensor)
     }
@@ -241,7 +241,7 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     )
 
 
-def _check_all_tensorvariable(args):
+def _check_all_tensorvariable(args) -> None:
     from . import TensorVariable
 
     if not all(type(a.realize()) is TensorVariable for a in args):
@@ -252,7 +252,7 @@ def _check_all_tensorvariable(args):
 
 def _check_supported_callable_arg(
     tx: "InstructionTranslator", func_var: VariableTracker, arg_name
-):
+) -> None:
     is_callable = (
         BuiltinVariable(callable).call_function(tx, [func_var], {}).as_python_constant()
     )
@@ -262,14 +262,14 @@ def _check_supported_callable_arg(
         )
 
 
-def are_same_graph_modules(fn_name, a_mod, b_mod, fake_mode):
+def are_same_graph_modules(fn_name, a_mod, b_mod, fake_mode) -> bool:
     from torch._subclasses._fake_tensor_utils import _CacheKeyState
     from torch._subclasses.fake_tensor import extract_tensor_metadata
 
     # Maps the equivalent nodes from a to b
     node_map = {}
 
-    def check_all_args(a_nodes, b_nodes):
+    def check_all_args(a_nodes, b_nodes) -> bool:
         for arg_a, arg_b in zip(a_nodes, b_nodes):
             if isinstance(arg_a, torch.fx.Node):
                 if node_map[arg_a] != arg_b:
@@ -572,8 +572,8 @@ def _merge_graph_inputs(
     # 2. only used in true branches: c, suffixed with _true_branch
     # 3. only used in false branches: d, suffixed with _false_branch
     # Within each part, we re-order the nodes by name to have a derterministic ordering for testing.
-    def fixup_branch_inps(graph, lifted_freevars, shared, unique_l, unique_r):
-        def _insert_or_replace_phs(new_args, name_suffix):
+    def fixup_branch_inps(graph, lifted_freevars, shared, unique_l, unique_r) -> None:
+        def _insert_or_replace_phs(new_args, name_suffix) -> None:
             for arg in new_args:
                 new_ph = graph.placeholder(arg.node.name + name_suffix)
                 # Override with new_ph if there exists a old placeholder.
@@ -765,7 +765,7 @@ def speculate_subgraph(
                 # O1, O2, O3, O4, O5, X1, X2, X3
                 def move_lifted_freevars_phs_to_end(
                     graph: torch.fx.Graph, lifted_freevars: tuple[torch.fx.Node]
-                ):
+                ) -> None:
                     lifted_ph_set = {
                         child_p.node for child_p in lifted_freevars.values()
                     }
@@ -1188,7 +1188,7 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-def validate_subgraph_output_types(output: VariableTracker):
+def validate_subgraph_output_types(output: VariableTracker) -> None:
     """Verify that that the output of the subgraph is a tensor,
     int, bool, SymBool, or SymInt.
     """
@@ -1866,7 +1866,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-def non_single_tensor_return_unsupported(api, ret):
+def non_single_tensor_return_unsupported(api, ret) -> None:
     from . import TensorVariable
 
     if not isinstance(ret, TensorVariable):

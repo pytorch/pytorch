@@ -374,7 +374,7 @@ class TensorVariable(VariableTracker):
         if self.is_nested is not None:
             return ConstantVariable.create(self.is_nested)
 
-    def method_attr_retain_grad(self, tx):
+    def method_attr_retain_grad(self, tx) -> None:
         unimplemented_v2(
             gb_type="Tensor.retain_grad() with AOTDispatcher",
             context=f"var_getattr {self} retain_grad",
@@ -986,7 +986,7 @@ class TensorVariable(VariableTracker):
         out = tolist(tensor, self.as_proxy())
         return VariableTracker.build(tx, out)
 
-    def method_backward(self, *args, **kwargs):
+    def method_backward(self, *args, **kwargs) -> None:
         unimplemented_v2(
             gb_type="Unsupported Tensor.backward() call",
             context=f"call_method {self} backward {args} {kwargs}",
@@ -997,7 +997,7 @@ class TensorVariable(VariableTracker):
     def method_data_ptr(self, *args, **kwargs):
         return DataPtrVariable(self)
 
-    def method_item(self, *args, **kwargs):
+    def method_item(self, *args, **kwargs) -> None:
         if not config.capture_scalar_outputs:
             self._warn_capture_scalar_outputs()
             unimplemented_v2(
@@ -1041,7 +1041,7 @@ class TensorVariable(VariableTracker):
 
     @staticmethod
     @functools.cache
-    def _warn_capture_scalar_outputs():
+    def _warn_capture_scalar_outputs() -> None:
         user_stack = torch._guards.TracingContext.extract_stack()
         user_stack_formatted = "".join(traceback.format_list(user_stack))
         log.warning(
@@ -1094,7 +1094,7 @@ class TensorVariable(VariableTracker):
 
         return ConstantVariable.create(None)
 
-    def method_resize_(self, *args, **kwargs):
+    def method_resize_(self, *args, **kwargs) -> None:
         unimplemented_v2(
             gb_type="Unsupported Tensor.resize_() call",
             context=f"call_method {self} resize_ {args} {kwargs}",
@@ -1102,7 +1102,7 @@ class TensorVariable(VariableTracker):
             hints=[],
         )
 
-    def method_resize_as_(self, *args, **kwargs):
+    def method_resize_as_(self, *args, **kwargs) -> None:
         unimplemented_v2(
             gb_type="Unsupported Tensor.resize_as_() call",
             context=f"call_method {self} resize_as_ {args} {kwargs}",
@@ -1110,7 +1110,7 @@ class TensorVariable(VariableTracker):
             hints=[],
         )
 
-    def method_sparse_resize_(self, *args, **kwargs):
+    def method_sparse_resize_(self, *args, **kwargs) -> None:
         unimplemented_v2(
             gb_type="Unsupported Tensor.sparse_resize_() call",
             context=f"call_method {self} sparse_resize_ {args} {kwargs}",
@@ -1118,7 +1118,7 @@ class TensorVariable(VariableTracker):
             hints=[],
         )
 
-    def method_sparse_resize_and_clear_(self, *args, **kwargs):
+    def method_sparse_resize_and_clear_(self, *args, **kwargs) -> None:
         unimplemented_v2(
             gb_type="Unsupported Tensor.sparse_resize_and_clear_() call",
             context=f"call_method {self} sparse_resize_and_clear_ {args} {kwargs}",
@@ -1126,7 +1126,7 @@ class TensorVariable(VariableTracker):
             hints=[],
         )
 
-    def method_set_(self, *args, **kwargs):
+    def method_set_(self, *args, **kwargs) -> None:
         if len(args) > 1:
             # torch.Tensor.set_() has several overloads.
             # aten::set_.source_Tensor(Tensor) gets special handling
@@ -1275,7 +1275,7 @@ class TensorVariable(VariableTracker):
 
             hook_name, bw_state_proxy = tx.output.add_backward_state_hook(hook)
 
-            def _register_hook_trampoline(tensor, bw_state):
+            def _register_hook_trampoline(tensor, bw_state) -> None:
                 register_hook = getattr(tensor, name)
                 register_hook(
                     functools.partial(
@@ -1346,7 +1346,7 @@ class TensorVariable(VariableTracker):
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
 
-    def set_name_hint(self, name: str):
+    def set_name_hint(self, name: str) -> None:
         if not self._is_name_set:
             self.proxy.node._rename(name)
             self._is_name_set = True
@@ -1724,7 +1724,7 @@ class UntypedStorageVariable(VariableTracker):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)
         codegen.load_method("untyped_storage")
         codegen.call_method(0)
@@ -1739,7 +1739,7 @@ class DataPtrVariable(VariableTracker):
         super().__init__(**kwargs)
         self.from_tensor = from_tensor
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)
         codegen.load_method("data_ptr")
         codegen.call_method(0)

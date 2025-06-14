@@ -3017,11 +3017,11 @@ class FunctionIdSet:
         assert self.function_names is not None
         return self.function_names.get(idx, default)
 
-    def add(self, idx: int):
+    def add(self, idx: int) -> None:
         function_ids = self()  # lazy init
         function_ids.add(idx)
 
-    def remove(self, idx: int):
+    def remove(self, idx: int) -> None:
         function_ids = self()
         if idx in function_ids:
             function_ids.remove(idx)
@@ -3089,7 +3089,7 @@ def _numpy_function_ids() -> dict[int, str]:
         "sample",
     }
 
-    def is_supported(k, v, mod):
+    def is_supported(k, v, mod) -> bool:
         if not callable(v):
             return False
         if not getattr(v, "__module__", None):
@@ -3546,7 +3546,7 @@ FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
 FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
 
 
-def _recompile_re():
+def _recompile_re() -> None:
     global SKIP_DIRS_RE
     SKIP_DIRS_RE = re.compile(
         rf"^[^\s<]*({'|'.join(re.escape(_as_posix_path(d)) for d in SKIP_DIRS)})"
@@ -3907,7 +3907,7 @@ def _lookup_inner(
         return UserFunctionVariable
 
 
-def clear_lru_cache():
+def clear_lru_cache() -> None:
     torch._dynamo.trace_rules.get_torch_obj_rule_map.cache_clear()
     torch._dynamo.trace_rules.get_tensor_method.cache_clear()
     torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()

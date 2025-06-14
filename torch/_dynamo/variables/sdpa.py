@@ -37,7 +37,7 @@ class SDPAParamsVariable(VariableTracker):
         self.param_vars = param_vars
         super().__init__(**kwargs)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         assert self.source is None
         assert self.param_vars is not None
         codegen.add_push_null(

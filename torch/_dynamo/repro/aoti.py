@@ -54,7 +54,7 @@ use_buck = inductor_config.is_fbcode()
 
 
 class AOTIMinifierError(Exception):
-    def __init__(self, original_exception):
+    def __init__(self, original_exception) -> None:
         additional_message = "This error is caused by a bug in the AOTI minifier, please report a bug to PyTorch"
         full_message = f"{additional_message}: {str(original_exception)}"
         super().__init__(full_message)
@@ -146,7 +146,7 @@ def save_graph_repro_ep(
     check_str=None,
     module_in_comment=False,
     strict=False,
-):
+) -> None:
     # Save graph for reproducing the error.
     # Either exported_program or gm will be saved, depending on which one is defined.
     # Only one of exported_program and gm should be defined.
@@ -197,7 +197,7 @@ def dump_compiler_graph_state(
     config_patches=None,
     accuracy=None,
     strict=False,
-):
+) -> None:
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -309,7 +309,7 @@ def repro_get_args(options, exported_program, config_patches):
     return mod, args, kwargs
 
 
-def repro_run(options, exported_program, config_patches):
+def repro_run(options, exported_program, config_patches) -> None:
     from torch._inductor import _aoti_compile_and_package_inner
 
     gm, args, kwargs = repro_common(options, exported_program)
@@ -372,7 +372,7 @@ def export_for_aoti_minifier(
     return None
 
 
-def repro_minify(options, exported_program, config_patches):
+def repro_minify(options, exported_program, config_patches) -> None:
     from functorch.compile import minifier
     from torch._inductor import _aoti_compile_and_package_inner
     from torch._inductor.compile_fx import _aoti_flatten_inputs
@@ -397,7 +397,7 @@ def repro_minify(options, exported_program, config_patches):
             need_sync = True
             break
 
-    def module_fails(gm, flat_example_inputs, check_str=None):
+    def module_fails(gm, flat_example_inputs, check_str=None) -> Optional[bool]:
         # Need to export first so the in_spec and out_spec are populated
         tuple_inputs = tuple(flat_example_inputs)
         gm = export_for_aoti_minifier(
@@ -486,7 +486,7 @@ default settings on this script:
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
-    def common_flags(parser):
+    def common_flags(parser) -> None:
         accuracy_group = parser.add_mutually_exclusive_group()
         accuracy_group.add_argument(
             "--no-accuracy",

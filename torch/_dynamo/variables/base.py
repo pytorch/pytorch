@@ -18,7 +18,7 @@ computations.
 import collections
 from collections.abc import ItemsView, KeysView, Sequence, ValuesView
 from enum import Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
@@ -139,7 +139,7 @@ class ValueMutationExisting(MutationType):
     # filter out which pre-existing values it needs to generate mutation for.
     is_modified: bool
 
-    def __init__(self, is_modified: bool = False):
+    def __init__(self, is_modified: bool = False) -> None:
         super().__init__(SourceType.Existing)
         self.is_modified = is_modified
 
@@ -150,7 +150,7 @@ class AttributeMutation(MutationType):
     allows mutation on the value's attributes.
     """
 
-    def __init__(self, typ: SourceType):
+    def __init__(self, typ: SourceType) -> None:
         super().__init__(typ)
 
 
@@ -166,7 +166,7 @@ class AttributeMutationExisting(AttributeMutation):
     be used afterwards in Python.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(SourceType.Existing)
 
 
@@ -182,7 +182,7 @@ class AttributeMutationNew(AttributeMutation):
     the Python world.
     """
 
-    def __init__(self, cls_source: Optional[Source] = None):
+    def __init__(self, cls_source: Optional[Source] = None) -> None:
         super().__init__(SourceType.New)
         self.cls_source = cls_source
 
@@ -209,7 +209,7 @@ def is_side_effect_safe(m: MutationType):
 class AsPythonConstantNotImplementedError(NotImplementedError):
     vt: "VariableTracker"
 
-    def __init__(self, vt: "VariableTracker"):
+    def __init__(self, vt: "VariableTracker") -> None:
         super().__init__(self, f"{vt} is not a constant")
         self.vt = vt
 
@@ -337,7 +337,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return "<unknown type>"
 
-    def as_python_constant(self):
+    def as_python_constant(self) -> NoReturn:
         """For constants"""
         raise AsPythonConstantNotImplementedError(self)
 
@@ -353,7 +353,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 hints=[],
             )
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> Optional[bool]:
         try:
             self.as_python_constant()
             return True
@@ -379,14 +379,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return variables.ConstantVariable.create(value, source=source)
 
-    def is_proxy(self):
+    def is_proxy(self) -> Optional[bool]:
         try:
             self.as_proxy()
             return True
         except NotImplementedError:
             return False
 
-    def as_proxy(self):
+    def as_proxy(self) -> NoReturn:
         raise NotImplementedError(str(self))
 
     def maybe_fx_node(self):
@@ -400,7 +400,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return None
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> NoReturn:
         raise NotImplementedError
 
     def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
@@ -554,7 +554,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=hints,
         )
 
-    def set_name_hint(self, name):
+    def set_name_hint(self, name) -> None:
         pass
 
     def realize(self) -> "VariableTracker":
@@ -565,11 +565,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to return the real VariableTracker if it already exists"""
         return self
 
-    def is_realized(self):
+    def is_realized(self) -> bool:
         """Used by LazyVariableTracker to indicate an unrealized node"""
         return True
 
-    def next_variable(self, tx):
+    def next_variable(self, tx) -> None:
         unimplemented_v2(
             gb_type="Unsupported next() call",
             context=f"next({self})",
@@ -580,7 +580,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def is_strict_mode(self, tx):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
 
-    def is_mutable(self):
+    def is_mutable(self) -> bool:
         """Whether Dynamo allows mutation on this variable."""
         return not self.is_immutable()
 

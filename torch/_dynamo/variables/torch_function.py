@@ -134,7 +134,7 @@ BUILTIN_TO_TENSOR_FN_MAP = {}
 BUILTIN_TO_TENSOR_RFN_MAP = {}
 
 
-def populate_builtin_to_tensor_fn_map():
+def populate_builtin_to_tensor_fn_map() -> None:
     global BUILTIN_TO_TENSOR_FN_MAP
 
     most_recent_func = None
@@ -208,7 +208,7 @@ def get_prev_stack_var_name():
 
 # Used to clear/restore the python torch function mode stack and temporarily restore it as needed
 class TorchFunctionModeStackStateManager:
-    def __init__(self):
+    def __init__(self) -> None:
         self.stack = []
 
     def __enter__(self):
@@ -233,7 +233,7 @@ torch_function_mode_stack_state_mgr = TorchFunctionModeStackStateManager()
 
 
 class SymbolicTorchFunctionState:
-    def __init__(self, py_stack):
+    def __init__(self, py_stack) -> None:
         # This is annoyingly complicated because of how the torch function subclass + mode C API was designed
         # There are two exposed C knobs here as contexts: torch._C.DisableTorchFunction and torch._C.DisableTorchFunctionSubclass
         # These are their definitions:
@@ -276,7 +276,7 @@ class SymbolicTorchFunctionState:
     def pop_torch_function_mode(self):
         return self.mode_stack.pop()
 
-    def push_torch_function_mode(self, mode_var):
+    def push_torch_function_mode(self, mode_var) -> None:
         self.mode_stack.append(mode_var)
 
     def call_torch_function_mode(self, tx, fn, types, args, kwargs):
@@ -312,16 +312,16 @@ class TorchFunctionModeStackVariable(VariableTracker):
     # each of the indices of other modes should be shifted left by 1 (-1)
     offset = 0
 
-    def __init__(self, source, symbolic_stack):
+    def __init__(self, source, symbolic_stack) -> None:
         self.source = source
         self.symbolic_stack = symbolic_stack
 
     @classmethod
-    def reset(cls):
+    def reset(cls) -> None:
         cls.offset = 0
 
     @classmethod
-    def register_mutation(cls, tx: "InstructionTranslator"):
+    def register_mutation(cls, tx: "InstructionTranslator") -> None:
         if cls.stack_value_singleton not in tx.output.side_effects:
             var = cls(
                 source=Source(),
@@ -331,7 +331,7 @@ class TorchFunctionModeStackVariable(VariableTracker):
             tx.output.side_effects.mutation(var)
 
     @classmethod
-    def register_device_context_insertion(cls, tx: "InstructionTranslator"):
+    def register_device_context_insertion(cls, tx: "InstructionTranslator") -> None:
         stack = tx.symbolic_torch_function_state.mode_stack
         if stack and cls.is_device_context(stack[0]):
             return
@@ -345,7 +345,7 @@ class TorchFunctionModeStackVariable(VariableTracker):
             )
 
     @classmethod
-    def clear_default_device(cls, tx: "InstructionTranslator"):
+    def clear_default_device(cls, tx: "InstructionTranslator") -> None:
         stack = tx.symbolic_torch_function_state.mode_stack
         if stack and cls.is_device_context(stack[0]):
             stack.popleft()
@@ -377,14 +377,14 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
             and inspect.getattr_static(ty, "__exit__") == TorchFunctionMode.__exit__
         )
 
-    def __init__(self, value, source=None, **kwargs):
+    def __init__(self, value, source=None, **kwargs) -> None:
         if value is not None:
             super().__init__(value, **kwargs)
         self.value = value
         self.cm_obj = value  # needed for BC with calling enter from CM code
         self.source = source
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         # This shouldn't be called unless we have a source
         assert self.source
         self.source.reconstruct(codegen)
@@ -427,7 +427,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         )
         return ConstantVariable.create(None)
 
-    def reconstruct_type(self, codegen: "PyCodegen"):
+    def reconstruct_type(self, codegen: "PyCodegen") -> None:
         ty = NoEnterTorchFunctionMode
         codegen(
             AttrSource(
@@ -436,10 +436,10 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
             )
         )
 
-    def supports_graph_breaks(self):
+    def supports_graph_breaks(self) -> bool:
         return True
 
-    def exit_on_graph_break(self):
+    def exit_on_graph_break(self) -> bool:
         return False
 
 
@@ -599,7 +599,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         var.install_global(tx)
         return var
 
-    def install_global(self, tx):
+    def install_global(self, tx) -> None:
         # stash the subclass type to rewrap an output tensor if needed
         # this is needed because the actual type needs to be available
         # each time the compiled artifact is run and outputs a wrapped tensor.

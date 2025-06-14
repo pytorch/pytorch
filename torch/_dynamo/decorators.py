@@ -184,7 +184,7 @@ def allow_in_graph(fn):
         trace_rules._allowed_callable_ids.add(fn_id)
 
         # Avoid id reuse which creates subtle bugs.
-        def deregister():
+        def deregister() -> None:
             trace_rules._allowed_callable_ids.remove(fn_id)
 
         weakref.finalize(fn, deregister)
@@ -224,7 +224,7 @@ def nonstrict_trace(traceable_fn):
     trace_rules._nonstrict_trace_callable_ids.add(wrapped_id)
 
     # Avoid id reuse which creates subtle bugs.
-    def deregister():
+    def deregister() -> None:
         trace_rules._allowed_callable_ids.remove(wrapped_id)
         trace_rules._nonstrict_trace_callable_ids.remove(wrapped_id)
 
@@ -282,13 +282,13 @@ def disallow_in_graph(fn):
 
 
 @_disallow_in_graph_helper(throw_if_not_allowed=False)
-def graph_break(msg=""):
+def graph_break(msg="") -> None:
     """Force a graph break"""
 
 
 # NOTE: primarily used for internal debugging purposes!
 @_disallow_in_graph_helper(throw_if_not_allowed=False)
-def skip_frame(msg=""):
+def skip_frame(msg="") -> None:
     """Force a skipped frame"""
 
 
@@ -499,7 +499,7 @@ def substitute_in_graph(
 # Helper function to flatten a tensor subclass and apply a function to
 # all inner tensors that match the outer dim. Used to reduce duplication
 # across the various marking APIs.
-def _apply_func_to_inner_tensors_of_same_dim(func, t, *args, **kwargs):
+def _apply_func_to_inner_tensors_of_same_dim(func, t, *args, **kwargs) -> None:
     assert is_traceable_wrapper_subclass(t)
 
     attrs, _ctx = t.__tensor_flatten__()
@@ -524,7 +524,7 @@ class _DimRange:
 
 
 @forbid_in_graph
-def mark_unbacked(t, index, strict=False, specialize_on=None):
+def mark_unbacked(t, index, strict=False, specialize_on=None) -> None:
     """
     Mark a tensor as having an unbacked dim.  This changes the semantics of operations,
     we will always report the size does not equal zero/one, we will turn asserts
@@ -563,7 +563,7 @@ def mark_unbacked(t, index, strict=False, specialize_on=None):
 
 
 @forbid_in_graph
-def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None):
+def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None) -> None:
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
@@ -629,7 +629,7 @@ def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None):
 
 
 @forbid_in_graph
-def maybe_mark_dynamic(t, index):
+def maybe_mark_dynamic(t, index) -> None:
     """
     Mark a tensor as having a dynamic dim, but don't enforce it (i.e., if this
     dimension ends up getting specialized, don't error).
@@ -716,7 +716,7 @@ def mark_static(t, index=None):
 
 
 @forbid_in_graph
-def mark_static_address(t, guard=True):
+def mark_static_address(t, guard=True) -> None:
     """
     Marks an input tensor whose data_ptr will not change across multiple calls
     to a dynamo-compiled function. This indicates to cudagraphs that an extra allocation
@@ -734,7 +734,7 @@ def mark_static_address(t, guard=True):
 
 # Note: this carefully avoids eagerly import einops.
 # TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
-def _allow_in_graph_einops():
+def _allow_in_graph_einops() -> None:
     mod = sys.modules.get("einops")
     if mod is None:
         return
@@ -772,7 +772,7 @@ trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 # Proxy class for torch._dynamo.config patching - so dynamo can identify context managers/decorators
 # created by patch_dynamo_config, compared to ones created by a raw torch._dynamo.config.patch.
 class DynamoConfigPatchProxy:
-    def __init__(self, config_patch):
+    def __init__(self, config_patch) -> None:
         self.config_patch = config_patch
 
     @property
@@ -818,7 +818,7 @@ for name in _allowed_config_patches:
 del config
 
 
-def _patch_dynamo_config_check(changes: dict[str, Any]):
+def _patch_dynamo_config_check(changes: dict[str, Any]) -> None:
     for k, v in changes.items():
         if k not in _allowed_config_patches:
             raise ValueError(

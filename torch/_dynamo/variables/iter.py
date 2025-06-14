@@ -264,7 +264,7 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    def next_variable(self, tx):
+    def next_variable(self, tx) -> None:
         unimplemented_v2(
             gb_type="Unimplemented next() call",
             context=f"next({self})",
@@ -304,7 +304,7 @@ class RepeatIteratorVariable(IteratorVariable):
     def next_variable(self, tx):
         return self.item
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -334,7 +334,7 @@ class CountIteratorVariable(IteratorVariable):
         self.item = self.item.call_method(tx, "__add__", [self.step], {})
         return old_item
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -483,7 +483,7 @@ class ZipVariable(IteratorVariable):
         self.index += 1
         return variables.TupleVariable(args)
 
-    def reconstruct_items(self, codegen: "PyCodegen"):
+    def reconstruct_items(self, codegen: "PyCodegen") -> None:
         for it in self.iterables:
             if isinstance(it, list):
                 remaining_items = it[self.index :]
@@ -494,7 +494,7 @@ class ZipVariable(IteratorVariable):
             else:
                 codegen(it)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", "zip"), call_function_ex=True
         )
@@ -539,7 +539,7 @@ class MapVariable(ZipVariable):
         args = super().next_variable(tx)
         return self.fn.call_function(tx, args.items, {})
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", "map"), call_function_ex=True
         )
@@ -613,7 +613,7 @@ class FilterVariable(IteratorVariable):
             if pred_res.as_python_constant():
                 return item
 
-    def reconstruct_items(self, codegen: "PyCodegen"):
+    def reconstruct_items(self, codegen: "PyCodegen") -> None:
         if isinstance(self.iterable, list):
             remaining_items = self.iterable[self.index :]
             codegen.foreach(remaining_items)
@@ -623,7 +623,7 @@ class FilterVariable(IteratorVariable):
         else:
             codegen(self.iterable)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("builtins", "filter"))
         codegen(self.fn)
         self.reconstruct_items(codegen)

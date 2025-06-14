@@ -102,13 +102,13 @@ def maybe_clone(x):
 # So different semantics are needed, this implementation below will check
 # for NaNs at the end of the autograd call, instead of after each node
 class NaNChecker:
-    def __init__(self, accumulate_grad: bool):
+    def __init__(self, accumulate_grad: bool) -> None:
         self.accumulate_grad = accumulate_grad
         self.params_indices: list[int] = []
         self.params_to_check: dict[str, torch.Tensor] = {}
         self.output_names: list[str] = []
 
-    def prep_with_graph(self, graph: torch.fx.Graph):
+    def prep_with_graph(self, graph: torch.fx.Graph) -> None:
         inputs_node = next(iter(graph.nodes))
         acc_grad_nodes = graph.find_nodes(
             op="call_function", target=torch.ops.inductor.accumulate_grad_.default
@@ -132,7 +132,7 @@ class NaNChecker:
 
         self.output_names = [node.name for node in output_nodes]
 
-    def prep_with_inputs(self, inputs: tuple[torch.Tensor]):
+    def prep_with_inputs(self, inputs: tuple[torch.Tensor]) -> None:
         if not self.accumulate_grad:
             # Using .grad, nothing to prep
             return
@@ -148,7 +148,7 @@ class NaNChecker:
 
             self.params_to_check[f"inputs[{idx}]"] = inputs[idx]
 
-    def check(self, out: tuple[torch.Tensor]):
+    def check(self, out: tuple[torch.Tensor]) -> None:
         if self.accumulate_grad:
             # Using .backward, graph outputs are empty
             assert not out
@@ -181,7 +181,7 @@ class NaNChecker:
 # function is called. It's possible to avoid lazy binding and instead bind
 # all of this upfront (perhaps at import time) via codegen changes.
 class OpNamespace:
-    def __init__(self):
+    def __init__(self) -> None:
         self.custom_function_name_counter: Counter[str] = Counter()
 
     def add(self, name, fn, is_custom_function, is_traceable):
@@ -210,7 +210,7 @@ class OpNamespace:
 
 
 class Op:
-    def __init__(self, name, fn, is_custom_function):
+    def __init__(self, name, fn, is_custom_function) -> None:
         self.fn = fn
         self.is_custom_function = is_custom_function
         self.__name__ = name
@@ -219,7 +219,7 @@ class Op:
     def __call__(self, *args, **kwargs):
         return self.fn(*args, **kwargs)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__module__ + "." + self.__name__
 
 
@@ -394,7 +394,7 @@ class AutogradCompilerInstance:
     def log_compile_reasons(
         self,
         compile_reasons: list[str],
-    ):
+    ) -> None:
         assert compile_reasons
         trace_structured(
             "artifact",
@@ -507,7 +507,7 @@ class AutogradCompilerInstance:
                 deduped_aot_id += f"_{self.aot_id_counter[aot_id]}"
             self.aot_id_counter[aot_id] += 1
 
-            def make_unique(node_name):
+            def make_unique(node_name) -> str:
                 # make it both informative and unique
                 return f"aot{deduped_aot_id}_{node_name}"
 
@@ -727,7 +727,7 @@ class AutogradCompilerInstance:
         self.bind_objects_to_proxies([result], [proxy_out])
         return result
 
-    def accumulate_grad(self, variable, grad):
+    def accumulate_grad(self, variable, grad) -> None:
         self.fx_tracer.create_proxy(
             "call_function",
             torch.ops.inductor.accumulate_grad_.default,
@@ -890,7 +890,7 @@ class AutogradCompilerInstance:
             in [torch.ops.aten.sym_size.int, torch.ops.aten.sym_numel.default]
         )
 
-    def dce(self):
+    def dce(self) -> None:
         # Most of these removed nodes would have been removed during Dynamo and AOTDispatch
         # Remove some of these nodes earlier to improve compilation speed
 
@@ -1075,7 +1075,7 @@ class AutogradCompilerInstance:
         return nodes
 
     @staticmethod
-    def is_placeholder(node):
+    def is_placeholder(node) -> bool:
         if node.op == "placeholder" or (
             node.op == "call_function"
             and node.target == operator.getitem
@@ -1084,7 +1084,7 @@ class AutogradCompilerInstance:
             return True
         return False
 
-    def reorder_accumulate_grad_nodes(self):
+    def reorder_accumulate_grad_nodes(self) -> None:
         """
         Usage of AOTAutograd causes all the accumulate_grad_ nodes to get pushed to the end of
         the graph.  This differs from eager mode, which schedules them as soon as possible. This
@@ -1105,7 +1105,7 @@ class AutogradCompilerInstance:
                 if getitem_node is not None:
                     arg.append(getitem_node)
 
-    def delay_unpack_hook_nodes(self):
+    def delay_unpack_hook_nodes(self) -> None:
         """
         We can delay unpack hooks until they are needed, even later than in the eager autograd engine.
         """
@@ -1118,7 +1118,7 @@ class AutogradCompilerInstance:
             first_user = min(node.users)
             first_user.prepend(node)
 
-    def reorder_tensor_pre_hook_nodes(self):
+    def reorder_tensor_pre_hook_nodes(self) -> None:
         """
         Usage of AOTAutograd causes all the tensor_pre_hook nodes to get pushed
         to the end of the graph. This differs from eager mode, which schedules
@@ -1138,7 +1138,7 @@ class AutogradCompilerInstance:
                 input_node.append(getitem_node)
                 getitem_node.append(node)
 
-    def reorder_pre_hook_nodes_to_schedule_asap(self):
+    def reorder_pre_hook_nodes_to_schedule_asap(self) -> None:
         """
         In this function, we schedule the pre hooks as soon as possible. This
         does not match eager behavior (schedule pre hook right before its
@@ -1174,7 +1174,7 @@ class AutogradCompilerInstance:
                 for n in hook_block:
                     getitem_node.append(n)
 
-    def reorder_pre_hook_nodes_to_mimic_eager(self):
+    def reorder_pre_hook_nodes_to_mimic_eager(self) -> None:
         """
         Usage of AOTAutograd causes all the pre_hook nodes to get pushed to the
         end of the graph. This differs from eager mode, which schedules them
@@ -1209,7 +1209,7 @@ class AutogradCompilerInstance:
                 for getitem in users:
                     registered_node.prepend(getitem)
 
-    def reorder_post_acc_grad_hook_nodes(self):
+    def reorder_post_acc_grad_hook_nodes(self) -> None:
         """
         Usage of AOTAutograd causes all the post_acc_grad_hook nodes to get
         pushed to the end of the graph. This differs from eager mode, which
@@ -1248,7 +1248,7 @@ class AutogradCompilerInstance:
             acc_grad_node.append(getitem_node)
             getitem_node.append(node)
 
-    def reorder_post_hook_nodes(self):
+    def reorder_post_hook_nodes(self) -> None:
         """
         Usage of AOTAutograd causes all the post_hook nodes to get pushed to the
         end of the graph. This differs from eager mode, which schedules them as
@@ -1355,7 +1355,7 @@ class AutogradCompilerInstance:
         node_name: str,
         nodecall_index: int,
         pyobj: Optional[torch.autograd.Function],
-    ):
+    ) -> None:
         maybe_aot_id = ""
         if pyobj is not None:
             forward_cls = pyobj._forward_cls  # type: ignore[attr-defined]

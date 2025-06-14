@@ -21,7 +21,7 @@ import inspect
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, NoReturn, Optional, Union
 
 import torch
 
@@ -68,7 +68,7 @@ class DeviceInterface:
         """
 
         @staticmethod
-        def set_device(device: int):
+        def set_device(device: int) -> NoReturn:
             raise NotImplementedError
 
         @staticmethod
@@ -76,15 +76,15 @@ class DeviceInterface:
             raise NotImplementedError
 
         @staticmethod
-        def get_device_properties(device: torch.types.Device = None):
+        def get_device_properties(device: torch.types.Device = None) -> NoReturn:
             raise NotImplementedError
 
     @staticmethod
-    def current_device():
+    def current_device() -> NoReturn:
         raise NotImplementedError
 
     @staticmethod
-    def set_device(device: torch.types.Device):
+    def set_device(device: torch.types.Device) -> NoReturn:
         raise NotImplementedError
 
     @staticmethod
@@ -96,7 +96,7 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def device_count():
+    def device_count() -> NoReturn:
         raise NotImplementedError
 
     @staticmethod
@@ -104,19 +104,21 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def stream(stream: torch.Stream):
+    def stream(stream: torch.Stream) -> NoReturn:
         raise NotImplementedError
 
     @staticmethod
-    def current_stream():
+    def current_stream() -> NoReturn:
         raise NotImplementedError
 
     @staticmethod
-    def set_stream(stream: torch.Stream):
+    def set_stream(stream: torch.Stream) -> NoReturn:
         raise NotImplementedError
 
     @staticmethod
-    def _set_stream_by_id(stream_id: int, device_index: int, device_type: int):
+    def _set_stream_by_id(
+        stream_id: int, device_index: int, device_type: int
+    ) -> NoReturn:
         raise NotImplementedError
 
     @staticmethod
@@ -124,7 +126,7 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def synchronize(device: torch.types.Device = None):
+    def synchronize(device: torch.types.Device = None) -> NoReturn:
         raise NotImplementedError
 
     @classmethod
@@ -132,11 +134,11 @@ class DeviceInterface:
         return cls.Worker.get_device_properties(device)
 
     @staticmethod
-    def get_compute_capability(device: torch.types.Device = None):
+    def get_compute_capability(device: torch.types.Device = None) -> NoReturn:
         raise NotImplementedError
 
     @staticmethod
-    def is_bf16_supported(including_emulation: bool = False):
+    def is_bf16_supported(including_emulation: bool = False) -> NoReturn:
         raise NotImplementedError
 
     @classmethod
@@ -208,7 +210,7 @@ class CudaInterface(DeviceInterface):
 
     class Worker:
         @staticmethod
-        def set_device(device: int):
+        def set_device(device: int) -> None:
             caching_worker_current_devices["cuda"] = device
 
         @staticmethod
@@ -303,7 +305,7 @@ class XpuInterface(DeviceInterface):
 
     class Worker:
         @staticmethod
-        def set_device(device: int):
+        def set_device(device: int) -> None:
             caching_worker_current_devices["xpu"] = device
 
         @staticmethod
@@ -379,13 +381,13 @@ class CpuDeviceProperties:
 
 class CpuInterface(DeviceInterface):
     class Event(torch.Event):
-        def __init__(self, enable_timing=True):
+        def __init__(self, enable_timing=True) -> None:
             self.time = 0.0
 
         def elapsed_time(self, end_event) -> float:
             return (end_event.time - self.time) * 1000
 
-        def record(self, stream=None):
+        def record(self, stream=None) -> None:
             self.time = time.perf_counter()
 
     class Worker:
@@ -401,7 +403,7 @@ class CpuInterface(DeviceInterface):
         return True
 
     @staticmethod
-    def is_bf16_supported(including_emulation: bool = False):
+    def is_bf16_supported(including_emulation: bool = False) -> bool:
         return True
 
     @staticmethod
@@ -413,11 +415,11 @@ class CpuInterface(DeviceInterface):
         return 0
 
     @staticmethod
-    def current_device():
+    def current_device() -> int:
         return 0
 
     @staticmethod
-    def synchronize(device: torch.types.Device = None):
+    def synchronize(device: torch.types.Device = None) -> None:
         pass
 
     @staticmethod
@@ -450,7 +452,7 @@ class MpsInterface(DeviceInterface):
         return torch.backends.mps.is_available()
 
     @staticmethod
-    def current_device():
+    def current_device() -> int:
         return 0
 
     @staticmethod
@@ -458,7 +460,7 @@ class MpsInterface(DeviceInterface):
         return ""
 
     @staticmethod
-    def synchronize(device: torch.types.Device = None):
+    def synchronize(device: torch.types.Device = None) -> None:
         torch.mps.synchronize()
 
     class Worker:
@@ -467,7 +469,7 @@ class MpsInterface(DeviceInterface):
             return {}
 
         @staticmethod
-        def current_device():
+        def current_device() -> int:
             return 0
 
 
@@ -477,7 +479,7 @@ _device_initialized = False
 
 def register_interface_for_device(
     device: Union[str, torch.device], device_interface: type[DeviceInterface]
-):
+) -> None:
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
@@ -499,7 +501,7 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
     return device_interfaces.items()
 
 
-def init_device_reg():
+def init_device_reg() -> None:
     global _device_initialized
     register_interface_for_device("cuda", CudaInterface)
     for i in range(torch.cuda.device_count()):

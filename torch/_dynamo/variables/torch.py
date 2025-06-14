@@ -228,7 +228,7 @@ class BaseTorchVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         try:
             name = f"{self.value.__module__}.{self.value.__name__}"
         except Exception:
@@ -532,7 +532,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
         @register(torch.is_inference_mode_enabled)
-        def handle_is_inference_mode_enabled(self, tx: "InstructionTranslator"):
+        def handle_is_inference_mode_enabled(self, tx: "InstructionTranslator") -> None:
             unimplemented_v2(
                 gb_type="Encountered torch.is_inference_mode_enabled during tracing",
                 context="",
@@ -870,7 +870,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args,
             layout=None,
             **kwargs,
-        ):
+        ) -> None:
             from .lists import BaseListVariable
 
             if layout and layout.as_python_constant() == torch.strided:
@@ -879,7 +879,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 unimplemented("nested_tensor with non-list input")
 
         @register(torch.nn.functional.one_hot)
-        def handle_one_hot(self, tx: "InstructionTranslator", *args, **kwargs):
+        def handle_one_hot(self, tx: "InstructionTranslator", *args, **kwargs) -> None:
             if len(args) + len(kwargs) == 1 or (
                 len(args) == 2
                 and args[1].is_python_constant()

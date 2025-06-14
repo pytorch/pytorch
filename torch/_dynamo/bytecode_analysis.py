@@ -62,7 +62,7 @@ def remove_dead_code(instructions):
     indexof = get_indexof(instructions)
     live_code = set()
 
-    def find_live_code(start):
+    def find_live_code(start) -> None:
         for i in range(start, len(instructions)):
             if i in live_code:
                 return
@@ -112,11 +112,11 @@ def remove_pointless_jumps(instructions):
     return [inst for inst in instructions if id(inst) not in pointless_jumps]
 
 
-def propagate_line_nums(instructions):
+def propagate_line_nums(instructions) -> None:
     """Ensure every instruction has line number set in case some are removed"""
     cur_line_no = None
 
-    def populate_line_num(inst):
+    def populate_line_num(inst) -> None:
         nonlocal cur_line_no
         if inst.starts_line:
             cur_line_no = inst.starts_line
@@ -127,12 +127,12 @@ def propagate_line_nums(instructions):
         populate_line_num(inst)
 
 
-def remove_extra_line_nums(instructions):
+def remove_extra_line_nums(instructions) -> None:
     """Remove extra starts line properties before packing bytecode"""
 
     cur_line_no = None
 
-    def remove_line_num(inst):
+    def remove_line_num(inst) -> None:
         nonlocal cur_line_no
         if inst.starts_line is None:
             return
@@ -157,7 +157,7 @@ def livevars_analysis(instructions, instruction):
     must = ReadsWrites(set(), set(), set())
     may = ReadsWrites(set(), set(), set())
 
-    def walk(state, start):
+    def walk(state, start) -> None:
         if start in state.visited:
             return
         state.visited.add(start)
@@ -197,19 +197,19 @@ class StackSize:
     high: Union[int, float]
     fixed_point: FixedPointBox
 
-    def zero(self):
+    def zero(self) -> None:
         self.low = 0
         self.high = 0
         self.fixed_point.value = False
 
-    def offset_of(self, other, n):
+    def offset_of(self, other, n) -> None:
         prior = (self.low, self.high)
         self.low = min(self.low, other.low + n)
         self.high = max(self.high, other.high + n)
         if (self.low, self.high) != prior:
             self.fixed_point.value = False
 
-    def exn_tab_jump(self, depth):
+    def exn_tab_jump(self, depth) -> None:
         prior = (self.low, self.high)
         self.low = min(self.low, depth)
         self.high = max(self.high, depth)

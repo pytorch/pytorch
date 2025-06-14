@@ -71,7 +71,7 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
     DEBUG_DIR = tempfile.mkdtemp()
 
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         super().setUpClass()
         cls._exit_stack.enter_context(  # type: ignore[attr-defined]
             torch._dynamo.config.patch(debug_dir_root=cls.DEBUG_DIR)
@@ -92,14 +92,14 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
         )
 
     @classmethod
-    def tearDownClass(cls):
+    def tearDownClass(cls) -> None:
         if os.getenv("PYTORCH_KEEP_TMPDIR", "0") != "1":
             shutil.rmtree(cls.DEBUG_DIR)
         else:
             print(f"test_minifier_common tmpdir kept at: {cls.DEBUG_DIR}")
         cls._exit_stack.close()  # type: ignore[attr-defined]
 
-    def _gen_codegen_fn_patch_code(self, device, bug_type):
+    def _gen_codegen_fn_patch_code(self, device, bug_type) -> str:
         assert bug_type in ("compile_error", "runtime_error", "accuracy")
         return f"""\
 {torch._dynamo.config.codegen_config()}
@@ -228,7 +228,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # `run_code` is the code to run for the test case.
     # `patch_code` is the code to be patched in every generated file; usually
     # just use this to turn on bugs via the config
-    def _gen_test_code(self, run_code, repro_after, repro_level):
+    def _gen_test_code(self, run_code, repro_after, repro_level) -> str:
         repro_after_line = ""
         if repro_after == "aot_inductor":
             repro_after_line = (

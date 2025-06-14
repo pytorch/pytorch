@@ -26,7 +26,7 @@ import inspect
 import operator
 import types
 from collections.abc import Hashable as py_Hashable
-from typing import Optional, TYPE_CHECKING
+from typing import NoReturn, Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
 
@@ -57,7 +57,7 @@ if TYPE_CHECKING:
 # - (perhaps) Define how it is compared in _HashableTracker._eq_impl
 
 
-def raise_args_mismatch(tx, name):
+def raise_args_mismatch(tx, name) -> None:
     raise_observed_exception(
         TypeError,
         tx,
@@ -69,7 +69,7 @@ def was_instancecheck_override(obj):
     return type(obj).__dict__.get("__instancecheck__", False)
 
 
-def raise_unhashable(arg, tx=None):
+def raise_unhashable(arg, tx=None) -> None:
     if tx is None:
         from torch._dynamo.symbolic_convert import InstructionTranslator
 
@@ -302,7 +302,7 @@ class ConstDictVariable(VariableTracker):
             return id(value.realize()) != id(other.realize())
         return id(value) != id(other)
 
-    def reconstruct_kvs_into_new_dict(self, codegen):
+    def reconstruct_kvs_into_new_dict(self, codegen) -> None:
         # Build a dictionary that contains the keys and values.
         num_args = 0
         for key, value in self.items.items():
@@ -314,7 +314,7 @@ class ConstDictVariable(VariableTracker):
                 num_args += 1
         codegen.append_output(create_instruction("BUILD_MAP", arg=num_args))
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.user_cls is collections.OrderedDict:
             # emit `OrderedDict(constructed_dict)`
             codegen.add_push_null(
@@ -359,7 +359,7 @@ class ConstDictVariable(VariableTracker):
             return None
         return self.items[key]
 
-    def realize_key_vt(self, arg: VariableTracker):
+    def realize_key_vt(self, arg: VariableTracker) -> None:
         # Realize the LazyVT on a particular index
         assert arg in self
         key = ConstDictVariable._HashableTracker(arg)
@@ -368,11 +368,11 @@ class ConstDictVariable(VariableTracker):
         if isinstance(original_key_vt, variables.LazyVariableTracker):
             original_key_vt.realize()
 
-    def install_dict_keys_match_guard(self):
+    def install_dict_keys_match_guard(self) -> None:
         if self.source:
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
 
-    def install_dict_contains_guard(self, tx, args):
+    def install_dict_contains_guard(self, tx, args) -> None:
         # Key guarding - These are the cases to consider
         # 1) The dict has been mutated. In this case, we would have already
         # inserted a DICT_KEYS_MATCH guard, so we can skip.
@@ -622,7 +622,7 @@ class MappingProxyVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         return self.dv_dict.unpack_var_sequence(tx)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         # load types.MappingProxyType
         if self.source:
             msg = (
@@ -681,10 +681,10 @@ class MappingProxyVariable(VariableTracker):
 
 class NNModuleHooksDictVariable(ConstDictVariable):
     # Special class to avoid adding any guards on the nn module hook ids.
-    def install_dict_keys_match_guard(self):
+    def install_dict_keys_match_guard(self) -> None:
         pass
 
-    def install_dict_contains_guard(self, tx, args):
+    def install_dict_contains_guard(self, tx, args) -> None:
         pass
 
 
@@ -701,7 +701,7 @@ class DefaultDictVariable(ConstDictVariable):
             return False
         return super().is_python_constant()
 
-    def debug_repr(self):
+    def debug_repr(self) -> str:
         return (
             f"defaultdict({self.default_factory.debug_repr()}, {super().debug_repr()})"
         )
@@ -737,7 +737,7 @@ class DefaultDictVariable(ConstDictVariable):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen) -> None:
         # emit `defaultdict(default_factory, new_dict)`
         codegen.add_push_null(
             lambda: codegen.extend_output(
@@ -790,7 +790,7 @@ class SetVariable(ConstDictVariable):
     def as_python_constant(self):
         return {k.vt.as_python_constant() for k in self.set_items}
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach([x.vt for x in self.set_items])
         codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
 
@@ -902,14 +902,16 @@ class SetVariable(ConstDictVariable):
             )
         return super().call_method(tx, name, args, kwargs)
 
-    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
+    def getitem_const(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> NoReturn:
         raise RuntimeError("Illegal to getitem on a set")
 
-    def install_dict_keys_match_guard(self):
+    def install_dict_keys_match_guard(self) -> None:
         # Already EQUALS_MATCH guarded
         pass
 
-    def install_dict_contains_guard(self, tx, args):
+    def install_dict_contains_guard(self, tx, args) -> None:
         # Already EQUALS_MATCH guarded
         pass
 
@@ -938,7 +940,7 @@ class FrozensetVariable(SetVariable):
     def as_python_constant(self):
         return {k.vt.as_python_constant() for k in self.set_items}
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach([x.vt for x in self.set_items])
         codegen.add_push_null(
             lambda: codegen.extend_output(
@@ -1032,7 +1034,7 @@ class DictViewVariable(VariableTracker):
         return getattr(self.dv_dict.items, self.kv)()
 
     @property
-    def view_items_vt(self):
+    def view_items_vt(self) -> NoReturn:
         # Returns an iterable of the unpacked items
         # Implement in the subclasses
         raise NotImplementedError
@@ -1040,7 +1042,7 @@ class DictViewVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         return self.view_items_vt
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)

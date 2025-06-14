@@ -894,7 +894,7 @@ class NamedTupleVariable(TupleVariable):
             getattr(self.tuple_cls, "_make", None)
         )
 
-    def is_structseq(self):
+    def is_structseq(self) -> bool:
         return not self.is_namedtuple()
 
     def fields(self):

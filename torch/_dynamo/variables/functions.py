@@ -32,7 +32,7 @@ import types
 import warnings
 from collections.abc import Sequence
 from types import FunctionType
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 from weakref import WeakKeyDictionary
@@ -100,7 +100,7 @@ _spec_cache = WeakKeyDictionary()
 
 
 class FunctionSpec:
-    def __init__(self, func: FunctionType):
+    def __init__(self, func: FunctionType) -> None:
         code = func.__code__
         vn = code.co_varnames
 
@@ -118,7 +118,7 @@ class FunctionSpec:
         off += 1 if self.varargs_name else 0
         self.varkw_name = vn[off] if code.co_flags & CO_VARKEYWORDS else None
 
-    def update_defaults(self, func: FunctionType):
+    def update_defaults(self, func: FunctionType) -> None:
         # Defaults can change from function call to function call. So re-update
         # them on every call.
         self.defaults = func.__defaults__ or ()
@@ -203,14 +203,14 @@ def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
         return variables.LazyVariableTracker.create(val, source)
 
 
-def wrap_args_kwargs(tx: "InstructionTranslator", result):
+def wrap_args_kwargs(tx: "InstructionTranslator", result) -> None:
     for k, v in list(result.items()):
         if isinstance(v, (tuple, dict)):
             # args/kwargs
             result[k] = wrap_bound_arg(tx, v)
 
 
-def init_cellvars(parent, result: dict[str, VariableTracker], code):
+def init_cellvars(parent, result: dict[str, VariableTracker], code) -> None:
     """
     Update `result` to add mapping from local name to new cells created
     directly by `code`, or update SideEffects in `parent` if the a local cell is
@@ -553,7 +553,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         f_globals,
         inline_tracer: Optional["InstructionTranslator"],
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         self.code = code
         self.f_globals = f_globals
@@ -568,21 +568,21 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def get_name(self):
         return self.get_code().co_name
 
-    def get_function(self):
+    def get_function(self) -> NoReturn:
         raise NotImplementedError
 
-    def has_self(self):
+    def has_self(self) -> bool:
         return False
 
     def __name__(self):
         return self.get_name()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.__class__.__name__}({self.get_name()})"
 
     __repr__ = __str__
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         from torch._dynamo.side_effects import disallow_side_effects_in_generator
         from torch._dynamo.symbolic_convert import (
             InstructionTranslator,
@@ -643,7 +643,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         finally:
             counters["unimplemented"] |= counters["inline_call"]
 
-    def has_unpack_var_sequence(self, tx):
+    def has_unpack_var_sequence(self, tx) -> bool:
         return False
 
     def has_force_unpack_var_sequence(self, tx) -> builtins.bool:
@@ -662,7 +662,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 handle_observed_exception(tx)
                 break
 
-    def _setup_exception(self, tx, exc):
+    def _setup_exception(self, tx, exc) -> None:
         tracer = self._get_inline_tracer(tx)
         try:
             tracer._raise_exception_variable(exc)
@@ -893,7 +893,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         *,
         generator_cls=LocalGeneratorObjectVariable,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         self.vt = vt
         self.generator_cls = generator_cls
@@ -943,7 +943,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         This is only used when the function is annotated with @contextlib.contextmanager
     """
 
-    def __init__(self, vt, **kwargs):
+    def __init__(self, vt, **kwargs) -> None:
         super().__init__(
             vt,
             generator_cls=ContextlibContextManagerLocalGeneratorObjectVariable,
@@ -1072,7 +1072,7 @@ class WrappedUserMethodVariable(UserMethodVariable):
         self.context.exit(tx)
         return result
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen) -> None:
         codegen.add_push_null(lambda: codegen(self.context))
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
@@ -1096,7 +1096,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         self.context.exit(tx)
         return result
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen) -> None:
         codegen.add_push_null(lambda: codegen(self.context))
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
@@ -1208,7 +1208,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             return self.fn_name.as_python_constant()
         return super().const_getattr(tx, name)
 
-    def has_self(self):
+    def has_self(self) -> bool:
         return False
 
     def get_globals(self):
@@ -1238,7 +1238,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         return result
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.load_import_from(__name__, "_create_nested_fn")
         )
@@ -1331,7 +1331,7 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
         self.context.exit(tx)
         return result
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen) -> None:
         codegen.add_push_null(lambda: codegen(self.context))
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
@@ -1510,7 +1510,7 @@ class WrappedSkipFunctionVariable(SkipFunctionVariable):
         self.context.exit(tx)
         return result
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen) -> None:
         codegen.add_push_null(lambda: codegen(self.context))
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
@@ -1730,7 +1730,7 @@ class FunctoolsPartialVariable(VariableTracker):
     def python_type(self):
         return functools.partial
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("functools", "partial"))
         codegen(self.func)
         if self.args:
@@ -1927,11 +1927,11 @@ class PolyfilledFunctionVariable(VariableTracker):
 
 class TracebackVariable(VariableTracker):
     # We don't track traceback. A call to any function in this module is a no-op
-    def call_function(self, tx, args, kwargs): ...
+    def call_function(self, tx, args, kwargs) -> None: ...
 
 
 class SysFunctionVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -2181,7 +2181,7 @@ class TMADescriptorExperimentalVariable(VariableTracker):
         block_dims: "list[ConstantVariable]",
         element_size: "ConstantVariable",
         **kwargs,
-    ):
+    ) -> None:
         assert isinstance(data_ptr, variables.DataPtrVariable)
         super().__init__(**kwargs)
         self.data_ptr = data_ptr
@@ -2196,7 +2196,7 @@ class TMADescriptorExperimentalVariable(VariableTracker):
             self.element_size.as_proxy(),
         )
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.load_import_from(
                 "triton.tools.experimental_descriptor",
@@ -2218,19 +2218,19 @@ class TMADescriptorStableVariable(VariableTracker):
         tensor: "variables.TensorVariable",
         block_shape: "variables.ListVariable",
         **kwargs,
-    ):
+    ) -> None:
         assert isinstance(tensor, variables.TensorVariable)
         super().__init__(**kwargs)
         self.tensor = tensor
         self.block_shape = block_shape
 
-    def to_metadata(self):
+    def to_metadata(self) -> NoReturn:
         # TODO(dberard) implement this
         raise NotImplementedError(
             "TensorDescriptor.from_tensor support is not yet implemented"
         )
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.load_import_from(
                 "triton.tools.tensor_descriptor",

@@ -78,7 +78,7 @@ def bucket_has_external_output(bucket: Bucket) -> bool:
     return False
 
 
-def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int):
+def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int) -> None:
     headers = ("Index", "Size (b)", "Param Names")
     rows = []
     extended_buckets = []
@@ -136,7 +136,7 @@ def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int):
         log.debug("DDPOptimizer captured no parameters and did not split this graph.")
 
 
-def has_higher_order_op(gm):
+def has_higher_order_op(gm) -> bool:
     # Check if there is a higher order op in the graph
     for node in gm.graph.nodes:
         if node.op == "get_attr":
@@ -419,18 +419,20 @@ class DDPOptimizer:
     def _ignore_parameter(self, parameter):
         return hasattr(parameter, "_ddp_ignored") and parameter._ddp_ignored
 
-    def add_param(self, bucket, param, name):
+    def add_param(self, bucket, param, name) -> None:
         bucket.size += param.untyped_storage().nbytes()
         bucket.params.append(name)
         bucket.param_ids.append(id(param))
 
-    def add_module_params_to_bucket(self, mod, bucket, processed_modules, prefix):
+    def add_module_params_to_bucket(
+        self, mod, bucket, processed_modules, prefix
+    ) -> None:
         processed_modules.add(mod)
         for name, param in mod.named_parameters():
             if param.requires_grad and not self._ignore_parameter(param):
                 self.add_param(bucket, param, f"{prefix}_{name}")
 
-    def add_param_args(self, bucket, node):
+    def add_param_args(self, bucket, node) -> None:
         for arg in node.args:
             if not isinstance(arg, torch.fx.node.Node):
                 continue

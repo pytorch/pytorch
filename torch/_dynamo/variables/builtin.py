@@ -761,7 +761,7 @@ class BuiltinVariable(VariableTracker):
             return DTYPE[self.fn]
         return super().as_proxy()
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
@@ -975,7 +975,7 @@ class BuiltinVariable(VariableTracker):
 
             handlers.append(constant_fold_handler)
 
-        def call_unimplemented_v2(args):
+        def call_unimplemented_v2(args) -> None:
             real_arg_types = [arg.python_type_name() for arg in args]
             unimplemented_v2(
                 gb_type="Failed to trace builtin operator",
@@ -2357,7 +2357,7 @@ class BuiltinVariable(VariableTracker):
                 ],
             )
 
-    def call_deepcopy(self, tx: "InstructionTranslator", x):
+    def call_deepcopy(self, tx: "InstructionTranslator", x) -> None:
         unimplemented_v2(
             gb_type="copy.deepcopy()",
             context=f"copy.deepcopy({x})",

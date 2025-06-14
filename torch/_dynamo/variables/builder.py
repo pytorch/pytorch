@@ -360,10 +360,10 @@ class GraphArg:
             self._example = TensorWeakRef(self._example)
             assert is_fake(self.fake_tensor)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.source)
 
-    def erase(self):
+    def erase(self) -> None:
         self._example = None
         self.example_strong_ref = None
 
@@ -381,7 +381,7 @@ class BackwardStateGraphArg(GraphArg):
             is_tensor=False,
         )
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         assert codegen.tx.output.backward_state_var
         codegen.add_push_null(
             lambda: codegen.load_import_from(BackwardState.__module__, "BackwardState")
@@ -525,7 +525,7 @@ class VariableBuilder:
         self.install_guards(GuardBuilder.TYPE_MATCH)
         return WeakRefVariable.build(self.tx, value, source=self.source)
 
-    def wrap_removable_handle(self, value):
+    def wrap_removable_handle(self, value) -> None:
         # This means that the removable handle was created in some other frame.
         # Our current infra requires the hook to be registered and removed in
         # the same frame. So graph break.
@@ -627,15 +627,15 @@ class VariableBuilder:
                 pass
 
         # default implementations, in case we don't have triton (or the wrong triton version)
-        def create_1d_tma_descriptor():
+        def create_1d_tma_descriptor() -> None:
             pass
 
-        def create_2d_tma_descriptor():
+        def create_2d_tma_descriptor() -> None:
             pass
 
         class TensorDescriptor:
             @staticmethod
-            def from_tensor():
+            def from_tensor() -> None:
                 pass
 
         if has_triton_experimental_host_tma():
@@ -1636,7 +1636,7 @@ class VariableBuilder:
         else:
             return RangeVariable(items, source=self.source)
 
-    def mark_static_input(self, value: torch.Tensor, guard: bool):
+    def mark_static_input(self, value: torch.Tensor, guard: bool) -> None:
         from ..decorators import mark_static_address
 
         static_inputs_log.debug(
@@ -1856,7 +1856,7 @@ class VariableBuilder:
                 return self.tx.output.side_effects.track_mutable(value, result)
             return result
 
-    def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
+    def assert_not_wrapped_by_this_graph(self, value: torch.Tensor) -> None:
         if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
             raise InternalTorchDynamoError(
                 "Cannot wrap a Tensor that has already been",
@@ -2563,7 +2563,7 @@ def wrap_fx_proxy(
         return result
 
 
-def cache_real_value_when_export(tx, proxy, example_value):
+def cache_real_value_when_export(tx, proxy, example_value) -> None:
     if tx.export:
         # The legacy behavior for real value cache with subclasses was
         # to perform a clone WITHOUT preserving the subclass.  It's
@@ -3162,7 +3162,7 @@ def _automatic_dynamic(
     t_id = id(e)
     dim2constraint = {}
 
-    def update_dim2constraint(dim, constraint_range, name):
+    def update_dim2constraint(dim, constraint_range, name) -> None:
         if dim in dim2constraint:
             from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 

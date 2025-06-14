@@ -135,7 +135,7 @@ class ComptimeVar:
             return bool(fs)
         return False
 
-    def force_static(self):
+    def force_static(self) -> None:
         """
         Forces that a value is static, inducing a guard on its specific value
         """
@@ -187,7 +187,7 @@ class ComptimeContext:
 
         return ComptimeVar(var)
 
-    def graph_break(self, msg="ComptimeContext.graph_break"):
+    def graph_break(self, msg="ComptimeContext.graph_break") -> None:
         """
         Manually trigger a graph break
         """
@@ -205,7 +205,7 @@ class ComptimeContext:
         """
         return self.__tx.output.graph
 
-    def assert_static(self, val):
+    def assert_static(self, val) -> None:
         """
         Asserts that the int is static (and not dynamic, per dynamic shapes)
         """
@@ -213,7 +213,7 @@ class ComptimeContext:
             "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
         )
 
-    def print_graph(self, *, verbose=True, file=None):
+    def print_graph(self, *, verbose=True, file=None) -> None:
         """
         Print the partially constructed FX graph that would be passed
         to the user compiler after compilation.
@@ -231,10 +231,10 @@ class ComptimeContext:
             tx = tx.parent
         return tx
 
-    def print(self, val, *, file=None):
+    def print(self, val, *, file=None) -> None:
         print(repr(val), file=file)
 
-    def print_disas(self, *, file=None, stacklevel=0):
+    def print_disas(self, *, file=None, stacklevel=0) -> None:
         """
         Print the current series of opcodes being executed (not including
         parent frames), including where you are in the particular opcode
@@ -249,7 +249,7 @@ class ComptimeContext:
             file=file,
         )
 
-    def print_value_stack(self, *, file=None, stacklevel=0):
+    def print_value_stack(self, *, file=None, stacklevel=0) -> None:
         """
         Print the current Python value stack.  Note that this is NOT the same
         as the traceback; use print_bt() to print that.  Note that at
@@ -264,7 +264,7 @@ class ComptimeContext:
         for s in tx.stack:
             print(f"- {s.debug_repr()}", file=file)
 
-    def print_locals(self, *, file=None, stacklevel=0):
+    def print_locals(self, *, file=None, stacklevel=0) -> None:
         """
         Print all of the locals available in the current context.
         By default this view is very limited; you can get more information
@@ -274,7 +274,7 @@ class ComptimeContext:
         for k, v in tx.symbolic_locals.items():
             print(f"{k} = {v.debug_repr()}", file=file)
 
-    def print_bt(self, *, file=None, stacklevel=0):
+    def print_bt(self, *, file=None, stacklevel=0) -> None:
         """
         Print the user code backtrace, starting at the beginning of the
         frame Dynamo started evaluating.  Note that this MAY NOT go all
@@ -293,7 +293,7 @@ class ComptimeContext:
             file=file,
         )
 
-    def print_guards(self, *, file=None):
+    def print_guards(self, *, file=None) -> None:
         """
         Print the currently installed guards for the Dynamo context.
         This does NOT include guards associated with variables that
@@ -316,32 +316,32 @@ class ComptimeContext:
         """
         return self.__tx
 
-    def sleep(self, sec):
+    def sleep(self, sec) -> None:
         time.sleep(sec)
 
 
 class _Comptime:
     @staticmethod
-    def __call__(fn, fallback_fn=lambda: None):
+    def __call__(fn, fallback_fn=lambda: None) -> None:
         """fn gets called at compile time in TorchDynamo, calls fallback_fn otherwise"""
         fallback_fn()
 
     # Convenience wrappers that are more compact to use
 
     @staticmethod
-    def graph_break():
+    def graph_break() -> None:
         comptime(lambda ctx: ctx.graph_break())
 
     @staticmethod
-    def print(e):
+    def print(e) -> None:
         comptime(lambda ctx: ctx.print(ctx.get_local("e")), lambda: print(e))
 
     @staticmethod
-    def print_graph():
+    def print_graph() -> None:
         comptime(lambda ctx: ctx.print_graph())
 
     @staticmethod
-    def print_disas(*, stacklevel=0):
+    def print_disas(*, stacklevel=0) -> None:
         comptime(
             lambda ctx: ctx.print_disas(
                 stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
@@ -349,7 +349,7 @@ class _Comptime:
         )
 
     @staticmethod
-    def print_value_stack(*, stacklevel=0):
+    def print_value_stack(*, stacklevel=0) -> None:
         comptime(
             lambda ctx: ctx.print_value_stack(
                 stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
@@ -369,7 +369,7 @@ class _Comptime:
         return e
 
     @staticmethod
-    def print_locals(*, stacklevel=0):
+    def print_locals(*, stacklevel=0) -> None:
         comptime(
             lambda ctx: ctx.print_locals(
                 stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
@@ -377,7 +377,7 @@ class _Comptime:
         )
 
     @staticmethod
-    def print_bt(*, stacklevel=0):
+    def print_bt(*, stacklevel=0) -> None:
         comptime(
             lambda ctx: ctx.print_bt(
                 stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
@@ -385,19 +385,19 @@ class _Comptime:
         )
 
     @staticmethod
-    def print_guards():
+    def print_guards() -> None:
         comptime(lambda ctx: ctx.print_guards())
 
     @staticmethod
-    def assert_static(val):
+    def assert_static(val) -> None:
         comptime(lambda ctx: ctx.assert_static(ctx.get_local("val")))
 
     @staticmethod
-    def force_static(val):
+    def force_static(val) -> None:
         comptime(lambda ctx: ctx.get_local("val").force_static())
 
     @staticmethod
-    def breakpoint():
+    def breakpoint() -> None:
         """
         Like pdb breakpoint(), but drop into pdb whenever this line
         of code is compiled by dynamo.  Use it by putting
@@ -415,14 +415,14 @@ class _Comptime:
             (Pdb) p ctx.get_local("attention").as_fake()
         """
 
-        def inner(inner_ctx):
+        def inner(inner_ctx) -> None:
             ctx = inner_ctx.parent()  # noqa: F841
             builtins.breakpoint()
 
         comptime(inner)
 
     @staticmethod
-    def sleep(sec):
+    def sleep(sec) -> None:
         comptime(lambda ctx: ctx.sleep(ctx.get_local("sec").as_python_constant()))
 
 

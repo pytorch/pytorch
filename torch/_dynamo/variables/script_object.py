@@ -99,5 +99,5 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
     )
-    def call_method(self, tx, name, args, kwargs):
+    def call_method(self, tx, name, args, kwargs) -> None:
         unimplemented(f"call method {name} on script object is not safe.")

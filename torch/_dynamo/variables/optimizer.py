@@ -153,7 +153,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         return super().var_getattr(tx, name)
 
-    def graph_break_if_pending_mutation(self, tx):
+    def graph_break_if_pending_mutation(self, tx) -> None:
         # If there are pending mutations on a parameter (due to using closure)
         # then we need to graph break to allow the python version of the parameter
         # to update, so that running _init_group will initialize the states with
@@ -167,7 +167,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
                     raise Unsupported("Pending mutation on parameter")
 
-    def _set_capturable(self, tx):
+    def _set_capturable(self, tx) -> None:
         from . import LazyVariableTracker
 
         # We only set capturable if params are on cuda
@@ -227,12 +227,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
     # if this is the case, move it to the GPU
     # corresponding to the parameter
     # in most cases this is a no-op because the state is empty
-    def move_step_if_cpu(self):
+    def move_step_if_cpu(self) -> None:
         for p, state in self.value.state.items():
             if "step" in state and state["step"].is_cpu:
                 state["step"] = state["step"].to(p.device)
 
-    def map_sources_and_install_guards(self, tx):
+    def map_sources_and_install_guards(self, tx) -> None:
         from ..decorators import mark_static_address
         from .lazy import LazyVariableTracker
 
@@ -247,7 +247,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # Mark all the tensors in the state dict to be static address. This has
         # to be done first because the variable builder relies on the static
         # address annotation.
-        def mark_static(x):
+        def mark_static(x) -> None:
             mark_static_address(x)
 
         tree_map_only(torch.Tensor, mark_static, self.value.state)
@@ -373,7 +373,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
     def update_list_args(
         self, tx: "InstructionTranslator", args, kwargs, py_args, py_kwargs
-    ):
+    ) -> None:
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable):
@@ -388,13 +388,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
                         source = arg.source and GetItemSource(arg.source, i)
                         arg.items.append(VariableTracker.build(tx, val, source))
 
-    def create_finalizer(self, tx):
+    def create_finalizer(self, tx) -> None:
         names_to_delete = self.static_tensor_names
         value = self.value
         tc = tx.output.tracing_context
 
-        def init_finalizer(gm):
-            def clear_static_tensor_refs():
+        def init_finalizer(gm) -> None:
+            def clear_static_tensor_refs() -> None:
                 for name in names_to_delete:
                     gm._buffers.pop(name, None)
                     gm._parameters.pop(name, None)

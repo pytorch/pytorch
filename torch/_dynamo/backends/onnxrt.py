@@ -4,6 +4,8 @@
 # to the right people, please tag related GitHub issues with `module: onnx`.
 #
 # Maintainers' Github IDs: wschin, xadupre
+from typing import NoReturn
+
 from torch.onnx._internal.onnxruntime import (
     is_onnxrt_backend_supported,
     torch_compile_backend,
@@ -21,7 +23,7 @@ if is_onnxrt_backend_supported():
     register_backend(name="onnxrt", compiler_fn=torch_compile_backend)
 else:
 
-    def information_displaying_backend(*args, **kwargs):
+    def information_displaying_backend(*args, **kwargs) -> NoReturn:
         raise ImportError(
             "onnxrt is not registered as a backend. "
             "Please make sure all dependencies such as "

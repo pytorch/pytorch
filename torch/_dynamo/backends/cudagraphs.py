@@ -225,7 +225,7 @@ class CudagraphsBackend:
     compiler_name = "cudagraphs"
 
     @staticmethod
-    def reset():
+    def reset() -> None:
         from torch._inductor.cudagraph_trees import reset_cudagraph_trees
 
         reset_cudagraph_trees()

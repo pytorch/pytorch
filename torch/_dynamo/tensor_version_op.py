@@ -59,5 +59,5 @@ def _tensor_version_functional(mode, self):
 
 
 @_unsafe_set_version_counter.py_impl(FunctionalTensorMode)
-def _unsafe_set_version_counter_functional(ctx, tensors, versions):
+def _unsafe_set_version_counter_functional(ctx, tensors, versions) -> None:
     torch._C._autograd._unsafe_set_version_counter(tensors, versions)

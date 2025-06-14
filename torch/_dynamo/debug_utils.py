@@ -79,7 +79,7 @@ BUCK_CMD_PREFIX = ["buck2", "run", "@mode/dev-nosan"]
 
 
 class BuckTargetWriter:
-    def __init__(self, filename):
+    def __init__(self, filename) -> None:
         self.subdir, self.py_file = os.path.split(os.path.abspath(filename))
         self.target = self.py_file.replace(".py", "")
 
@@ -171,7 +171,7 @@ class NNModuleToString:
     ]
 
     @staticmethod
-    def can_convert_to_string(gm):
+    def can_convert_to_string(gm) -> bool:
         cant_convert = set()
         for _, module in gm.named_children():
             if type(module) not in NNModuleToString.safe_reprs:
@@ -272,7 +272,7 @@ def _cuda_system_info_comment():
     return model_str
 
 
-def generate_env_vars_string(*, stable_output=False):
+def generate_env_vars_string(*, stable_output=False) -> str:
     """
     Generate a string configuration for environment variables related to Dynamo, Inductor, and Triton.
     """
@@ -297,7 +297,7 @@ import os
     """
 
 
-def generate_config_string(*, stable_output=False):
+def generate_config_string(*, stable_output=False) -> str:
     import torch._functorch.config
     import torch._inductor.config
 
@@ -321,7 +321,7 @@ def get_minifier_repro_path():
     return os.path.join(minifier_dir(), "minifier_launcher.py")
 
 
-def helper_for_dump_minify(contents):
+def helper_for_dump_minify(contents) -> None:
     minified_repro_path = get_minifier_repro_path()
     log.warning("Writing minified repro to:\n%s", minified_repro_path)
 
@@ -489,7 +489,7 @@ def backend_accuracy_fails(
     *,
     require_fp64=False,
     ignore_non_fp=False,
-):
+) -> Optional[bool]:
     try:
         compiled_gm = compiler_fn(
             copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
@@ -545,20 +545,20 @@ class NopInputReader:
     def __init__(self) -> None:
         self.total = 0
 
-    def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
+    def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None) -> None:
         self.total += 1
 
-    def tensor(self, *args, **kwargs):
+    def tensor(self, *args, **kwargs) -> None:
         pass
 
-    def symint(self, *args, **kwargs):
+    def symint(self, *args, **kwargs) -> None:
         pass
 
 
 # TODO: Support bundling the entire repro into a zip file for ease of
 # transferring around
 class InputReader:
-    def __init__(self, save_dir=None, *, pbar=None):
+    def __init__(self, save_dir=None, *, pbar=None) -> None:
         # If None, we will generate random data instead.  It's important
         # to natively support this use case as it will allow people to
         # share repros without including the real data, if the problem
@@ -642,7 +642,7 @@ class InputReader:
 
 
 class InputWriter:
-    def __init__(self, save_dir, *, stable_hash=False):
+    def __init__(self, save_dir, *, stable_hash=False) -> None:
         self._lines = []
         # TODO: consider ensuring tensor and storage counters line up?
         self.storage_counter = itertools.count()
@@ -729,7 +729,7 @@ class InputWriter:
             + f")  # {name}"
         )
 
-    def unsupported(self, name, arg):
+    def unsupported(self, name, arg) -> None:
         # NB: Try hard not to /print/ a tensor, that will be very slow
         self._lines.append(f"# {name} was unsupported type for dumping: {type(arg)}")
         # Best effort dump as much useful stuff we can lol, in case you want
@@ -879,7 +879,7 @@ def profile_to_file(filename: str) -> Callable[[T], T]:
 
         return wrapper
 
-    def save_it():
+    def save_it() -> None:
         prof.dump_stats(filename)
         sys.stderr.write(
             textwrap.dedent(

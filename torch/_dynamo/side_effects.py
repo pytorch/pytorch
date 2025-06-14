@@ -61,7 +61,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-def _manual_dict_setitem(dict_from, dict_to, mro_index):
+def _manual_dict_setitem(dict_from, dict_to, mro_index) -> None:
     # Carefully calls the dict or OrderedDict `clear` or `__setitem__`. We have
     # to be careful because we don't want to trigger the user defined object
     # setitem or clear. The mro_index is used to find the dict/OrderedDict from
@@ -72,7 +72,7 @@ def _manual_dict_setitem(dict_from, dict_to, mro_index):
         dict_class.__setitem__(dict_to, k, v)
 
 
-def _manual_list_update(list_from, list_to):
+def _manual_list_update(list_from, list_to) -> None:
     list.clear(list_to)
     list.extend(list_to, list_from)
 
@@ -109,7 +109,7 @@ class SideEffects:
         keepalive=None,
         save_for_backward=None,
         tensor_hooks=None,
-    ):
+    ) -> None:
         super().__init__()
         self.output_graph_weakref = weakref.ref(output_graph)
         self.id_to_variable = id_to_variable or {}
@@ -169,7 +169,7 @@ class SideEffects:
             tensor_hooks=self.tensor_hooks,
         )
 
-    def __contains__(self, item):
+    def __contains__(self, item) -> bool:
         return id(item) in self.id_to_variable
 
     def __getitem__(self, item):
@@ -191,7 +191,7 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
-    def check_allowed_side_effect(self, item):
+    def check_allowed_side_effect(self, item) -> Optional[bool]:
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
         # People do things like self.dim = dim inside autograd.Function.
@@ -217,7 +217,9 @@ class SideEffects:
                 hints=[],
             )
 
-    def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
+    def store_attr(
+        self, item: VariableTracker, name: str, value: VariableTracker
+    ) -> None:
         assert self.is_attribute_mutation(item)
         self.check_allowed_side_effect(item)
         if item not in self.store_attr_mutations:
@@ -237,7 +239,7 @@ class SideEffects:
             )
         return result
 
-    def store_cell(self, cellvar, value):
+    def store_cell(self, cellvar, value) -> None:
         if cellvar.is_immutable():
             unimplemented_v2(
                 gb_type="Write to immutable cell",
@@ -266,7 +268,9 @@ class SideEffects:
         assert isinstance(gvar, variables.VariableTracker)
         return self.load_attr(gvar, name)
 
-    def store_global(self, gvar: VariableTracker, name: str, value: VariableTracker):
+    def store_global(
+        self, gvar: VariableTracker, name: str, value: VariableTracker
+    ) -> None:
         assert isinstance(gvar, variables.VariableTracker)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(gvar, name, value)
@@ -500,11 +504,11 @@ class SideEffects:
         self.keepalive.append(item)
         return variable
 
-    def track_save_for_backward(self, ctx, args):
+    def track_save_for_backward(self, ctx, args) -> None:
         assert isinstance(ctx, variables.AutogradFunctionContextVariable)
         self.save_for_backward.append((ctx, args))
 
-    def track_tensor_variables_from_runahead_side_effects(self, other):
+    def track_tensor_variables_from_runahead_side_effects(self, other) -> None:
         # In higher order ops we want to keep track of tensors seen in the
         # speculate_subgraph so that we don't lift them again as a new input in
         # other speculate_subgraph or in the root tracer.
@@ -516,12 +520,12 @@ class SideEffects:
             ):
                 self.track_object_existing(other_item, other_variable)
 
-    def prune_dead_object_new(self, tx):
+    def prune_dead_object_new(self, tx) -> None:
         # Avoid VT cycles from e.g., recursive function.
         visited: set[VariableTracker] = set()
         live_new_objects: set[VariableTracker] = set()
 
-        def visit(var: VariableTracker):
+        def visit(var: VariableTracker) -> None:
             if var in visited:
                 return
             visited.add(var)
@@ -580,7 +584,7 @@ class SideEffects:
             k: v for k, v in self.store_attr_mutations.items() if is_live(k)
         }
 
-    def mutation(self, var):
+    def mutation(self, var) -> None:
         self.check_allowed_side_effect(var)
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
@@ -597,7 +601,7 @@ class SideEffects:
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
-    def codegen_save_tempvars(self, cg: PyCodegen):
+    def codegen_save_tempvars(self, cg: PyCodegen) -> None:
         # We must codegen modified VT to their source by default, so that
         # mutation and aliasing are properly accounted for.
         #
@@ -657,7 +661,7 @@ class SideEffects:
                 # base_cls.__new__(user_cls, *args)
                 if isinstance(var, variables.UserDefinedObjectVariable):
 
-                    def load_new_method():
+                    def load_new_method() -> None:
                         assert var.base_cls_vt is not None
                         cg(var.base_cls_vt)  # type: ignore[attr-defined]
                         cg.extend_output([cg.create_load_attr("__new__")])
@@ -691,7 +695,7 @@ class SideEffects:
                 ]
             )
 
-    def register_hook(self, tensor, hook, handle, name):
+    def register_hook(self, tensor, hook, handle, name) -> None:
         assert isinstance(tensor, variables.TensorVariable)
         assert isinstance(hook, variables.VariableTracker)
         assert (
@@ -707,10 +711,10 @@ class SideEffects:
         assert not handle.idx
         handle.idx = idx
 
-    def remove_hook(self, idx):
+    def remove_hook(self, idx) -> None:
         del self.tensor_hooks[idx]
 
-    def codegen_hooks(self, cg):
+    def codegen_hooks(self, cg) -> None:
         for (
             tensor,
             hook,
@@ -752,7 +756,7 @@ class SideEffects:
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
             assert tensor.source, "Hooks on non input tensors NYI - should not get here"
 
-            def gen_fn():
+            def gen_fn() -> None:
                 cg(tensor)
                 cg.extend_output([cg.create_load_attr(name)])
 
@@ -773,7 +777,7 @@ class SideEffects:
             )
         return self.ca_final_callbacks_var
 
-    def codegen_update_mutated(self, cg: PyCodegen):
+    def codegen_update_mutated(self, cg: PyCodegen) -> None:
         suffixes = []
         for var in self._get_modified_vars():
             if isinstance(var, variables.ListVariable):
@@ -1066,7 +1070,7 @@ class SideEffects:
                     cg.pop_top()
             elif isinstance(var, variables.RandomVariable):
                 # set correct random seed state
-                def gen_fn():
+                def gen_fn() -> None:
                     cg(var.source)  # type: ignore[attr-defined]
                     cg.load_attr("setstate")
 
@@ -1086,7 +1090,7 @@ class SideEffects:
         for suffix in reversed(suffixes):
             cg.extend_output(suffix)
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
         return not (
             any(map(self.is_modified, self.id_to_variable.values()))
             or self.tensor_hooks
@@ -1094,7 +1098,7 @@ class SideEffects:
             or self.tensor_hooks
         )
 
-    def clear(self):
+    def clear(self) -> None:
         self.keepalive.clear()
         self.id_to_variable.clear()
 

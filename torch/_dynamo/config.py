@@ -624,7 +624,7 @@ _custom_ops_profile: Optional[Any] = None
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
-    def _make_closure_patcher(**changes): ...
+    def _make_closure_patcher(**changes) -> None: ...
 
 
 install_config_module(sys.modules[__name__])

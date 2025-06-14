@@ -74,7 +74,7 @@ def radians(x):
     return math.pi / 180.0 * x
 
 
-def accumulate_grad(x, new_grad):
+def accumulate_grad(x, new_grad) -> None:
     # polyfills according to the Gradient Layout Contract
     if new_grad is None:
         return
@@ -112,13 +112,13 @@ def set_symmetric_difference(set1, set2):
     return symmetric_difference_set
 
 
-def set_symmetric_difference_update(set1, set2):
+def set_symmetric_difference_update(set1, set2) -> None:
     result = set1.symmetric_difference(set2)
     set1.clear()
     set1.update(result)
 
 
-def set_isdisjoint(set1, set2):
+def set_isdisjoint(set1, set2) -> bool:
     for x in set1:
         if x in set2:
             return False
@@ -139,7 +139,7 @@ def set_intersection(set1, *others):
     return intersection_set
 
 
-def set_intersection_update(set1, *others):
+def set_intersection_update(set1, *others) -> None:
     result = set1.intersection(*others)
     set1.clear()
     set1.update(result)
@@ -180,7 +180,7 @@ def set_difference(set1, *others):
     return difference_set
 
 
-def set_difference_update(set1, *others):
+def set_difference_update(set1, *others) -> None:
     result = set1.difference(*others)
     set1.clear()
     set1.update(result)

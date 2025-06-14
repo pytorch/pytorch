@@ -28,7 +28,7 @@ import inspect
 import itertools
 import types
 from contextlib import contextmanager, nullcontext
-from typing import TYPE_CHECKING
+from typing import NoReturn, TYPE_CHECKING
 
 import torch.nn
 
@@ -76,7 +76,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
+def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs) -> None:
     """
     Fairly coupled helper used by NNModuleVariable and UnspecializedNNModuleVariable.
 
@@ -117,7 +117,7 @@ def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
         del tx.nn_module_stack[module_key]
 
 
-def guard_to_detect_forward_monkeypatching(source, mod):
+def guard_to_detect_forward_monkeypatching(source, mod) -> None:
     # Users sometimes patch the forward method of a nn module instance to
     # perform optimizations like quantization. Though this is not a good
     # software practice, but python allows this and Dynamo needs to detect
@@ -172,7 +172,7 @@ class NNModuleVariable(VariableTracker):
     def get_nn_module_stack_source(self):
         return self.nn_module_stack_source or self.source
 
-    def set_nn_module_stack_source(self, source):
+    def set_nn_module_stack_source(self, source) -> None:
         self.nn_module_stack_source = source
 
     def python_type(self):
@@ -180,7 +180,7 @@ class NNModuleVariable(VariableTracker):
 
     def _wrap_submodule(
         self, tx: "InstructionTranslator", source, submod, *key_extra, **options
-    ):
+    ) -> None:
         return
 
     def unpack_var_sequence(self, tx):
@@ -231,7 +231,7 @@ class NNModuleVariable(VariableTracker):
         mod = tx.output.get_submodule(self.module_key)
         return getattr(mod, "training", False)
 
-    def convert_to_unspecialized(self, tx):
+    def convert_to_unspecialized(self, tx) -> NoReturn:
         """Restart analysis treating this module as an UnspecializedNNModuleVariable"""
         mod = tx.output.get_submodule(self.module_key)
         GenerationTracker.tag(mod)
@@ -602,7 +602,7 @@ class NNModuleVariable(VariableTracker):
             name = f"{module.__class__.__name__}_{name}_result"
             return invoke_and_store_as_constant(tx, fn, name, args, kwargs)
 
-        def assert_all_args_kwargs_const():
+        def assert_all_args_kwargs_const() -> None:
             if not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
             ):
@@ -896,7 +896,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def get_nn_module_stack_source(self):
         return self.nn_module_stack_source or self.source
 
-    def set_nn_module_stack_source(self, source):
+    def set_nn_module_stack_source(self, source) -> None:
         self.nn_module_stack_source = source
 
     @staticmethod

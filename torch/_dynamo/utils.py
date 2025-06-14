@@ -183,18 +183,18 @@ class ReinplaceCounters:
 
     # Track sizes of known not re-inplaced tensors (exclude dynamic shapes).
     @classmethod
-    def add_missed_bytes(cls, trigger: ReInplaceTrigger, bytes: int):
+    def add_missed_bytes(cls, trigger: ReInplaceTrigger, bytes: int) -> None:
         if bytes != 0:
             cls._values[f"missed_bytes_{trigger.name}"] += bytes
 
     # Track number of not re-inplaced tensors.
     @classmethod
-    def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int):
+    def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int) -> None:
         if count != 0:
             cls._values[f"missed_tensors_{trigger}"] += count
 
     @classmethod
-    def clear(cls):
+    def clear(cls) -> None:
         cls._values.clear()
 
     @classmethod
@@ -212,7 +212,7 @@ class ReinplaceCounters:
         return sum
 
     @classmethod
-    def log(cls):
+    def log(cls) -> None:
         # if not empty log.
         if cls._values:
             signpost_event("inductor", "reinplace_counters", cls._values)
@@ -363,7 +363,7 @@ class CompileEventLogger:
         metadata: dict[str, Any],
         time_ns: Optional[int] = None,
         log_level: CompileEventLogLevel = CompileEventLogLevel.CHROMIUM,
-    ):
+    ) -> None:
         if time_ns is None:
             time_ns = time.time_ns()
         chromium_log = get_chromium_event_logger()
@@ -385,7 +385,7 @@ class CompileEventLogger:
         log_level: CompileEventLogLevel,
         overwrite: bool = False,
         **metadata: object,
-    ):
+    ) -> None:
         """
         Centralized API for adding data to various events
         Log an event to a toplevel "dynamo" event or metrics context
@@ -428,7 +428,7 @@ class CompileEventLogger:
     @staticmethod
     def add_toplevel(
         log_level: CompileEventLogLevel, overwrite: bool = False, **metadata: object
-    ):
+    ) -> None:
         """
         Syntactic sugar for logging to the toplevel event
         """
@@ -442,7 +442,7 @@ class CompileEventLogger:
     @staticmethod
     def increment(
         event_name: str, log_level: CompileEventLogLevel, key: str, value: int
-    ):
+    ) -> None:
         """
         Increments an existing field, or adds it
         """
@@ -475,7 +475,7 @@ class CompileEventLogger:
         key: str,
         value: int = 1,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
-    ):
+    ) -> None:
         """
         Increments a value on the toplevel metric. By default, logs to metric.
         """
@@ -490,7 +490,7 @@ class CompileEventLogger:
     @staticmethod
     def add_to_set(
         event_name: str, log_level: CompileEventLogLevel, key: str, value: Any
-    ):
+    ) -> None:
         """
         Add metadata <value> to a set of values with key <key>. Creates a set if it doesn't exist.
         """
@@ -523,7 +523,7 @@ class CompileEventLogger:
         key: str,
         value: Any,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
-    ):
+    ) -> None:
         """
         Same as add to set, just does it automatically to the toplevel event instead of having to explicitly name it.
         Defaults to COMPILATION_METRIC log level.
@@ -539,7 +539,7 @@ class CompileEventLogger:
     # Helper functions that are syntactic sugar
 
     @staticmethod
-    def chromium(event_name: str, **metadata: object):
+    def chromium(event_name: str, **metadata: object) -> None:
         """
         Add <metadata> to <event_name> in chromium. Each key/value of metadata will appear in the chromium trace.
         <event_name> should be the name of a timed event span passed to `dynamo_timed`.
@@ -549,7 +549,7 @@ class CompileEventLogger:
         )
 
     @staticmethod
-    def pt2_compile(event_name: str, **metadata: object):
+    def pt2_compile(event_name: str, **metadata: object) -> None:
         """
         Add <metadata> to <event_name> in chromium and PT2 Compile Events.
         Each key/value of metadata will appear in the chromium trace. Each kwarg name becomes
@@ -562,7 +562,7 @@ class CompileEventLogger:
         )
 
     @staticmethod
-    def compilation_metric(overwrite: bool = False, **metadata: object):
+    def compilation_metric(overwrite: bool = False, **metadata: object) -> None:
         """
         Add <metadata> to the CompilationMetrics context. Also logs to PT2 Compile Events
         and chromium.
@@ -576,7 +576,7 @@ class CompileEventLogger:
     @staticmethod
     def instant(
         event_name: str, metadata: dict[str, Any], time_ns: Optional[int] = None
-    ):
+    ) -> None:
         """
         Log an instant event to chromium logs with name <event_name> at time <time_ns>. The `args` field in
         Perfetto will point to metadata. <time_ns> should be a value obtained from time.time_ns().
@@ -586,7 +586,7 @@ class CompileEventLogger:
         )
 
     @staticmethod
-    def try_add_pt2_compile(event_name: str, **metadata: object):
+    def try_add_pt2_compile(event_name: str, **metadata: object) -> None:
         """
         Adds to an existing pt2_compile event, but silently returns if the event doesn't exist
         or ChromiumEventLogger is not initialized.
@@ -598,7 +598,7 @@ class CompileEventLogger:
         chromium_log.try_add_event_data(event_name, **metadata)
 
     @staticmethod
-    def try_(method_fn, *args, **kwargs):
+    def try_(method_fn, *args, **kwargs) -> None:
         """
         Special function that quietly runs a given method, returning if CHROMIUM_EVENT_LOG is None or metrics context is not set
         """
@@ -830,7 +830,7 @@ class DuplicateWarningChecker:
         self.maxsize = maxsize
         self.reset()
 
-    def reset(self):
+    def reset(self) -> None:
         self.set = OrderedDict()
 
     def add(self, key: Union[str, tuple[object, object]]) -> bool:
@@ -917,7 +917,7 @@ def identity(x: T) -> T:
     return x
 
 
-def hashable(x):
+def hashable(x) -> Optional[bool]:
     try:
         hash(x)
         return True
@@ -928,14 +928,14 @@ def hashable(x):
         return False
 
 
-def nothing(*args, **kwargs):
+def nothing(*args, **kwargs) -> None:
     pass
 
 
 class ExactWeakKeyDictionary:
     """Similar to weakref.WeakKeyDictionary, but use `is`/`id` rather than `==` to compare equality"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.values = {}
         self.refs = {}
 
@@ -945,22 +945,22 @@ class ExactWeakKeyDictionary:
     def get(self, key, default=None):
         return self.values.get(id(key), default)
 
-    def __contains__(self, key):
+    def __contains__(self, key) -> bool:
         return id(key) in self.values
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key, value) -> None:
         idx = id(key)
         if idx not in self.refs:
             self.refs[idx] = weakref.ref(key, lambda ref: self._remove_id(idx))
         self.values[idx] = value
 
-    def _remove_id(self, idx):
+    def _remove_id(self, idx) -> None:
         if idx in self.values:
             del self.values[idx]
         if idx in self.refs:
             del self.refs[idx]
 
-    def clear(self):
+    def clear(self) -> None:
         self.refs.clear()
         self.values.clear()
 
@@ -1182,7 +1182,7 @@ def is_lazy_module(mod):
 
 
 @functools.lru_cache(4096)
-def print_once(*args):
+def print_once(*args) -> None:
     print(*args)
 
 
@@ -1551,7 +1551,7 @@ def record_compilation_metrics(
     metrics: dict[str, Any],
     exc_type: Optional[type[BaseException]],
     exc_value: Optional[BaseException],
-):
+) -> None:
     if torch._inductor.utils.should_use_remote_fx_graph_cache():
         try:
             from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
@@ -1687,7 +1687,7 @@ class ChromiumEventLogger:
             self.tls.event_data = {}
         return self.tls.event_data
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.tls = threading.local()
         # Generate a unique id for this logger, which we can use in scuba to filter down
         # to a single python run.
@@ -1724,7 +1724,7 @@ class ChromiumEventLogger:
             event_data[event_name] = {}
         event_data[event_name].update(kwargs)
 
-    def increment(self, event_name: str, key: str, value: int):
+    def increment(self, event_name: str, key: str, value: int) -> None:
         """
         Increment an integer event data field by the given amount
         """
@@ -1747,7 +1747,7 @@ class ChromiumEventLogger:
         event_name: str,
         key: str,
         value: Any,
-    ):
+    ) -> None:
         """
         Add a value to a set within a event_name's metadata if it exists
         """
@@ -1843,7 +1843,7 @@ class ChromiumEventLogger:
             event_metadata,
         )
 
-        def pop_stack(stack):
+        def pop_stack(stack) -> None:
             while event_name != stack[-1]:
                 # If the event isn't the most recent one to end, pop
                 # off the stack until it is.
@@ -2022,7 +2022,7 @@ class CleanupManager(ExactWeakKeyDictionary):
     count = 0
     instance: ClassVar[CleanupManager]
 
-    def _remove_id(self, idx):
+    def _remove_id(self, idx) -> None:
         for hook in self.values[idx]:
             hook()
         super()._remove_id(idx)
@@ -2132,7 +2132,7 @@ def clone_inputs(example_inputs):
     return res
 
 
-def skip_frame_if_in_functorch_mode(val: torch.Tensor):
+def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
     try:
         val.data_ptr()  # will throw for functorch tensors
     except RuntimeError as e:
@@ -2207,7 +2207,7 @@ def is_namedtuple(obj):
     return is_namedtuple_cls(type(obj))
 
 
-def is_namedtuple_cls(cls):
+def is_namedtuple_cls(cls) -> bool:
     """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
     try:
         if issubclass(cls, tuple):
@@ -2273,7 +2273,7 @@ def checkpoint_params(gm):
             for param in itertools.chain(gm.parameters(), gm.buffers())
         ]
 
-    def restore():
+    def restore() -> None:
         with torch.no_grad():
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
@@ -2469,7 +2469,7 @@ def check_unspec_python_args(args, kwargs):
     return unspec_count > 0
 
 
-def check_unspec_or_constant_args(args, kwargs):
+def check_unspec_or_constant_args(args, kwargs) -> bool:
     # A fused version of:
     # return check_constant_args(args, kwargs) or check_unspec_python_args(args, kwargs)
     from .variables.tensor import UnspecializedPythonVariable
@@ -2582,7 +2582,7 @@ def enum_repr(value, local):
     return local_name
 
 
-def set_example_value(node, example_value):
+def set_example_value(node, example_value) -> None:
     # NB: example_value is a bit of a misnomer, because this is always a fake
     # tensor of some sort.  Furthermore, these example values serve as the
     # runtime state of Dynamo tracing, which means if metadata mutation
@@ -2711,7 +2711,7 @@ GLOBAL_KEY_PREFIX = "__dict_key"
 from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 
 
-def get_safe_global_name(tx, root, obj):
+def get_safe_global_name(tx, root, obj) -> str:
     # The global_mangled_class_name should be different for different
     # invocations of torch.compile. Otherwise, we can run into a situation
     # where multiple torch.compile invocations re-use the same global name,
@@ -3077,7 +3077,7 @@ def same(
         raise RuntimeError(f"unsupported type: {type(ref).__name__}")
 
 
-def format_func_info(code):
+def format_func_info(code) -> str:
     short_filename = code.co_filename.split("/")[-1]
     return f"'{code.co_name}' ({short_filename}:{code.co_firstlineno})"
 
@@ -3501,10 +3501,10 @@ def get_real_value(node, tracer):
     return real_value
 
 
-def assert_no_fake_params_or_buffers(gm):
+def assert_no_fake_params_or_buffers(gm) -> None:
     from torch._subclasses.fake_tensor import FakeTensorConfig, is_fake
 
-    def stack_or_hint(t):
+    def stack_or_hint(t) -> str:
         if FakeTensorConfig.debug:
             import traceback
 
@@ -3522,7 +3522,7 @@ def assert_no_fake_params_or_buffers(gm):
         )
 
 
-def fqn(obj: Any):
+def fqn(obj: Any) -> str:
     """
     Returns the fully qualified name of the object.
     """
@@ -3536,7 +3536,7 @@ def ifdynstaticdefault(count1, count2):
         return count2
 
 
-def import_submodule(mod: types.ModuleType):
+def import_submodule(mod: types.ModuleType) -> None:
     """
     Ensure all the files in a given submodule are imported
     """
@@ -3549,13 +3549,13 @@ def object_has_getattribute(value: Any):
     return class_has_getattribute(type(value))
 
 
-def object_setattr_ignore_descriptor(obj, name, value):
+def object_setattr_ignore_descriptor(obj, name, value) -> None:
     # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
     d = object.__getattribute__(obj, "__dict__")
     d[name] = value
 
 
-def class_has_getattribute(cls: type):
+def class_has_getattribute(cls: type) -> bool:
     try:
         if isinstance(
             inspect.getattr_static(cls, "__getattribute__"),
@@ -3584,7 +3584,7 @@ class TensorStaticReason(enum.Enum):
     NN_MODULE_PROPERTY = 5
 
 
-def tensor_static_reason_to_message(reason: TensorStaticReason):
+def tensor_static_reason_to_message(reason: TensorStaticReason) -> str:
     if reason == TensorStaticReason.PARAMETER:
         return "mark_dynamic on parameter, parameters are always static today."
     if reason == TensorStaticReason.NOT_TENSOR:
@@ -3649,7 +3649,7 @@ def lazy_format_graph_tabular(fn_name, gm):
     return LazyString(inner)
 
 
-def format_bytecode(prefix, name, filename, line_no, code):
+def format_bytecode(prefix, name, filename, line_no, code) -> str:
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
 
 
@@ -3751,7 +3751,7 @@ def numpy_to_tensor(value):
 
 
 class numpy_to_tensor_wrapper:
-    def __init__(self, f):
+    def __init__(self, f) -> None:
         self.f = f
         self.__name__ = "wrapped_" + self.f.__name__
 
@@ -3775,7 +3775,7 @@ def numpy_attr_wrapper(obj, name):
 class numpy_method_wrapper:
     """Convert obj from torch.Tensor to tnp.ndarray and call method. Then convert result back to torch.Tensor."""
 
-    def __init__(self, method: str):
+    def __init__(self, method: str) -> None:
         self.method = method
         self.__name__ = "wrapped_" + self.method
 
@@ -3794,7 +3794,7 @@ class numpy_method_wrapper:
 class numpy_operator_wrapper:
     """Implements dunder methods for tnp.ndarray via functions from the operator library"""
 
-    def __init__(self, op: Callable[..., Any]):
+    def __init__(self, op: Callable[..., Any]) -> None:
         self.op = op
         self.__name__ = f"wrapped_{op.__name__}"
 
@@ -4330,7 +4330,7 @@ def nn_module_proxy(mod):
 
 
 class GmWrapper(torch.nn.Module):
-    def __init__(self, gm, unflatten_fn):
+    def __init__(self, gm, unflatten_fn) -> None:
         super().__init__()
         self.gm = gm
         self.unflatten_fn = unflatten_fn
@@ -4393,12 +4393,12 @@ def get_locals_to_steal(maybe_gm):
     return maybe_gm.meta.get("locals_to_steal", [])
 
 
-def set_locals_to_steal(gm, locals_to_steal):
+def set_locals_to_steal(gm, locals_to_steal) -> None:
     gm.meta["locals_to_steal"] = locals_to_steal
 
 
 class Lit:
-    def __init__(self, s):
+    def __init__(self, s) -> None:
         self.s = s
 
     def __repr__(self) -> str:
@@ -4408,7 +4408,7 @@ class Lit:
 warn_once_cache: set[str] = set()
 
 
-def warn_once(msg, stacklevel=1):
+def warn_once(msg, stacklevel=1) -> None:
     # Dynamo causes all warnings.warn (in user code and in Dynamo code) to print all the time.
     # https://github.com/pytorch/pytorch/issues/128427.
     # warn_once is a workaround: if the msg has been warned on before, then we will not
@@ -4451,7 +4451,7 @@ def get_torch_function_mode_stack_at(ind):
     return torch._C._get_function_stack_at(ind)
 
 
-def set_torch_function_mode_stack(stack):
+def set_torch_function_mode_stack(stack) -> None:
     for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
@@ -4459,17 +4459,17 @@ def set_torch_function_mode_stack(stack):
         _push_on_torch_function_stack(mode)
 
 
-def clear_torch_function_mode_stack():
+def clear_torch_function_mode_stack() -> None:
     for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
 
 # call from C dynamo in order to inspect values in pdb
-def _breakpoint_for_c_dynamo(*args):
+def _breakpoint_for_c_dynamo(*args) -> None:
     breakpoint()
 
 
-def verify_guard_fn_signature(value):
+def verify_guard_fn_signature(value) -> None:
     fn = value.__metadata_guard__
     sig = inspect.signature(fn)
     if len(sig.parameters) != 2:
@@ -4540,7 +4540,7 @@ def get_user_object_from_id(obj_id):
     return obj
 
 
-def store_user_object_weakref(obj):
+def store_user_object_weakref(obj) -> None:
     obj_id = id(obj)
     user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
 
@@ -4583,7 +4583,7 @@ class CompileTimeInstructionCounter:
                 cls.end()
 
 
-def set_feature_use(feature: str, usage: bool):
+def set_feature_use(feature: str, usage: bool) -> None:
     """
     Records whether we are using a feature
     Generally a feature is a JK.

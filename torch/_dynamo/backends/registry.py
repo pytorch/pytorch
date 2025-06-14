@@ -155,7 +155,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
 
 
 @functools.cache
-def _lazy_import():
+def _lazy_import() -> None:
     from .. import backends
     from ..utils import import_submodule
 
@@ -169,7 +169,7 @@ def _lazy_import():
 
 
 @functools.cache
-def _discover_entrypoint_backends():
+def _discover_entrypoint_backends() -> None:
     # importing here so it will pick up the mocked version in test_backends.py
     from importlib.metadata import entry_points
 

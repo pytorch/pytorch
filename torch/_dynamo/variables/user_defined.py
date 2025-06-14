@@ -794,7 +794,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
-    def is_underlying_vt_modified(self, side_effects):
+    def is_underlying_vt_modified(self, side_effects) -> bool:
         return False
 
     def python_type(self):
@@ -817,7 +817,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
         return super().guard_as_python_constant()
 
-    def torch_function_check(self):
+    def torch_function_check(self) -> None:
         assert has_torch_function(self), (
             f"calling torch function on object without __torch_function__ {self}"
         )
@@ -954,7 +954,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx.output.side_effects.store_attr(self, name, value)
         return variables.ConstantVariable(None)
 
-    def needs_slow_setattr(self):
+    def needs_slow_setattr(self) -> bool:
         return not is_standard_setattr(
             inspect.getattr_static(self.value, "__setattr__", None)
         ) and not isinstance(self.value, threading.local)
@@ -1080,7 +1080,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return subobj
 
-    def should_skip_descriptor_setter(self, attr_name):
+    def should_skip_descriptor_setter(self, attr_name) -> bool:
         # Check if `attr_name` corresponds to a descriptor.
         descriptor = inspect.getattr_static(type(self.value), attr_name, None)
         setter = inspect.getattr_static(type(descriptor), "__set__", None)
@@ -1494,7 +1494,7 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
 
 
 class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(value, **kwargs)
         self.exc_vt = variables.ExceptionVariable(self.value_type, ())
 
@@ -1594,7 +1594,7 @@ class RemovableHandleVariable(VariableTracker):
             return variables.ConstantVariable.create(None)
         super().call_method(tx, method_name, args, kwargs)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.idx == self.REMOVED:
             # Hook has already been removed, return a dummy handle
             codegen.add_push_null(
@@ -1622,7 +1622,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
-    def __init__(self, value, dict_vt=None, **kwargs):
+    def __init__(self, value, dict_vt=None, **kwargs) -> None:
         super().__init__(value, **kwargs)
         self._dict_vt = dict_vt
         if self._dict_vt is None:
@@ -1669,7 +1669,7 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
 
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
-    def __init__(self, value, list_vt=None, **kwargs):
+    def __init__(self, value, list_vt=None, **kwargs) -> None:
         super().__init__(value, **kwargs)
         self._list_vt = list_vt
         if self._list_vt is None:
@@ -1712,7 +1712,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
-    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
+    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs) -> None:
         super().__init__(value, init_args=init_args, **kwargs)
         self._tuple_vt = tuple_vt
         if self._tuple_vt is None:
@@ -1754,7 +1754,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 class MutableMappingVariable(UserDefinedObjectVariable):
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
         self.mutation_type = AttributeMutationExisting()

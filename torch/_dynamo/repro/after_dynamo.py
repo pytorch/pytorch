@@ -96,7 +96,7 @@ class WrapBackendDebug:
 
         if config.repro_after == "dynamo":
 
-            def add_paths(exc):
+            def add_paths(exc) -> None:
                 exc.minifier_path = os.path.join(minifier_dir(), "minifier_launcher.py")
                 if use_buck:
                     exc.buck_command = " ".join(
@@ -225,7 +225,7 @@ if __name__ == '__main__':
     )
 
 
-def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
+def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False) -> None:
     """
     Saves the repro to a repro.py file
     """
@@ -271,7 +271,7 @@ def dump_backend_state(gm, args, compiler_name, check_accuracy=False):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def dump_to_minify_after_dynamo(gm, args, compiler_name):
+def dump_to_minify_after_dynamo(gm, args, compiler_name) -> None:
     # TODO: factor this out
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
@@ -366,7 +366,7 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     return gm
 
 
-def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
+def backend_fails(gm, example_inputs, compiler_fn, orig_failure) -> bool:
     """
     Minifier uses this function to identify if the minified graph module fails
     with the same error.
@@ -423,7 +423,7 @@ def run_load_args(options, mod, load_args):
     return args
 
 
-def repro_minify(options, mod, load_args):
+def repro_minify(options, mod, load_args) -> None:
     args = run_load_args(options, mod, load_args)
 
     # Setup debug minifier compiler
@@ -450,7 +450,7 @@ def repro_minify(options, mod, load_args):
         opt_mod(*args)
 
 
-def repro_run(options, mod, load_args):
+def repro_run(options, mod, load_args) -> None:
     opt_mod = torch._dynamo.optimize(options.backend)(mod)
 
     if options.accuracy != "":
@@ -491,7 +491,7 @@ def run_repro(
     autocast=False,
     backend="inductor",
     **kwargs,
-):
+) -> None:
     for k in kwargs:
         log.warning(
             "Unrecognized kwarg %s; perhaps this repro was made on a newer version of PyTorch",
@@ -517,7 +517,7 @@ default settings on this script:
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
-    def common_flags(parser):
+    def common_flags(parser) -> None:
         accuracy_group = parser.add_mutually_exclusive_group()
         accuracy_group.add_argument(
             "--no-accuracy",

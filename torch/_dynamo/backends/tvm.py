@@ -193,7 +193,7 @@ tvm_meta_schedule = functools.partial(tvm, scheduler="meta_schedule")
 tvm_auto_scheduler = functools.partial(tvm, scheduler="auto_scheduler")
 
 
-def has_tvm():
+def has_tvm() -> Optional[bool]:
     try:
         importlib.import_module("tvm")
         return True
@@ -202,7 +202,7 @@ def has_tvm():
 
 
 @functools.cache
-def llvm_target():
+def llvm_target() -> str:
     if sys.platform == "linux":
         cpuinfo = open("/proc/cpuinfo").read()
         if "avx512" in cpuinfo:

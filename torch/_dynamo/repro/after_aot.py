@@ -249,7 +249,7 @@ def wrap_compiler_debug(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def maybe_fbcode_instructions():
+def maybe_fbcode_instructions() -> str:
     if is_fbcode():
         extra_deps_formatted = "\n".join([f'        "{dep}",' for dep in extra_deps])
         if len(extra_deps_formatted) > 0:
@@ -350,7 +350,7 @@ def save_graph_repro(
     tracing_mode=None,
     check_str=None,
     stable_hash=False,
-):
+) -> None:
     if any(
         isinstance(arg, torch.fx.experimental._backward_state.BackwardState)
         for arg in args
@@ -390,7 +390,7 @@ def save_graph_repro(
     )
 
 
-def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
+def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None) -> None:
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -493,14 +493,14 @@ def isolate_fails(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def inductor_fails(fx_g, args, check_str=None):
+def inductor_fails(fx_g, args, check_str=None) -> bool:
     has_cuda = False
     for arg in args:
         if isinstance(arg, torch.Tensor) and arg.is_cuda:
             has_cuda = True
             break
 
-    def sync():
+    def sync() -> None:
         if has_cuda:
             # Ensures that segfaults are surfaced
             torch.cuda.synchronize()
@@ -607,7 +607,7 @@ ACCURACY_FAILS: dict[str, Callable[[nn.Module, Any], bool]] = {
 }
 
 
-def repro_minifier_query(options, mod, load_args):
+def repro_minifier_query(options, mod, load_args) -> None:
     mod, args = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
         ACCURACY_FAILS[options.accuracy],
@@ -619,7 +619,7 @@ def repro_minifier_query(options, mod, load_args):
         sys.exit(0)
 
 
-def repro_minify(options, mod, load_args):
+def repro_minify(options, mod, load_args) -> None:
     from functorch.compile import minifier
 
     mod, args = repro_common(options, mod, load_args)
@@ -656,7 +656,7 @@ def repro_minify(options, mod, load_args):
     )
 
 
-def repro_analyze(options, mod, load_args):
+def repro_analyze(options, mod, load_args) -> None:
     from torch._inductor.compile_fx import compile_fx_inner
     from torch._inductor.hooks import intermediate_hook
 
@@ -674,7 +674,7 @@ def repro_analyze(options, mod, load_args):
 
     known_names = set()
 
-    def save_hook(name, val):
+    def save_hook(name, val) -> None:
         known_names.add(name)
         if not options.skip_saving_inductor_intermediates:
             writer.write_tensor(os.path.join("inductor", name), val)
@@ -703,7 +703,7 @@ def repro_analyze(options, mod, load_args):
         else:
             return " and ".join(f"{a} != {b}" for a, b in diff_values)
 
-    def check_hook(name, val):
+    def check_hook(name, val) -> None:
         meta = writer.compute_tensor_metadata(val)
         meta2 = reader.read_tensor_metadata(os.path.join("inductor", name))
         reason = compare_tuples(meta, meta2)
@@ -773,7 +773,7 @@ def repro_analyze(options, mod, load_args):
                 float64 = reader.read_tensor(os.path.join("float64", name))
                 logged = False
 
-                def log_error(msg, *args):
+                def log_error(msg, *args) -> None:
                     nonlocal logged
                     logged = True
                     pbar.write(f"DIVERGED at {name}: {msg % args}")
@@ -800,7 +800,7 @@ def repro_get_args(options, mod, load_args):
     return mod, args
 
 
-def repro_run(options, mod, load_args):
+def repro_run(options, mod, load_args) -> None:
     from torch._inductor.compile_fx import compile_fx_inner
 
     mod, args = repro_common(options, mod, load_args)
@@ -880,7 +880,7 @@ default settings on this script:
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
-    def common_flags(parser):
+    def common_flags(parser) -> None:
         accuracy_group = parser.add_mutually_exclusive_group()
         accuracy_group.add_argument(
             "--no-accuracy",

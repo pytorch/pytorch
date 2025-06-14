@@ -91,7 +91,7 @@ its type to `common_constant_types`.
     def as_python_constant(self):
         return self.value
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> bool:
         return True
 
     @property

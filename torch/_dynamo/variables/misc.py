@@ -26,7 +26,7 @@ import re
 import sys
 import types
 import warnings
-from typing import Optional, TYPE_CHECKING
+from typing import NoReturn, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._numpy as tnp
@@ -87,7 +87,7 @@ class SuperVariable(VariableTracker):
         # cls for a classmethod)
         self.objvar = objvar
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
         codegen(self.typevar)
         if self.objvar is not None:
@@ -401,10 +401,10 @@ class ExceptionVariable(VariableTracker):
         # not track traceback. So, this variable is always set to None
         self.__traceback__ = ConstantVariable(None)
 
-    def set_context(self, context: "ExceptionVariable"):
+    def set_context(self, context: "ExceptionVariable") -> None:
         self.__context__ = context
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
         )
@@ -434,7 +434,7 @@ class ExceptionVariable(VariableTracker):
         name_var: VariableTracker,
         val: VariableTracker,
     ):
-        def raise_error(msg):
+        def raise_error(msg) -> None:
             raise_observed_exception(TypeError, tx, args=[ConstantVariable(msg)])
 
         name = name_var.as_python_constant()
@@ -508,7 +508,7 @@ class ExceptionVariable(VariableTracker):
             return variables.ListVariable(self.args, source=self.source)
         return super().var_getattr(tx, name)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.__class__.__name__}({self.exc_type})"
 
     __repr__ = __str__
@@ -525,7 +525,7 @@ class DelayGraphBreakVariable(UnknownVariable):
     Used to insert a dummy variable in the stack to do the graph break at CALL_FUNCTION.
     """
 
-    def __init__(self, msg=None, **kwargs):
+    def __init__(self, msg=None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.msg = msg
 
@@ -550,7 +550,7 @@ class ComptimeVariable(VariableTracker):
     Dynamo compile time
     """
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> NoReturn:
         raise NotImplementedError("comptime is special form")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
@@ -653,7 +653,7 @@ class AutogradFunctionVariable(VariableTracker):
     def call_apply(self, tx: "InstructionTranslator", args, kwargs):
         requires_grad = False
 
-        def visit(node):
+        def visit(node) -> None:
             nonlocal requires_grad
             if isinstance(node, variables.TensorVariable):
                 if node.requires_grad is not False:
@@ -1098,7 +1098,7 @@ class GetAttrVariable(VariableTracker):
             raise NotImplementedError
         return inspect.getattr_static(step2, name)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
@@ -1216,7 +1216,7 @@ class MethodWrapperVariable(VariableTracker):
 
         return super().call_function(tx, args, kwargs)
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> bool:
         return True
 
     def as_python_constant(self):
@@ -1235,7 +1235,7 @@ class GetSetDescriptorVariable(VariableTracker):
         else:
             return super().var_getattr(tx, name)
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> bool:
         return True
 
     def as_python_constant(self):
@@ -1495,7 +1495,7 @@ class NullVariable(VariableTracker):
     def __repr__(self) -> str:
         return "NullVariable"
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         if sys.version_info < (3, 11):
             unimplemented("cannot reconstruct NullVariable in < Python 3.11")
         codegen.append_output(create_instruction("PUSH_NULL"))
@@ -1536,7 +1536,7 @@ class StringFormatVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.format_string!r}, {self.sym_args!r}, {self.sym_kwargs!r})"
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -1572,7 +1572,7 @@ class DebuggingVariable(VariableTracker):
             and obj in torch._dynamo.config.reorderable_logging_functions
         )
 
-    def call_function(self, tx: "InstructionTranslator", args, kwargs):
+    def call_function(self, tx: "InstructionTranslator", args, kwargs) -> None:
         if tx.export:
             # For export cases, we can just make debugging functions no-ops
             return
@@ -1796,7 +1796,7 @@ class RandomVariable(VariableTracker):
         return self.random
 
     @staticmethod
-    def is_supported_random_obj(val):
+    def is_supported_random_obj(val) -> bool:
         if type(val) is not random.Random:
             return False
         for name in itertools.chain(
@@ -1815,7 +1815,7 @@ class RandomVariable(VariableTracker):
         return True
 
     @staticmethod
-    def check_state(state):
+    def check_state(state) -> None:
         assert type(state) is tuple
         assert type(state[0]) is int
         assert type(state[1]) is tuple
@@ -1880,7 +1880,7 @@ class RandomVariable(VariableTracker):
             return call_random_fn(tx, call_random_meth, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -1909,7 +1909,7 @@ class WeakRefVariable(VariableTracker):
         options["source"] = source
         return WeakRefVariable(referent_vt, **options)
 
-    def __init__(self, referent_vt, **options):
+    def __init__(self, referent_vt, **options) -> None:
         super().__init__(**options)
         self.referent_vt = referent_vt
 
@@ -1921,7 +1921,7 @@ class WeakRefVariable(VariableTracker):
     ) -> "VariableTracker":
         return self.referent_vt
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("weakref", "ref"))
         codegen(self.referent_vt)
         codegen.extend_output(create_call_function(1, False))
