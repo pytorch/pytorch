@@ -1850,7 +1850,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             additional_inputs_proxy,
         )
 
-        with tx.fake_mode:
+        with tx.fake_mode, tx.functional_mode:
             example_carry = [
                 init_p.node.meta["example_value"].clone() for init_p in init_proxy
             ]
@@ -2866,7 +2866,10 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         query_meta = query.as_proxy().node.meta["example_value"]
         value_meta = value.as_proxy().node.meta["example_value"]
-        with torch._guards.TracingContext.try_get().fake_mode:
+        with (
+            torch._guards.TracingContext.try_get().fake_mode,
+            torch._guards.TracingContext.try_get().functional_mode,
+        ):
             out_meta, lse_meta = flex_attention_fake_impl(query_meta, value_meta)
         example_value = (out_meta, lse_meta)
 

@@ -32,6 +32,7 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
+from torch._functorch._aot_autograd.functional_utils import from_fun
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -264,7 +265,7 @@ class TensorVariable(VariableTracker):
         return props
 
     def dynamic_getattr(self, tx: "InstructionTranslator", name):
-        fake_val = self.proxy.node.meta["example_value"]
+        fake_val = from_fun(self.proxy.node.meta["example_value"])
         # For getattrs on tensors without sources,
         # we can do better than the default (creating a GetAttrVariable)
         # if:
@@ -975,7 +976,10 @@ class TensorVariable(VariableTracker):
                 return wrap(tensor, sub_proxy)
 
             if tensor.dim() == 1:
-                return [wrap(val, sub_proxy[i]) for i, val in enumerate(tensor)]
+                # Example value may be functional tensor, in which case,
+                # enumerate() calls, so we need to wrap in functional mode
+                with tx.functional_mode:
+                    return [wrap(val, sub_proxy[i]) for i, val in enumerate(tensor)]
 
             return [
                 tolist(sub_tensor, sub_proxy=sub_proxy[i])
