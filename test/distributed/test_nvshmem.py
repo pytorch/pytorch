@@ -61,6 +61,25 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         return torch.device(device_type, self.rank)
 
     @skipIfRocm
+    def test_alloc(self) -> None:
+        self._init_device()
+
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+
+        def foo():
+            inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+            symm_mem.rendezvous(inp, group=group_name)
+
+        foo()
+
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        symm_mem.rendezvous(out, group=group_name)
+
+    @skipIfRocm
     def test_nvshmem_all_to_all(self) -> None:
         self._init_device()
 
