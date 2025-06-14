@@ -556,9 +556,9 @@ bool Dispatcher::profilingOperatorEvents() {
   return TORCH_SDT_IS_ENABLED(operator_start) || TORCH_SDT_IS_ENABLED(operator_end);
 }
 
-C10_NOINLINE void Dispatcher::fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref) {
+C10_NOINLINE void Dispatcher::fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref, int numArgs, std::vector<void*> argsAddresses, std::vector<int64_t> argsTypes) {
   if (TORCH_SDT_IS_ENABLED(operator_start)) {
-    TORCH_SDT_WITH_SEMAPHORE(operator_start, schema_ref.get().name().c_str());
+    TORCH_SDT_WITH_SEMAPHORE(operator_start, schema_ref.get().name().c_str(), numArgs, argsAddresses.data(), argsTypes.data());
   }
 }
 
