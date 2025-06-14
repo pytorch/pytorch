@@ -488,7 +488,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       found_filenames_str += filename + "\n";
     }
     throw std::runtime_error(
-        "No AOTInductor generate cpp file or so file found in zip archive. Loaded the following:\n" +
+        "No AOTInductor generate cpp file or so file found in zip archive with the prefix " + 
+        model_directory +
+        "Loaded the following:\n" +
         found_filenames_str);
   }
 
