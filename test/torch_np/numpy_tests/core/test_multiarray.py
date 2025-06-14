@@ -4104,7 +4104,6 @@ class TestIO(TestCase):
             def test_decimal_period_separator():
                 pass
 
-
             def test_decimal_comma_separator():
                 with CommaDecimalPointLocale():
                     pass
@@ -6787,10 +6786,7 @@ class TestWritebackIfCopy(TestCase):
 class TestArange(TestCase):
     def test_infinite(self):
         assert_raises(
-            (RuntimeError, ValueError),
-            np.arange,
-            0,
-            np.inf,  # "unsupported range",
+            (RuntimeError, ValueError), np.arange, 0, np.inf  # "unsupported range",
         )
 
     def test_nan_step(self):

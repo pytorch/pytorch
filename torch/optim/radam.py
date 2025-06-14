@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the RAdam algorithm."""
-
 from typing import cast, Optional, Union
 
 import torch
@@ -286,9 +285,7 @@ def _single_tensor_radam(
             assert (
                 param.device.type == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ), (
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
         if torch.is_complex(param):
             param = torch.view_as_real(param)
@@ -389,9 +386,7 @@ def _multi_tensor_radam(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     lr = _to_scalar(lr)
 

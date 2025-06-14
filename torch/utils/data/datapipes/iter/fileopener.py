@@ -33,12 +33,8 @@ class FileOpenerIterDataPipe(IterDataPipe[tuple[str, IOBase]]):
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> from torchdata.datapipes.iter import (
-        ...     FileLister,
-        ...     FileOpener,
-        ...     StreamReader,
-        ... )
-        >>> dp = FileLister(root=".").filter(lambda fname: fname.endswith(".txt"))
+        >>> from torchdata.datapipes.iter import FileLister, FileOpener, StreamReader
+        >>> dp = FileLister(root=".").filter(lambda fname: fname.endswith('.txt'))
         >>> dp = FileOpener(dp)
         >>> dp = StreamReader(dp)
         >>> list(dp)
