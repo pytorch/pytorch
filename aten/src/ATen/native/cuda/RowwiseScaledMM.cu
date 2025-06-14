@@ -938,7 +938,8 @@ void dispatch_fp8_rowwise_kernel_on_sm(
   const bool sm89 = properties != nullptr && properties->major == 8 && properties->minor == 9;
   const bool sm9x = properties != nullptr && properties->major == 9;
   const bool sm10x = properties != nullptr && properties->major == 10;
-  if (!(sm89 || sm9x || sm10x)) {
+  const bool sm12x = properties != nullptr && properties->major == 12;
+  if (!(sm89 || sm9x || sm10x || sm12x)) {
     TORCH_CHECK(
         false, "Rowwise scaling is not currently supported on your device");
   }
