@@ -1176,6 +1176,7 @@ def _compile(
 
             if tracer:
                 tracer.output.local_scope = {}
+                tracer.f_locals = {}
 
             from .utils import curr_frame
 
