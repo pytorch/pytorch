@@ -423,6 +423,103 @@ class SequenceParallel(ParallelStyle):
         tmpstr += ")"
         return tmpstr
 
+class ChannelParallel(ParallelStyle):
+    """
+    Partition nn.Conv2d modules by sharding weights on the output channel dimension (dim=0).
+    Input tensors are replicated.
+    
+    Keyword Args:
+        input_layouts (Placement, optional): DTensor layout of input tensor. Defaults to Replicate().
+        output_layouts (Placement, optional): DTensor layout of output tensor. Defaults to Shard(0).
+        use_local_output (bool, optional): Return local tensor instead of DTensor. Defaults to True.
+    """
+    def __init__(
+        self,
+        *,
+        input_layouts: Optional[tuple] = None,
+        output_layouts: Optional[tuple] = None,
+        use_local_output: bool = True,
+    ):
+        super().__init__()
+        self.input_layouts = input_layouts or (Replicate(),)
+        self.output_layouts = output_layouts or (Shard(0),)
+        self.use_local_output = use_local_output
+    
+    def _partition_conv_fn(self, name: str, module: nn.Module, device_mesh: DeviceMesh):
+        # Shard conv.weight on output channel dimension (dim=0)
+        for pname, param in module.named_parameters():
+            if pname == "weight":
+                dist_param = nn.Parameter(
+                    distribute_tensor(
+                        param,
+                        device_mesh,
+                        [Shard(0)],
+                        # src_data_rank=self.src_data_rank,
+                    )
+                )
+                module.register_parameter(pname, dist_param)
+            
+            elif pname == "bias" and param is not None:
+                # Shard bias on output channels as well if exists
+                dist_param = nn.Parameter(
+                    distribute_tensor(
+                        param,
+                        device_mesh,
+                        [Shard(0)],
+                        # src_data_rank=self.src_data_rank,
+                    )
+                )
+                module.register_parameter(pname, dist_param)
+    
+    @staticmethod
+    def _prepare_input_fn(
+        input_layouts, desired_input_layouts, mod, inputs, device_mesh
+    ):  
+        input_tensor = inputs[0]
+        if not isinstance(input_tensor, DTensor):
+            input_tensor = DTensor.from_local(
+                input_tensor, device_mesh, input_layouts, run_check=False
+            )
+
+        if input_layouts != desired_input_layouts:
+            input_tensor = input_tensor.redistribute(
+                placements=desired_input_layouts, async_op=True
+            )
+        return input_tensor
+    
+    @staticmethod
+    def _prepare_output_fn(output_layouts, use_local_output, mod, outputs, device_mesh):
+        if outputs.placements != output_layouts:
+            outputs = outputs.redistribute(placements=output_layouts, async_op=True)
+        return outputs.to_local() if use_local_output else outputs
+    
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        if isinstance(module, nn.Conv2d):
+            partition_fn = self._partition_conv_fn
+        else:
+            raise NotImplementedError(
+                "ChannelParallel currently only supports nn.Conv2d modules!"
+            )
+
+        return distribute_module(
+            module,
+            device_mesh,
+            partition_fn,
+            partial(
+                self._prepare_input_fn, self.input_layouts, (Replicate(),)
+            ),
+            partial(
+                self._prepare_output_fn, self.output_layouts, self.use_local_output
+            ),
+        )
+    
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"input_layouts={self.input_layouts}, "
+            f"output_layouts={self.output_layouts}, "
+            f"use_local_output={self.use_local_output})"
+        )
 
 class PrepareModuleInput(ParallelStyle):
     """
