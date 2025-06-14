@@ -404,6 +404,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
   } else if constexpr (std::is_same_v<Dtype, float>) {
+    std::cout<<"aten/src/ATen/cuda/CUDABlas.cpp 407 "<<at::globalContext().allowTF32CuBLAS()<<"\n";
     if (at::globalContext().allowTF32CuBLAS()) {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
@@ -1586,6 +1587,7 @@ bool gemm_and_bias(
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
   } else if constexpr (std::is_same_v<Dtype, float>) {
+    std::cout<<"aten/src/ATen/cuda/CUDABlas.cpp 1589 "<<at::globalContext().allowTF32CuBLAS()<<"\n";
     if (at::globalContext().allowTF32CuBLAS()) {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
