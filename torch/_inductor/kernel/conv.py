@@ -438,17 +438,17 @@ def convolution(
     dilation = tuple(dilation)
     output_padding = tuple(output_padding)
     if not isinstance(groups, int):
-        groups = V.graph.sizevars.evaluate_static_shape(groups)
+        groups = V.graph.sizevars.guard_int(groups)
     assert isinstance(groups, int)
 
     # Need use hint for triton template since the template does not
     # work with a dynamic shape.
     #
-    # No need to evaluate_static_shape for dilation and output_padding
+    # No need to guard_int for dilation and output_padding
     # since the template is only used when dilation is 1 and output_padding
     # is 0.
-    stride = tuple(V.graph.sizevars.evaluate_static_shapes(stride))
-    padding = tuple(V.graph.sizevars.evaluate_static_shapes(padding))
+    stride = tuple(V.graph.sizevars.guard_int_seq(stride))
+    padding = tuple(V.graph.sizevars.guard_int_seq(padding))
 
     kwargs: ConvLayoutParams = {
         "stride": stride,
@@ -468,9 +468,7 @@ def convolution(
             dim=0,
         )
 
-    out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
-        weight.get_size()
-    )
+    out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_int_seq(weight.get_size())
 
     # Always convert conv1D to 2D for Intel GPU.
     # Only conv2D can be converted to channel last layout,
@@ -568,7 +566,7 @@ def convolution(
         args = [x, weight, bias]
         bias.realize()
         bias.freeze_layout()
-        V.graph.sizevars.evaluate_static_shapes(bias.get_size())
+        V.graph.sizevars.guard_int_seq(bias.get_size())
 
     choices = []
     if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
