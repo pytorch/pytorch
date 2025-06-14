@@ -241,7 +241,10 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
         [
             event
             for event in p.events()
-            if event.device_type == DeviceType.CUDA and "fused_abs_max_0" in event.name
+            if (
+                event.device_type == DeviceType.CUDA
+                and re.match(r"fused_abs_max_\d", event.name) is not None
+            )
         ]
     )
     if filtered_events:
