@@ -1,5 +1,4 @@
-Quantization Accuracy Debugging
--------------------------------
+# Quantization Accuracy Debugging
 
 This document provides high level strategies for improving quantization
 accuracy. If a quantized model has error compared to the original model,
@@ -11,11 +10,9 @@ we can categorize the error into:
    portion of input data has large error
 3. **implementation error** - quantized kernel is not matching reference implementation
 
-Data insensitive error
-~~~~~~~~~~~~~~~~~~~~~~
+## Data insensitive error
 
-General tips
-^^^^^^^^^^^^
+### General tips
 
 1. For PTQ, ensure that the data you are calibrating with is representative
    of your dataset. For example, for a classification problem a general
@@ -41,8 +38,7 @@ General tips
 4. If you are using PTQ, consider using QAT to recover some of the accuracy loss
    from quantization.
 
-Int8 quantization tips
-^^^^^^^^^^^^^^^^^^^^^^
+### Int8 quantization tips
 
 1. If you are using per-tensor weight quantization, consider using per-channel
    weight quantization.
@@ -52,8 +48,7 @@ Int8 quantization tips
    If this variation is high, the layer may be suitable for dynamic quantization
    but not static quantization.
 
-Data sensitive error
-~~~~~~~~~~~~~~~~~~~~
+## Data sensitive error
 
 If you are using static quantization and a small portion of your input data is
 resulting in high quantization error, you can try:
@@ -65,8 +60,7 @@ resulting in high quantization error, you can try:
    the observer settings to choose a better scale and zero_point.
 
 
-Implementation error
-~~~~~~~~~~~~~~~~~~~~
+## Implementation error
 
 If you are using PyTorch quantization with your own backend
 you may see differences between the reference implementation of an
@@ -80,19 +74,23 @@ operation (such as ``dequant -> op_fp32 -> quant``) and the quantized implementa
 2. the kernel on the target hardware has an accuracy issue. In this case, reach
    out to the kernel developer.
 
-Numerical Debugging Tooling (prototype)
----------------------------------------
+## Numerical Debugging Tooling (prototype)
 
+```{eval-rst}
 .. toctree::
     :hidden:
 
     torch.ao.ns._numeric_suite
     torch.ao.ns._numeric_suite_fx
+```
 
-.. warning ::
-     Numerical debugging tooling is early prototype and subject to change.
+```{warning}
+Numerical debugging tooling is early prototype and subject to change.
+```
 
+```{eval-rst}
 * :ref:`torch_ao_ns_numeric_suite`
   Eager mode numeric suite
 * :ref:`torch_ao_ns_numeric_suite_fx`
   FX numeric suite
+```
