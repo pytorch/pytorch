@@ -86,8 +86,6 @@ class ListTest(list_tests.CommonTest):
             # Note: This test is expected to SEGV under Cygwin 1.3.12 or
             # earlier due to a newlib bug.  See the following mailing list
             # thread for the details:
-
-            #     http://sources.redhat.com/ml/newlib/2002/msg00369.html
             self.assertRaises(MemoryError, list, range(sys.maxsize // 2))
 
         # This code used to segfault in Py2.4a3
@@ -375,7 +373,7 @@ class ListTest(list_tests.CommonTest):
             a.append(4)
             self.assertEqual(list(it), [])
 
-    @unittest.expectedFailure
+    @unittest.skip("Fails on python <=3.13.2 and passes on >=3.13.3")
     def test_deopt_from_append_list(self):
         # gh-132011: it used to crash, because
         # of `CALL_LIST_APPEND` specialization failure.

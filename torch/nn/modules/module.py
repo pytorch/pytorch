@@ -526,7 +526,7 @@ class Module:
     ) -> None:
         r"""Add a buffer to the module.
 
-        This is typically used to register a buffer that should not to be
+        This is typically used to register a buffer that should not be
         considered a model parameter. For example, BatchNorm's ``running_mean``
         is not a parameter, but is part of the module's state. Buffers, by
         default, are persistent and will be saved alongside parameters. This
@@ -954,9 +954,13 @@ class Module:
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
+            from torch._subclasses.fake_tensor import FakeTensor
+
             # subclasses may have multiple child tensors so we need to use swap_tensors
             p_should_use_swap_tensors = (
-                should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
+                should_use_swap_tensors
+                or is_traceable_wrapper_subclass(param_applied)
+                or isinstance(param, FakeTensor)
             )
 
             param_grad = param.grad
@@ -2521,15 +2525,14 @@ class Module:
             assign (bool, optional): When set to ``False``, the properties of the tensors
                 in the current module are preserved whereas setting it to ``True`` preserves
                 properties of the Tensors in the state dict. The only
-                exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`s
-                for which the value from the module is preserved.
-                Default: ``False``
+                exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`
+                for which the value from the module is preserved. Default: ``False``
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
-                * **missing_keys** is a list of str containing any keys that are expected
+                * ``missing_keys`` is a list of str containing any keys that are expected
                     by this module but missing from the provided ``state_dict``.
-                * **unexpected_keys** is a list of str containing the keys that are not
+                * ``unexpected_keys`` is a list of str containing the keys that are not
                     expected by this module but present in the provided ``state_dict``.
 
         Note:
