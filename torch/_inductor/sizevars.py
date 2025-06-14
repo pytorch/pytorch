@@ -486,15 +486,23 @@ class SizeVarAllocator:
         min_val = self.evaluate_min(left, right)
         return right if min_val is left else left
 
-    def evaluate_static_shape(self, left: Union[Expr, int]) -> int:
-        if isinstance(left, int):
-            return left
-        right = self.size_hint(left)
-        self.check_equals(left, sympy.Integer(right))
-        return int(right)
+    def guard_int(self, expr: Union[Expr, int]) -> int:
+        """
+        Like guard_int in symbolic_shapes.py, this function works with SymPy expressions. It extracts
+        the value represented by expr from shapeEnv and specialize the compiled graph on it).
+        Raises an error if the result cannot be determined due to unhinted or unbacked symbols
+        """
+        if isinstance(expr, int):
+            return expr
+        val = self.size_hint(expr)
+        self.check_equals(expr, sympy.Integer(val))
+        return int(expr)
 
-    def evaluate_static_shapes(self, left: Sequence[Union[Expr, int]]) -> list[int]:
-        return [self.evaluate_static_shape(x) for x in left]
+    def guard_int_seq(self, left: Sequence[Union[Expr, int]]) -> list[int]:
+        """
+        Apply guard_int on a sequence of inputs.
+        """
+        return [self.guard_int(x) for x in left]
 
     def remove_precomputed_replacements(self, expr: Expr) -> Expr:
         if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
