@@ -345,6 +345,14 @@ def is_xpu_dispatch_key(dk: DispatchKey) -> bool:
     }
 
 
+# Dispatch keys for op level fall back control. Including your backend here will enable users
+# explictly fallback ATen ops to CPU using the PYTORCH_CPU_FALLBACK_OPS env var without un-registering them.
+def is_cpu_fallback_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {
+        DispatchKey.MTIA,
+    }
+
+
 # Structured kernel generation is only supported for certain key types;
 # otherwise use old-style
 def is_structured_dispatch_key(dk: DispatchKey) -> bool:
