@@ -281,7 +281,7 @@ struct div_trunc_functor {
 struct remainder_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return T(a - b * c10::metal::floor_divide(a, b));
+    return T(c10::metal::remainder(a, b));
   }
 };
 
@@ -362,35 +362,35 @@ REGISTER_OPMATH_FLOAT_BINARY_OP(remainder);
 REGISTER_INTEGER_BINARY_OP(remainder);
 REGISTER_OPMATH_FLOAT_BINARY_OP(fmod);
 REGISTER_INTEGER_BINARY_OP(fmod);
-REGISTER_BINARY_ALPHA_OP(add_alpha, long, long);
-REGISTER_BINARY_ALPHA_OP(add_alpha, int, int);
-REGISTER_BINARY_ALPHA_OP(add_alpha, float, float);
-REGISTER_BINARY_ALPHA_OP(add_alpha, half, half);
-REGISTER_BINARY_ALPHA_OP(add_alpha, short, short);
-REGISTER_BINARY_ALPHA_OP(add_alpha, uchar, uchar);
-REGISTER_BINARY_ALPHA_OP(add_alpha, char, char);
-REGISTER_BINARY_ALPHA_OP(add_alpha, bool, bool);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, long, long);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, int, int);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, float, float);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, half, half);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, short, short);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, uchar, uchar);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, char, char);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, bool, bool);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, long, long);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, int, int);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, float, float);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, half, half);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, short, short);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, uchar, uchar);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, char, char);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool);
+REGISTER_BINARY_ALPHA_OP(add_alpha, long, long, long);
+REGISTER_BINARY_ALPHA_OP(add_alpha, int, int, int);
+REGISTER_BINARY_ALPHA_OP(add_alpha, float, float, float);
+REGISTER_BINARY_ALPHA_OP(add_alpha, half, half, half);
+REGISTER_BINARY_ALPHA_OP(add_alpha, short, short, short);
+REGISTER_BINARY_ALPHA_OP(add_alpha, uchar, uchar, uchar);
+REGISTER_BINARY_ALPHA_OP(add_alpha, char, char, char);
+REGISTER_BINARY_ALPHA_OP(add_alpha, bool, bool, bool);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, long, long, long);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, int, int, int);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, float, float, float);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, half, half, half);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, short, short, short);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, uchar, uchar, uchar);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, char, char, char);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, bool, bool, bool);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, long, long, long);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, int, int, int);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, float, float, float);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, half, half, half);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, short, short, short);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, uchar, uchar, uchar);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, char, char, char);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool, bool);
 
 #if __METAL_VERSION__ >= 310
-REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, bfloat, bfloat);
 #endif
 
 // Complex binary functions
@@ -406,9 +406,9 @@ REGISTER_BINARY_OP(add, float2, float2);
 REGISTER_BINARY_OP(add, half2, half2);
 REGISTER_BINARY_OP(sub, float2, float2);
 REGISTER_BINARY_OP(sub, half2, half2);
-REGISTER_BINARY_ALPHA_OP(add_alpha, float2, float2);
-REGISTER_BINARY_ALPHA_OP(add_alpha, half2, half2);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, float2, float2);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, half2, half2);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, float2, float2);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, half2);
+REGISTER_BINARY_ALPHA_OP(add_alpha, float2, float2, float2);
+REGISTER_BINARY_ALPHA_OP(add_alpha, half2, half2, half2);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, float2, float2, float2);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, half2, half2, half2);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, float2, float2, float2);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, half2, half2);
