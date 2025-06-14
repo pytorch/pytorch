@@ -50,3 +50,11 @@ size
 
 # torch/standalone/macros/Export.h
 C10_API
+
+# torch/standalone/macros/Macros.h
+C10_STRINGIZE
+C10_LIKELY
+C10_UNLIKELY
+
+# torch/standalone/util/Exception.h
+STD_TORCH_CHECK
