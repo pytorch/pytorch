@@ -384,7 +384,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self._test_single_gpu(torch.optim.Adam)
         self._test_single_gpu(torch.optim.AdamW)
 
-    def _test_strict(self, parallelism: str) -> None:
+    def _test_strict(self, parallelism: str, full_state_dict: bool) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
         if parallelism == "DDP":
             model = DDP(model)
@@ -403,7 +403,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         incompatible_keys = set_model_state_dict(
             model,
             model_state_dict=model_state_dict,
-            options=StateDictOptions(strict=False),
+            options=StateDictOptions(strict=False, full_state_dict=full_state_dict),
         )
         self.assertEqual(incompatible_keys.missing_keys, [key])
         self.assertEqual(incompatible_keys.unexpected_keys, ["abc"])
@@ -415,7 +415,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(1)
     def test_strict(self) -> None:
         self.run_subtests(
-            {"parallelism": ["DDP", "fully_shard"]},
+            {"parallelism": ["DDP", "fully_shard"], "full_state_dict": [True, False]},
             self._test_strict,
         )
 
