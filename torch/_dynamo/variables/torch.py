@@ -408,7 +408,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 unimplemented_v2(
                     gb_type="Invalid arguments to sdpa_kernel",
                     context="",
-                    explanation="Invalid arguments to sdpa_kernel",
+                    explanation=str(e),
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
