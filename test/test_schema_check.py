@@ -232,7 +232,7 @@ class TestSchemaCheck(JitTestCase):
             actual = x.relu().sin()
         self.assertEqual(expected, actual)
 
-    # Tests that SchemaCheckMode wraps torch.Tensor when an argument's default is overriden
+    # Tests that SchemaCheckMode wraps torch.Tensor when an argument's default is overridden
     def test_schema_check_mode_functionality_default_replaced(self):
         x = torch.rand((3, 3), requires_grad=True)
         expected = x.add(x, alpha=2)
