@@ -418,7 +418,7 @@ class SizeVarAllocator:
         Return the order of a sequence as a permutation of range(len(seq)) and guard on that order not changing.
         """
         seq = [*map(self.remove_precomputed_replacements, seq)]
-        seq = [(self.size_hint(var), orig_idx, var) for orig_idx, var in enumerate(seq)]
+        seq = [(self.size_hint_or_throw(var), orig_idx, var) for orig_idx, var in enumerate(seq)]
         seq.sort()
         order = [-1] * len(seq)
         last_var = None
@@ -466,8 +466,8 @@ class SizeVarAllocator:
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         try:
-            lv = self.size_hint(left)
-            rv = self.size_hint(right)
+            lv = self.size_hint_or_throw(left)
+            rv = self.size_hint_or_throw(right)
         except TypeError:  # unbacked symints
             if left == right or self.statically_known_leq(left, right):
                 return left
@@ -498,7 +498,7 @@ class SizeVarAllocator:
     def evaluate_static_shape(self, left: Union[Expr, int]) -> int:
         if isinstance(left, int):
             return left
-        right = self.size_hint(left)
+        right = self.size_hint_or_throw(left)
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
 
@@ -528,10 +528,22 @@ class SizeVarAllocator:
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(
-        self, expr: Union[Expr, int], *, fallback: Optional[int] = None
+        self, expr: Union[Expr, int], *, fallback: int
     ) -> int:
+        """
+        Get the size hint for an expression with explicit fallback for unbacked shapes.
+        
+        Args:
+            expr: The expression to get size hint for
+            fallback: Required fallback value to use when unbacked shapes are encountered
+            
+        Returns:
+            Size hint as integer
+            
+        Note: fallback parameter is now required to make unbacked shape handling explicit
+        """
         out = self.symbolic_hint(expr)
-        if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
+        if not isinstance(out, (int, sympy.Integer)):
             # Use the provided heuristic fallback hint
             unbacked_sym_vrs = {
                 s: self.shape_env.var_to_range.get(s, None) for s in out.free_symbols
@@ -550,13 +562,69 @@ class SizeVarAllocator:
             log.debug("failed on: %s", out)
             raise
 
+    def size_hint_or_throw(
+        self, expr: Union[Expr, int]
+    ) -> int:
+        """
+        Get the size hint for an expression, explicitly throwing on unbacked shapes.
+        
+        Args:
+            expr: The expression to get size hint for
+            
+        Returns:
+            Size hint as integer
+            
+        Raises:
+            TypeError: When unbacked shapes are encountered and cannot be converted to int
+            
+        Note: Use this method when you explicitly want to error on unbacked shapes
+        """
+        out = self.symbolic_hint(expr)
+        try:
+            return int(out)
+        except Exception:
+            log.debug("failed on: %s", out)
+            raise
+
     def size_hints(
         self,
         exprs: Iterable[Union[Expr, int]],
         *,
-        fallback: Optional[int] = None,
+        fallback: int,
     ) -> tuple[int, ...]:
+        """
+        Get size hints for multiple expressions with explicit fallback for unbacked shapes.
+        
+        Args:
+            exprs: Iterable of expressions to get size hints for
+            fallback: Required fallback value to use when unbacked shapes are encountered
+            
+        Returns:
+            Tuple of size hints as integers
+            
+        Note: fallback parameter is now required to make unbacked shape handling explicit
+        """
         return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
+
+    def size_hints_or_throw(
+        self,
+        exprs: Iterable[Union[Expr, int]],
+    ) -> tuple[int, ...]:
+        """
+        Get size hints for multiple expressions, explicitly throwing on unbacked shapes.
+        
+        Args:
+            exprs: Iterable of expressions to get size hints for
+            
+        Returns:
+            Tuple of size hints as integers
+            
+        Raises:
+            TypeError: When unbacked shapes are encountered and cannot be converted to int
+            
+        Note: Use this method when you explicitly want to error on unbacked shapes
+        """
+        return tuple(self.size_hint_or_throw(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -713,7 +781,7 @@ class SizeVarAllocator:
         result = []
         for s in self.stride_vars(index, vars, support_vars):
             try:
-                result.append(self.size_hint(s))
+                result.append(self.size_hint_or_throw(s))
             except TypeError:
                 result.append(0)
         return result

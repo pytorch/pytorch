@@ -1339,8 +1339,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             return False
         if len(B_layout.size) < 1:
             return False
-        A_size = list(V.graph.sizevars.size_hints(A_layout.size))
-        B_size = list(V.graph.sizevars.size_hints(B_layout.size))
+        A_size = list(V.graph.sizevars.size_hints(A_layout.size, fallback=1))
+        B_size = list(V.graph.sizevars.size_hints(B_layout.size, fallback=1))
         if len(A_size) < 2:
             A_size.insert(0, 1)
         if len(B_size) < 2:
@@ -1363,7 +1363,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                 return False
         if len(layouts) == 3:
             C_layout = layouts[2]
-            C_size = [V.graph.sizevars.size_hint(i) for i in C_layout.size]
+            C_size = [V.graph.sizevars.size_hint(i, fallback=1) for i in C_layout.size]
             while len(C_size) < len(A_size):
                 C_size.insert(0, 1)
             # check batch dims

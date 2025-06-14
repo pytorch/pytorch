@@ -1069,7 +1069,7 @@ def expand(x, sizes):
         return x
 
     if not free_unbacked_symbols(x.get_size()):
-        x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
+        x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()), fallback=1)
         # TODO: It would be better to realize the input if any of its sizes
         # are unbacked, because typically the size will be non-zero.  However,
         # this cannot be done directly as below as we'll choke on the size_hint
@@ -1077,7 +1077,7 @@ def expand(x, sizes):
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # maybe realize input before broadcasting it
             x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product
+                V.graph.sizevars.size_hint(sympy_product(sizes), fallback=1) // x_size_product
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
@@ -1136,12 +1136,12 @@ def repeat(x, repeats):
         return x_loader(index)
 
     if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
-        old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
+        old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size), fallback=1)
         if old_size_product > 0:
             # maybe realize the input but skip for unbacked symints since it'll
             # choke on the size hint.
             x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
+                V.graph.sizevars.size_hint(sympy_product(new_size), fallback=1) // old_size_product
             )
 
     x_loader = x.make_loader()
@@ -1813,8 +1813,8 @@ def unfold(x, dimension, size, step):
     sizevars.guard_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
-    if sizevars.size_hint(dim_size) > 0:
-        x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, dim_size)))
+    if sizevars.size_hint(dim_size, fallback=1) > 0:
+        x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, dim_size), fallback=1))
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
 
@@ -2598,7 +2598,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         def is_aligned(x):
-            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
+            return (V.graph.sizevars.size_hint(x.get_size()[-1], fallback=1) % ALIGNMENT) == 0
 
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
@@ -3337,7 +3337,7 @@ def new_empty_strided(
 
 @register_lowering(prims.copy_strided.default)
 def copy_strided(x, stride):
-    stride = [V.graph.sizevars.size_hint(s) for s in stride]
+    stride = [V.graph.sizevars.size_hint(s, fallback=1) for s in stride]
     stride_order = sorted(range(len(stride)), key=stride.__getitem__)
     return ir.ExternKernel.require_stride_order(x, stride_order)
 
@@ -4340,11 +4340,11 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode, *, dilation=None
             + 2 * (stride[i] - 1),
             stride[i],
         )
-        if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
+        if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i], fallback=0) >= 0:
             # Sliding windows must start within the input or left padding
             x_alt -= 1  # type: ignore[assignment]
             V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
-        if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
+        if V.graph.sizevars.size_hint(x_out - x_alt, fallback=0) == 0:
             # ceil mode is actually a no-op, lets guard on that
             V.graph.sizevars.guard_equals(x_out, x_alt)
             ceil_mode = False
@@ -7067,7 +7067,7 @@ def prepare_softmax_online(x, dim):
 
     if (
         num_split == 1
-        and V.graph.sizevars.size_hint(rnumel) >= config.unroll_reductions_threshold
+        and V.graph.sizevars.size_hint(rnumel, fallback=1) >= config.unroll_reductions_threshold
     ):
         max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
             input_node=x, num_output=2, reduction_hint=hint, **kwargs

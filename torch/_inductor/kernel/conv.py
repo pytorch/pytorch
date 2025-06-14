@@ -374,11 +374,11 @@ def conv_layout(
             ir.ir_node_to_tensor(x, guard_shape=True),
             ir.ir_node_to_tensor(weight, guard_shape=True),
             ir.ir_node_to_tensor(bias, guard_shape=True),
-            V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
-            V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
-            V.graph.sizevars.size_hints(dilation),  # type: ignore[arg-type]
+            V.graph.sizevars.size_hints(stride, fallback=1),  # type: ignore[arg-type]
+            V.graph.sizevars.size_hints(padding, fallback=0),  # type: ignore[arg-type]
+            V.graph.sizevars.size_hints(dilation, fallback=1),  # type: ignore[arg-type]
             transposed,
-            V.graph.sizevars.size_hints(output_padding),  # type: ignore[arg-type]
+            V.graph.sizevars.size_hints(output_padding, fallback=0),  # type: ignore[arg-type]
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
@@ -505,7 +505,7 @@ def convolution(
 
         layout = conv_layout(x, weight, None, **kwargs)
         req_stride_order = ir.get_stride_order(
-            V.graph.sizevars.size_hints(layout.stride)
+            V.graph.sizevars.size_hints(layout.stride, fallback=1)
         )
         return req_stride_order == ir.NHWC_STRIDE_ORDER
 
@@ -547,7 +547,7 @@ def convolution(
     else:
         layout = conv_layout(x, weight, None, **kwargs)
         req_stride_order = ir.get_stride_order(
-            V.graph.sizevars.size_hints(layout.stride)
+            V.graph.sizevars.size_hints(layout.stride, fallback=1)
         )
         x = ir.ExternKernel.require_stride_order(x, req_stride_order)
         weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)

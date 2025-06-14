@@ -107,7 +107,7 @@ class ROCmTemplate(KernelTemplate):
             self.size_args() if hasattr(self, "size_args") else ()
         )  # subclass should define def size_args()
         size_args_ints = [
-            V.graph.sizevars.size_hint(arg) for arg in size_args
+            V.graph.sizevars.size_hint(arg, fallback=1) for arg in size_args
         ]  # resolve to ints for benchmarking
         # The runtime args come right after the size args
         runtime_args = self.get_runtime_arg_values(**kwargs)

@@ -1131,6 +1131,41 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(actual, expect)
         check_count(2)  # Reused existing kernel
 
+    def test_size_hint_api_fallback_required(self):
+        """Test that size_hint API requires explicit fallback parameter"""
+        import sympy
+        from torch._inductor.sizevars import SizeVars
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        
+        shape_env = ShapeEnv()
+        sizevars = SizeVars(shape_env)
+        
+        # Test size_hint with backed shapes works with fallback
+        result = sizevars.size_hint(sympy.Integer(42), fallback=10)
+        self.assertEqual(result, 42)
+        
+        # Test size_hint_or_throw works with backed shapes  
+        result = sizevars.size_hint_or_throw(sympy.Integer(100))
+        self.assertEqual(result, 100)
+        
+        # Test size_hints batch operation
+        exprs = [sympy.Integer(1), sympy.Integer(2), sympy.Integer(3)]
+        result = sizevars.size_hints(exprs, fallback=10)
+        self.assertEqual(result, (1, 2, 3))
+        
+        # Test size_hints_or_throw batch operation
+        result = sizevars.size_hints_or_throw(exprs)
+        self.assertEqual(result, (1, 2, 3))
+        
+        # Test that unbacked symbols use fallback
+        x = sympy.Symbol('x')
+        result = sizevars.size_hint(x, fallback=99)
+        self.assertEqual(result, 99)
+        
+        # Test that size_hint_or_throw raises on unbacked symbols
+        with self.assertRaises((TypeError, ValueError)):
+            sizevars.size_hint_or_throw(x)
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 

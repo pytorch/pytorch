@@ -2284,7 +2284,7 @@ class PythonWrapperCodegen(CodeGen):
                     name,
                     ws.device,
                     ws.dtype,
-                    shape=(V.graph.sizevars.size_hint(ws.count),),
+                    shape=(V.graph.sizevars.size_hint(ws.count, fallback=1),),
                     stride=(1,),
                 )
             )

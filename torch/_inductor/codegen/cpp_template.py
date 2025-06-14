@@ -73,7 +73,7 @@ class CppTemplate(KernelTemplate):
             expected_args,
         )
         extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, call_args[len(expected_args) :])
+            map(sympy.expand, call_args[len(expected_args) :]), fallback=1
         )
         # Cast the size hint from int to ctypes.c_ulonglong explicitly
         # since in cpp kernel, we bind it to C long
