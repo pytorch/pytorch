@@ -1549,6 +1549,21 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_complex(self):
+        # Observed in Wan2.1
+        @mark_compile_region
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x) + gn(x)
+
+        x = torch.randn(2, 2, dtype=torch.complex64)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_pending_unbacked(self):
         @mark_compile_region
