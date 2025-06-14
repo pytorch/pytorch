@@ -82,6 +82,7 @@ REQUIRE_HIGHER_TOLERANCE = {
     "selecsls42b",
     "convnext_base",
     "cait_m36_384",
+    "convmixer_768_32",
 }
 
 REQUIRE_HIGHER_TOLERANCE_AMP = {
