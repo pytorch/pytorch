@@ -1685,7 +1685,7 @@ class GraphModule(torch.nn.Module):
                 # z = 4
                 return x + y + z + w2
 
-        ep = export(M(), (torch.randn(2, 3),), strict=False).run_decompositions({})
+        ep = export(M(), (torch.randn(2, 3),), strict=False).functionalize()
         self.assertEqual(list(ep.graph_signature.buffers_to_mutate.values()), ["buf"])
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 12)
@@ -1734,7 +1734,7 @@ class GraphModule(torch.nn.Module):
                 # z = 3 + 3
                 return x + y + z
 
-        ep = export(M(), (torch.randn(2, 3),), strict=False).run_decompositions({})
+        ep = export(M(), (torch.randn(2, 3),), strict=False).functionalize()
         self.assertEqual(
             list(ep.graph_signature.buffers_to_mutate.values()), ["buf_0", "buf_1"]
         )
@@ -2239,7 +2239,7 @@ graph():
     return (add_1,)""",
         )
 
-        ep = export(m, (ref_x,)).run_decompositions({})
+        ep = export(m, (ref_x,)).functionalize()
         self.assertExpectedInline(
             str(ep.graph).strip(),
             """\
@@ -2306,7 +2306,7 @@ graph():
         )
 
         ep = export(m, (ref_x,))
-        ep = ep.run_decompositions({})
+        ep = ep.functionalize()
         self.assertExpectedInline(
             str(ep.graph).strip(),
             """\
@@ -3566,7 +3566,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         ep = torch.export.export(
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
-        ep_has_linear_convd = ep.run_decompositions({})
+        ep_has_linear_convd = ep.functionalize()
 
         self.assertExpectedInline(
             str(ep_has_linear_convd.graph_module.code).strip(),
@@ -4959,7 +4959,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 return x.cos() + y.cos()
 
         foo = Module()
-        gm = export(foo, (torch.tensor([2, 3, 5]),)).run_decompositions({})
+        gm = export(foo, (torch.tensor([2, 3, 5]),)).functionalize()
 
         view_count = 0
         for node in gm.graph.nodes:
@@ -6527,7 +6527,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 ],
             )
 
-        ep = ep.run_decompositions({})
+        ep = ep.functionalize()
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
@@ -6568,7 +6568,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 ],
             )
 
-        ep = ep.run_decompositions({})
+        ep = ep.functionalize()
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
@@ -6615,7 +6615,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(id(y), id(x))
 
         # test decomp ep
-        ep = ep.run_decompositions({})
+        ep = ep.functionalize()
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 self.assertNotEqual(node.target, torch.ops.aten.to.dtype_layout)
@@ -6690,7 +6690,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         inputs = (torch.randn(1, 10),)
         model = Module()
-        ep = export(model, inputs).run_decompositions({})
+        ep = export(model, inputs).functionalize()
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
@@ -6729,7 +6729,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 ],
             )
 
-        ep = ep.run_decompositions({})
+        ep = ep.functionalize()
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
@@ -6776,7 +6776,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
             ep.module()(torch.tensor(1, dtype=torch.float32))
 
-        ep = ep.run_decompositions({})
+        ep = ep.functionalize()
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
@@ -6835,7 +6835,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(id(y), id(x))
 
         # test decomp ep
-        ep = ep.run_decompositions({})
+        ep = ep.functionalize()
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 self.assertNotEqual(node.target, torch.ops.aten.to.dtype)
@@ -7832,7 +7832,7 @@ def forward(self, b_a_buffer, x):
             def forward(self, x):
                 return torch.ops.aten.lift_fresh_copy(x)
 
-        ep = export(M(), (torch.ones(6, 4),)).run_decompositions({})
+        ep = export(M(), (torch.ones(6, 4),)).functionalize()
         found = False
 
         op = "torch.ops.aten.clone.default"
@@ -8691,7 +8691,7 @@ graph():
                 return m(x) * x
 
         inps = (torch.randn(3, 3),)
-        ep = export_for_training(M2(), inps).run_decompositions({})
+        ep = export_for_training(M2(), inps).functionalize()
         self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
 
         self.assertEqual(len(ep.state_dict), 0)
@@ -8728,7 +8728,7 @@ graph():
 
         inps = (torch.randn(3, 3),)
         # Strict export segfaults (Issue #128109)
-        ep = export_for_training(M2(), inps, strict=False).run_decompositions({})
+        ep = export_for_training(M2(), inps, strict=False).functionalize()
         self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
 
         self.assertEqual(len(ep.state_dict), 0)
@@ -11153,7 +11153,7 @@ graph():
             )
             # running decompositions again should work for all IRs
             ep = export(M(), inp, preserve_module_call_signature=("n",))
-            test(ep.run_decompositions({}), swap={"n": N()})
+            test(ep.functionalize(), swap={"n": N()})
 
         test(export(M(), inp))
 
@@ -11508,7 +11508,7 @@ graph():
         ep = export(
             Foo(),
             (torch.randn(4, 4),),
-        ).run_decompositions({})
+        ).functionalize()
         # check correct lines are in stack trace
         trace_mul = [node for node in ep.graph.nodes if node.name == "mul"][0].meta.get(
             "stack_trace", ""
@@ -12288,7 +12288,7 @@ def forward(self, x, b_t, y):
 
         inps = (torch.ones(5),)
 
-        ep = export_for_training(M(), inps).run_decompositions({})
+        ep = export_for_training(M(), inps).functionalize()
         self.assertExpectedInline(
             str(ep.graph_module.code.strip()),
             """\
@@ -13155,7 +13155,7 @@ graph():
             Foo(),
             inputs,
             dynamic_shapes=shapes,
-        ).run_decompositions({})
+        ).functionalize()
         # test that shape is from size compute, not sym_size call
         add_node = [node for node in ep.graph.nodes if node.target == operator.add][0]
         self.assertTrue(add_node.args[0].target == operator.mul)
@@ -13295,7 +13295,7 @@ graph():
         self.assertEqual(ep.module()(inp), mod(inp))
 
         with torch.inference_mode():
-            ep = ep.run_decompositions({})
+            ep = ep.functionalize()
 
         # There should be no subclases
         self.assertExpectedInline(
@@ -13313,7 +13313,7 @@ graph():
         self.assertEqual(ep.module()(inp), mod(inp))
 
         mod = Foo()
-        ep = export(mod, (torch.randn(4, 4),)).run_decompositions({})
+        ep = export(mod, (torch.randn(4, 4),)).functionalize()
 
         self.assertEqual(ep.module()(inp), mod(inp))
         if is_training_ir_test(self._testMethodName):
@@ -14292,7 +14292,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-        ep = export(M(), (x, y), strict=strict).run_decompositions({})
+        ep = export(M(), (x, y), strict=strict).functionalize()
         export_res = ep.module()(x, y)
         ref_res = M()(x, y)
         self.assertEqual(export_res, ref_res)
@@ -14970,7 +14970,7 @@ x: USER_INPUT
 add: USER_OUTPUT""",
         )
 
-        ep = ep.run_decompositions({})
+        ep = ep.functionalize()
         self.assertExpectedInline(
             str(ep.graph_signature).strip(),
             """\
@@ -15390,7 +15390,7 @@ class TestExportCustomClass(TorchTestCase):
         }
         traced = export(
             MyModel(), inps, dynamic_shapes=spec, strict=True
-        ).run_decompositions({})
+        ).functionalize()
 
 
 if __name__ == "__main__":
