@@ -3249,7 +3249,7 @@ class TestCase(expecttest.TestCase):
                             f(*args, **kwargs)
                         except BaseException as e:
                             self.skipTest(e)
-                        # raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
+                        raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
                     return wrapper
 
                 if TEST_WITH_TORCHINDUCTOR:
