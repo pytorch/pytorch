@@ -1647,6 +1647,62 @@ def forward(self, x_1, output_1):
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("tma_version", ["new", "old"])
+    def test_on_device_tma(self, dynamic, tma_version):
+        if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+        if tma_version == "old" and not has_triton_experimental_host_tma():
+            self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+
+        kernel = (
+            add_kernel_on_device_tma_new_api
+            if tma_version == "new"
+            else add_kernel_on_device_tma_old_api
+        )
+
+        def f(a, b):
+            BLOCK_SIZE = 32
+            out = torch.zeros_like(a)
+            m, n = out.size()
+
+            # Allocate workspace for on-device TMA descriptors
+            # Need 128 bytes per descriptor, 3 descriptors total
+            workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+
+            grid = lambda meta: (
+                triton.cdiv(m, meta["BLOCK_SIZE"]),
+                triton.cdiv(n, meta["BLOCK_SIZE"]),
+            )
+
+            kernel[grid](
+                a,
+                b,
+                out,
+                m,
+                n,
+                workspace,
+                BLOCK_SIZE=BLOCK_SIZE,
+            )
+
+            return out
+
+        a = torch.randn((32, 32), device=GPU_TYPE)
+        b = torch.randn((32, 32), device=GPU_TYPE)
+
+        expected_out = a + b
+        triton.set_allocator(
+            lambda size, align, stream: torch.empty(
+                size, dtype=torch.int8, device=GPU_TYPE
+            )
+        )
+        eager_out = f(a, b)
+        compiled_out = torch.compile(f, fullgraph=True, dynamic=dynamic)(a, b)
+
+        self.assertEqual(eager_out, expected_out)
+        self.assertEqual(compiled_out, expected_out)
+
+    @requires_gpu
+    @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_multiple_outputs(self, dynamic, backend):
         @triton.jit
@@ -3207,61 +3263,54 @@ class MutationTests(torch._inductor.test_case.TestCase):
 
     @unittest.skipIf(
         not has_triton_experimental_host_tma(),
-        "Requires experimental TMA API in Triton",
+        "requires experimental TMA descriptor API",
     )
     @make_mutation_test
-    def test_on_device_tma_store_old_api():
-        @triton.jit
-        def on_device_tma_kernel(A, B, workspace_ptr, m, n, BLOCK_SIZE: tl.constexpr):
-            workspace_ptr_A = workspace_ptr
-            workspace_ptr_B = workspace_ptr + 128
-            tl.extra.cuda.experimental_device_tensormap_create2d(
-                desc_ptr=workspace_ptr_A,
-                global_address=A,
-                load_size=[BLOCK_SIZE, BLOCK_SIZE],
-                global_size=[m, n],
-                element_ty=A.dtype.element_ty,
-            )
-            tl.extra.cuda.experimental_device_tensormap_create2d(
-                desc_ptr=workspace_ptr_B,
-                global_address=B,
-                load_size=[BLOCK_SIZE, BLOCK_SIZE],
-                global_size=[m, n],
-                element_ty=A.dtype.element_ty,
-            )
-
-            pid = tl.program_id(0)
-            n_blocks = tl.cdiv(n, BLOCK_SIZE)
-            m_block_id = pid // n_blocks
-            n_block_id = pid % n_blocks
-
-            data = tl._experimental_descriptor_load(
-                workspace_ptr_A,
-                [m_block_id * BLOCK_SIZE, n_block_id * BLOCK_SIZE],
-                [BLOCK_SIZE, BLOCK_SIZE],
-                A.dtype.element_ty,
-            )
-            tl._experimental_descriptor_store(
-                workspace_ptr_B,
-                data,
-                [m_block_id * BLOCK_SIZE, n_block_id * BLOCK_SIZE],
-            )
-
-        B = torch.randn(1024, 1024)
-        A = torch.empty(1024, 1024)
-        workspace = torch.empty(256, dtype=torch.int8)
+    def test_add_kernel_on_device_tma_old_api():
+        a = torch.randn(1024, 1024)
+        b = torch.randn(1024, 1024)
+        c = torch.empty(1024, 1024)
+        workspace = torch.empty(128 * 3, dtype=torch.int8)
         return (
-            on_device_tma_kernel,
+            add_kernel_on_device_tma_old_api,
             {
-                "A": A,
-                "B": B,
-                "workspace_ptr": workspace,
+                "a_ptr": a,
+                "b_ptr": b,
+                "c_ptr": c,
                 "m": 1024,
                 "n": 1024,
+                "workspace": workspace,
                 "BLOCK_SIZE": 32,
             },
             {},
-            ["B", "workspace_ptr"],
+            ["c_ptr", "workspace"],
+        )
+
+    @unittest.skipIf(
+        not has_triton_tensor_descriptor_host_tma(),
+        "requires TensorDescriptor API in Triton",
+    )
+    @make_mutation_test
+    def test_add_kernel_on_device_tma_new_api():
+        a = torch.randn(1024, 1024)
+        b = torch.randn(1024, 1024)
+        c = torch.empty(1024, 1024)
+        workspace = torch.empty(
+            128 * 3, dtype=torch.int8
+        )  # Not used by the new API but kept for consistency
+        return (
+            add_kernel_on_device_tma_new_api,
+            {
+                "a_ptr": a,
+                "b_ptr": b,
+                "c_ptr": c,
+                "m": 1024,
+                "n": 1024,
+                "workspace": workspace,
+                "BLOCK_SIZE": 32,
+            },
+            {},
+            ["c_ptr"],
         )
 
 
