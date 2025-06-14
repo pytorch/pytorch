@@ -218,7 +218,7 @@ class FakeQuantize(FakeQuantizeBase):
         self.is_per_channel = _is_per_channel(self.qscheme)
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         return self.activation_post_process.calculate_qparams()
 
     def forward(self, X):
@@ -342,7 +342,7 @@ class FixedQParamsFakeQuantize(FakeQuantize):
         )
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         return self.scale, self.zero_point
 
     @torch.jit.export

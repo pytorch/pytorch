@@ -1011,7 +1011,7 @@ class _SymNodeDict:
     ) -> _PySymProxyType:
         # dict.get()'s annotation doesn't accept `None` when the value type
         # isn't Optional.
-        return self.sym_node_dict.get(key.node, default)  # type: ignore[arg-type]
+        return self.sym_node_dict.get(key.node, default)  # type: ignore[arg-type, return-value]
 
     def __iter__(self) -> Any:
         raise NotImplementedError

@@ -310,7 +310,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
                 self.update_mask(name, data, **config)
 
     @abc.abstractmethod
-    def update_mask(self, name, data, **kwargs):
+    def update_mask(self, name, data, **kwargs):  # type: ignore[override]
         pass
 
     def _delete_data(self, name):

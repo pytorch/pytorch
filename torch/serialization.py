@@ -825,7 +825,7 @@ def _open_zipfile_writer(name_or_buffer: Union[str, IO[bytes]]) -> _opener:
         container = _open_zipfile_writer_file
     else:
         container = _open_zipfile_writer_buffer
-    return container(name_or_buffer)
+    return container(name_or_buffer)  # type: ignore[arg-type]
 
 
 def _is_compressed_file(f) -> bool:

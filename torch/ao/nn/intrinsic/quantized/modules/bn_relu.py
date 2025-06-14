@@ -47,7 +47,7 @@ class BNReLU2d(nnq.BatchNorm2d):
         return "QuantizedBNReLU2d"
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         # TODO: Add qat support for BNReLU2d
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
@@ -96,7 +96,7 @@ class BNReLU3d(nnq.BatchNorm3d):
         return "QuantizedBNReLU3d"
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         # TODO: Add qat support for BNReLU3d
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
