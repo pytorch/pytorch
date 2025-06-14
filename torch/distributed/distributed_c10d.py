@@ -15,6 +15,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
+from enum import Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
@@ -232,7 +233,6 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     return reduceOp not in denyList
 
 
-# TODO refactor into enum/strenum
 class Backend(str):  # noqa: SLOT000
     """
     An enum-like class for backends.
@@ -252,16 +252,37 @@ class Backend(str):  # noqa: SLOT000
               nor assume its existence.
     """
 
-    UNDEFINED = "undefined"
-    GLOO = "gloo"
-    NCCL = "nccl"
-    UCC = "ucc"
-    MPI = "mpi"
-    XCCL = "xccl"
+    # Inner enum for core backends
+    class _Core(Enum):
+        UNDEFINED = "undefined"
+        GLOO = "gloo"
+        NCCL = "nccl"
+        UCC = "ucc"
+        MPI = "mpi"
+        XCCL = "xccl"
 
+    # Mock ProcessGroup.BackendType (since it's external)
+    class _BackendType(Enum):
+        UNDEFINED = 0
+        GLOO = 1
+        NCCL = 2
+        XCCL = 3
+        UCC = 4
+        MPI = 5
+        CUSTOM = 6
+
+    # Plugin system
     _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
     _plugins: dict[str, _BackendPlugin] = {}
+
+    # Expose core backend values as class attributes
+    UNDEFINED = _Core.UNDEFINED.value
+    GLOO = _Core.GLOO.value
+    NCCL = _Core.NCCL.value
+    UCC = _Core.UCC.value
+    MPI = _Core.MPI.value
+    XCCL = _Core.XCCL.value
 
     backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI]
 
@@ -281,24 +302,33 @@ class Backend(str):  # noqa: SLOT000
         MPI: ["cpu", "cuda"],
     }
 
-    backend_type_map: dict[str, ProcessGroup.BackendType] = {
-        UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
-        GLOO: ProcessGroup.BackendType.GLOO,
-        NCCL: ProcessGroup.BackendType.NCCL,
-        XCCL: ProcessGroup.BackendType.XCCL,
-        UCC: ProcessGroup.BackendType.UCC,
-        MPI: ProcessGroup.BackendType.MPI,
+    backend_type_map: dict[str, _BackendType] = {
+        UNDEFINED: _BackendType.UNDEFINED,
+        GLOO: _BackendType.GLOO,
+        NCCL: _BackendType.NCCL,
+        XCCL: _BackendType.XCCL,
+        UCC: _BackendType.UCC,
+        MPI: _BackendType.MPI,
     }
 
     def __new__(cls, name: str):
         """Create and return a new instance of the class."""
         if not isinstance(name, str):
             raise ValueError("Backend constructor parameter must be string-ish")
-        value = getattr(Backend, name.upper(), Backend.UNDEFINED)
 
-        if value == Backend.UNDEFINED:
-            value = name.lower()
-        return value
+        # Try core backends first
+        try:
+            core_backend = cls._Core[name.upper()]
+            return core_backend.value
+        except KeyError:
+            pass
+
+        # Check registered plugins
+        if name.upper() in cls._plugins:
+            return name.lower()
+
+        # Fallback - return lowercase
+        return name.lower()
 
     @classmethod
     def register_backend(
@@ -332,17 +362,21 @@ class Backend(str):  # noqa: SLOT000
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
-        # This takes care of CUSTOM Out-of-tree backend types, update in backend_list indicates availability
-        if not hasattr(Backend, name.upper()):
-            setattr(Backend, name.upper(), name.lower())
-        if name.lower() not in Backend.backend_list:
-            Backend.backend_list.append(name.lower())
+        # Add to backend_list if not present
+        if name.lower() not in cls.backend_list:
+            cls.backend_list.append(name.lower())
+
+        # Register plugin
+        cls._plugins[name.upper()] = cls._BackendPlugin(func, extended_api)
 
         if devices is not None:
-            for device in devices:
-                if device not in Backend.default_device_backend_map:
-                    Backend.default_device_backend_map[device] = name.lower()
-        Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
+            devices_list = [devices] if isinstance(devices, str) else devices
+            for device in devices_list:
+                if device not in cls.default_device_backend_map:
+                    cls.default_device_backend_map[device] = name.lower()
+
+        # Update type mapping
+        cls.backend_type_map[name.lower()] = cls._BackendType.CUSTOM
 
         # Update device capability matrix in Backend class
         if devices is None:
@@ -353,14 +387,14 @@ class Backend(str):  # noqa: SLOT000
                 "`cuda`. Please specify it via the `devices` argument of "
                 "`register_backend`."
             )
-            Backend.backend_capability[name.lower()] = ["cpu", "cuda"]
+            cls.backend_capability[name.lower()] = ["cpu", "cuda"]
         elif isinstance(devices, str):
-            # Single device string specified. Simply convert to list.
-            Backend.backend_capability[name.lower()] = [devices]
+            cls.backend_capability[name.lower()] = [devices]
         else:
-            Backend.backend_capability[name.lower()] = devices
+            cls.backend_capability[name.lower()] = devices
 
-        Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
+        # Add as class attribute for Backend.CUSTOM_NAME access
+        setattr(cls, name.upper(), name.lower())
 
 
 class BackendConfig:
@@ -1074,18 +1108,17 @@ def _get_global_rank(group, rank) -> int:
     return get_global_rank(group, rank)
 
 
-def get_process_group_ranks(group: Optional[ProcessGroup]) -> list[int]:
+def get_process_group_ranks(group: ProcessGroup) -> list[int]:
     """
     Get all ranks associated with ``group``.
 
     Args:
-        group (Optional[ProcessGroup]): ProcessGroup to get all ranks from.
-            If None, the default process group will be used.
+        group (ProcessGroup): ProcessGroup to get all ranks from.
 
     Returns:
         List of global ranks ordered by group rank.
     """
-    return list(_world.pg_group_ranks[group or _get_default_group()].keys())
+    return list(_world.pg_group_ranks[group].keys())
 
 
 def _get_group_size(group) -> int:
@@ -1950,13 +1983,9 @@ def _new_process_group_helper(
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
-            if not is_gloo_available():
-                raise RuntimeError("Distributed package doesn't have Gloo built in")
             backend_class = ProcessGroupGloo(
                 backend_prefix_store, group_rank, group_size, timeout=timeout
             )
-            backend_class.options.global_ranks_in_group = global_ranks_in_group
-            backend_class.options.group_name = group_name
             backend_type = ProcessGroup.BackendType.GLOO
         elif backend_str == Backend.NCCL:
             if not is_nccl_available():
@@ -5443,22 +5472,28 @@ def new_subgroups(
             f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})"
         )
     if world_size % group_size != 0:
-        raise ValueError(
-            f"The world size ({world_size}) must be divisible by '{group_size=}'"
-        )
+        raise ValueError("The world size must be divisible by 'group_size'")
+
+    subgroups = []
+    cur_subgroup = None
 
     # TODO: Use itertools.batched(get_process_group_ranks(group=group), group_size) instead when Python 3.12 is supported.
-    ranks = get_process_group_ranks(group=group)
-    ranks_per_subgroup_list = [
-        ranks[i : i + group_size] for i in range(0, len(ranks), group_size)
-    ]
-    return new_subgroups_by_enumeration(
-        ranks_per_subgroup_list,
-        timeout=timeout,
-        backend=backend,
-        pg_options=pg_options,
-        group_desc=group_desc,
-    )
+    ranks_iterator = iter(get_process_group_ranks(group=group or _get_default_group()))
+    while ranks_in_subgroup := tuple(itertools.islice(ranks_iterator, group_size)):
+        subgroup = new_group(
+            ranks=ranks_in_subgroup,
+            timeout=timeout,
+            backend=backend,
+            pg_options=pg_options,
+            group_desc=group_desc,
+        )
+        subgroups.append(subgroup)
+
+        if rank := get_rank(group=group) in ranks_in_subgroup:
+            cur_subgroup = subgroup
+            logger.info("Rank %s is assigned to subgroup %s", rank, ranks_in_subgroup)
+
+    return cur_subgroup, subgroups
 
 
 def new_subgroups_by_enumeration(
