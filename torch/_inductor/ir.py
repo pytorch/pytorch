@@ -6063,10 +6063,12 @@ class MutationOutput(Buffer):
 
 class TMADescriptor(ExternKernel):
     """
-    An IR node representing a host-side TMA descriptor in the Triton API
-    (the ones obtained via create_{1d,2d}_tma_descriptor calls). Mostly
-    useful for user-defined Triton kernels relying on host-side TMA; but
-    can, in principle, be used for Inductor's Triton templates, too.
+    An IR node representing a generic host-side TMA descriptor in the Triton API
+    Mostly useful for user-defined Triton kernels relying on host-side TMA;
+    but can, in principle, be used for Inductor's Triton templates, too.
+
+    See TMADescriptorExperimental and TMADescriptorStable for the two implementations
+    (the old API and the new API)
     """
 
     # as TMA descriptors are immutable,
@@ -6074,54 +6076,26 @@ class TMADescriptor(ExternKernel):
     _CACHE: dict[Any, TMADescriptor] = {}
 
     @classmethod
-    def create(  # type: ignore[no-untyped-def]
-        cls,
-        tensor: IRNode,
-        tma_meta: Any,
-    ):
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            maybe_unpack_tma_experimental_metadata,
-        )
+    def _create_impl(
+        cls, tensor: IRNode, tma_meta: tuple[str, tuple[Any, ...]]
+    ) -> TMADescriptor:
+        assert len(tma_meta) == 2
+        if tma_meta[0] == "experimental":
+            return TMADescriptorExperimental(tensor, *tma_meta[1])
+        else:
+            assert tma_meta[0] == "stable"
+            return TMADescriptorStable(tensor, *tma_meta[1])
 
-        exp_meta = maybe_unpack_tma_experimental_metadata(tma_meta)
-        if exp_meta is None:
-            raise NotImplementedError(
-                f"tma_meta {tma_meta} not recognized (if this kernel uses a TMA descriptor created "
-                "with TensorDescriptor.from_tensor, this is not implemented in Inductor yet)"
-            )
-
-        dims, block_dims, element_size = exp_meta
-        key = (id(tensor), dims, block_dims, element_size)
+    @classmethod
+    def create(
+        cls, tensor: IRNode, tma_meta: tuple[str, tuple[Any, ...]]
+    ) -> TMADescriptor:
+        key = (id(tensor), tma_meta)
         if key not in cls._CACHE:
-            cls._CACHE[key] = TMADescriptor(tensor, dims, block_dims, element_size)  # type: ignore[arg-type]
+            cls._CACHE[key] = cls._create_impl(tensor, tma_meta)
         return cls._CACHE[key]
 
-    def __init__(
-        self,
-        tensor: IRNode,
-        dims: list[Union[int, torch.SymInt]],
-        block_dims: list[Union[int, torch.SymInt]],
-        element_size: Optional[int] = None,
-    ) -> None:
-        assert len(dims) in (1, 2)
-        assert len(dims) == len(block_dims)
-
-        if element_size is None:
-            element_size = tensor.get_dtype().itemsize
-
-        self.tensor = tensor
-        self.dims = dims
-        self.block_dims = block_dims
-        self.element_size = element_size
-        self.rank = len(self.dims)
-
-        inputs = [tensor]
-        constant_args = [
-            *self.dims,
-            *self.block_dims,
-            self.element_size,
-        ]
-
+    def __init__(self, tensor: IRNode, inputs, constant_args):  # type: ignore[no-untyped-def]
         super().__init__(
             None,
             # link back to the underlying tensor in terms of ownership
@@ -6138,11 +6112,73 @@ class TMADescriptor(ExternKernel):
             None,
         )
 
+        self.tensor = tensor
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.generate_tma_descriptor(self)
+
+    def get_tensor(self) -> IRNode:
+        return self.tensor
+
+
+class TMADescriptorExperimental(TMADescriptor):
+    """
+    the new host-side TMA Descriptor API:
+    (the ones obtained via create_{1d,2d}_tma_descriptor calls).
+
+    See also TMADescriptorStable for the new API.
+    """
+
+    def __init__(
+        self,
+        tensor: IRNode,
+        dims: list[Union[int, torch.SymInt]],
+        block_dims: list[Union[int, torch.SymInt]],
+        element_size: Optional[int] = None,
+    ) -> None:
+        assert len(dims) in (1, 2)
+        assert len(dims) == len(block_dims)
+
+        if element_size is None:
+            element_size = tensor.get_dtype().itemsize
+
+        self.dims = dims
+        self.block_dims = block_dims
+        self.element_size = element_size
+        self.rank = len(self.dims)
+
+        inputs = [tensor]
+        constant_args = [
+            *self.dims,
+            *self.block_dims,
+            self.element_size,
+        ]
+
+        super().__init__(
+            tensor=tensor,
+            inputs=inputs,
+            constant_args=constant_args,
+        )
+
+
+class TMADescriptorStable(TMADescriptor):
+    """
+    the new host-side TMA descriptor API
+    (the ones obtained via TensorDescriptor.from_tensor).
+
+    See also TMADescriptorExperimental for the old API.
+    """
+
+    def __init__(self, tensor: IRNode, block_shape: list[Union[int, torch.SymInt]]):
+        self.block_shape = block_shape
+
+        super().__init__(
+            tensor=tensor,
+            inputs=[tensor],
+            constant_args=block_shape,
+        )
 
 
 class SubgraphBuffer(ExternKernel):
