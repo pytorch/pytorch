@@ -347,27 +347,29 @@ class DistributedDataParallel(Module, Joinable):
     To use ``DistributedDataParallel`` on a host with N GPUs, you should spawn
     up ``N`` processes, ensuring that each process exclusively works on a single
     GPU from 0 to N-1. This can be done by either setting
-    ``CUDA_VISIBLE_DEVICES`` for every process or by calling:
+    ``CUDA_VISIBLE_DEVICES`` for every process or by calling the following API for GPUs,
 
         >>> # xdoctest: +SKIP("undefined variables")
         >>> torch.cuda.set_device(i)
 
-    where i is from 0 to N-1. For XPU devices, you can use the following API
-    to map each process on a single XPU in order to use ``DistributedDataParallel``.
-
+    and XPUs,
+    
         >>> # xdoctest: +SKIP("undefined variables")
         >>> torch.xpu.set_device(i)
 
-    In each process, you should refer the following
+    where i is from 0 to N-1. In each process, you should refer the following
     to construct this module:
 
         >>> # xdoctest: +SKIP("undefined variables")
+        >>> if torch.cuda.is_available():
+        >>>     vendor_backend = 'nccl'
+        >>> elif torch.xpu.is_available():
+        >>>     vendor_backend = 'xccl'
+        >>>
         >>> torch.distributed.init_process_group(
-        >>>     backend='nccl', world_size=N, init_method='...'
+        >>>     backend=vendor_backend, world_size=N, init_method='...'
         >>> )
         >>> model = DistributedDataParallel(model, device_ids=[i], output_device=i)
-
-    You need to set backend='xccl' for similar model initialization to use distributed backend for XPU devices.
 
     In order to spawn up multiple processes per node, you can use either
     ``torch.distributed.launch`` or ``torch.multiprocessing.spawn``.
