@@ -1313,7 +1313,7 @@ Tensor sparse_coo_tensor_ctor(
         inferred_options,
         inferred_scalar_type,
         deviceOptional,
-        r.pyobject(ARG_VALUES),
+        r.pyobject(ARG_VALUES1),
         /*copy_variables=*/false,
         /*copy_numpy=*/true,
         /*type_inference=*/type_inference);
@@ -1322,7 +1322,7 @@ Tensor sparse_coo_tensor_ctor(
         values.options(),
         kLong,
         deviceOptional,
-        r.pyobject(ARG_INDICES),
+        r.pyobject(ARG_INDICES1),
         /*copy_variables=*/false,
         /*copy_numpy=*/true,
         /*type_inference=*/false);
