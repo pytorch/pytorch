@@ -192,7 +192,9 @@ class Vectorized16 {
   static constexpr size_type size() {
     return 32;
   }
-  Vectorized16() {}
+  Vectorized16() {
+    values = _mm512_setzero_si512();
+  }
   Vectorized16(__m512i v) : values(v) {}
   Vectorized16(T val) {
     value_type uw = val.x;
@@ -1082,6 +1084,54 @@ Vectorized<BFloat16> inline fmadd(
   return cvtfp32_bf16(o1, o2);
 }
 
+template <>
+Vectorized<BFloat16> inline fmsub(
+    const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& b,
+    const Vectorized<BFloat16>& c) {
+  __m512 a_lo, a_hi;
+  __m512 b_lo, b_hi;
+  __m512 c_lo, c_hi;
+  cvtbf16_fp32(__m512i(a), a_lo, a_hi);
+  cvtbf16_fp32(__m512i(b), b_lo, b_hi);
+  cvtbf16_fp32(__m512i(c), c_lo, c_hi);
+  auto o1 = _mm512_fmsub_ps(a_lo, b_lo, c_lo);
+  auto o2 = _mm512_fmsub_ps(a_hi, b_hi, c_hi);
+  return cvtfp32_bf16(o1, o2);
+}
+
+template <>
+Vectorized<BFloat16> inline fnmadd(
+    const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& b,
+    const Vectorized<BFloat16>& c) {
+  __m512 a_lo, a_hi;
+  __m512 b_lo, b_hi;
+  __m512 c_lo, c_hi;
+  cvtbf16_fp32(__m512i(a), a_lo, a_hi);
+  cvtbf16_fp32(__m512i(b), b_lo, b_hi);
+  cvtbf16_fp32(__m512i(c), c_lo, c_hi);
+  auto o1 = _mm512_fnmadd_ps(a_lo, b_lo, c_lo);
+  auto o2 = _mm512_fnmadd_ps(a_hi, b_hi, c_hi);
+  return cvtfp32_bf16(o1, o2);
+}
+
+template <>
+Vectorized<BFloat16> inline fnmsub(
+    const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& b,
+    const Vectorized<BFloat16>& c) {
+  __m512 a_lo, a_hi;
+  __m512 b_lo, b_hi;
+  __m512 c_lo, c_hi;
+  cvtbf16_fp32(__m512i(a), a_lo, a_hi);
+  cvtbf16_fp32(__m512i(b), b_lo, b_hi);
+  cvtbf16_fp32(__m512i(c), c_lo, c_hi);
+  auto o1 = _mm512_fnmsub_ps(a_lo, b_lo, c_lo);
+  auto o2 = _mm512_fnmsub_ps(a_hi, b_hi, c_hi);
+  return cvtfp32_bf16(o1, o2);
+}
+
 static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
   __m512i r[8];
   // a0a1 a2a3 a4a5 a6a7 a8a9 a10a11 a12a13 a14a15   e0e1 e2e3 e4e5 e6e7 e8e9
@@ -1839,6 +1889,54 @@ Vectorized<Half> inline fmadd(
   cvtfp16_fp32(__m512i(c), c_lo, c_hi);
   auto o1 = _mm512_fmadd_ps(a_lo, b_lo, c_lo);
   auto o2 = _mm512_fmadd_ps(a_hi, b_hi, c_hi);
+  return cvtfp32_fp16(o1, o2);
+}
+
+template <>
+Vectorized<Half> inline fmsub(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b,
+    const Vectorized<Half>& c) {
+  __m512 a_lo, a_hi;
+  __m512 b_lo, b_hi;
+  __m512 c_lo, c_hi;
+  cvtfp16_fp32(__m512i(a), a_lo, a_hi);
+  cvtfp16_fp32(__m512i(b), b_lo, b_hi);
+  cvtfp16_fp32(__m512i(c), c_lo, c_hi);
+  auto o1 = _mm512_fmsub_ps(a_lo, b_lo, c_lo);
+  auto o2 = _mm512_fmsub_ps(a_hi, b_hi, c_hi);
+  return cvtfp32_fp16(o1, o2);
+}
+
+template <>
+Vectorized<Half> inline fnmadd(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b,
+    const Vectorized<Half>& c) {
+  __m512 a_lo, a_hi;
+  __m512 b_lo, b_hi;
+  __m512 c_lo, c_hi;
+  cvtfp16_fp32(__m512i(a), a_lo, a_hi);
+  cvtfp16_fp32(__m512i(b), b_lo, b_hi);
+  cvtfp16_fp32(__m512i(c), c_lo, c_hi);
+  auto o1 = _mm512_fnmadd_ps(a_lo, b_lo, c_lo);
+  auto o2 = _mm512_fnmadd_ps(a_hi, b_hi, c_hi);
+  return cvtfp32_fp16(o1, o2);
+}
+
+template <>
+Vectorized<Half> inline fnmsub(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b,
+    const Vectorized<Half>& c) {
+  __m512 a_lo, a_hi;
+  __m512 b_lo, b_hi;
+  __m512 c_lo, c_hi;
+  cvtfp16_fp32(__m512i(a), a_lo, a_hi);
+  cvtfp16_fp32(__m512i(b), b_lo, b_hi);
+  cvtfp16_fp32(__m512i(c), c_lo, c_hi);
+  auto o1 = _mm512_fnmsub_ps(a_lo, b_lo, c_lo);
+  auto o2 = _mm512_fnmsub_ps(a_hi, b_hi, c_hi);
   return cvtfp32_fp16(o1, o2);
 }
 

@@ -36,10 +36,13 @@ class Vectorized<BFloat16> {
     return VECTOR_WIDTH / sizeof(BFloat16);
   }
 
-  Vectorized() {}
+  Vectorized() {
+    values = svdup_n_bf16(0);
+  }
   Vectorized(svbfloat16_t v) : values(v) {}
-  Vectorized(int val);
-  Vectorized(BFloat16 val);
+  Vectorized(BFloat16 val) {
+    values = svdup_n_bf16(val);
+  }
 
   template <
       typename... Args,
