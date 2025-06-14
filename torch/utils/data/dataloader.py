@@ -5,7 +5,6 @@ To support these two classes, in `./_utils` we define many utility methods and
 functions to be run in multiprocessing. E.g., the data loading worker loop is
 in `./_utils/worker.py`.
 """
-
 from __future__ import annotations
 
 import functools
@@ -176,7 +175,9 @@ class DataLoader(Generic[_T_co]):
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
         multiprocessing_context (str or multiprocessing.context.BaseContext, optional): If
-            ``None``, the default `multiprocessing context`_ of your operating system will
+            ``None``, the default
+            `multiprocessing context <https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods>`_ # noqa: D401
+            of your operating system will
             be used. (default: ``None``)
         generator (torch.Generator, optional): If not ``None``, this RNG will be used
             by RandomSampler to generate random indexes and multiprocessing to generate
@@ -224,9 +225,6 @@ class DataLoader(Generic[_T_co]):
 
     .. warning:: Setting `in_order` to `False` can harm reproducibility and may lead to a skewed data
                  distribution being fed to the trainer in cases with imbalanced data.
-
-    .. _multiprocessing context:
-        https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
     """
 
     dataset: Dataset[_T_co]
@@ -1224,10 +1222,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 atexit.register(_MultiProcessingDataLoaderIter._clean_up_worker, w)
 
         # .pid can be None only before process is spawned (not the case, so ignore)
-        _utils.signal_handling._set_worker_pids(
-            id(self),
-            tuple(w.pid for w in self._workers),  # type: ignore[misc]
-        )
+        _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self._workers))  # type: ignore[misc]
         _utils.signal_handling._set_SIGCHLD_handler()
         self._worker_pids_set = True
         self._reset(loader, first_iter=True)
