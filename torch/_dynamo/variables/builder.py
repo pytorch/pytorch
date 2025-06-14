@@ -3008,7 +3008,7 @@ def is_dynamic_source(source_name: str) -> bool:
 
 
 def record_automatic_dynamic(
-    tx: "InstructionTranslator", name: str, e: torch.Tensor
+    tx: "InstructionTranslator", name: str, source: Source, e: torch.Tensor
 ) -> FrameStateSizeEntry:
     # This mimics stride inference algorithm in _create_symbolic_sizes_strides_storage_offset
     ex_size = e.size()
@@ -3028,7 +3028,7 @@ def record_automatic_dynamic(
         stride = []
 
     return process_automatic_dynamic(
-        tx, name, FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride))
+        tx, name, FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride), is_optimizer=is_from_optimizer_source(source))
     )
 
 
@@ -3125,7 +3125,7 @@ def _automatic_dynamic(
         )
 
     if static_shapes and not is_dynamic_source(name):
-        record_automatic_dynamic(tx, name, e)
+        record_automatic_dynamic(tx, name, source, e)
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -3155,7 +3155,7 @@ def _automatic_dynamic(
         )
 
     # Prep for automatic dynamic
-    frame_state_entry = record_automatic_dynamic(tx, name, e)
+    frame_state_entry = record_automatic_dynamic(tx, name, source, e)
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
