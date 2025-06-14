@@ -1502,7 +1502,7 @@ def insert_observers_for_model(
 
     # first, populate the dtype map based only on qconfig and qhandler
     # this assumes:
-    # graph inputs are fp32 by default, and int8 where overriden
+    # graph inputs are fp32 by default, and int8 where overridden
     # other nodes output dtype is specified by the qconfig
     named_modules = dict(model.named_modules(remove_duplicate=False))
 

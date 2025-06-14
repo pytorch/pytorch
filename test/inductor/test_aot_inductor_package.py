@@ -136,7 +136,7 @@ class TestAOTInductorPackage(TestCase):
 
     def test_remove_intermediate_files(self):
         # For CUDA, generated cpp files contain absolute path to the generated cubin files.
-        # With the package artifact, that cubin path should be overriden at the run time,
+        # With the package artifact, that cubin path should be overridden at the run time,
         # so removing those intermeidate files in this test to verify that.
         class Model(torch.nn.Module):
             def forward(self, x, y):

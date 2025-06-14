@@ -999,7 +999,7 @@
   ],
   "GB0103": [
     {
-      "Gb_type": "Tensor subclass overriden method call",
+      "Gb_type": "Tensor subclass overridden method call",
       "Context": "{name}",
       "Explanation": "`torch.compile` currently can't trace this",
       "Hints": [
@@ -1601,9 +1601,9 @@
   ],
   "GB0164": [
     {
-      "Gb_type": "Unsupported tensor subclass overriden attribute access",
+      "Gb_type": "Unsupported tensor subclass overridden attribute access",
       "Context": "{name}",
-      "Explanation": "`torch.compile` only support tracing certain types of overriden tensor subclass attributes",
+      "Explanation": "`torch.compile` only support tracing certain types of overridden tensor subclass attributes",
       "Hints": [
         "Avoid accessing {name} of tensor subclass in torch.compile region",
         "Renaming attribute `{name}` of type {self.class_type}",

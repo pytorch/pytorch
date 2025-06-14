@@ -637,7 +637,7 @@ class PGOCacheArtifact(CacheArtifact):
         update the key to use the new MAST job's name and version.
         """
         if not original_key.startswith("mast:"):
-            # if original_key is overriden, then dont change it
+            # if original_key is overridden, then dont change it
             return original_key
         if (new_key := get_cache_key()) is not None:
             return new_key

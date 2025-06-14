@@ -52,7 +52,7 @@ class WeightNormSparsifier(BaseSparsifier):
 
     Note::
         All arguments to the WeightNormSparsifier constructor are "default"
-        arguments and could be overriden by the configuration provided in the
+        arguments and could be overridden by the configuration provided in the
         `prepare` step.
     """
 

@@ -1227,7 +1227,7 @@ class TritonHOPifier:
     to the HOP (which can then be traced).
 
     Because Dynamo has its own calling conventions for e.g. invoking a user-defined function
-    TritonHOPifier is an abstract class that can be overriden by its subclasses.
+    TritonHOPifier is an abstract class that can be overridden by its subclasses.
     """
 
     def raise_unsupported(self, msg: str) -> Never:
