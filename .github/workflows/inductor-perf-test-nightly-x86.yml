@@ -90,6 +90,31 @@ jobs:
       selected-test-configs: ${{ inputs.benchmark_configs }}
     secrets: inherit
 
+  linux-jammy-cpu-py3_9-gcc11-inductor-build-amd:
+    name: linux-jammy-cpu-py3.9-gcc11-inductor-amd
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      test-matrix: |
+        { include: [
+          { config: "inductor_huggingface_perf_cpu_x86", shard: 1, num_shards: 3, runner: "linux.24xlarge.amd" },
+          { config: "inductor_huggingface_perf_cpu_x86", shard: 2, num_shards: 3, runner: "linux.24xlarge.amd" },
+          { config: "inductor_huggingface_perf_cpu_x86", shard: 3, num_shards: 3, runner: "linux.24xlarge.amd" },
+          { config: "inductor_timm_perf_cpu_x86", shard: 1, num_shards: 5, runner: "linux.24xlarge.amd" },
+          { config: "inductor_timm_perf_cpu_x86", shard: 2, num_shards: 5, runner: "linux.24xlarge.amd" },
+          { config: "inductor_timm_perf_cpu_x86", shard: 3, num_shards: 5, runner: "linux.24xlarge.amd" },
+          { config: "inductor_timm_perf_cpu_x86", shard: 4, num_shards: 5, runner: "linux.24xlarge.amd" },
+          { config: "inductor_timm_perf_cpu_x86", shard: 5, num_shards: 5, runner: "linux.24xlarge.amd" },
+          { config: "inductor_torchbench_perf_cpu_x86", shard: 1, num_shards: 4, runner: "linux.24xlarge.amd" },
+          { config: "inductor_torchbench_perf_cpu_x86", shard: 2, num_shards: 4, runner: "linux.24xlarge.amd" },
+          { config: "inductor_torchbench_perf_cpu_x86", shard: 3, num_shards: 4, runner: "linux.24xlarge.amd" },
+          { config: "inductor_torchbench_perf_cpu_x86", shard: 4, num_shards: 4, runner: "linux.24xlarge.amd" },
+        ]}
+      selected-test-configs: ${{ inputs.benchmark_configs }}
+    secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-inductor-test-nightly:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
@@ -108,6 +133,22 @@ jobs:
       monitor-data-collect-interval: 4
     secrets: inherit
 
+  linux-jammy-cpu-py3_9-gcc11-inductor-test-nightly-amd:
+    name: linux-jammy-cpu-py3.9-gcc11-inductor-amd
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-cpu-py3_9-gcc11-inductor-build-amd
+    if: github.event.schedule == '0 7 * * *'
+    with:
+      build-environment: linux-jammy-py3.9-gcc11-build
+      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true-amd
+      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build-amd.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build-amd.outputs.test-matrix }}
+      timeout-minutes: 720
+      # disable monitor in perf tests
+      disable-monitor: false
+      monitor-log-interval: 15
+      monitor-data-collect-interval: 4
+    secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-inductor-test:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
@@ -119,6 +160,23 @@ jobs:
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
+      timeout-minutes: 720
+      # disable monitor in perf tests
+      disable-monitor: false
+      monitor-log-interval: 15
+      monitor-data-collect-interval: 4
+    secrets: inherit
+
+  linux-jammy-cpu-py3_9-gcc11-inductor-test-amd:
+    name: linux-jammy-cpu-py3.9-gcc11-inductor-amd
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-cpu-py3_9-gcc11-inductor-build-amd
+    if: github.event_name == 'workflow_dispatch'
+    with:
+      build-environment: linux-jammy-py3.9-gcc11-build
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-amd
+      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build-amd.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build-amd.outputs.test-matrix }}
       timeout-minutes: 720
       # disable monitor in perf tests
       disable-monitor: false
