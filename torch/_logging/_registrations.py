@@ -14,6 +14,13 @@ DISTRIBUTED = [
 ]
 
 register_log(
+    "async_compile",
+    [
+        "torch._inductor.async_compile",
+        "torch._inductor.compile_worker.tracked_process_pool",
+    ],
+)
+register_log(
     "cache", ("torch._inductor.remote_cache", "torch._inductor.fb.remote_cache")
 )
 register_log("dynamo", ["torch._dynamo", *DYNAMIC])
