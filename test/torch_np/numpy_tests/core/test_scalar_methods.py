@@ -3,7 +3,6 @@
 """
 Test the scalar constructors, which also do type-coercion
 """
-
 import fractions
 import functools
 import types

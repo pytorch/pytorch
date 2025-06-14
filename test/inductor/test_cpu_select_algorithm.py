@@ -649,9 +649,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         view_425 = torch.randn(flatten_BS, in_features)
         add_184 = torch.randn(batch_size, img_size_0, img_size_1, in_features)
         mod = M(bias=bias).eval()
-        with (
-            verify(dtype) as (atol, rtol),
-            torch.cpu.amp.autocast(enabled=dtype == torch.bfloat16),
+        with verify(dtype) as (atol, rtol), torch.cpu.amp.autocast(
+            enabled=dtype == torch.bfloat16
         ):
             self.common(
                 mod,
@@ -1353,10 +1352,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         if dtype == torch.bfloat16:
             atol, rtol = 5e-2, 5e-2
 
-        with (
-            patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)),
-            torch.no_grad(),
-            torch.autocast("cpu", enabled=(dtype == torch.bfloat16), dtype=dtype),
+        with patch.object(
+            select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)
+        ), torch.no_grad(), torch.autocast(
+            "cpu", enabled=(dtype == torch.bfloat16), dtype=dtype
         ):
             ref_res = ref_quantized_mod(input)
             cfn = torch.compile(ref_quantized_mod)
@@ -1701,10 +1700,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             (input, other, other2),
         )
         atol, rtol = 5e-2, 5e-2
-        with (
-            patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)),
-            torch.no_grad(),
-            torch.autocast("cpu", enabled=int8_mixed_bf16, dtype=torch.bfloat16),
+        with patch.object(
+            select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)
+        ), torch.no_grad(), torch.autocast(
+            "cpu", enabled=int8_mixed_bf16, dtype=torch.bfloat16
         ):
             ref_res = ref_quantized_mod(input, other, other2)
             cfn = torch.compile(ref_quantized_mod)
@@ -1939,11 +1938,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             counters.clear()
             mod = M(in_features, out_features, gemm_num).eval()
             v = torch.randn(batch_size, in_features).to(dtype)
-            with (
-                verify(dtype) as (atol, rtol),
-                torch.autocast(device_type="cpu", dtype=dtype),
-                torch.no_grad(),
-            ):
+            with verify(dtype) as (atol, rtol), torch.autocast(
+                device_type="cpu", dtype=dtype
+            ), torch.no_grad():
                 self.common(mod, (v,), atol=atol, rtol=rtol)
             # gemm_num independent template instead of grouped gemm template
             self.assertEqual(
@@ -1995,11 +1992,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             mod = M(in_features, out_features, gemm_num).eval()
             B = (2, batch_size) if input_3d else (batch_size,)
             v = torch.randn(*B, in_features).to(dtype)
-            with (
-                verify(dtype) as (atol, rtol),
-                torch.autocast(device_type="cpu", dtype=dtype),
-                torch.no_grad(),
-            ):
+            with verify(dtype) as (atol, rtol), torch.autocast(
+                device_type="cpu", dtype=dtype
+            ), torch.no_grad():
                 self.common(mod, (v,), atol=atol, rtol=rtol)
             self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
 
@@ -2075,11 +2070,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             mod = M(in_features, out_features, bias, epilogue).eval()
             B = (2, batch_size) if input_3d else (batch_size,)
             v = torch.randn(*B, in_features).to(dtype)
-            with (
-                verify(dtype) as (atol, rtol),
-                torch.autocast(device_type="cpu", dtype=dtype),
-                torch.no_grad(),
-            ):
+            with verify(dtype) as (atol, rtol), torch.autocast(
+                device_type="cpu", dtype=dtype
+            ), torch.no_grad():
                 self.common(mod, (v,), atol=atol, rtol=rtol)
             self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
             if any(e != "none" for e in epilogue):
@@ -2681,22 +2674,16 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     def test_bmm_with_pointwise_with_reshape_dynamic_shapes(
         self, bs, Mdim, Kdim, Ndim, dtype
     ):
-        from torch.fx.experimental.symbolic_shapes import guard_scalar
-
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.epilogue = torch.nn.ReLU()
 
             def forward(self, x, other, noise):
-                # we do not want to to have Mdim, Kdim and Ndim dynamic so we force specialize them.
-                result = x.reshape(
-                    -1, guard_scalar(Mdim), guard_scalar(Kdim)
-                ) @ other.reshape(-1, guard_scalar(Kdim), guard_scalar(Ndim))
+                result = x.reshape(-1, Mdim, Kdim) @ other.reshape(-1, Kdim, Ndim)
                 return self.epilogue(result) + noise
 
         counters.clear()
-
         u = torch.randn(bs, 8, Mdim, Kdim).to(dtype=dtype)
         v = torch.randn(bs, 8, Kdim, Ndim).to(dtype=dtype)
         noise = torch.randn(bs * 8, Mdim, Ndim).to(dtype=dtype)

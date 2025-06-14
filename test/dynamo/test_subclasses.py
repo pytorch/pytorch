@@ -108,10 +108,9 @@ def get_view_test_cases():
         for requires_grad_1, requires_grad_2 in itertools.product(
             [True, False], repeat=2
         ):
-            yield (
-                partial(mk_leaf, base_is_nt, requires_grad_1, requires_grad_2),
-                f"{prefix}_leaf_{requires_grad_1}_{requires_grad_2}",
-            )
+            yield partial(
+                mk_leaf, base_is_nt, requires_grad_1, requires_grad_2
+            ), f"{prefix}_leaf_{requires_grad_1}_{requires_grad_2}"
 
         # (3) obscure case:
         # view is not a leaf (implies requires_grad True)
@@ -119,10 +118,9 @@ def get_view_test_cases():
         yield partial(mk_obscure, base_is_nt), f"{prefix}_obscure"
 
     # Subclass -> Dense
-    yield (
-        lambda: get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone(),
-        "subclass_dense",
-    )
+    yield lambda: get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[
+        0
+    ].clone(), "subclass_dense"
 
     # Dense -> Subclass -> Dense -> Subclass
     def mk_dense_subclass_dense_subclass():
@@ -2287,8 +2285,8 @@ class GraphModule(torch.nn.Module):
         clone_1: "f32[s47, s16]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
 
         view: "f32[s16, s47]" = torch.ops.aten.view.default(clone, [primals_2, primals_1]);  clone = None
-        view_1: "f32[s16, s47]" = torch.ops.aten.view.default(clone_1, [primals_2, primals_1]);  clone_1 = None
-        return (view, view_1, primals_2, primals_1, primals_5, primals_5, primals_7)
+        view_1: "f32[s16, s47]" = torch.ops.aten.view.default(clone_1, [primals_2, primals_1]);  clone_1 = primals_1 = None
+        return (view, view_1, primals_2, primals_5, primals_5, primals_5, primals_7)
 """,  # noqa: B950
         )
 

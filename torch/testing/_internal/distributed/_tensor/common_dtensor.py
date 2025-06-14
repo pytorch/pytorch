@@ -425,9 +425,7 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
     def decorator(func, eager_init: bool = False):
         @wraps(func)  # pyre-ignore[6]
         def wrapper(
-            self,
-            *args: tuple[object],
-            **kwargs: dict[str, Any],  # type: ignore[misc]
+            self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
         ) -> None:
             self.init_pg(eager_init)
 

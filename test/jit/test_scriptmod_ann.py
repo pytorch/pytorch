@@ -146,7 +146,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         ):
             with self.assertWarnsRegex(
                 UserWarning,
-                "doesn't support instance-level annotations on empty non-base types",
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
             ):
                 torch.jit.script(M())
 
@@ -165,7 +167,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         ):
             with self.assertWarnsRegex(
                 UserWarning,
-                "doesn't support instance-level annotations on empty non-base types",
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
             ):
                 torch.jit.script(M())
 
@@ -184,7 +188,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         ):
             with self.assertWarnsRegex(
                 UserWarning,
-                "doesn't support instance-level annotations on empty non-base types",
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
             ):
                 torch.jit.script(M())
 
@@ -203,7 +209,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         ):
             with self.assertWarnsRegex(
                 UserWarning,
-                "doesn't support instance-level annotations on empty non-base types",
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
             ):
                 torch.jit.script(M())
 
@@ -222,7 +230,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         ):
             with self.assertWarnsRegex(
                 UserWarning,
-                "doesn't support instance-level annotations on empty non-base types",
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
             ):
                 torch.jit.script(M())
 
@@ -241,7 +251,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         ):
             with self.assertWarnsRegex(
                 UserWarning,
-                "doesn't support instance-level annotations on empty non-base types",
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
             ):
                 torch.jit.script(M())
 
@@ -260,7 +272,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         ):
             with self.assertWarnsRegex(
                 UserWarning,
-                "doesn't support instance-level annotations on empty non-base types",
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
             ):
                 torch.jit.script(M())
 
@@ -279,7 +293,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         ):
             with self.assertWarnsRegex(
                 UserWarning,
-                "doesn't support instance-level annotations on empty non-base types",
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
             ):
                 torch.jit.script(M())
 
@@ -298,7 +314,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         ):
             with self.assertWarnsRegex(
                 UserWarning,
-                "doesn't support instance-level annotations on empty non-base types",
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
             ):
                 torch.jit.script(M())
 
@@ -317,7 +335,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         ):
             with self.assertWarnsRegex(
                 UserWarning,
-                "doesn't support instance-level annotations on empty non-base types",
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
             ):
                 torch.jit.script(M())
 
@@ -338,6 +358,8 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         ):
             with self.assertWarnsRegex(
                 UserWarning,
-                "doesn't support instance-level annotations on empty non-base types",
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
             ):
                 torch.jit.script(M())

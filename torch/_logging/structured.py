@@ -1,7 +1,6 @@
 """
 Utilities for converting data types into structured JSON for dumping.
 """
-
 import inspect
 import os
 import traceback

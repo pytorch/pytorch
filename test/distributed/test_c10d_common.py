@@ -1938,15 +1938,12 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             return registered_backend
 
         # Need to patch these methods in absence of a true c10d::Backend wrapper
-        with (
-            patch.object(
-                dist.ProcessGroup,
-                "_register_backend",
-                side_effect=_register_backend_side_effect,
-            ),
-            patch.object(
-                dist.ProcessGroup, "_get_backend", side_effect=_get_backend_side_effect
-            ),
+        with patch.object(
+            dist.ProcessGroup,
+            "_register_backend",
+            side_effect=_register_backend_side_effect,
+        ), patch.object(
+            dist.ProcessGroup, "_get_backend", side_effect=_get_backend_side_effect
         ):
             split_pg = dist.split_group(
                 split_ranks=all_group_ranks,
@@ -2298,8 +2295,8 @@ class LocalRankTest(MultiProcessTestCase):
 
 
 if __name__ == "__main__":
-    assert not torch.cuda._initialized, (
-        "test_distributed must not have initialized CUDA context on main process"
-    )
+    assert (
+        not torch.cuda._initialized
+    ), "test_distributed must not have initialized CUDA context on main process"
 
     run_tests()
