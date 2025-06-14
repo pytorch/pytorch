@@ -104,7 +104,7 @@ def higher_order_scan(
 ) -> Sequence[ir.Value]:
     subgraph_inputs = [
         ir.Value(
-            name=f"{inp.name}_{body_func.name}",
+            name=f"{inp.name}_{body_func.name}__subgraph_in",
             shape=inp.shape,
             type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
         )
