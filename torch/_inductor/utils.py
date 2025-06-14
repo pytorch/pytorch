@@ -1578,6 +1578,14 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
+def _use_cutlass_for_op(op_name: str) -> bool:
+    """Check if CUTLASS should be used for the given operation."""
+    enabled_ops = config.cuda.cutlass_enabled_ops.upper()
+    if enabled_ops == "ALL":
+        return True
+    return op_name.upper() in [x.strip() for x in enabled_ops.split(",")]
+
+
 decompose_k_threshold = 32
 
 # To limit compile time
@@ -1810,9 +1818,9 @@ def use_cpp_gemm_template(
         use_4x2_dim=is_woq_int4,
     )
 
+    # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
-
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
 
