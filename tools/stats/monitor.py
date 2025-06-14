@@ -159,7 +159,7 @@ class SharedResource:
         with self._lock:
             self._data_list.append(data)
 
-    def add_error(self, error: Exception) -> None:
+    def add_error(self, error: Exception | str) -> None:
         with self._lock:
             self._data_errors.append(str(error))
 
@@ -390,13 +390,16 @@ class UsageLogger:
                     )
                 )
         elif self._has_amdsmi:
-            # Iterate over the available GPUs
             for handle in self._gpu_handles:
-                # see https://rocm.docs.amd.com/projects/amdsmi/en/docs-5.7.0/py-interface_readme_link.html
                 engine_usage = amdsmi.amdsmi_get_gpu_activity(handle)
+                usage =  f"check engine_usage: {engine_usage}"
+                self.shared_resource.add_error(usage)
+
                 gpu_uuid = amdsmi.amdsmi_get_gpu_device_uuid(handle)
-                gpu_utilization = engine_usage["gfx_activity"]
-                gpu_mem_utilization = gpu_utilization["umc_activity"]
+
+                gpu_utilization = engine_usage.get("gfx_activity", 0)
+                gpu_mem_utilization = engine_usage.get("umc_activity", 0)
+
                 gpu_data_list.append(
                     GpuData(
                         uuid=gpu_uuid,
