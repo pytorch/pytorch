@@ -905,7 +905,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         layout,
     )
 
-    if (not is_nonzero) or (not use_max_autotune()):
+    if (not is_nonzero) or (not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)):
         # Use a FlexibleLayout if we are not autotuning.
         # This allows padding strides for the output.
         from torch._inductor.ir import FixedLayout, FlexibleLayout
