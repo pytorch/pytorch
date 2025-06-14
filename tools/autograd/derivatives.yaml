@@ -3032,6 +3032,10 @@
   index: non_differentiable
   result: scatter_reduce_jvp(self_p, self_t, dim, index, src_p, src_t, reduce, include_self, result)
 
+- name: attn(Tensor Q, Tensor K, Tensor V) -> (Tensor, Tensor)
+  output_differentiability: [True, True]
+  Q, K, V: attn_backward(grads[0], grads[1], Q, K, V, result1)
+
 - name: special_airy_ai(Tensor x) -> Tensor
   x: non_differentiable
 
