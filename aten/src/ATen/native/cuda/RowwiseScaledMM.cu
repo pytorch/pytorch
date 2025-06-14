@@ -589,7 +589,7 @@ void f8f8bf16_rowwise_impl_sm89(
       Output,
       EVTApplyBias>;
 
-  using EVTKernel = at::cuda::detail::enable_2x_kernel_for_sm89<
+  using EVTKernel = at::cuda::detail::enable_2x_kernel_for_sm89_sm12x<
       typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
           DtypeA, LayoutInputA, cutlass::ComplexTransform::kNone, AlignmentInputA,
           DtypeB, LayoutInputB, cutlass::ComplexTransform::kNone, AlignmentInputB,
