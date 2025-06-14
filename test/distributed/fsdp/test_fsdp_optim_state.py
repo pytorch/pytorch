@@ -1689,7 +1689,7 @@ class TestFSDPOptimState(FSDPTest):
         current_rank = dist.get_rank()
         is_fsdp_rank = current_rank >= total_ranks // 2
         mesh = dist.DeviceMesh(
-            'cuda',
+            "cuda",
             mesh=target_ranks,
             mesh_dim_names=("shard",),
         )
@@ -1719,9 +1719,8 @@ class TestFSDPOptimState(FSDPTest):
                 osd = FSDP.optim_state_dict(model, optim, group=mesh.get_group())
                 ref_osd = optim.state_dict()
                 self._check_same_state(osd, ref_osd, check_same_param_keys=False)
-        
         dist.barrier()
-    
+
     @skip_if_lt_x_gpu(2)
     def test_optim_state_without_param_groups(self):
         class SimpleModel(torch.nn.Module):
