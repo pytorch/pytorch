@@ -13,6 +13,7 @@ flaky_models = {
     "gluon_inception_v3",
     "detectron2_maskrcnn_r_101_c4",
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
+    "detectron2_fcos_r_50_fpn",
 }
 
 
