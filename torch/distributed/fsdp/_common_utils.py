@@ -105,6 +105,11 @@ class _UninitializedDeviceHandle(_FSDPDeviceHandle):
 
 
 class _FSDPState(_State):
+    # NOTE: These are used as tokens to ensure that there is at most one ongoing allgather
+    # and reducescatter each in the FSDP pass.
+    _all_gather_work_handle: Optional["FlatParamHandle"] = None
+    _reduce_scatter_work_handle: Optional["FlatParamHandle"] = None
+
     def __init__(self) -> None:
         # TODO: Move all the attributes to this class to enable typing for
         # FSDP/fully_shard.
