@@ -287,6 +287,10 @@ bool Reducer::static_graph_after_first_iteration() {
   return static_graph_ && num_bwd_calls_ > 1;
 }
 
+bool Reducer::should_push_rebuilt_params() {
+  return !has_rebuilt_bucket_ && (static_graph_after_first_iteration() || (dynamic_graph_find_unused() && num_bwd_calls_==1));
+}
+
 bool Reducer::ddp_graph_static() {
   std::lock_guard<std::mutex> lock(mutex_);
   return ddp_graph_static_;
@@ -526,7 +530,7 @@ at::Tensor Reducer::get_local_used_map_on_device() const {
 
 void Reducer::push_rebuilt_params_for_all_indices() {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!should_rebuild_buckets() || !rebuilt_param_indices_.empty()) {
+  if (has_rebuilt_bucket_ || !rebuilt_param_indices_.empty()) {
     return;
   }
   const auto variable_count = params_.size();
@@ -719,14 +723,14 @@ void Reducer::autograd_hook(size_t index) {
         "then got used in the second iteration. this is not ",
         "compatible with static_graph set to True.");
     if (--numGradHooksTriggeredMapPerIteration_[index] == 0) {
-      if (should_rebuild_buckets()) {
+      if (should_push_rebuilt_params()) {
         push_rebuilt_params(index);
       }
       // Finally mark variable for which this function was originally called.
       mark_variable_ready(index);
     }
   } else {
-    if (should_rebuild_buckets()) {
+    if (should_push_rebuilt_params()) {
       push_rebuilt_params(index);
     }
     // Finally mark variable for which this function was originally called.
@@ -927,7 +931,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
       }
       // Check that all buckets were completed and had their work kicked off.
       TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
-      if (static_graph_after_first_iteration() && should_rebuild_buckets()) {
+      if (should_push_rebuilt_params()) {
         for (const auto& unused_index : unused_parameters_) {
           push_rebuilt_params(unused_index);
         }
@@ -1870,7 +1874,7 @@ bool Reducer::rebuild_buckets() {
   // exception below.
   std::lock_guard<std::mutex> lock(mutex_);
   ensure_prior_reduction_finished();
-  if (!should_rebuild_buckets() || rebuilt_params_.empty()) {
+  if (has_rebuilt_bucket_ || rebuilt_params_.empty()) {
     return false;
   }
 
