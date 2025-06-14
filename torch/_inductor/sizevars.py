@@ -488,9 +488,10 @@ class SizeVarAllocator:
 
     def guard_int(self, expr: Union[Expr, int]) -> int:
         """
-        Like guard_int in symbolic_shapes.py, this function works with SymPy expressions. It extracts
-        the value represented by expr from shapeEnv and specialize the compiled graph on it).
-        Raises an error if the result cannot be determined due to unhinted or unbacked symbols
+        Similar to guard_int in symbolic_shapes.py, except this function works with SymPy
+        expressions instead of SymNodes. It extracts the value represented by expr from shapeEnv
+        and specialize the compiled graph on it. Raises an error if the result cannot be
+        determined due to unhinted or unbacked symbols.
         """
         if isinstance(expr, int):
             return expr
