@@ -10,6 +10,8 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
 
+#include <nvshmem.h>
+
 namespace c10d {
 namespace symmetric_memory {
 
@@ -48,16 +50,16 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
               << "rank_to_global_rank: " << rank_to_global_rank_;
 
     for (int r = 0; r < world_size_; ++r) {
-      buffers_.push_back(nvshmem_extension::nvshmem_ptr(
+      buffers_.push_back(nvshmem_ptr(
           allocation->ptr, rank_to_global_rank_[r]));
     }
 
     // TODO: use the same allocation for signal pad
-    void* signal_pad_ptr = nvshmem_extension::nvshmem_malloc(signal_pad_size);
+    void* signal_pad_ptr = nvshmem_malloc(signal_pad_size);
     AT_CUDA_CHECK(cudaMemset(signal_pad_ptr, 0, signal_pad_size));
 
     for (int r = 0; r < world_size_; ++r) {
-      signal_pads_.push_back(nvshmem_extension::nvshmem_ptr(
+      signal_pads_.push_back(nvshmem_ptr(
           signal_pad_ptr, rank_to_global_rank_[r]));
     }
 
@@ -257,7 +259,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     int world_size = group_info.world_size;
 
     nvshmem_extension::initialize_nvshmem_with_store(store, rank, world_size);
-    auto ptr = nvshmem_extension::nvshmem_malloc(size);
+    auto ptr = nvshmem_malloc(size);
     auto allocation =
         std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
     // TODO: thread safety
