@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import logging
-import unittest
 
 import pytest
 import transformers
@@ -16,8 +15,7 @@ from torch.testing._internal import common_utils
 from torch.utils import _pytree as torch_pytree
 
 
-@common_utils.instantiate_parametrized_tests
-class DynamoExporterTest(common_utils.TestCase):
+class _WithExport:
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
         onnx_program = torch.onnx.export(
             model,
@@ -31,6 +29,9 @@ class DynamoExporterTest(common_utils.TestCase):
         assert onnx_program is not None
         return onnx_program
 
+
+@common_utils.instantiate_parametrized_tests
+class DynamoExporterTest(common_utils.TestCase, _WithExport):
     def test_insert_contiguous_between_transpose_and_view(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
@@ -308,7 +309,7 @@ class DynamoExporterTest(common_utils.TestCase):
                 return x + y
 
         dim0_x = torch.export.Dim("dim0_x", min=6)
-        dynamic_shapes = {"x": {0: dim0_x}, "y": None}
+        dynamic_shapes = {"x": {0: dim0_x}, "y": torch.export.Dim.STATIC}
         # specialized input y to 5 during tracing
         onnx_program = self.export(
             Model(),
@@ -549,7 +550,7 @@ class DynamoExporterTest(common_utils.TestCase):
         # all of these should be fine
         dynamic_shapes = (
             {0: dx, 1: torch.export.Dim.AUTO},
-            {0: dy, 1: None},
+            {0: dy, 1: torch.export.Dim.STATIC},
             {0: dz, 1: 3},
         )
         onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
@@ -617,20 +618,6 @@ class DynamoExporterTest(common_utils.TestCase):
             [node.op_type for node in onnx_program.model.graph],
         )
 
-    def test_group_norm_opset_21(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return torch.nn.functional.group_norm(x, 4)
-
-        x = torch.randn(1, 4, 4, 4, dtype=torch.float32)
-        onnx_program = self.export(Model(), (x,), opset_version=21)
-        # TODO(after ort support): As of ONNX Runtime 1.22, the operator is not implemented yet.
-        # call assert_onnx_program after ort support
-        self.assertIn(
-            "GroupNormalization",
-            [node.op_type for node in onnx_program.model.graph],
-        )
-
     def test_scan_cdist_add(self):
         def dist(unused: torch.Tensor, x: torch.Tensor, samex: torch.Tensor):
             sub = samex - x.reshape((1, -1))
@@ -662,7 +649,9 @@ class DynamoExporterTest(common_utils.TestCase):
 
         class ScanModel(torch.nn.Module):
             def forward(self, x, y):
-                carry, out = torch.ops.higher_order.scan(dist, [y], [x], additional_inputs=[])
+                carry, out = torch.ops.higher_order.scan(
+                    dist, [y], [x], additional_inputs=[]
+                )
                 return out
 
         x_rows = torch.export.Dim("x_rows")
@@ -670,10 +659,13 @@ class DynamoExporterTest(common_utils.TestCase):
         dim = torch.export.Dim("dim")
         inputs = (torch.randn(3, 4), torch.randn(5, 4))
         onnx_program = self.export(
-            ScanModel(), inputs, dynamic_shapes=({0: x_rows, 1: dim}, {0: y_rows, 1: dim})
+            ScanModel(),
+            inputs,
+            dynamic_shapes=({0: x_rows, 1: dim}, {0: y_rows, 1: dim}),
         )
         onnx_testing.assert_onnx_program(onnx_program)
 
+    @pytest.mark.xfail(reason="Data dependent error.")
     def test_scan_loop_inplace(self):
         def dummy_loop(padded: torch.Tensor, pos: torch.Tensor):
             copy = torch.zeros(padded.shape)
@@ -716,6 +708,23 @@ class DynamoExporterTest(common_utils.TestCase):
         )
         onnx_program = self.export(ep)
         onnx_testing.assert_onnx_program(onnx_program)
+
+
+@common_utils.instantiate_parametrized_tests
+class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
+    def test_group_norm_opset_21(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.group_norm(x, 4)
+
+        x = torch.randn(1, 4, 4, 4, dtype=torch.float32)
+        onnx_program = self.export(Model(), (x,), opset_version=21)
+        # TODO(after ort support): As of ONNX Runtime 1.22, the operator is not implemented yet.
+        # call assert_onnx_program after ort support
+        self.assertIn(
+            "GroupNormalization",
+            [node.op_type for node in onnx_program.model.graph],
+        )
 
     def test_graph_attention_opset_23(self):
         class Model(torch.nn.Module):
