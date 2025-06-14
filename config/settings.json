@@ -1,0 +1,15 @@
+{
+  "agents": {
+    "online_agent_enabled": false,
+    "online_agent_api_key": "YOUR_API_KEY_HERE",
+    "max_requests_framework_improve": 10,
+    "max_requests_model_builder": 5
+  },
+  "model_building": {
+    "max_layers": 10,
+    "max_iterations_no_improvement": 3
+  },
+  "logging": {
+    "level": "INFO"
+  }
+}
