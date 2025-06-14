@@ -1,16 +1,19 @@
+```{eval-rst}
 .. role:: hidden
     :class: hidden-section
+```
 
-.. _nn-init-doc:
+(nn-init-doc)=
 
-torch.nn.init
-=============
+# torch.nn.init
 
-.. warning::
-    All the functions in this module are intended to be used to initialize neural network
-    parameters, so they all run in :func:`torch.no_grad` mode and will not be taken into
-    account by autograd.
+```{warning}
+All the functions in this module are intended to be used to initialize neural network
+parameters, so they all run in {func}`torch.no_grad` mode and will not be taken into
+account by autograd.
+```
 
+```{eval-rst}
 .. currentmodule:: torch.nn.init
 .. autofunction:: calculate_gain
 .. autofunction:: uniform_
@@ -27,3 +30,4 @@ torch.nn.init
 .. autofunction:: trunc_normal_
 .. autofunction:: orthogonal_
 .. autofunction:: sparse_
+```
