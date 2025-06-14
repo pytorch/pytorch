@@ -257,6 +257,7 @@ using Conv3dFuncOptions = ConvFuncOptions<3>;
 template <size_t D>
 struct ConvTransposeOptions {
   using padding_mode_t = detail::conv_padding_mode_t;
+  using padding_t = detail::conv_padding_t<D>;
 
   ConvTransposeOptions(
       int64_t in_channels,
@@ -290,7 +291,7 @@ struct ConvTransposeOptions {
   /// For a `D`-dim convolution, must be a single number or a list of `D`
   /// numbers.
   /// This parameter __can__ be changed after construction.
-  TORCH_ARG(ExpandingArray<D>, padding) = 0;
+  TORCH_ARG(padding_t, padding) = 0;
 
   /// For transpose convolutions, the padding to add to output volumes.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
@@ -351,6 +352,7 @@ namespace functional {
 /// Options for a `D`-dimensional convolution functional.
 template <size_t D>
 struct ConvTransposeFuncOptions {
+  using padding_t = torch::nn::detail::conv_padding_t<D>;
   /// optional bias of shape `(out_channels)`. Default: ``None``
   TORCH_ARG(torch::Tensor, bias) = Tensor();
 
@@ -362,7 +364,7 @@ struct ConvTransposeFuncOptions {
   /// Implicit paddings on both sides of the input.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
   /// numbers.
-  TORCH_ARG(ExpandingArray<D>, padding) = 0;
+  TORCH_ARG(padding_t, padding) = 0;
 
   /// Additional size added to one side of each dimension in the output shape.
   /// Default: 0
