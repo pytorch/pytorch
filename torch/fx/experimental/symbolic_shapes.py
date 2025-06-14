@@ -2359,7 +2359,7 @@ def _maybe_evaluate_static_worker(
         # we have to increase it by offset (and conversely, the new
         # variables have to have their value range bounds adjusted as
         # well)
-        s = sympy.Symbol(f"evaluate_static_shape_{idx}", positive=True, integer=True)
+        s = sympy.Symbol(f"guard_int_{idx}", positive=True, integer=True)
 
         # Note:
         #   Offset might be a fraction(e.g. aten.split.Tensor), but shapes are always integers.
