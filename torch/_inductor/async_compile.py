@@ -2,18 +2,14 @@
 from __future__ import annotations
 
 import atexit
-import concurrent.futures
-import dataclasses
 import functools
 import json
 import logging
 import multiprocessing
 import os
 import sys
-import threading
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from dataclasses import dataclass
 from functools import partial
 from time import time, time_ns
 from typing import Any, Callable, Optional, TYPE_CHECKING
@@ -41,6 +37,9 @@ from torch._inductor.codecache import (
     torch_key,
 )
 from torch._inductor.compile_worker.subproc_pool import AnyPool, SubprocPool
+from torch._inductor.compile_worker.tracked_process_pool import (
+    TrackedProcessPoolExecutor,
+)
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
@@ -517,87 +516,6 @@ class AsyncCompile:
                     "to cause compilation to occur in the main process."
                 ) from e
             pbar.update(1)
-
-
-@dataclass
-class _QueueStats:
-    # Mapping from id(future) -> start time
-    pending: dict[int, float] = dataclasses.field(default_factory=dict)
-    timing: list[float] = dataclasses.field(default_factory=list)
-    enqueue_count: int = 0
-    dequeue_count: int = 0
-    max_queue_depth: int = 0
-    pool_count: int = 0
-
-
-# The queue statistics tracked by TrackedProcessPoolExecutor. Always grab
-# _queue_stats_lock before touching.
-_queue_stats = _QueueStats()
-_queue_stats_lock = threading.Lock()
-
-
-class TrackedProcessPoolExecutor(ProcessPoolExecutor):
-    def __init__(self, *args, **kwargs) -> None:
-        with _queue_stats_lock:
-            _queue_stats.pool_count += 1
-        super().__init__(*args, **kwargs)
-
-    def _record_dequeue(self, f: concurrent.futures.Future[Any]) -> None:
-        now = time()
-        with _queue_stats_lock:
-            stats = _queue_stats
-            if (start_time := stats.pending.pop(id(f), None)) is None:
-                return
-            stats.dequeue_count += 1
-            duration = now - start_time
-            stats.timing.append(duration)
-
-    def _record_enqueue(self, f: concurrent.futures.Future[Any]) -> None:
-        # Monkeypatch the set_running_or_notify_cancel so we can track when the Future moves out of PENDING.
-        saved_running_or_notify_cancel = f.set_running_or_notify_cancel
-
-        def set_running_or_notify_cancel():
-            self._record_dequeue(f)
-            return saved_running_or_notify_cancel()
-
-        now = time()
-        with _queue_stats_lock:
-            stats = _queue_stats
-            stats.pending[id(f)] = now
-            stats.enqueue_count += 1
-            stats.max_queue_depth = max(stats.max_queue_depth, len(stats.pending))
-            f.set_running_or_notify_cancel = set_running_or_notify_cancel  # type: ignore[method-assign]
-
-        if f._state != concurrent.futures._base.PENDING:
-            self._record_dequeue(f)
-
-    def submit(self, fn, /, *args, **kwargs):
-        f = super().submit(fn, *args, **kwargs)
-        self._record_enqueue(f)
-        return f
-
-
-@atexit.register
-def _queue_stats_report() -> None:
-    stats = _queue_stats
-    if stats.pool_count == 0:
-        return
-
-    timing = stats.timing
-    timing.sort()
-
-    log.info("AsyncCompile Metrics:")
-    log.info("  Pools %s", stats.pool_count)
-    log.info(
-        "  Items %d enqueued / %d dequeued", stats.enqueue_count, stats.dequeue_count
-    )
-    log.info("  Max Queue Depth: %d", stats.max_queue_depth)
-    n = len(timing)
-    if n > 0:
-        log.info("  Longest queue time: %0.2fs", timing[-1])
-        log.info("  P50: %0.2fs", timing[n // 2])
-        if n >= 20:
-            log.info("  P95: %0.2fs", timing[n * 95 // 100])
 
 
 if (
