@@ -24,7 +24,6 @@ from torch.testing._internal.common_cuda import (
     SM89OrLater,
     SM90OrLater,
     xfailIfSM100OrLater,
-    xfailIfSM120OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -1102,7 +1101,6 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @onlyCUDA
-    @xfailIfSM120OrLater
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("use_fast_accum", [True, False])
@@ -1209,7 +1207,6 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-    @xfailIfSM120OrLater
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("base_dtype", [torch.bfloat16])
