@@ -1793,7 +1793,8 @@ class SIMDScheduling(BaseScheduling):
                 score = V.graph.sizevars.size_hint(
                     sympy_product(
                         size for size, stride in zip(ranges, strides) if stride != 0
-                    )
+                    ),
+                    fallback=1,
                 )
                 if dep.name in write_names:
                     # ngimel said contiguous writes is more important than reads
@@ -1805,7 +1806,8 @@ class SIMDScheduling(BaseScheduling):
 
                 if (
                     V.graph.sizevars.size_hint(
-                        score - sympy_product(itertools.chain(ranges, reduction_ranges))
+                        score - sympy_product(itertools.chain(ranges, reduction_ranges)),
+                        fallback=1,
                     )
                     >= 0
                 ):
