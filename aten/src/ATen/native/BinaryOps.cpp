@@ -1,6 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/BinaryOps.h>
 
+#include <cmath>
+#include <iostream>
 #include <type_traits>
 #include <utility>
 
@@ -9,6 +11,9 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/TypeDefault.h>
+#include <ATen/core/ScalarType.h>
+#include <ATen/ops/result_type.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -144,6 +149,9 @@
 #include <ATen/ops/xlogy.h>
 #include <ATen/ops/xlogy_native.h>
 #include <ATen/ops/xor_native.h>
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/Dispatch.h>
 #endif
 
 namespace at::meta {
@@ -429,6 +437,7 @@ DEFINE_DISPATCH(shifted_chebyshev_polynomial_t_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_u_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_v_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_w_stub);
+DEFINE_DISPATCH(ldexp_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -1542,27 +1551,46 @@ TORCH_IMPL_FUNC(heaviside_out) (
   heaviside_stub(device_type(), *this);
 }
 
-static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
-  const auto self_dtype = self.scalar_type();
-  // All integral types are promoted to float32
-  if (isIntegralType(self_dtype, true) || self_dtype == kFloat) {
-      return at::pow(2.0, other);
-  }
-  // For double and reduced floating types do regular type promotion
-  return at::full({}, 2.0, self.options()).pow(other);
-}
-
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  return at::mul_out(result, self, _pow2(self, other));
-}
+    TORCH_CHECK(other.scalar_type() == at::kInt || other.scalar_type() == at::kLong,
+                "ldexp(): exponent must be an integer tensor (int32 or int64), but got ", other.scalar_type());
 
+    // Make sure output is floating type!
+    TORCH_CHECK(c10::isFloatingType(result.scalar_type()),
+                "ldexp(): result/output tensor must be floating point (got ", result.scalar_type(), ")");
+
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .add_output(result)
+      .add_input(self)
+      .add_input(other)
+      .build();
+
+    ldexp_stub(result.device().type(), iter);
+    return result;
+}
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
-  return at::mul(self, _pow2(self, other));
+    ScalarType self_type = self.scalar_type();
+    ScalarType other_type = other.scalar_type();
+    ScalarType out_type;
+
+    if (c10::isFloatingType(self_type) || c10::isFloatingType(other_type)) {
+        out_type = c10::promoteTypes(self_type, other_type);
+        if (!c10::isFloatingType(out_type)) {
+            out_type = at::kFloat;
+        }
+    } else {
+        out_type = at::kFloat;
+    }
+
+    Tensor result = at::empty(self.sizes(), self.options().dtype(out_type));
+    Tensor self_fp = self.to(out_type);
+    return at::native::ldexp_out(self_fp, other, result);
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
-  return at::ldexp_out(self, self, other);
+  return at::native::ldexp_out(self, other, self);
 }
 
 Tensor& xlogy_out(const Scalar& self, const Tensor& other, Tensor& result) {
@@ -1609,4 +1637,4 @@ Tensor special_xlogy(const Tensor& x, const Scalar& y) {
   return at::xlogy(x, y);
 }
 
-} // namespace at::native
+}// namespace at::native
