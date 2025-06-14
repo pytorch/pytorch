@@ -244,24 +244,50 @@ class CompileCounter:
         self.op_count = 0
 
 
+_CP = ParamSpec("_CP")
+_CT = TypeVar("_CT")
+
+
 class CompileCounterWithBackend:
-    def __init__(self, backend: str) -> None:
+    def __init__(
+        self,
+        backend: Union[str, Callable[_CP, _CT]],
+        mode: Optional[str] = None,
+        options: Optional[dict[str, Union[str, int, bool]]] = None,
+        dynamic: Optional[bool] = None,
+    ) -> None:
+        from torch import _TorchCompileInductorWrapper, _TorchCompileWrapper
+
         self.frame_count = 0
         self.op_count = 0
-        self.backend = backend
+        self.backend = (
+            _TorchCompileInductorWrapper(
+                mode=mode,
+                options=options,
+                dynamic=dynamic,
+            )
+            if backend == "inductor"
+            else _TorchCompileWrapper(
+                backend,
+                mode=mode,
+                options=options,
+                dynamic=dynamic,
+            )
+        )
         self.graphs: list[torch.fx.GraphModule] = []
 
     def __call__(
-        self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
-    ) -> Callable[..., Any]:
-        from .backends.registry import lookup_backend
-
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: list[torch.Tensor],
+        **kwargs: Any,
+    ) -> Any:
         self.frame_count += 1
         for node in gm.graph.nodes:
             if "call" in node.op:
                 self.op_count += 1
         self.graphs.append(gm)
-        return lookup_backend(self.backend)(gm, example_inputs)
+        return self.backend(gm, example_inputs)
 
     def clear(self) -> None:
         self.frame_count = 0
