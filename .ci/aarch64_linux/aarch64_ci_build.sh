@@ -3,9 +3,7 @@ set -eux -o pipefail
 
 GPU_ARCH_VERSION=${GPU_ARCH_VERSION:-}
 
-if [[ "$GPU_ARCH_VERSION" == *"12.6"* ]]; then
-    export TORCH_CUDA_ARCH_LIST="9.0"
-elif [[ "$GPU_ARCH_VERSION" == *"12.8"* ]]; then
+if [[ "$GPU_ARCH_VERSION" == *"12.9"* ]]; then
     export TORCH_CUDA_ARCH_LIST="9.0;10.0;12.0"
 fi
 
