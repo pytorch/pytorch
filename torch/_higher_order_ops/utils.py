@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import functools
 from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
@@ -7,9 +8,15 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
-from torch._ops import OperatorBase
+from torch._higher_order_ops.schema import HopSchema
+from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.functional_tensor import (
+    disable_functional_mode,
+    FunctionalTensor,
+)
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     disable_proxy_modes_tracing,
@@ -416,7 +423,6 @@ def unique_graph_name_with_root(
 
 def _from_fun(t):
     from torch._functorch.aot_autograd import from_fun
-    from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, torch.Tensor):
         if t.dtype != torch.bool:
@@ -526,6 +532,24 @@ def _maybe_fake_prop_ignore_unbacked(fn, args):
                     fake_mode.shape_env.ignore_fresh_unbacked_symbols()
                 )
         return fn(*args)
+
+
+def redirect_to_mode(hop: OperatorBase, mode):
+    """Utility for redispatching HOP to underlying mode
+
+    Args:
+        hop: The HOP to redispatch
+        mode: The mode to redispatch to
+
+    Returns:
+        A decorated function that implements the HOP for the given mode
+    """
+
+    @hop.py_impl(mode)
+    def impl(mode, *args, **kwargs):
+        return mode.__torch_dispatch__(hop, [], args, kwargs)
+
+    return impl
 
 
 # TODO: The parameter use_output_and_grad_bw is required because some operations
@@ -752,13 +776,13 @@ def check_input_alias_and_mutation(
         inp_out_alias_map,
         out_out_alias_map,
         mutated_inputs,
-    ) = check_input_alias_and_mutation_return_ouputs(gm, fake_args)[:-1]
+    ) = check_input_alias_and_mutation_return_outputs(gm, fake_args)[:-1]
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 
-def check_input_alias_and_mutation_return_ouputs(
+def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
-    fake_args: list[FakeTensor],
+    fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
 ) -> tuple[
     dict[int, int],
     dict[int, int],
@@ -766,6 +790,25 @@ def check_input_alias_and_mutation_return_ouputs(
     list[int],
     Union[tuple[Any, ...], list[Any]],
 ]:
+    # This function can be called under autograd, functional, proxy and fake tensor mode.
+    # We need to return either a fake tensor or a real tensor depending on the mode.
+    # to detect the input mutation/aliasing.
+    with disable_proxy_modes_tracing(), disable_functional_mode(), suspend_functionalization():
+
+        def _from_functional_tensor(t: torch.Tensor) -> torch.Tensor:
+            if isinstance(t, FunctionalTensor) or torch._is_functional_tensor(t):
+                return torch.empty_strided(
+                    t.size(),
+                    t.stride(),
+                    dtype=t.dtype,
+                    requires_grad=t.requires_grad,
+                    device=t.device,
+                )
+            return t
+
+        fake_args = pytree.tree_map_only(
+            torch.Tensor, _from_functional_tensor, fake_args
+        )
     # We want to disable active functional, proxy and fake modes if any.
     # to create a encapsulated environment for fake tensor prop
     with torch.utils._python_dispatch._disable_current_modes():
@@ -777,7 +820,8 @@ def check_input_alias_and_mutation_return_ouputs(
 
         def _tensor_version(t) -> Optional[int]:
             if isinstance(t, torch.Tensor):
-                assert isinstance(t, FakeTensor), "Only fake tensor is allowed"
+                if not isinstance(t, FakeTensor):
+                    raise RuntimeError("Only fake tensor is allowed")
                 return t._version
             return None
 
@@ -792,13 +836,13 @@ def check_input_alias_and_mutation_return_ouputs(
             # has a persistent fake mode but fake tensors can be created
             # outside of the tracing context (e.g. in testing).
             # Instead, we just look at fake_args fake tensor mode
-            prev_fake_mode = None
+            if len(fake_args) == 0:
+                return torch.fx.experimental.symbolic_shapes.ShapeEnv()
+
             for arg in fake_args:
-                if isinstance(arg, torch.Tensor):
-                    assert isinstance(arg, FakeTensor)
-                    prev_fake_mode = arg.fake_mode
-            assert prev_fake_mode is not None
-            return prev_fake_mode.shape_env
+                if isinstance(arg, FakeTensor):
+                    return arg.fake_mode.shape_env
+            return None
 
         # Clone the fake args to avoid mutating the original fake args
         with ExitStack() as ctx_stack:
@@ -891,10 +935,7 @@ def register_fake(hop, fn=None):
     def register(func):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
-        # Redirect the hop to the fake tensor mode implementation.
-        @hop.py_impl(FakeTensorMode)
-        def _(mode, *args, **kwargs):
-            return mode.__torch_dispatch__(hop, [], args, kwargs)
+        redirect_to_mode(hop, FakeTensorMode)
 
         registered_hop_fake_fns[hop] = func
         return func
@@ -937,3 +978,120 @@ class FunctionalizeCtxWrapper:
                     *args, **kwargs
                 )
         return self.ctx.functionalize(self.subgraph)(*args, **kwargs)
+
+
+# A wrapper over HigherOrderOperator that also carries its schema
+class HopInstance:
+    def __init__(self, op: HigherOrderOperator, schema: HopSchema):
+        assert isinstance(op, HigherOrderOperator), op
+        self._op = op
+        # Using "_" to be consistent with how we access _schema of OpOverload
+        self._schema = schema
+
+    def __call__(self, *args, **kwargs):
+        return self._op(*args, **kwargs)
+
+    @staticmethod
+    def create(hop: HigherOrderOperator, *args, **kwargs):
+        return HopInstance(hop, hop.gen_schema(*args, **kwargs))
+
+
+# This call_op can be used to call a HopInstance with
+# flat args and kwargs. We need to make use of the hop's schema's tree_spec
+# to unflatten the args and kwargs before calling the hop.
+def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
+    if isinstance(op, OpOverload):
+        return op(*args, **kwargs)
+
+    assert isinstance(op, HopInstance), op
+    schema = op._schema
+    bound_args = list(args)
+    bound_kwargs = {}
+    for arg in schema.arguments[len(bound_args) :]:
+        assert arg.name in kwargs, (arg.name, kwargs)
+        val = kwargs[arg.name]
+        if not arg.kwarg_only:
+            bound_args.append(val)
+        else:
+            bound_kwargs[arg.name] = val
+
+    if schema.tree_spec is not None:
+        assert len(bound_args) == len(schema.arguments) and len(bound_kwargs) == 0
+        args, kwargs = pytree.tree_unflatten(bound_args, schema.tree_spec)
+        return op(*args, **kwargs)
+    else:
+        assert len(bound_args) + len(bound_kwargs) == len(schema.arguments)
+        return op(*bound_args, **bound_kwargs)
+
+
+def materialize_as_graph(
+    fn: Callable,
+    args: tuple[Any],
+    include_key_set: Optional[torch._C.DispatchKeySet] = None,
+    exclude_key_set: Optional[torch._C.DispatchKeySet] = None,
+    force_enable_grad=False,
+) -> torch.fx.GraphModule:
+    if include_key_set is None:
+        include_key_set = torch._C._dispatch_tls_local_include_set()
+    if exclude_key_set is None:
+        exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+
+    @torch._dynamo.disable(recursive=True, reason=None)
+    def _materialize_as_graph_inner():
+        with suspend_functionalization(), disable_functional_mode():
+            with disable_proxy_modes_tracing():
+                unfunc_t = [_from_fun(arg) for arg in args]
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
+                )
+                if force_enable_grad:
+                    stack.enter_context(torch.enable_grad())
+                return _maybe_reenter_make_fx(fn)(*unfunc_t)
+
+    gm = _materialize_as_graph_inner()
+    assert gm is not None
+    return gm
+
+
+def materialize_callable_in_args(op: HopInstance, args, kwargs):
+    schema = op._schema
+    hop = op._op
+    flat_args, flat_spec = pytree.tree_flatten((args, kwargs))
+
+    def wrapped_fn(*flat_args):
+        return call_op(op, args, kwargs)
+
+    # We need to trace the higher order op in order to materilaize the callable inputs that
+    # are a callable (e.g. after functionalization key)
+    gm = reenter_make_fx(wrapped_fn)(*flat_args)
+    hop_node = gm.graph.find_nodes(op="call_function", target=hop)[0]
+    arg_proxies = pytree.tree_leaves((hop_node.args, hop_node.kwargs))
+    assert isinstance(schema, torch._C.FunctionSchema) and len(arg_proxies) == len(
+        schema.arguments
+    )
+
+    # call_op preserves ordering of proxies via schema
+    materialized_args = []
+    for i, (proxy, arg) in enumerate(zip(arg_proxies, schema.arguments)):
+        if (
+            isinstance(proxy, torch.fx.Node)
+            and proxy.op == "get_attr"
+            and isinstance(getattr(gm, proxy.target), torch.fx.GraphModule)  # type: ignore[arg-type]
+        ):
+            assert callable(flat_args[i]), (schema, args, kwargs)
+            materialized_args.append(getattr(gm, proxy.target))  # type: ignore[arg-type]
+        else:
+            materialized_args.append(flat_args[i])
+
+    return pytree.tree_unflatten(materialized_args, flat_spec)
+
+
+def _has_gen_schema(op: HigherOrderOperator):
+    # There is an InvokeQuant argument we cannot gen_schema.
+    if op is torch.ops.higher_order.invoke_quant_packed:
+        return False
+    method = "gen_schema"
+    return hasattr(type(op), method) and getattr(type(op), method) is not getattr(
+        HigherOrderOperator, method
+    )

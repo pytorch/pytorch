@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 
-from __future__ import annotations
-
 import os
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import Union
 
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 import argparse
@@ -195,20 +191,26 @@ class UploadUtilizationData:
         info: WorkflowInfo,
         dry_run: bool = False,
         debug: bool = False,
+        local_path: str = "",
     ):
         self.artifact_prefix = artifact_prefix
         self.info = info
         self.segment_generator = SegmentGenerator()
         self.debug_mode = debug
         self.dry_run = dry_run
+        self.local_path = local_path
 
     def start(self) -> None:
-        metadata, valid_records, _ = self.get_log_data(
-            self.info.workflow_run_id,
-            self.info.job_id,
-            self.info.run_attempt,
-            self.artifact_prefix,
-        )
+        if self.local_path:
+            metadata, valid_records, _ = self.get_log_data_from_local(self.local_path)
+        else:
+            print(f"Search for test log in s3 bucket: {UTILIZATION_BUCKET}")
+            metadata, valid_records, _ = self.get_log_data_from_s3(
+                self.info.workflow_run_id,
+                self.info.job_id,
+                self.info.run_attempt,
+                self.artifact_prefix,
+            )
 
         if not metadata:
             print("[Log Model] Failed to process test log, metadata is None")
@@ -276,7 +278,23 @@ class UploadUtilizationData:
         key = f"{collection}/{version}/{repo}/{workflow_run_id}/{workflow_run_attempt}/{job_id}/{file_name}"
         upload_to_s3(bucket_name, key, docs)
 
-    def get_log_data(
+    def get_log_data_from_local(
+        self,
+        file_path: str,
+        artifact_prefix: str = "",
+    ) -> tuple[
+        Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
+    ]:
+        test_log_content = read_file(file_path)
+        if not test_log_content:
+            return None, [], []
+        metadata, records, error_records = self.convert_to_log_models(test_log_content)
+        if metadata is None:
+            return None, [], []
+        print(f"Converted Log Model: UtilizationMetadata:\n {metadata}")
+        return metadata, records, error_records
+
+    def get_log_data_from_s3(
         self,
         workflow_run_id: int,
         job_id: int,
@@ -378,13 +396,25 @@ def handle_file(file_path: Path) -> str:
     return ""
 
 
-def read_file(file_path: Path) -> str:
+def read_file(file_path: Union[str, Path]) -> str:
     try:
-        with open(file_path) as f:
-            return f.read()
+        if isinstance(file_path, Path):
+            if file_path.is_file():
+                with file_path.open("r") as f:
+                    return f.read()
+            else:
+                print(f"::warning file {file_path} does not exist.")
+        elif isinstance(file_path, str):
+            if os.path.isfile(file_path):
+                with open(file_path) as f:
+                    return f.read()
+            else:
+                print(f"::warning file {file_path} does not exist.")
+        else:
+            print(f"::warning unsupported file_path type: {type(file_path)}")
     except Exception as e:
-        print(f"::warning trying to download test log {object} failed by: {e}")
-        return ""
+        print(f"::warning trying to read file {file_path} failed by: {e}")
+    return ""
 
 
 def unzip_file(path: Path, file_name: str) -> str:
@@ -451,6 +481,12 @@ def parse_args() -> argparse.Namespace:
         required=False,
         help="artifact prefix to download raw utilizarion data from s3",
     )
+    parser.add_argument(
+        "--local-path",
+        type=str,
+        required=False,
+        help="path of the raw utilizarion data from local location",
+    )
 
     return parser.parse_args()
 
@@ -478,12 +514,14 @@ if __name__ == "__main__":
     artifact_prefix = JOB_TEST_ARTIFACT_PREFIX
     if args.artifact_prefix:
         artifact_prefix = args.artifact_prefix
-    print(f"args.artifact_prefix: {args.artifact_prefix}")
-    print(f"artifact_prefix: {artifact_prefix}")
+        print(f"args.artifact_prefix: {args.artifact_prefix}")
+        print(f"artifact_prefix: {artifact_prefix}")
+
     ud = UploadUtilizationData(
         info=workflow_info,
         dry_run=args.dry_run,
         debug=args.debug,
         artifact_prefix=artifact_prefix,
+        local_path=args.local_path,
     )
     ud.start()

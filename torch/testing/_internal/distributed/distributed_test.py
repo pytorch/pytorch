@@ -7,6 +7,7 @@ import math
 import operator
 import os
 import random
+import re
 import sys
 import tempfile
 import time
@@ -84,6 +85,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.data.distributed import DistributedSampler
@@ -966,7 +968,8 @@ class DistributedTest:
         @skip_if_lt_x_gpu(4)
         def test_new_subgroups_world_size_not_divisible_by_group_size(self):
             with self.assertRaisesRegex(
-                ValueError, "The world size must be divisible by 'group_size'"
+                ValueError,
+                re.escape("The world size (4) must be divisible by 'group_size=3'"),
             ):
                 dist.new_subgroups(3)
 
@@ -4851,6 +4854,7 @@ class DistributedTest:
                         # case.
                         optim.zero_grad(set_to_none=True)
 
+        @skipIfRocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward(self):
             for optim_cls, init_before in itertools.product(
@@ -4863,6 +4867,7 @@ class DistributedTest:
                         init_before=init_before,
                     )
 
+        @skipIfRocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
             for init_before in [True, False]:
@@ -4873,6 +4878,7 @@ class DistributedTest:
                     gradient_as_bucket_view=False,
                 )
 
+        @skipIfRocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_ignored_params(self):
             torch.cuda.set_device(self.rank)
@@ -8668,7 +8674,7 @@ class DistributedTest:
             base_model = self._test_different_graph_across_ranks(
                 find_unused_parameters=True
             )
-            self.assertTrue(
+            self.assertFalse(
                 base_model._get_ddp_logging_data().get("has_rebuilt_buckets", 0)
             )
             static_model = self._test_different_graph_across_ranks(static_graph=True)
@@ -10325,7 +10331,7 @@ class DistributedTest:
             with OpPatcher():
                 ddp(input).sum().backward()
 
-        def _test_unused_parameters_buckets(
+        def _test_skip_all_reduce_unused_parameters(
             self,
             find_unused_parameters=False,
             static_graph=False,
@@ -10362,10 +10368,10 @@ class DistributedTest:
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_skip_all_reduce_unused_parameters(self):
-            base_model = self._test_unused_parameters_buckets(
+            base_model = self._test_skip_all_reduce_unused_parameters(
                 find_unused_parameters=True, static_graph=False
             )
-            test_model_1 = self._test_unused_parameters_buckets(
+            test_model_1 = self._test_skip_all_reduce_unused_parameters(
                 find_unused_parameters=True,
                 static_graph=False,
                 skip_all_reduce_unused_params=True,
@@ -10376,27 +10382,6 @@ class DistributedTest:
             )
             self.assertEqual(
                 test_model_1._get_ddp_logging_data().get("num_buckets_reduced"), 1
-            )
-
-            for i, j in zip(base_model.parameters(), test_model_1.parameters()):
-                self.assertEqual(i, j)
-
-        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
-        @skip_if_lt_x_gpu(2)
-        def test_rebuild_buckets_unused_parameters(self):
-            base_model = self._test_unused_parameters_buckets(
-                find_unused_parameters=False, static_graph=True
-            )
-            test_model_1 = self._test_unused_parameters_buckets(
-                find_unused_parameters=True,
-                static_graph=False,
-            )
-
-            self.assertEqual(
-                base_model._get_ddp_logging_data().get("has_rebuilt_buckets"), 1
-            )
-            self.assertEqual(
-                test_model_1._get_ddp_logging_data().get("has_rebuilt_buckets"), 1
             )
 
             for i, j in zip(base_model.parameters(), test_model_1.parameters()):

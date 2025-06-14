@@ -56,7 +56,7 @@ def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
     return content
 
 
-@functools.lru_cache(None)
+@functools.cache
 def try_import_cutlass() -> bool:
     """
     We want to support three ways of passing in CUTLASS:
@@ -251,7 +251,7 @@ class CUTLASSArgs:
 
 
 @clear_on_fresh_inductor_cache
-@functools.lru_cache(None)
+@functools.cache
 def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     # Note: Cache needs to be specific for cuda architecture and version
 
@@ -314,6 +314,7 @@ DTYPE_TO_CUTLASS_TYPE = {
     **DTYPE_TO_CPP,
     torch.float16: "__half",
     torch.bfloat16: "__nv_bfloat16",
+    torch.float8_e4m3fn: "__nv_fp8_e4m3",
 }
 
 
@@ -359,6 +360,8 @@ def dtype_match(
         return cutlass_dtype == cutlass_library.library.DataType.u8
     elif torch_dtype == torch.int32:
         return cutlass_dtype == cutlass_library.library.DataType.s32
+    elif torch_dtype == torch.float8_e4m3fn:
+        return cutlass_dtype == cutlass_library.library.DataType.e4m3
     else:
         return False
 
@@ -389,7 +392,7 @@ def get_accumulator_dtype(
         ]:
             torch_dtype = dtype0
 
-    if torch_dtype in (torch.float16, torch.bfloat16, torch.float):
+    if torch_dtype in (torch.float16, torch.bfloat16, torch.float, torch.float8_e4m3fn):
         return torch.float
     if torch_dtype == torch.int8:
         return torch.int32
@@ -407,7 +410,7 @@ def get_alignments(torch_dtype: torch.dtype) -> list[int]:
         return [8, 4, 2, 1]
     elif torch_dtype == torch.float:
         return [4, 2, 1]
-    elif torch_dtype in (torch.uint8, torch.int8):
+    elif torch_dtype in (torch.uint8, torch.int8, torch.float8_e4m3fn):
         return [16, 8, 4, 2]
     elif torch_dtype == torch.int32:
         return [4, 2, 1]
