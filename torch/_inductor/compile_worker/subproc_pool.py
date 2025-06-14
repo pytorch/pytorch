@@ -155,9 +155,7 @@ class SubprocPool:
                 "PYTHONPATH": os.environ.get(
                     "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
                 ),
-                # We don't want to re-create the pool when the subprocess imports
-                # torch._inductor.codecache since the warmup call is what creates
-                # the SubprocPool in the first place.
+                # Safeguard against creating a SubprocPool in the subprocess.
                 "TORCH_WARM_POOL": "0",
                 # Some internal usages need a modified LD_LIBRARY_PATH.
                 "LD_LIBRARY_PATH": get_ld_library_path(),

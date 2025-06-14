@@ -90,7 +90,6 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExpr
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._triton import has_triton_package
 
 from .._dynamo.backends.common import aot_autograd
 from .._dynamo.exc import ShortenTraceback, SkipFrame
@@ -152,20 +151,6 @@ if TYPE_CHECKING:
         GraphInputName,
         GraphSignature,
     )
-
-
-# The subproc pool can be slow to start, so warm it up early, i.e., as soon as
-# the inductor backend is imported.
-if not (
-    os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
-    or os.environ.get("TORCH_WARM_POOL", "1") != "1"
-    # The subprocess pool is only used for the Triton backend
-    or not has_triton_package()
-    # Skip for fbcode. We have internal reports of usages inside multiprocessing
-    # pools that lead a multiplicative number of compile subprocesses.
-    or config.is_fbcode()
-):
-    torch._inductor.async_compile.AsyncCompile.warm_pool()
 
 
 class FxCompileMode(enum.Enum):
