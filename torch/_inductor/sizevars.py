@@ -55,6 +55,14 @@ def statically_known_true(
 # lifting and in some cases we should be directly passing through to ShapeEnv,
 # but there is some extra inductor logic that needs to be handled here
 class SizeVarAllocator:
+    """
+    Manages size variables and their allocation for PyTorch Inductor.
+
+    This class provides an interface for handling symbolic shape variables,
+    with additional inductor-specific logic on top of ShapeEnv. It manages
+    variable allocation, replacement, and size hint computations with proper
+    fallback handling for unbacked symbolic shapes.
+    """
     def __init__(self, shape_env=None) -> None:
         super().__init__()
         if shape_env is None:
@@ -532,14 +540,14 @@ class SizeVarAllocator:
     ) -> int:
         """
         Get the size hint for an expression with explicit fallback for unbacked shapes.
-        
+
         Args:
             expr: The expression to get size hint for
             fallback: Required fallback value to use when unbacked shapes are encountered
-            
+
         Returns:
             Size hint as integer
-            
+
         Note: fallback parameter is now required to make unbacked shape handling explicit
         """
         out = self.symbolic_hint(expr)
@@ -567,16 +575,16 @@ class SizeVarAllocator:
     ) -> int:
         """
         Get the size hint for an expression, explicitly throwing on unbacked shapes.
-        
+
         Args:
             expr: The expression to get size hint for
-            
+
         Returns:
             Size hint as integer
-            
+
         Raises:
             TypeError: When unbacked shapes are encountered and cannot be converted to int
-            
+
         Note: Use this method when you explicitly want to error on unbacked shapes
         """
         out = self.symbolic_hint(expr)
@@ -594,14 +602,14 @@ class SizeVarAllocator:
     ) -> tuple[int, ...]:
         """
         Get size hints for multiple expressions with explicit fallback for unbacked shapes.
-        
+
         Args:
             exprs: Iterable of expressions to get size hints for
             fallback: Required fallback value to use when unbacked shapes are encountered
-            
+
         Returns:
             Tuple of size hints as integers
-            
+
         Note: fallback parameter is now required to make unbacked shape handling explicit
         """
         return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
@@ -612,16 +620,16 @@ class SizeVarAllocator:
     ) -> tuple[int, ...]:
         """
         Get size hints for multiple expressions, explicitly throwing on unbacked shapes.
-        
+
         Args:
             exprs: Iterable of expressions to get size hints for
-            
+
         Returns:
             Tuple of size hints as integers
-            
+
         Raises:
             TypeError: When unbacked shapes are encountered and cannot be converted to int
-            
+
         Note: Use this method when you explicitly want to error on unbacked shapes
         """
         return tuple(self.size_hint_or_throw(x) for x in exprs)

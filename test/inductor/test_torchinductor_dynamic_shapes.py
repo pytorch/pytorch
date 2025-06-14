@@ -1134,11 +1134,11 @@ class TestInductorDynamic(TestCase):
     def test_size_hint_api_fallback_required(self):
         """Test that size_hint API requires explicit fallback parameter"""
         import sympy
-        from torch._inductor.sizevars import SizeVars
+        from torch._inductor.sizevars import SizeVarAllocator
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
         
         shape_env = ShapeEnv()
-        sizevars = SizeVars(shape_env)
+        sizevars = SizeVarAllocator(shape_env)
         
         # Test size_hint with backed shapes works with fallback
         result = sizevars.size_hint(sympy.Integer(42), fallback=10)
