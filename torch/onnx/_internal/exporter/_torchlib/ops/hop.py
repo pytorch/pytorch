@@ -103,12 +103,24 @@ def higher_order_scan(
     reverse: bool = False,
 ) -> Sequence[ir.Value]:
     subgraph_inputs = [
-        ir.Value(
-            name=f"{inp.name}_{body_func.name}__subgraph_in",
-            shape=inp.shape,
-            type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
-        )
-        for inp in [*scan_inits, *scan_inputs]
+        *[
+            ir.Value(
+                name=f"{inp.name}_{body_func.name}__subgraph_in",
+                shape=inp.shape,
+                type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
+            )
+            for inp in scan_inits
+        ],
+        *[
+            ir.Value(
+                name=f"{inp.name}_{body_func.name}__subgraph_in",
+                # The iterated element passed to the body subgraph does not have a sequence axis.
+                # It will have a rank one less than the rank of the corresponding scan_input.
+                shape=ir.Shape(inp.shape[1:]),
+                type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
+            )
+            for inp in scan_inputs
+        ],
     ]
     # The one and only node in the Scan subgraph that calls the body_func
     body_node = ir.Node(
@@ -140,6 +152,5 @@ def higher_order_scan(
         ),
         num_scan_inputs=len(scan_inputs),
         scan_input_directions=[(1 if reverse else 0) for _ in scan_inputs],
-        scan_output_axes=[0 for _ in range(n_outputs)],
         scan_output_directions=[(1 if reverse else 0) for _ in range(n_outputs)],
     )
