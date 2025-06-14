@@ -6112,6 +6112,7 @@ class TMADescriptor(ExternKernel):
             None,
         )
 
+        self.tensor = tensor
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
@@ -6119,7 +6120,7 @@ class TMADescriptor(ExternKernel):
         wrapper.generate_tma_descriptor(self)
 
     def get_tensor(self) -> IRNode:
-        raise NotImplementedError
+        return self.tensor
 
 
 class TMADescriptorExperimental(TMADescriptor):
@@ -6143,7 +6144,6 @@ class TMADescriptorExperimental(TMADescriptor):
         if element_size is None:
             element_size = tensor.get_dtype().itemsize
 
-        self.tensor = tensor
         self.dims = dims
         self.block_dims = block_dims
         self.element_size = element_size
@@ -6162,9 +6162,6 @@ class TMADescriptorExperimental(TMADescriptor):
             constant_args=constant_args,
         )
 
-    def get_tensor(self) -> IRNode:
-        return self.tensor
-
 
 class TMADescriptorStable(TMADescriptor):
     """
@@ -6175,7 +6172,6 @@ class TMADescriptorStable(TMADescriptor):
     """
 
     def __init__(self, tensor: IRNode, block_shape: list[Union[int, torch.SymInt]]):
-        self.tensor = tensor
         self.block_shape = block_shape
 
         super().__init__(
@@ -6183,9 +6179,6 @@ class TMADescriptorStable(TMADescriptor):
             inputs=[tensor],
             constant_args=block_shape,
         )
-
-    def get_tensor(self) -> IRNode:
-        return self.tensor
 
 
 class SubgraphBuffer(ExternKernel):
