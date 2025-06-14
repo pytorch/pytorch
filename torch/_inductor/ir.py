@@ -6077,13 +6077,23 @@ class TMADescriptor(ExternKernel):
     def create(  # type: ignore[no-untyped-def]
         cls,
         tensor: IRNode,
-        dims: list[Union[int, torch.SymInt]],
-        block_dims: list[Union[int, torch.SymInt]],
-        element_size: Optional[int] = None,
+        tma_meta: Any,
     ):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            maybe_unpack_tma_experimental_metadata,
+        )
+
+        exp_meta = maybe_unpack_tma_experimental_metadata(tma_meta)
+        if exp_meta is None:
+            raise NotImplementedError(
+                f"tma_meta {tma_meta} not recognized (if this kernel uses a TMA descriptor created "
+                "with TensorDescriptor.from_tensor, this is not implemented in Inductor yet)"
+            )
+
+        dims, block_dims, element_size = exp_meta
         key = (id(tensor), dims, block_dims, element_size)
         if key not in cls._CACHE:
-            cls._CACHE[key] = TMADescriptor(tensor, dims, block_dims, element_size)
+            cls._CACHE[key] = TMADescriptor(tensor, dims, block_dims, element_size)  # type: ignore[arg-type]
         return cls._CACHE[key]
 
     def __init__(
@@ -6317,7 +6327,7 @@ class UserDefinedTritonKernel(ExternKernel):
             if isinstance(v, TensorBox):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
                 if k in tma_descriptor_metadata:
-                    t = TMADescriptor.create(t, *tma_descriptor_metadata[k])
+                    t = TMADescriptor.create(t, tma_descriptor_metadata[k])
                 inputs.append(t)
                 kwargs[k] = t
             else:
@@ -6350,7 +6360,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.mutable_args = [
             kernel_args[key]
             for key in identify_mutated_tensors(
-                kernel, {**kernel_args, **autotuned_kwargs}
+                kernel, {**kernel_args, **autotuned_kwargs}, tma_descriptor_metadata
             )
         ]
 
