@@ -51,6 +51,10 @@ from torch import SymInt, Tensor
 from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
+from torch._inductor.codegen.common import (
+    custom_backend_passes,
+    init_backend_registration,
+)
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
@@ -72,7 +76,11 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
-from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
+from torch._inductor.custom_graph_pass import (
+    CustomGraphModulePass,
+    CustomGraphPass,
+    CustomGraphPassType,
+)
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
@@ -900,6 +908,12 @@ class FxGraphHashDetails:
             config._fuse_ddp_communication_passes
         )
 
+        # Register indcutor backends and custom passes and get their UUIDs.
+        init_backend_registration()
+        self.custom_backend_passes = tuple(
+            map(self._get_custom_pass_detail, custom_backend_passes.values())
+        )
+
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
     # - _pre_fusion_custom_pass
@@ -925,11 +939,11 @@ class FxGraphHashDetails:
         raise AssertionError(f"unknown config type: {str(type(custom_pass))}")
 
     def _get_custom_pass_detail(
-        self, custom_pass: CustomGraphPassType
+        self, custom_pass: Union[CustomGraphPassType, CustomGraphModulePass]
     ) -> Optional[Any]:
         if not custom_pass:
             return None
-        assert isinstance(custom_pass, CustomGraphPass)
+        assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
         return custom_pass.uuid()
 
 
