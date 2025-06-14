@@ -1,10 +1,18 @@
 # mypy: allow-untyped-defs
+
+import timeit
 import functools
 import logging
 from typing import Any, Optional
 
 import sympy
 
+from gemm_modeling.modeling.torch import get_nn_x, NeuralNetwork
+from gemm_modeling.sql_queries.common import (
+    get_total_gb_feature,
+    get_total_gflop_feature,
+)
+import numpy as np
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -25,6 +33,7 @@ from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphTemplate
 from ..ir import FlexibleLayout, is_triton
+import pandas as pd
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -63,6 +72,7 @@ from .mm_common import (
     scale_mm_epilogue,
     scaled_mm_options,
 )
+from ..template_heuristics import CUDAConfigHeuristic
 
 
 try:
@@ -659,7 +669,132 @@ def decomposeK(a, b, k_splits):
     result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
     reduced_buf = torch.sum(result, 0)
     return reduced_buf.to(a.dtype)
+def get_model():
+    fname = '/home/gabeferns/manifold/triton_h100_from_arm_108.pkl'
+    import sys
+    sys.path.append('/home/santorella/fbsource/fbcode/scripts/santorella/gemm_modeling')
+    from gemm_modeling.modeling.torch import NeuralNetwork
+    import time
+    start_time = time.time()
+    model = NeuralNetwork(n_inputs=12, hidden_layer_widths=[2**8 for _ in range(6)])
+    model.load_state_dict(torch.load(fname))
+    model.eval()
+    end_time = time.time()
+    print("model loaded!")
+    print(f"took: {end_time - start_time} seconds")
+    return model
 
+class ModelWrapper:
+    def __init__(self):
+        self.model = get_model()
+        self.mean_for_standardization = torch.tensor([
+                2.78275084,
+                8.23996746,
+                7.27791873,
+                7.92035942,
+                -2.39558163,
+                3.40679233,
+                5.80237395,
+                3.95781827,
+                4.19478321,
+                4.19098234,
+                0.9045909,
+                1.28331208,
+            ])
+        
+        self.std_for_standardization = torch.tensor([
+                0.08322756,
+                2.31893439,
+                1.65605574,
+                2.15447078,
+                2.19682881,
+                2.99600806,
+                1.24328795,
+                0.92352521,
+                0.93849802,
+                0.93872011,
+                0.57455891,
+                0.5837217,
+            ]
+        )
+
+    def vec(self, m:int, n:int, k:int, dsize:int, config) -> tuple[int, int, int, int, int, int, int, int, int]:
+        kwargs = config.all_kwargs()
+        ret = (
+            m,
+            n,
+            k,
+            dsize,
+            kwargs["BLOCK_M"],
+            kwargs["BLOCK_N"],
+            kwargs["BLOCK_K"],
+            kwargs["num_stages"],
+            kwargs["num_warps"]
+        )
+        # for v in ret:
+        #     if type(v) not in [int, sympy.Expr]:
+        #         breakpoint()
+        return (
+            int(m),
+            int(n),
+            int(k),
+            int(dsize),
+            int(kwargs["BLOCK_M"]),
+            int(kwargs["BLOCK_N"]),
+            int(kwargs["BLOCK_K"]),
+            int(kwargs["num_stages"]),
+            int(kwargs["num_warps"])
+        )
+    def encode(self, m: int, n: int, k: int, dtype: torch.dtype, configs) -> torch.Tensor:
+        # encodes the triton autotune config as the vector expected by the model
+        if dtype == torch.bfloat16 or dtype == torch.float16:
+            dsize = 16
+        elif dtype == torch.float32:
+            dsize = 32
+        else:
+            raise Exception("missing dtype in encode, add")
+        df = pd.DataFrame(
+            columns = [
+                "dim_m", 
+                "dim_n", 
+                "dim_k", 
+                "dtype_size", 
+                "config_block_m",
+                "config_block_n",
+                "config_block_k",
+                "config_num_stages",
+                "config_num_warps",
+            ],
+            data = [self.vec(m, n, k, dsize, config) for config in configs]
+        )
+        df["total_gb"] = get_total_gb_feature(df=df).astype(np.float32)
+        df["total_gflop"] = get_total_gflop_feature(df=df).astype(np.float32)
+        df["flops_per_byte"] = df["total_gflop"] / df["total_gb"]
+        df = df[[
+            'dtype_size',
+            'dim_m',
+            'dim_n',
+            'dim_k',
+            'total_gb',
+            'total_gflop',
+            'flops_per_byte',
+            'config_block_k',
+            'config_block_m',
+            'config_block_n',
+            'config_num_stages',
+            'config_num_warps'
+        ]] 
+        inp, _, _ = get_nn_x(df=df, mean=self.mean_for_standardization, std=self.std_for_standardization)
+        return inp
+    def inference(self, inp_tensor: torch.Tensor) -> torch.Tensor:
+        with torch.no_grad():
+            return self.model(inp_tensor)
+
+    def decode(self, ret_tensor: torch.Tensor) -> torch.Tensor:
+        # returns the runtime
+        # could just run exp in here
+        return ret_tensor
+wrappedmodel = ModelWrapper()
 
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
@@ -667,6 +802,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    #m, n, k = 1024, 4096, 1024
     device_type = ir.get_device_type(mat1)
     name = "mm"
 
@@ -689,6 +825,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         )
 
     # options to tune from
+    print(f"using aten? {use_aten_gemm_kernels()}")
     choices = (
         [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
     )
@@ -698,13 +835,43 @@ def tuned_mm(mat1, mat2, *, layout=None):
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
+    import time
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(
-            m,
-            n,
-            k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+        import os
+        if (
+            os.environ.get("TORCHINDUCTOR_NEW_CONFIGS", "0") == "1"
+            or torch._inductor.config.new_configs
         ):
+            exhaustive_configs = CUDAConfigHeuristic().get_exhaustive_mm_configs()
+            config_list = list(exhaustive_configs(m, n, k))
+            start_time = time.time()
+            t: torch.Tensor = wrappedmodel.encode(m, n, k, mat1.get_dtype(), config_list)
+            end_time = time.time()
+            print(f"Encoding exhaustive configs took {end_time - start_time:.4f} seconds")
+            start_time = time.time()
+            res = torch.exp(wrappedmodel.inference(t))
+            end_time = time.time()
+            total_time = end_time - start_time
+            print(f"running inference on exhaustive configs took {total_time:.4f} seconds, {total_time / len(config_list):.4f} seconds per config")
+            timings = list(zip(res.flatten().tolist(), config_list))
+            timings.sort(key=lambda x: x[0])
+            def print_timings(arst):
+                for timing, config in arst:
+                    kw = config.kwargs
+                    print(f"{timing}, Config(M: {kw['BLOCK_M']}, K: {kw['BLOCK_K']}, K: {kw['BLOCK_N']}, num_stages: {config.num_stages}, num_warps: {config.num_warps})")
+            top20 = timings[:20]
+            print(f"Top 20 predicted configs on M:{m} K:{k} N:{n}: ")
+            print_timings(top20)
+            prelim_configs = [cfg for _, cfg in top20]
+        else:
+            print(f"Running original configs on M:{m} K:{k} N:{n}... ")
+            prelim_configs = mm_configs(
+                m,
+                n,
+                k,
+                **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+            )
+        for config in prelim_configs:
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),

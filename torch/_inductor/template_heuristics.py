@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from triton import Config as TritonConfig
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class BaseConfig:
     """
     Base Gemm configuration used for most backends (CPU, CUDA)
@@ -32,7 +32,7 @@ class BaseConfig:
     num_warps: int
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class GemmConfig(BaseConfig):
     """
     Gemm configuration used for most backends (CPU, CUDA)
@@ -44,7 +44,7 @@ class GemmConfig(BaseConfig):
 ConvConfig = BaseConfig
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class ROCmGemmConfig(GemmConfig):
     """
     ROCm subclass for GEMMs, with AMD backend specific tuneable kernargs
@@ -55,7 +55,7 @@ class ROCmGemmConfig(GemmConfig):
     kpack: int = 2
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class ROCmConvConfig(ConvConfig):
     """
     ROCm subclass for Conv, with AMD backend specific tuneable kernargs
@@ -84,60 +84,116 @@ class BaseHeuristicSingleton(type):
                 cls._instances[cls] = instance
             return cls._instances[cls]
 
+
 import os
+
 
 class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     """
     Base class for mm_configs, device specific triton kernels config inherit from here
     """
+
     @property
     def mm_configs(self) -> list[BaseConfig]:
-        if os.environ.get("TORCHINDUCTOR_NEW_CONFIGS", "0") == "1" or config.new_configs:
-            return [
-                # GemmConfig(16, 16, 128, 5, 1),
-                # GemmConfig(16, 16, 256, 4, 1),
-                GemmConfig(64, 16, 128, 4, 4),
-                GemmConfig(64, 16, 256, 4, 4),
-                GemmConfig(64, 32, 128, 4, 4),
-                GemmConfig(64, 32, 128, 5, 8),
-                # GemmConfig(63, 32, 256, 1, 8),
-                GemmConfig(64, 64, 128, 4, 4),
-                GemmConfig(64, 128, 64, 4, 4),
-                GemmConfig(64, 128, 128, 3, 4),
-                GemmConfig(128, 16, 128, 5, 8),
-                GemmConfig(128, 128, 32, 5, 8),
-                GemmConfig(128, 128, 64, 3, 4),
-                GemmConfig(128, 128, 64, 3, 8),
-                GemmConfig(128, 128, 64, 4, 4),
-                GemmConfig(128, 128, 64, 4, 8),
-                GemmConfig(128, 256, 32, 5, 8),
-                GemmConfig(128, 256, 64, 3, 8),
-                GemmConfig(128, 256, 64, 4, 8),
-                #GemmConfig(128, 256, 64, 5, 8),
-                GemmConfig(256, 128, 32, 5, 8)
-            ]
-        else:
-            return [
-                GemmConfig(32, 32, 16, 1, 2),
-                GemmConfig(32, 32, 128, 2, 4),
-                GemmConfig(32, 64, 32, 5, 8),
-                GemmConfig(64, 32, 32, 5, 8),
-                GemmConfig(64, 32, 128, 5, 4),
-                GemmConfig(64, 64, 16, 2, 4),
-                GemmConfig(64, 64, 32, 2, 4),
-                GemmConfig(64, 64, 64, 3, 8),
-                GemmConfig(64, 64, 128, 5, 4),
-                GemmConfig(64, 128, 32, 3, 4),
-                GemmConfig(64, 128, 32, 4, 8),
-                GemmConfig(64, 128, 64, 3, 4),
-                GemmConfig(64, 128, 128, 4, 4),
-                GemmConfig(128, 64, 32, 3, 4),
-                GemmConfig(128, 64, 32, 4, 8),
-                GemmConfig(128, 128, 32, 2, 8),
-                GemmConfig(128, 128, 32, 3, 4),
-                GemmConfig(128, 128, 64, 3, 4),
-                GemmConfig(128, 128, 64, 5, 8),
-            ]
+        # if (
+        #     os.environ.get("TORCHINDUCTOR_NEW_CONFIGS", "0") == "1"
+        #     or config.new_configs
+        # ):
+        #     return [
+        #         GemmConfig(128, 16, 128, 5, 8), # new
+        #         GemmConfig(64, 16, 128, 4, 4), #new
+        #         GemmConfig(64, 128, 128, 4, 8),
+        #         GemmConfig(128, 32, 32, 4, 4),
+        #         GemmConfig(64, 128, 64, 4, 4), # new
+        #         GemmConfig(64, 128, 128, 3, 4), # new
+        #         GemmConfig(128, 16, 128, 5, 8), # new
+        #         # GemmConfig(64, 128, 256, 4, 8),
+        #         GemmConfig(64, 64, 128, 5, 4),
+        #         GemmConfig(128, 32, 16, 5, 2),
+        #         GemmConfig(32, 128, 128, 4, 4),
+        #         GemmConfig(64, 64, 32, 5, 4),
+        #         GemmConfig(64, 128, 128, 3, 8),
+        #         GemmConfig(32, 64, 64, 3, 4),
+        #         # GemmConfig(64, 128, 256, 3, 8),
+        #         GemmConfig(64, 16, 32, 4, 2),
+        #         GemmConfig(128, 64, 64, 5, 4),
+        #         # GemmConfig(32, 128, 256, 4, 8),
+        #         GemmConfig(128, 32, 32, 5, 4),
+        #         GemmConfig(256, 32, 16, 3, 2),
+        #         GemmConfig(16, 128, 64, 1, 4),
+        #         GemmConfig(256, 64, 16, 1, 4),
+        #         GemmConfig(64, 128, 64, 4, 4),
+        #     ]
+        #     # return [
+        #     #     GemmConfig(64, 128, 128, 4, 8),
+        #     #     GemmConfig(128, 32, 32, 4, 4),
+        #     #     GemmConfig(64, 128, 256, 4, 8),
+        #     #     GemmConfig(64, 64, 128, 5, 4),
+        #     #     GemmConfig(128, 32, 16, 5, 2),
+        #     #     #GemmConfig(32, 256, 128, 4, 8),
+        #     #     GemmConfig(32, 128, 128, 4, 4),
+        #     #     GemmConfig(64, 64, 32, 5, 4),
+        #     #     GemmConfig(64, 128, 128, 3, 8),
+        #     #     GemmConfig(32, 64, 64, 3, 4),
+        #     #     GemmConfig(64, 128, 256, 3, 8),
+        #     #     GemmConfig(64, 16, 32, 4, 2),
+        #     #     GemmConfig(128, 64, 64, 5, 4),
+        #     #     GemmConfig(32, 128, 256, 4, 8),
+        #     #     GemmConfig(128, 32, 32, 5, 4),
+        #     #     # GemmConfig(64, 128, 128, 5, 4),
+        #     #     GemmConfig(256, 32, 16, 3, 2),
+        #     #     GemmConfig(16, 128, 64, 1, 4),
+        #     #     GemmConfig(256, 64, 16, 1, 4),
+        #     #     GemmConfig(64, 128, 64, 4, 4),
+        #     # ]
+        #     # return [
+        #     #     # GemmConfig(16, 16, 128, 5, 1),
+        #     #     # GemmConfig(16, 16, 256, 4, 1),
+        #     #     GemmConfig(64, 16, 128, 4, 4),
+        #     #     GemmConfig(64, 16, 256, 4, 4),
+        #     #     GemmConfig(64, 32, 128, 4, 4),
+        #     #     GemmConfig(64, 32, 128, 5, 8),
+        #     #     # GemmConfig(63, 32, 256, 1, 8),
+        #     #     GemmConfig(64, 64, 128, 4, 4),
+        #     #     GemmConfig(64, 128, 64, 4, 4),
+        #     #     GemmConfig(64, 128, 128, 3, 4),
+        #     #     GemmConfig(128, 16, 128, 5, 8),
+        #     #     GemmConfig(128, 128, 32, 5, 8),
+        #     #     GemmConfig(128, 128, 64, 3, 4),
+        #     #     GemmConfig(128, 128, 64, 3, 8),
+        #     #     GemmConfig(128, 128, 64, 4, 4),
+        #     #     GemmConfig(128, 128, 64, 4, 8),
+        #     #     GemmConfig(128, 256, 32, 5, 8),
+        #     #     GemmConfig(128, 256, 64, 3, 8),
+        #     #     GemmConfig(128, 256, 64, 4, 8),
+        #     #     #GemmConfig(128, 256, 64, 5, 8),
+        #     #     GemmConfig(256, 128, 32, 5, 8)
+        #     # ]
+        # else:
+        return [
+            GemmConfig(32, 32, 16, 1, 2),
+            GemmConfig(32, 32, 128, 2, 4),
+            GemmConfig(32, 64, 32, 5, 8),
+            GemmConfig(64, 32, 32, 5, 8),
+            GemmConfig(64, 32, 128, 5, 4),
+            GemmConfig(64, 64, 16, 2, 4),
+            GemmConfig(64, 64, 32, 2, 4),
+            GemmConfig(64, 64, 64, 3, 8),
+            GemmConfig(64, 64, 128, 5, 4),
+            GemmConfig(64, 128, 32, 3, 4),
+            GemmConfig(64, 128, 32, 4, 8),
+            GemmConfig(64, 128, 64, 3, 4),
+            GemmConfig(64, 128, 128, 4, 4),
+            GemmConfig(128, 64, 32, 3, 4),
+            GemmConfig(128, 64, 32, 4, 8),
+            GemmConfig(128, 128, 32, 2, 8),
+            GemmConfig(128, 128, 32, 3, 4),
+            GemmConfig(128, 128, 64, 3, 4),
+            GemmConfig(128, 128, 64, 5, 8),
+        ]
+        # TODO more results on compile time overhead
+        # TODO compare to exhaustive results
+        # TODO ask about cudagraph benchmarking
 
     def __init__(self) -> None:
         # List of dictionaries to store the kernel configs. Configs that evaluate to true
