@@ -311,7 +311,7 @@ def tensorify_python_scalars(
                         and isinstance(zf := a.meta["val"], torch.SymFloat)
                     ):
                         failed_tensorify_ops.update(str(node.target))
-                        log.info(f"Failed to tensorify {str(node.target)}")
+                        log.info("Failed to tensorify %s", str(node.target))
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
