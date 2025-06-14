@@ -6086,8 +6086,8 @@ class TMADescriptor(ExternKernel):
         exp_meta = maybe_unpack_tma_experimental_metadata(tma_meta)
         if exp_meta is None:
             raise NotImplementedError(
-                f"tma_meta {tma_meta} not recognized (if this kernel uses TensorDescriptor.from_tensor, "
-                "this is not implemented in Inductor yet)"
+                f"tma_meta {tma_meta} not recognized (if this kernel uses a TMA descriptor created "
+                "with TensorDescriptor.from_tensor, this is not implemented in Inductor yet)"
             )
 
         dims, block_dims, element_size = exp_meta
