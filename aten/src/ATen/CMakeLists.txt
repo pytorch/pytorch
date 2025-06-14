@@ -164,14 +164,10 @@ file(GLOB native_transformers_hip_cpp "native/transformers/hip/*.cpp")
 file(GLOB native_quantized_cudnn_hip_cpp "native/quantized/cudnn/hip/*.cpp")
 file(GLOB native_utils_cpp "native/utils/*.cpp")
 
-# flash_attention sources
+# Create a separate library for flash_attention that can be built independently
 file(GLOB flash_attention_cuda_kernels_cu ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
-# Flash attention C++ sources
 file(GLOB flash_attention_cuda_cpp ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp)
 
-message(STATUS "flash_attention sources: ${flash_attention_cuda_kernels_cu}")
-
-# Create a separate library for flash_attention that can be built independently
 add_library(flash_attention SHARED ${flash_attention_cuda_kernels_cu} ${flash_attention_cuda_cpp})
 
 target_include_directories(flash_attention PUBLIC
@@ -187,7 +183,7 @@ target_compile_definitions(flash_attention PRIVATE
   FLASHATTENTION_DISABLE_ALIBI    # Disable alibi attention as it's not currently used
   FLASHATTENTION_DISABLE_SOFTCAP
   UNFUSE_FMA                      # Addressing issue #121558
-  MAYBE_FORCE_FORCE_SCCACHE_MISS=2
+  MAYBE_FORCE_FORCE_SCCACHE_MISS=3
 )
 
 set_target_properties(flash_attention PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -223,8 +219,8 @@ file(GLOB mem_eff_attention_cuda_kernels_cu "native/transformers/cuda/mem_eff_at
 file(GLOB mem_eff_attention_cuda_cpp "native/transformers/cuda/mem_eff_attention/*.cpp")
 
 if(USE_FLASH_ATTENTION)
-  file(GLOB tempthing_cat "native/transformers/cuda/flash_attn/flash_api.cpp")
-  list(APPEND native_transformers_cuda_cpp ${tempthing_cat})
+  file(GLOB native_flash_attn_api_cpp "native/transformers/cuda/flash_attn/flash_api.cpp")
+  list(APPEND native_transformers_cuda_cpp ${native_flash_attn_api_cpp})
 
   list(APPEND native_transformers_hip_hip ${flash_attention_hip_hip})
   list(APPEND native_transformers_hip_hip ${flash_attention_hip_aot_hip})
@@ -235,7 +231,6 @@ if(USE_MEM_EFF_ATTENTION)
   list(APPEND native_transformers_cuda_cu ${mem_eff_attention_cuda_cu})
   list(APPEND native_transformers_cuda_cu ${mem_eff_attention_cuda_kernels_cu})
   list(APPEND native_transformers_cuda_cpp ${mem_eff_attention_cuda_cpp})
-  list(APPEND MEM_EFF_ATTENTION_CUDA_SOURCES ${native_transformers_cuda_cu} ${mem_eff_attention_cuda_cu} ${mem_eff_attention_cuda_kernels_cu})
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${mem_eff_attention_cuda_kernels_cu})
 endif()
 
@@ -789,5 +784,4 @@ set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_XPU_DEPENDENCY_LIBS ${ATen_XPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS} PARENT_SCOPE)
-set(MEM_EFF_ATTENTION_CUDA_SOURCES ${MEM_EFF_ATTENTION_CUDA_SOURCES} PARENT_SCOPE)
 set(ATen_ATTENTION_KERNEL_SRCS ${ATen_ATTENTION_KERNEL_SRCS} PARENT_SCOPE)

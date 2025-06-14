@@ -40,6 +40,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
+# Build flash attention with 2 jobs due to OOM
 export PRE_BUILD_COMMAND="ninja -C build flash_attention -j 2"
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
