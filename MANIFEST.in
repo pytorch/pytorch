@@ -15,11 +15,10 @@ graft c10
 graft caffe2
 graft cmake
 graft functorch
-graft ios
 graft third_party
 graft tools
 graft torch
-graft torchgen
+# graft torchgen
 
 # Misc files and directories in SDist
 include CITATION.cff
