@@ -18,7 +18,9 @@ graft functorch
 graft third_party
 graft tools
 graft torch
-# graft torchgen
+graft torchgen
+# FIXME: torch-xla codegen build failure if include this file in wheel
+exclude torchgen/BUILD.bazel
 
 # Misc files and directories in SDist
 include CITATION.cff
