@@ -78,13 +78,6 @@ class Tensor {
     return stride;
   }
 
-  template <typename T>
-  T* data_ptr() const {
-    // the actual implementation directs through mutable_data_ptr but like. how
-    // different is that really.
-    return static_cast<T*>(this->data_ptr());
-  }
-
   DeviceIndex get_device() const {
     int32_t device_index;
     AOTI_TORCH_ERROR_CODE_CHECK(
