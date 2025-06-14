@@ -26,6 +26,15 @@ struct NVSHMEMAllocation {
 
   NVSHMEMAllocation(void* ptr, size_t buffer_size, int device_idx)
       : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
+
+  ~NVSHMEMAllocation() {
+    // Avoid calling CUDA functions after driver shutting down
+    if (is_finalizing()) {
+      return;
+    }
+    c10::cuda::CUDAGuard guard(device_idx);
+    nvshmem_free(ptr);  // nvshmem_free has no return value
+  }
 };
 
 class NVSHMEMSymmetricMemory : public SymmetricMemory {
