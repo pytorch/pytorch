@@ -156,9 +156,9 @@ class PT2ArchiveReader:
 
     def __init__(self, archive_path_or_buffer: FileLike):
         self.archive_file = torch._C.PyTorchFileReader(archive_path_or_buffer)  # type: ignore[arg-type]
-        assert self.read_string(ARCHIVE_FORMAT_PATH) == ARCHIVE_FORMAT_VALUE, (
-            "Invalid archive format"
-        )
+        assert (
+            self.read_string(ARCHIVE_FORMAT_PATH) == ARCHIVE_FORMAT_VALUE
+        ), "Invalid archive format"
 
     def __enter__(self) -> "PT2ArchiveReader":
         return self
@@ -216,7 +216,6 @@ def _package_aoti_files(
 
     for model_name, files in aoti_files.items():
         num_so_files = 0
-        num_cpp_files = 0
 
         for file in files:
             if file == "":
@@ -227,14 +226,6 @@ def _package_aoti_files(
                 if num_so_files > 1:
                     raise RuntimeError(
                         f"Multiple .so files found in {files}. "
-                        "You might need to clear your cache "
-                        "directory before calling aoti_compile again."
-                    )
-            if file.endswith(".cpp"):
-                num_cpp_files += 1
-                if num_so_files > 1:
-                    raise RuntimeError(
-                        f"Multiple .cpp files found in {files}. "
                         "You might need to clear your cache "
                         "directory before calling aoti_compile again."
                     )

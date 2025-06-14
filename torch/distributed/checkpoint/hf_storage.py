@@ -31,7 +31,7 @@ from torch.distributed.checkpoint.storage import WriteResult
 from torch.futures import Future
 
 
-__all__ = ["_HuggingFaceStorageWriter", "_HuggingFaceStorageReader"]
+__all__ = ["HuggingFaceStorageWriter", "HuggingFaceStorageReader"]
 
 _metadata_fn: str = "model.safetensors.index.json"
 
@@ -61,7 +61,7 @@ DTYPE_MAP = {
 }
 
 
-class _HuggingFaceStorageWriter(FsspecWriter):
+class HuggingFaceStorageWriter(FsspecWriter):
     """
     A writer that writes to a huggingface repository in the huggingface format.
     Uses Fsspec back-end to communicate with back-end storage.
@@ -213,7 +213,7 @@ class _HuggingFaceStorageWriter(FsspecWriter):
         return _metadata_fn
 
 
-class _HuggingFaceStorageReader(FsspecReader):
+class HuggingFaceStorageReader(FsspecReader):
     """
     A reader that reads from a huggingface repository in the huggingface format.
     Uses in Fsspec back-end to communicate with storage.

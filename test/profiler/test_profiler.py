@@ -1421,7 +1421,7 @@ class TestProfiler(TestCase):
                     cats = {e.get("cat", None) for e in j["traceEvents"]}
             self.assertTrue(
                 "cuda_sync" in cats,
-                f"Expected to find cuda_sync event found = {cats}",
+                "Expected to find cuda_sync event" f" found = {cats}",
             )
 
         print("Testing enable_cuda_sync_events in _ExperimentalConfig")
