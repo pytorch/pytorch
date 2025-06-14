@@ -30,4 +30,20 @@ This note will eventually contain more details on how to use the APIs in torch/c
 | ? | ? | c10::SymBool | SymBool |
 | ? | ? | at::QScheme | QScheme |
 
-Our confidently supported types are the ones in the table that have completed rows. For a limited set of use cases, we also implicitly support any literal type that is representable within 64 bits as StableIValues, as the default reinterpret_cast will succeed. You can work with StableIValue abstractions in your custom kernel for types such as c10::Device even if there is no standard defined representation of device in custom extensions. For example, a custom operator can take as argument a StableIValue device and directly pass it through to an aten operator with aoti_torch_call_dispatcher.
+Our confidently supported types are the ones in the table that have completed rows. For a limited set of use cases, we also implicitly support any literal type that is representable within 64 bits as StableIValues, as the default reinterpret_cast will succeed. You can work with StableIValue abstractions in your custom kernel for types such as c10::Device even if there is no standard defined representation of device in custom extensions. For example, a custom operator can take as argument a StableIValue device and directly pass it through to an aten operator with `aoti_torch_call_dispatcher`.
+
+
+## How to use stack-based APIs
+
+`aoti_torch_call_dispatcher` is what we consider a stack-based API because it takes as input a stack of StableIValues. Working with the dispatcher will likely bring you into proximity with stack-based APIs, so we are documenting some invariants:
+
+1. The stack is populated left to right.
+    a. For example, a stack representing arguments `arg0`, `arg1`, and `arg2` will have `arg0` at index 0, `arg1` at index 1, and `arg2` at index 2.
+    b. Returns are also populated left to right, e.g., `ret0` will be at index 0 and `ret1` will be at index 1, and so on.
+
+2. The receiver of the stack consumes the stack and will "pop" all inputs off the stack, stealing ownership of any references.
+    a. This is why when the stack is repopulated with returns, the returns start at index 0.
+
+3. The stack always has ownership of the objects it holds.
+    a. As the receiver of the stack is responsible for popping the stack, the stack must have ownership in order to transfer the ownership.
+    b. As a corollary, the populater of the stack is responsible for ensuring that the stack has ownership of its underlying objects. In other words, the stack must not contain borrowed references.
