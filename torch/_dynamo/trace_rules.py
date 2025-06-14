@@ -321,6 +321,8 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
     "torch._C._functorch.peek_interpreter_stack": TorchInGraphFunctionVariable,
     "torch._C._functorch.unwrap_if_dead": TorchInGraphFunctionVariable,
+    "torch._C._functorch._vmap_increment_nesting": TorchInGraphFunctionVariable,
+    "torch._C._functorch._vmap_decrement_nesting": TorchInGraphFunctionVariable,
     # everything else
     "torch._functorch.pyfunctorch.coerce_cinterpreter": TorchInGraphFunctionVariable,
     "torch._higher_order_ops.triton_kernel_wrap.do_prune_configs": UserFunctionVariable,

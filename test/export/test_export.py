@@ -2334,6 +2334,24 @@ graph():
         res = ep.module()(ref_x)
         self.assertEqual(res, ref_out)
 
+    @testing.expectedFailureSerDer  # can't serialize functorch ops 
+    @testing.expectedFailureSerDerNonStrict  # can't serialize functorch ops 
+    @testing.expectedFailureLegacyExportStrict 
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureCppRuntime
+    def test_vmap(self):
+        class Vmap(torch.nn.Module):
+            def forward(self, x, y):
+                f = lambda x, y: x * y + 1  # noqa: E731
+                return torch.vmap(f)(x, y)
+        
+        DYN = torch.export.Dim.DYNAMIC
+        inputs = (torch.tensor([1.0, 2.0, 3.0]), torch.tensor([0.1, 0.2, 0.3]))
+        dynamic = {"x": {0: DYN}, "y": {0: DYN}}
+        #ep = export(Vmap(), inputs, {}, dynamic_shapes=dynamic)
+        ep = export(Vmap(), inputs, {}, dynamic_shapes=dynamic)
+        self.assertTrue(torch.allclose(ep.module()(*inputs), Vmap()(*inputs)))
+
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access(self):

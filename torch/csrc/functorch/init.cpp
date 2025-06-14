@@ -8,6 +8,8 @@
 #include <ATen/WrapDimUtils.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/utils/python_raii.h>
+#include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/python.h>
 
 #include <ATen/functorch/BatchRulesHelper.h>
@@ -40,7 +42,28 @@ static Tensor _add_batch_dim(
     const Tensor& self,
     int64_t batch_dim,
     int64_t level) {
-  return addBatchDim(self, batch_dim, level);
+    if (at::impl::torch_function_mode_enabled()) {
+      auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C._functorch"));
+      PyObject* py_self = THPVariable_Wrap(self);  
+      PyObject* py_batch_dim = PyLong_FromLongLong(batch_dim);
+      PyObject* py_level = PyLong_FromLongLong(level);
+
+      PyObject* args = PyTuple_New(3);
+      PyTuple_SET_ITEM(args, 0, py_self);      
+      PyTuple_SET_ITEM(args, 1, py_batch_dim); 
+      PyTuple_SET_ITEM(args, 2, py_level);    
+      
+      static PythonArgParser parser({
+        "_add_batch_dim(Tensor self, Scalar batch_dim, Scalar level)",
+      });
+      ParsedArgs<3> parsed_args;
+      auto r = parser.parse(args, nullptr, parsed_args);
+      return THPVariable_Unpack(handle_torch_function(
+          r, args, nullptr, torch_C_module, "torch._C._functorch", "_add_batch_dim"));
+    }
+
+    return addBatchDim(self, batch_dim, level);
+
 }
 
 static Tensor _wrap_functional_tensor(const Tensor& self, int64_t level) {
@@ -152,6 +175,31 @@ static Tensor _remove_batch_dim(
       out_dim == 0 || !self.key_set().has(DispatchKey::BatchedNestedTensor),
       "Nested tensors can only be vmapped over dim=0, but got dim=",
       out_dim);
+  if (at::impl::torch_function_mode_enabled()) {
+    auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C._functorch"));
+    PyObject* py_self = THPVariable_Wrap(self);  
+    PyObject* py_level = PyLong_FromLongLong(level);
+    c10::SymNode node = batch_size.toSymNode();
+    auto* py_node = dynamic_cast<torch::impl::PythonSymNodeImpl*>(batch_size.toSymNodeImplUnowned());
+    PyObject* py_batch_size = torch::get_symint_class()(py_node->getPyObj()).release().ptr();
+    PyObject* py_out_dim = PyLong_FromLongLong(out_dim);
+
+    PyObject* args = PyTuple_New(4);
+    PyTuple_SET_ITEM(args, 0, py_self);      
+    PyTuple_SET_ITEM(args, 1, py_level); 
+    PyTuple_SET_ITEM(args, 2, py_batch_size); 
+    PyTuple_SET_ITEM(args, 3, py_out_dim); 
+
+    static PythonArgParser parser({
+      "_remove_batch_dim(Tensor self, Scalar level, SymInt batch_size, Scalar out_dim)",
+    });
+    ParsedArgs<4> parsed_args;
+    auto r = parser.parse(args, nullptr, parsed_args);
+
+    return THPVariable_Unpack(handle_torch_function(
+        r, args, nullptr, torch_C_module, "torch._C._functorch", "_remove_batch_dim"));
+  }
+
   if (!has_level(self, level)) {
     auto self_sizes = self.sym_sizes();
     VmapSymDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
@@ -277,6 +325,26 @@ static int64_t _jvp_decrement_nesting() {
 static int64_t _vmap_increment_nesting(
     c10::SymInt batch_size,
     const std::string& randomness) {
+  
+    if (at::impl::torch_function_mode_enabled()) {
+      auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C._functorch")); 
+      auto* py_node = dynamic_cast<torch::impl::PythonSymNodeImpl*>(batch_size.toSymNodeImplUnowned());
+      PyObject* py_batch_size = torch::get_symint_class()(py_node->getPyObj()).release().ptr();
+      PyObject* py_str = PyUnicode_FromString(randomness.c_str());
+
+      PyObject* args = PyTuple_New(2);
+      PyTuple_SET_ITEM(args, 0, py_batch_size);      
+      PyTuple_SET_ITEM(args, 1, py_str);     
+      
+      static PythonArgParser parser({
+        "_vmap_increment_nesting(SymInt batch_size, std::string randomness)",
+      });
+      ParsedArgs<2> parsed_args;
+      auto r = parser.parse(args, nullptr, parsed_args);
+      return PyLong_AsLong(handle_torch_function(
+          r, args, nullptr, torch_C_module, "torch._C._functorch", "_vmap_increment_nesting"));
+  }
+  
   return initAndPushDynamicLayer(
       TransformType::Vmap,
       std::move(batch_size),
@@ -284,6 +352,25 @@ static int64_t _vmap_increment_nesting(
 }
 
 static int64_t _vmap_decrement_nesting() {
+  if (at::impl::torch_function_mode_enabled()) {
+    auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C._functorch")); 
+    const string& func_name = "_vmap_decrement_nesting";
+    const string& module_name = "torch._C._functorch";
+    py::object torch_api_function =
+      PyObject_FastGetAttrString(torch_C_module, (char*)func_name.c_str());
+    TORCH_INTERNAL_ASSERT(
+        torch_api_function.ptr() != nullptr, "torch API function must exist");
+    py::tuple args_ = py::tuple();
+    return PyLong_AsLong(handle_torch_function_no_python_arg_parser(
+      {},
+      args_.ptr(),
+      nullptr,
+      func_name.c_str(),
+      torch_api_function.ptr(),
+      module_name.c_str(),
+      TorchFunctionName::TorchFunction));
+
+}
   auto layer = popDynamicLayerAndDeleteMetadata();
   TORCH_INTERNAL_ASSERT(layer.key() == TransformType::Vmap);
   return layer.layerId();

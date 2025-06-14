@@ -191,7 +191,7 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
       handleScalarTypePromotion(other_, tensor_);
     }
   }
-
+  
   // If the dimensions aren't aligned, we need to line them up.
   // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
   // Note that only tensors that have a batch dim need to be modified.

@@ -191,7 +191,7 @@ def vmap(
         sequences out of the box.
     """
     from torch._dynamo import is_compiling
-
+    
     _check_randomness_arg(randomness)
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError(

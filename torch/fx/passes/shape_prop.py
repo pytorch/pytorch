@@ -11,6 +11,10 @@ from torch._prims_common import definitely_contiguous_for_memory_format
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx._compatibility import compatibility
 from torch.fx.node import map_aggregate, Node
+from torch._C._functorch import (
+    get_unwrapped,
+    is_batchedtensor,
+)
 
 
 __all__ = ["TensorMetadata", "ShapeProp"]
@@ -43,6 +47,10 @@ def _extract_tensor_metadata(
     """
     Extract a TensorMetadata NamedTuple describing `result`.
     """
+    # If it is vmap tensor, just unwrap it. Note that this is only relevant
+    # when we are dping pre-dispatch.
+    if is_batchedtensor(result):
+        result = get_unwrapped(result)
     shape = result.shape
     dtype = result.dtype
     requires_grad = result.requires_grad

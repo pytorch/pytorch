@@ -435,8 +435,8 @@ class Tracer(TracerBase):
             setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
-
         return super().create_arg(a)
+        
 
     @compatibility(is_backward_compatible=True)
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
