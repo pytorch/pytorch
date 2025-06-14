@@ -1415,7 +1415,7 @@ init_command = [
     '--no-black-binary',
     'black==23.12.1',
     'usort==1.0.8.post1',
-    'isort==5.13.2',
+    'isort==6.0.1',
     'ruff==0.11.13',  # sync with RUFF
 ]
 is_formatter = true
