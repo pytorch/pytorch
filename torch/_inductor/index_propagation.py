@@ -272,8 +272,11 @@ class IndexPropagation(DefaultHandler):
     ) -> IndexPropResult:
         # Build a new SymPy expression from this ops call
         def unwrap(a: Union[Any, IndexPropVar]) -> Any:
+            from torch.utils._sympy.functions import Identity
             if not isinstance(a, IndexPropVar):
                 return a
+            if isinstance(a, Identity):
+                return a.expand(identity=True)
             return a.value
 
         new_args = [unwrap(a) for a in args]
