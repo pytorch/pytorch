@@ -2275,14 +2275,16 @@ TEST_F(LazyOpsTest, TestCosineSimilarity) {
   torch::Tensor x2 = torch::rand(
       {4, 3}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   double eps = 1e-8;
+  bool keepdim = false;
   int rank = x1.dim();
   for (int dim = -rank; dim < rank; ++dim) {
     ForEachDevice([&](const torch::Device& device) {
-      torch::Tensor output = torch::cosine_similarity(x1, x2, dim, eps);
+      torch::Tensor output =
+          torch::cosine_similarity(x1, x2, dim, eps, keepdim);
       torch::Tensor lazy_x1 = CopyToDevice(x1, device);
       torch::Tensor lazy_x2 = CopyToDevice(x2, device);
       torch::Tensor lazy_output =
-          torch::cosine_similarity(lazy_x1, lazy_x2, dim, eps);
+          torch::cosine_similarity(lazy_x1, lazy_x2, dim, eps, keepdim);
       AllClose(output, lazy_output);
     });
   }

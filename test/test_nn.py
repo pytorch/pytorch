@@ -5503,6 +5503,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         out = F.cosine_similarity(a, b)
         self.assertEqual(out, torch.ones(2, dtype=torch.float))
 
+        a = torch.rand(3, 4, 5, dtype=torch.float)
+        b = torch.rand(3, 4, 5, dtype=torch.float)
+        out = F.cosine_similarity(a, b, dim=-1, keepdim=False)
+        self.assertEqual(out.shape, (3, 4))
+        out = F.cosine_similarity(a, b, dim=-1, keepdim=True)
+        self.assertEqual(out.shape, (3, 4, 1))
+
 
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
