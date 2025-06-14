@@ -12,6 +12,7 @@ from typing import Any, Optional, Union
 import sympy
 
 import torch
+import torch._prims as prims
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
@@ -2677,7 +2678,28 @@ def flex_attention_backward(*args, **kwargs):
 
     # Create delta which will is needed for the bwd's kernel
     grad_lse_exp2 = lowerings[aten.mul](grad_logsumexp, 1 / math.log(2))
+
+    # Upcast mul to bf16 if operands are both fp8, since elementwise fp8 mul op is not supported
+    # due to hardware limitation.
+    fp8_dtypes = (
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+    )
+    upcast_from_fp8 = False
+    orig_fp8_dtype = None
+    if out.get_dtype() in fp8_dtypes and grad_out.get_dtype() in fp8_dtypes:
+        orig_fp8_dtype = out.get_dtype()
+        assert out.get_dtype() == grad_out.get_dtype(), "FP8 types must match"
+        upcast_from_fp8 = True
+        out =  lowerings[prims.convert_element_type](out, torch.bfloat16)
+        grad_out =  lowerings[prims.convert_element_type](grad_out, torch.bfloat16)
+
     mul_delta = lowerings[aten.mul](out, grad_out)
+
+    # If mul was upcasted from fp8 to bf16, we need to downcast it back to fp8.
+    if upcast_from_fp8:
+        mul_delta = lowerings[prims.convert_element_type](mul_delta, orig_fp8_dtype)
+
     delta = lowerings[aten.sum](mul_delta, axis=-1)
     delta = lowerings[aten.sub](delta, grad_lse_exp2)
     delta = ExternKernel.require_contiguous(delta)
@@ -2853,7 +2875,6 @@ def flex_attention_backward(*args, **kwargs):
         14: create_num_blocks_fake_generator(full_q_indices),  # full_q_num_blocks
         15: create_indices_fake,
     }
-
     broadcasted_grad_key = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
