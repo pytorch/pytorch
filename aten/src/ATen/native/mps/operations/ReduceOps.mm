@@ -72,15 +72,15 @@ static void set_apparent_shapes(NSMutableArray<NSNumber*>*& apparent_out_shape,
      * Input shape becomes flattened
      * Because 0 reduce dims means all dims are reduced
      */
-    apparent_in_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
+    apparent_in_shape = [[[NSMutableArray<NSNumber*> alloc] initWithCapacity:1] autorelease];
     int64_t num_in_elements = c10::multiply_integers(input_shape);
     apparent_in_shape[0] = [NSNumber numberWithInt:num_in_elements];
 
-    apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
+    apparent_out_shape = [[[NSMutableArray<NSNumber*> alloc] initWithCapacity:1] autorelease];
     apparent_out_shape[0] = @1;
   } else {
     // num_output_dims in this case is number of input dims
-    apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_output_dims];
+    apparent_out_shape = [[[NSMutableArray<NSNumber*> alloc] initWithCapacity:num_output_dims] autorelease];
     for (const auto i : c10::irange(num_output_dims)) {
       int64_t current_input_dim = input_shape[i];
 
@@ -105,12 +105,12 @@ static void set_axes(NSMutableArray<NSNumber*>*& axes,
                      OptionalIntArrayRef opt_dim,
                      int64_t num_input_dims) {
   if (num_reduce_dims == 0) {
-    axes = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
+    axes = [[[NSMutableArray<NSNumber*> alloc] initWithCapacity:1] autorelease];
     axes[0] = @0;
   } else {
     TORCH_INTERNAL_ASSERT(opt_dim.has_value());
     IntArrayRef dim = opt_dim.value();
-    axes = [NSMutableArray<NSNumber*> arrayWithCapacity:num_reduce_dims];
+    axes = [[[NSMutableArray<NSNumber*> alloc] initWithCapacity:num_reduce_dims] autorelease];
     for (const auto i : c10::irange(num_reduce_dims)) {
       axes[i] = [NSNumber numberWithInt:maybe_wrap_dim(dim[i], num_input_dims)];
     }
@@ -341,29 +341,29 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
   int64_t num_reduce_dims = dim.size();
   int64_t num_output_dims;
 
-  // For output shape calculation, assume that keepdim is true
-  num_output_dims = num_input_dims;
-  NSMutableArray<NSNumber*>* apparent_output_shape = nil;
-  NSMutableArray<NSNumber*>* apparent_input_shape = nil;
-
-  // Reduction axes
-  NSMutableArray<NSNumber*>* axes;
-  set_axes(axes, num_reduce_dims, dim, input_shape.size());
-
-  set_apparent_shapes(apparent_output_shape, apparent_input_shape, num_reduce_dims, num_output_dims, input_shape, axes);
-
-  NSArray<NSNumber*>* wrappedAxes = getTensorAxes(input_shape, dim);
-  if (cdist) {
-    apparent_input_shape = [getMPSShape(input_tensor.sizes()) mutableCopy];
-    apparent_output_shape = [getMPSShape(output_t.sizes()) mutableCopy];
-  }
-
   if (output_t.numel() == 0) {
     return;
   }
 
   auto stream = getCurrentMPSStream();
   @autoreleasepool {
+    // For output shape calculation, assume that keepdim is true
+    num_output_dims = num_input_dims;
+    NSMutableArray<NSNumber*>* apparent_output_shape = nil;
+    NSMutableArray<NSNumber*>* apparent_input_shape = nil;
+
+    // Reduction axes
+    NSMutableArray<NSNumber*>* axes;
+    set_axes(axes, num_reduce_dims, dim, input_shape.size());
+
+    set_apparent_shapes(
+        apparent_output_shape, apparent_input_shape, num_reduce_dims, num_output_dims, input_shape, axes);
+
+    NSArray<NSNumber*>* wrappedAxes = getTensorAxes(input_shape, dim);
+    if (cdist) {
+      apparent_output_shape = [[getMPSShape(output_t.sizes()) mutableCopy] autorelease];
+    }
+
     NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
     std::string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
     std::string tensor_key = cdist ? getTensorsStringKey({input_tensor, other_tensor}) : getTensorsStringKey({input_t});
