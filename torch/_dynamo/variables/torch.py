@@ -405,7 +405,12 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 bound_args = sig.bind(*args, **kwargs)
                 bound_args.apply_defaults()
             except TypeError as e:
-                raise AssertionError("Invalid arguments to sdpa_kernel") from e
+                unimplemented_v2(
+                    gb_type="Invalid arguments to sdpa_kernel",
+                    context="",
+                    explanation="Invalid arguments to sdpa_kernel",
+                    hints=[*graph_break_hints.FUNDAMENTAL],
+                )
 
             backends = bound_args.arguments["backends"]
             set_priority = bound_args.arguments["set_priority"]
