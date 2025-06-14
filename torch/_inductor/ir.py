@@ -1507,6 +1507,16 @@ class Reduction(Loops):
             reduction_numel,
             input_node,
         )
+
+        if (
+            reduction_type == "sum"
+            and src_dtype in (torch.float, torch.bfloat16, torch.float16)
+            and isinstance(reduction_numel, Integer)
+            and reduction_numel > 1_000_000
+            and device.type == "cpu"
+        ):
+            split = 1024
+
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
         # reuse the passed hint if available
