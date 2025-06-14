@@ -1,6 +1,7 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/stable/library.h>
+#include <torch/csrc/stable/tensor.h>
 
 #include <optional>
 
@@ -128,18 +129,19 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("identity", &boxed_identity);
 }
 
-RAIIATH my_abs(RAIIATH t) {
+using torch::stable::Tensor;
+
+Tensor my_abs(Tensor t) {
   const auto num_args = 1;
   StableIValue stack[num_args];
-  stack[0] = from(t.release());
+  stack[0] = from(t);
   aoti_torch_call_dispatcher("aten::abs", "", stack);
-  return RAIIATH(to<AtenTensorHandle>(stack[0]));
+  return to<Tensor>(stack[0]);
 }
 
 void boxed_my_abs(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  RAIIATH t(to<AtenTensorHandle>(stack[0]));
-  RAIIATH raiiath_res = my_abs(std::move(t));
-  stack[0] = from(raiiath_res.release());
+  Tensor tensor_res = my_abs(to<Tensor>(stack[0]));
+  stack[0] = from(tensor_res);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
@@ -221,4 +223,54 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("exp_neg_is_leaf", &boxed_exp_neg_is_leaf);
+}
+
+Tensor neg_exp(Tensor t) {
+  StableIValue stack[1];
+  stack[0] = from(t);
+  aoti_torch_call_dispatcher("aten::exp", "", stack);
+  aoti_torch_call_dispatcher("aten::neg", "", stack);
+  return to<Tensor>(stack[0]);
+}
+
+void boxed_neg_exp(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  Tensor res = neg_exp(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("neg_exp(Tensor t) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("neg_exp", &boxed_neg_exp);
+}
+
+Tensor divide_neg_exp(Tensor t) {
+  StableIValue stack_neg[1];
+  stack_neg[0] = from(t);
+
+  StableIValue stack_exp[1];
+  stack_exp[0] = from(t);
+  aoti_torch_call_dispatcher("aten::exp", "", stack_exp);
+  aoti_torch_call_dispatcher("aten::neg", "", stack_neg);
+
+  StableIValue stack_div[2];
+  stack_div[0] = stack_neg[0];
+  stack_div[1] = stack_exp[0];
+  aoti_torch_call_dispatcher("aten::divide", "Tensor", stack_div);
+  return to<Tensor>(stack_div[0]);
+}
+
+void boxed_divide_neg_exp(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  Tensor res = divide_neg_exp(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("divide_neg_exp(Tensor t) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("divide_neg_exp", &boxed_divide_neg_exp);
 }
