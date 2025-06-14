@@ -205,8 +205,10 @@ struct MediumRadixSort {
     TORCH_INTERNAL_ASSERT(ceilPowerOf2 <= 4096);
 #ifdef USE_ROCM
     constexpr int default_ipt = 8;
+    constexpr int small_ipt = 2;
 #else
     constexpr int default_ipt = 32;
+    constexpr int small_ipt = 4;
 #endif
     switch (ceilPowerOf2) {
       case 4096:
@@ -223,7 +225,7 @@ struct MediumRadixSort {
       case 128:
       case 64:
 #if !HAS_WARP_MERGE_SORT()
-        HANDLE_CASE(128, 4);
+        HANDLE_CASE(128, small_ipt);
         break;
 #endif
       case 32:
