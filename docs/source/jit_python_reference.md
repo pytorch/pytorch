@@ -1,12 +1,11 @@
-.. _python-language-reference:
+(python-language-reference)=
 
-Python Language Reference Coverage
-==================================
+# Python Language Reference Coverage
 
 This is a 1:1 mapping of the features listed in https://docs.python.org/3/reference/ and their
 support in TorchScript. The categorizations are as follows:
 
-
+```{eval-rst}
 .. list-table::
    :header-rows: 1
 
@@ -430,3 +429,4 @@ support in TorchScript. The categorizations are as follows:
    * - `9.4. Expression input <https://docs.python.org/3/reference/toplevel_components.html#expression-input>`_
      - Not Relevant
      -
+```
