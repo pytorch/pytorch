@@ -57,7 +57,9 @@ C10_DECLARE_bool(caffe2_use_fatal_for_enforce);
 
 namespace c10 {
 
+#if !defined(C10_NODEPRECATED)
 using std::string;
+#endif
 
 // Functions that we use for initialization.
 C10_API bool InitCaffeLogging(int* argc, char** argv);
