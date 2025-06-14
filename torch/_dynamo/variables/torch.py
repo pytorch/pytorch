@@ -403,13 +403,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             sig = inspect.signature(torch.nn.attention.sdpa_kernel)
             try:
                 bound_args = sig.bind(*args, **kwargs)
-                bound_args.apply_defaults()
+                if "set_priority" not in bound_args.arguments:
+                    bound_args.arguments["set_priority"] = False
             except TypeError as e:
                 unimplemented_v2(
                     gb_type="Invalid arguments to sdpa_kernel",
                     context="",
                     explanation=str(e),
-                    hints=[*graph_break_hints.FUNDAMENTAL],
+                    hints=[*graph_break_hints.USER_ERROR],
                 )
 
             backends = bound_args.arguments["backends"]
