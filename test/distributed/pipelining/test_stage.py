@@ -14,18 +14,16 @@ from torch.distributed.pipelining import (
     ScheduleGPipe,
 )
 from torch.distributed.pipelining._utils import PipeliningShapeError
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
     MultiProcessTestCase,
-    requires_nccl,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle,
-    skip_but_pass_in_sandcastle_if,
 )
 from torch.utils._pytree import tree_map_only
 
@@ -34,7 +32,7 @@ d_hid = 512
 batch_size = 256
 chunks = 4
 
-device_type = "cuda"
+device_type = torch.accelerator.current_accelerator().type
 
 torch.manual_seed(0)
 
@@ -66,8 +64,8 @@ def get_flatten_hook():
 class StageTest(MultiProcContinousTest):
     @classmethod
     def backend_str(cls) -> str:
-        # Testing with NCCL backend
-        return "nccl"
+        backend = torch.get_default_backend_for_device(device_type)
+        return backend
 
     @classmethod
     def device_type(cls) -> str:
@@ -75,10 +73,9 @@ class StageTest(MultiProcContinousTest):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
+        return torch.device(device_type, torch.accelerator.current_device_index())
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(2)
     @parametrize("ModelClass", [ExampleCode, MultiMLP])
     def test_tracer(self, ModelClass):
         mod = ModelClass(d_hid, self.world_size)
@@ -121,8 +118,7 @@ class StageTest(MultiProcContinousTest):
         old_keys = mod.state_dict().keys()
         assert all(k in old_keys for k in submod_keys)
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(2)
     @parametrize("ModelClass", [ModelWithKwargs])
     def test_tracer_kwargs(self, ModelClass):
         mod = ModelClass(d_hid, self.world_size)
@@ -170,8 +166,7 @@ class StageTest(MultiProcContinousTest):
         old_keys = mod.state_dict().keys()
         assert all(k in old_keys for k in submod_keys)
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(2)
     def test_manual(self):
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
         full_mod.to(self.device)
@@ -202,8 +197,7 @@ class StageTest(MultiProcContinousTest):
             ref_out = full_mod(x)
             torch.testing.assert_close(out, ref_out)
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(2)
     def test_custom_dw_with_fb_schedule(self):
         """Tests that separate weight grad function 'dw_runner' gets run under a schedule that's only aware of F/B."""
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
@@ -262,8 +256,7 @@ class StageTest(MultiProcContinousTest):
             ref_out = full_mod(x)
             torch.testing.assert_close(out, ref_out)
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(2)
     def test_output_chunks_memory_usage(self):
         """Test that output_chunks doesn't store memory for non-first stages."""
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
@@ -347,14 +340,13 @@ class StageNegativeTest(MultiProcessTestCase):
     def init_pg(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            backend="nccl",
+            backend=dist.get_default_backend_for_device(self.device),
             store=store,
             rank=self.rank,
             world_size=self.world_size,
             device_id=self.device,
         )
 
-    @requires_nccl()
     @skip_but_pass_in_sandcastle("Flaky in CI")
     def test_shape_prop_mismatch(self):
         """Tests shape prop errors are raised"""
@@ -402,8 +394,7 @@ class StageNegativeTest(MultiProcessTestCase):
             with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
                 _run_step(x)
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(2)
     def test_custom_dw_errors(self):
         """Tests expected errors are raised"""
         self.init_pg()
