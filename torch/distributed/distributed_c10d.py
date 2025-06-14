@@ -13,10 +13,9 @@ import pickle
 import sys
 import time
 import warnings
-from collections import namedtuple
 from datetime import timedelta
 from enum import Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union, NamedTuple
 from typing_extensions import deprecated
 
 import torch
@@ -272,7 +271,7 @@ class Backend(str):  # noqa: SLOT000
         CUSTOM = 6
 
     # Plugin system
-    _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
+    _BackendPlugin = NamedTuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
     _plugins: dict[str, _BackendPlugin] = {}
 
