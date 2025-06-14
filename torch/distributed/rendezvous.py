@@ -202,7 +202,7 @@ def _create_c10d_store(
             is_master=start_daemon,
             timeout=timeout,
             multi_tenant=True,
-            use_libuv=use_libuv,
+            use_libuv=False,
         )
 
 
@@ -228,7 +228,7 @@ def _tcp_rendezvous_handler(
     assert result.hostname is not None
 
     store = _create_c10d_store(
-        result.hostname, result.port, rank, world_size, timeout, use_libuv
+        result.hostname, result.port, rank, world_size, timeout, False
     )
 
     yield (store, rank, world_size)
