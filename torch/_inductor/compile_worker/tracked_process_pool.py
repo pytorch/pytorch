@@ -49,7 +49,7 @@ class TrackedProcessPoolExecutor(ProcessPoolExecutor):
     ) -> None:
         with _queue_stats_lock:
             _queue_stats.pool_count += 1
-        super().__init__()
+        super().__init__(max_workers, mp_context, initializer)
 
     def _record_dequeue(self, f: Future[Any]) -> None:
         now = time()
