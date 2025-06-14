@@ -50,7 +50,8 @@ class Weights {
       std::string_view constantPathPrefix,
       Placement placement = Placement(),
       std::function<bool(const std::string&)> skipSizeCheck = {},
-      std::function<bool(const std::string&)> skipDtypeCheck = {});
+      std::function<bool(const std::string&)> skipDtypeCheck = {},
+      std::string (*convertOldToNewTensorName)(const std::string&) = nullptr);
 
   at::Tensor at(const std::string& name) const;
   at::Tensor& at(const std::string& name);
