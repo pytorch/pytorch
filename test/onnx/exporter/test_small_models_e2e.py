@@ -638,6 +638,7 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             ),
         )
         onnx_program = self.export(ScanModel(), inputs)
+        onnx_program.save("scan_cdist_add.onnx")
         onnx_testing.assert_onnx_program(onnx_program)
 
     def test_scan_cdist_dynamic_shapes(self):
