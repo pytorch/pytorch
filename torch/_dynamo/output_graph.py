@@ -368,6 +368,7 @@ class OutputGraph(OutputGraphGuardsState):
         global_scope: Scope,
         f_code,
         torch_function_mode_stack,
+        package,
     ):
         super().__init__(
             local_scope,
@@ -471,6 +472,7 @@ class OutputGraph(OutputGraphGuardsState):
         self.compiler_fn: Optional[CompilerFn] = compiler_fn
         self.root_tx = root_tx
 
+        self.package = package
         # Given a source, what are the user stacks of all locations that
         # accessed it?
         #
@@ -1714,6 +1716,9 @@ class OutputGraph(OutputGraphGuardsState):
                 if not isinstance(compiled_fn, _LazyGraphModule):
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
+
+            if self.package is not None:
+                self.package.add_backend_id(name, compiled_fn)
 
             compiled_fn = disable(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"
