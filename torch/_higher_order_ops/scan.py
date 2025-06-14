@@ -1,22 +1,23 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from collections.abc import Sequence
 from typing import Any, Callable, Optional
 
 import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.cond import create_bw_fn
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     check_meta_consistency,
+    create_bw_fn,
     first_slice_copy,
+    first_slice_copy_with_grad,
     materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
+    split_into_chunks,
     unique_graph_id,
     validate_subgraph_args_types,
 )
@@ -83,24 +84,6 @@ def mask_list(
         return [i if m else o for m, i, o in zip(mask, inp, other)]
     else:
         return [i for m, i in zip(mask, inp) if m]
-
-
-def first_slice_copy_with_grad(li: list[Any]) -> list[Any]:
-    # First_slice_copy does not keep the original requires_grad flag,
-    # but we need it for materialize_as_graph
-    # in order to compute the correct gradients
-    # The reason why first_slice_copy doesn't keep requires_grad flag is
-    # because it's called in torch.autograd.Function.backward/forward.
-    slc = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in li]
-    return slc
-
-
-def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
-    it = iter(iterable)
-    assert sum(chunk_sizes) == len(
-        iterable
-    ), "the sum of all chunks needs to match the length of the iterable."
-    return [list(itertools.islice(it, size)) for size in chunk_sizes]
 
 
 def call_operator(operator, *args):
