@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from functools import wraps
 from pstats import Stats
 from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch.distributed as dist
@@ -27,6 +28,7 @@ from .metadata import MetadataIndex, STATE_DICT_TYPE
 
 __all__ = ["find_tensor_shard", "find_state_dict_object"]
 
+_P = ParamSpec("_P")
 T = TypeVar("T")
 R = TypeVar("R")
 
@@ -450,9 +452,9 @@ def _profile():
         yield
 
 
-def _api_bc_check(func):
+def _api_bc_check(func: Callable[_P, R]) -> Callable[_P, R]:
     @wraps(func)
-    def inner_func(*args, **kwargs) -> Any:
+    def inner_func(*args: _P.args, **kwargs: _P.kwargs) -> R:
         if len(args) == 2:
             warnings.warn(
                 f"The argument order of {func.__name__} has been changed. "
@@ -470,7 +472,7 @@ def _api_bc_check(func):
                 kwargs["storage_reader"] = args[1]
             else:
                 raise RuntimeError(f"Unexpected kwonlyargs = {kwonlyargs}")
-            return func(args[0], **kwargs)
+            return func(args[0], **kwargs)  # type: ignore[arg-type]
         else:
             return func(*args, **kwargs)
 
