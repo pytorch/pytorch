@@ -590,26 +590,22 @@ class PyCodegen:
         seen_sources: OrderedSet[Source] = OrderedSet()
 
         def collect_temp_source(source):
-            stack = collections.deque([source])
-            while stack:
-                source = stack.pop()
+            if source in seen_sources:
+                # This source is used atleast twice, so it can be reused
+                self.mark_source_temp(source)
+                # Dont trace source further. This prevents us from marking too
+                # many nodes as temp sources.
+                return
 
-                if source in seen_sources:
-                    # This source is used at least twice, so it can be reused
-                    self.mark_source_temp(source)
-                    # Dont trace source further. This prevents us from marking too
-                    # many nodes as temp sources.
-                    return
+            seen_sources.add(source)
 
-                seen_sources.add(source)
+            if isinstance(source, ChainedSource):
+                collect_temp_source(source.base)
 
-                if isinstance(source, ChainedSource):
-                    stack.append(source.base)
-
-                if isinstance(source, DictGetItemSource) and isinstance(
-                    source.index, Source
-                ):
-                    stack.append(source.index)
+            if isinstance(source, DictGetItemSource) and isinstance(
+                source.index, Source
+            ):
+                collect_temp_source(source.index)
 
         # Collect all the sources that are used more than once, so that we can
         # generate tmp variables in the generated pre-graph bytecode. This
