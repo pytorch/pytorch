@@ -232,6 +232,7 @@ struct RNNDescriptorParams {
 RNNDescriptor
 descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
   RNNDescriptor rnn_desc;
+  std::cout<<"aten/src/ATen/native/cudnn/RNN.cpp 235 "<<at::globalContext().allowTF32CuDNN("rnn")<<"\n";
 #ifndef USE_CUDNN_RNN_V8_API
   rnn_desc.set(
       handle,
@@ -245,7 +246,7 @@ descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
       datatype,
       input_datatype,
       algo,
-      at::globalContext().allowTF32CuDNN());
+      at::globalContext().allowTF32CuDNN("rnn"));
 #else
     rnn_desc.set(
         handle,
@@ -261,7 +262,7 @@ descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
         datatype,
         input_datatype,
         algo,
-        at::globalContext().allowTF32CuDNN());
+        at::globalContext().allowTF32CuDNN("rnn"));
 #endif
   return rnn_desc;
 }
