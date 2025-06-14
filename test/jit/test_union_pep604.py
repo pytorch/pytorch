@@ -413,7 +413,9 @@ class TestUnion(JitTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "only int, float, complex, Tensor, device and string keys are supported",
+            "only int, float, "
+            "complex, Tensor, device and string keys "
+            "are supported",
         ):
             torch.jit.script(fn)
 
@@ -617,7 +619,9 @@ class TestUnion(JitTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "y is set to type str in the true branch and type int in the false branch",
+            "y is set to type str"
+            " in the true branch and type int "
+            "in the false branch",
         ):
             torch.jit.script(fn)
 
@@ -635,7 +639,9 @@ class TestUnion(JitTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "previously had type str but is now being assigned to a value of type int",
+            "previously had type "
+            "str but is now being assigned to a"
+            " value of type int",
         ):
             torch.jit.script(fn)
 
@@ -740,7 +746,8 @@ class TestUnion(JitTestCase):
             template,
             "List[str] | List[torch.Tensor]",
             lhs["list_literal_empty"],
-            "there are multiple possible List type candidates in the Union annotation",
+            "there are multiple possible List type "
+            "candidates in the Union annotation",
         )
 
         self._assert_passes(
@@ -906,7 +913,8 @@ class TestUnion(JitTestCase):
             template,
             "Dict[str, torch.Tensor] | Dict[str, int]",
             lhs["dict_literal_of_mixed"],
-            "none of those dict types can hold the types of the given keys and values",
+            "none of those dict types can hold the "
+            "types of the given keys and values",
         )
 
         # TODO: String frontend does not support tuple unpacking

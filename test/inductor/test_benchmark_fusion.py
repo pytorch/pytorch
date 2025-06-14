@@ -96,12 +96,9 @@ class BenchmarkFusionTestTemplate:
 
         # Disable dynamic_scale_rblock to make it easier to trigger register
         # spilling.
-        with (
-            unittest.mock.patch.object(
-                Scheduler, "benchmark_fused_nodes", new_benchmark_fn
-            ),
-            config.patch("dynamic_scale_rblock", False),
-        ):
+        with unittest.mock.patch.object(
+            Scheduler, "benchmark_fused_nodes", new_benchmark_fn
+        ), config.patch("dynamic_scale_rblock", False):
             S = 512
 
             def f(*inputs):
@@ -173,10 +170,9 @@ class BenchmarkFusionTestTemplate:
                 ".run", 2, exactly=True
             ).run(out_code[0])
 
-        with (
-            config.patch({"benchmark_fusion": False, "epilogue_fusion": False}),
-            torch.no_grad(),
-        ):
+        with config.patch(
+            {"benchmark_fusion": False, "epilogue_fusion": False}
+        ), torch.no_grad():
             torch._dynamo.reset()
 
             foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
@@ -296,7 +292,11 @@ if HAS_CUDA:
                     "empty_strided", 1, exactly=True
                 ).check("triton_tem_fused_addmm_relu_0").check_count(
                     ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
-                ).check("" if config.cpp_wrapper else "return").run(out_code[0])
+                ).check(
+                    "" if config.cpp_wrapper else "return"
+                ).run(
+                    out_code[0]
+                )
 
         @fresh_inductor_cache()
         @config.patch(max_autotune_gemm_backends="ATEN")
@@ -310,7 +310,11 @@ if HAS_CUDA:
                     "empty_strided", 1, exactly=True
                 ).check("" if config.cpp_wrapper else "extern_kernels.").check_count(
                     ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
-                ).check("" if config.cpp_wrapper else "return").run(out_code[0])
+                ).check(
+                    "" if config.cpp_wrapper else "return"
+                ).run(
+                    out_code[0]
+                )
 
         def test_changed_layout(self):
             # cat addmm planning will change layout - make sure propagated

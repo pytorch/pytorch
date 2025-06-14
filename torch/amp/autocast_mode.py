@@ -43,9 +43,7 @@ def autocast_decorator(autocast_instance, func):
         with autocast_instance:
             return func(*args, **kwargs)
 
-    decorate_autocast.__script_unsupported = (  # type: ignore[attr-defined]
-        "@autocast() decorator is not supported in script mode"
-    )
+    decorate_autocast.__script_unsupported = "@autocast() decorator is not supported in script mode"  # type: ignore[attr-defined]
     return decorate_autocast
 
 
@@ -90,9 +88,9 @@ class autocast:
 
         class AutocastModel(nn.Module):
             ...
-
             @torch.autocast(device_type="cuda")
-            def forward(self, input): ...
+            def forward(self, input):
+                ...
 
     Floating-point Tensors produced in an autocast-enabled region may be ``float16``.
     After returning to an autocast-disabled region, using them with floating-point
@@ -154,10 +152,8 @@ class autocast:
             def __init__(self, input_size, num_classes):
                 super().__init__()
                 self.fc1 = nn.Linear(input_size, num_classes)
-
             def forward(self, x):
                 return self.fc1(x)
-
 
         input_size = 2
         num_classes = 2

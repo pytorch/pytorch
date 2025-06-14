@@ -176,9 +176,9 @@ def shapes_to_tensor(x, device=None):
     if torch.jit.is_scripting():
         return torch.as_tensor(x, device=device)
     if torch.jit.is_tracing():
-        assert all(isinstance(t, torch.Tensor) for t in x), (
-            "Shape should be tensor during tracing!"
-        )
+        assert all(
+            isinstance(t, torch.Tensor) for t in x
+        ), "Shape should be tensor during tracing!"
         # as_tensor should not be used in tracing because it records a constant
         ret = torch.stack(x)
         if ret.device != device:  # avoid recording a hard-coded device if not necessary
@@ -477,9 +477,9 @@ class PartialT5(torch.nn.Module):
         real_seq_length = seq_length
 
         if past_key_value is not None:
-            assert len(past_key_value) == 2, (
-                f"past_key_value should have 2 past states: keys and values. Got {len(past_key_value)} past states"
-            )
+            assert (
+                len(past_key_value) == 2
+            ), f"past_key_value should have 2 past states: keys and values. Got {len(past_key_value)} past states"
             real_seq_length += (
                 past_key_value[0].shape[2] if query_length is None else query_length
             )
@@ -1280,7 +1280,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertExpectedInline(cnt.op_count, """4""")
         else:
             self.assertExpectedInline(cnt.frame_count, """2""")
-            self.assertExpectedInline(cnt.op_count, """20""")
+            self.assertExpectedInline(cnt.op_count, """19""")
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -4855,9 +4855,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 with warnings.catch_warnings(record=True):
                     data_len = len(value)
                 if len(self._fields):
-                    assert len(self) == data_len, (
-                        f"Adding a field of length {data_len} to a Instances of length {len(self)}"
-                    )
+                    assert (
+                        len(self) == data_len
+                    ), f"Adding a field of length {data_len} to a Instances of length {len(self)}"
                 self._fields[name] = value
 
             def get(self, name: str) -> Any:
@@ -5741,6 +5741,17 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.view_as_real(out_ref).sum().backward()
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
+
+    def test_add_complex_conj(self):
+        def f(x):
+            return x + x.conj()
+
+        x = torch.randn(4, dtype=torch.complex64, requires_grad=True)
+        out = torch.compile(f)(x)
+        expected_complex = (2 * x.real).to(dtype=out.dtype)
+
+        self.assertTrue(out.dtype == torch.complex64)
+        self.assertEqual(out, expected_complex)
 
     # https://github.com/pytorch/pytorch/issues/132200
     def test_partitioner_cse_respects_mutation_boundaries(self):
@@ -6815,12 +6826,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         ):
             torch.compile(lambda: None)
 
-        with (
-            torch._dynamo.config.patch(
-                suppress_errors=True, fail_on_recompile_limit_hit=True
-            ),
-            self.assertRaises(AssertionError),
-        ):
+        with torch._dynamo.config.patch(
+            suppress_errors=True, fail_on_recompile_limit_hit=True
+        ), self.assertRaises(AssertionError):
             torch.compile(lambda: None)
 
     def test_str_isalnum(self):
