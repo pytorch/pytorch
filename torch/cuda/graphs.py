@@ -46,12 +46,34 @@ def graph_pool_handle():
 class CUDAGraph(torch._C._CUDAGraph):
     r"""Wrapper around a CUDA graph.
 
+    Arguments:
+        keep_graph (bool, optional):
+
+        If keep_graph=False, a the cudaGraphExec_t will be
+        instantiated on GPU at the end of capture_end() and the
+        underlying cudaGraph_t will be destroyed. Users who want to
+        query or otherwise modify the underlying cudaGraph_t before
+        instantiatiation can set keep_graph=True and access it via
+        raw_cuda_graph() after capture_end(). Note that the
+        cudaGraphExec_t will not be instantiated at the end of
+        capture_end() in this case. Instead, it wil be instantiated
+        via an explicit called to instantiate() or automatically on
+        the first call to replay() if instantiate() was not already
+        called. Calling instantiate() manually before replay() is
+        recommended to prevent increased latency on the first call to
+        replay(). It is allowed to modify the raw cudaGraph_t after
+        first calling instantiate(), but the user must call
+        instantiate() again manually to make sure the instantiated
+        graph has these changes. Pytorch has no means of tracking
+        these changes.
+
     .. warning::
         This API is in beta and may change in future releases.
+
     """
 
-    def __new__(cls):
-        return super().__new__(cls)
+    def __new__(cls, keep_graph=False):
+        return super().__new__(cls, keep_graph)
 
     def capture_begin(self, pool=None, capture_error_mode="global"):
         r"""Begin capturing CUDA work on the current stream.
@@ -83,6 +105,15 @@ class CUDAGraph(torch._C._CUDAGraph):
         """
         super().capture_end()
 
+    def instantiate(self):
+        r"""Instantiate the CUDA graph. Will be called by
+        capture_end() if keep_graph=False, or by replay() if
+        keep_graph=True and instantiate() has not already been
+        explicitly called. Does not destroy the cudaGraph_t returned
+        by raw_cuda_graph().
+        """
+        super().instantiate()
+
     def replay(self):
         r"""Replay the CUDA work captured by this graph."""
         super().replay()
@@ -112,6 +143,9 @@ class CUDAGraph(torch._C._CUDAGraph):
         enabled via CUDAGraph.enable_debug_mode()
         """
         return super().debug_dump(debug_path)
+
+    def raw_cuda_graph(self):
+        return super().raw_cuda_graph()
 
 
 class graph:
