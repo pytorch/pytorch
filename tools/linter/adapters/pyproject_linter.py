@@ -87,10 +87,9 @@ def format_error_message(
 
 def check_file(filename: str) -> list[LintMessage]:
     path = Path(filename).absolute()
-    content = path.read_text(encoding="utf-8")
     try:
-        pyproject = tomllib.loads(content)
-    except tomllib.TOMLDecodeError as err:
+        pyproject = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (tomllib.TOMLDecodeError, OSError) as err:
         return [format_error_message(filename, err)]
 
     if not (isinstance(pyproject, dict) and isinstance(pyproject.get("project"), dict)):
