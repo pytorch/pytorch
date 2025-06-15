@@ -1,32 +1,33 @@
 # TorchScript
 
 ```{toctree}
-   :maxdepth: 1
-   :caption: Builtin Functions
-   :hidden:
+:maxdepth: 1
+:caption: Builtin Functions
+:hidden:
 
-   torch.jit.supported_ops <jit_builtin_functions>
-
-
-```{toctree}
-    :maxdepth: 1
-    :caption: Language Reference
-    :hidden:
-
-    jit_language_reference
-
+torch.jit.supported_ops <jit_builtin_functions>
+```
 
 ```{toctree}
-    :maxdepth: 1
+:maxdepth: 1
+:caption: Language Reference
+:hidden:
 
-    jit_language_reference_v2
+jit_language_reference
+```
 
+```{toctree}
+:maxdepth: 1
+
+jit_language_reference_v2
+```
 
 ```{contents}
 :local:
 :depth: 2
-    :depth: 2
+```
 
+```{eval-rst}
 .. automodule:: torch.jit
 .. currentmodule:: torch.jit
 ```
@@ -88,43 +89,40 @@ to use control-flow around a simple feed-forward model. For instance the beam se
 of a sequence to sequence model will typically be written in script but can call an
 encoder module generated using tracing.
 
-```{eval-rst}
-.. testsetup::
+```{testsetup}
+# These are hidden from the docs, but these are necessary for `doctest`
+# since the `inspect` module doesn't play nicely with the execution
+# environment for `doctest`
+import torch
 
-    # These are hidden from the docs, but these are necessary for `doctest`
-    # since the `inspect` module doesn't play nicely with the execution
-    # environment for `doctest`
-    import torch
+original_script = torch.jit.script
+def script_wrapper(obj, *args, **kwargs):
+    obj.__module__ = 'FakeMod'
+    return original_script(obj, *args, **kwargs)
 
-    original_script = torch.jit.script
-    def script_wrapper(obj, *args, **kwargs):
-        obj.__module__ = 'FakeMod'
-        return original_script(obj, *args, **kwargs)
+torch.jit.script = script_wrapper
 
-    torch.jit.script = script_wrapper
+original_trace = torch.jit.trace
+def trace_wrapper(obj, *args, **kwargs):
+    obj.__module__ = 'FakeMod'
+    return original_trace(obj, *args, **kwargs)
 
-    original_trace = torch.jit.trace
-    def trace_wrapper(obj, *args, **kwargs):
-        obj.__module__ = 'FakeMod'
-        return original_trace(obj, *args, **kwargs)
-
-    torch.jit.trace = trace_wrapper
+torch.jit.trace = trace_wrapper
 ```
 
 Example (calling a traced function in script):
 
-```{eval-rst}
-.. testcode::
-    import torch
+```{testcode}
+import torch
 
-    def foo(x, y):
-        return 2 * x + y
+def foo(x, y):
+    return 2 * x + y
 
-    traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
+traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
 
-    @torch.jit.script
-    def bar(x):
-        return traced_foo(x, x)
+@torch.jit.script
+def bar(x):
+    return traced_foo(x, x)
 ```
 
 Traced functions can call script functions. This is useful when a small part of
@@ -134,23 +132,22 @@ preserved correctly.
 
 Example (calling a script function in a traced function):
 
-```{eval-rst}
-.. testcode::
-    import torch
+```{testcode}
+import torch
 
-    @torch.jit.script
-    def foo(x, y):
-        if x.max() > y.max():
-            r = x
-        else:
-            r = y
-        return r
+@torch.jit.script
+def foo(x, y):
+    if x.max() > y.max():
+        r = x
+    else:
+        r = y
+    return r
 
 
-    def bar(x, y, z):
-        return foo(x, y) + z
+def bar(x, y, z):
+    return foo(x, y) + z
 
-    traced_bar = torch.jit.trace(bar, (torch.rand(3), torch.rand(3), torch.rand(3)))
+traced_bar = torch.jit.trace(bar, (torch.rand(3), torch.rand(3), torch.rand(3)))
 ```
 
 This composition also works for `nn.Module`s as well, where it can be used to generate
@@ -158,24 +155,23 @@ a submodule using tracing that can be called from the methods of a script module
 
 Example (using a traced module):
 
-```{eval-rst}
-.. testcode::
-    import torch
-    import torchvision
-    :skipif: torchvision is None
+```{testcode}
+import torch
+import torchvision
+:skipif: torchvision is None
 
-    class MyScriptModule(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.means = torch.nn.Parameter(torch.tensor([103.939, 116.779, 123.68])
-                                            .resize_(1, 3, 1, 1))
-            self.resnet = torch.jit.trace(torchvision.models.resnet18(),
-                                        torch.rand(1, 3, 224, 224))
+class MyScriptModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.means = torch.nn.Parameter(torch.tensor([103.939, 116.779, 123.68])
+                                        .resize_(1, 3, 1, 1))
+        self.resnet = torch.jit.trace(torchvision.models.resnet18(),
+                                    torch.rand(1, 3, 224, 224))
 
-        def forward(self, input):
-            return self.resnet(input - self.means)
+    def forward(self, input):
+        return self.resnet(input - self.means)
 
-    my_script_module = torch.jit.script(MyScriptModule())
+my_script_module = torch.jit.script(MyScriptModule())
 ```
 
 ## TorchScript Language
@@ -264,25 +260,25 @@ TorchScript provides a code pretty-printer for all {class}`ScriptModule` instanc
 pretty-printer gives an interpretation of the script method's code as valid
 Python syntax. For example:
 
-```{eval-rst}
-.. testcode::
-    @torch.jit.script
-    def foo(len):
-        # type: (int) -> torch.Tensor
-        rv = torch.zeros(3, 4)
-        for i in range(len):
-            if i < 10:
-                rv = rv - 1.0
-            else:
-                rv = rv + 1.0
-        return rv
+```{testcode}
+@torch.jit.script
+def foo(len):
+    # type: (int) -> torch.Tensor
+    rv = torch.zeros(3, 4)
+    for i in range(len):
+        if i < 10:
+            rv = rv - 1.0
+        else:
+            rv = rv + 1.0
+    return rv
 
-    print(foo.code)
+print(foo.code)
+```
 
-.. testoutput::
-    :hide:
+```{testoutput}
+:hide:
 
-    ...
+...
 ```
 
 A {class}`ScriptModule` with a single `forward` method will have an attribute
@@ -320,25 +316,25 @@ TorchScript uses a static single assignment (SSA) intermediate representation
 ATen (the C++ backend of PyTorch) operators and other primitive operators,
 including control flow operators for loops and conditionals. As an example:
 
-```{eval-rst}
-.. testcode::
-    @torch.jit.script
-    def foo(len):
-        # type: (int) -> torch.Tensor
-        rv = torch.zeros(3, 4)
-        for i in range(len):
-            if i < 10:
-                rv = rv - 1.0
-            else:
-                rv = rv + 1.0
-        return rv
+```{testcode}
+@torch.jit.script
+def foo(len):
+    # type: (int) -> torch.Tensor
+    rv = torch.zeros(3, 4)
+    for i in range(len):
+        if i < 10:
+            rv = rv - 1.0
+        else:
+            rv = rv + 1.0
+    return rv
 
-    print(foo.graph)
+print(foo.graph)
+```
 
-.. testoutput::
-    :hide:
+```{testoutput}
+:hide:
 
-    ...
+...
 ```
 
 `graph` follows the same rules described in the {ref}`inspecting-code` section
@@ -469,22 +465,21 @@ shape, the trace differs.
 In this case, data-dependent control flow like this can be captured using
 {func}`torch.jit.script` instead:
 
-```{eval-rst}
-.. testcode::
-    def fn(x):
-        result = x[0]
-        for i in range(x.size(0)):
-            result = result * x[i]
-        return result
+```{testcode}
+def fn(x):
+    result = x[0]
+    for i in range(x.size(0)):
+        result = result * x[i]
+    return result
 
-    inputs = (torch.rand(3, 4, 5),)
-    check_inputs = [(torch.rand(4, 5, 6),), (torch.rand(2, 3, 4),)]
+inputs = (torch.rand(3, 4, 5),)
+check_inputs = [(torch.rand(4, 5, 6),), (torch.rand(2, 3, 4),)]
 
-    scripted_fn = torch.jit.script(fn)
-    print(scripted_fn.graph)
+scripted_fn = torch.jit.script(fn)
+print(scripted_fn.graph)
 
-    for input_tuple in [inputs] + check_inputs:
-        torch.testing.assert_close(fn(*input_tuple), scripted_fn(*input_tuple))
+for input_tuple in [inputs] + check_inputs:
+    torch.testing.assert_close(fn(*input_tuple), scripted_fn(*input_tuple))
 ```
 
 Which produces:
@@ -511,20 +506,19 @@ The tracer produces warnings for several problematic patterns in traced
 computation. As an example, take a trace of a function that contains an
 in-place assignment on a slice (a view) of a Tensor:
 
-```{eval-rst}
-.. testcode::
+```{testcode}
+def fill_row_zero(x):
+    x[0] = torch.rand(*x.shape[1:2])
+    return x
 
-    def fill_row_zero(x):
-        x[0] = torch.rand(*x.shape[1:2])
-        return x
+traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
+print(traced.graph)
+```
 
-    traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
-    print(traced.graph)
+```{testoutput}
+:hide:
 
-.. testoutput::
-    :hide:
-
-    ...
+...
 ```
 
 Produces several warnings and a graph which simply returns the input:
@@ -543,20 +537,19 @@ graph(%0 : Float(3, 4)) {
 We can fix this by modifying the code to not use the in-place update, but
 rather build up the result tensor out-of-place with `torch.cat`:
 
-```{eval-rst}
-.. testcode::
+```{testcode}
+def fill_row_zero(x):
+    x = torch.cat((torch.rand(1, *x.shape[1:2]), x[1:2]), dim=0)
+    return x
 
-    def fill_row_zero(x):
-        x = torch.cat((torch.rand(1, *x.shape[1:2]), x[1:2]), dim=0)
-        return x
+traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
+print(traced.graph)
+```
 
-    traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
-    print(traced.graph)
+```{testoutput}
+:hide:
 
-.. testoutput::
-    :hide:
-
-    ...
+...
 ```
 
 ## Frequently Asked Questions
@@ -593,19 +586,18 @@ Q: How do I store attributes on a {class}`ScriptModule`?
 
 Say we have a model like:
 
-```{eval-rst}
-.. testcode::
-    import torch
+```{testcode}
+import torch
 
-    class Model(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.x = 2
+class Model(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.x = 2
 
-        def forward(self):
-            return self.x
+    def forward(self):
+        return self.x
 
-    m = torch.jit.script(Model())
+m = torch.jit.script(Model())
 ```
 
 If `Model` is instantiated it will result in a compilation error
@@ -667,24 +659,23 @@ skip this section. There are two main changes to the TorchScript API with PyTorc
 
 The new usage looks like this:
 
-```{eval-rst}
-.. testcode::
-    import torch
-    import torch.nn as nn
-    import torch.nn.functional as F
+```{testcode}
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-    class Model(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.conv1 = nn.Conv2d(1, 20, 5)
-            self.conv2 = nn.Conv2d(20, 20, 5)
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 20, 5)
+        self.conv2 = nn.Conv2d(20, 20, 5)
 
-        def forward(self, x):
-            x = F.relu(self.conv1(x))
-            return F.relu(self.conv2(x))
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        return F.relu(self.conv2(x))
 
-    my_model = Model()
-    my_scripted_model = torch.jit.script(my_model)
+my_model = Model()
+my_scripted_model = torch.jit.script(my_model)
 ```
 
 - The module's `forward` is compiled by default. Methods called from `forward` are lazily compiled in the order they are used in `forward`.
@@ -704,14 +695,13 @@ As a result of these changes, the following items are considered deprecated and 
 
 #### Modules
 
-```{eval-rst}
-.. warning::
-    The {func}`@torch.jit.ignore <torch.jit.ignore>` annotation's behavior changes in
-    PyTorch 1.2. Before PyTorch 1.2 the `@ignore` decorator was used to make a function
-    or method callable from code that is exported. To get this functionality back,
-    use `@torch.jit.unused()`. `@torch.jit.ignore` is now equivalent
-    to `@torch.jit.ignore(drop=False)`. See {func}`@torch.jit.ignore <torch.jit.ignore>`
-    and {func}`@torch.jit.unused torch.jit.unused` for details.
+```{warning}
+The {func}`@torch.jit.ignore <torch.jit.ignore>` annotation's behavior changes in
+PyTorch 1.2. Before PyTorch 1.2 the `@ignore` decorator was used to make a function
+or method callable from code that is exported. To get this functionality back,
+use `@torch.jit.unused()`. `@torch.jit.ignore` is now equivalent
+to `@torch.jit.ignore(drop=False)`. See {func}`@torch.jit.ignore <torch.jit.ignore>`
+and {func}`@torch.jit.unused torch.jit.unused` for details.
 ```
 
 When passed to the {func}`torch.jit.script` function, a `torch.nn.Module`'s data is
@@ -728,40 +718,38 @@ lazily compiled in the order they are used in `forward`, as well as any
 
 Functions don't change much, they can be decorated with {func}`@torch.jit.ignore <torch.jit.ignore>` or {func}`@torch.jit.unused <torch.jit.unused>` if needed.
 
-```{eval-rst}
-.. testcode::
-    # Same behavior as pre-PyTorch 1.2
-    @torch.jit.script
-    def some_fn():
-        return 2
+```{testcode}
+# Same behavior as pre-PyTorch 1.2
+@torch.jit.script
+def some_fn():
+    return 2
 
-    # Marks a function as ignored, if nothing
-    # ever calls it then this has no effect
-    @torch.jit.ignore
-    def some_fn2():
-        return 2
+# Marks a function as ignored, if nothing
+# ever calls it then this has no effect
+@torch.jit.ignore
+def some_fn2():
+    return 2
 
-    # As with ignore, if nothing calls it then it has no effect.
-    # If it is called in script it is replaced with an exception.
-    @torch.jit.unused
-    def some_fn3():
-    import pdb; pdb.set_trace()
-    return 4
+# As with ignore, if nothing calls it then it has no effect.
+# If it is called in script it is replaced with an exception.
+@torch.jit.unused
+def some_fn3():
+import pdb; pdb.set_trace()
+return 4
 
-    # Doesn't do anything, this function is already
-    # the main entry point
-    @torch.jit.export
-    def some_fn4():
-        return 2
+# Doesn't do anything, this function is already
+# the main entry point
+@torch.jit.export
+def some_fn4():
+    return 2
 ```
 
 #### TorchScript Classes
 
 ```{warning}
-
-    TorchScript class support is experimental. Currently it is best suited
-    for simple record-like types (think a ``NamedTuple`` with methods
-    attached).
+TorchScript class support is experimental. Currently it is best suited
+for simple record-like types (think a ``NamedTuple`` with methods
+attached).
 ```
 
 Everything in a user defined TorchScript Class is
@@ -777,41 +765,39 @@ to the resulting {class}`ScriptModule`
 
 Old API:
 
-```{eval-rst}
-.. testcode::
-    from typing import Dict
-    import torch
+```{testcode}
+from typing import Dict
+import torch
 
-    class MyModule(torch.jit.ScriptModule):
-        def __init__(self):
-            super().__init__()
-            self.my_dict = torch.jit.Attribute({}, Dict[str, int])
-            self.my_int = torch.jit.Attribute(20, int)
+class MyModule(torch.jit.ScriptModule):
+    def __init__(self):
+        super().__init__()
+        self.my_dict = torch.jit.Attribute({}, Dict[str, int])
+        self.my_int = torch.jit.Attribute(20, int)
 
-    m = MyModule()
+m = MyModule()
 ```
 
 New API:
 
-```{eval-rst}
-.. testcode::
-    from typing import Dict
+```{testcode}
+from typing import Dict
 
-    class MyModule(torch.nn.Module):
-        my_dict: Dict[str, int]
+class MyModule(torch.nn.Module):
+    my_dict: Dict[str, int]
 
-        def __init__(self):
-            super().__init__()
-            # This type cannot be inferred and must be specified
-            self.my_dict = {}
+    def __init__(self):
+        super().__init__()
+        # This type cannot be inferred and must be specified
+        self.my_dict = {}
 
-            # The attribute type here is inferred to be `int`
-            self.my_int = 20
+        # The attribute type here is inferred to be `int`
+        self.my_int = 20
 
-        def forward(self):
-            pass
+    def forward(self):
+        pass
 
-    m = torch.jit.script(MyModule())
+m = torch.jit.script(MyModule())
 ```
 
 #### Constants
@@ -820,38 +806,36 @@ The `Final` type constructor can be used to mark members as constant. If members
 
 Old API:
 
-```{eval-rst}
-.. testcode::
-    class MyModule(torch.jit.ScriptModule):
-        __constants__ = ['my_constant']
+```{testcode}
+class MyModule(torch.jit.ScriptModule):
+    __constants__ = ['my_constant']
 
-        def __init__(self):
-            super().__init__()
-            self.my_constant = 2
+    def __init__(self):
+        super().__init__()
+        self.my_constant = 2
 
-        def forward(self):
-            pass
-    m = MyModule()
+    def forward(self):
+        pass
+m = MyModule()
 ```
 
 New API:
 
-```{eval-rst}
-.. testcode::
-    from typing import Final
+```{testcode}
+from typing import Final
 
-    class MyModule(torch.nn.Module):
+class MyModule(torch.nn.Module):
 
-        my_constant: Final[int]
+    my_constant: Final[int]
 
-        def __init__(self):
-            super().__init__()
-            self.my_constant = 2
+    def __init__(self):
+        super().__init__()
+        self.my_constant = 2
 
-        def forward(self):
-            pass
+    def forward(self):
+        pass
 
-    m = torch.jit.script(MyModule())
+m = torch.jit.script(MyModule())
 ```
 
 (Python 3 type hints)=
@@ -863,19 +847,18 @@ Containers are assumed to have type `Tensor` and be non-optional (see
 tell the TorchScript compiler what the type should be. Python 3 style type hints are
 now supported.
 
-```{eval-rst}
-.. testcode::
-    import torch
-    from typing import Dict, Optional
+```{testcode}
+import torch
+from typing import Dict, Optional
 
-    @torch.jit.script
-    def make_dict(flag: bool):
-        x: Dict[str, int] = {}
-        x['hi'] = 2
-        b: Optional[int] = None
-        if flag:
-            b = 2
-        return x, b
+@torch.jit.script
+def make_dict(flag: bool):
+    x: Dict[str, int] = {}
+    x['hi'] = 2
+    b: Optional[int] = None
+    if flag:
+        b = 2
+    return x, b
 ```
 
 ### Fusion Backends
@@ -885,11 +868,14 @@ There are a couple of fusion backends available to optimize TorchScript executio
 ### References
 
 ```{toctree}
-    :maxdepth: 1
+:maxdepth: 1
 
-    jit_python_reference
-    jit_unsupported
+jit_python_reference
 
+jit_unsupported
+```
+
+```{eval-rst}
 .. This package is missing doc. Adding it here for coverage
 .. This does not add anything to the rendered page.
 .. py:module:: torch.jit.mobile
