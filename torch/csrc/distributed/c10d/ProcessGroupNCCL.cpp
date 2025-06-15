@@ -364,11 +364,20 @@ static void attachAllocatorHooks() {
 static std::
     unordered_map<std::string, std::unordered_map<std::string, std::string>>
     getNCCLCommDumpMap() {
-#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP) && \
+    defined(NCCL_COMM_GET_UNIQUE_HASH)
   std::unordered_map<
-      std::string /* ncclUniqueID */,
+      std::string /* CommHash */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
       ncclDumpMap;
+#ifdef NCCL_COMM_DUMP_ALL
+  auto res = ncclCommDumpAll(ncclDumpMap);
+  if (res == ncclSuccess) {
+    return ncclDumpMap;
+  }
+  // Fall back to dump from each comm if ncclCommDumpAll failed
+#endif // NCCL_COMM_DUMP_ALL
+
   // dump_nccl_trace is only called from the default PG (local_id_=0), but we
   // want to dump from all comms so we need to iterate over ncclCommMemPoolMap,
   // which is static
@@ -382,8 +391,11 @@ static std::
     }
   }
   for (auto& ncclComm : allNCCLComms) {
-    std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
-    ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
+    std::stringstream ss;
+    ss << std::hex << ncclComm->getNcclUniqueHash();
+    std::string ncclUniqueHashStr = ss.str();
+
+    ncclDumpMap[ncclUniqueHashStr] = ncclComm->ncclCommDump();
   }
   return ncclDumpMap;
 #else
