@@ -758,7 +758,7 @@ Functions don't change much, they can be decorated with {func}`@torch.jit.ignore
 
 #### TorchScript Classes
 
-```{eval-rst}
+```{warning}
 .. warning::
 
     TorchScript class support is experimental. Currently it is best suited
