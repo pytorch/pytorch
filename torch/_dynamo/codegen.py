@@ -615,7 +615,7 @@ class PyCodegen:
                 collect_temp_source(arg.source)
 
         cm_var = None
-        if config.record_pre_graph_bytecode_in_traces:
+        if config.record_runtime_overhead:
             # Record the pregraph bytecode start
             self.add_push_null(
                 lambda: self.load_import_from(
@@ -641,7 +641,7 @@ class PyCodegen:
             else:
                 self.call_reconstruct(arg)
 
-        if config.record_pre_graph_bytecode_in_traces:
+        if config.record_runtime_overhead:
             # Record the pregraph bytecode end
             self.add_push_null(
                 lambda: self.load_import_from(
