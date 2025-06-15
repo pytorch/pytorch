@@ -234,6 +234,9 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
 import platform
 
 
+BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
+BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
+
 # Also update `project.requires-python` in pyproject.toml when changing this
 python_min_version = (3, 9, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
@@ -259,19 +262,6 @@ import setuptools.command.install
 import setuptools.command.sdist
 from setuptools import Extension, find_packages, setup
 from setuptools.dist import Distribution
-
-
-cwd = os.path.dirname(os.path.abspath(__file__))
-
-# Add the current directory to the Python path so that we can import `tools`
-sys.path.insert(0, cwd)
-os.environ["PYTHONPATH"] = os.pathsep.join(
-    [
-        cwd,
-        os.getenv("PYTHONPATH", ""),
-    ]
-).rstrip(os.pathsep)
-
 from tools.build_pytorch_libs import build_pytorch
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
@@ -292,9 +282,6 @@ def _get_package_path(package_name):
             pass
     return None
 
-
-BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
-BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
 
 # set up appropriate env variables
 if BUILD_LIBTORCH_WHL:
@@ -354,6 +341,7 @@ else:
     setuptools.distutils.log.warn = report
 
 # Constant known variables used throughout this file
+cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
 
@@ -425,7 +413,7 @@ def check_submodules():
             os.path.isdir(folder) and len(os.listdir(folder)) == 0
         )
 
-    if os.getenv("USE_SYSTEM_LIBS"):
+    if bool(os.getenv("USE_SYSTEM_LIBS", False)):
         return
     folders = get_submodule_folders()
     # If none of the submodule folders exists, try to initialize them
@@ -439,7 +427,7 @@ def check_submodules():
             end = time.time()
             report(f" --- Submodule initialization took {end - start:.2f} sec")
         except Exception:
-            report(" --- Submodule initialization failed")
+            report(" --- Submodule initalization failed")
             report("Please run:\n\tgit submodule update --init --recursive")
             sys.exit(1)
     for folder in folders:
