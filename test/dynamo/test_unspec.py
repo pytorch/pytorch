@@ -23,6 +23,13 @@ from torch.testing._internal.logging_utils import logs_to_string
 # test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
 
 
+device_type = (
+    torch.accelerator.current_accelerator().type
+    if torch.accelerator.current_accelerator() is not None
+    else "cpu"
+)
+
+
 @torch._dynamo.config.patch(assume_static_by_default=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):
@@ -78,7 +85,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             from functools import partial
 
             dtype = torch.float16
-            device = "cuda"
+            device = device_type
             make_tensor = partial(
                 torch.rand, device=device, dtype=dtype, requires_grad=True
             )
@@ -883,8 +890,10 @@ class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref.device, res.device)
 
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(UnspecTestsDevice, globals(), only_for=devices)
+devices = ["cuda", "hpu", "xpu"]
+instantiate_device_type_tests(
+    UnspecTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
