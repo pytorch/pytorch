@@ -16,7 +16,7 @@ from torch._prims_common import DeviceLikeType
 from torch.nn.parameter import Buffer, Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.hooks import BackwardHook, RemovableHandle
-
+import warnings
 
 __all__ = [
     "register_module_forward_pre_hook",
@@ -2512,9 +2512,12 @@ class Module:
                         unexpected_keys.append(key)
 
     def load_state_dict(
-        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
+        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False, warn_on_mismatch: bool = False
     ):
         r"""Copy parameters and buffers from :attr:`state_dict` into this module and its descendants.
+
+        New parameters:
+        - `warn_on_mismatch: bool = False` – if True, size‐mismatch errors become warnings.
 
         If :attr:`strict` is ``True``, then
         the keys of :attr:`state_dict` must exactly match the keys returned
@@ -2618,11 +2621,29 @@ class Module:
                 )
 
         if len(error_msgs) > 0:
-            raise RuntimeError(
-                "Error(s) in loading state_dict for {}:\n\t{}".format(
-                    self.__class__.__name__, "\n\t".join(error_msgs)
+            # split out size-mismatch errors vs. everything else
+            mismatch_msgs = [m for m in error_msgs if "size mismatch" in m.lower()]
+            other_msgs    = [m for m in error_msgs if "size mismatch" not in m.lower()]
+
+            # if there are any non-mismatch errors, always raise on them
+            if other_msgs:
+                msg = (
+                    f"Error(s) in loading state_dict for {self.__class__.__name__}:\n\t"
+                    + "\n\t".join(other_msgs)
                 )
+                raise RuntimeError(msg)
+
+            # here we only have size-mismatch errors
+            msg = (
+                f"Size mismatch(s) in loading state_dict for {self.__class__.__name__}:\n\t"
+                + "\n\t".join(mismatch_msgs)
             )
+            if warn_on_mismatch:
+                warnings.warn(msg, UserWarning)
+            else:
+                raise RuntimeError(msg)
+
+
         return _IncompatibleKeys(missing_keys, unexpected_keys)
 
     def _named_members(
