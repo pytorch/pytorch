@@ -225,7 +225,7 @@ import os
 import sys
 
 
-if sys.platform.startswith("win") and sys.maxsize.bit_length() == 31:
+if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     print(
         "32-bit Windows Python runtime is not supported. Please switch to 64-bit Python."
     )
@@ -239,8 +239,7 @@ python_min_version = (3, 9, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
-        f"You are using Python {platform.python_version()}. "
-        f"Python >={python_min_version_str} is required."
+        f"You are using Python {platform.python_version()}. Python >={python_min_version_str} is required."
     )
     sys.exit(-1)
 
