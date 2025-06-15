@@ -3774,6 +3774,22 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(e_string, "MPS does not support cumsum_out_mps op with int64 input." +
                              " Support has been added in macOS 13.3")
 
+    def test_cumsum_gt_4d(self):
+        a = torch.ones(1, 2, 3, 4, 5, dtype=torch.float).to('mps')
+        try:
+            t_mps = torch.ops.aten.cumsum(a, dim=0)
+        except Exception as e:
+            e_string = str(e)
+            self.assertEqual(e_string, "On-going issue on MPSGraph cumulative ops when ndims() - axis > 4, see issue #154881")
+
+    def test_cumprod_gt_4d(self):
+        a = torch.ones(1, 2, 3, 4, 5, dtype=torch.float).to('mps')
+        try:
+            t_mps = torch.ops.aten.cumprod(a, dim=0)
+        except Exception as e:
+            e_string = str(e)
+            self.assertEqual(e_string, "On-going issue on MPSGraph cumulative ops when ndims() - axis > 4, see issue #154881")
+
     def test_cumsum_bool(self):
         a = torch.ones(2**16, dtype=torch.bool)
         t_cpu = a.cumsum(0)
