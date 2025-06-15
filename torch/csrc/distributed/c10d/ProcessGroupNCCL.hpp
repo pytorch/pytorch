@@ -385,6 +385,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Print the traceback of the collective at call time
     void printTraceback() const;
 
+    std::string getTraceback() const;
+
     std::vector<at::Tensor> result() override;
 
    protected:
