@@ -47,7 +47,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfRocm,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -116,7 +115,6 @@ class TestFullyShard2DTraining(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm
     def test_train_parity_2d_mlp(self):
         global_mesh = self.init_global_mesh()
         self.run_subtests(
@@ -164,7 +162,6 @@ class TestFullyShard2DTraining(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm
     def test_train_parity_2d_transformer(self):
         self.run_subtests(
             {"use_shard_placement_fn": [False, True]},
@@ -245,7 +242,6 @@ class TestFullyShard2DTraining(FSDPTest):
             self.assertEqual(full_param, ref_param)
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm
     def test_tp_with_fsdp_offloading(self):
         global_mesh = init_device_mesh(
             "cuda", (1, self.world_size), mesh_dim_names=("dp", "tp")
