@@ -117,7 +117,7 @@ if(INTERN_BUILD_ATEN_OPS)
 
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
-      "89;90a;100a")
+      "89;90a;100a;120a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
       "90a")
