@@ -2014,6 +2014,7 @@ def get_default_op_list() -> OpTypes:
         aten.as_strided,
         aten.permute,
         aten.select,
+        aten.split,
     ]
     view_ops = recomputable_view_ops
     default_recomputable_ops += [
