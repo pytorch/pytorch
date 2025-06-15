@@ -4,6 +4,8 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
 
+#include <utility>
+
 namespace at {
 
 /**
@@ -36,7 +38,7 @@ struct TORCH_API QTensorImpl : public c10::TensorImpl {
   }
 
   void set_quantizer_(QuantizerPtr quantizer) {
-    quantizer_ = quantizer;
+    quantizer_ = std::move(quantizer);
   }
 
   /**

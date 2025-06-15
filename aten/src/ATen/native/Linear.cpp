@@ -349,7 +349,7 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
   // to compute the number of dimensions covered by ellipsis.
   for(const auto i : c10::irange(num_ops)) {
     const auto& operand = operands[i];
-    const auto labels = op_labels[i];
+    const auto& labels = op_labels[i];
     const auto ndims = operand.dim();
     int64_t nlabels = static_cast<int64_t>(labels.size());
     bool has_ellipsis = false;

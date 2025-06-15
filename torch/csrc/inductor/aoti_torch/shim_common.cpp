@@ -1187,11 +1187,11 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   // Print dtypes and for float types, print exact precision
   auto scalarType = t->scalar_type();
   if (scalarType == at::ScalarType::Float) {
-    std::cout << "Dtype: float32" << std::endl;
+    std::cout << "Dtype: float32" << '\n';
   } else if (scalarType == at::ScalarType::Half) {
-    std::cout << "Dtype: float16" << std::endl;
+    std::cout << "Dtype: float16" << '\n';
   } else if (scalarType == at::ScalarType::BFloat16) {
-    std::cout << "Dtype: bfloat16" << std::endl;
+    std::cout << "Dtype: bfloat16" << '\n';
   } else {
     std::cout << "Dtype: " << t->dtype() << '\n';
   }
