@@ -31,7 +31,6 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
     # shellcheck disable=SC2046
     sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
-
     retry apt-get update
     retry apt-get -y install zip openssl
 else
@@ -98,7 +97,7 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
     exit 1
 fi
 pushd "$PYTORCH_ROOT"
-retry pip install -qU "setuptools<80.0"
+retry pip install -qU cmake "setuptools<80.0"
 python setup.py clean
 retry pip install -qr requirements.txt
 case ${DESIRED_PYTHON} in
