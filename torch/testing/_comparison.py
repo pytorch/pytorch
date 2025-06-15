@@ -673,6 +673,7 @@ class TensorLikePair(Pair):
         check_dtype: bool = True,
         check_layout: bool = True,
         check_stride: bool = False,
+        tensor_similarity: bool = False, 
         **other_parameters: Any,
     ):
         actual, expected = self._process_inputs(
@@ -892,6 +893,8 @@ class TensorLikePair(Pair):
                 )
 
             compare_fn = bitwise_comp
+        elif self.tensor_similarity:
+            compare_fn = self._compare_tensors_close
         else:
             compare_fn = self._compare_regular_values_close
 
@@ -1093,6 +1096,39 @@ class TensorLikePair(Pair):
                 actual, expected, matches, rtol=rtol, atol=atol, identifier=identifier
             )
         self._fail(AssertionError, msg)
+    
+    def _compare_tensors_close(self,
+        actual: torch.Tensor,
+        expected: torch.Tensor,
+        *,
+        rtol: float,
+        atol: float,
+        equal_nan: bool,
+        identifier: Optional[Union[str, Callable[[str], str]]] = None,
+    ) -> None:
+        """Checks if two tensors are close overall up to a desired tolerance."""
+
+        def _tensors_close(actual, expected):
+            numerator = torch.sum(actual * expected)
+            denominator = torch.sum(actual * actual) + torch.sum(expected * expected)
+            if denominator == 0:
+                similarity_score = 1
+            similarity_score = 1 - (numerator / denominator)
+            return similarity_score
+        
+        if _tensors_close(actual, expected) <= atol:
+            return
+
+        msg = make_scalar_mismatch_msg(
+            actual.item(),
+            expected.item(),
+            rtol=rtol,
+            atol=atol,
+            identifier=identifier,
+        )
+
+        self._fail(AssertionError, msg)
+
 
     def extra_repr(self) -> Sequence[str]:
         return (
@@ -1327,6 +1363,7 @@ def assert_close(
     check_layout: bool = True,
     check_stride: bool = False,
     msg: Optional[Union[str, Callable[[str], str]]] = None,
+    tensor_similarity: bool = False, 
 ):
     r"""Asserts that ``actual`` and ``expected`` are close.
 
@@ -1580,6 +1617,7 @@ def assert_close(
         check_layout=check_layout,
         check_stride=check_stride,
         msg=msg,
+        tensor_similarity=tensor_similarity,
     )
 
     if error_metas:
