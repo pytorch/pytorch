@@ -1524,6 +1524,28 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
             self.assertEqual(dequantized_X, dequantized_decomposed_X)
 
+    def test_decomposed_quantize_per_tensor_fp8_output(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        X_ = torch.randn(5, 10)
+        qdtypes = [torch.float8_e4m3fn, torch.float8_e5m2]
+        dtypes = [torch.float, torch.float16, torch.bfloat16]
+        scales = [1., 2.]
+        zero_points = [0, 1]
+        for scale, zero_point, qdtype, dtype in itertools.product(scales, zero_points, qdtypes, dtypes):
+            X = X_.to(dtype)
+            scale = torch.tensor(scale)
+            zero_point = torch.tensor(zero_point)
+            quant_min = torch.finfo(qdtype).min
+            quant_max = torch.finfo(qdtype).max
+            quantized_X = torch.clamp((X.float() / scale) + zero_point, quant_min, quant_max).to(qdtype)
+            quantized_decomposed_X = \
+                torch.ops.quantized_decomposed.quantize_per_tensor(
+                    X, scale, zero_point, int(quant_min), int(quant_max), qdtype)
+
+            self.assertEqual(quantized_decomposed_X.dtype, qdtype)
+            self.assertEqual(quantized_X.float(), quantized_decomposed_X.float())
+
     def test_decomposed_dynamic_quant_pattern(self):
         import torch.ao.quantization.fx._decomposed
         X = torch.randn(5, 10)
@@ -1564,6 +1586,26 @@ class TestQuantizedTensor(TestCase):
                 X, scales, zero_points, axis, quant_min, quant_max, dtype)
         self.assertEqual(quantized_decomposed_X.dtype, dtype)
         self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
+
+    def test_decomposed_quantize_per_channel_fp8_output(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        X_ = torch.randn(5, 10)
+        qdtypes = [torch.float8_e4m3fn, torch.float8_e5m2]
+        dtypes = [torch.float, torch.float16, torch.bfloat16]
+        scales = torch.randn(5,)
+        zero_points = torch.randint(0, 100, (5,))
+        axis = 0
+
+        for qdtype, dtype in itertools.product(qdtypes, dtypes):
+            X = X_.to(dtype)
+            quant_min, quant_max = torch.finfo(qdtype).min, torch.finfo(qdtype).max
+            quantized_X = torch.clamp((X.float() / scales.view(-1, 1)) + zero_points.view(-1, 1), quant_min, quant_max).to(qdtype)
+            quantized_decomposed_X = \
+                torch.ops.quantized_decomposed.quantize_per_channel(
+                    X, scales, zero_points, axis, int(quant_min), int(quant_max), qdtype)
+            self.assertEqual(quantized_decomposed_X.dtype, qdtype)
+            self.assertEqual(quantized_X.float(), quantized_decomposed_X.float())
 
     def test_decomposed_quantize_per_channel_bfloat16_input(self):
         # register the ops
