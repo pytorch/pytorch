@@ -293,6 +293,37 @@ def _scaled_dot_product_ring_cudnn_attention(
     )
 
 
+def _scaled_dot_product_ring_fused_attention_overrideable(
+    mesh: DeviceMesh,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_bias: Optional[torch.Tensor] = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    *,
+    scale: Optional[float] = None,
+) -> tuple[torch.Tensor, ...]:
+    if attn_bias is not None:
+        raise NotImplementedError("attn_bias is not supported yet")
+
+    seq_dim = 2
+    return _templated_ring_attention(
+        mesh,
+        seq_dim,
+        aten._scaled_dot_product_fused_attention_overrideable,
+        query=query,
+        key=key,
+        value=value,
+        attn_bias=attn_bias,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        return_debug_mask=return_debug_mask,
+        scale=scale,
+    )
+
+
 class _AttentionOp(Protocol):
     def __call__(
         self,
@@ -598,6 +629,12 @@ def _sdpa_handler(
             *op_info.local_args,  # type: ignore[arg-type]
             **op_info.local_kwargs,  # type: ignore[arg-type]
         )
+    elif op_call == aten._scaled_dot_product_fused_attention_overrideable.default:
+        local_results = _scaled_dot_product_ring_fused_attention_overrideable(
+            op_info.compute_mesh,
+            *op_info.local_args,  # type: ignore[arg-type]
+            **op_info.local_kwargs,  # type: ignore[arg-type]
+        )
     else:
         raise NotImplementedError(
             "CP only supports flash attention and memory efficient attention now."
@@ -639,6 +676,15 @@ def _sdpa_backward_handler(
         )
     elif op_call == aten._scaled_dot_product_cudnn_attention_backward.default:
         local_results = _scaled_dot_product_ring_cudnn_attention_backward(
+            op_info.compute_mesh,
+            *op_info.local_args,  # type: ignore[arg-type]
+            **op_info.local_kwargs,  # type: ignore[arg-type]
+        )
+    elif (
+        op_call
+        == aten._scaled_dot_product_fused_attention_overrideable_backward.default
+    ):
+        local_results = _scaled_dot_product_ring_fused_attention_overrideable_backward(
             op_info.compute_mesh,
             *op_info.local_args,  # type: ignore[arg-type]
             **op_info.local_kwargs,  # type: ignore[arg-type]
@@ -945,6 +991,53 @@ def _scaled_dot_product_ring_cudnn_attention_backward(
     )
 
 
+def _scaled_dot_product_ring_fused_attention_overrideable_backward(
+    mesh: DeviceMesh,
+    grad_out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    bias: torch.Tensor,
+    grad_input_mask: tuple[bool, ...],
+    out: torch.Tensor,
+    logsumexp: torch.Tensor,
+    cum_seq_q: torch.Tensor,
+    cum_seq_k: torch.Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    philox_seed: torch.Tensor,
+    philox_offset: torch.Tensor,
+    *,
+    scale: Optional[float] = None,
+) -> tuple[torch.Tensor, ...]:
+    seq_dim = 2
+    return _templated_ring_attention_backward(
+        mesh,
+        seq_dim,
+        aten._scaled_dot_product_fused_attention_overrideable_backward.default,
+        grad_out=grad_out,
+        grad_out_name="grad_out",
+        query=query,
+        key=key,
+        value=value,
+        attn_bias=bias,
+        grad_input_mask=grad_input_mask,
+        out=out,
+        logsumexp=logsumexp,
+        cum_seq_q=cum_seq_q,
+        cum_seq_k=cum_seq_k,
+        max_q=max_q,
+        max_k=max_k,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        philox_seed=philox_seed,
+        philox_offset=philox_offset,
+        scale=scale,
+    )
+
+
 customized_ops = {
     aten._scaled_dot_product_flash_attention.default: _sdpa_handler,
     aten._scaled_dot_product_flash_attention_backward.default: _sdpa_backward_handler,
@@ -952,6 +1045,8 @@ customized_ops = {
     aten._scaled_dot_product_efficient_attention_backward.default: _sdpa_backward_handler,
     aten._scaled_dot_product_cudnn_attention.default: _sdpa_handler,
     aten._scaled_dot_product_cudnn_attention_backward.default: _sdpa_backward_handler,
+    aten._scaled_dot_product_fused_attention_overrideable.default: _sdpa_handler,
+    aten._scaled_dot_product_fused_attention_overrideable_backward.default: _sdpa_backward_handler,
 }
 
 
