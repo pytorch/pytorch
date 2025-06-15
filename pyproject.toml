@@ -6,7 +6,7 @@ requires = [
     # API temporarily restored and shim used. Please fix
     # Setuptools will drop support for setup.py past 80
     # min version for recursive glob package data support
-    "setuptools>=77.0,<80.0",
+    "setuptools>=62.3.0,<80.0",
     "wheel",
     "astunparse",
     "numpy",
@@ -23,7 +23,7 @@ name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
 requires-python = ">=3.9,<3.14"
-license = "BSD-3-Clause"
+license = { text = "BSD-3-Clause" }
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
 classifiers = [
@@ -31,6 +31,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Education",
     "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
