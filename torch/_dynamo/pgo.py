@@ -663,7 +663,7 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
         trace_structured_artifact(
             f"get_{ty}_code_state",
             "string",
-            lambda: render_code_state(_CODE_STATE),
+            lambda: render_code_state(_CODE_STATE),  # type: ignore[arg-type]
         )
         set_feature_use("pgo", True)
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
