@@ -294,6 +294,42 @@ void copy_device_to_device(TensorIterator& iter,
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+/**
+ * @brief Determines if two tensor size arrays are broadcast-compatible according to PyTorch's broadcasting rules.
+ *
+ * Broadcasting rules:
+ * - Two dimensions are compatible if they are equal or if either of them is `1`.
+ * - Tensors are broadcast-compatible if all dimensions (from last to first) satisfy this rule.
+ *
+ * @param tensor1 The first tensor
+ * @param tensor2 The second tensor
+ * @return true if the tensors are broadcast-compatible, false otherwise.
+ *
+ * Example:
+ * - can_broadcast({10, 5}, {5}) returns true (5 is compatible with 10x5).
+ * - can_broadcast({3, 1, 5}, {2, 5}) returns false (3 is incompatible with 2).
+ */
+ bool broadcast_required(const at::Tensor& tensor1, const at::Tensor& tensor2) {
+  // If shapes are identical, broadcasting is not needed
+  if (tensor1.sizes() == tensor2.sizes()) {
+    return false;
+  }
+
+  // Check compatibility from the last dimensions backward
+  auto it1 = tensor1.sizes().rbegin();
+  auto it2 = tensor2.sizes().rbegin();
+
+  // Compare dimensions from the last to the first
+  while (it1 != tensor1.sizes().rend() && it2 != tensor2.sizes().rend()) {
+      if (*it1 != *it2 && *it1 != 1 && *it2 != 1) {
+          return false;
+      }
+      ++it1;
+      ++it2;
+  }
+  return true;
+}
+
 static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
@@ -305,6 +341,50 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   }
 
   bool same_dtype = iter.dtype(0) == iter.dtype(1);
+#if defined(__CUDACC__) && !defined(__HIP__)
+  bool is_complex = at::isComplexType(iter.dtype(1));
+  bool broadcast =  broadcast_required(iter.tensor(0), iter.tensor(1));
+
+  if (iter.ndim() == 2 && same_dtype && !broadcast && !is_complex) {
+
+    size_t element_size = iter.tensor(1).element_size();
+    int64_t dim0 = iter.shape()[0];
+    int64_t dim1 = iter.ndim() > 1 ? iter.shape()[1] : 1;
+
+    int64_t src_stride0 = iter.strides(1)[0];
+    int64_t src_stride1 = iter.ndim() > 1 ? iter.strides(1)[1] : 1;
+
+    int64_t dst_stride0 = iter.strides(0)[0];
+    int64_t dst_stride1 = iter.ndim() > 1 ? iter.strides(0)[1] : 1;
+
+    // Check for row-major contiguous data
+    bool src_row_contiguous = (src_stride1 == 1);
+    bool dst_row_contiguous = (dst_stride1 == 1);
+    if (src_row_contiguous && dst_row_contiguous) {
+        size_t width_in_bytes = dim1 * element_size;
+        size_t src_pitch = src_stride0 * element_size;
+        size_t dst_pitch = dst_stride0 * element_size;
+
+        if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
+            return false; // No need for temporaries
+        }
+    }
+
+    // Check for column-major contiguous data
+    bool src_col_contiguous = (src_stride0 == 1);
+    bool dst_col_contiguous = (dst_stride0 == 1);
+    if (src_col_contiguous && dst_col_contiguous) {
+        size_t width_in_bytes = dim0 * element_size;
+        size_t src_pitch = src_stride1 * element_size;
+        size_t dst_pitch = dst_stride1 * element_size;
+
+        if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
+            return false; // No need for temporaries
+        }
+    }
+
+  }
+#endif
   if (same_dtype && iter.is_contiguous()) {
     // Contiguous same-dtype copies can always use cudaMemcpyAsync
     return false;
@@ -325,109 +405,207 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
   return at::cuda::get_p2p_access(src_device.index(), dst_device.index());
 }
 
+/**
+ * @brief Attempts to copy data from a non-contiguous CPU tensor to a GPU tensor directly,
+ * handling 1D and 2D cases without creating temporary contiguous buffers. Returns `true`
+ * if the copy was successful, or `false` if conditions for the optimized path were not met.
+ *
+ * This function leverages `cudaMemcpy2DAsync` to efficiently perform 2D memory
+ * transfers by specifying pitch (stride) information, which eliminates the need
+ * for temporary contiguous buffers for non-contiguous tensors.
+ *
+ * @param dst           Destination pointer on the GPU.
+ * @param src           Source pointer on the CPU.
+ * @param iter          TensorIterator containing tensor details, such as dimensions,
+ *                      strides, and element size.
+ * @param kind          Type of memory transfer (cudaMemcpyHostToDevice or cudaMemcpyDeviceToHost).
+ * @param stream        CUDA stream to use for asynchronous execution.
+ *
+ * This function is optimized to handle 1D and 2D non-contiguous tensors only:
+ * - **1D tensors**: Treated as a single row (height = 1) with width equal to the tensor size.
+ * - **2D tensors**: Uses the specified strides and dimensions to set up pitched memory copy,
+ *   allowing efficient copying without reshaping or reallocating memory.
+ *
+ * Preconditions:
+ * - `iter` must represent a non-contiguous tensor with 1 or 2 dimensions.
+ * - The `src` and `dst` tensors must have valid stride and size information.
+ * - The function checks that pitch (stride) values are compatible with the width of each row.
+ *   If these conditions are not met, the function returns `false`, indicating that a fallback
+ *   copy method should be used.
+  *
+ * @return bool         Returns `true` if the copy was successfully performed with `cudaMemcpy2DAsync`.
+ *                      Returns `false` if conditions were not met for the optimized path.
+ */
+ static bool copy_non_contiguous_2d(
+  void* dst,
+  const void* src,
+  const TensorIterator& iter,
+  cudaMemcpyKind kind,
+  cudaStream_t stream,
+  bool non_blocking = false) {
+
+  const auto& dst_tensor = iter.tensor(0);
+  const auto& src_tensor = iter.tensor(1);
+  size_t element_size = src_tensor.element_size();
+
+  // Set dimensions and strides for 1D or 2D cases
+  int64_t dim0 = src_tensor.size(0);
+  int64_t dim1 = iter.ndim() == 1 ? 1 : src_tensor.size(1);
+  int64_t src_stride0 = src_tensor.stride(0);
+  int64_t src_stride1 = iter.ndim() == 1 ? 1 : src_tensor.stride(1);
+  int64_t dst_stride0 = dst_tensor.stride(0);
+  int64_t dst_stride1 = iter.ndim() == 1 ? 1 : dst_tensor.stride(1);
+
+  size_t width_in_bytes = 0;
+  size_t height = 0;
+  size_t src_pitch = 0;
+  size_t dst_pitch = 0;
+
+  // Check for row-major contiguous data
+  if (src_stride1 == 1 && dst_stride1 == 1) {
+    width_in_bytes = dim1 * element_size;
+    height = dim0;
+    src_pitch = src_stride0 * element_size;
+    dst_pitch = dst_stride0 * element_size;
+
+    if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
+        at::cuda::memcpy2d_conditional_sync(
+            dst,
+            src,
+            src_pitch,
+            dst_pitch,
+            width_in_bytes,
+            height,
+            kind,
+            stream,
+            non_blocking
+        );
+        return true;
+    }
+  }
+
+  // Check for column-major contiguous data
+  if (src_stride0 == 1 && dst_stride0 == 1) {
+    width_in_bytes = dim0 * element_size;
+    height = dim1;
+    src_pitch = src_stride1 * element_size;
+    dst_pitch = dst_stride1 * element_size;
+
+    if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
+        at::cuda::memcpy2d_conditional_sync(
+            dst,
+            src,
+            src_pitch,
+            dst_pitch,
+            width_in_bytes,
+            height,
+            kind,
+            stream,
+            non_blocking
+        );
+        return true; // Copy successfully performed
+    }
+  }
+
+  // Assert that we can use memcpy2DAsync as per copy_requires_temporaries
+  TORCH_INTERNAL_ASSERT(false,
+      "copy_non_contiguous_2d: Expected to be able to use cudamemcpy2Dasync, but conditions were not met.");
+
+  return false;
+}
+
 static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   TORCH_CHECK(iter.ntensors() == 2);
 
-  Device dst_device = iter.device(0);
-  Device src_device = iter.device(1);
-
-  // Enable p2p access between devices. (No-op if it involves the CPU)
-  bool p2p_enabled = maybe_enable_p2p_access(dst_device, src_device);
-
-  if (copy_requires_temporaries(iter, p2p_enabled)) {
-    // NB: this involves recursive calls to copy. Be careful that those copies
-    // don't require temporaries or you will cause an infinite recursion!
-    auto& dst = iter.tensor(0);
-    Tensor dst_contig;
-    Tensor src_contig;
-
-    // If non_blocking is true - type conversions are performed on the GPU
-    // For blocking transfers conversions are performed on CPU to avoid allocating
-    // extra GPU memory
-    // for GPU-GPU transfers conversions are performed on the source device
-    auto conversion_device = non_blocking ? kCUDA : kCPU;
-    if (iter.device_type(1) == conversion_device) {
-      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
-    } else {
-      bool same_type = iter.dtype(0) == iter.dtype(1);
-      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      src_contig = iter.tensor(1).expand_as(dst).contiguous();
-    }
-
-    // propagate the correct conjugate bit
-    dst_contig._set_conj(dst.is_conj());
-    src_contig._set_conj(iter.tensor(1).is_conj());
-
-    dst_contig._set_neg(dst.is_neg());
-    src_contig._set_neg(iter.tensor(1).is_neg());
-
-    // perform a same-dtype copy on contiguous tensors
-    TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));
-    TORCH_INTERNAL_ASSERT(dst_contig.scalar_type() == src_contig.scalar_type());
-    dst_contig.copy_(src_contig, non_blocking);
-
-    // if necessary, copy back into dst
-    if (!dst_contig.is_same(dst)) {
-      TORCH_INTERNAL_ASSERT(dst_contig.device() == dst.device());
-      dst.copy_(dst_contig, non_blocking);
-    }
-    return;
-  }
-
-  // Copy on GPU (or between GPUs)
-  if (dst_device.is_cuda() && src_device.is_cuda()) {
-    copy_device_to_device(iter, non_blocking, p2p_enabled);
-    return;
-  }
-
-  // Copy between CPU and GPU
-  cuda::OptionalCUDAGuard device_guard;
-  cudaMemcpyKind kind;
-  if (dst_device.is_cuda() && src_device.is_cpu()) {
-    device_guard.set_device(dst_device);
-    kind = cudaMemcpyHostToDevice;
-  } else if (dst_device.is_cpu() && src_device.is_cuda()) {
-    device_guard.set_device(src_device);
-    kind = cudaMemcpyDeviceToHost;
-  } else {
-    TORCH_INTERNAL_ASSERT(false, "unsupported devices in GPU copy_()");
-  }
-
-  void* dst = iter.data_ptr(0);
-  void* src = iter.data_ptr(1);
+  Device dst = iter.device(0);
+  Device src = iter.device(1);
+  bool p2p_enabled = maybe_enable_p2p_access(dst, src);
   int64_t nbytes = iter.numel() * iter.element_size(0);
+  void* dst_ptr = iter.data_ptr(0);
+  void* src_ptr = iter.data_ptr(1);
   CUDAStream stream = getCurrentCUDAStream();
 
-  if (non_blocking) {
-    AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-    // we use both the storage context and the tensor data pointer as the key
-    // for the caching host allocator. This allows us to better attribute the
-    // events to the original tensor allocation correctly. The cases we seek to
-    // handle are:
-
-    // 1: a user can pass a pinned memory tensor with an alternative
-    // context, for example if allocating memory directly from the pinned memory
-    // allocator and constructing a tensor with torch::from_blob.
-
-    // 2: a user can pass a tensor with a different base pointer to the original
-    // allocation (via slicing).
-    const auto& dst_tensor = iter.tensor(0);
-    const auto& src_tensor = iter.tensor(1);
-    const auto& host_tensor = (dst_device == kCPU ? dst_tensor : src_tensor);
-    auto* ptr = (dst_device == kCPU ? dst : src);
-    auto* ctx = host_tensor.storage().data_ptr().get_context();
-    // TODO: warn on the return value.
-    at::getHostAllocator(at::kCUDA)->record_event(ptr, ctx, stream.unwrap());
-  } else {
-    at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
+  // GPU -> GPU peer copy
+  if (dst.is_cuda() && src.is_cuda() && p2p_enabled) {
+    AT_CUDA_CHECK(cudaMemcpyPeerAsync(
+      dst_ptr, dst.index(),
+      src_ptr, src.index(),
+      nbytes,
+      stream));
+    return;
   }
 
-  if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
-     iter.tensor(0).conj_physical_();
+  // CPU <-> GPU copy
+  if ((dst.is_cuda() && src.is_cpu()) || (dst.is_cpu() && src.is_cuda())) {
+    // pick device and kind
+    cuda::OptionalCUDAGuard device_guard;
+    cudaMemcpyKind kind;
+    if (dst.is_cuda()) {
+      device_guard.set_device(dst);
+      kind = cudaMemcpyHostToDevice;
+    } else {
+      device_guard.set_device(src);
+      kind = cudaMemcpyDeviceToHost;
+    }
+
+#if defined(__CUDACC__) && !defined(__HIP__)
+    // 2D pitched path
+    if (iter.ndim() == 2 && !iter.is_contiguous()) {
+      if (copy_non_contiguous_2d(dst_ptr, src_ptr, iter, kind, stream, non_blocking)) {
+        if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) iter.tensor(0).conj_physical_();
+        if (iter.tensor(0).is_neg()  != iter.tensor(1).is_neg())  iter.tensor(0).neg_();
+        return;
+      }
+    }
+#endif
+
+    // single-copy fast path
+    if (!copy_requires_temporaries(iter, p2p_enabled)) {
+      if (non_blocking) {
+        AT_CUDA_CHECK(cudaMemcpyAsync(dst_ptr, src_ptr, nbytes, kind, stream));
+        // we use both the storage context and the tensor data pointer as the key
+        // for the caching host allocator. This allows us to better attribute the
+        // events to the original tensor allocation correctly. The cases we seek to
+        // handle are:
+
+        // 1: a user can pass a pinned memory tensor with an alternative
+        // context, for example if allocating memory directly from the pinned memory
+        // allocator and constructing a tensor with torch::from_blob.
+
+        // 2: a user can pass a tensor with a different base pointer to the original
+        // allocation (via slicing).
+        const auto& dst_tensor = iter.tensor(0);
+        const auto& src_tensor = iter.tensor(1);
+        const auto& host_tensor = (dst.is_cpu() ? dst_tensor : src_tensor);
+        void* ptr = (dst.is_cpu() ? dst_ptr : src_ptr);
+        auto* ctx = host_tensor.storage().data_ptr().get_context();
+        at::getHostAllocator(at::kCUDA)->record_event(ptr, ctx, stream);
+      } else {
+        at::cuda::memcpy_and_sync(dst_ptr, src_ptr, nbytes, kind, stream);
+      }
+      if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) iter.tensor(0).conj_physical_();
+      if (iter.tensor(0).is_neg()  != iter.tensor(1).is_neg())  iter.tensor(0).neg_();
+      return;
+    }
+
+    // fallback via temporaries & recursive copy
+    Tensor dst_contig = iter.tensor(0).contiguous();
+    Tensor src_contig = iter.tensor(1).contiguous();
+    dst_contig.copy_(src_contig, non_blocking);
+    if (!dst_contig.is_same(iter.tensor(0))) {
+      iter.tensor(0).copy_(dst_contig, non_blocking);
+    }
+    return;
   }
-  if (iter.tensor(0).is_neg() != iter.tensor(1).is_neg()) {
-     iter.tensor(0).neg_();
+
+  // device -> device (including same-GPU)
+  {
+    AT_CUDA_CHECK(cudaMemcpyAsync(
+      dst_ptr, src_ptr, nbytes,
+      cudaMemcpyDeviceToDevice,
+      stream));
+    if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) iter.tensor(0).conj_physical_();
+    if (iter.tensor(0).is_neg()  != iter.tensor(1).is_neg())  iter.tensor(0).neg_();
   }
 }
 
