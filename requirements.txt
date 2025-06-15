@@ -11,7 +11,7 @@ networkx
 ninja
 numpy
 optree>=0.13.0
-packaging
+packaging>=24.2
 psutil
 pyyaml
 requests
