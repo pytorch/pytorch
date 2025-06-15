@@ -78,3 +78,11 @@ class TestTensorCreationOps(JitTestCase):
             assert indices.dtype == torch.int32
 
         self.checkScript(tril_indices, (3, 3))
+
+    def test_llong_min_values(self):
+        def create_tensor_with_llong_min(n: int):
+            x = torch.tensor([-9223372036854775808] * n, device='cpu')
+
+            assert x.dtype == torch.int64
+
+        self.checkScript(create_tensor_with_llong_min, (10,))
