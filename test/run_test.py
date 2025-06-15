@@ -656,7 +656,7 @@ def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
         shutil.rmtree(cpp_extensions_test_build_dir)
 
     # Build the test cpp extensions modules
-    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
+    cmd = [sys.executable, "pip", "install", ".", "--root", "./install"]
     return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
     if return_code != 0:
         return None, return_code
