@@ -307,6 +307,7 @@ dispatch_keys = [
     DispatchKey.NestedTensorMeta,
     DispatchKey.ZeroTensor,
     DispatchKey.MTIA,
+    DispatchKey.PrivateUse1,
 ]
 
 
