@@ -422,10 +422,16 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   checkSingleTensor(tensors);
+  TORCH_CHECK(
+      !(opts.reduceOp == ReduceOp::AVG && !tensors[0].is_floating_point()),
+      "Allreduce: input tensor must be floating point for AVG reduce.");
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
         auto data = (entry->src)[0];
+        MPI_Op mpi_op = (opts.reduceOp == ReduceOp::AVG)
+            ? MPI_SUM
+            : mpiOp.at(opts.reduceOp);
         c10::DeviceGuard guard(data.device());
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Allreduce(
@@ -433,8 +439,11 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce(
             data.data_ptr(),
             data.numel(),
             mpiDatatype.at(data.scalar_type()),
-            mpiOp.at(opts.reduceOp),
+            mpi_op,
             pgComm_));
+        if (opts.reduceOp == ReduceOp::AVG) {
+          data.div_(size_);
+        }
       };
   auto entry =
       std::make_unique<WorkEntry>(&tensors, &tensors, std::move(runFunc));
@@ -454,6 +463,9 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   checkSingleTensor(tensors);
+  TORCH_CHECK(
+      !(opts.reduceOp == ReduceOp::AVG && !tensors[0].is_floating_point()),
+      "Reduce: input tensor must be floating point for AVG reduce.");
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
@@ -461,7 +473,9 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::reduce(
         auto dataPtr = (entry->src)[0].data_ptr();
         void* sendbuf = (rank_ == opts.rootRank) ? MPI_IN_PLACE : dataPtr;
         void* recvbuf = (rank_ == opts.rootRank) ? dataPtr : nullptr;
-
+        MPI_Op mpi_op = (opts.reduceOp == ReduceOp::AVG)
+            ? MPI_SUM
+            : mpiOp.at(opts.reduceOp);
         c10::DeviceGuard guard(data.device());
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Reduce(
@@ -469,9 +483,12 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::reduce(
             recvbuf,
             data.numel(),
             mpiDatatype.at(data.scalar_type()),
-            mpiOp.at(opts.reduceOp),
+            mpi_op,
             opts.rootRank,
             pgComm_));
+        if (opts.reduceOp == ReduceOp::AVG) {
+          data.div_(size_);
+        }
       };
   auto entry =
       std::make_unique<WorkEntry>(&tensors, &tensors, std::move(runFunc));
@@ -708,6 +725,10 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::reduce_scatter(
         "Reduce scatter: number of input tensors should equal "
         "to the world size");
   }
+  TORCH_CHECK(
+      !(opts.reduceOp == ReduceOp::AVG &&
+        !inputTensors[0][0].is_floating_point()),
+      "Reduce scatter: input tensor must be floating point for AVG reduce.");
   checkSameSizeAndType(outputTensors[0], inputTensors[0]);
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
@@ -718,7 +739,9 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::reduce_scatter(
           flatInputTensor[static_cast<int64_t>(i)].copy_(entry->src[i]);
         }
         int recvcount = flatInputTensor.numel() / size_;
-
+        MPI_Op mpi_op = (opts.reduceOp == ReduceOp::AVG)
+            ? MPI_SUM
+            : mpiOp.at(opts.reduceOp);
         c10::DeviceGuard guard(data.device());
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Reduce_scatter_block(
@@ -726,8 +749,11 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::reduce_scatter(
             data.data_ptr(),
             recvcount,
             mpiDatatype.at(data.scalar_type()),
-            mpiOp.at(opts.reduceOp),
+            mpi_op,
             pgComm_));
+        if (opts.reduceOp == ReduceOp::AVG) {
+          data.div_(size_);
+        }
       };
 
   auto entry = std::make_unique<WorkEntry>(
@@ -1021,11 +1047,17 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::_reduce_scatter_base(
   TORCH_CHECK(
       outputTensor.numel() * size_ == inputTensor.numel(),
       "Reduce scatter: input tensor size must be equal to output tensor size times the world size");
+  TORCH_CHECK(
+      !(opts.reduceOp == ReduceOp::AVG && !inputTensor.is_floating_point()),
+      "Reduce scatter: input tensor must be floating point for AVG reduce.");
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
         auto dstdata = (entry->dst)[0];
         auto srcdata = (entry->src)[0];
+        MPI_Op mpi_op = (opts.reduceOp == ReduceOp::AVG)
+            ? MPI_SUM
+            : mpiOp.at(opts.reduceOp);
         c10::DeviceGuard guard(srcdata.device());
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Reduce_scatter_block(
@@ -1033,8 +1065,11 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::_reduce_scatter_base(
             dstdata.data_ptr(),
             dstdata.numel(),
             mpiDatatype.at(srcdata.scalar_type()),
-            mpiOp.at(opts.reduceOp),
+            mpi_op,
             pgComm_));
+        if (opts.reduceOp == ReduceOp::AVG) {
+          dstdata.div_(size_);
+        }
       };
 
   auto inputTensors = std::vector<at::Tensor>({inputTensor});
