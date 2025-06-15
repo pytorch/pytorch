@@ -281,3 +281,10 @@ select = [
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
+
+[variant.default-priorities]
+namespace = ["nvidia"]
+
+[variant.providers.nvidia]
+requires = ["nvidia-variant-provider>=0.0.1,<1.0.0"]
+plugin-api = "nvidia_variant_provider.plugin:NvidiaVariantPlugin"
