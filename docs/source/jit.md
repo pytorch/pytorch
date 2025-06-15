@@ -9,7 +9,7 @@
    torch.jit.supported_ops <jit_builtin_functions>
 
 
-.. toctree::
+```{toctree}
     :maxdepth: 1
     :caption: Language Reference
     :hidden:
