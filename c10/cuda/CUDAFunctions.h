@@ -29,6 +29,8 @@ C10_CUDA_API DeviceIndex current_device();
 
 C10_CUDA_API void set_device(DeviceIndex device);
 
+C10_CUDA_API void set_device(DeviceIndex device, const bool force);
+
 C10_CUDA_API void device_synchronize();
 
 C10_CUDA_API void warn_or_error_on_sync();
@@ -39,6 +41,8 @@ C10_CUDA_API cudaError_t GetDeviceCount(int* dev_count);
 C10_CUDA_API cudaError_t GetDevice(DeviceIndex* device);
 
 C10_CUDA_API cudaError_t SetDevice(DeviceIndex device);
+
+C10_CUDA_API cudaError_t SetDevice(DeviceIndex device, const bool force);
 
 C10_CUDA_API cudaError_t MaybeSetDevice(DeviceIndex device);
 
