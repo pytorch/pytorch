@@ -23,7 +23,9 @@
     jit_language_reference_v2
 
 
-.. contents:: :local:
+```{contents}
+:local:
+:depth: 2
     :depth: 2
 
 .. automodule:: torch.jit
