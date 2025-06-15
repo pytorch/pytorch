@@ -72,6 +72,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
+    SM90OrLater,
     TEST_CUDNN,
     tf32_on_and_off,
     with_tf32_off,
@@ -1731,6 +1732,12 @@ class CommonTemplate:
             return a[padded_idx]
 
         self.common(fn, (torch.randn(1024),))
+
+    def test_index_remainder(self):
+        def fn(x, y):
+            return x[y % 12]
+
+        self.common(fn, (torch.rand(1024), torch.randint(50, (50,))))
 
     @xfailIfS390X
     @config.patch(debug_index_asserts=False)
@@ -3872,9 +3879,7 @@ class CommonTemplate:
         with self.assertRaisesRegex(RuntimeError, msg):
             with torch.no_grad():
                 torch.compile(fn)(t)
-        # TODO: Autograd internal assertion
-        msg = r".*isDifferentiableType\(variable.scalar_type\(\)\) INTERNAL ASSERT FAILED.*"
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(RuntimeError, "Autograd not support dtype:.*"):
             torch.compile(fn)(t)
 
     @unittest.skipIf(
@@ -8276,7 +8281,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         actual_out = compiled_fn(view)
         self.assertEqual(reference_out.stride(), actual_out.stride())
 
-    @xfail_if_triton_cpu
     def test_like_channels_last(self):
         def foo():
             randn = torch.randn((4, 3, 8, 8), device=self.device, dtype=torch.float32)
@@ -13577,6 +13581,42 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (1, x))
         self.common(fn, (2, x))
 
+    @skip_if_triton
+    @skip_if_halide
+    @config.patch({"freezing": True})
+    def test_dont_constant_fold(self):
+        from torch._inductor.constant_folding import (
+            add_dont_constant_fold,
+            clear_dont_constant_fold,
+        )
+
+        m = 5
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.randn(m)
+                self.s = torch.randn(m)
+
+            def forward(self, x):
+                return self.w * self.s + x
+
+        x = torch.rand(m)
+        mod = M()
+        for dont_constant_fold in [True, False]:
+            clear_dont_constant_fold()
+            if dont_constant_fold:
+                add_dont_constant_fold(torch.ops.aten.mul.Tensor)
+            with torch.no_grad():
+                refe_out = mod(x)
+                mod = torch.compile(mod)
+                test_out, (code,) = run_and_get_code(mod, x)
+            if dont_constant_fold:
+                FileCheck().check("cpp_fused_add_mul").run(code)
+            else:
+                FileCheck().check("cpp_fused_add_0").run(code)
+            self.assertEqual(refe_out, test_out)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -13932,6 +13972,51 @@ if RUN_GPU:
                     restore_fqn=False,
                 )
                 torch._inductor.aot_compile(traced, inputs)
+
+        @skipCUDAIf(not SM90OrLater, "Requires sm90")
+        @requires_cuda
+        @unittest.skipIf(TEST_WITH_ROCM, "no grouped_mm support")
+        @config.patch(implicit_fallbacks=True)
+        def test_grouped_mm(self):
+            @torch.compile(fullgraph=True)
+            def f(a, b, offs, out_dtype):
+                return torch._grouped_mm(
+                    a, b.transpose(-2, -1), offs=offs, out_dtype=out_dtype
+                )
+
+            device = "cuda"
+            dtype = torch.bfloat16
+
+            m, n, k, n_groups = 16, 32, 16, 4
+            a_ref = torch.randn(m * n_groups, k, device=device, dtype=dtype)[:, :k]
+
+            b_ref = torch.randn(
+                n_groups,
+                n,
+                k,
+                device=device,
+                dtype=dtype,
+            )[::1, :, :k]
+
+            offs = torch.arange(
+                k, n_groups * k + 1, k, device=device, dtype=torch.int32
+            )
+
+            a_ref.requires_grad_(True)
+            b_ref.requires_grad_(True)
+
+            a_test = a_ref.clone().detach().requires_grad_()
+            b_test = b_ref.clone().detach().requires_grad_()
+
+            out_ref = f(a_ref, b_ref, offs, out_dtype=torch.bfloat16)
+            out_ref.sum().backward()
+
+            out_test = f(a_test, b_test, offs=offs, out_dtype=torch.bfloat16)
+            out_test.sum().backward()
+
+            self.assertEqual(out_ref, out_test)
+            self.assertEqual(a_ref.grad, a_test.grad)
+            self.assertEqual(b_ref.grad, b_test.grad)
 
         def test_optimize_indexing_assert(self):
             def has_indirect(code, tl_fn: str):

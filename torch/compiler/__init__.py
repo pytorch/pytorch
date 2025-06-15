@@ -30,8 +30,8 @@ __all__ = [
     "load_cache_artifacts",
     "skip_guard_on_inbuilt_nn_modules_unsafe",
     "skip_guard_on_all_nn_modules_unsafe",
-    "keep_tensor_guards",
-    "skip_guard_on_globals",
+    "keep_tensor_guards_unsafe",
+    "skip_guard_on_globals_unsafe",
 ]
 
 
@@ -477,7 +477,10 @@ def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
     """
     from ._cache import CacheArtifactManager, CacheInfo
 
-    return CacheArtifactManager.deserialize(serialized_artifacts)
+    artifacts = CacheArtifactManager.deserialize(serialized_artifacts)
+    if artifacts is not None:
+        return CacheArtifactManager.populate_caches(artifacts)
+    return None
 
 
 def skip_guard_on_inbuilt_nn_modules_unsafe(guard_entries):
@@ -523,7 +526,7 @@ def skip_guard_on_all_nn_modules_unsafe(guard_entries):
     ]
 
 
-def keep_tensor_guards(guard_entries, keep_parameters=False):
+def keep_tensor_guards_unsafe(guard_entries, keep_parameters=False):
     """
     A common function to keep tensor guards on all tensors. This is unsafe to
     use by default. But if you don't expect any changes in the model code, you
@@ -550,7 +553,7 @@ def keep_tensor_guards(guard_entries, keep_parameters=False):
     return keep_flags
 
 
-def skip_guard_on_globals(guard_entries):
+def skip_guard_on_globals_unsafe(guard_entries):
     """
     A common function to skip guards on all globals. This is unsafe to use by
     default. But if you don't expect any changes in the globals, you can just

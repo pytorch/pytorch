@@ -449,7 +449,7 @@ def get_custom_backend_pass_for_device(device: str) -> Optional[CustomGraphModul
     return custom_backend_passes[device] if device in custom_backend_passes else None
 
 
-@functools.lru_cache(None)
+@functools.cache
 def init_backend_registration() -> None:
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
@@ -2231,7 +2231,7 @@ class OptimizationContext:
     ops_name: str = ""
 
 
-@functools.lru_cache(None)
+@functools.cache
 def jinja2_env() -> Any:
     try:
         import jinja2
