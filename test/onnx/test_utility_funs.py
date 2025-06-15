@@ -9,6 +9,7 @@ from typing import Callable
 
 import onnx
 
+import onnx_test_common
 import parameterized
 import pytorch_test_common
 import torchvision
@@ -22,7 +23,7 @@ from pytorch_test_common import (
 import torch
 import torch.onnx
 import torch.utils.cpp_extension
-from torch.onnx import _constants, OperatorExportTypes, TrainingMode, utils
+from torch.onnx import OperatorExportTypes, TrainingMode, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
@@ -170,8 +171,8 @@ class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
     [
         {"opset_version": opset}
         for opset in range(
-            _constants.ONNX_BASE_OPSET,
-            _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET + 1,
+            onnx_test_common.MIN_ONNX_OPSET_VERSION,
+            onnx_test_common.MAX_ONNX_OPSET_VERSION + 1,
         )
     ],
     class_name_func=lambda cls,
