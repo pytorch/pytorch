@@ -590,7 +590,8 @@ struct GlobalStateGuard {
     _torch_function_all_disabled = at::impl::torch_function_all_disabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
     _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
-    _allow_tf32 = ctx.allowTF32CuBLAS();
+    _allow_tf32 = ctx.float32Precision("cuda", "matmul") == "tf32";
+    std::cout<<"torch/csrc/dynamo/guards.cpp 594 "<<_allow_tf32<<"\n";
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
@@ -599,6 +600,7 @@ struct GlobalStateGuard {
 
   inline bool check() const {
     auto& ctx = at::globalContext();
+    std::cout<<"torch/csrc/dynamo/guards.cpp 603 "<<(ctx.float32Precision("cuda", "matmul") == "tf32")<<"\n";
     return (_grad_mode == at::GradMode::is_enabled() &&
             _autocast_state == AutocastState() &&
             _torch_function == torch::torch_function_enabled() &&
@@ -607,7 +609,7 @@ struct GlobalStateGuard {
             _deterministic_algorithms == ctx.deterministicAlgorithms() &&
             _deterministic_algorithms_warn_only ==
                 ctx.deterministicAlgorithmsWarnOnly() &&
-            _allow_tf32 == ctx.allowTF32CuBLAS() &&
+            _allow_tf32 == (ctx.float32Precision("cuda", "matmul") == "tf32") &&
             _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
             _num_threads == at::get_num_threads()) &&
@@ -628,7 +630,8 @@ struct GlobalStateGuard {
     if (_deterministic_algorithms_warn_only !=
         ctx.deterministicAlgorithmsWarnOnly())
       os << "deterministic_algorithms_warn_only ";
-    if (_allow_tf32 != ctx.allowTF32CuBLAS())
+    std::cout<<"torch/csrc/dynamo/guards.cpp 633 "<<(ctx.float32Precision("cuda", "matmul") == "tf32")<<"\n";
+    if (_allow_tf32 != (ctx.float32Precision("cuda", "matmul") == "tf32"))
       os << "allow_tf32 ";
     if (_allow_fp16_reduce != ctx.allowFP16ReductionCuBLAS())
       os << "allow_fp16_reduce ";
