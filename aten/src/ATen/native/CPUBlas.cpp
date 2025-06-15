@@ -368,8 +368,12 @@ void gemm(
               b, &ldb_,
               &beta_,
               float_v.data(), &ldc_);
-      for (auto cv: float_v) {
-        *(c++) = c10::convert<at::BFloat16>(cv);
+
+      for (const auto j : c10::irange(n)) {
+        for (const auto i : c10::irange(m)) {
+          auto offset = j * ldc + i;
+          c[offset] = c10::convert<c10::BFloat16>(float_v[j * m + i]);
+        }
       }
       return;
    }
