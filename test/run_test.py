@@ -1794,11 +1794,6 @@ def run_tests(
         x for x in selected_tests if x not in selected_tests_parallel
     ]
 
-    # See Note [ROCm parallel CI testing]
-    pool = get_context("spawn").Pool(
-        NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
-    )
-
     # NB: This is a hack to make conftest.py and files it depends on available
     # on CPP_TESTS_DIR. We should see if the file could be turned into a
     # full-fledge ptest plugin instead
@@ -1816,23 +1811,15 @@ def run_tests(
         ):
             shutil.copy(os.path.join(test_directory, conftest_file), cpp_file)
 
-    def handle_error_messages(failure: Optional[TestFailure]):
-        if failure is None:
+    def handle_complete(failure: Optional[TestFailure]):
+        failed = failure is not None
+        if IS_CI and options.upload_artifacts_while_running:
+            zip_and_upload_artifacts(failed)
+        if not failed:
             return False
         failures.append(failure)
         print_to_stderr(failure.message)
         return True
-
-    def parallel_test_completion_callback(failure):
-        test_failed = handle_error_messages(failure)
-        if IS_CI and options.upload_artifacts_while_running:
-            zip_and_upload_artifacts(test_failed)
-        if (
-            test_failed
-            and not options.continue_through_error
-            and not RERUN_DISABLED_TESTS
-        ):
-            pool.terminate()
 
     keep_going_message = (
         "\n\nTip: You can keep running tests even on failure by passing --keep-going to run_test.py.\n"
@@ -1845,7 +1832,7 @@ def run_tests(
             if can_run_in_pytest(test):
                 options_clone.pytest = True
             failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(failure)
+            test_failed = handle_complete(failure)
             if (
                 test_failed
                 and not options.continue_through_error
@@ -1860,7 +1847,7 @@ def run_tests(
                 options_clone.pytest = True
             options_clone.additional_args.extend(["-m", "serial"])
             failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(failure)
+            test_failed = handle_complete(failure)
             if (
                 test_failed
                 and not options.continue_through_error
@@ -1869,6 +1856,21 @@ def run_tests(
                 raise RuntimeError(failure.message + keep_going_message)
 
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
+
+        # See Note [ROCm parallel CI testing]
+        pool = get_context("spawn").Pool(
+            NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
+        )
+
+        def parallel_test_completion_callback(failure):
+            test_failed = handle_complete(failure)
+            if (
+                test_failed
+                and not options.continue_through_error
+                and not RERUN_DISABLED_TESTS
+            ):
+                pool.terminate()
+
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
