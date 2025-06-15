@@ -21,12 +21,20 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 
 #include <ATen/ThreadLocalState.h>
 
 namespace c10d {
 
 constexpr const char* GLOO_BACKEND_NAME = "gloo";
+
+// Control whether or not connections are established in a full mesh or lazily
+// as needed.
+static std::vector<std::string> TORCH_GLOO_LAZY_INIT = {"TORCH_GLOO_LAZY_INIT"};
+
+// Returns default value for lazyInit.
+bool TORCH_API getDefaultGlooLazyInit();
 
 // ProcessGroupGloo implements Gloo bindings for c10d.
 //
@@ -57,6 +65,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
   class TORCH_API AsyncWork : public Work {
    public:
     explicit AsyncWork(
+        std::shared_ptr<gloo::Context> context,
         std::vector<std::vector<at::Tensor>> outputTensors,
         OpType opType,
         uint64_t seq,
@@ -74,13 +83,22 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
     uint64_t getSequencenumber() const override;
-
+    std::chrono::milliseconds getTimeout() const;
+    virtual const std::vector<at::Tensor> getInputTensors() = 0;
+    virtual const std::vector<at::Tensor> getOutputTensors() = 0;
+    inline std::string getProfilerTitle() const {
+      return profilingTitle_;
+    }
     inline at::ThreadLocalState getTLS() const {
       return tls_;
     }
 
    protected:
     friend class ProcessGroupGloo;
+    // unique id used to tell the trace buffer that this
+    // work has completed
+    std::optional<uint64_t> trace_id_;
+    std::shared_ptr<gloo::Context> context_;
 
    private:
     void finishWorkGloo();
@@ -93,6 +111,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     c10::intrusive_ptr<at::ivalue::Future> future_;
     std::function<void()> recordFunctionBeforeCallback_;
     const uint64_t seq_;
+    std::string profilingTitle_;
     at::ThreadLocalState tls_;
   };
 
@@ -230,6 +249,8 @@ class TORCH_API ProcessGroupGloo : public Backend {
       return c10::make_intrusive<Options>(timeout);
     }
 
+    std::vector<uint64_t> global_ranks_in_group;
+    std::string group_name;
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads;
   };
@@ -244,24 +265,20 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
   // Create new device instance for specific interface.
   static std::shared_ptr<::gloo::transport::Device> createDeviceForInterface(
-      const std::string& interface);
+      const std::string& interface,
+      bool lazyInit = false);
 
   // Create new device instance for specific hostname or address.
   static std::shared_ptr<::gloo::transport::Device> createDeviceForHostname(
-      const std::string& hostname);
+      const std::string& hostname,
+      bool lazyInit = false);
 
   // Create new device instance.
   // It tries to resolve this machine's hostname and bind to that address.
   // If that fails (i.e. the hostname doesn't resolve to an address), it
   // falls back to binding to the loopback address.
-  static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
-
-  // Create ProcessGroupGloo instance.
-  static c10::intrusive_ptr<ProcessGroupGloo> createProcessGroupGloo(
-      const c10::intrusive_ptr<Store>& store,
-      int rank,
-      int size,
-      std::chrono::milliseconds timeout);
+  static std::shared_ptr<::gloo::transport::Device> createDefaultDevice(
+      bool lazyInit = false);
 
   explicit ProcessGroupGloo(
       const c10::intrusive_ptr<Store>& store,
@@ -274,6 +291,8 @@ class TORCH_API ProcessGroupGloo : public Backend {
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
   }
+
+  const std::vector<uint64_t>& groupRanks() const;
 
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& tensors,
@@ -435,6 +454,9 @@ class TORCH_API ProcessGroupGloo : public Backend {
   std::condition_variable workProduceCV_;
   std::condition_variable workConsumeCV_;
   uint64_t seq_{0};
+  size_t local_id_;
+  std::shared_ptr<ProcessGroupStatus> pgStatus_ =
+      std::make_shared<ProcessGroupStatus>();
 };
 
 } // namespace c10d

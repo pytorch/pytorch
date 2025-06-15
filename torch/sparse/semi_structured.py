@@ -138,13 +138,14 @@ class SparseSemiStructuredTensor(torch.Tensor):
         else:
             raise ValueError("At least one of packed or packed_t must be provided")
 
-        kwargs = {
-            "device": previous_tensor.device,
-            "dtype": previous_tensor.dtype,
-            "layout": previous_tensor.layout,
-            "requires_grad": requires_grad,
-        }
-        tensor = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)  # type: ignore[attr-defined]
+        tensor = torch.Tensor._make_wrapper_subclass(
+            cls,
+            shape,
+            device=previous_tensor.device,
+            dtype=previous_tensor.dtype,
+            layout=previous_tensor.layout,
+            requires_grad=requires_grad,
+        )
 
         tensor.packed = packed
         tensor.meta = meta
@@ -196,10 +197,10 @@ class SparseSemiStructuredTensor(torch.Tensor):
             requires_grad=requires_grad,
         )
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
+    __torch_function__ = torch._C._disabled_torch_function_impl  # type: ignore[assignment]
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:
+    def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:  # type: ignore[override]
         if func._overloadpacket not in cls.SPARSE_DISPATCH:
             raise NotImplementedError(
                 f"{cls.__name__} only supports a specific set of operations, "

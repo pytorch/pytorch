@@ -109,9 +109,9 @@ assert_type(INT % TENSOR, Any)
 assert_type(INT**TENSOR, Any)
 assert_type(INT << TENSOR, Any)
 assert_type(INT >> TENSOR, Any)
-assert_type(INT & TENSOR, Any)  # type: ignore[operator]
-assert_type(INT | TENSOR, Any)  # type: ignore[operator]
-assert_type(INT ^ TENSOR, Any)  # type: ignore[operator]
+assert_type(INT & TENSOR, Tensor)
+assert_type(INT | TENSOR, Tensor)
+assert_type(INT ^ TENSOR, Tensor)
 
 assert_type(TENSOR == FLOAT, Tensor)
 assert_type(TENSOR != FLOAT, Tensor)
@@ -147,9 +147,6 @@ assert_type(FLOAT % TENSOR, Any)
 assert_type(FLOAT**TENSOR, Any)
 assert_type(FLOAT << TENSOR, Any)
 assert_type(FLOAT >> TENSOR, Any)
-assert_type(FLOAT & TENSOR, Tensor)  # type: ignore[operator]
-assert_type(FLOAT | TENSOR, Tensor)  # type: ignore[operator]
-assert_type(FLOAT ^ TENSOR, Tensor)  # type: ignore[operator]
 
 
 NUMBER: TypeAlias = Union[int, float, bool]
@@ -408,12 +405,3 @@ assert_type(INT << TENSOR, Any)
 assert_type(BOOL >> TENSOR, Any)
 assert_type(FLOAT >> TENSOR, Any)
 assert_type(INT >> TENSOR, Any)
-
-assert_type(FLOAT & TENSOR, Tensor)  # type: ignore[operator]
-assert_type(INT & TENSOR, Any)  # type: ignore[operator]
-
-assert_type(FLOAT | TENSOR, Tensor)  # type: ignore[operator]
-assert_type(INT | TENSOR, Any)  # type: ignore[operator]
-
-assert_type(FLOAT ^ TENSOR, Tensor)  # type: ignore[operator]
-assert_type(INT ^ TENSOR, Any)  # type: ignore[operator]

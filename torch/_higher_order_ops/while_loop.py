@@ -6,14 +6,11 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
     check_meta_consistency,
     reenter_make_fx,
-    UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
@@ -215,7 +212,7 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
     return carried_vals
 
 
-while_loop_op.py_impl(DispatchKey.Autograd)(
+while_loop_op.py_autograd_impl(
     autograd_not_implemented(while_loop_op, deferred_error=True)
 )
 
@@ -380,7 +377,11 @@ def while_loop_fake_tensor_mode(
             # so we could just return the output after one iteration.
             body_outs = body_fn(*carried_inputs, *additional_inputs)
             check_meta_consistency(
-                carried_inputs, body_outs, "carried_inputs", "body_output"
+                carried_inputs,
+                body_outs,
+                "carried_inputs",
+                "body_output",
+                include_contiguity=False,
             )
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
@@ -396,6 +397,8 @@ def while_loop_fake_tensor_mode(
 
 @while_loop_op.py_functionalize_impl
 def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
+    from torch._higher_order_ops.utils import _check_alias_and_mutation
+
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     unwrapped_inputs = unwrapped_carried_inputs + unwrapped_additional_inputs
@@ -407,19 +410,7 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
             (cond_fn, "cond_fn"),
             (body_fn, "body_fn"),
         ]:
-            if _has_potential_branch_input_mutation(
-                fn, unwrapped_inputs, pre_dispatch=pre_dispatch
-            ):
-                raise UnsupportedAliasMutationException(
-                    f"torch.while_loop's {fn_name} might be modifying the input!"
-                )
-
-            if _has_potential_branch_input_alias(
-                fn, unwrapped_inputs, pre_dispatch=pre_dispatch
-            ):
-                raise UnsupportedAliasMutationException(
-                    f"torch.while_loop's {fn_name} might be aliasing the input!"
-                )
+            _check_alias_and_mutation(fn, unwrapped_inputs, fn_name, pre_dispatch)
         ret = while_loop_op(
             functional_cond_fn,
             functional_body_fn,

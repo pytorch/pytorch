@@ -44,7 +44,7 @@ constexpr int64_t kReasonableMaxDim = 1000000;
 } // namespace
 
 template <int kSpatialDim = 2>
-bool ConvDimChecks(
+static bool ConvDimChecks(
     int64_t act_dims,
     int64_t stride_dims,
     int64_t padding_dims,
@@ -95,7 +95,7 @@ bool ConvDimChecks(
   return true;
 }
 
-inline int64_t compute_deconv_shape(int64_t input,
+static inline int64_t compute_deconv_shape(int64_t input,
                                     int64_t kernel,
                                     int64_t stride,
                                     int64_t input_padding,
@@ -107,7 +107,7 @@ inline int64_t compute_deconv_shape(int64_t input,
 }
 
 template <int64_t kSpatialDim>
-at::SmallVector<int64_t, kSpatialDim + 2> MakeDeConvOutputShape(
+static at::SmallVector<int64_t, kSpatialDim + 2> MakeDeConvOutputShape(
     int64_t N, int64_t M,
     const std::vector<int64_t>& input_shape,
     const std::vector<int64_t>& kernel,
@@ -178,7 +178,7 @@ at::SmallVector<int64_t, 5> MakeConvOutputShape<3>(
 #ifdef USE_PYTORCH_QNNPACK
 
 template <size_t kSpatialDim>
-std::array<int64_t, kSpatialDim> MakeInputShape(
+static std::array<int64_t, kSpatialDim> MakeInputShape(
     int64_t D,
     int64_t H,
     int64_t W);
@@ -448,7 +448,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
   at::Tensor output = kSpatialDim == 2
       ? at::_empty_affine_quantized(
             output_shape,
-            device(c10::kCPU)
+            at::device(c10::kCPU)
                 .dtype(c10::kQUInt8)
                 .memory_format(c10::MemoryFormat::ChannelsLast),
             output_scale,
@@ -460,7 +460,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
             output_shape[2],
             output_shape[3],
             output_shape[4],
-            device(c10::kCPU).dtype(c10::kQUInt8),
+            at::device(c10::kCPU).dtype(c10::kQUInt8),
             output_scale,
             output_zero_point);
   at::Tensor buffer =
@@ -1225,7 +1225,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   ideep::dims dst_dims = ideep::dims({output_sizes.cbegin(), output_sizes.cend()});
   at::Tensor output = at::_empty_affine_quantized(
       dst_dims,
-      device(c10::kCPU)
+      at::device(c10::kCPU)
           .dtype(c10::kQUInt8)
           .memory_format(kSpatialDim == 2 ?
               c10::MemoryFormat::ChannelsLast :
@@ -1593,7 +1593,7 @@ static at::Tensor _quantized_convolution_onednn(
     accum.value() :
     at::empty(
       dst_dims,
-      device(c10::kCPU)
+      at::device(c10::kCPU)
           .dtype(fp32_output ? c10::kFloat : (bfloat16_output ? c10::kBFloat16 : c10::kByte))
           .memory_format(kSpatialDim == 2 ?
               c10::MemoryFormat::ChannelsLast :
@@ -1758,23 +1758,26 @@ namespace at::native {
       std::optional<std::string_view> algorithm) {
 #if AT_MKLDNN_ENABLED()
 
-    if (act.dim() == 3 || act.dim() == 5) {
-      // Conv1D/3D post op check
-      TORCH_CHECK(
-        attr == "none",
-        "quantized pointwise conv",
-        act.dim()-2,
-        "d doesn't support unary_post_op fusion. Got unary_post_op: ",
-        attr,
-        ".")
-    } else {
-      // Conv2D post op check
-      TORCH_CHECK(
-        attr == "none" || attr == "relu" || attr == "hardtanh" || attr == "hardswish" || attr == "swish",
-        "none post_op or post_op relu/hardtanh/hardswish is supported for quantized pointwise conv2d. Got unary_post_op: ",
-        attr,
-        ".")
+    std::vector<std::string> supported_postop = {
+      "none"
+    };
+    if (act.dim() == 3) {
+      // Conv1D post op
+      supported_postop.push_back("relu");
+    } else if (act.dim() == 4) {
+      // Conv2D post op
+      supported_postop.push_back("relu");
+      supported_postop.push_back("hardtanh");
+      supported_postop.push_back("hardswish");
+      supported_postop.push_back("swish");
     }
+    TORCH_CHECK(
+      std::find(supported_postop.begin(), supported_postop.end(), attr) != supported_postop.end(),
+      "Unsupported post op ",
+      attr,
+      " for quantized pointwise conv",
+      act.dim()-2,
+      "d.")
     return _quantized_convolution_onednn(
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
@@ -1920,7 +1923,7 @@ namespace {
  * FBGEMM uses vpmaddubsw instruction to multiply activations (uint8_t) and
  * weights (int8_t).
  *
- * https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm256_maddubs_epi16&expand=3284,3530
+ * https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_maddubs_epi16&expand=3284,3530&ig_expand=4236
  *
  * vpmaddubsw operates on a vector of activations and a vector of
  * weights. If these vectors are
@@ -2079,6 +2082,8 @@ TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise"), at::native::QConvoneDNN::run_pointwise);
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.tensor"), at::native::QConvoneDNN::run_pointwise_tensor);
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv3d_pointwise"), at::native::QConvoneDNN::run_pointwise);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_pointwise"), at::native::QConvoneDNN::run_pointwise);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_pointwise.tensor"), at::native::QConvoneDNN::run_pointwise_tensor);
 
   // Conv2D with binary postop
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary"), at::native::QConvoneDNN::run_pointwise_binary);

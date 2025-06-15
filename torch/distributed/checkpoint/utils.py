@@ -119,7 +119,7 @@ class _DistWrapper:
             dist.broadcast_object_list(
                 object_list=object_list,
                 group=self.group,
-                src=self.coordinator_rank,
+                src=self.global_coordinator_rank,
             )
         return cast(T, object_list[0])
 
@@ -306,6 +306,16 @@ class _DistWrapper:
         if isinstance(final_result, CheckpointException):
             raise final_result
         return cast(T, final_result)
+
+    def barrier(self) -> None:
+        """
+        Add a synchronization point across all processes when using distributed.
+        If torch.distributed is initialized, this function will invoke a barrier across the global process group.
+        If torch.distributed is not initialized, this function is a no-op.
+        """
+        if not self.use_dist:
+            return
+        dist.barrier(group=self.group)
 
 
 def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:

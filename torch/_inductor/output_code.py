@@ -25,9 +25,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
-import re
 from functools import partial
-from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
@@ -76,6 +74,9 @@ class OutputCode:
 
     # None if the output is not remote cacheable
     _fx_graph_cache_key: Optional[str] = dataclasses.field(default=None, init=False)
+    _fx_graph_cache_debug_lines: Optional[list[str]] = dataclasses.field(
+        default=None, init=False
+    )
 
     # How long it took to compile this OutputCode, end to end
     _time_taken_ns: Optional[int] = dataclasses.field(default=None, init=False)
@@ -324,6 +325,7 @@ def maybe_realign_inputs(
     ran_cudagraphs: BoxedBool,
     compiled_graph: CompiledFxGraph,
     inputs_to_check: Sequence[int],
+    mutated_inputs_idxs: OrderedSet[int],
 ) -> None:
     """
     Realigns input strides from inputs_to_check if
@@ -334,7 +336,7 @@ def maybe_realign_inputs(
     if not ran_cudagraphs:
         assert compiled_graph.current_callable is not None
         new_callable = align_inputs_from_check_idxs(
-            compiled_graph.current_callable, inputs_to_check
+            compiled_graph.current_callable, inputs_to_check, mutated_inputs_idxs
         )
         if new_callable is not compiled_graph.current_callable:
             compiled_graph.current_callable = new_callable
@@ -393,8 +395,13 @@ class CompiledFxGraph(OutputCode):
 
     current_callable: Optional[Callable[..., Any]]
     recursively_apply_fns: Optional[Callable[..., Any]]
+    compiled_fn_runner: Optional[Any]
     cache_key: str
     source_code: str = dataclasses.field(repr=False)  # Do not display source_code
+    runnable_graph_str: str = dataclasses.field(repr=False)  # Do not display graph
+    inductor_post_grad_graph_str: str = dataclasses.field(
+        repr=False
+    )  # Do not display graph
     cache_linemap: Optional[list[tuple[int, str]]]
     device_types: OrderedSet[str]
     device_idxs: OrderedSet[int]
@@ -436,14 +443,23 @@ class CompiledFxGraph(OutputCode):
         static_input_idxs: Sequence[int],
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
-        recursively_apply_fns: Optional[Callable[..., Any]] = None,
+        runnable_graph_str: str,
+        inductor_post_grad_graph_str: str,
+        compiled_fn_runner: Optional[Any] = None,
     ) -> None:
         self.current_callable = current_callable
-        self.recursively_apply_fns = recursively_apply_fns
+        self.compiled_fn_runner = compiled_fn_runner
+        self.recursively_apply_fns = (
+            compiled_fn_runner.recursively_apply_fns
+            if compiled_fn_runner is not None
+            else None
+        )
         self.cache_key = graph.cache_key
         if graph.cache_path:
             with open(graph.cache_path) as f:
                 self.source_code = f.read()
+        self.runnable_graph_str = runnable_graph_str
+        self.inductor_post_grad_graph_str = inductor_post_grad_graph_str
         self.cache_linemap = graph.cache_linemap
         # TODO - ordered set
         self.device_types = OrderedSet(graph.device_types)
@@ -552,6 +568,15 @@ class CompiledFxGraph(OutputCode):
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
 
+    def __del__(self) -> None:
+        if self.compiled_fn_runner is not None:
+            # For torch._inductor.config.graph_partition = True,
+            # self.compiled_fn_runner.partitions hold cudagraphified functions
+            # which prevents deallocation. When CompiledFxGraph is deleted,
+            # self.compiled_fn_runner will not be called in the future so we
+            # should also delete these partitions.
+            del self.compiled_fn_runner.partitions
+
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
         try:
@@ -630,6 +655,7 @@ class CompiledFxGraph(OutputCode):
             cudagraphs,
             self,
             inputs_to_check,
+            self.mutated_input_idxs,
         )
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
@@ -642,15 +668,11 @@ class CompiledFxGraph(OutputCode):
         # models to disk.
         self.current_callable = None
         self.recursively_apply_fns = None
+        self.compiled_fn_runner = None
 
-    def after_deserialization(self, constants: CompiledFxGraphConstants) -> str:
-        from torch._dynamo.utils import counters, dynamo_timed
-        from torch._inductor.codecache import (
-            cpp_prefix_path,
-            get_path,
-            PyCodeCache,
-            write_atomic,
-        )
+    def write_to_disk(self) -> str:
+        from torch._dynamo.utils import counters
+        from torch._inductor.codecache import get_path, write_atomic
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
@@ -658,19 +680,14 @@ class CompiledFxGraph(OutputCode):
         code = self.source_code
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
-            Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
-            cpp_pp = cpp_prefix_path()
-            if os.path.basename(cpp_pp) in code:
-                if cpp_pp in code:
-                    # Great the name is correct
-                    pass
-                else:
-                    # Old dir name is included, replace it
-                    pattern = rf'#include\s*"[^"]+{os.path.basename(cpp_pp)}"'
-                    code = re.sub(pattern, f'#include "{cpp_pp}"', code)
-                    self.source_code = code
-
             write_atomic(artifact_path, code, make_dirs=True)
+        return artifact_path
+
+    def after_deserialization(self, constants: CompiledFxGraphConstants) -> str:
+        from torch._dynamo.utils import dynamo_timed
+        from torch._inductor.codecache import PyCodeCache
+
+        artifact_path = self.write_to_disk()
 
         try:
             with dynamo_timed(
@@ -687,6 +704,7 @@ class CompiledFxGraph(OutputCode):
                 self.recursively_apply_fns = getattr(
                     code_cache, "recursively_apply_fns", None
                 )
+                self.compiled_fn_runner = getattr(code_cache, "runner", None)
         except OSError:
             log.error("Failed to load artifact: %s", artifact_path)
             raise

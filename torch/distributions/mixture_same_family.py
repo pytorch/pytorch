@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
+from typing import Optional
 
 import torch
 from torch import Tensor
 from torch.distributions import Categorical, constraints
+from torch.distributions.constraints import MixtureSameFamilyConstraint
 from torch.distributions.distribution import Distribution
 
 
@@ -59,7 +61,7 @@ class MixtureSameFamily(Distribution):
         self,
         mixture_distribution: Categorical,
         component_distribution: Distribution,
-        validate_args=None,
+        validate_args: Optional[bool] = None,
     ) -> None:
         self._mixture_distribution = mixture_distribution
         self._component_distribution = component_distribution
@@ -123,9 +125,7 @@ class MixtureSameFamily(Distribution):
 
     @constraints.dependent_property
     def support(self):
-        # FIXME this may have the wrong shape when support contains batched
-        # parameters
-        return self._component_distribution.support
+        return MixtureSameFamilyConstraint(self._component_distribution.support)
 
     @property
     def mixture_distribution(self) -> Categorical:

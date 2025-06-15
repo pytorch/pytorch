@@ -81,14 +81,14 @@ def _get_lstm_with_individually_observed_parts(
     quantizable_lstm.qconfig = float_lstm.qconfig
 
     for idx in range(float_lstm.num_layers):
-        quantizable_lstm.layers[
-            idx
-        ] = torch.ao.nn.quantizable.modules.rnn._LSTMLayer.from_float(
-            float_lstm,
-            idx,
-            float_lstm.qconfig,
-            batch_first=False,
-            split_gates=split_gates,
+        quantizable_lstm.layers[idx] = (
+            torch.ao.nn.quantizable.modules.rnn._LSTMLayer.from_float(
+                float_lstm,
+                idx,
+                float_lstm.qconfig,
+                batch_first=False,
+                split_gates=split_gates,
+            )
         )
 
     # Build QConfigMapping for the LSTM cell
@@ -104,7 +104,8 @@ def _get_lstm_with_individually_observed_parts(
     # Insert observers into each LSTM cell
     # TODO: maybe make this work for layer_bw as well
     for layer in quantizable_lstm.layers:
-        cell = layer.layer_fw.cell
+        cell = layer.layer_fw.cell  # type: ignore[union-attr]
+        assert isinstance(cell, torch.nn.Module), "cell should be a nn.Module"
         cell = prepare_fx(cell, cell_qm, example_inputs, backend_config=backend_config)
         # HACK: Manually replace the activation_post_process following these ops.
         # This is needed for FloatFunctional ops because there is currently no way
@@ -154,7 +155,7 @@ def _get_lstm_with_individually_observed_parts(
                 setattr(
                     cell, activation_post_process_name, activation_post_process_ctr()
                 )
-        layer.layer_fw.cell = cell
+        layer.layer_fw.cell = cell  # type: ignore[union-attr]
     return quantizable_lstm
 
 
@@ -216,5 +217,5 @@ def _get_reference_quantized_lstm_module(
                         node.replace_input_with(arg, arg.args[0])
         cell.graph.eliminate_dead_code()
         cell.recompile()
-        layer.layer_fw.cell = cell
+        layer.layer_fw.cell = cell  # type: ignore[union-attr]
     return quantized_lstm

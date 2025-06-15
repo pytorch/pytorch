@@ -335,12 +335,15 @@ at::BlasBackend Context::blasPreferredBackend() {
     static const bool hipblaslt_preferred = []() {
       static const std::vector<std::string> archs = {
           "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60400
+          "gfx1200", "gfx1201",
+#endif
 #if ROCM_VERSION >= 60500
           "gfx950"
 #endif
       };
       for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
-        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
           return false;
         }
       }
@@ -359,14 +362,14 @@ at::BlasBackend Context::blasPreferredBackend() {
       static const std::vector<std::string> archs = {
           "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-          "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+          "gfx1100", "gfx1101", "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 60500
           "gfx950"
 #endif
       };
       for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
-        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
           TORCH_WARN_ONCE(
             "Attempting to use hipBLASLt on an unsupported architecture! "
             "Overriding blas backend to hipblas");
@@ -419,7 +422,7 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
           "gfx90a",  "gfx942"
       };
       for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
-        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
           TORCH_WARN_ONCE(
             "Attempting to use CK on an unsupported architecture! Cannot set backend to CK");
           return true;
@@ -694,7 +697,7 @@ void Context::setAllowFP16ReductionCPU(bool b) {
 #else
     if (true)
 #endif
-      throw std::runtime_error("Float16 arithmetic is not supported by the CPU!");
+      TORCH_CHECK(false, "Float16 arithmetic is not supported by the CPU!");
   }
   allow_fp16_reduction_cpu = b;
 }

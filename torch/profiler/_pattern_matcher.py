@@ -90,7 +90,7 @@ class Pattern:
     def match(self, event: _ProfilerEvent):
         """
         Return True if the event matches the pattern.
-        This method should be overriden in subclass.
+        This method should be overridden in subclass.
         """
         raise NotImplementedError
 

@@ -69,7 +69,7 @@ class LocalShardsWrapper(torch.Tensor):
             ChunkStorageMetadata(o, s.shape) for s, o in zip(local_shards, offsets)
         ]
 
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             wrapper_shape,
         )
@@ -84,7 +84,7 @@ class LocalShardsWrapper(torch.Tensor):
 
     # necessary for ops dispatching from this subclass to its local shards
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         kwargs = kwargs or {}
 
         # TODO: we shall continually extend this function to support more ops if needed
