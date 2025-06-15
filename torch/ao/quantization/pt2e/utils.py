@@ -167,7 +167,11 @@ def _is_conv_node(n: Node):
     """
     return n.op == "call_function" and n.target in [
         torch.ops.aten.conv1d.default,
+        torch.ops.aten.conv1d.padding,
         torch.ops.aten.conv2d.default,
+        torch.ops.aten.conv2d.padding,
+        torch.ops.aten.conv3d.default,
+        torch.ops.aten.conv3d.padding,
     ]
 
 
@@ -355,6 +359,7 @@ def _get_aten_graph_module_for_pattern(
         pattern,  # type: ignore[arg-type]
         example_inputs,
         kwargs,
+        strict=True,
     ).module()
 
     aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]

@@ -17,6 +17,7 @@ StringCordView::StringCordView(
     std::vector<std::string_view> inputs,
     std::vector<std::shared_ptr<std::string>> ownerships)
     : pieces_(std::move(inputs)), owned_strings_(std::move(ownerships)) {
+  accumulated_sizes_.reserve(pieces_.size() + 1);
   accumulated_sizes_.push_back(0);
   size_t running_sum = 0;
   for (auto& s : pieces_) {
@@ -79,8 +80,8 @@ StringCordView StringCordView::substr(size_t start, size_t size) const {
   if (start + size >= this->size()) {
     size = this->size() - start;
   }
-  Iterator begin = iter_for_pos(start);
-  Iterator end = iter_for_pos(start + size);
+  IteratorImpl begin = iter_impl_for_pos(start);
+  IteratorImpl end = iter_impl_for_pos(start + size);
 
   if (begin.line_ == end.line_) {
     // same line
@@ -89,14 +90,14 @@ StringCordView StringCordView::substr(size_t start, size_t size) const {
     pieces.push_back(pieces_[begin.line_].substr(begin.pos_));
 
     size_t last_line = pieces_.size();
-    if (end != this->end() && end.line_ < last_line) {
+    if (end.has_next() && end.line_ < last_line) {
       // end is within the string
       last_line = end.line_;
     }
     for (size_t i = begin.line_ + 1; i < last_line; i++) {
       pieces.push_back(pieces_[i]);
     }
-    if (end != this->end()) {
+    if (end.has_next()) {
       pieces.push_back(pieces_[end.line_].substr(0, end.pos_));
     }
   }
@@ -129,21 +130,57 @@ bool StringCordView::operator==(const StringCordView& rhs) const {
 }
 
 StringCordView::Iterator StringCordView::iter_for_pos(size_t pos) const {
-  if (pos == 0) {
-    return begin();
-  }
   if (pos >= size()) {
     return end();
   }
-  auto upper = std::upper_bound(
-      accumulated_sizes_.begin(), accumulated_sizes_.end(), pos);
-  if (upper == accumulated_sizes_.end()) {
-    return end();
+  return begin() + pos;
+}
+
+StringCordView::IteratorImpl StringCordView::iter_impl_for_pos(
+    size_t pos) const {
+  if (pos >= size()) {
+    return end_impl();
   }
-  size_t line = upper - accumulated_sizes_.begin() - 1;
-  assert(accumulated_sizes_[line] <= pos);
-  assert(accumulated_sizes_[line + 1] > pos);
-  return Iterator(this, line, pos - accumulated_sizes_[line], size() - pos);
+  return begin_impl() + pos;
+}
+
+StringCordView::IteratorImpl& StringCordView::IteratorImpl::operator+=(
+    size_t num) {
+  if (!has_next()) {
+    return *this;
+  }
+  size_t target_pos = pos_ + num;
+  if (target_pos >= str_->accumulated_sizes_[line_] &&
+      (line_ + 1) < str_->accumulated_sizes_.size() &&
+      target_pos < str_->accumulated_sizes_[line_ + 1]) {
+    pos_ = target_pos;
+    return *this;
+  }
+
+  size_t target_abs_pos = pos() + num;
+  if (target_abs_pos >= size_) {
+    *this = str_->end_impl();
+    return *this;
+  }
+  auto upper = std::upper_bound(
+      str_->accumulated_sizes_.begin(),
+      str_->accumulated_sizes_.end(),
+      target_abs_pos);
+  if (upper == str_->accumulated_sizes_.end()) {
+    *this = str_->end_impl();
+    return *this;
+  }
+  size_t line = upper - str_->accumulated_sizes_.begin() - 1;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      str_->accumulated_sizes_[line] <= target_abs_pos);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      str_->accumulated_sizes_[line + 1] > target_abs_pos);
+  *this = IteratorImpl(
+      str_,
+      line,
+      target_abs_pos - str_->accumulated_sizes_[line],
+      str_->size() - target_abs_pos);
+  return *this;
 }
 
 size_t SourceRangeHasher::operator()(const torch::jit::SourceRange& key) const {
