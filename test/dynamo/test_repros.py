@@ -944,6 +944,10 @@ class IncByTwo:
     def __init__(self, x):
         self.x = x + 2
 
+def get_num_torch_recompiles():
+    guard_failures = torch._dynamo.utils.guard_failures
+    num_recompiles = [len(guard_failures[code]) for code in guard_failures]
+    return 0 if len(num_recompiles) == 0 else max(num_recompiles)
 
 class ReproTests(torch._dynamo.test_case.TestCase):
     def setUp(self) -> None:
@@ -6856,6 +6860,245 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = torch.compile(f, backend="aot_eager")()
         self.assertEqual(ref, res)
 
+    def test_out_variants_no_recompilation_bmm(self):
+        # https://github.com/pytorch/pytorch/issues/135859
+        def bmm_func(input, mat, out):
+            torch.bmm(input, mat, out=out)
+
+        torch._dynamo.reset()
+        opt_model = torch.compile(bmm_func)
+        total_comps = 0
+
+        input = torch.randn(10, 3, 4)
+        mat = torch.randn(10, 4, 5)
+        out = torch.empty(10, 3, 5)
+        opt_model(input, mat, out)
+        self.assertEqual(get_num_torch_recompiles() - total_comps, 0)
+        total_comps = get_num_torch_recompiles()
+
+        input = torch.randn(12, 5, 6)
+        mat = torch.randn(12, 6, 7)
+        out = torch.empty(12, 5, 7)
+        opt_model(input, mat, out)
+        self.assertEqual(get_num_torch_recompiles() - total_comps, 1)
+        total_comps = get_num_torch_recompiles()
+
+        input = torch.randn(14, 7, 8)
+        mat = torch.randn(14, 8, 9)
+        out = torch.empty(14, 7, 9)
+        opt_model(input, mat, out)
+        self.assertEqual(get_num_torch_recompiles() - total_comps, 0)
+
+    def test_out_variants_no_recompilation_topk(self):
+        # https://github.com/pytorch/pytorch/issues/135859
+        def topk_func(input, k, out):
+            torch.topk(input, k, out=out)
+
+        torch._dynamo.reset()
+        opt_model = torch.compile(topk_func)
+        total_comps = 0
+
+        values = torch.empty(3)
+        indices = torch.empty(3, dtype=torch.long)
+        x = torch.arange(1., 6.)
+        opt_model(x, 3, out=(values, indices))
+        self.assertEqual(get_num_torch_recompiles() - total_comps, 0)
+        total_comps = get_num_torch_recompiles()
+
+        x = torch.arange(1., 8.)
+        opt_model(x, 3, out=(values, indices))
+        self.assertEqual(get_num_torch_recompiles() - total_comps, 1)
+        total_comps = get_num_torch_recompiles()
+
+        x = torch.arange(1., 10.)
+        opt_model(x, 3, out=(values, indices))
+        self.assertEqual(get_num_torch_recompiles() - total_comps, 0)
+
+    def test_out_variants_no_recompilation_cholesky(self):
+        # https://github.com/pytorch/pytorch/issues/135859
+        def cholesky_func(input, out):
+            torch.linalg.cholesky(input, out=out)
+
+        torch._dynamo.reset()
+        opt_model = torch.compile(cholesky_func)
+        total_comps = 0
+
+        values = torch.randn(8, 32, 32)
+        ifm_positive_definite = values @ values.mT + torch.eye(values.shape[-1])
+        opt_model(ifm_positive_definite, out=ifm_positive_definite)
+        self.assertEqual(get_num_torch_recompiles() - total_comps, 0)
+        total_comps = get_num_torch_recompiles()
+
+        values = torch.randn(9, 32, 32)
+        ifm_positive_definite = values @ values.mT + torch.eye(values.shape[-1])
+        opt_model(ifm_positive_definite, out=ifm_positive_definite)
+        self.assertEqual(get_num_torch_recompiles() - total_comps, 1)
+        total_comps = get_num_torch_recompiles()
+
+        values = torch.randn(10, 32, 32)
+        ifm_positive_definite = values @ values.mT + torch.eye(values.shape[-1])
+        opt_model(ifm_positive_definite, out=ifm_positive_definite)
+        self.assertEqual(get_num_torch_recompiles() - total_comps, 0)
+
+    def test_out_variants_no_recompilation_linalg_norm(self):
+        # https://github.com/pytorch/pytorch/issues/135859
+        def model_norm(inputs, out):
+            torch.linalg.norm(inputs, ord=-1, dim=(0, 1), out=out)
+
+        torch._dynamo.reset()
+        opt_model = torch.compile(model_norm)
+        total_comps = 0
+
+        a = torch.rand((16, 16, 550), dtype=torch.bfloat16)
+        out = torch.empty(550, dtype=torch.bfloat16)
+        opt_model(a, out)
+        self.assertEqual(get_num_torch_recompiles() - total_comps, 0)
+        total_comps = get_num_torch_recompiles()
+
+        a = torch.rand((16, 16, 32), dtype=torch.bfloat16)
+        out = torch.empty(32, dtype=torch.bfloat16)
+        opt_model(a, out)
+        self.assertEqual(get_num_torch_recompiles() - total_comps, 1)
+        total_comps = get_num_torch_recompiles()
+
+        a = torch.rand((16, 16, 341), dtype=torch.bfloat16)
+        out = torch.empty(341, dtype=torch.bfloat16)
+        opt_model(a, out)
+        self.assertEqual(get_num_torch_recompiles() - total_comps, 0)
+
+    def test_out_variants_correctness_bmm(self):
+        # https://github.com/pytorch/pytorch/issues/135859
+        def bmm_out_func(input, mat, out):
+            torch.bmm(input, mat, out=out)
+            return out
+
+        def bmm_regular_func(input, mat):
+            return torch.bmm(input, mat)
+
+        opt_out_model = torch.compile(bmm_out_func)
+        opt_regular_model = torch.compile(bmm_regular_func)
+
+        # Test multiple configurations
+        test_cases = [
+            (torch.randn(10, 3, 4), torch.randn(10, 4, 5)),
+            (torch.randn(5, 2, 8), torch.randn(5, 8, 3)),
+            (torch.randn(1, 1, 1), torch.randn(1, 1, 1)),
+        ]
+
+        for input_tensor, mat_tensor in test_cases:
+            with self.subTest(input_shape=input_tensor.shape, mat_shape=mat_tensor.shape):
+                # Test with out= variant
+                out_tensor = torch.empty(input_tensor.shape[0], input_tensor.shape[1], mat_tensor.shape[2])
+                result_out = opt_out_model(input_tensor, mat_tensor, out_tensor)
+
+                # Test regular variant
+                result_regular = opt_regular_model(input_tensor, mat_tensor)
+
+                # Compare results
+                self.assertTrue(torch.allclose(result_out, result_regular, rtol=1e-5, atol=1e-8))
+                self.assertTrue(torch.allclose(out_tensor, result_regular, rtol=1e-5, atol=1e-8))
+
+    def test_out_variants_correctness_topk(self):
+        # https://github.com/pytorch/pytorch/issues/135859
+        def topk_out_func(input, k, out):
+            torch.topk(input, k, out=out)
+            return out
+
+        def topk_regular_func(input, k):
+            return torch.topk(input, k)
+
+        opt_out_model = torch.compile(topk_out_func)
+        opt_regular_model = torch.compile(topk_regular_func)
+
+        # Test multiple configurations
+        test_cases = [
+            (torch.arange(1., 10.), 3),
+            (torch.randn(20), 5),
+            (torch.tensor([1.0]), 1),
+        ]
+
+        for input_tensor, k in test_cases:
+            with self.subTest(input_shape=input_tensor.shape, k=k):
+                # Test with out= variant
+                values_out = torch.empty(k)
+                indices_out = torch.empty(k, dtype=torch.long)
+                result_out = opt_out_model(input_tensor, k, out=(values_out, indices_out))
+
+                # Test regular variant
+                result_regular = opt_regular_model(input_tensor, k)
+
+                # Compare results
+                self.assertTrue(torch.allclose(result_out[0], result_regular[0], rtol=1e-5, atol=1e-8))
+                self.assertTrue(torch.equal(result_out[1], result_regular[1]))
+                self.assertTrue(torch.allclose(values_out, result_regular[0], rtol=1e-5, atol=1e-8))
+                self.assertTrue(torch.equal(indices_out, result_regular[1]))
+
+    def test_out_variants_correctness_cholesky(self):
+        # https://github.com/pytorch/pytorch/issues/135859
+        def cholesky_out_func(input, out):
+            torch.linalg.cholesky(input, out=out)
+            return out
+
+        def cholesky_regular_func(input):
+            return torch.linalg.cholesky(input)
+
+        opt_out_model = torch.compile(cholesky_out_func)
+        opt_regular_model = torch.compile(cholesky_regular_func)
+
+        # Test multiple configurations
+        test_cases = [
+            torch.randn(5, 32, 32),
+            torch.randn(3, 16, 16),
+            torch.randn(1, 4, 4),
+        ]
+
+        for values in test_cases:
+            # Create positive definite matrix
+            input_tensor = values @ values.mT + torch.eye(values.shape[-1])
+
+            with self.subTest(input_shape=input_tensor.shape):
+                # Test with out= variant
+                out_tensor = torch.empty_like(input_tensor)
+                result_out = opt_out_model(input_tensor.clone(), out_tensor)
+
+                # Test regular variant
+                result_regular = opt_regular_model(input_tensor.clone())
+
+                # Compare results
+                self.assertTrue(torch.allclose(result_out, result_regular, rtol=1e-4, atol=1e-6))
+                self.assertTrue(torch.allclose(out_tensor, result_regular, rtol=1e-4, atol=1e-6))
+
+    def test_out_variants_correctness_linalg_norm(self):
+        # https://github.com/pytorch/pytorch/issues/135859
+        def norm_out_func(input, out):
+            torch.linalg.norm(input, ord=-1, dim=(0, 1), out=out)
+            return out
+
+        def norm_regular_func(input):
+            return torch.linalg.norm(input, ord=-1, dim=(0, 1))
+
+        opt_out_model = torch.compile(norm_out_func)
+        opt_regular_model = torch.compile(norm_regular_func)
+
+        # Test multiple configurations
+        test_cases = [
+            torch.rand((16, 16, 550), dtype=torch.bfloat16),
+            torch.rand((8, 8, 100), dtype=torch.float32),
+            torch.rand((4, 4, 10), dtype=torch.float16),
+        ]
+
+        for input_tensor in test_cases:
+            with self.subTest(input_shape=input_tensor.shape, dtype=input_tensor.dtype):
+                # Test with out= variant
+                out_tensor = torch.empty(input_tensor.shape[-1], dtype=input_tensor.dtype)
+                result_out = opt_out_model(input_tensor, out_tensor)
+
+                # Test regular variant
+                result_regular = opt_regular_model(input_tensor)
+
+                # Compare results
+                self.assertTrue(torch.allclose(result_out, result_regular, rtol=1e-3, atol=1e-5))
+                self.assertTrue(torch.allclose(out_tensor, result_regular, rtol=1e-3, atol=1e-5))
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
