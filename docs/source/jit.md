@@ -17,7 +17,7 @@
     jit_language_reference
 
 
-.. toctree::
+```{toctree}
     :maxdepth: 1
 
     jit_language_reference_v2
