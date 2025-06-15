@@ -2,7 +2,7 @@
 import functools
 import operator
 from functools import reduce
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from torch._dynamo.utils import counters
@@ -17,6 +17,7 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     KeywordArg,
+    Match,
     MULTIPLE,
 )
 from ..virtualized import ops, V
@@ -267,12 +268,15 @@ if torch._C._has_mkldnn:
     def _binary_fusion_v2(computation_call, binary_fn):
         return CallFunction(binary_fn, computation_call, KeywordArg("other"))
 
-    def _is_single_computation_op(computation_op, lowp_dtype=None) -> bool:
-        def fn(match):
+    def _is_single_computation_op(
+        computation_op, lowp_dtype=None
+    ) -> Callable[[Match], bool]:
+        def fn(match: Match) -> bool:
             computation_nodes = filter_nodes(match.nodes, computation_op)
 
             if lowp_dtype:
                 output_node_meta = match.output_node().meta.get("val")
+                assert output_node_meta is not None
                 if output_node_meta.dtype != lowp_dtype:
                     return False
 
@@ -284,8 +288,10 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _is_valid_computation_unary_fusion(computation_op, lowp_dtype=None) -> bool:
-        def fn(match):
+    def _is_valid_computation_unary_fusion(
+        computation_op, lowp_dtype=None
+    ) -> Callable[[Match], bool]:
+        def fn(match: Match) -> bool:
             matched = _is_single_computation_op(computation_op, lowp_dtype)(match)
             computation_node = filter_nodes(match.nodes, computation_op)[0]
             if lowp_dtype:
@@ -502,8 +508,8 @@ if torch._C._has_mkldnn:
 
     def _is_valid_computation_binary(
         computation_op, binary_op, other_index=None
-    ) -> bool:
-        def fn(match):
+    ) -> Callable[[Match], bool]:
+        def fn(match: Match) -> bool:
             if not _is_single_computation_op(computation_op)(match):
                 return False
             if not _is_valid_binary(match, computation_op, binary_op):
@@ -555,8 +561,8 @@ if torch._C._has_mkldnn:
 
     def _is_valid_computation_binary_inplace(
         computation_op, binary_op, other_index
-    ) -> bool:
-        def fn(match):
+    ) -> Callable[[Match], bool]:
+        def fn(match: Match) -> bool:
             if not _is_valid_computation_binary(computation_op, binary_op)(match):
                 return False
             binary_nodes = filter_nodes(match.nodes, binary_op)

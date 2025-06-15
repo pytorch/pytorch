@@ -5,7 +5,7 @@ import functools
 import itertools
 import math
 import operator
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from torch._dynamo.utils import counters
@@ -345,8 +345,8 @@ def _check_node_kwarg_arg_value(check_node, kwarg_name, args_index, expected_val
         return actual_value == expected_value
 
 
-def _is_valid_quantized_conv_optimization_pattern() -> bool:
-    def fn(match):
+def _is_valid_quantized_conv_optimization_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         output_dtype = _get_pattern_output_dtype(match)
         if output_dtype in [torch.float32, torch.bfloat16]:
             # Only keep matched pattern with same output_dtype
@@ -369,8 +369,8 @@ def _is_valid_qconv_post_op_fusion_pattern(has_binary_post_op=False) -> bool:
     )
 
 
-def _is_valid_qconv_lowering_pattern() -> bool:
-    def fn(match):
+def _is_valid_qconv_lowering_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         if len(match.nodes) != 1:
             return False
         return match.nodes[0].target in (
@@ -475,8 +475,8 @@ def _is_valid_qlinear_post_op_fusion_pattern(has_binary_post_op=False) -> bool:
     )
 
 
-def _is_valid_qlinear_lowering_pattern() -> bool:
-    def fn(match):
+def _is_valid_qlinear_lowering_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         if len(match.nodes) != 1:
             return False
         return match.nodes[0].target in (
@@ -848,8 +848,8 @@ def _register_quantization_binary_lowering():
         )
 
 
-def _is_valid_quantized_maxpool2d_optimization_pattern() -> bool:
-    def fn(match):
+def _is_valid_quantized_maxpool2d_optimization_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         # Only match the pattern which max_pool2d_with_indices returns value
         # instead of indices.
         get_item_node = filter_nodes(match.nodes, operator.getitem)[0]
@@ -968,8 +968,8 @@ def _register_quantization_maxpool2d():
         )
 
 
-def _is_input_output_same_scale_zp(check_node) -> bool:
-    def fn(match):
+def _is_input_output_same_scale_zp(check_node) -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         # Ensure all the inputs and output has same scale and zero point
         # Step 1: Check inputs/output zero point
         # Get dequant nodes at input
@@ -1068,8 +1068,8 @@ def _register_quantization_reshape():
     )
 
 
-def _is_valid_woq_optimization_pattern() -> bool:
-    def fn(match):
+def _is_valid_woq_optimization_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         assert all(k in match.kwargs for k in ("x", "weight", "scales"))
         if not all(
             hasattr(match.kwargs[key], "meta") for key in ["x", "weight", "scales"]
@@ -1229,8 +1229,8 @@ def _register_woq_lowerings():
     _register_woq_mm_int8_pattern4()
 
 
-def _is_valid_dequant_promotion_pattern(dtype=torch.float32) -> bool:
-    def _inner(match):
+def _is_valid_dequant_promotion_pattern(dtype=torch.float32) -> Callable[[Match], bool]:
+    def _inner(match: Match) -> bool:
         assert dtype in [torch.float32, torch.bfloat16]
         dequant_pattern_end_node = match.output_node()
         if dequant_pattern_end_node.target not in [
@@ -1375,8 +1375,8 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         counters["inductor"]["dequant_promotion_matcher_nodes"] += len(match.nodes)
 
 
-def _is_valid_dequant_conv_pattern(dtype) -> bool:
-    def _inner(match):
+def _is_valid_dequant_conv_pattern(dtype) -> Callable[[Match], bool]:
+    def _inner(match: Match) -> bool:
         # Here we do some further check to ensure:
         # 1. It's a conv2d node with dim of 4, since we only support lowering of conv2d now.
         # 2. The dequant pattern has only 1 user of conv2d node.
@@ -1661,8 +1661,8 @@ def _get_linear_dq_node(
 
 def _is_valid_dequant_linear_pattern(
     dtype, input_dim_exceeds_two, input_contiguous
-) -> bool:
-    def _inner(match):
+) -> Callable[[Match], bool]:
+    def _inner(match: Match) -> bool:
         # Check dequant pattern has only 1 user.
         (
             linear_node,
