@@ -208,20 +208,18 @@ std::pair<Vectorized<double>, Vectorized<double>> inline interleave2<double>(
   //   a = {a0, a1, a2, a3}
   //   b = {b0, b1, b2, b3}
 
-  // swap lanes:
-  //   a_swapped = {a0, a1, b0, b1}
-  //   b_swapped = {a2, a3, b2, b3}
-  auto a_swapped =
-      _mm256_permute2f128_pd(a, b, 0b0100000); // 0, 2.   4 bits apart
-  auto b_swapped =
-      _mm256_permute2f128_pd(a, b, 0b0110001); // 1, 3.   4 bits apart
+  // interleave lanes:
+  //   lo_interleaved = {a0, b0, a2, b2}
+  //   hi_interleaved = {a1, b1, a3, b3}
+  auto lo_interleaved = _mm256_unpacklo_pd(a, b);
+  auto hi_interleaved = _mm256_unpackhi_pd(a, b);
 
-  // group cols crossing lanes:
+  // swap lanes:
   //   return {a0, b0, a1, b1}
   //          {a2, b2, a3, b3}
   return std::make_pair(
-      _mm256_permute4x64_pd(a_swapped, 0b11011000), // 0, 2, 1, 3
-      _mm256_permute4x64_pd(b_swapped, 0b11011000)); // 0, 2, 1, 3
+      _mm256_permute2f128_pd(lo_interleaved, hi_interleaved, 0x20),
+      _mm256_permute2f128_pd(lo_interleaved, hi_interleaved, 0x31));
 }
 
 template <>
@@ -232,22 +230,19 @@ std::pair<Vectorized<float>, Vectorized<float>> inline interleave2<float>(
   //   a = {a0, a1, a2, a3, a4, a5, a6, a7}
   //   b = {b0, b1, b2, b3, b4, b5, b6, b7}
 
-  // swap lanes:
-  //   a_swapped = {a0, a1, a2, a3, b0, b1, b2, b3}
-  //   b_swapped = {a4, a5, a6, a7, b4, b5, b6, b7}
+  // interleave lanes:
+  //   lo_interleaved = {a0, b0, a1, b1, a4, b4, a5, b5}
+  //   hi_interleaved = {a2, b2, a3, b3, a6, b6, a7, b7}
   // TODO: can we support caching this?
-  auto a_swapped =
-      _mm256_permute2f128_ps(a, b, 0b0100000); // 0, 2.   4 bits apart
-  auto b_swapped =
-      _mm256_permute2f128_ps(a, b, 0b0110001); // 1, 3.   4 bits apart
+  auto lo_interleaved = _mm256_unpacklo_ps(a, b);
+  auto hi_interleaved = _mm256_unpackhi_ps(a, b);
 
-  // group cols crossing lanes:
+  // swap lanes:
   //   return {a0, b0, a1, b1, a2, b2, a3, b3}
   //          {a4, b4, a5, b5, a6, b6, a7, b7}
-  const __m256i group_ctrl = _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7);
   return std::make_pair(
-      _mm256_permutevar8x32_ps(a_swapped, group_ctrl),
-      _mm256_permutevar8x32_ps(b_swapped, group_ctrl));
+      _mm256_permute2f128_ps(lo_interleaved, hi_interleaved, 0x20),
+      _mm256_permute2f128_ps(lo_interleaved, hi_interleaved, 0x31));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DEINTERLEAVE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -260,20 +255,19 @@ std::pair<Vectorized<double>, Vectorized<double>> inline deinterleave2<double>(
   //   a = {a0, b0, a1, b1}
   //   b = {a2, b2, a3, b3}
 
-  // group cols crossing lanes:
-  //   a_grouped = {a0, a1, b0, b1}
-  //   b_grouped = {a2, a3, b2, b3}
-  auto a_grouped = _mm256_permute4x64_pd(a, 0b11011000); // 0, 2, 1, 3
-  auto b_grouped = _mm256_permute4x64_pd(b, 0b11011000); // 0, 2, 1, 3
+  // interleave lanes:
+  //   lo_interleaved = {a0, a2, a1, a3}
+  //   hi_interleaved = {b0, b2, b1, b3}
+  auto lo_interleaved = _mm256_unpacklo_pd(a, b);
+  auto hi_interleaved = _mm256_unpackhi_pd(a, b);
 
-  // swap lanes:
+  // swap rows:
   //   return {a0, a1, a2, a3}
   //          {b0, b1, b2, b3}
   return std::make_pair(
-      _mm256_permute2f128_pd(
-          a_grouped, b_grouped, 0b0100000), // 0, 2.   4 bits apart
-      _mm256_permute2f128_pd(
-          a_grouped, b_grouped, 0b0110001)); // 1, 3.   4 bits apart
+      _mm256_permute4x64_pd(lo_interleaved, 0b11011000), // 0, 2, 1, 3
+      _mm256_permute4x64_pd(hi_interleaved, 0b11011000) // 0, 2, 1, 3
+  );
 }
 
 template <>
