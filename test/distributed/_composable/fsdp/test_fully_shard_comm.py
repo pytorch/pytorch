@@ -20,6 +20,7 @@ from torch.distributed.fsdp import (
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
+    DefaultAllGather,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
@@ -164,6 +165,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 all_gather_copy_in_stream=all_gather_copy_in_stream,
                 all_gather_stream=all_gather_stream,
                 device=self.device,
+                all_gather_comm=DefaultAllGather(),
             )
             foreach_all_gather_copy_out(all_gather_result, fsdp_params, group)
             # Transition to unsharded state to register unsharded parameters

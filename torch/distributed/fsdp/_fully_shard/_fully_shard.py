@@ -20,7 +20,7 @@ import torch.nn as nn
 from torch.distributed._composable import contract
 from torch.distributed.utils import _get_root_modules
 
-from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
+from ._fsdp_api import AllGather, MixedPrecisionPolicy, OffloadPolicy, ReduceScatter
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
     _get_device_from_mesh,
@@ -452,6 +452,32 @@ class FSDPModule:
         self._get_fsdp_state()._states_to_backward_prefetch = [
             module._get_fsdp_state() for module in modules
         ]
+
+    def set_custom_all_gather(self, comm: AllGather) -> None:
+        """
+        Overrides the default ``all_gather`` communication behavior,
+        to have better control over the communication and memory usage.
+        See `Comm` and `ReduceScatter` for details.
+
+        Args:
+            comm (AllGather): Custom all-gather communication.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group._all_gather_comm = comm
+
+    def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
+        """
+        Overrides the default ``reduce_scatter`` communication behavior,
+        to have better control over the communication and memory usage.
+        See `Comm` and `ReduceScatter` for details.
+
+        Args:
+            comm (ReduceScatter): Custom reduce_scatter communication.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group._reduce_scatter_comm = comm
 
     def set_all_reduce_hook(
         self,
