@@ -31,6 +31,28 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <optional>
 
+#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION == 12
+static bool should_ignore_c_calls = false;
+static void init_should_ignore_c_calls() {
+  [[maybe_unused]] static const int once = []() {
+    const char* version = Py_GetVersion();
+    const char micro = version[5];
+    if (micro == '0' || (micro <= '4' && version[6] == ' ')) {
+      should_ignore_c_calls = true;
+      TORCH_WARN(
+          "Python 3.12.0 to 3.12.4 contain a bug that prevents "
+          "PyTorch Profiler from correctly handling C functions, "
+          "so C functions are ignored to avoid misleading. "
+          "You can upgrade to Python 3.12.5+ to resolve this problem.");
+    }
+    return 0;
+  }();
+}
+#else
+static const bool should_ignore_c_calls = false;
+static void init_should_ignore_c_calls() {}
+#endif
+
 namespace py = pybind11;
 
 namespace torch::profiler::impl {
@@ -712,12 +734,9 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   void recordCCall(
       ThreadLocalResults& tls,
       PyFrameObject* frame,
-      PyObject* arg,
-      bool start_frame = false);
+      PyObject* arg);
 
   const std::vector<PyThreadState*> interpreterThreads() const;
-
-  PyObject* get_callable_from_frame(PyFrameObject* frame);
 
   std::atomic<bool> active_lock_{false};
   bool active_{false};
@@ -764,6 +783,8 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
   gil_and_restore_thread gil;
   interpreter_ = PyInterpreterState_Get();
 
+  init_should_ignore_c_calls();
+
   if (!gil.initial_thread_state()) {
     TORCH_WARN("PyThreadState_Get returned NULL");
     return;
@@ -797,15 +818,6 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
 
     for (auto it = current_stack.rbegin(); it != current_stack.rend(); it++) {
       recordPyCall(thread_local_results_.back(), it->get(), true);
-      PyFrameObject* frame = it->get();
-      PyObject* callable = get_callable_from_frame(frame);
-      if (callable) {
-        // If the frame has a callable, record it as a C call since
-        // PyEval_GetFrame only gets the python frame. We need to record this C
-        // call so that when exiting the profiler we don't have a mismatched C
-        // call.
-        recordCCall(thread_local_results_.back(), it->get(), callable, true);
-      }
 
       auto frame_refcount = Py_REFCNT(it->get());
 
@@ -921,13 +933,9 @@ void PythonTracer::recordPyCall(
 void PythonTracer::recordCCall(
     ThreadLocalResults& tls,
     PyFrameObject* frame,
-    PyObject* arg,
-    bool start_frame) {
-  // for starting frames we duplicate callable python functions to avoid having
-  // empty C frames in trace when exiting
-  if (!start_frame) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyCFunction_Check(arg));
-  }
+    PyObject* arg) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyCFunction_Check(arg));
+
   auto fn = reinterpret_cast<PyCFunctionObject*>(arg);
 
   // NB: For C calls a new frame is not created, so we use `frame` rather than
@@ -935,26 +943,6 @@ void PythonTracer::recordCCall(
   auto key = tls.intern<CallType::PyCCall, EventType::PyCCall>(
       arg, (void*)(fn->m_ml), frame);
   queue_->getSubqueue()->emplace_py_call(key, c10::getApproximateTime());
-}
-
-PyObject* PythonTracer::get_callable_from_frame(PyFrameObject* frame) {
-  if (frame == nullptr) {
-    return nullptr;
-  }
-  // Get the code object associated with the frame
-  auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
-  if (code == nullptr) {
-    return nullptr;
-  }
-  // Get the function name (if needed)
-  auto name = THPUtils_unpackStringView(code->co_name).data();
-  // To get the function object, you will need to look in the globals or the
-  // frame's f_globals
-  PyObject* func = PyDict_GetItemString(PyFrame_GetGlobals(frame), name);
-  if (func) {
-    Py_INCREF(func); // Make sure the returned function has a reference
-  }
-  return func; // Returns a PyObject* (the function)
 }
 
 // ============================================================================
@@ -1027,7 +1015,9 @@ class PostProcess {
         });
     std::vector<std::shared_ptr<Result>> out;
     populate<EventType::PyCall>(enters, out);
-    populate<EventType::PyCCall>(enters, out);
+    if (!should_ignore_c_calls) {
+      populate<EventType::PyCCall>(enters, out);
+    }
     return out;
   }
 
@@ -1058,9 +1048,7 @@ class PostProcess {
                state.exits_.top().t_ < enter.enter_t_) {
           auto& exit = state.exits_.top();
           auto& tstack = stacks[exit.python_tid_];
-          if (!tstack.empty()) {
-            pop(tstack, exit.t_);
-          }
+          pop(tstack, exit.t_);
           state.exits_.pop();
         }
         out.push_back(Result::create(
@@ -1249,7 +1237,9 @@ int PythonTracer::pyProfileFn(
       break;
 
     case PyTrace_C_CALL:
-      local_results.active_tracer_->recordCCall(local_results, frame, arg);
+      if (!should_ignore_c_calls) {
+        local_results.active_tracer_->recordCCall(local_results, frame, arg);
+      }
       break;
 
     case PyTrace_EXCEPTION:
@@ -1259,7 +1249,9 @@ int PythonTracer::pyProfileFn(
 
     case PyTrace_C_EXCEPTION:
     case PyTrace_C_RETURN:
-      local_results.c_exit_times_.emplace_back(c10::getApproximateTime());
+      if (!should_ignore_c_calls) {
+        local_results.c_exit_times_.emplace_back(c10::getApproximateTime());
+      }
       break;
   }
   return 0;
