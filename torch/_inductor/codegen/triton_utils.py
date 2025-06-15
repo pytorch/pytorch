@@ -2,7 +2,7 @@
 from typing import Any, Optional
 
 import sympy
-from typing_extentions import TypeIs
+from typing_extensions import TypeIs
 
 import torch
 
