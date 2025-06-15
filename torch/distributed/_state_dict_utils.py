@@ -8,6 +8,7 @@ from typing import Any, Callable, cast, NamedTuple, Optional, TYPE_CHECKING, Uni
 
 import torch
 import torch.distributed as dist
+import torch.cuda._pin_memory_utils as pin_memory_utils
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
@@ -406,24 +407,9 @@ def _create_cpu_state_dict(
             t = torch.empty(*tuple(obj.size()), dtype=obj.dtype)
             t = t.share_memory_()
             if pin_memory:
-
-                def unpin_memory(t):
-                    succ = int(torch.cuda.cudart().cudaHostUnregister(t.data_ptr()))
-                    assert succ == 0, (
-                        f"Unpinning shared memory failed with error-code: {succ}"
-                    )
-
-                weakref.finalize(t, unpin_memory, t)
-                succ = int(
-                    torch.cuda.cudart().cudaHostRegister(
-                        t.data_ptr(),
-                        t.numel() * t.element_size(),
-                        1,  # lines up with 'cudaHostRegisterPortable'
-                    )
-                )
-                assert succ == 0, (
-                    f"Pinning shared memory failed with error-code: {succ}"
-                )
+                pin_memory_utils.pin_memory(t.data_ptr(), t.numel() * t.element_size())
+                weakref.finalize(t, pin_memory_utils.unpin_memory, t)
+            
             return t
         elif pin_memory:
             return torch.empty(*tuple(obj.size()), dtype=obj.dtype).pin_memory()
