@@ -871,6 +871,18 @@ _rocm_default_config = {
     (torch.float16, 256): (32, 64, 4, 1),
 }
 
+_xpu_default_config = {
+    (torch.float32, 64): (128, 32, 4, 1),
+    (torch.float32, 128): (128, 32, 4, 1),
+    (torch.float32, 256): (64, 16, 4, 1),
+    (torch.bfloat16, 64): (128, 64, 8, 1),
+    (torch.bfloat16, 128): (128, 64, 8, 1),
+    (torch.bfloat16, 256): (32, 64, 8, 1),
+    (torch.float16, 64): (128, 64, 8, 1),
+    (torch.float16, 128): (128, 64, 8, 1),
+    (torch.float16, 256): (32, 64, 4, 1),
+}
+
 
 class Mode(Enum):
     fwd = auto()
@@ -959,18 +971,63 @@ def _get_nv_config(query, mode: Mode) -> tuple[int, int, int, int]:
         return bwd_config
 
 
+def _get_xpu_config(query, mode: Mode) -> tuple[int, int, int, int]:
+    dtype = query.get_dtype()
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
+    fwd_config = None
+
+    if mode == Mode.fwd:
+        if head_dim <= 256:
+            if dtype == torch.float32:
+                fwd_config = (64, 64, 4, 1)
+            else:
+                fwd_config = (128, 64, 8, 1)
+            fwd_config = _xpu_default_config.get((dtype, head_dim), fwd_config)
+        else:  # modest hardware or extremely large head_dim
+            if dtype == torch.float32:
+                fwd_config = (32, 16, 4, 1)
+            else:
+                fwd_config = (64, 32, 4, 1)
+        return fwd_config
+    else:  # bwd
+        assert mode == Mode.bwd
+        if dtype == torch.float32:
+            return (16, 16, 4, 1)
+        elif head_dim <= 256:
+            if head_dim == 64:
+                return (64, 64, 4, 1)
+            elif head_dim == 128:
+                return (64, 128, 8, 1)
+            else:
+                return (64, 64, 4, 1)
+        else:  # modest hardware or extremely large head_dim
+            return (16, 16, 4, 1)
+
+
 def _get_default_config_fwd(query) -> tuple[int, int, int, int]:
-    if torch.version.hip is None:
-        return _get_nv_config(query, mode=Mode.fwd)
+    device_type = query.get_device().type
+    if device_type == "cuda":
+        if torch.version.hip is None:
+            return _get_nv_config(query, mode=Mode.fwd)
+        else:
+            return _get_rocm_config(query, mode=Mode.fwd)
+    elif device_type == "xpu":
+        return _get_xpu_config(query, mode=Mode.fwd)
     else:
-        return _get_rocm_config(query, mode=Mode.fwd)
+        raise NotImplementedError(f"Unsupported device type: {device_type}")
 
 
 def _get_default_config_bwd(query) -> tuple[int, int, int, int]:
-    if torch.version.hip is None:
-        return _get_nv_config(query, mode=Mode.bwd)
+    device_type = query.get_device().type
+    if device_type == "cuda":
+        if torch.version.hip is None:
+            return _get_nv_config(query, mode=Mode.bwd)
+        else:
+            return _get_rocm_config(query, mode=Mode.bwd)
+    elif device_type == "xpu":
+        return _get_xpu_config(query, mode=Mode.bwd)
     else:
-        return _get_rocm_config(query, mode=Mode.bwd)
+        raise NotImplementedError(f"Unsupported device type: {device_type}")
 
 
 def create_num_blocks_fake_generator(sparse_indices):
