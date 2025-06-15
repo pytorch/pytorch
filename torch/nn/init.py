@@ -168,7 +168,9 @@ def calculate_gain(
         param: optional parameter for the non-linear function
 
     Examples:
-        >>> gain = nn.init.calculate_gain('leaky_relu', 0.2)  # leaky_relu with negative_slope=0.2
+        >>> gain = nn.init.calculate_gain(
+        ...     "leaky_relu", 0.2
+        ... )  # leaky_relu with negative_slope=0.2
 
     .. _Self-Normalizing Neural Networks: https://papers.nips.cc/paper/2017/hash/5d44ee6f2c3f71b73125876103c8f6c4-Abstract.html
     """
@@ -456,7 +458,7 @@ def xavier_uniform_(
 
     Examples:
         >>> w = torch.empty(3, 5)
-        >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain('relu'))
+        >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain("relu"))
 
     Note:
         Be aware that ``fan_in`` and ``fan_out`` are calculated assuming
@@ -555,7 +557,7 @@ def kaiming_uniform_(
 
     Examples:
         >>> w = torch.empty(3, 5)
-        >>> nn.init.kaiming_uniform_(w, mode='fan_in', nonlinearity='relu')
+        >>> nn.init.kaiming_uniform_(w, mode="fan_in", nonlinearity="relu")
 
     Note:
         Be aware that ``fan_in`` and ``fan_out`` are calculated assuming
@@ -620,7 +622,7 @@ def kaiming_normal_(
 
     Examples:
         >>> w = torch.empty(3, 5)
-        >>> nn.init.kaiming_normal_(w, mode='fan_out', nonlinearity='relu')
+        >>> nn.init.kaiming_normal_(w, mode="fan_out", nonlinearity="relu")
 
     Note:
         Be aware that ``fan_in`` and ``fan_out`` are calculated assuming
