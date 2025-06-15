@@ -122,6 +122,7 @@ def check_file(filename: str) -> list[LintMessage]:
     min_ver = Version(match.group("min_ver"))
     max_op = COMPARE_OPS[match.group("max_op")]
     max_ver = Version(match.group("max_ver"))
+    major = 3
     if min_ver >= max_ver:
         return [
             format_error_message(
@@ -129,22 +130,22 @@ def check_file(filename: str) -> list[LintMessage]:
                 message="'project.requires-python' minimum version must be less than the maximum version.",
             )
         ]
-    if min_ver.major != 3:
+    if min_ver.major != major:
         return [
             format_error_message(
                 filename,
-                message="'project.requires-python' minimum version must be 3.x.",
+                message=f"'project.requires-python' minimum version must be {major}.x.",
             )
         ]
-    if max_ver.major != 3:
+    if max_ver.major != major:
         return [
             format_error_message(
                 filename,
-                message="'project.requires-python' maximum version must be 3.x.",
+                message=f"'project.requires-python' maximum version must be {major}.x.",
             )
         ]
+
     supported_versions = []
-    major = 3
     for minor in range(min_ver.minor, max_ver.minor + 1):
         ver = Version(f"{major}.{minor}")
         if min_op(ver, min_ver) and max_op(ver, max_ver):
@@ -163,8 +164,10 @@ def check_file(filename: str) -> list[LintMessage]:
     version_classifiers = [
         c
         for c in classifiers
-        if c.startswith("Programming Language :: Python :: ")
-        and not c.endswith((":: 3", ":: 3 :: Only"))
+        if (
+            c.startswith("Programming Language :: Python :: ")
+            and not c.endswith((f":: {major}", f":: {major} :: Only"))
+        )
     ]
     version_classifier_set = set(version_classifiers)
     if len(set(version_classifier_set)) != len(version_classifiers):
