@@ -885,7 +885,6 @@ There are a couple of fusion backends available to optimize TorchScript executio
 
 ### References
 
-```{eval-rst}
 ```{toctree}
     :maxdepth: 1
 
