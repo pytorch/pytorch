@@ -431,7 +431,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         node_loc = node_order[node]
         copy_node_loc = node_order[copy_node] if copy_node is not None else None
 
-        def is_meta_only_user(node):
+        def is_meta_only_user(node) -> bool:
             if _is_view_op(node.target):
                 return all(is_meta_only_user(u) for u in node.users)
             return node.target in META_ONLY_OPS

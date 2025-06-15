@@ -92,10 +92,10 @@ class FakeTensorUpdater:
         for node in self.graph.nodes:
             existing_storages[get_node_storage(node)] += 1
 
-        def is_intlist_same(new, old):
+        def is_intlist_same(new, old) -> bool:
             return statically_known_true(sym_eq(new, old))
 
-        def is_fake_tensor_same(new, old):
+        def is_fake_tensor_same(new, old) -> bool:
             if type(new) != type(old):
                 return False
             if isinstance(new, (list, tuple)):
