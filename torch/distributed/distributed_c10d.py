@@ -13,9 +13,9 @@ import pickle
 import sys
 import time
 import warnings
-from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from enum import Enum
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union, NamedTuple
 from typing_extensions import deprecated
 
 import torch
@@ -232,7 +232,6 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     return reduceOp not in denyList
 
 
-# TODO refactor into enum/strenum
 class Backend(str):  # noqa: SLOT000
     """
     An enum-like class for backends.
@@ -252,16 +251,37 @@ class Backend(str):  # noqa: SLOT000
               nor assume its existence.
     """
 
-    UNDEFINED = "undefined"
-    GLOO = "gloo"
-    NCCL = "nccl"
-    UCC = "ucc"
-    MPI = "mpi"
-    XCCL = "xccl"
+    # Inner enum for core backends
+    class _Core(Enum):
+        UNDEFINED = "undefined"
+        GLOO = "gloo"
+        NCCL = "nccl"
+        UCC = "ucc"
+        MPI = "mpi"
+        XCCL = "xccl"
 
-    _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
+    # Mock ProcessGroup.BackendType (since it's external)
+    class _BackendType(Enum):
+        UNDEFINED = 0
+        GLOO = 1
+        NCCL = 2
+        XCCL = 3
+        UCC = 4
+        MPI = 5
+        CUSTOM = 6
+
+    # Plugin system
+    _BackendPlugin = NamedTuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
     _plugins: dict[str, _BackendPlugin] = {}
+
+    # Expose core backend values as class attributes
+    UNDEFINED = _Core.UNDEFINED.value
+    GLOO = _Core.GLOO.value
+    NCCL = _Core.NCCL.value
+    UCC = _Core.UCC.value
+    MPI = _Core.MPI.value
+    XCCL = _Core.XCCL.value
 
     backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI]
 
@@ -281,24 +301,33 @@ class Backend(str):  # noqa: SLOT000
         MPI: ["cpu", "cuda"],
     }
 
-    backend_type_map: dict[str, ProcessGroup.BackendType] = {
-        UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
-        GLOO: ProcessGroup.BackendType.GLOO,
-        NCCL: ProcessGroup.BackendType.NCCL,
-        XCCL: ProcessGroup.BackendType.XCCL,
-        UCC: ProcessGroup.BackendType.UCC,
-        MPI: ProcessGroup.BackendType.MPI,
+    backend_type_map: dict[str, _BackendType] = {
+        UNDEFINED: _BackendType.UNDEFINED,
+        GLOO: _BackendType.GLOO,
+        NCCL: _BackendType.NCCL,
+        XCCL: _BackendType.XCCL,
+        UCC: _BackendType.UCC,
+        MPI: _BackendType.MPI,
     }
 
     def __new__(cls, name: str):
         """Create and return a new instance of the class."""
         if not isinstance(name, str):
             raise ValueError("Backend constructor parameter must be string-ish")
-        value = getattr(Backend, name.upper(), Backend.UNDEFINED)
 
-        if value == Backend.UNDEFINED:
-            value = name.lower()
-        return value
+        # Try core backends first
+        try:
+            core_backend = cls._Core[name.upper()]
+            return core_backend.value
+        except KeyError:
+            pass
+
+        # Check registered plugins
+        if name.upper() in cls._plugins:
+            return name.lower()
+
+        # Fallback - return lowercase
+        return name.lower()
 
     @classmethod
     def register_backend(
@@ -332,17 +361,21 @@ class Backend(str):  # noqa: SLOT000
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
-        # This takes care of CUSTOM Out-of-tree backend types, update in backend_list indicates availability
-        if not hasattr(Backend, name.upper()):
-            setattr(Backend, name.upper(), name.lower())
-        if name.lower() not in Backend.backend_list:
-            Backend.backend_list.append(name.lower())
+        # Add to backend_list if not present
+        if name.lower() not in cls.backend_list:
+            cls.backend_list.append(name.lower())
+
+        # Register plugin
+        cls._plugins[name.upper()] = cls._BackendPlugin(func, extended_api)
 
         if devices is not None:
-            for device in devices:
-                if device not in Backend.default_device_backend_map:
-                    Backend.default_device_backend_map[device] = name.lower()
-        Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
+            devices_list = [devices] if isinstance(devices, str) else devices
+            for device in devices_list:
+                if device not in cls.default_device_backend_map:
+                    cls.default_device_backend_map[device] = name.lower()
+
+        # Update type mapping
+        cls.backend_type_map[name.lower()] = cls._BackendType.CUSTOM
 
         # Update device capability matrix in Backend class
         if devices is None:
@@ -353,14 +386,14 @@ class Backend(str):  # noqa: SLOT000
                 "`cuda`. Please specify it via the `devices` argument of "
                 "`register_backend`."
             )
-            Backend.backend_capability[name.lower()] = ["cpu", "cuda"]
+            cls.backend_capability[name.lower()] = ["cpu", "cuda"]
         elif isinstance(devices, str):
-            # Single device string specified. Simply convert to list.
-            Backend.backend_capability[name.lower()] = [devices]
+            cls.backend_capability[name.lower()] = [devices]
         else:
-            Backend.backend_capability[name.lower()] = devices
+            cls.backend_capability[name.lower()] = devices
 
-        Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
+        # Add as class attribute for Backend.CUSTOM_NAME access
+        setattr(cls, name.upper(), name.lower())
 
 
 class BackendConfig:
