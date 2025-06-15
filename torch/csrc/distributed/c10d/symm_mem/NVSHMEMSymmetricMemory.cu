@@ -9,6 +9,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
+#include <utility>
 
 #include <nvshmem.h>
 
@@ -272,7 +273,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto allocation =
         std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
     // TODO: thread safety
-    allocations_.emplace(ptr, allocation);
+    allocations_.try_emplace(ptr, std::move(allocation));
     return ptr;
   }
 
