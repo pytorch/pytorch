@@ -1216,7 +1216,7 @@ class MethodWrapperVariable(VariableTracker):
 
         return super().call_function(tx, args, kwargs)
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> bool:
         return True
 
     def as_python_constant(self):
@@ -1235,7 +1235,7 @@ class GetSetDescriptorVariable(VariableTracker):
         else:
             return super().var_getattr(tx, name)
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> bool:
         return True
 
     def as_python_constant(self):
@@ -1565,7 +1565,7 @@ class DebuggingVariable(VariableTracker):
         self.value = value
 
     @staticmethod
-    def is_reorderable_logging_function(obj):
+    def is_reorderable_logging_function(obj) -> bool:
         return (
             callable(obj)
             and isinstance(obj, (types.FunctionType, types.BuiltinFunctionType))
@@ -1796,7 +1796,7 @@ class RandomVariable(VariableTracker):
         return self.random
 
     @staticmethod
-    def is_supported_random_obj(val):
+    def is_supported_random_obj(val) -> bool:
         if type(val) is not random.Random:
             return False
         for name in itertools.chain(

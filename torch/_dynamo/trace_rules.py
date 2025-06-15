@@ -3043,7 +3043,7 @@ Return if a torch object is ATen op or torch.Tensor method.
 """
 
 
-def is_aten_op_or_tensor_method(obj):
+def is_aten_op_or_tensor_method(obj) -> bool:
     return obj in get_tensor_method() or isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
@@ -3156,7 +3156,7 @@ def _numpy_function_ids() -> dict[int, str]:
         "sample",
     }
 
-    def is_supported(k, v, mod):
+    def is_supported(k, v, mod) -> bool:
         if not callable(v):
             return False
         if not getattr(v, "__module__", None):
@@ -3803,7 +3803,7 @@ for _name in THIRDPARTY_SKIPLIST:
 _recompile_re()
 
 
-def is_torch_inline_allowed(filename):
+def is_torch_inline_allowed(filename) -> bool:
     return any(filename.startswith(d) for d in get_mod_inlinelist())
 
 
@@ -3814,7 +3814,7 @@ def dynamo_dir():
     return _module_dir(torch._dynamo)
 
 
-def is_torch(filename):
+def is_torch(filename) -> bool:
     if filename.startswith(dynamo_dir()):
         return False
     return filename.startswith(_module_dir(torch))
