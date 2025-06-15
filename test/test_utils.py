@@ -20,6 +20,7 @@ import torch.nn as nn
 import torch.utils.cpp_extension
 import torch.utils.data
 from torch._utils import try_import
+from torch._utils_internal import deprecated
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -59,6 +60,9 @@ HAS_CUDA = torch.cuda.is_available()
 
 
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+# mypy: disable-error-code="name-defined"
 
 
 class RandomDatasetMock(torch.utils.data.Dataset):
@@ -1195,6 +1199,21 @@ class TestTryImport(TestCase):
     def test_import_missing(self):
         missing_module = try_import("missing_module")
         self.assertIsNone(missing_module)
+
+
+@deprecated()
+def _deprecated_api(x, y=15):
+    return x + y
+
+
+class TestDeprecate(TestCase):
+    def test_deprecated(self):
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            deprecated_api(1, 2)  # noqa: F821
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            deprecated_api(1, y=2)  # noqa: F821
+        _deprecated_api(1, 2)
+        _deprecated_api(1, y=2)
 
 
 if __name__ == "__main__":
