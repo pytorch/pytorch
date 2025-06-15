@@ -388,7 +388,12 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
       EpilogueScheduleType,
       EpilogueEVT>::CollectiveOp;
 
-  using MainloopScheduleType = cutlass::gemm::collective::KernelScheduleAuto;
+  // on sm120, EpilogueScheduleAuto resolves to KernelTmaWarpSpecializedCooperativeSm120<2>>,
+  // which does not support TileShape.M < 128
+  using MainloopScheduleType = std::conditional_t<
+      std::is_same_v<ArchTag, cutlass::arch::Sm120> && cute::size<0>(TileShape{}) < 128,
+      cutlass::gemm::KernelTmaWarpSpecializedPingpong,
+      cutlass::gemm::collective::KernelScheduleAuto>;
   using CollectiveMainloop =
       typename cutlass::gemm::collective::CollectiveBuilder<
           ArchTag,
@@ -727,19 +732,10 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
           /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
           ClusterShape,
           Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
-    } else if constexpr (std::is_same_v<ArchTag, cutlass::arch::Sm100>) {
+    } else {
       return f8f8bf16_rowwise_impl_sm100_sm120<
         ArchTag,
         /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
-        ClusterShape,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
-    } else {
-      // KernelScheduleAuto in sm120 is KernelTmaWarpSpecializedCooperativeSm120,
-      // which does not support TileShape.M < 128
-      // TODO: manually select KernelSchedule in this case
-      return f8f8bf16_rowwise_impl_sm100_sm120<
-        ArchTag,
-        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         ClusterShape,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
     }
