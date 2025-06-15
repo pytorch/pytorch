@@ -116,6 +116,20 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             f(torch.randn(8, 8), torch.randn(8))
             self.assertEqual(cnts.frame_count, 1)
 
+    def test_whitelist_ints_floats(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        f = Bar()
+        f(2, 2.0)
+        f(3, 2.0)
+        state = torch._dynamo.pgo.render_code_state(torch._dynamo.pgo.get_code_state())
+        whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(1)
+        self.assertTrue("L['x']" in whitelist)
+        self.assertTrue("L['y']" in whitelist)
+
     def test_pgo_dynamic_params(self):
         cnts = CompileCounter()
 
