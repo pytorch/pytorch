@@ -341,3 +341,25 @@ def svdvals(A: TensorLikeType) -> Tensor:
 def vecdot(x: Tensor, y: Tensor, dim: int = -1) -> Tensor:
     check_fp_or_complex(x.dtype, "linalg.vecdot")
     return (x.conj() * y).sum(dim=dim)
+
+
+# CompositeImplicitAutograd - don't register decomp
+@torch._ops.ops.aten.linalg_norm.out.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)
+@out_wrapper(exact_dtype=True)
+def linalg_norm_out_decomposition(a, *, ord=None, dim=None, keepdim=False, dtype=None):
+    """
+    Leverages the existing functional implementation of linalg.norm to provide
+    a SymInt-aware decomposition for the out= variant.
+    """
+    return torch.linalg.norm(a, ord=ord, dim=dim, keepdim=keepdim, dtype=dtype)
+
+
+# CompositeImplicitAutograd - don't register decomp
+@torch._ops.ops.aten.linalg_cholesky.out.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)
+@out_wrapper(exact_dtype=True)
+def linalg_cholesky_out_decomposition(a, *, upper=False):
+    """
+    Leverages the existing functional implementation of linalg.cholesky to provide
+    a SymInt-aware decomposition for the out= variant.
+    """
+    return torch.linalg.cholesky(a, upper=upper)

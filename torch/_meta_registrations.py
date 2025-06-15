@@ -4353,7 +4353,8 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
     return output
 
 
-@register_meta(aten.bmm.default)
+@register_meta([aten.bmm.default, aten.bmm.out])
+@out_wrapper()
 def meta_bmm(self, mat2):
     return common_meta_baddbmm_bmm(self, mat2, True)
 
@@ -6762,7 +6763,8 @@ def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
     )
 
 
-@register_meta(aten.topk.default)
+@register_meta([aten.topk.default, aten.topk.values])
+@out_wrapper("values", "indices")
 def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
