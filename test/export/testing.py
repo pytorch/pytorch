@@ -1,8 +1,15 @@
 import functools
+import os
 import unittest
+from pathlib import Path
+from typing import Any, Callable
 from unittest.mock import patch
 
+import expecttest
+
 import torch
+from torch._dynamo.testing import normalize_gm
+from torch.export import ExportedProgram
 
 
 aten = torch.ops.aten
@@ -321,3 +328,110 @@ def expectedFailureLegacyExportStrict(fn):
 def expectedFailureLegacyExportNonStrict(fn):
     fn._expected_failure_legacy_export_non_strict = True
     return fn
+
+
+def _deepcopy_inputs(inputs):
+    import copy
+
+    # copy.deepcopy(deepcopy) can fail if tensor inputs have attribute (i.e. __dict__).
+    # we remove __dict__ when deepcopying.
+    dict_mapping = dict()
+    inputs_clone = ()
+    for idx, i in enumerate(inputs):
+        if isinstance(i, torch.Tensor) and hasattr(inputs[0], "__dict__"):
+            dict_mapping[idx] = i.__dict__
+            i.__dict__ = {}
+        inputs_clone += (copy.deepcopy(i),)
+
+    # Add __dict__ back.
+    for k, v in dict_mapping.items():
+        inputs[k].__dict__ = v
+        inputs_clone[k].__dict__ = v
+    return inputs_clone
+
+
+def load_or_save(ep: ExportedProgram, path: str):
+    EXPECTTEST_ACCEPT_ARTIFACT = os.getenv("EXPECTTEST_ACCEPT_ARTIFACT", "0") == "1"
+
+    if not EXPECTTEST_ACCEPT_ARTIFACT and not path.exists():
+        raise RuntimeError(
+            f"Artifact path \"{path}\" doesn't exist. Either you change the path or you're adding a new test. "
+            f"In either case, please re-run the test by setting environment variable EXPECTTEST_ACCEPT_ARTIFACT=1 "
+            f"to generate a new test artifact."
+            f"If you change the test name, please also delete the old test artifacts."
+        )
+
+    if EXPECTTEST_ACCEPT_ARTIFACT:
+        assert ep is not None
+        path.parent.mkdir(exist_ok=True, parents=True)
+        if not path.exists():
+            # Create the file if it doesn't exist yet
+            with open(path, "x"):
+                pass
+        torch.export.save(ep, path)
+    return torch.export.load(path)
+
+
+def diff_str(str1: str, str2: str) -> str:
+    import difflib
+
+    diff = "\n".join(
+        list(
+            difflib.unified_diff(
+                str1.split("\n"),
+                str2.split("\n"),
+            )
+        )
+    )
+    return diff
+
+
+def _check_graph_module(test, gm1: torch.fx.GraphModule, gm2: torch.fx.GraphModule):
+    import difflib
+
+    normalized_gm1 = normalize_gm(gm1.print_readable(print_output=False)).split("\n")
+    normalized_gm2 = normalize_gm(gm2.print_readable(print_output=False)).split("\n")
+    diff_str = "\n".join(
+        list(
+            difflib.unified_diff(
+                normalized_gm1,
+                normalized_gm2,
+                "current",
+                "artifact",
+                n=1,
+            )
+        )
+    )
+    test.maxDiff = None
+    test.assertEqual(diff_str, "")
+
+
+def _check_outputs(test: Any, mod1: Callable, mod2: Callable, args: tuple[Any]):
+    test.assertEqual(mod1(*_deepcopy_inputs(args)), mod2(*_deepcopy_inputs(args)))
+
+
+def _check_ep(test: Any, ep1: ExportedProgram, ep2: ExportedProgram, args: tuple[Any]):
+    gm1 = ep1.module()
+    gm2 = ep2.module()
+    _check_graph_module(test, gm1, gm2)
+    _check_graph_module(test, ep1.graph_module, ep2.graph_module)
+    _check_outputs(test, gm1, gm2, args)
+
+
+def check_artifact(
+    test: expecttest.TestCase,
+    artifact_name: str,
+    mod: torch.nn.Module,
+    args: tuple[Any, ...],
+    dynamic_shapes: Any = None,
+):
+    """artifact_name: the name of the artifact file to load or save."""
+    assert isinstance(test, expecttest.TestCase)
+    if dynamic_shapes is None:
+        dynamic_shapes = {}
+    ep = torch.export.export(mod, args, {}, dynamic_shapes=dynamic_shapes)
+    artifact_path = Path(__file__).resolve().parent.parent.parent / (
+        "test/export/serialized_artifacts/" + artifact_name
+    )
+    loaded_ep = load_or_save(ep, artifact_path)
+    _check_ep(test, ep, loaded_ep, args)
