@@ -225,7 +225,7 @@ import os
 import sys
 
 
-if sys.platform.startswith("win") and sys.maxsize.bit_length() == 31:
+if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     print(
         "32-bit Windows Python runtime is not supported. Please switch to 64-bit Python."
     )
@@ -239,8 +239,7 @@ python_min_version = (3, 9, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
-        f"You are using Python {platform.python_version()}. "
-        f"Python >={python_min_version_str} is required."
+        f"You are using Python {platform.python_version()}. Python >={python_min_version_str} is required."
     )
     sys.exit(-1)
 
@@ -513,7 +512,7 @@ def build_deps():
         report(
             'Finished running cmake. Run "ccmake build" or '
             '"cmake-gui build" to adjust build options and '
-            '"python setup.py install" to build.'
+            '"python -m pip install ." to build.'
         )
         sys.exit()
 
@@ -1127,11 +1126,12 @@ build_update_message = """
     It is no longer necessary to use the 'build' or 'rebuild' targets
 
     To install:
-      $ python setup.py install
+      $ python -m pip install .
     To develop locally:
-      $ python setup.py develop
+      $ python -m pip install -e .
     To force cmake to re-generate native build files (off by default):
-      $ python setup.py develop --cmake
+      $ python setup.py build --cmake --cmake-only
+      $ python -m pip install -e .
 """
 
 
