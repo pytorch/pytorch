@@ -353,7 +353,7 @@ class DistributedDataParallel(Module, Joinable):
         >>> torch.cuda.set_device(i)
 
     and XPUs,
-    
+
         >>> # xdoctest: +SKIP("undefined variables")
         >>> torch.xpu.set_device(i)
 
