@@ -175,3 +175,6 @@ def quant_dequant_APoT(
     )
     result = quantizer.quant_dequant(tensor2quantize)
     return result
+
+
+__all__ = ["APoTQuantizer", "quantize_APoT", "dequantize_APoT", "quant_dequant_APoT"]

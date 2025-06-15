@@ -45,3 +45,6 @@ class APoTFakeQuantize(FakeQuantizeBase):
             )
 
         return X
+
+
+__all__ = ["APoTFakeQuantize", "fake_quantize_function"]

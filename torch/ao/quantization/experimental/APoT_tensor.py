@@ -13,3 +13,6 @@ class TensorAPoT:
 
     def int_repr(self) -> torch.Tensor:
         return self.data
+
+
+__all__ = ["TensorAPoT"]
