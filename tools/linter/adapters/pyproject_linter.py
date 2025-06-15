@@ -214,8 +214,8 @@ def check_file(filename: str) -> list[LintMessage]:
                         format_error_message(
                             filename,
                             message=(
-                                f"'project.classifiers' is missing the following classifiers: "
-                                f"{missing_classifiers}."
+                                "'project.classifiers' is missing the following classifier(s):\n"
+                                + "\n".join(f"  {c!r}" for c in missing_classifiers)
                             ),
                         )
                     ]
@@ -224,8 +224,8 @@ def check_file(filename: str) -> list[LintMessage]:
                         format_error_message(
                             filename,
                             message=(
-                                f"'project.classifiers' contains extra classifiers: "
-                                f"{extra_classifiers}."
+                                "'project.classifiers' contains extra classifier(s):\n"
+                                + "\n".join(f"  {c!r}" for c in extra_classifiers)
                             ),
                         )
                     ]
