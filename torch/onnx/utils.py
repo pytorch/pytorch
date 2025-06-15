@@ -355,7 +355,7 @@ def export(
 
         opset_version (int, default 18): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
-            to target. Must be >= 7 and <= 23.
+            to target. Must be >= 7.
         do_constant_folding: Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
