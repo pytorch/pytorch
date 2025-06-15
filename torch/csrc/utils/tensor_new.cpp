@@ -301,7 +301,7 @@ std::optional<Tensor> try_create_from_tensor_sequence(
       return std::nullopt;
     }
 
-    tensors.push_back(tensor);
+    tensors.emplace_back(std::move(tensor));
   }
 
   at::Tensor result;
@@ -412,8 +412,9 @@ Tensor internal_new_from_data(
 
   if (PyObject_HasAttrString(data, "__dlpack__")) {
     py::object tensor_o =
-        py::module::import("torch").attr("utils").attr("dlpack").attr(
-            "from_dlpack")(py::handle(data));
+        py::module::import("torch").attr("utils").attr(
+            "dlpack")
+            .attr("from_dlpack")(py::handle(data));
     Tensor tensor = py::cast<Tensor>(tensor_o);
     const auto& inferred_scalar_type =
         type_inference ? tensor.scalar_type() : scalar_type;
@@ -1313,7 +1314,7 @@ Tensor sparse_coo_tensor_ctor(
         inferred_options,
         inferred_scalar_type,
         deviceOptional,
-        r.pyobject(ARG_VALUES1),
+        r.pyobject(ARG_VALUES),
         /*copy_variables=*/false,
         /*copy_numpy=*/true,
         /*type_inference=*/type_inference);
@@ -1322,7 +1323,7 @@ Tensor sparse_coo_tensor_ctor(
         values.options(),
         kLong,
         deviceOptional,
-        r.pyobject(ARG_INDICES1),
+        r.pyobject(ARG_INDICES),
         /*copy_variables=*/false,
         /*copy_numpy=*/true,
         /*type_inference=*/false);
