@@ -431,7 +431,8 @@ def same_two_models(
         ref,
         res,
         fp64_ref,
-        tol=config.repro_tolerance,
+        atol=config.repro_tolerance,
+        rtol=config.repro_tolerance,
         equal_nan=True,
         ignore_non_fp=ignore_non_fp,
     )
