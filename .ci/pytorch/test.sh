@@ -220,8 +220,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
         export ASAN_OPTIONS="${ASAN_OPTIONS}:protect_shadow_gap=0"
     fi
-    # Disable ASLR
-    sudo sysctl -w kernel.randomize_va_space=0
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
