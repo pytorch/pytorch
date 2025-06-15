@@ -79,7 +79,7 @@ class ComptimeVar:
         """
         return self.__variable.as_proxy()
 
-    def is_proxy(self):
+    def is_proxy(self) -> bool:
         """
         Returns True if as_proxy() would succeed.
         """
@@ -123,13 +123,13 @@ class ComptimeVar:
         """
         return self.__variable.as_python_constant()
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> bool:
         """
         Returns True if as_python_constant would succeed.
         """
         return self.__variable.is_python_constant()
 
-    def is_dynamic(self):
+    def is_dynamic(self) -> bool:
         if isinstance(self.__variable, SymNodeVariable):
             fs = free_symbols(self.__variable.sym_num)
             return bool(fs)

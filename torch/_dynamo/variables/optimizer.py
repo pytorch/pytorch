@@ -63,7 +63,7 @@ class GuardInstallException(Exception):
 perf_hint_log = getArtifactLogger(__name__, "perf_hints")
 
 
-def _is_static_for_cudagraphs(x):
+def _is_static_for_cudagraphs(x) -> bool:
     from torch._inductor.cudagraph_trees import get_manager
 
     if x.is_cuda:

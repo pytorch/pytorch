@@ -227,7 +227,7 @@ class NNModuleVariable(VariableTracker):
         )
         return variables.ConstantVariable.create(result)
 
-    def is_training(self, tx):
+    def is_training(self, tx) -> bool:
         mod = tx.output.get_submodule(self.module_key)
         return getattr(mod, "training", False)
 

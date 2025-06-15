@@ -136,7 +136,7 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def is_bf16_supported(including_emulation: bool = False):
+    def is_bf16_supported(including_emulation: bool = False) -> bool:
         raise NotImplementedError
 
     @classmethod
@@ -401,7 +401,7 @@ class CpuInterface(DeviceInterface):
         return True
 
     @staticmethod
-    def is_bf16_supported(including_emulation: bool = False):
+    def is_bf16_supported(including_emulation: bool = False) -> bool:
         return True
 
     @staticmethod

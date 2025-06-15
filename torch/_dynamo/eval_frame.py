@@ -266,7 +266,7 @@ def _create_delayed_compile_callback(callback, stance):
     return callback_fn
 
 
-def _is_skip_guard_eval_unsafe_stance():
+def _is_skip_guard_eval_unsafe_stance() -> bool:
     return _stance.skip_guard_eval_unsafe
 
 
@@ -981,7 +981,7 @@ def check_if_dynamo_supported():
         )
 
 
-def is_dynamo_supported():
+def is_dynamo_supported() -> bool:
     try:
         check_if_dynamo_supported()
         return True
@@ -993,7 +993,7 @@ def check_if_inductor_supported():
     check_if_dynamo_supported()
 
 
-def is_inductor_supported():
+def is_inductor_supported() -> bool:
     try:
         check_if_inductor_supported()
         return True
@@ -1378,7 +1378,7 @@ def rewrite_signature(
             _IntWrapper,
         ] + list(common_constant_types)
 
-        def is_supported_type(val):
+        def is_supported_type(val) -> bool:
             return isinstance(val, tuple(supported_types))
 
         value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
