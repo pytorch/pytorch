@@ -302,8 +302,9 @@ void f8f8bf16_rowwise_impl(
 }
 
 
-// Cutlass rowwise kernel for SM100
+// Cutlass rowwise kernel for SM100/SM120
 template <
+    typename ArchTag,
     typename TileShape,
     typename ClusterShape,
     typename Transposed,
@@ -311,7 +312,7 @@ template <
     typename DtypeA,
     typename DtypeB,
     typename DtypeBias>
-void f8f8bf16_rowwise_impl_sm100(
+void f8f8bf16_rowwise_impl_sm100_sm120(
     at::Tensor XQ, // FP8
     at::Tensor WQ, // FP8
     at::Tensor x_scale,
@@ -344,8 +345,6 @@ void f8f8bf16_rowwise_impl_sm100(
       cutlass::layout::RowMajor>;
   constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
 
-  // Tag indicating the minimum SM that supports the intended feature
-  using ArchTag = cutlass::arch::Sm100;
   using OperatorClass = cutlass::arch::OpClassTensorOp;
 
   // Implement rowwise scaling epilogue.
@@ -380,7 +379,7 @@ void f8f8bf16_rowwise_impl_sm100(
 
   using EpilogueScheduleType = cutlass::epilogue::collective::EpilogueScheduleAuto;
   using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
-      cutlass::arch::Sm100, OperatorClass,
+      ArchTag, OperatorClass,
       TileShape, ClusterShape,
       cutlass::epilogue::collective::EpilogueTileAuto,
       DtypeAccum, DtypeEpilogue,
@@ -589,7 +588,7 @@ void f8f8bf16_rowwise_impl_sm89(
       Output,
       EVTApplyBias>;
 
-  using EVTKernel = at::cuda::detail::enable_2x_kernel_for_sm89_sm12x<
+  using EVTKernel = at::cuda::detail::enable_2x_kernel_for_sm89<
       typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
           DtypeA, LayoutInputA, cutlass::ComplexTransform::kNone, AlignmentInputA,
           DtypeB, LayoutInputB, cutlass::ComplexTransform::kNone, AlignmentInputB,
@@ -698,7 +697,7 @@ void f8f8bf16_rowwise_impl_sm89(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-template <typename ClusterShape, typename... Types>
+template <typename ClusterShape, typename ArchTag, typename... Types>
 void dispatch_fp8_rowwise_kernel_on_tile_size(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -715,9 +714,6 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
     smTarget -= at::globalContext()._SMCarveout_EXPERIMENTAL().value();
   }
 
-  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool sm10x = properties != nullptr && properties->major == 10;
-
   // We prefer to use smaller tiles (less wasted compute in case of padding),
   // but if this causes us to have more CUDA blocks than there are SMs on the
   // GPU then we'll hit wave quantization, hence we'll switch to larger tiles.
@@ -726,33 +722,47 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
       smTarget / cute::size(ClusterShape{});
 
   if (use_smaller_tiles) {
-    if (sm10x) {
-      return f8f8bf16_rowwise_impl_sm100<
+    if constexpr (std::is_same_v<ArchTag, cutlass::arch::Sm90>) {
+      return f8f8bf16_rowwise_impl<
+          /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
+          ClusterShape,
+          Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+    } else if constexpr (std::is_same_v<ArchTag, cutlass::arch::Sm100>) {
+      return f8f8bf16_rowwise_impl_sm100_sm120<
+        ArchTag,
         /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
+        ClusterShape,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+    } else {
+      // KernelScheduleAuto in sm120 is KernelTmaWarpSpecializedCooperativeSm120,
+      // which does not support TileShape.M < 128
+      // TODO: manually select KernelSchedule in this case
+      return f8f8bf16_rowwise_impl_sm100_sm120<
+        ArchTag,
+        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         ClusterShape,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
     }
-    return f8f8bf16_rowwise_impl<
-        /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
-        ClusterShape,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   } else {
-    if (sm10x) {
-      return f8f8bf16_rowwise_impl_sm100<
+    if constexpr (std::is_same_v<ArchTag, cutlass::arch::Sm90>) {
+      return f8f8bf16_rowwise_impl<
+        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
+        ClusterShape,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+    } else {
+      return f8f8bf16_rowwise_impl_sm100_sm120<
+        ArchTag,
         /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         ClusterShape,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
     }
-    return f8f8bf16_rowwise_impl<
-        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
-        ClusterShape,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   }
 }
 
 template <
     typename ClusterShape,
     typename Transposed,
+    typename ArchTag,
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
@@ -768,6 +778,7 @@ void handle_transposition(
   if constexpr (!Transposed::value) {
     dispatch_fp8_rowwise_kernel_on_tile_size<
         ClusterShape,
+        ArchTag,
         Transposed,
         FastAccum,
         DtypeA,
@@ -776,6 +787,7 @@ void handle_transposition(
   } else {
     dispatch_fp8_rowwise_kernel_on_tile_size<
         ClusterShape,
+        ArchTag,
         Transposed,
         FastAccum,
         DtypeB,
@@ -944,8 +956,21 @@ void dispatch_fp8_rowwise_kernel_on_sm(
         false, "Rowwise scaling is not currently supported on your device");
   }
 
-  if (sm9x || sm10x) {
-    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  if (sm9x) {
+    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+      /*ArchTag=*/cutlass::arch::Sm90,
+      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else if (sm10x) {
+    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+      /*ArchTag=*/cutlass::arch::Sm100,
+      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else if (sm12x) {
+    // sm12x doesn't have multicast feature
+    handle_transposition<
+      /*ClusterShape=*/cute::Shape<cute::_1, cute::_1, cute::_1>,
+      /*Transposed=*/std::false_type,
+      /*ArchTag=*/cutlass::arch::Sm120,
+      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     dispatch_fp8_rowwise_kernel_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
