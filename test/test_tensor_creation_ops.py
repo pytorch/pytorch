@@ -4171,6 +4171,13 @@ class TestAsArray(TestCase):
             t = torch.asarray(e)
             self.assertEqual(t, original)
 
+    @onlyCPU
+    def test_as_tensor_retains_autograd_history(self):
+        a = torch.tensor(1.0, requires_grad=True)
+        b = torch.tensor(2.0, requires_grad=True)
+        t_as_tensor = torch.as_tensor([a, b])
+        self.assertNotEqual(t_as_tensor.grad_fn, None)
+
     # Dynamo changes numpy scalar to array, thus skips the asserted error.
     @xfailIfTorchDynamo
     @onlyCPU
