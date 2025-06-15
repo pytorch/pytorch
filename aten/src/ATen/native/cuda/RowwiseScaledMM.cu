@@ -388,7 +388,7 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
       EpilogueScheduleType,
       EpilogueEVT>::CollectiveOp;
 
-  // on sm120, EpilogueScheduleAuto resolves to KernelTmaWarpSpecializedCooperativeSm120<2>>,
+  // on sm120, KernelScheduleAuto resolves to KernelTmaWarpSpecializedCooperativeSm120<2>>,
   // which does not support TileShape.M < 128
   using MainloopScheduleType = std::conditional_t<
       std::is_same_v<ArchTag, cutlass::arch::Sm120> && cute::size<0>(TileShape{}) < 128,
