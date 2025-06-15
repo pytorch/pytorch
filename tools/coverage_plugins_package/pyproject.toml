@@ -1,6 +1,23 @@
 [build-system]
-requires = [
-    "setuptools>=42",
-    "wheel"
-]
+requires = ["setuptools>=42"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "coverage-plugins"
+version = "0.0.1"
+description = "plug-in to coverage for PyTorch JIT"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Repository = "https://github.com/pytorch/pytorch"
+"Issue Tracker" = "https://github.com/pytorch/pytorch/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]

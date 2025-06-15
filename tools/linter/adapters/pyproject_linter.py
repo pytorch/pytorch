@@ -24,11 +24,11 @@ else:
 REQUIRES_PYTHON_PATTERN = re.compile(
     r"""
     ^\s*
-    (?P<min_op>>=)
+    (?P<min_ver_op>>=)
     \s*
     (?P<min_ver>\d+\.\d+(?:\.\d+)?)
     \s*,\s*
-    (?P<max_op><(=?))
+    (?P<max_ver_op><(=?))
     \s*
     (?P<max_ver>\d+\.\d+(?:\.\d+)?)
     \s*$
@@ -87,9 +87,9 @@ def format_error_message(
 
 def check_file(filename: str) -> list[LintMessage]:
     path = Path(filename).absolute()
-    original = path.read_text(encoding="utf-8")
+    content = path.read_text(encoding="utf-8")
     try:
-        pyproject = tomllib.loads(original)
+        pyproject = tomllib.loads(content)
     except tomllib.TOMLDecodeError as err:
         return [format_error_message(filename, err)]
 
@@ -97,115 +97,138 @@ def check_file(filename: str) -> list[LintMessage]:
         return [
             format_error_message(
                 filename,
-                message="'project' section in pyproject.toml must present and be a dictionary.",
+                message=(
+                    "'project' section in pyproject.toml must present and be a table."
+                ),
             )
         ]
+
     project = pyproject["project"]
-
     requires_python = project.get("requires-python")
-    if not isinstance(requires_python, str):
-        return [
-            format_error_message(
-                filename,
-                message="'project.requires-python' must be a string.",
-            )
-        ]
-    match = REQUIRES_PYTHON_PATTERN.match(requires_python)
-    if not match:
-        return [
-            format_error_message(
-                filename,
-                message=r"'project.requires-python' must be in the format '>={X}.{Y},<{U}.{V}'.",
-            )
-        ]
-    min_op = COMPARE_OPS[match.group("min_op")]
-    min_ver = Version(match.group("min_ver"))
-    max_op = COMPARE_OPS[match.group("max_op")]
-    max_ver = Version(match.group("max_ver"))
-    major = 3
-    if min_ver >= max_ver:
-        return [
-            format_error_message(
-                filename,
-                message="'project.requires-python' minimum version must be less than the maximum version.",
-            )
-        ]
-    if min_ver.major != major:
-        return [
-            format_error_message(
-                filename,
-                message=f"'project.requires-python' minimum version must be {major}.x.",
-            )
-        ]
-    if max_ver.major != major:
-        return [
-            format_error_message(
-                filename,
-                message=f"'project.requires-python' maximum version must be {major}.x.",
-            )
-        ]
+    if requires_python is not None:
+        if not isinstance(requires_python, str):
+            return [
+                format_error_message(
+                    filename,
+                    message="'project.requires-python' must be a string.",
+                )
+            ]
 
-    supported_versions = []
-    for minor in range(min_ver.minor, max_ver.minor + 1):
-        ver = Version(f"{major}.{minor}")
-        if min_op(ver, min_ver) and max_op(ver, max_ver):
-            supported_versions.append(f"{major}.{minor}")
+        match = REQUIRES_PYTHON_PATTERN.match(requires_python)
+        if not match:
+            return [
+                format_error_message(
+                    filename,
+                    message=(
+                        "'project.requires-python' must be "
+                        r"in the format '>={X}.{Y},<{U}.{V}'."
+                    ),
+                )
+            ]
+        min_ver_op = COMPARE_OPS[match.group("min_ver_op")]
+        python_min_ver = Version(match.group("min_ver"))
+        max_ver_op = COMPARE_OPS[match.group("max_ver_op")]
+        python_max_ver = Version(match.group("max_ver"))
+        python_major = 3
+        if python_min_ver >= python_max_ver:
+            return [
+                format_error_message(
+                    filename,
+                    message=(
+                        "'project.requires-python' minimum version "
+                        "must be less than the maximum version."
+                    ),
+                )
+            ]
+        if python_min_ver.major != python_major:
+            return [
+                format_error_message(
+                    filename,
+                    message=(
+                        f"'project.requires-python' minimum version "
+                        f"must be {python_major}.x."
+                    ),
+                )
+            ]
+        if python_max_ver.major != python_major:
+            return [
+                format_error_message(
+                    filename,
+                    message=(
+                        f"'project.requires-python' maximum version "
+                        f"must be {python_major}.x."
+                    ),
+                )
+            ]
 
-    classifiers = project.get("classifiers")
-    if not (
-        isinstance(classifiers, list) and all(isinstance(c, str) for c in classifiers)
-    ):
-        return [
-            format_error_message(
-                filename,
-                message="'project.classifiers' must be a list of strings.",
+        supported_python_versions = []
+        for minor in range(python_min_ver.minor, python_max_ver.minor + 1):
+            ver = Version(f"{python_major}.{minor}")
+            if min_ver_op(ver, python_min_ver) and max_ver_op(ver, python_max_ver):
+                supported_python_versions.append(f"{python_major}.{minor}")
+
+        classifiers = project.get("classifiers")
+        if not (
+            isinstance(classifiers, list)
+            and all(isinstance(c, str) for c in classifiers)
+        ):
+            return [
+                format_error_message(
+                    filename,
+                    message="'project.classifiers' must be an array of strings.",
+                )
+            ]
+        if len(set(classifiers)) != len(classifiers):
+            return [
+                format_error_message(
+                    filename,
+                    message="'project.classifiers' must not contain duplicates.",
+                )
+            ]
+
+        python_version_classifiers = [
+            c
+            for c in classifiers
+            if (
+                c.startswith("Programming Language :: Python :: ")
+                and not c.endswith((f":: {python_major}", f":: {python_major} :: Only"))
             )
         ]
-    version_classifiers = [
-        c
-        for c in classifiers
-        if (
-            c.startswith("Programming Language :: Python :: ")
-            and not c.endswith((f":: {major}", f":: {major} :: Only"))
-        )
-    ]
-    version_classifier_set = set(version_classifiers)
-    if len(set(version_classifier_set)) != len(version_classifiers):
-        return [
-            format_error_message(
-                filename,
-                message="'project.classifiers' must not contain duplicates.",
-            )
-        ]
-    supported_version_classifier_set = {
-        f"Programming Language :: Python :: {v}" for v in supported_versions
-    }
-    missing_classifiers = sorted(
-        supported_version_classifier_set - version_classifier_set
-    )
-    extra_classifiers = sorted(
-        version_classifier_set - supported_version_classifier_set
-    )
-    if missing_classifiers:
-        return [
-            format_error_message(
-                filename,
-                message=(
-                    f"'project.classifiers' is missing the following classifiers: "
-                    f"{missing_classifiers}."
-                ),
-            )
-        ]
-    if extra_classifiers:
-        return [
-            format_error_message(
-                filename,
-                message=(
-                    f"'project.classifiers' contains extra classifiers: "
-                    f"{extra_classifiers}."
-                ),
-            )
-        ]
+        if python_version_classifiers:
+            python_version_classifier_set = set(python_version_classifiers)
+            supported_python_version_classifier_set = {
+                f"Programming Language :: Python :: {v}"
+                for v in supported_python_versions
+            }
+            if python_version_classifier_set != supported_python_version_classifier_set:
+                missing_classifiers = sorted(
+                    supported_python_version_classifier_set
+                    - python_version_classifier_set
+                )
+                extra_classifiers = sorted(
+                    python_version_classifier_set
+                    - supported_python_version_classifier_set
+                )
+                if missing_classifiers:
+                    return [
+                        format_error_message(
+                            filename,
+                            message=(
+                                f"'project.classifiers' is missing the following classifiers: "
+                                f"{missing_classifiers}."
+                            ),
+                        )
+                    ]
+                if extra_classifiers:
+                    return [
+                        format_error_message(
+                            filename,
+                            message=(
+                                f"'project.classifiers' contains extra classifiers: "
+                                f"{extra_classifiers}."
+                            ),
+                        )
+                    ]
 
     return []
 
