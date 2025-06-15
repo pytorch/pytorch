@@ -267,7 +267,7 @@ from setuptools.dist import Distribution
 cwd = os.path.dirname(os.path.abspath(__file__))
 
 # Add the current directory to the Python path so that we can import `tools`.
-# This is required when installing with a PEP-517-enabled build backend.
+# This is required when running this script with a PEP-517-enabled build backend.
 #
 # From the PEP-517 documentation: https://peps.python.org/pep-0517
 #
@@ -275,7 +275,8 @@ cwd = os.path.dirname(os.path.abspath(__file__))
 # > the source tree, unless that would be on `sys.path` anyway (e.g. because it
 # > is specified in `PYTHONPATH`).
 #
-sys.path.insert(0, cwd)
+sys.path.insert(0, cwd)  # this only affects the current process
+# Add the current directory to PYTHONPATH so that we can import `tools` in subprocesses
 os.environ["PYTHONPATH"] = os.pathsep.join(
     [
         cwd,
