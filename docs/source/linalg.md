@@ -1,19 +1,22 @@
+```{eval-rst}
 .. role:: hidden
     :class: hidden-section
+```
 
-torch.linalg
-============
+# torch.linalg
 
 Common linear algebra operations.
 
-See :ref:`Linear Algebra Stability` for some common numerical edge-cases.
+See {ref}`Linear Algebra Stability` for some common numerical edge-cases.
 
+```{eval-rst}
 .. automodule:: torch.linalg
 .. currentmodule:: torch.linalg
+```
 
-Matrix Properties
------------------
+## Matrix Properties
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -26,10 +29,11 @@ Matrix Properties
     slogdet
     cond
     matrix_rank
+```
 
-Decompositions
---------------
+## Decompositions
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -44,12 +48,13 @@ Decompositions
     eigvalsh
     svd
     svdvals
+```
 
-.. _linalg solvers:
+(linalg solvers)=
 
-Solvers
--------
+## Solvers
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -58,32 +63,35 @@ Solvers
     solve_triangular
     lu_solve
     lstsq
+```
 
-.. _linalg inverses:
+(linalg inverses)=
 
-Inverses
---------
+## Inverses
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     inv
     pinv
+```
 
-Matrix Functions
-----------------
+## Matrix Functions
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     matrix_exp
     matrix_power
+```
 
-Matrix Products
----------------
+## Matrix Products
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -93,28 +101,32 @@ Matrix Products
     vecdot
     multi_dot
     householder_product
+```
 
-Tensor Operations
------------------
+## Tensor Operations
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     tensorinv
     tensorsolve
+```
 
-Misc
-----
+## Misc
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     vander
+```
 
-Experimental Functions
-----------------------
+## Experimental Functions
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -126,3 +138,4 @@ Experimental Functions
     ldl_factor
     ldl_factor_ex
     ldl_solve
+```
