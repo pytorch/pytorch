@@ -24,7 +24,6 @@ if(NOT __NCCL_INCLUDED)
       set(NCCL_VERSION "v2.27.3-1")
     endif()
     message(STATUS "NCCL: Using GIT_TAG ${NCCL_VERSION} for CUDA ${CUDA_VERSION_STRING}")
-    
 
     if(DEFINED ENV{MAX_JOBS})
       set(MAX_JOBS "$ENV{MAX_JOBS}")
