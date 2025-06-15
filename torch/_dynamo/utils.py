@@ -105,6 +105,8 @@ if typing.TYPE_CHECKING:
         ValuesView,
     )
 
+    import torch.utils.checkpoint
+
 
 try:
     import numpy as np

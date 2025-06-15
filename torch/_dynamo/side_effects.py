@@ -31,6 +31,7 @@ import weakref
 from collections.abc import MutableMapping
 from types import CellType
 from typing import Any, Optional, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 import torch.nn
 
@@ -175,10 +176,10 @@ class SideEffects:
     def __getitem__(self, item):
         return self.id_to_variable[id(item)]
 
-    def should_allow_side_effects_under_checkpoint(self):
+    def should_allow_side_effects_under_checkpoint(self) -> bool:
         output_graph = self.output_graph_weakref()
         return (
-            output_graph
+            output_graph is not None
             and output_graph.current_tx.output.current_tracer.under_activation_checkpoint
             and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
         )
@@ -283,7 +284,7 @@ class SideEffects:
             BaseException.__getattribute__,
         )
 
-    def is_attribute_mutation(self, item) -> bool:
+    def is_attribute_mutation(self, item) -> TypeIs[AttributeMutation]:
         return isinstance(item.mutation_type, AttributeMutation)
 
     def has_pending_mutation(self, item):

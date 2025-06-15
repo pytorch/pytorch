@@ -23,6 +23,7 @@ import operator
 import time
 from collections import Counter, defaultdict
 from typing import Optional, TYPE_CHECKING, Union
+from typing_extensions import TypeGuard
 
 import torch
 import torch.utils._pytree as pytree
@@ -882,7 +883,7 @@ class AutogradCompilerInstance:
 
         return []
 
-    def is_sym_node(self, node) -> bool:
+    def is_sym_node(self, node) -> TypeGuard[torch.fx.Node]:
         return (
             isinstance(node, torch.fx.Node)
             and node.op == "call_function"
