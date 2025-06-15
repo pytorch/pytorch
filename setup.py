@@ -262,6 +262,27 @@ import setuptools.command.install
 import setuptools.command.sdist
 from setuptools import Extension, find_packages, setup
 from setuptools.dist import Distribution
+
+
+cwd = os.path.dirname(os.path.abspath(__file__))
+
+# Add the current directory to the Python path so that we can import `tools`.
+# This is required when installing with a PEP-517-enabled build backend.
+#
+# From the PEP-517 documentation: https://peps.python.org/pep-0517
+#
+# > When importing the module path, we do *not* look in the directory containing
+# > the source tree, unless that would be on `sys.path` anyway (e.g. because it
+# > is specified in `PYTHONPATH`).
+#
+sys.path.insert(0, cwd)
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    [
+        cwd,
+        os.getenv("PYTHONPATH", ""),
+    ]
+).rstrip(os.pathsep)
+
 from tools.build_pytorch_libs import build_pytorch
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
@@ -341,7 +362,6 @@ else:
     setuptools.distutils.log.warn = report
 
 # Constant known variables used throughout this file
-cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
 
