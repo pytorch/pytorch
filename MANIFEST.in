@@ -38,4 +38,6 @@ graft test
 # Prune compiled files
 prune */__pycache__
 global-exclude *.o *.obj *.so *.a *.dylib *.pxd *.dll *.lib *.py[cod]
+
+prune */.git
 global-exclude .git *~ *.swp
