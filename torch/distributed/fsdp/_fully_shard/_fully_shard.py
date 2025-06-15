@@ -184,6 +184,7 @@ def fully_shard(
     Returns:
         FSDPModule: The module with FSDP applied (in-place).
     """
+    torch._C._log_api_usage_once("torch.distributed.fsdp.fully_shard")
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
             f"fully_shard does not support containers that do not implement forward: {module}"
