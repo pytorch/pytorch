@@ -3,7 +3,7 @@
 # TorchDynamo APIs for fine-grained tracing
 
 :::{note}
-In this document `torch.compiler.compile` and `torch.compile` are used interchangeably. 
+In this document `torch.compiler.compile` and `torch.compile` are used interchangeably.
 Both versions will work in your code.
 :::
 
