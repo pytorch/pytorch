@@ -1,7 +1,6 @@
 # TorchScript
 
-```{eval-rst}
-.. toctree::
+```{toctree}
    :maxdepth: 1
    :caption: Builtin Functions
    :hidden:
