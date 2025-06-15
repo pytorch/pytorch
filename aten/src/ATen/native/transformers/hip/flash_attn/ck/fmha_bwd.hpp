@@ -453,4 +453,5 @@ struct fmha_bwd_traits
     bool is_deterministic;
     // TODO: padding check is inside this api
 };
+template <int Version = 2>
 float fmha_bwd(fmha_bwd_traits, fmha_bwd_args, const ck_tile::stream_config&);
