@@ -759,7 +759,6 @@ Functions don't change much, they can be decorated with {func}`@torch.jit.ignore
 #### TorchScript Classes
 
 ```{warning}
-.. warning::
 
     TorchScript class support is experimental. Currently it is best suited
     for simple record-like types (think a ``NamedTuple`` with methods
