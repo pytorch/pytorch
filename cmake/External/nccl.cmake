@@ -52,7 +52,7 @@ if(NOT __NCCL_INCLUDED)
     ExternalProject_Add(nccl_external
       SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl
       GIT_REPOSITORY https://github.com/NVIDIA/nccl.git
-      GIT_TAG ${NCCL_VERSION} 
+      GIT_TAG ${NCCL_VERSION}
       BUILD_IN_SOURCE 1
       CONFIGURE_COMMAND ""
       BUILD_COMMAND
