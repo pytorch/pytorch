@@ -91,6 +91,7 @@ from .simd import (
 from .triton_utils import (
     config_of,
     equal_1_arg_indices,
+    is_static_int,
     non_constexpr_signature,
     should_unwrap_unspec_arg,
     signature_to_meta,
@@ -3778,13 +3779,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         knows that its a static numel, as that you just plop a constant into the kernel.
         """
 
-        def is_static_integer(expr: sympy.Expr) -> bool:
-            return isinstance(expr, (sympy.Integer, int))
-
         for tree in self.range_trees:
             if not tree.is_reduction or self.inside_reduction:
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
-                if is_static_integer(simplified_tree_numel):
+                if is_static_int(simplified_tree_numel):
                     code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
 
             if tree.is_reduction and self.persistent_reduction:

@@ -588,11 +588,11 @@ aten__fp8_mm = ExternKernelChoice(
 )
 
 
-def _is_int8_mat(mat):
+def _is_int8_mat(mat) -> bool:
     return mat.get_dtype() in (torch.int8, torch.uint8)
 
 
-def _is_large_block_for_cpu(m, n, k):
+def _is_large_block_for_cpu(m, n, k) -> bool:
     # Thresholds are experimentally determined to reduce Triton CPU compile times
     return m * n > 2**13
 

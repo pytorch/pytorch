@@ -61,7 +61,7 @@ def conv3d_grid(n, c, d, h, w, meta, *, cdiv):
     )
 
 
-def _is_large_block_for_cpu(m, n, k):
+def _is_large_block_for_cpu(m, n, k) -> bool:
     # Thresholds are experimentally determined to reduce Triton CPU compile times
     if m > 256 or n > 256 or k > 256:
         return True
