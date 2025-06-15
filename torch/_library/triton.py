@@ -207,7 +207,7 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
     The ``wrap_triton`` API wraps a triton kernel into a callable that
     can actually be traced into a graph.
 
-    Please use this API together with :func:`torch.library.triton_op`.
+    You can use this API directly for compiling Triton kernels. Use it with :func:`torch.library.triton_op` only if you need to interpose at the dispatch level (i.e., registering a custom operator).
 
     Examples:
 
