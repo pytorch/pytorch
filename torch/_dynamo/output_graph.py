@@ -55,6 +55,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
@@ -437,7 +438,12 @@ class OutputGraph(OutputGraphGuardsState):
                 allow_non_fake_inputs=True if self.export else False,
                 export=self.export,
             )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        functional_mode = FunctionalTensorMode(
+            export=self.export, _allow_token_discovery=True
+        )
+        self.tracing_context: TracingContext = TracingContext(
+            fake_mode, functional_mode
+        )
         self.tracing_context.traced_code.append(f_code)
         self.dynamo_compile_id: Optional[CompileId] = (
             CompileContext.current_compile_id()
@@ -794,6 +800,10 @@ class OutputGraph(OutputGraphGuardsState):
     @property
     def fake_mode(self):
         return self.tracing_context.fake_mode
+
+    @property
+    def functional_mode(self):
+        return self.tracing_context.functional_mode
 
     @property
     def shape_env(self):
@@ -1678,18 +1688,18 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.call_cleanup_hooks()
             old_fake_mode = self.tracing_context.fake_mode
-            if not self.export:
-                import torch._functorch.config as _config
+            # if not self.export:
+            #     import torch._functorch.config as _config
 
-                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                    # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
-                    backend_fake_mode = torch._subclasses.FakeTensorMode(
-                        shape_env=old_fake_mode.shape_env,
-                    )
-                # TODO(voz): Ostensibily, this should be scoped and
-                # restore back to old_fake_mode, but doing so currently violates
-                # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
-                self.tracing_context.fake_mode = backend_fake_mode
+            #     with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            #         # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+            #         backend_fake_mode = torch._subclasses.FakeTensorMode(
+            #             shape_env=old_fake_mode.shape_env,
+            #         )
+            #     # TODO(voz): Ostensibily, this should be scoped and
+            #     # restore back to old_fake_mode, but doing so currently violates
+            #     # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
+            #     self.tracing_context.fake_mode = backend_fake_mode
 
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())

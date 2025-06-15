@@ -689,8 +689,9 @@ def _create_aot_dispatcher_function(
                         static_input_indices=aot_config.static_input_indices,
                         keep_input_mutations=aot_config.keep_inference_input_mutations,
                         is_train=needs_autograd,
-                        pre_dispatch=aot_config.pre_dispatch,
                         is_export=aot_config.is_export,
+                        gm=aot_config.gm,
+                        functional_mode=aot_config.functional_mode,
                     )(*_dup_fake_script_obj(fake_flat_args))
 
                 req_subclass_dispatch = requires_subclass_dispatch(
@@ -735,7 +736,6 @@ def _create_aot_dispatcher_function(
                             flat_fn,
                             keep_input_mutations=aot_config.keep_inference_input_mutations,
                             is_train=False,
-                            pre_dispatch=aot_config.pre_dispatch,
                             static_input_indices=aot_config.static_input_indices,
                         )(*fake_flat_args)
                     else:
@@ -1171,6 +1171,8 @@ def aot_module_simplified(
         no_tangents=False,
         cache_info=None,
         ignore_shape_env=ignore_shape_env,
+        gm=mod if isinstance(mod, torch.fx.GraphModule) else None,
+        functional_mode=tracing_context.functional_mode if tracing_context else None,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(

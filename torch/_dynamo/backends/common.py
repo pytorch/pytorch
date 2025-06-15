@@ -45,7 +45,6 @@ class AotAutograd:
     def __call__(self, gm: torch.fx.GraphModule, example_inputs, **kwargs):
         if kwargs:
             log.warning("aot_autograd-based backend ignoring extra kwargs %s", kwargs)
-
         if any(isinstance(x, (list, tuple, dict)) for x in example_inputs):
             return flatten_graph_inputs(
                 gm,

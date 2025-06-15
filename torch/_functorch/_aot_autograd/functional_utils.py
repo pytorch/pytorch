@@ -38,6 +38,20 @@ def to_fun(t):
             out = transform_subclass(t, lambda _, inner_t: to_fun(inner_t))
             torch._mirror_autograd_meta_to(t, out)  # type: ignore[attr-defined]
             return out
+        # NOTE: This may need to be expanded to other nontraceable subclasses too;
+        # not sure how to do this outside of explicit adding
+        # for instance, GradTrackingTensor
+        # alternatively, can move this wrapping into meta_utils.py
+        elif torch._C._functorch.is_batchedtensor(t):
+            # Special case to get to the fake tensor and wrap properly
+            unwrapped = torch._C._functorch.get_unwrapped(t)
+            assert unwrapped is not None
+            unwrapped = to_fun(unwrapped)
+            return torch._C._functorch._add_batch_dim(
+                unwrapped,
+                torch._C._functorch.maybe_get_bdim(t),
+                torch._C._functorch.maybe_get_level(t),
+            )
         else:
             return FunctionalTensor.to_functional(t)
     else:
