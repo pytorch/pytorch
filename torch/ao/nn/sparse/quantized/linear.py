@@ -103,6 +103,7 @@ class Linear(torch.nn.Module):
     r"""
     A quantized sparse linear module with quantized tensor as inputs and outputs.
     """
+
     _version = 1
     _FLOAT_MODULE = torch.nn.Linear
 
@@ -264,7 +265,10 @@ class Linear(torch.nn.Module):
             dtype=dtype,
         )
         qlinear.set_weight_bias(
-            qweight, mod.bias, row_block_size, col_block_size  # type: ignore[arg-type]
+            qweight,
+            mod.bias,
+            row_block_size,  # type: ignore[arg-type]
+            col_block_size,  # type: ignore[arg-type]
         )
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)
