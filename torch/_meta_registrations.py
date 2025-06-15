@@ -371,11 +371,33 @@ def meta_fft_r2c(self, dim, normalization, onesided):
         return output
 
     elif device_hint(self) == "xpu":
-        sorted_dims = _sort_dims(self, dim, exclude_last=True)
         out = self.new_empty(
             out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
         )
-        return _exec_fft(out, self, out_sizes, sorted_dims, forward=True)
+
+        working_tensor = self
+        # First do the R2C transform on the last dimension
+        target_sizes = out_sizes if len(dim) == 1 else onesided_sizes
+        _exec_fft(out, working_tensor, target_sizes, [last_dim], forward=True)
+        if len(dim) > 1:
+            working_tensor = self.new_empty(
+                out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            )
+
+        # Then any remaining C2C transforms
+        sorted_dims = dim[:-1]
+        while sorted_dims:
+            out, working_tensor = working_tensor, out
+
+            sorted_dims = _sort_dims(self, sorted_dims)
+            max_dims = min(cufft_max_ndim, len(sorted_dims))
+            last_dims = sorted_dims[len(sorted_dims) - max_dims :]
+            _exec_fft(
+                out, working_tensor, onesided_sizes, last_dims, forward=True
+            )
+            sorted_dims = sorted_dims[: len(sorted_dims) - max_dims]
+
+        return out
     else:
         return self.new_empty(
             out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
