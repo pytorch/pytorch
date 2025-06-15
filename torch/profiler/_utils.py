@@ -143,13 +143,13 @@ class BasicEvaluation:
 
         def is_cuda_launch_kernel(e):
             """Check if the event is a CUDA launch kernel."""
-            launch_patterns = [
+            launch_patterns = {
                 "cudaLaunchKernel",  # Standard CUDA
                 "cudaLaunchKernelExC",  # Extended C
                 "__cudaLaunchKernel"  # Internal
                 "cudaLaunchCooperativeKernel",  # Collaborative (single-device)
                 "cudaLaunchCooperativeKernelMultiDevice",  # Collaborative (multi-devices)
-            ]
+            }
             return any(e.name.startswith(pattern) for pattern in launch_patterns)
 
         def is_cuda_kernel(e):
