@@ -404,7 +404,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             try:
                 bound_args = sig.bind(*args, **kwargs)
                 if "set_priority" not in bound_args.arguments:
-                    bound_args.arguments["set_priority"] = sig.parameters["set_priority"].default
+                    bound_args.arguments["set_priority"] = sig.parameters[
+                        "set_priority"
+                    ].default
             except TypeError as e:
                 unimplemented_v2(
                     gb_type="Invalid arguments to sdpa_kernel",

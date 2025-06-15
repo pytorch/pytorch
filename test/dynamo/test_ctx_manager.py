@@ -1751,6 +1751,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(len(counters["graph_break"]), 1)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_sdpa_kernel_ctx_manager_params(self) -> None:
         """
         Test the sdpa_kernel context manager with set_priority=True.
