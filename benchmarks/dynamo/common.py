@@ -3520,6 +3520,8 @@ def run(runner, args, original_dir=None):
             torch._dynamo.config.assume_static_by_default = False
     if args.compiled_autograd:
         torch._dynamo.config.compiled_autograd = True
+    if args.cold_start_latency:
+        torch._inductor.config.force_disable_caches = True
     if args.propagate_real_tensors:
         # TODO: Separate flag for data dependent
         torch._dynamo.config.capture_scalar_outputs = True
