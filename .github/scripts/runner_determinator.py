@@ -429,7 +429,7 @@ def is_user_opted_out(user: str, user_optins: UserOptins, experiment_name: str) 
 
 def get_runner_prefix(
     rollout_state: str,
-    workflow_requesters: Iterable[str],
+    workflow_requestors: Iterable[str],
     branch: str,
     eligible_experiments: frozenset[str] = frozenset(),
     opt_out_experiments: frozenset[str] = frozenset(),
@@ -468,11 +468,11 @@ def get_runner_prefix(
             )
             continue
 
-        # Is any workflow_requester opted out to this experiment?
+        # Is any workflow_requestor opted out to this experiment?
         opted_out_users = [
-            requester
-            for requester in workflow_requesters
-            if is_user_opted_out(requester, user_optins, experiment_name)
+            requestor
+            for requestor in workflow_requestors
+            if is_user_opted_out(requestor, user_optins, experiment_name)
         ]
 
         if opted_out_users:
@@ -481,11 +481,11 @@ def get_runner_prefix(
             )
             continue
 
-        # Is any workflow_requester opted in to this experiment?
+        # Is any workflow_requestor opted in to this experiment?
         opted_in_users = [
-            requester
-            for requester in workflow_requesters
-            if is_user_opted_in(requester, user_optins, experiment_name)
+            requestor
+            for requestor in workflow_requestors
+            if is_user_opted_in(requestor, user_optins, experiment_name)
         ]
 
         enabled = False

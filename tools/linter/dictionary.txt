@@ -2,11 +2,12 @@ coo
 Din
 Dout
 hsa
-multipy
 nd
 optins
 OT
-Raison
+rebuild
+reenable
+requestor
 supercedes
 te
 wih
