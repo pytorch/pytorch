@@ -1364,8 +1364,7 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
         assert isinstance(a, bool)
         return a
 
-    # xla nodes do not support sym_max, remove after this get merged.
-    # https://github.com/pytorch/xla/pull/9291
+    # if backed_size_oblivious is True we treat backed as unbacked here.
     if torch.fx.experimental._config.backed_size_oblivious:
         result = _static_eval_sym_bool(a)
         return result if result is not None else default
@@ -5521,8 +5520,9 @@ class ShapeEnv:
                     )
                     msg = (
                         f"You marked {self._debug_name(source)} as dynamic but your code "
-                        f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
-                        f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        f"specialized it to be a constant ({val}). If you're using mark_dynamic, "
+                        f"either remove it or use maybe_mark_dynamic. If you're using Dim.DYNAMIC, "
+                        f"replace it with either Dim.STATIC or Dim.AUTO."
                         + (
                             "\n\nFramework stack:\n" + "".join(framework_stack.format())
                             if framework_stack

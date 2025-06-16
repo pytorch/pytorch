@@ -51,6 +51,10 @@ from torch import SymInt, Tensor
 from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
+from torch._inductor.codegen.common import (
+    custom_backend_passes,
+    init_backend_registration,
+)
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
@@ -72,7 +76,11 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
-from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
+from torch._inductor.custom_graph_pass import (
+    CustomGraphModulePass,
+    CustomGraphPass,
+    CustomGraphPassType,
+)
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
@@ -159,7 +167,7 @@ def use_re_build() -> bool:
     """
     Use for CUTLASS compilation only right now.
     """
-    if config.is_fbcode() and not cuda_env.nvcc_exist():
+    if config.is_fbcode() and not cuda_env.nvcc_exist(_cuda_compiler()):
         from triton.fb.re_build_helper import should_build_locally
 
         return not should_build_locally()
@@ -900,6 +908,12 @@ class FxGraphHashDetails:
             config._fuse_ddp_communication_passes
         )
 
+        # Register indcutor backends and custom passes and get their UUIDs.
+        init_backend_registration()
+        self.custom_backend_passes = tuple(
+            map(self._get_custom_pass_detail, custom_backend_passes.values())
+        )
+
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
     # - _pre_fusion_custom_pass
@@ -925,11 +939,11 @@ class FxGraphHashDetails:
         raise AssertionError(f"unknown config type: {str(type(custom_pass))}")
 
     def _get_custom_pass_detail(
-        self, custom_pass: CustomGraphPassType
+        self, custom_pass: Union[CustomGraphPassType, CustomGraphModulePass]
     ) -> Optional[Any]:
         if not custom_pass:
             return None
-        assert isinstance(custom_pass, CustomGraphPass)
+        assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
         return custom_pass.uuid()
 
 
@@ -2108,14 +2122,11 @@ class AotCodeCompiler:
                     current_arch = _nvcc_arch_as_compile_option()
                     cmd = (
                         f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
-                        # Include PTX with the minimum arch as SM80
-                        "-gencode arch=compute_80,code=compute_80 "
+                        # Triton only allows generating PTX version as same as the current arch
+                        f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
+                        # Include SASS for the current specific arch
+                        f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                     )
-                    if config.aot_inductor.emit_current_arch_binary:
-                        # Include SASS for the current specific arch, to avoid
-                        # CUDA JIT compilation overhead. In theory, we could do
-                        # this for all archs that are newer than the current arch.
-                        cmd += f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                     subprocess.run(
                         cmd.split(), capture_output=True, text=True, check=True
                     )
