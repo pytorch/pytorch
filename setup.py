@@ -31,7 +31,7 @@
 #     the C/C++ compiler to use
 #
 #   CMAKE_FRESH=1
-#     force a fresh cmake run and ignore the existing cmake cache
+#     force a fresh cmake configuration run, ignoring the existing cmake cache
 #
 #   CMAKE_ONLY=1
 #     run cmake and stop; do not build the project
