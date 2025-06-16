@@ -8760,12 +8760,20 @@ class TestHopSchema(TestCase):
 
 class TestAutoFunctionalizeControlFlow(TestCase):
     def check(
-        self, gen_fn: Callable, args
+        self, gen_fn: Callable, args, device, dynamic
     ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+        args = pytree.tree_map(lambda t: t.to(device=device), args)
+
         def _clone(args):
             return [
                 arg.clone() if isinstance(arg, torch.Tensor) else arg for arg in args
             ]
+
+        def _new_fn():
+            mod_or_fn = gen_fn()
+            if isinstance(mod_or_fn, torch.nn.Module):
+                mod_or_fn.to(device)
+            return mod_or_fn
 
         with patch.object(
             torch._dynamo.variables.higher_order_ops.CondHigherOrderVariable,
@@ -8774,24 +8782,27 @@ class TestAutoFunctionalizeControlFlow(TestCase):
         ):
             # Only suuport input mutation in inference
             with torch.no_grad():
-                exp = gen_fn()(*_clone(args))
+                exp = _new_fn()(*_clone(args))
             backend = AotEagerAndRecordGraphs()
             torch._dynamo.reset()
             with torch.no_grad():
-                eager_out = torch.compile(gen_fn(), backend=backend, fullgraph=True)(
-                    *_clone(args)
-                )
+                eager_out = torch.compile(
+                    _new_fn(), backend=backend, fullgraph=True, dynamic=dynamic
+                )(*_clone(args))
             torch._dynamo.reset()
             with torch.no_grad():
                 inductor_out = torch.compile(
-                    gen_fn(), backend="inductor", fullgraph=True
+                    _new_fn(), backend="inductor", fullgraph=True, dynamic=dynamic
                 )(*_clone(args))
 
         self.assertEqual(exp, eager_out)
         self.assertEqual(exp, inductor_out)
         return backend.fw_graphs[0]
 
-    def test_cond_auto_functionalize_input_mutation(self):
+    @requires_cuda
+    @parametrize("device", ["cuda", "cpu"])
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_input_mutation(self, device, dynamic):
         class M(torch.nn.Module):
             def forward(self, x, y):
                 def true_fn(x):
@@ -8805,8 +8816,8 @@ class TestAutoFunctionalizeControlFlow(TestCase):
         x, y = torch.randn(3, 4, requires_grad=True), torch.randn(
             3, 4, requires_grad=True
         )
-        fw_gm = self.check(M, (x, y))
-        if not TEST_WITH_CROSSREF:
+        fw_gm = self.check(M, (x, y), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
@@ -8842,9 +8853,10 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
             )
 
-    def test_cond_auto_functionalize_buffer_mutation(self):
-        device = "cuda"
-
+    @requires_cuda
+    @parametrize("device", ["cuda", "cpu"])
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_buffer_mutation(self, device, dynamic):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -8861,11 +8873,9 @@ class <lambda>(torch.nn.Module):
                 out = torch.cond(p, true_fn, true_fn, (x,))
                 return x + self.buf + out
 
-        p, x = torch.tensor(True, device=device), torch.randn(
-            1, requires_grad=True, device=device
-        )
-        fw_gm = self.check(M, (p, x))
-        if not TEST_WITH_CROSSREF:
+        p, x = torch.tensor(True), torch.randn(1, requires_grad=True)
+        fw_gm = self.check(M, (p, x), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
@@ -8906,7 +8916,10 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
             )
 
-    def test_cond_auto_functionalize_union_input_mutation(self):
+    @requires_cuda
+    @parametrize("device", ["cuda", "cpu"])
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_union_input_mutation(self, device, dynamic):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -8928,8 +8941,8 @@ class <lambda>(torch.nn.Module):
         x, y = torch.randn(3, 4, requires_grad=False), torch.randn(
             1, requires_grad=False
         )
-        fw_gm = self.check(M, (x, y))
-        if not TEST_WITH_CROSSREF:
+        fw_gm = self.check(M, (x, y), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
@@ -8978,6 +8991,7 @@ class <lambda>(torch.nn.Module):
 
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
+instantiate_parametrized_tests(TestAutoFunctionalizeControlFlow)
 
 instantiate_parametrized_tests(TestControlFlow)
 instantiate_parametrized_tests(AssociativeScanTests)
