@@ -327,10 +327,6 @@ def deprecated():
 
         setattr(module, public_name, alias)
 
-        @functools.wraps(func)
-        def wrapper(*args: _P.args, **kwargs: _P.kwargs):  # type: ignore[misc]
-            return func(*args, **kwargs)
-
-        return wrapper
+        return func
 
     return decorator
