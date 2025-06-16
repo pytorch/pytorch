@@ -49,8 +49,8 @@ __global__ void prepare_grouped_gemm_data(
     delta = offs[tid] - start;
     int align = 16 / sizeof(DtypeA);
     CUDA_KERNEL_ASSERT(
-        delta % align == 0 &&
-        "expected dynamic dimension byte size to be multiple of 16 \n");
+        delta >=0 && delta % align == 0 &&
+        "expected dynamic dimension byte size to be non-negative multiple of 16 \n");
   }
   int64_t lda, ldb, ldoutput;
   if (M < 0) {
@@ -81,6 +81,7 @@ __global__ void prepare_grouped_gemm_data(
   } else if (K < 0) {
     // A, B is 2d, output is 3d
     K = delta;
+    CUDA_KERNEL_ASSERT(delta > 0 && "can't handle K=0");
     lda = a_row_major ? tensor_StrideA[0] : tensor_StrideA[1];
     ldb = b_row_major ? tensor_StrideB[0] : tensor_StrideB[1];
     ldoutput = tensor_StrideOutput[1];

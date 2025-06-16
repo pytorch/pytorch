@@ -74,6 +74,7 @@ def define_c10_ovrsource(name, is_mobile):
             ],
         }),
         exported_deps = [
+            "//xplat/caffe2:torch_standalone_headers",
             ":ovrsource_c10_cmake_macros.h",
             "//arvr/third-party/gflags:gflags",
             "//third-party/cpuinfo:cpuinfo",

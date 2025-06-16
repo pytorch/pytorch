@@ -16,7 +16,7 @@ from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import IS_FBCODE, run_tests
 from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.utils import _pytree as pytree
 
@@ -57,6 +57,15 @@ class AOTIRunnerUtil:
                 # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
                 restore_fqn=False,
             )
+
+        if IS_FBCODE:
+            from deeplearning.aot_inductor.extern_node_thrift_serializer import (
+                thrift_serializer,
+            )
+
+            if options is None:
+                options = {}
+            options["extern_node_serializer"] = thrift_serializer
 
         with torch.no_grad():
             so_path = torch._inductor.aot_compile(gm, example_inputs, options=options)  # type: ignore[arg-type]
@@ -196,11 +205,14 @@ def check_model(
     atol=None,
     rtol=None,
 ):
-    with torch.no_grad(), config.patch(
-        {
-            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
-            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
+    with (
+        torch.no_grad(),
+        config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ),
     ):
         torch.manual_seed(0)
         if not isinstance(model, types.FunctionType):
@@ -239,11 +251,14 @@ def check_model_with_multiple_inputs(
     options=None,
     dynamic_shapes=None,
 ):
-    with torch.no_grad(), config.patch(
-        {
-            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
-            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
+    with (
+        torch.no_grad(),
+        config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ),
     ):
         torch.manual_seed(0)
         model = model.to(self.device)
@@ -266,11 +281,14 @@ def code_check_count(
     target_str: str,
     target_count: int,
 ):
-    with torch.no_grad(), config.patch(
-        {
-            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
-            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
+    with (
+        torch.no_grad(),
+        config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ),
     ):
         package_path = torch._export.aot_compile(model, example_inputs)
 
@@ -281,3 +299,7 @@ def code_check_count(
             target_count,
             exactly=True,
         ).run(src_code)
+
+
+if __name__ == "__main__":
+    run_tests()

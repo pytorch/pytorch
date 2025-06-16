@@ -6,7 +6,7 @@
 
 namespace torch::aot_inductor {
 
-enum DynamicArgType : int {
+enum class DynamicArgType : int {
   TensorType = 0,
   ListTensorType = 1,
   ListOptionalTensorType = 2,

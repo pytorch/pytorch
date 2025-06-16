@@ -213,7 +213,7 @@ INSTANTIATE_INT4MV(bfloat, 256);
  * 1. Load A and B blocks (32x32 and 64x32 respectively) into shared memory.
  * 2. In 4 simdgroups, calculate the outer product of the loaded blocks. Each simdgroup produces a 2x4 8x8 result.
  *      2.1 For how to use outer product to perform matrix multiplication, refer to
- *           http://mlwiki.org/index.php/Matrix-Matrix_Multiplication#Sum_of_Outer_Products
+ *           https://web.archive.org/web/20230521063455/http://mlwiki.org/index.php/Matrix-Matrix_Multiplication#Sum_of_Outer_Products
  * 3. Repeat 1 & 2 along K axis, with K block size 32, accumulate the result in the 2x4 8x8 block.
  * 4. Dequantize the final result and store it in the output matrix.
  *

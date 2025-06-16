@@ -2,13 +2,13 @@
 
 import sys
 import threading
+import weakref
 from dataclasses import dataclass
-from typing import Optional, Union
 from functools import partial, reduce
+from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
-import weakref
 from torch._C._distributed_c10d import (
     _create_work_from_future,
     AllgatherOptions,
@@ -16,14 +16,15 @@ from torch._C._distributed_c10d import (
     AllToAllOptions,
     BarrierOptions,
     BroadcastOptions,
+    ReduceOp,
     ReduceScatterOptions,
     ScatterOptions,
     Store,
-    ReduceOp,
 )
 from torch.distributed.distributed_c10d import _CollOp, _store_based_barrier, P2POp
 from torch.futures import Future
 from torch.utils import _pytree as pytree
+
 
 """
 TODO:
@@ -45,6 +46,7 @@ def ret_work(ret):
     fut.set_result(ret)
     return _create_work_from_future(fut)
 
+
 def binop_reduce(tensors, op):
     res = op(torch.stack(tensors), dim=0)
     if isinstance(res, torch.Tensor):
@@ -52,8 +54,10 @@ def binop_reduce(tensors, op):
     # min/max return a namedtuple
     return res.values
 
+
 def bitwise_reduce(tensors, op):
     return reduce(op, tensors)
+
 
 _reduce_ops = {
     ReduceOp.SUM: partial(binop_reduce, op=torch.sum),
@@ -66,6 +70,7 @@ _reduce_ops = {
     ReduceOp.BXOR: partial(bitwise_reduce, op=torch.bitwise_xor),
 }
 
+
 class AllToAll:
     @torch.no_grad()
     def work(self, data):
@@ -76,6 +81,7 @@ class AllToAll:
                 _, input_tensor_list = data[src_rank]
                 output_tensor_list[src_rank].copy_(input_tensor_list[dest_rank])
 
+
 class AllToAllBase:
     @torch.no_grad()
     def work(self, data):
@@ -83,34 +89,44 @@ class AllToAllBase:
         for dest_rank in range(world_size):
             output_buffer, _, output_split_sizes, _ = data[dest_rank]
 
-            output_indexes = self._size_cumsum(output_buffer.size(0), output_split_sizes, world_size)
+            output_indexes = self._size_cumsum(
+                output_buffer.size(0), output_split_sizes, world_size
+            )
 
             for src_rank in range(world_size):
                 _, input_buffer, _, input_split_sizes = data[src_rank]
-                input_indexes = self._size_cumsum(input_buffer.size(0), input_split_sizes, world_size)
-
-                output_buffer[output_indexes[src_rank]:output_indexes[src_rank + 1]].copy_(
-                    input_buffer[input_indexes[dest_rank]:input_indexes[dest_rank + 1]]
+                input_indexes = self._size_cumsum(
+                    input_buffer.size(0), input_split_sizes, world_size
                 )
 
-    def _size_cumsum(self, buf_size: int, sizes: Union[torch.Tensor, list[int], None], world_size: int) -> torch.Tensor:
+                output_buffer[
+                    output_indexes[src_rank] : output_indexes[src_rank + 1]
+                ].copy_(
+                    input_buffer[
+                        input_indexes[dest_rank] : input_indexes[dest_rank + 1]
+                    ]
+                )
+
+    def _size_cumsum(
+        self,
+        buf_size: int,
+        sizes: Union[torch.Tensor, list[int], None],
+        world_size: int,
+    ) -> torch.Tensor:
         if sizes is None or len(sizes) == 0:
-            sizes = torch.full(
-                (world_size,), buf_size // world_size, dtype=torch.int64
-            )
+            sizes = torch.full((world_size,), buf_size // world_size, dtype=torch.int64)
         if not isinstance(sizes, torch.Tensor):
             sizes = torch.tensor(sizes, dtype=torch.int64)
         assert sizes.dtype == torch.int64
         sizes = torch.cumsum(
             torch.cat(
-                (
-                    torch.tensor([0], dtype=torch.int64, device=sizes.device), sizes
-                ),
-                dim=0
+                (torch.tensor([0], dtype=torch.int64, device=sizes.device), sizes),
+                dim=0,
             ),
-            dim=0
+            dim=0,
         )
         return sizes
+
 
 class AllReduce:
     def __init__(self, op):
@@ -127,7 +143,9 @@ class AllReduce:
             rank_0_device = data[0][i].device
             # collect all data to the list and make them
             # all on rank 0 device
-            tensors = [data[src_rank][i].to(rank_0_device) for src_rank in range(0, len(data))]
+            tensors = [
+                data[src_rank][i].to(rank_0_device) for src_rank in range(0, len(data))
+            ]
 
             # now mimic reduce across all ranks
             res = _reduce_ops[self.op](tensors)
@@ -185,6 +203,7 @@ class Gather:
             assert len(src_in_tensor_list) == 1
             dest_tensor = out_tensor_list[rank]
             dest_tensor.copy_(src_in_tensor_list[0])
+
 
 class ReduceScatter:
     def __init__(self, op):
@@ -254,7 +273,8 @@ class Collective:
 
             if rank == 0:
                 self._start_cond.wait_for(
-                    lambda: self._count == self._world_size or self._pg._terminate.is_set()
+                    lambda: self._count == self._world_size
+                    or self._pg._terminate.is_set()
                 )
                 # SystemExit is not a subclass of Exception but BaseException
                 # and can be distinguished from normal exception raised from program errors
@@ -265,7 +285,9 @@ class Collective:
         with self._done_cond:
             # wait for rank 0 to finish
             if rank > 0:
-                self._done_cond.wait_for(lambda: self._done or self._pg._terminate.is_set())
+                self._done_cond.wait_for(
+                    lambda: self._done or self._pg._terminate.is_set()
+                )
                 if self._pg._terminate.is_set():
                     sys.exit("Test termination event occurs.")
             else:
@@ -287,14 +309,19 @@ class ProcessLocalGroup(dist.ProcessGroup):
         with cls._coll_lock:
             # pg_name is unique, we use that to record the mapping between pg and collective
             if pg.pg_name not in cls._cur_coll_on_pgs:
-                cls._cur_coll_on_pgs[pg.pg_name] = Collective(pg.size(), collective, cls)
+                cls._cur_coll_on_pgs[pg.pg_name] = Collective(
+                    pg.size(), collective, cls
+                )
             return cls._cur_coll_on_pgs[pg.pg_name]
 
     @classmethod
     def _end_coll(cls, collective, pg):
         # This is racily called by all ranks, so only one will work
         with cls._coll_lock:
-            if pg.pg_name in cls._cur_coll_on_pgs and cls._cur_coll_on_pgs[pg.pg_name] == collective:
+            if (
+                pg.pg_name in cls._cur_coll_on_pgs
+                and cls._cur_coll_on_pgs[pg.pg_name] == collective
+            ):
                 cls._cur_coll_on_pgs.pop(pg.pg_name)
 
     @classmethod
@@ -318,10 +345,13 @@ class ProcessLocalGroup(dist.ProcessGroup):
         input_buffer: torch.Tensor,
         output_split_sizes: Optional[list[int]],
         input_split_sizes: Optional[list[int]],
-        opts=AllToAllOptions()
+        opts=AllToAllOptions(),
     ) -> torch.Tensor:
         coll = ProcessLocalGroup._start_coll(AllToAllBase(), self)
-        res = coll.join(self._rank, (output_buffer, input_buffer, output_split_sizes, input_split_sizes))
+        res = coll.join(
+            self._rank,
+            (output_buffer, input_buffer, output_split_sizes, input_split_sizes),
+        )
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
@@ -380,21 +410,26 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def _reduce_scatter_base(self, output_tensor, input_tensor, opts=ReduceScatterOptions()):
+    def _reduce_scatter_base(
+        self, output_tensor, input_tensor, opts=ReduceScatterOptions()
+    ):
         tensor_list = list(torch.chunk(input_tensor, self._world_size))
         return self.reduce_scatter([output_tensor], [tensor_list], opts)
 
-    def reduce_scatter_tensor_coalesced(self, output_tensors, input_tensors, opts=ReduceScatterOptions()):
+    def reduce_scatter_tensor_coalesced(
+        self, output_tensors, input_tensors, opts=ReduceScatterOptions()
+    ):
         works = [
             self._reduce_scatter_base(output_tensor, input_tensor, opts)
-            for output_tensor, input_tensor
-            in zip(output_tensors, input_tensors)
+            for output_tensor, input_tensor in zip(output_tensors, input_tensors)
         ]
         for work in works[:-1]:
             work.wait()
         return works[-1]
 
-    def allgather_into_tensor_coalesced(self, output_tensor_list, input_tensor_list, opts=AllgatherOptions()):
+    def allgather_into_tensor_coalesced(
+        self, output_tensor_list, input_tensor_list, opts=AllgatherOptions()
+    ):
         res = None
         for o_t, i_t in zip(output_tensor_list, input_tensor_list):
             res = self._allgather_base(o_t, i_t)
@@ -470,7 +505,9 @@ class ThreadLocalWorld:
 
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {}, {})
+            ThreadLocalWorld._world.world = WorldData(
+                None, {}, {}, {}, {}, 0, {}, {}, {}
+            )
         return ThreadLocalWorld._world.world
 
     @property

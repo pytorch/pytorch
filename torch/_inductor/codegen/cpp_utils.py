@@ -80,12 +80,16 @@ DEVICE_TO_ATEN = {
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
     "xpu": "at::kXPU",
+    "mps": "at::kMPS",
 }
 
 LAYOUT_TO_ATEN = {
     torch.strided: "at::kStrided",
     torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
+
+# matches c10/core/DeviceType.h
+DEVICE_TO_INT = {"cpu": 0, "cuda": 1}
 
 _IS_WINDOWS = sys.platform == "win32"
 

@@ -37,7 +37,7 @@ def numpy_random(dtype, *shapes):
     Args:
         shapes: int or a sequence of ints to defining the shapes of the tensor
         dtype: use the dtypes from numpy
-            (https://docs.scipy.org/doc/numpy/user/basics.types.html)
+            (https://numpy.org/doc/stable/user/basics.types.html)
     Return:
         numpy tensor of dtype
     """

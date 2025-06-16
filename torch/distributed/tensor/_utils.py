@@ -1,8 +1,9 @@
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import cast
+from typing import cast, Optional
 
 import torch
+import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch._prims_common import ShapeType
 from torch.distributed.device_mesh import DeviceMesh
@@ -110,9 +111,19 @@ def compute_local_shape_and_global_offset(
         identifying how this shard fits into the global tensor in each dimension.
 
     """
-    ordered_placements = _explicit_order_placements(mesh.shape, placements)
+    return _compute_local_shape_and_global_offset(
+        global_shape, mesh.shape, mesh.get_coordinate(), placements
+    )
 
-    my_coordinate = mesh.get_coordinate()
+
+# accept 'plain data types' to enable simpler unit testing without creating device mesh
+def _compute_local_shape_and_global_offset(
+    global_shape: ShapeType,
+    mesh_shape: ShapeType,
+    my_coordinate: Optional[list[int]],
+    placements: Sequence[Placement],
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    ordered_placements = _explicit_order_placements(mesh_shape, placements)
 
     if my_coordinate is None:
         # if rank not in the mesh, return empty offset
@@ -121,7 +132,7 @@ def compute_local_shape_and_global_offset(
         local_shape = list(global_shape)
         global_offset = [0] * len(global_shape)
         for mesh_dim, placement in ordered_placements:
-            mesh_dim_size = mesh.size(mesh_dim)
+            mesh_dim_size = mesh_shape[mesh_dim]
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
                 local_offset = [0] * len(global_shape)
@@ -136,15 +147,20 @@ def compute_local_shape_and_global_offset(
 
                 local_shape[shard_dim] = shard_size
                 local_offset[shard_dim] = shard_offset
-
-                # On a given dimension, if the local_offset[shard_dim] is smaller than global_offset[shard_dim],
-                # it means that this dimension has been already sharded in previous placement.
-                # Therefore, we cannot simply replace the global_offset[shard_dim] with local_offset[shard_dim].
-                # Instead, for the given shard_dim, we need to add local_offset[shard_dim] to existing global_offset[shard_dim].
-                if global_offset[shard_dim] <= local_offset[shard_dim]:
-                    global_offset[shard_dim] = local_offset[shard_dim]
+                if shard_size == 0:
+                    # Special case to fill in a standardized non-garbage value for the global_offset
+                    # of zero-sized shards.  This value is out of bounds of the tensor, so it won't conflict
+                    # with any real offsets.  DCP may rely on this value to de-duplicate shards.
+                    global_offset[shard_dim] = global_shape[shard_dim]
                 else:
-                    global_offset[shard_dim] += local_offset[shard_dim]
+                    # On a given dimension, if the local_offset[shard_dim] is smaller than global_offset[shard_dim],
+                    # it means that this dimension has been already sharded in previous placement.
+                    # Therefore, we cannot simply replace the global_offset[shard_dim] with local_offset[shard_dim].
+                    # Instead, for the given shard_dim, we need to add local_offset[shard_dim] to existing global_offset[shard_dim].
+                    if global_offset[shard_dim] <= local_offset[shard_dim]:
+                        global_offset[shard_dim] = local_offset[shard_dim]
+                    else:
+                        global_offset[shard_dim] += local_offset[shard_dim]
 
         # NOTE: the offset compute relies on the local shard index and it has no
         # problem when strided sharding is not present. To correctly compute, we assume
@@ -229,6 +245,68 @@ def compute_global_tensor_info(
         elif not isinstance(placement, (Replicate, Partial)):
             raise RuntimeError(f"placement type {type(placement)} not supported!")
     return tensor_shape, tensor_stride
+
+
+def compute_global_tensor_shape(
+    shape: torch.Size, mesh: DeviceMesh, placements: Sequence[Placement]
+) -> torch.Size:
+    """
+    Compute the global size of a DTensor from the given local tensor shape,
+    the mesh and placements. Different from `compute_global_tensor_info`,
+    which assumes sharding is even, this util allgathers local shards' shapes
+    from all ranks and thus can support uneven sharding.
+    NOTE: Currently this function only supports 1D mesh.
+
+    Args:
+        shape (:class:`torch.Size`):
+            Shape of the local tensor
+        mesh (:class:`DeviceMesh`):
+            Object which describes the mesh topology
+            of devices for the DTensor.
+        placements (Sequence[:class:`Placement`]]):
+            The attribute of the DTensor that describes its layout
+            on the mesh topology.
+
+    Return:
+        tensor_shape: Shape of the global DTensor.
+    """
+    if len(placements) != 1:
+        raise NotImplementedError(
+            "compute_global_tensor_shape only supports 1 placement for now."
+        )
+
+    if len(placements) != mesh.ndim:
+        raise RuntimeError(
+            "Expected one placement per mesh dim, "
+            f"but found {len(placements)} placements and {mesh.ndim} mesh dims."
+        )
+
+    if isinstance(placements[0], Replicate):
+        return shape
+    elif isinstance(placements[0], Shard):
+        local_shape = torch.tensor(list(shape))
+        gathered_shaped_tensors = [
+            torch.empty_like(local_shape, device=local_shape.device)
+            for _ in range(mesh.size())
+        ]
+        funcol.all_gather_inplace(gathered_shaped_tensors, local_shape)
+        sharded_dim_sum = 0
+        shard_dim = placements[0].dim
+        other_dims = [d for d in range(mesh.ndim) if d != shard_dim]
+        for shape_tensor in gathered_shaped_tensors:
+            if not torch.equal(local_shape[other_dims], shape_tensor[other_dims]):
+                raise RuntimeError(
+                    "Non-sharded dimentions should have identical size across ranks."
+                )
+            shape_tensor_list = shape_tensor.tolist()
+            sharded_dim_sum += shape_tensor_list[shard_dim]
+        global_shape = list(shape)
+        global_shape[placements[0].dim] = sharded_dim_sum
+        return torch.Size(global_shape)
+    else:
+        raise NotImplementedError(
+            f"Placement type {type(placements[0])} not supported."
+        )
 
 
 def try_find_mesh_from_args(

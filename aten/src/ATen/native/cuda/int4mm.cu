@@ -127,6 +127,14 @@ inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
   return diff == 0 ? 0 : uint32_t(Align) - diff;
 }
 
+#if defined (__gfx90a__) || defined(__gfx942__)
+#define CDNA2_OR_LATER 1
+#else
+#define CDNA2_OR_LATER 0
+#endif
+
+#if (defined(USE_ROCM) && ROCM_VERSION >= 50700) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
+
 #if defined(USE_ROCM)
 // TODO: Support RDNA
 constexpr int32_t kWarpSize = 64;
@@ -141,14 +149,6 @@ static bool isCDNA2orLater(int index) {
 #else
 constexpr int32_t kWarpSize = 32;
 #endif
-
-#if defined (__gfx90a__) || defined(__gfx942__)
-#define CDNA2_OR_LATER 1
-#else
-#define CDNA2_OR_LATER 0
-#endif
-
-#if (defined(USE_ROCM) && ROCM_VERSION >= 50700) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
 
 // f16 vector types
 struct __align__(2) f16x1 {

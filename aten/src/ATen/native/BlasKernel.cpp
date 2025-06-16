@@ -33,11 +33,13 @@ T* remove_const(const T* x) {
 } // namespace
 
 #if AT_BUILD_WITH_BLAS()
+#ifndef _ARMPL_H
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
 extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
 extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
+#endif
 
 #if AT_BLAS_F2C()
 # define ffloat double
@@ -52,10 +54,12 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
   extern "C" void cblas_cdotc_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotc);
   extern "C" void cblas_zdotc_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotc);
 
+#ifndef _ARMPL_H
   static inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
   {
     return cblas_sdot(*n, x, *incx, y, *incy);
   }
+#endif
   static inline void cdotu_(std::complex<float> *res, const int *n, const std::complex<float> *x, const int *incx,
   const std::complex<float> *y, const int *incy) {
     cblas_cdotu_sub(*n, x, *incx, y, *incy, res);
@@ -86,6 +90,8 @@ namespace at::native {
 #if !defined(C10_MOBILE)
 DEFINE_DISPATCH(fp16_gemv_trans_stub);
 DEFINE_DISPATCH(bf16_gemv_trans_stub);
+DEFINE_DISPATCH(fp16_dot_stub);
+DEFINE_DISPATCH(bf16_dot_stub);
 #endif // !defined(C10_MOBILE)
 
 namespace blas_impl {
@@ -116,21 +122,62 @@ void fp16_gemv_trans(
   fp16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
-void bf16_gemv_trans(
-    const int m,
-    const int n,
-    const at::BFloat16 alpha,
-    const at::BFloat16* a,
-    const int lda,
-    const at::BFloat16* x,
-    const int incx,
-    const at::BFloat16 beta,
-    at::BFloat16* y,
-    const int incy);
+static float fp16_dot(
+  const int64_t n,
+  const Half* x,
+  const int64_t incx,
+  const Half* y,
+  const int64_t incy) {
+  return fp16_dot_stub(kCPU, n, x, incx, y, incy);
+}
+
+static float bf16_dot(
+  const int64_t n,
+  const BFloat16* x,
+  const int64_t incx,
+  const BFloat16* y,
+  const int64_t incy) {
+  return bf16_dot_stub(kCPU, n, x, incx, y, incy);
+}
 
 #endif // !defined(C10_MOBILE)
 
 #if defined(__aarch64__) && !defined(C10_MOBILE)
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+static void fp16_gemv_notrans_fp16_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
+  for (auto j = 0; j < n; j++) {
+    auto vecCol = vdup_n_f16(x[j]);
+    const auto* column = a + lda * j;
+    for (auto i = 0; i < m; i += 4) {
+      auto yf16 = y + i;
+      auto matRow = vld1_f16(column + i);
+      auto resVec = j != 0 ? vld1_f16(yf16) : vdup_n_f16(0);
+      resVec = vfma_lane_f16(resVec, matRow, vecCol, 0);
+      vst1_f16(yf16, resVec);
+    }
+  }
+}
+#endif
+
+static void fp16_gemv_notrans_fp32_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
+  std::vector<float> sum(m);
+  for (auto j = 0; j < n; j++) {
+    auto vecCol = vdup_n_f32(x[j]);
+    const auto* column = a + lda * j;
+    for (auto i = 0; i < m; i += 4) {
+      auto sf32 = sum.data() + i;
+      auto matRow = vcvt_f32_f16(vld1_f16(column + i));
+      auto resVec = j != 0 ? vld1q_f32(sf32) : vdupq_n_f32(0);
+      resVec = vfmaq_lane_f32(resVec, matRow, vecCol, 0);
+      vst1q_f32(sf32, resVec);
+    }
+  }
+
+  for (auto i = 0; i < m; i+= 4) {
+    vst1_f16(y + i, vcvt_f16_f32(vld1q_f32(sum.data() + i)));
+  }
+}
+
 void fp16_gemv_notrans(
     const int m,
     const int n,
@@ -143,17 +190,55 @@ void fp16_gemv_notrans(
     Half* y,
     const int incy);
 
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const Half* a,
+    const int lda,
+    const Half* x,
+    const int incx,
+    const float beta,
+    Half* y,
+    const int incy) {
+  if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+    if (at::globalContext().allowFP16ReductionCPU())  {
+      return fp16_gemv_notrans_fp16_arith(m, n, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(x), reinterpret_cast<float16_t*>(y));
+    }
+#endif
+    return fp16_gemv_notrans_fp32_arith(m, n, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(x), reinterpret_cast<float16_t*>(y));
+  }
+  std::vector<float> sum(m);
+  for (const auto j : c10::irange(n)) {
+    const auto* column_ = a + lda * j;
+    auto z = alpha * x[j * incx];
+    for (const auto i : c10::irange(m)) {
+      sum[i] += z * column_[i];
+    }
+  }
+  if (beta == 0.0) {
+    for (const auto i : c10::irange(m)) {
+      y[i * incy] = sum[i];
+    }
+  } else {
+    for (const auto i : c10::irange(m)) {
+      y[i * incy] += sum[i];
+    }
+  }
+}
+
 #endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
 template <typename scalar_t>
-bool scal_use_fast_path(
+static bool scal_use_fast_path(
     [[maybe_unused]] int64_t n,
     [[maybe_unused]] int64_t incx) {
   return false;
 }
 
 template <typename scalar_t>
-bool gemv_use_fast_path(
+static bool gemv_use_fast_path(
     [[maybe_unused]] char trans,
     [[maybe_unused]] int64_t m,
     [[maybe_unused]] int64_t n,
@@ -166,7 +251,7 @@ bool gemv_use_fast_path(
 }
 
 template <typename scalar_t>
-void scal_fast_path(
+static void scal_fast_path(
     [[maybe_unused]] int* n,
     [[maybe_unused]] scalar_t* a,
     [[maybe_unused]] scalar_t* x,
@@ -176,7 +261,7 @@ void scal_fast_path(
 }
 
 template <typename scalar_t>
-void gemv_fast_path(
+static void gemv_fast_path(
     [[maybe_unused]] const char* trans,
     [[maybe_unused]] const int* m,
     [[maybe_unused]] const int* n,
@@ -258,10 +343,6 @@ template <>
 void gemv_fast_path<float>(const char *trans, const int *m, const int *n, const float *alpha, const float *a, const int *lda, const float *x, const int *incx, const float *beta, float *y, const int *incy) {
   sgemv_(remove_const(trans), remove_const(m), remove_const(n), remove_const(alpha), remove_const(a), remove_const(lda), remove_const(x), remove_const(incx), remove_const(beta), y, remove_const(incy));
 }
-#else
-INSTANTIATE(float)
-INSTANTIATE(double)
-#endif // AT_BUILD_WITH_BLAS
 
 INSTANTIATE(uint8_t)
 INSTANTIATE(int8_t)
@@ -283,7 +364,7 @@ bool gemv_use_fast_path<at::BFloat16>(
       beta == 0.0;
 }
 
-void bf16_gemv_trans(
+static void bf16_gemv_trans(
   const int m,
   const int n,
   const at::BFloat16 alpha,
@@ -368,14 +449,7 @@ void gemv_fast_path<at::Half>(
       y,
       *incy);
 }
-#else
-template <>
-bool scal_use_fast_path<at::Half>(
-    [[maybe_unused]] int64_t n,
-    [[maybe_unused]] int64_t incx) {
-  return false;
-}
-
+#else // !defined(__aarch64__))
 template <>
 bool gemv_use_fast_path<at::Half>(
     char trans,
@@ -389,79 +463,6 @@ bool gemv_use_fast_path<at::Half>(
   return incx == 1 && c10::detail::fp16_from_bits(alpha.x) == 1.0f &&
       // TODO: enable nonzero beta for fp16_gemv_notrans
       (c10::detail::fp16_from_bits(beta.x) == 0.0f || trans == 't' || trans == 'T');
-}
-
-#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-static void fp16_gemv_notrans_fp16_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
-  for (auto j = 0; j < n; j++) {
-    auto vecCol = vdup_n_f16(x[j]);
-    const auto* column = a + lda * j;
-    for (auto i = 0; i < m; i += 4) {
-      auto yf16 = y + i;
-      auto matRow = vld1_f16(column + i);
-      auto resVec = j != 0 ? vld1_f16(yf16) : vdup_n_f16(0);
-      resVec = vfma_lane_f16(resVec, matRow, vecCol, 0);
-      vst1_f16(yf16, resVec);
-    }
-  }
-}
-#endif
-
-static void fp16_gemv_notrans_fp32_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
-  std::vector<float> sum(m);
-  for (auto j = 0; j < n; j++) {
-    auto vecCol = vdup_n_f32(x[j]);
-    const auto* column = a + lda * j;
-    for (auto i = 0; i < m; i += 4) {
-      auto sf32 = sum.data() + i;
-      auto matRow = vcvt_f32_f16(vld1_f16(column + i));
-      auto resVec = j != 0 ? vld1q_f32(sf32) : vdupq_n_f32(0);
-      resVec = vfmaq_lane_f32(resVec, matRow, vecCol, 0);
-      vst1q_f32(sf32, resVec);
-    }
-  }
-
-  for (auto i = 0; i < m; i+= 4) {
-    vst1_f16(y + i, vcvt_f16_f32(vld1q_f32(sum.data() + i)));
-  }
-}
-
-void fp16_gemv_notrans(
-    const int m,
-    const int n,
-    const float alpha,
-    const Half* a,
-    const int lda,
-    const Half* x,
-    const int incx,
-    const float beta,
-    Half* y,
-    const int incy) {
-  if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
-#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-    if (at::globalContext().allowFP16ReductionCPU())  {
-      return fp16_gemv_notrans_fp16_arith(m, n, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(x), reinterpret_cast<float16_t*>(y));
-    }
-#endif
-    return fp16_gemv_notrans_fp32_arith(m, n, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(x), reinterpret_cast<float16_t*>(y));
-  }
-  std::vector<float> sum(m);
-  for (const auto j : c10::irange(n)) {
-    const auto* column_ = a + lda * j;
-    auto z = alpha * x[j * incx];
-    for (const auto i : c10::irange(m)) {
-      sum[i] += z * column_[i];
-    }
-  }
-  if (beta == 0.0) {
-    for (const auto i : c10::irange(m)) {
-      y[i * incy] = sum[i];
-    }
-  } else {
-    for (const auto i : c10::irange(m)) {
-      y[i * incy] += sum[i];
-    }
-  }
 }
 
 template <>
@@ -511,6 +512,7 @@ void gemv_fast_path<at::Half>(
 INSTANTIATE(c10::Half)
 INSTANTIATE(c10::BFloat16)
 #endif // !defined(C10_MOBILE)
+#endif // AT_BUILD_WITH_BLAS
 #undef INSTANTIATE
 
 } // namespace blas_impl
@@ -559,7 +561,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
       opmath_t sum = 0;
       const scalar_t *row_ = a + lda * i;
       for (const auto j : c10::irange(m)) {
-        sum += x[j * incx] * row_[j];
+        sum += static_cast<opmath_t>(x[j * incx]) * static_cast<opmath_t>(row_[j]);
       }
       if (beta == scalar_t(0)) {
         y[i * incy] = alpha * sum;
@@ -690,7 +692,7 @@ scalar_t dot_impl(int64_t n, const scalar_t* x, int64_t incx, const scalar_t* y,
     incx = 1;
     incy = 1;
   }
-  return blas_impl::dot_naive(n, x, incx, y, incy, std::multiplies<scalar_t>{});
+  return blas_impl::dot_naive(n, x, incx, y, incy, std::multiplies<at::opmath_type<scalar_t>>{});
 }
 
 template <>
@@ -711,6 +713,34 @@ c10::complex<double> dot_impl(int64_t n, const c10::complex<double>* x, int64_t 
 template <>
 c10::complex<float> dot_impl(int64_t n, const c10::complex<float>* x, int64_t incx, const c10::complex<float>* y, int64_t incy) {
   return dot_impl_floating(n, x, incx, y, incy);
+}
+
+template <>
+Half dot_impl(int64_t n, const Half* x, int64_t incx, const Half* y, int64_t incy) {
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+#if !defined(C10_MOBILE)
+  if (incx == 1 && incy == 1) {
+    return blas_impl::fp16_dot(n, x, incx, y, incy);
+  }
+#endif // !defined(C10_MOBILE)
+  return blas_impl::dot_naive(n, x, incx, y, incy, std::multiplies<float>{});
+}
+
+template <>
+BFloat16 dot_impl(int64_t n, const BFloat16* x, int64_t incx, const BFloat16* y, int64_t incy) {
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+#if !defined(C10_MOBILE)
+  if (incx == 1 && incy == 1) {
+    return blas_impl::bf16_dot(n, x, incx, y, incy);
+  }
+#endif // !defined(C10_MOBILE)
+  return blas_impl::dot_naive(n, x, incx, y, incy, std::multiplies<float>{});
 }
 
 namespace {
@@ -739,7 +769,7 @@ scalar_t vdot_impl(int64_t n, const scalar_t* x, int64_t incx, const scalar_t* y
 #endif
 }
 
-// Skip reinstantiating the explicitly specialized types `float` and `double`.
+// Skip reinstantiating the explicitly specialized types `float`, `double`, `half` & `bfloat16`.
 #define INSTANTIATE_DOT_IMPL(scalar_t)  \
   template scalar_t dot_impl<scalar_t>( \
       int64_t n, const scalar_t * x, int64_t incx, const scalar_t * y, int64_t incy);
@@ -748,8 +778,6 @@ INSTANTIATE_DOT_IMPL(int8_t)
 INSTANTIATE_DOT_IMPL(int16_t)
 INSTANTIATE_DOT_IMPL(int)
 INSTANTIATE_DOT_IMPL(int64_t)
-INSTANTIATE_DOT_IMPL(c10::Half)
-INSTANTIATE_DOT_IMPL(c10::BFloat16)
 
 #define INSTANTIATE_VDOT_IMPL(scalar_t)  \
   template scalar_t vdot_impl<scalar_t>( \

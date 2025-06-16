@@ -386,7 +386,7 @@ void cpu_flash_attention(
     int64_t thresh_size = (dtype == at::ScalarType::BFloat16) ? 64 : 16;
     need_pack = kvSize >= thresh_size && qSize >= thresh_size;
     // When the number of gemm is greater than the number of pack,
-    // the pack overhead can be overlaped.
+    // the pack overhead can be overlapped.
     if (need_pack) {
       double pack_size = batchSize * num_head * kvSize * headSize;
       double qs_per_thread = (batchSize * num_head * qSlice + num_thread - 1) / num_thread;

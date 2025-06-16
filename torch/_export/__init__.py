@@ -165,7 +165,8 @@ def aot_load(so_path: str, device: str) -> Callable:
         runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)  # type: ignore[assignment, call-arg]
     elif device == "xpu" or device.startswith("xpu:"):
         runner = torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)  # type: ignore[assignment, call-arg]
-
+    elif device == "mps" or device.startswith("mps:"):
+        runner = torch._C._aoti.AOTIModelContainerRunnerMps(so_path, 1)  # type: ignore[assignment, call-arg]
     else:
         raise RuntimeError("Unsupported device " + device)
 

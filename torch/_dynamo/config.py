@@ -38,7 +38,7 @@ verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] verify the correctness of optimized backend
 verify_correctness = False
 
-# need this many ops to create an FX graph
+# need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
 
 # turn on/off DCE pass (deprecated: always true)
@@ -286,7 +286,7 @@ allow_unspec_int_on_nn_module = False
 
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 3 modes.
-# 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
+# 1. "ddp_optimizer" (or True): with "ddp_optimizer", Dynamo will automatically
 # split model graph into pieces to match DDP bucket sizes to allow DDP
 # comm/compute overlap.
 # 2. "python_reducer" (experimental): this optimization requires the usage
@@ -322,6 +322,8 @@ do_not_emit_runtime_asserts: bool = (
 # Skip tracing the torchrec files added to trace_rules.FBCODE_SKIP_DIRS
 skip_torchrec = True
 
+# Don't apply most trace_rules.py rules
+dont_skip_tracing = False
 
 # No longer used
 optimize_ddp_lazy_compile = False
@@ -414,7 +416,12 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
 )
 
-# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
+# Install "free" tensor variables (globals, non-locals, nn module attributes)
+# as graph attributes.  This is useful for export, as it
+# produces a consitent number of inputs to the graph.
+install_free_tensors = False
+
+# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
 enable_cpp_framelocals_guard_eval = True
 
 # Whether to automatically find and replace identical graph
@@ -607,6 +614,9 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
 # Takes the function/module decorated with torch.compile and passes it through a
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.
 wrap_top_frame = False
+
+# record pre-graph bytecode in profile traces
+record_pre_graph_bytecode_in_traces = True
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
