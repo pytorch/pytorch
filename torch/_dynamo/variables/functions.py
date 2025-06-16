@@ -502,7 +502,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         if (
             not tx.output.current_tracer.allow_side_effects
-            and self.fn is torch._dynamo.utils.allow_side_effects
+            and self.fn is torch._dynamo.utils._UNSAFE_allow_side_effects
         ):
             with torch._dynamo.side_effects.allow_side_effects(tx):
                 return super().call_function(tx, args, kwargs)

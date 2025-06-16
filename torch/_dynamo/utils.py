@@ -3793,7 +3793,7 @@ def defake(x):
     return y
 
 
-def allow_side_effects(fn, *args, **kwargs):
+def _UNSAFE_allow_side_effects(fn, *args, **kwargs):
     return fn(*args, **kwargs)
 
 

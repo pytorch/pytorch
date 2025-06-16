@@ -2246,7 +2246,7 @@ class SubgraphTracer(fx.Tracer):
         # True if we want to allow side-effects (doesn't throw error on their existence)
         # during this tracer's tracing. Unlike the above flag, this is not specific
         # to torch.utils.checkpoint. You can flip this on by calling your function through
-        # `torch._dynamo.utils.allow_side_effects(fn, *args, **kwargs)`. Note: Side-effects
+        # `torch._dynamo.utils._UNSAFE_allow_side_effects(fn, *args, **kwargs)`. Note: Side-effects
         # are allowed if this flag OR the above flag is True.
         self.allow_side_effects = False
 
