@@ -387,13 +387,30 @@ struct ExpandableSegment {
   // returns the actual range mapped, which may be
   // greater than requested if size is not aligned to segment_size_.
   // return size of 0 indicates OOM
+  // return nullptr indicates the handle type is not supported.
   SegmentRange map(SegmentRange range) {
+
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
     TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr);
     if (begin == end) {
       return rangeFromHandles(begin, end);
     }
+
+    // if the handle type is not specified, try to use fabric handle first.
+    // if it fails, use posix file handle
+    if (CUDAAllocatorConfig::expandable_segments_handle_type() == Expandable_Segments_Handle_Type::UNSPECIFIED) {
+      CUDAAllocatorConfig::set_expandable_segments_handle_type(Expandable_Segments_Handle_Type::FABRIC_HANDLE);
+      auto output = map(range);
+      if(output.ptr != nullptr)
+      {
+        return output;
+      }
+      // if fabric handle is not supported, use posix file handle.
+      CUDAAllocatorConfig::set_expandable_segments_handle_type(Expandable_Segments_Handle_Type::POSIX_FD);
+      return map(range);
+    }
+
     while (end > handles_.size()) {
       handles_.emplace_back(std::nullopt);
     }
@@ -403,7 +420,11 @@ struct ExpandableSegment {
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
 #ifndef FBCODE_CAFFE2
-      prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+      if (CUDAAllocatorConfig::expandable_segments_handle_type() != Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+        prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+      }else{
+        prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
+      }
 #endif
       int flag = 0;
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuDeviceGetAttribute_(
@@ -417,18 +438,34 @@ struct ExpandableSegment {
       prop.location.id = static_cast<int>(device_);
       auto status =
           DriverAPI::get()->cuMemCreate_(&handle, segment_size_, &prop, 0);
-      if (status == CUDA_ERROR_OUT_OF_MEMORY) {
-        for (auto j : c10::irange(begin, i)) {
-          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-          auto h = handles_.at(j).value();
-          handles_.at(j) = std::nullopt;
-          C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
+      if(status != CUDA_SUCCESS)
+      {
+        if (status == CUDA_ERROR_OUT_OF_MEMORY) {
+          for (auto j : c10::irange(begin, i)) {
+            // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+            auto h = handles_.at(j).value();
+            handles_.at(j) = std::nullopt;
+            C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
+          }
+          trimHandles();
+          return rangeFromHandles(begin, begin);
+        }else if(CUDAAllocatorConfig::expandable_segments_handle_type() == Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+          // we are testing if we can use fabric handle.
+          // if we can, we will use it.
+          // if we can't, we will use posix file handle.
+          // so we should not return an error here.
+          // in practice, we can get CUDA_ERROR_NOT_SUPPORTED or CUDA_ERROR_NOT_PERMITTED
+          // to be safe, any non out-of-memory error is considered as the handle type is not supported.
+          // if the handle type is not supported, return a null range to indicate it.
+          // and clear the error by calling cuGetErrorString_.
+          const char* error_string;
+          DriverAPI::get()->cuGetErrorString_(status, &error_string);
+          return SegmentRange(nullptr, 0);
+        }else{
+          C10_CUDA_DRIVER_CHECK(status);
         }
-        trimHandles();
-        return rangeFromHandles(begin, begin);
       }
-      C10_CUDA_DRIVER_CHECK(status);
-      handles_.at(i) = Handle{handle, std::nullopt};
+      handles_.at(i) = Handle{handle, std::nullopt, std::nullopt};
     }
     mapAndSetAccess(begin, end);
     return rangeFromHandles(begin, end);
@@ -460,14 +497,24 @@ struct ExpandableSegment {
     for (auto i : c10::irange(begin, end)) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto& handle = handles_.at(i).value();
-      if (!handle.fd) {
-        int fd = 0;
-        C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
-            &fd, handle.handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
-        handle.fd = fd;
+      if (CUDAAllocatorConfig::expandable_segments_handle_type() != Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+        if (!handle.fd) {
+          int fd = 0;
+          C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
+              &fd, handle.handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
+          handle.fd = fd;
+          TORCH_WARN_ONCE("use posix fd to share expandable segments.");
+        }
+        int fd = *handle.fd;
+        buf.write((const char*)&fd, sizeof(int));
+      }else{
+        if (!handle.fabric_handle) {
+          C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
+              &handle.fabric_handle, handle.handle, CU_MEM_HANDLE_TYPE_FABRIC, 0));
+          TORCH_WARN_ONCE("use fabric handle to share expandable segments.");
+        }
+        buf.write((const char*)&handle.fabric_handle, sizeof(CUmemFabricHandle));
       }
-      int fd = *handle.fd;
-      buf.write((const char*)&fd, sizeof(int));
     }
     return rangeFromHandles(begin, end);
   }
@@ -492,6 +539,7 @@ struct ExpandableSegment {
 #ifndef SYS_pidfd_getfd
 #define SYS_pidfd_getfd 438
 #endif
+    if (CUDAAllocatorConfig::expandable_segments_handle_type() != Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
     auto pidfd = syscall(SYS_pidfd_open, header.pid, 0);
     TORCH_CHECK(
         pidfd != -1 || errno != ENOSYS,
@@ -524,10 +572,26 @@ struct ExpandableSegment {
           // NOLINTNEXTLINE(performance-no-int-to-ptr)
           (void*)(uintptr_t)myfd,
           CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+      TORCH_WARN_ONCE("use posix fd to import expandable segments.");
       close((int)myfd);
-      segment->handles_.emplace_back(Handle{handle, std::nullopt});
+      segment->handles_.emplace_back(Handle{handle, std::nullopt, std::nullopt});
     }
     close((int)pidfd);
+    }else{
+      for (auto i : c10::irange(header.num_handles)) {
+        (void)i;
+        CUmemFabricHandle fabric_handle;
+        buf.read((char*)&fabric_handle, sizeof(CUmemFabricHandle));
+        CUmemGenericAllocationHandle handle = 0;
+        C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
+            &handle,
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            (void*)&fabric_handle,
+            CU_MEM_HANDLE_TYPE_FABRIC));
+        TORCH_WARN_ONCE("use fabric handle to import expandable segments.");
+        segment->handles_.emplace_back(Handle{handle, std::nullopt, std::nullopt});
+      }
+    }
     segment->mapAndSetAccess(0, header.num_handles);
     return segment;
   }
@@ -647,6 +711,7 @@ struct ExpandableSegment {
   struct Handle {
     CUmemGenericAllocationHandle handle;
     std::optional<int> fd;
+    std::optional<CUmemFabricHandle> fabric_handle;
   };
   struct ShareHeader {
     pid_t pid;
