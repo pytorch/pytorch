@@ -74,8 +74,7 @@ lib.impl("foo", torch.sin, "CPU")
 
 requires_gpu = unittest.skipUnless(torch.cuda.is_available() or torch.xpu.is_available, "requires cuda or xpu")
 
-device_type = torch.accelerator.current_accelerator().type if torch.accelerator.current_accelerator() \
-    is not None else 'cpu'
+device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cuda"
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
 

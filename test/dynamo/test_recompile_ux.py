@@ -11,8 +11,8 @@ import torch._logging
 from torch._dynamo.exc import FailOnRecompileLimitHit
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
-device_type = torch.accelerator.current_accelerator().type if torch.accelerator.current_accelerator() \
-    is not None else 'cpu'
+device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cuda"
+
 class RecompileUxTests(torch._dynamo.test_case.TestCase):
     # TODO(whc) dynamo actually recompiles one more time than the cache limit
     cache_limit = 1

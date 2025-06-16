@@ -23,11 +23,7 @@ from torch.testing._internal.logging_utils import logs_to_string
 # test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
 
 
-device_type = (
-    torch.accelerator.current_accelerator().type
-    if torch.accelerator.current_accelerator() is not None
-    else "cpu"
-)
+device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cuda"
 
 
 @torch._dynamo.config.patch(assume_static_by_default=False)

@@ -39,8 +39,7 @@ requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
 
-device_type = torch.accelerator.current_accelerator().type if torch.accelerator.current_accelerator() \
-    is not None else 'cpu'
+device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cuda"
 
 def munge_shape_guards(s: str) -> str:
     SHAPE_GUARD = (

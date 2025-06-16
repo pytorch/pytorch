@@ -111,8 +111,7 @@ TPFLAGS_MAPPING = 1 << 6
 
 GLOBAL_INT = 1
 
-device_type = torch.accelerator.current_accelerator().type if torch.accelerator.current_accelerator() \
-    is not None else 'cpu'
+device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cuda"
 
 # Specializes a test to run only if translation validation is set.
 def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
@@ -12797,6 +12796,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
 devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(MiscTestsDevice, globals(), only_for=devices, allow_xpu=True)
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
