@@ -1856,8 +1856,7 @@ def run_tests(
                 raise RuntimeError(failure.message + keep_going_message)
 
         # This is used later to constrain memory per proc on the GPU. On ROCm
-        # then number of procs is the number of GPUs, so we don't need to do
-        # this
+        # the number of procs is the number of GPUs, so we don't need to do this
         os.environ["NUM_PARALLEL_PROCS"] = str(1 if torch.version.hip else NUM_PROCS)
 
         # See Note [ROCm parallel CI testing]
