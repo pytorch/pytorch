@@ -132,7 +132,7 @@ def check_changed_files(sha: str) -> bool:
     # Return true if all the changed files are in the list of allowed files to
     # be changed to reuse the old whl
 
-    # Removing any files is not allowed since rysnc will not remove files
+    # Removing any files is not allowed since rsync will not remove files
     removed_files = (
         subprocess.check_output(
             ["git", "diff", "--name-only", sha, "HEAD", "--diff-filter=D"],

@@ -47,8 +47,8 @@ def submit_build(pipeline_id, project_id, source_branch, source_version):
 
     build_id = run_build_json["id"]
 
-    print("Submitted bulid: " + str(build_id))
-    print("Bulid URL: " + run_build_json["url"])
+    print("Submitted build: " + str(build_id))
+    print("Build URL: " + run_build_json["url"])
     return build_id
 
 
@@ -89,7 +89,7 @@ def wait_for_build(_id):
 
         time.sleep(30)
 
-    print("Bulid started: ", str(_id))
+    print("Build started: ", str(_id))
 
     handled_logs = set()
     while build_status == "inProgress":
@@ -121,8 +121,8 @@ def wait_for_build(_id):
 
     build_result = build_detail["result"]
 
-    print("Bulid status: " + build_status)
-    print("Bulid result: " + build_result)
+    print("Build status: " + build_status)
+    print("Build result: " + build_result)
 
     return build_status, build_result
 
