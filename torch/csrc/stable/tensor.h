@@ -8,18 +8,8 @@
 
 namespace torch::stable {
 
-// use anonymous namespace to avoid collisions between differing
-// versions of this file that may be included by different sources
-namespace {
-
 using DeviceIndex =
     int8_t; // this is from c10/core/Device.h and can be header only
-
-namespace detail {
-void _delete_tensor_object(AtenTensorHandle ath) {
-  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ath));
-}
-} // namespace detail
 
 // The torch::stable::Tensor class is a highlevel C++ wrapper around
 // the C shim Tensor APIs. We've modeled this class after TensorBase, as custom
@@ -46,7 +36,9 @@ class Tensor {
   // Construct a stable::Tensor from an AtenTensorHandle (ATH)
   // Steals ownership from the ATH
   explicit Tensor(AtenTensorHandle ath)
-      : ath_(ath, detail::_delete_tensor_object) {}
+      : ath_(ath, [](AtenTensorHandle ath) {
+          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ath));
+        }) {}
 
   // Copy and move constructors can be default cuz the underlying handle is a
   // shared_ptr
@@ -108,7 +100,5 @@ class Tensor {
   // END of C-shimified TensorBase APIs
   // =============================================================================
 };
-
-} // namespace
 
 } // namespace torch::stable
