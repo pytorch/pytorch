@@ -189,7 +189,7 @@ class SideEffects:
 
         return (
             output_graph is not None
-            and output_graph.current_tx.output.current_tracer.is_reconstructing_generator()
+            and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
     def check_allowed_side_effect(self, item):
