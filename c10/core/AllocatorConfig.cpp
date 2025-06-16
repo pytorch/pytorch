@@ -1,5 +1,6 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/DeviceType.h>
+#include <c10/util/CallOnce.h>
 
 #include <array>
 #include <cstdlib>
@@ -16,27 +17,20 @@ constexpr size_t kPinnedMaxRegisterThreads = 128;
 
 AllocatorConfig& AllocatorConfig::instance() {
   static AllocatorConfig instance;
-  const char* env = std::getenv("PYTORCH_ALLOC_CONF");
-  if (env) {
-    instance.parseArgs(env);
-    return instance;
+  c10::once_flag init_once;
+#define C10_ALLOCATOR_CONFIG_PARSE_ARGS(env)                                \
+  const char* env##_name = std::getenv(#env);                               \
+  if (env##_name && strcmp(#env, "PYTORCH_ALLOC_CONF") != 0) {              \
+    TORCH_WARN_ONCE(#env " is deprecated, use PYTORCH_ALLOC_CONF instead"); \
+    instance.parseArgs(env##_name);                                         \
+    return;                                                                 \
   }
-  // Keep this for backwards compatibility
-  const char* env_cuda = std::getenv("PYTORCH_CUDA_ALLOC_CONF");
-  if (env_cuda) {
-    TORCH_WARN_ONCE(
-        "PYTORCH_CUDA_ALLOC_CONF is deprecated, use PYTORCH_ALLOC_CONF instead");
-    instance.parseArgs(env_cuda);
-    return instance;
-  }
-  // Keep this for backwards compatibility and convenience for ROCm users
-  const char* env_hip = std::getenv("PYTORCH_HIP_ALLOC_CONF");
-  if (env_hip) {
-    TORCH_WARN_ONCE(
-        "PYTORCH_HIP_ALLOC_CONF is deprecated, use PYTORCH_ALLOC_CONF instead");
-    instance.parseArgs(env_hip);
-    return instance;
-  }
+  c10::call_once(init_once, []() {
+    C10_ALLOCATOR_CONFIG_PARSE_ARGS(PYTORCH_ALLOC_CONF)
+    // Keep this for backwards compatibility
+    C10_ALLOCATOR_CONFIG_PARSE_ARGS(PYTORCH_CUDA_ALLOC_CONF)
+    C10_ALLOCATOR_CONFIG_PARSE_ARGS(PYTORCH_HIP_ALLOC_CONF)
+  });
   return instance;
 }
 
@@ -58,7 +52,7 @@ size_t AllocatorConfig::roundup_power2_divisions(size_t size) {
 
   auto index = (log_size > interval_start) ? (log_size - interval_start) : 0ul;
   index = std::min(index, kRoundUpPowerOfTwoIntervals - 1);
-  return roundup_power2_divisions_[index];
+  return instance().roundup_power2_divisions_[index];
 }
 
 size_t AllocatorConfig::pinned_max_register_threads() {
@@ -436,7 +430,7 @@ void AllocatorConfig::parseArgs(const char* env) {
 }
 
 void setAllocatorSettings(const std::string& env) {
-  getAllocatorConfig().parseArgs(env.c_str());
+  AllocatorConfig::instance().parseArgs(env.c_str());
 }
 
 } // namespace c10::CachingAllocator

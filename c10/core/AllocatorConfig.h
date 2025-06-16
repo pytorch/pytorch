@@ -47,12 +47,12 @@ class C10_API AllocatorConfig {
 
   /* Device allocator settings */
 
-  size_t max_split_size() {
-    return max_split_size_;
+  static size_t max_split_size() {
+    return instance().max_split_size_;
   }
 
-  size_t max_non_split_rounding_size() {
-    return max_non_split_rounding_size_;
+  static size_t max_non_split_rounding_size() {
+    return instance().max_non_split_rounding_size_;
   }
 
   // This is used to round-up allocation size to nearest power of 2 divisions.
@@ -60,55 +60,55 @@ class C10_API AllocatorConfig {
   // As an example, if we want 4 divisions between 2's power, this can be done
   // using env variable:
   // PYTORCH_ALLOC_CONF=roundup_power2_divisions:4
-  size_t roundup_power2_divisions(size_t size);
+  static size_t roundup_power2_divisions(size_t size);
 
-  std::vector<size_t> roundup_power2_divisions() {
-    return roundup_power2_divisions_;
+  static std::vector<size_t> roundup_power2_divisions() {
+    return instance().roundup_power2_divisions_;
   }
 
-  double garbage_collection_threshold() {
-    return garbage_collection_threshold_;
+  static double garbage_collection_threshold() {
+    return instance().garbage_collection_threshold_;
   }
 
-  bool use_async_allocator() {
-    return use_async_allocator_;
+  static bool use_async_allocator() {
+    return instance().use_async_allocator_;
   }
 
-  void set_allocator_loaded() {
+  static void set_allocator_loaded() {
     TORCH_INTERNAL_ASSERT(
-        !is_allocator_loaded_,
+        !instance().is_allocator_loaded_,
         "AllocatorConfig::set_allocator_loaded() called multiple times");
-    is_allocator_loaded_ = true;
+    instance().is_allocator_loaded_ = true;
   }
 
-  bool use_expandable_segments() {
-    return use_expandable_segments_;
+  static bool use_expandable_segments() {
+    return instance().use_expandable_segments_;
   }
 
-  bool use_release_lock_on_device_malloc() {
-    return use_release_lock_on_device_malloc_;
+  static bool use_release_lock_on_device_malloc() {
+    return instance().use_release_lock_on_device_malloc_;
   }
 
   /* Host allocator settings */
-  bool pinned_use_device_host_register() {
-    return pinned_use_device_host_register_;
+  static bool pinned_use_device_host_register() {
+    return instance().pinned_use_device_host_register_;
   }
 
-  size_t pinned_num_register_threads() {
-    return pinned_num_register_threads_;
+  static size_t pinned_num_register_threads() {
+    return instance().pinned_num_register_threads_;
   }
 
-  size_t pinned_max_register_threads();
+  static size_t pinned_max_register_threads();
 
-  bool pinned_use_background_threads() {
-    return pinned_use_background_threads_;
+  static bool pinned_use_background_threads() {
+    return instance().pinned_use_background_threads_;
   }
 
   /* Settings for both device and host allocator */
 
-  std::string last_allocator_settings() {
-    std::lock_guard<std::mutex> lock(last_allocator_settings_mutex_);
-    return last_allocator_settings_;
+  static std::string last_allocator_settings() {
+    std::lock_guard<std::mutex> lock(instance().last_allocator_settings_mutex_);
+    return instance().last_allocator_settings_;
   }
 
   void parseArgs(const char* env);
@@ -208,10 +208,6 @@ class C10_API AllocatorConfig {
   std::mutex last_allocator_settings_mutex_;
   std::string last_allocator_settings_;
 };
-
-C10_API inline AllocatorConfig& getAllocatorConfig() {
-  return AllocatorConfig::instance();
-}
 
 C10_API void setAllocatorSettings(const std::string& env);
 
