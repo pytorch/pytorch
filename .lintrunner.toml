@@ -1152,17 +1152,15 @@ exclude_patterns = [
     'fb/**',
     '**/fb/**',
     'test/dynamo/cpython/**',
-    'third_party/*/**',
     'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
-    '*',
-    'third_party/*',
     '.ci/**',
     '.circleci/**',
     '.github/**',
+    'third_party/**',
     'aten/**',
     'benchmarks/**',
     'c10/**',
