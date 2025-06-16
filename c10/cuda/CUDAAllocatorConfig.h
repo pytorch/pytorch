@@ -13,7 +13,7 @@
 
 namespace c10::cuda::CUDACachingAllocator {
 
-enum Expandable_Segments_Handle_Type : int {
+enum class Expandable_Segments_Handle_Type : int {
   UNSPECIFIED = 0,
   POSIX_FD = 1,
   FABRIC_HANDLE = 2,
