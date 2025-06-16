@@ -9,16 +9,8 @@ import torch
 from torch import nn, Tensor
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import sample_inputs_cat_concat
-from torch.testing._internal.common_utils import make_tensor
+from torch.testing._internal.common_utils import make_tensor, raise_on_run_directly
 from torch.testing._internal.jit_utils import execWrapper, JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 # XXX: still in prototype
@@ -819,3 +811,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         input.setType(input.type().with_sizes([1, 5, 8]))
         torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
         self.assertEqual(next(foo.graph.outputs()).type().symbolic_sizes(), [5, 8])
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")
