@@ -106,7 +106,9 @@ def check_dictionary(filename: str) -> list[LintMessage]:
             raise ValueError(
                 "The dictionary file is not sorted alphabetically (case-insensitive)."
             )
-        for forbidden_word in FORBIDDEN_WORDS.intersection(words_set):
+        for forbidden_word in sorted(
+            FORBIDDEN_WORDS & (words_set | set(uncased_words))
+        ):
             raise ValueError(
                 f"The dictionary file contains a forbidden word: {forbidden_word!r}. "
                 "Please remove it from the dictionary file and use 'codespell:ignore' "
