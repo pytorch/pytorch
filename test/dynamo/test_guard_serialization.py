@@ -324,9 +324,13 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 distributed_state=None,
                 package=None,
             )
-            with compile_context(CompileContext(CompileId(0, 0))), tracing(
-                tracer.output.tracing_context
-            ), tracer.set_current_tx(), get_metrics_context(), dynamo_timed(""):
+            with (
+                compile_context(CompileContext(CompileId(0, 0))),
+                tracing(tracer.output.tracing_context),
+                tracer.set_current_tx(),
+                get_metrics_context(),
+                dynamo_timed(""),
+            ):
                 tracer.run()
 
                 check_fn_manager = CheckFunctionManager(

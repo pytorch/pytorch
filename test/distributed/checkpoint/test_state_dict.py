@@ -677,9 +677,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             fully_shard(layer)
         fully_shard(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        torch.optim.lr_scheduler.LambdaLR(
-            optim, lr_lambda=[lambda epoch: 0.95**epoch]
-        )
+        torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=[lambda epoch: 0.95**epoch])
         opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
             model,
             optim,

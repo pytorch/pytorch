@@ -26,9 +26,10 @@ class CallbackTests(TestCase):
     def test_callbacks_with_duplicate_prevention(self) -> None:
         trigger = CallbackTrigger.DYNAMO
         compile_id = CompileId(0, 0)
-        with callback_handler.install_callbacks(
-            trigger, compile_id
-        ), callback_handler.install_callbacks(trigger, compile_id):
+        with (
+            callback_handler.install_callbacks(trigger, compile_id),
+            callback_handler.install_callbacks(trigger, compile_id),
+        ):
             self._on_compile_start.assert_called_once()
         self._on_compile_end.assert_called_once()
 

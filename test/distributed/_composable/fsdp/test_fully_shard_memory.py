@@ -54,9 +54,9 @@ class TestFullyShardMemory(FSDPTest):
             )
         ):
             return  # skip since not a common use case
-        assert (
-            self.world_size == 2
-        ), f"Requires world size of 2 since some values are hard coded: {self.world_size}"
+        assert self.world_size == 2, (
+            f"Requires world size of 2 since some values are hard coded: {self.world_size}"
+        )
         torch.manual_seed(42)
         # Pre-run a linear forward (gemm and bias) and backward (gemm) to
         # allocate the cuBLAS workspaces before measuring the memory usage

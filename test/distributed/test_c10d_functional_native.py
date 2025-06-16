@@ -796,13 +796,11 @@ class CompileTest(TestCase):
             .check("buf6 = empty")
             # Expect in-place with inductor allocated buf
             .check(
-                "torch.ops._c10d_functional.all_reduce_coalesced_"
-                ".default([buf0, buf1]"
+                "torch.ops._c10d_functional.all_reduce_coalesced_.default([buf0, buf1]"
             )
             # Expect no in-place with graph input (buf5, buf6 are clones)
             .check(
-                "torch.ops._c10d_functional.all_reduce_coalesced_"
-                ".default([buf5, buf6]"
+                "torch.ops._c10d_functional.all_reduce_coalesced_.default([buf5, buf6]"
             )
             .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf1")

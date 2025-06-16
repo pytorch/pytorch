@@ -348,8 +348,7 @@ def check_fc(existing_schemas):
                 "\n\t".join(str(s) for s in matching_new_schemas),
             )
             log.warning(
-                "Refer to following reasons for failure "
-                "to find FC schema:\n[\n%s\n]",
+                "Refer to following reasons for failure to find FC schema:\n[\n%s\n]",
                 "\n\t".join(str(r) for r in possible_failure_reasons),
             )
             broken_ops.append(str(existing_schema))

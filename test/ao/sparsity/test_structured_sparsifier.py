@@ -1055,9 +1055,9 @@ class TestFPGMPruner(TestCase):
         mask1 = pruner.groups[0]["module"].parametrizations.weight[0].mask[-1]
         mask2 = pruner.groups[0]["module"].parametrizations.weight[0].mask[-2]
         # Check if either of the least-norm filters is not pruned
-        assert (
-            mask1.item() is not False or mask2.item() is not False
-        ), "Do not prune all least-norm filters"
+        assert mask1.item() is not False or mask2.item() is not False, (
+            "Do not prune all least-norm filters"
+        )
 
         # fusion step
         pruned_model = pruner.prune()

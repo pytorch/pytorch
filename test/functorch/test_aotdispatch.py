@@ -2568,8 +2568,9 @@ def forward(self, primals_1, primals_2):
         def fn(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
             return torch.ops._test._clone_create_graph(x, x1)
 
-        inp_x, inp_x1 = torch.randn(3, requires_grad=True), torch.randn(
-            3, requires_grad=True
+        inp_x, inp_x1 = (
+            torch.randn(3, requires_grad=True),
+            torch.randn(3, requires_grad=True),
         )
 
         ref_x, ref_x1 = inp_x.clone(), inp_x1.clone()
@@ -5283,11 +5284,12 @@ def forward(self, arg0_1):
 
         mod = TestMod(fn)
         inp = torch.randn(2)
-        with patch(
-            "functorch.compile.config.functionalize_rng_ops", True
-        ), self.assertRaisesRegex(
-            RuntimeError,
-            "Functionalized RNG is not currently supported in the aot_export",
+        with (
+            patch("functorch.compile.config.functionalize_rng_ops", True),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Functionalized RNG is not currently supported in the aot_export",
+            ),
         ):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=False)
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
