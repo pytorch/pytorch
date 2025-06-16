@@ -1363,6 +1363,7 @@ static void apply_syevj_batched(const Tensor& values, const Tensor& vectors, con
   auto values_data = values.data_ptr<value_t>();
   auto infos_data = infos.data_ptr<int>();
 
+#ifndef USE_CUSOLVER_64_BIT_XSYEV_BATCHED
   // syevj_params controls the numerical accuracy of syevj
   // by default the tolerance is set to machine accuracy
   // the maximum number of iteration of Jacobi method by default is 100
@@ -1406,6 +1407,54 @@ static void apply_syevj_batched(const Tensor& values, const Tensor& vectors, con
       syevj_params,
       batch_size);
   TORCH_CUSOLVER_CHECK(cusolverDnDestroySyevjInfo(syevj_params));
+
+#else
+
+  cusolverDnParams_t syev_params;
+  TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&syev_params));
+
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+  // get the optimal work size and allocate workspace tensor
+  size_t worksize_device;
+  size_t worksize_host;
+
+  at::cuda::solver::xsyevBatched_bufferSize<scalar_t>(
+      handle,
+      syev_params,
+      jobz,
+      uplo,
+      n,
+      vectors_data,
+      lda,
+      values_data,
+      &worksize_device,
+      &worksize_host,
+      batch_size);
+
+  // allocate workspace storage on device and host
+  auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
+  auto work_device_data = device_allocator.allocate(worksize_device);
+  auto& host_allocator = *at::getCPUAllocator();
+  auto work_host_data = host_allocator.allocate(worksize_host);
+  at::cuda::solver::xsyevBatched<scalar_t>(
+      handle,
+      syev_params,
+      jobz,
+      uplo,
+      n,
+      vectors_data,
+      lda,
+      values_data,
+      work_device_data.get(),
+      worksize_device,
+      work_host_data.get(),
+      worksize_host,
+      infos_data,
+      batch_size);
+  TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(syev_params));
+
+#endif // USE_CUSOLVER_64_BIT_XSYEV_BATCHED
 }
 
 static void linalg_eigh_cusolver_syevd(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
