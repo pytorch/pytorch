@@ -80,7 +80,11 @@ def split_build(cmd: str) -> None:
     # own cmake files that it needs to generate
     setup_py(
         [cmd],
-        extra_env={"BUILD_LIBTORCH_WHL": "0", "BUILD_PYTHON_ONLY": "1", "CMAKE_FRESH": "1"},
+        extra_env={
+            "BUILD_LIBTORCH_WHL": "0",
+            "BUILD_PYTHON_ONLY": "1",
+            "CMAKE_FRESH": "1",
+        },
     )
 
 
