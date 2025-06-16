@@ -19,7 +19,6 @@ enum Expandable_Segments_Handle_Type : int {
   FABRIC_HANDLE = 2,
 };
 
-
 // Environment config parser
 class C10_CUDA_API CUDAAllocatorConfig {
  public:
@@ -45,7 +44,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_expandable_segments_handle_type;
   }
 
-  static void set_expandable_segments_handle_type(Expandable_Segments_Handle_Type handle_type) {
+  static void set_expandable_segments_handle_type(
+      Expandable_Segments_Handle_Type handle_type) {
     instance().m_expandable_segments_handle_type = handle_type;
   }
 
@@ -149,7 +149,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<double> m_garbage_collection_threshold;
   std::atomic<size_t> m_pinned_num_register_threads;
   std::atomic<bool> m_expandable_segments;
-  std::atomic<Expandable_Segments_Handle_Type> m_expandable_segments_handle_type;
+  std::atomic<Expandable_Segments_Handle_Type>
+      m_expandable_segments_handle_type;
   std::atomic<bool> m_release_lock_on_cudamalloc;
   std::atomic<bool> m_pinned_use_cuda_host_register;
   std::atomic<bool> m_pinned_use_background_threads;
