@@ -1,6 +1,6 @@
+#include <ATen/native/mps/kernels/UpSample.h>
 #include <c10/metal/atomic.h>
 #include <metal_stdlib>
-#include <ATen/native/mps/kernels/UpSample.h>
 
 using namespace metal;
 using namespace c10::metal;

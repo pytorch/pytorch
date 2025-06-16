@@ -7,7 +7,7 @@ using namespace std;
 using namespace metal;
 #endif
 
-template<unsigned N=5>
+template <unsigned N = 5>
 struct TensorShapes {
   array<ulong, N> sizes;
   array<ulong, N> strides;
