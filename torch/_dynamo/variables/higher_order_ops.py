@@ -2827,8 +2827,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from torch._higher_order_ops.flex_attention import flex_attention
-        from . import TensorVariable
 
+        from . import TensorVariable
         from .builder import wrap_fx_proxy
 
         (
@@ -2856,7 +2856,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return pytree.tree_map(unwrap_proxy_to_faketensor, x.items)
             if isinstance(x, (TensorVariable, SymNodeVariable)):
                 x_proxy = x.as_proxy()
-                return x_proxy.node.meta['example_value']
+                return x_proxy.node.meta["example_value"]
             else:
                 return x.as_python_constant()
 
@@ -2873,8 +2873,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         all_fake_args = pytree.tree_map(unwrap_proxy_to_faketensor, vt_full_args)
 
         with torch._guards.TracingContext.try_get().fake_mode:
-            out_meta, lse_meta = flex_attention(*all_fake_args)
-        example_value = (out_meta, lse_meta)
+            example_value = flex_attention(*all_fake_args)
 
         proxied_args = [
             query,

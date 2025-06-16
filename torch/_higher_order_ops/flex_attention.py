@@ -416,8 +416,7 @@ def flex_attention_functionalize(
     if any(
         isinstance(a, torch.Tensor)
         and type(a) is not torch.Tensor
-        and not isinstance(a, FakeTensor)
-        and not isinstance(a, FunctionalTensor)
+        and not isinstance(a, (FakeTensor, FunctionalTensor))
         for a in flat_args
     ):
         return NotImplemented
@@ -562,7 +561,7 @@ def create_fw_bw_graph(
         with disable_proxy_modes_tracing():
 
             def _from_fun(
-                t: Union[Tensor, torch.SymInt, int]
+                t: Union[Tensor, torch.SymInt, int],
             ) -> Union[Tensor, torch.SymInt, int]:
                 if isinstance(t, torch.Tensor):
                     return torch.empty_strided(
@@ -850,7 +849,7 @@ def sdpa_dense_backward(
     actual_grad_value = _permute_strides(actual_grad_value, value.stride())
 
     def _maybe_new_buffer(
-        buffer: Union[torch.Tensor, torch.SymInt, int]
+        buffer: Union[torch.Tensor, torch.SymInt, int],
     ) -> Optional[Union[torch.Tensor, torch.SymInt, int]]:
         if isinstance(buffer, torch.Tensor):
             return (
@@ -1162,8 +1161,7 @@ def flex_attention_backward_functionalize(
     if any(
         isinstance(a, torch.Tensor)
         and type(a) is not torch.Tensor
-        and not isinstance(a, FakeTensor)
-        and not isinstance(a, FunctionalTensor)
+        and not isinstance(a, (FakeTensor, FunctionalTensor))
         for a in flat_args
     ):
         return NotImplemented
@@ -1271,9 +1269,11 @@ def flex_attention_backward_fake_tensor_mode(
         # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
         grad_score_mod_captured = tuple(
             [
-                torch.empty_like(buffer, memory_format=torch.contiguous_format)
-                if isinstance(buffer, torch.Tensor) and buffer.requires_grad
-                else None
+                (
+                    torch.empty_like(buffer, memory_format=torch.contiguous_format)
+                    if isinstance(buffer, torch.Tensor) and buffer.requires_grad
+                    else None
+                )
                 for buffer in score_mod_other_buffers
             ]
         )
