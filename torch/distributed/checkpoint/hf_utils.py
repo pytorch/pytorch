@@ -1,4 +1,9 @@
+import io
+import json
+
+import struct
 from dataclasses import dataclass
+from typing import Any, Optional
 
 import torch
 
@@ -46,3 +51,47 @@ class _HFStorageInfo:
 
     def __getstate__(self):
         return {k: v for k, v in self.__dict__.items() if v is not None}
+
+
+def _gen_file_name(index: int, largest_index: int, shard_index: Optional[int] = None) -> str:
+        if shard_index is not None:
+            return SHARDED_FILE_NAME.format(
+                shard_idx=f"{shard_index}".zfill(5), cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
+            ) + SUFFIX
+        else:
+            return (
+                FILE_NAME.format(
+                cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
+                )
+                + SUFFIX
+            )
+
+
+def _get_safetensors_file_metadata(file_bytes: io.IOBase) -> tuple[Any, int]:
+    # this uses the same logic that's done in HF code base
+    # https://github.com/2404589803/huggingface_hub/blob/main/src/huggingface_hub/hf_api.py#L5308
+    # and follows their documentation on how their files are serialized
+    # https://huggingface.co/docs/safetensors/index#format
+
+    num_bytes_for_header_len = 8
+    header_len_bytes = file_bytes.read(num_bytes_for_header_len)
+    header_len = struct.unpack("<Q", header_len_bytes)[0]
+    header_json = file_bytes.read(header_len)
+    metadata = json.loads(header_json)
+    return (metadata, header_len + num_bytes_for_header_len)
+
+
+def _get_dtype(dtype_str: str) -> torch.dtype:
+    try:
+        dtype = DTYPE_MAP[dtype_str]
+    except KeyError:
+        dtype = torch.get_default_dtype()
+
+    return dtype
+
+def _get_dcp_custom_metadata(metadata: Any) -> Optional[Any]:
+    if DEFAULT_EXTRA_METADATA_KEY in metadata:
+        custom_metadata = metadata[DEFAULT_EXTRA_METADATA_KEY]
+        if CUSTOM_METADATA_KEY in custom_metadata:
+            return json.loads(custom_metadata[CUSTOM_METADATA_KEY])
+    return None

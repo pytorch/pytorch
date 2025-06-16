@@ -113,14 +113,18 @@ def _(x):
 class AOTInductorTestsTemplate:
     def test_custom_op_add(self) -> None:
         class M(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.ops.aoti_custom_ops.custom_add(x, y)
+            def __init__(self, device):
+                super().__init__()
+                self.device = device
+                self.w = torch.randn(3, 3, device=device)
 
-        m = M().to(device=self.device)
-        args = (
-            torch.randn(3, 3, device=self.device),
-            torch.randn(3, 3, device=self.device),
-        )
+            def forward(self, x):
+                const = torch.tensor([1], device=self.device)
+                x = torch.ops.aoti_custom_ops.custom_add(x, const)
+                return torch.ops.aoti_custom_ops.custom_add(x, self.w)
+
+        m = M(self.device).to(device=self.device)
+        args = (torch.randn(3, 3, device=self.device),)
         self.check_model(m, args)
 
     def test_custom_op_add_output_path(self) -> None:
