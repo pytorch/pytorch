@@ -130,8 +130,8 @@ DeviceIndex current_device() {
   return cur_device;
 }
 
-void set_device(DeviceIndex device, const bool force) {
-  C10_CUDA_CHECK(c10::cuda::SetDevice(device, force));
+void set_device(DeviceIndex device) {
+  C10_CUDA_CHECK(c10::cuda::SetDevice(device));
 }
 
 void device_synchronize() {
@@ -231,11 +231,8 @@ cudaError_t GetDevice(DeviceIndex* device) {
   return err;
 }
 
-cudaError_t SetDevice(DeviceIndex device, const bool force) {
-  TORCH_CHECK(device >= 0, "device id must be non-negative!", device);
-  if (force) {
-    return cudaSetDevice(device);
-  }
+cudaError_t SetDevice(DeviceIndex device) {
+  TORCH_CHECK(device >= 0, "device id must be positive!", device);
   targetDeviceIndex = -1;
   int cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&cur_device));
@@ -312,11 +309,8 @@ cudaError_t GetDevice(DeviceIndex* device) {
   return err;
 }
 
-cudaError_t SetDevice(DeviceIndex device, const bool force) {
-  TORCH_CHECK(device >= 0, "device id must be non-negative!", device);
-  if (force) {
-    return cudaSetDevice(device);
-  }
+cudaError_t SetDevice(DeviceIndex device) {
+  TORCH_CHECK(device >= 0, "device id must be positive!", device);
   int cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&cur_device));
   if (device == cur_device) {
