@@ -101,7 +101,6 @@ class ComposabilityTest(MultiProcessTestCase):
     def device(self):
         return self.rank
 
-    @skipIfRocm()
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
