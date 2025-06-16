@@ -184,7 +184,7 @@ class ShardedTensorBase(torch.Tensor):
         return sharded_tensor_base
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         raise RuntimeError(
             f"A {cls.__name__} object is being used from c++ while calling {func.__module__}.{func.__name__} "
             "but the there is no custom __torch_dispatch__ implementation for it."
