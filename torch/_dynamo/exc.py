@@ -510,20 +510,18 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
     """
     GRAPH_BREAK_SITE_URL = "https://compile-graph-break-site.vercel.app/gb/"
 
-    try:
-        script_dir = Path(__file__).resolve().parent
-        repo_root = script_dir.parent.parent
-        registry_path = repo_root / "tools" / "dynamo" / "graph_break_registry.json"
+    script_dir = Path(__file__).resolve().parent
+    repo_root = script_dir.parent.parent
+    registry_path = repo_root / "tools" / "dynamo" / "graph_break_registry.json"
 
-        with registry_path.open() as f:
-            registry = json.load(f)
+    with registry_path.open() as f:
+        registry = json.load(f)
 
-        for k, v in registry.items():
-            if v and v[0].get("Gb_type") == gb_type:
-                return f"{GRAPH_BREAK_SITE_URL}{k}"
-    except Exception:
-        pass
-    return None
+    for k, v in registry.items():
+        if v and v[0].get("Gb_type") == gb_type:
+            return f"{GRAPH_BREAK_SITE_URL}{k}"
+
+    return "Was not able to find link for this graph break type"
 
 
 # TODO replace old unimplemented later
