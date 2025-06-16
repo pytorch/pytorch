@@ -116,7 +116,7 @@ During backpropagation, this can lead to problematic gradient expressions. For e
 
     x = torch.tensor([1., 1.], requires_grad=True)
     div = torch.tensor([0., 1.])
-    
+
     y = x / div          # Results in [inf, 1]
     mask = div != 0      # [False, True]
     loss = y[mask].sum()
@@ -133,7 +133,7 @@ To avoid this issue, there are several recommended approaches:
 
     x = torch.tensor([1., 1.], requires_grad=True)
     div = torch.tensor([0., 1.])
-    
+
     mask = div != 0
     safe = torch.zeros_like(x)
     safe[mask] = x[mask] / div[mask]
@@ -145,10 +145,10 @@ To avoid this issue, there are several recommended approaches:
 .. code::
 
     from torch.masked import as_masked_tensor
-    
+
     x = torch.tensor([1., 1.], requires_grad=True)
     div = torch.tensor([0., 1.])
-    
+
     y = x / div
     mask = div != 0
     loss = as_masked_tensor(y, mask).sum()
