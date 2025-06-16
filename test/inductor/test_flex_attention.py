@@ -3809,7 +3809,7 @@ class GraphModule(torch.nn.Module):
     def test_tensor_subclass_dispatch_order(self, device):
         """Test that tensor subclasses get proper dispatch priority over modes.
 
-        This test verifies the fix that allows tensor subclasses to run before
+        This test verifies the fix that allows tensor subclasses' pyimpl to run before
         FakeTensorMode/FunctionalTensorMode implementations, preventing issues
         where subclasses that error on as_strided would fail in flex_attention.
         """
@@ -3887,19 +3887,10 @@ class GraphModule(torch.nn.Module):
             score_mod_other_buffers=(),
             mask_mod_other_buffers=(),
         ):
-            out_elem, lse_elem = flex_attention(
-                query.elem,
-                key.elem,
-                value.elem,
-                score_mod=score_mod,
-                block_mask=block_mask,
-                scale=scale,
-                kernel_options=kernel_options,
-                score_mod_other_buffers=score_mod_other_buffers,
-                mask_mod_other_buffers=mask_mod_other_buffers,
+            b, h, s, _ = query.shape
+            return AsStridedErrorTensor(torch.rand_like(query)), AsStridedErrorTensor(
+                query.new_empty(b, h, s)
             )
-            # Wrap outputs back in AsStridedErrorTensor
-            return AsStridedErrorTensor(out_elem), AsStridedErrorTensor(lse_elem)
 
         # Test setup
         B, H, S, D = 2, 1, 128, 16
@@ -3924,8 +3915,8 @@ class GraphModule(torch.nn.Module):
         try:
             out, lse = compiled_fn(query, key, value, return_lse=True)
             # Verify we got valid output
-            self.assertIsInstance(out, torch.Tensor)
-            self.assertIsInstance(lse, torch.Tensor)
+            self.assertIsInstance(out, AsStridedErrorTensor)
+            self.assertIsInstance(lse, AsStridedErrorTensor)
             self.assertEqual(out.shape, (B, H, S, D))
             self.assertEqual(lse.shape, (B, H, S))
         except RuntimeError as e:
