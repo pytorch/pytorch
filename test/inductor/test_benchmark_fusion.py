@@ -7,7 +7,7 @@ import torch
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.test_operators import realize
-from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
+from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
@@ -283,7 +283,7 @@ if HAS_CUDA:
             self.assertEqual(res, res2, atol=1e-4, rtol=1.1)
             return code, code2
 
-        @fresh_inductor_cache()
+        @fresh_cache()
         @config.patch(max_autotune_gemm_backends="TRITON")
         def test_equivalent_template_code(self):
             code, code2 = self._equivalent_output_code_impl(256)
@@ -298,7 +298,7 @@ if HAS_CUDA:
                     out_code[0]
                 )
 
-        @fresh_inductor_cache()
+        @fresh_cache()
         @config.patch(max_autotune_gemm_backends="ATEN")
         def test_equivalent_extern_code(self):
             torch._dynamo.reset()

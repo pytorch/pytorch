@@ -12,7 +12,7 @@ from torch._inductor.codecache import cutlass_key
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch, get_cuda_version
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
 from torch._inductor.runtime.cache_dir_utils import cache_dir
-from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.utils import clear_on_fresh_cache
 
 
 log = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ def _generate_config_filename(request_key: str) -> str:
     return f"{CONFIG_PREFIX}_{request_key}.json"
 
 
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
 @functools.cache
 def maybe_fetch_ops() -> Optional[list[Any]]:
     """
