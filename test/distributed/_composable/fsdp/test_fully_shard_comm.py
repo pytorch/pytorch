@@ -313,13 +313,13 @@ class TestFullyShardCommunication(FSDPTest):
         reduce-scatters during forward and backward.
         """
         self.run_subtests(
-            {"reshard_after_forward": [True, False, 2]},
+            {"reshard_after_forward": [True, False, 2, None]},
             self._test_communication_count,
         )
 
     def _test_communication_count(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: Union[bool, int, None],
     ):
         torch.manual_seed(42)
         model_args = ModelArgs()
@@ -345,12 +345,16 @@ class TestFullyShardCommunication(FSDPTest):
         with CommDebugMode() as bwd_comm_mode:
             loss.sum().backward()
         bwd_comm_counts = bwd_comm_mode.get_comm_counts()
-        if reshard_after_forward is False:
-            self.assertEqual(len(bwd_comm_counts), 1)
-        else:
+        if reshard_after_forward is None:
             # 2 means two types of collectives (all-gather, reduce-scatter)
             self.assertEqual(len(bwd_comm_counts), 2)
+            # do not reshard root model
+            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_blocks)
+        elif reshard_after_forward:
+            self.assertEqual(len(bwd_comm_counts), 2)
             self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_blocks + 1)
+        else:
+            self.assertEqual(len(bwd_comm_counts), 1)
         self.assertEqual(
             bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_blocks + 1
         )
@@ -439,21 +443,28 @@ class TestFullyShardCommunication(FSDPTest):
         comm_count should perform same as test_fully_shard_communication_count.
         """
         self.run_subtests(
-            {"set_reshard_after_forward": [True, False], "recurse": [True, False]},
+            {
+                "set_reshard_after_forward": [True, False, None],
+                "recurse": [True, False],
+            },
             self._test_set_reshard_after_forward_by_communication_count,
         )
 
     def _test_set_reshard_after_forward_by_communication_count(
         self,
-        set_reshard_after_forward: bool,
+        set_reshard_after_forward: Union[bool, None],
         recurse: bool,
     ):
         torch.manual_seed(42)
         model_args = ModelArgs()
         model = Transformer(model_args).to(device_type)
-        fully_shard_fn = functools.partial(
-            fully_shard, reshard_after_forward=not set_reshard_after_forward
-        )
+        if set_reshard_after_forward is None:
+            fully_shard_fn = fully_shard
+        else:
+            fully_shard_fn = functools.partial(
+                fully_shard, reshard_after_forward=not set_reshard_after_forward
+            )
+
         num_blocks = 0
         for module in model.modules():
             if isinstance(module, TransformerBlock):
@@ -463,9 +474,10 @@ class TestFullyShardCommunication(FSDPTest):
         num_fsdp_modules = sum(
             isinstance(module, FSDPModule) for module in model.modules()
         )
-        model.set_reshard_after_forward(
-            reshard_after_forward=set_reshard_after_forward, recurse=recurse
-        )
+        if set_reshard_after_forward is not None:
+            model.set_reshard_after_forward(
+                reshard_after_forward=set_reshard_after_forward, recurse=recurse
+            )
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
@@ -479,7 +491,10 @@ class TestFullyShardCommunication(FSDPTest):
             loss.sum().backward()
         bwd_comm_counts = bwd_comm_mode.get_comm_counts()
         # If recurse is False, set_reshard_after_forward only affects the root module
-        if set_reshard_after_forward:
+        if set_reshard_after_forward is None:
+            self.assertEqual(len(bwd_comm_counts), 2)
+            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_blocks)
+        elif set_reshard_after_forward:
             self.assertEqual(len(bwd_comm_counts), 2)
             self.assertEqual(
                 bwd_comm_counts[c10d_ops._allgather_base_],
@@ -507,14 +522,14 @@ class TestFullyShardPrefetch(FSDPTest):
         # Activation checkpointing should not affect the expected FSDP events
         self.run_subtests(
             {
-                "reshard_after_forward": [True, False, 2],
+                "reshard_after_forward": [True, False, 2, None],
                 "checkpoint_impl": [None, "utils", "composable"],
             },
             self._test_backward_prefetch_forward_backward,
         )
         self.run_subtests(
             {
-                "reshard_after_forward": [True, False, 2],
+                "reshard_after_forward": [True, False, 2, None],
                 "checkpoint_impl": [None, "utils", "composable"],
             },
             self._test_backward_prefetch_multi_forward,
@@ -522,7 +537,9 @@ class TestFullyShardPrefetch(FSDPTest):
         self._test_backward_prefetch_unused_in_backward(True)
 
     def _test_backward_prefetch_forward_backward(
-        self, reshard_after_forward: Union[bool, int], checkpoint_impl: Optional[str]
+        self,
+        reshard_after_forward: Union[bool, int, None],
+        checkpoint_impl: Optional[str],
     ):
         n_layers = 3
         model, optim, inp = self._init_transformer(
@@ -550,19 +567,25 @@ class TestFullyShardPrefetch(FSDPTest):
                 self.assertEqual(events, expected_events)
                 events.clear()
                 loss.sum().backward()
-                expected_events = [
-                    ("unshard", "", TrainingState.PRE_BACKWARD),
-                    ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
-                    # Explicit backward prefetching moves the unshards early
-                    # by one module (note how swapping each unshard down one
-                    # event would give the natural event order)
-                    ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
-                    ("post_backward", "layers.2", TrainingState.POST_BACKWARD),
-                    ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
-                    ("post_backward", "layers.1", TrainingState.POST_BACKWARD),
-                    ("post_backward", "layers.0", TrainingState.POST_BACKWARD),
-                    ("post_backward", "", TrainingState.POST_BACKWARD),
-                ]
+                expected_events = []
+                # Root does not reshard after forward so there is no
+                # unshard event for it in backward
+                if reshard_after_forward is not None:
+                    expected_events.append(("unshard", "", TrainingState.PRE_BACKWARD))
+                expected_events.extend(
+                    [
+                        ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
+                        # Explicit backward prefetching moves the unshards early
+                        # by one module (note how swapping each unshard down one
+                        # event would give the natural event order)
+                        ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
+                        ("post_backward", "layers.2", TrainingState.POST_BACKWARD),
+                        ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
+                        ("post_backward", "layers.1", TrainingState.POST_BACKWARD),
+                        ("post_backward", "layers.0", TrainingState.POST_BACKWARD),
+                        ("post_backward", "", TrainingState.POST_BACKWARD),
+                    ]
+                )
                 if reshard_after_forward is False:
                     # No reshard after forward means no backward unshards
                     expected_events = [e for e in expected_events if e[0] != "unshard"]
@@ -596,31 +619,40 @@ class TestFullyShardPrefetch(FSDPTest):
                 ("unshard", "layers.0", TrainingState.FORWARD),
                 ("unshard", "layers.1", TrainingState.FORWARD),
                 ("unshard", "layers.2", TrainingState.FORWARD),
-                ("unshard", "", TrainingState.FORWARD),  # root
-                ("unshard", "layers.0", TrainingState.FORWARD),
-                ("unshard", "layers.1", TrainingState.FORWARD),
-                ("unshard", "layers.2", TrainingState.FORWARD),
             ]
+            if reshard_after_forward is not None:
+                expected_events.append(("unshard", "", TrainingState.FORWARD))
+            expected_events.extend(
+                [
+                    ("unshard", "layers.0", TrainingState.FORWARD),
+                    ("unshard", "layers.1", TrainingState.FORWARD),
+                    ("unshard", "layers.2", TrainingState.FORWARD),
+                ]
+            )
             if reshard_after_forward is False:
                 # No reshard after forward means no second set of unshards
                 expected_events = expected_events[:-4]
             self.assertEqual(events, expected_events)
             events.clear()
             (loss1 + loss2).sum().backward()
-            expected_events = [
-                # Same as the single forward/backward case except the root's
-                # post-backward does not run until the end of backward in the
-                # final callback (since the input not requiring gradient means
-                # that we do not have a tensor on which to hook for
-                # post-backward)
-                ("unshard", "", TrainingState.PRE_BACKWARD),
-                ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
-                ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
-                ("post_backward", "layers.2", TrainingState.POST_BACKWARD),
-                ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
-                ("post_backward", "layers.1", TrainingState.POST_BACKWARD),
-                ("post_backward", "layers.0", TrainingState.POST_BACKWARD),
-            ]
+            expected_events = []
+            if reshard_after_forward is not None:
+                expected_events.append(("unshard", "", TrainingState.PRE_BACKWARD))
+            expected_events.extend(
+                [
+                    # Same as the single forward/backward case except the root's
+                    # post-backward does not run until the end of backward in the
+                    # final callback (since the input not requiring gradient means
+                    # that we do not have a tensor on which to hook for
+                    # post-backward)
+                    ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
+                    ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
+                    ("post_backward", "layers.2", TrainingState.POST_BACKWARD),
+                    ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
+                    ("post_backward", "layers.1", TrainingState.POST_BACKWARD),
+                    ("post_backward", "layers.0", TrainingState.POST_BACKWARD),
+                ]
+            )
             if reshard_after_forward is False:
                 # No reshard after forward means no backward unshards
                 expected_events = [e for e in expected_events if e[0] != "unshard"]
@@ -641,7 +673,7 @@ class TestFullyShardPrefetch(FSDPTest):
             events.clear()
 
     def _test_backward_prefetch_unused_in_backward(
-        self, reshard_after_forward: Union[bool, int]
+        self, reshard_after_forward: Union[bool, int, None]
     ):
         """
         Test a model with a linear module then a split into two linear modules,
@@ -1074,7 +1106,7 @@ class TestFullyShardPrefetch(FSDPTest):
     def _init_transformer(
         self,
         n_layers: int,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: Union[bool, int, None],
         checkpoint_impl: Optional[str],
     ):
         model_args = ModelArgs(

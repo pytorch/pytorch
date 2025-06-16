@@ -1,5 +1,6 @@
 #include <c10/metal/indexing.h>
 #include <c10/metal/special_math.h>
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 using namespace metal;
 using namespace c10::metal;
@@ -28,6 +29,31 @@ struct exp_functor {
   }
 };
 
+struct expm1_functor {
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    if (::metal::fabs(x) < 1e-5f) {
+      return static_cast<T>(c10::metal::expm1f(static_cast<float>(x)));
+    } else {
+      return static_cast<T>(exp_(static_cast<float>(x)) - 1.0f);
+    }
+  }
+  template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
+  inline float operator()(const T x) {
+    return exp_(static_cast<float>(x)) - 1;
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    if (::precise::sqrt(dot(x, x)) < 1e-2) {
+      return T(
+          c10::metal::expm1f(x.x + ::precise::log(precise::cos(x.y))),
+          exp_(x.x) * precise::sin(x.y));
+    } else {
+      return exp_(x) - T(1.0f, 0.0f);
+    }
+  }
+};
+
 struct sigmoid_functor {
   template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
@@ -40,6 +66,17 @@ struct sigmoid_functor {
   template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
   inline float operator()(const T x) {
     return 1.0f / (1.0f + exp_(-static_cast<float>(x)));
+  }
+};
+
+struct abs_functor {
+  template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return static_cast<T>(precise::abs(x));
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return T(::precise::sqrt(dot(x, x)), 0);
   }
 };
 
@@ -101,6 +138,50 @@ struct tan_functor {
   }
 };
 
+struct sinh_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::sinh(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::sinh(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // sinh(x) = (e^x - e^(-x)) / 2
+    auto exp_1 =
+        T(precise::exp(x.x) * precise::cos(x.y),
+          precise::exp(x.x) * precise::sin(x.y));
+    auto exp_2 =
+        T(precise::exp(-x.x) * precise::cos(-x.y),
+          precise::exp(-x.x) * precise::sin(-x.y));
+    return div(exp_1 - exp_2, T(2, 0));
+  }
+};
+
+struct cosh_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::cosh(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::cosh(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // cosh(x+iy)=(e^x + e^(-x)) / 2
+    auto exp_1 =
+        T(precise::exp(x.x) * precise::cos(x.y),
+          precise::exp(x.x) * precise::sin(x.y));
+    auto exp_2 =
+        T(precise::exp(-x.x) * precise::cos(-x.y),
+          precise::exp(-x.x) * precise::sin(-x.y));
+    return div(exp_1 + exp_2, T(2, 0));
+  }
+};
+
 struct tanh_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -116,6 +197,119 @@ struct tanh_functor {
     auto tanh_x = precise::tanh(x.x);
     auto tan_y = precise::tan(x.y);
     return div(T(tanh_x, tan_y), T(1.0, tanh_x * tan_y));
+  }
+};
+
+struct asin_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::asin(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::asin(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // asin(z) = atan(z/sqrt(1-z^2)) if z != ±1
+    if (x.x == 1 && x.y == 0)
+      return T(M_PI_F / 2, 0);
+    else if (x.x == -1 && x.y == 0)
+      return T(M_PI_F / -2, 0);
+    auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
+    // calculate sqrt
+    // modulus
+    auto m = precise::sqrt(sqrt_val.x * sqrt_val.x + sqrt_val.y * sqrt_val.y);
+    // real part: sqrt((m + a)/2)
+    auto real_part = precise::sqrt((m + sqrt_val.x) * .5);
+    // imaginary part: sign(b) * sqrt((m - a)/2)
+    auto imag_part = copysign(
+        static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
+        sqrt_val.y);
+    auto atan_val = div(x, T(real_part, imag_part));
+    // calculate atan (see atan_functor)
+    auto coef = div(T(1, 0), T(0, 2));
+    auto log_arg =
+        div(T(-1 * atan_val.x, 1 - atan_val.y), T(atan_val.x, 1 + atan_val.y));
+    // Calculate log using method from log_functor
+    auto magnitude =
+        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (log_arg.x == 0 && log_arg.y == 0)
+        ? 0
+        : ::precise::atan2(log_arg.y, log_arg.x);
+    // return coefficient * log value
+    return c10::metal::mul(coef, T(real, imag));
+  }
+};
+
+struct acos_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::acos(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::acos(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // acos(z) = pi/2 - asin(z) if z != ±1
+    // calculate asin
+    if (x.x == 1 && x.y == 0)
+      return T(M_PI_F, 0);
+    else if (x.x == -1 && x.y == 0)
+      return T(-M_PI_F, 0);
+    auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
+    // calculate sqrt
+    // modulus
+    auto m = precise::sqrt(sqrt_val.x * sqrt_val.x + sqrt_val.y * sqrt_val.y);
+    // real part: sqrt((m + a)/2)
+    auto real_part = precise::sqrt((m + sqrt_val.x) * .5);
+    // imaginary part: sign(b) * sqrt((m - a)/2)
+    auto imag_part = copysign(
+        static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
+        sqrt_val.y);
+    auto atan_val = div(x, T(real_part, imag_part));
+    // calculate atan (see atan_functor)
+    auto coef = div(T(1, 0), T(0, 2));
+    auto log_arg =
+        div(T(-1 * atan_val.x, 1 - atan_val.y), T(atan_val.x, 1 + atan_val.y));
+    // Calculate log using method from log_functor
+    auto magnitude =
+        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (log_arg.x == 0 && log_arg.y == 0)
+        ? 0
+        : ::precise::atan2(log_arg.y, log_arg.x);
+    // return coefficient * log value
+    return T(M_PI_F / 2, 0) - c10::metal::mul(coef, T(real, imag));
+  }
+};
+
+struct atan_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::atan(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::atan(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // atan(z) = (1/2i)ln((i-z)/(i+z))
+    auto coef = div(T(1, 0), T(0, 2));
+    auto log_arg = div(T(-1 * x.x, 1 - x.y), T(x.x, 1 + x.y));
+    // Calculate log using method from log_functor
+    auto magnitude =
+        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (log_arg.x == 0 && log_arg.y == 0)
+        ? 0
+        : ::precise::atan2(log_arg.y, log_arg.x);
+    // return coefficient * log value
+    return c10::metal::mul(coef, T(real, imag));
   }
 };
 
@@ -296,6 +490,21 @@ struct bitwise_not_functor {
   }
 };
 
+template <typename T>
+float erfc(T x) {
+  return 1.0 - erf(x);
+}
+
+struct round_decimals_functor {
+  template <typename T>
+  inline T operator()(const T x, const long ndigits) {
+    return static_cast<T>(
+        rint(exp10(float(ndigits)) * x) * exp10(float(-ndigits)));
+  }
+};
+
+DEFINE_UNARY_FLOATING_FUNCTOR(erf);
+DEFINE_UNARY_FLOATING_FUNCTOR(erfc);
 DEFINE_UNARY_FLOATING_FUNCTOR(erfinv);
 DEFINE_UNARY_FLOATING_FUNCTOR(sinc);
 
@@ -314,9 +523,20 @@ REGISTER_UNARY_OP(bitwise_not, char, char);
 REGISTER_UNARY_OP(bitwise_not, uchar, uchar);
 REGISTER_UNARY_OP(bitwise_not, bool, bool);
 
+REGISTER_UNARY_OP(abs, int, int);
+REGISTER_UNARY_OP(abs, long, long);
+REGISTER_UNARY_OP(abs, short, short);
+REGISTER_UNARY_OP(abs, char, char);
+REGISTER_UNARY_OP(abs, uchar, uchar);
+REGISTER_UNARY_OP(abs, float, float);
+REGISTER_UNARY_OP(abs, half, half);
+
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
+  REGISTER_UNARY_OP(erf, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(erfc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
   REGISTER_UNARY_OP(exp, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(expm1, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(sigmoid, DTYPE1, DTYPE0);      \
   REGISTER_UNARY_OP(exp2, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(log, DTYPE1, DTYPE0);          \
@@ -326,14 +546,20 @@ REGISTER_UNARY_OP(bitwise_not, bool, bool);
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(rsqrt, DTYPE1, DTYPE0);        \
+  REGISTER_UNARY_OP(sinh, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(cosh, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(tanh, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sin, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(cos, DTYPE1, DTYPE0);          \
-  REGISTER_UNARY_OP(tan, DTYPE1, DTYPE0)
+  REGISTER_UNARY_OP(tan, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(asin, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(acos, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(atan, DTYPE1, DTYPE0)
 
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
 REGISTER_UNARY_OP(neg, bfloat, bfloat);
+REGISTER_UNARY_OP(abs, bfloat, bfloat);
 #endif
 INSTANTIATE_UNARY_KERNELS2(half, half);
 INSTANTIATE_UNARY_KERNELS2(float, float);
@@ -347,12 +573,16 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
 #define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)     \
   REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);     \
+  REGISTER_UNARY_OP(expm1, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(sigmoid, DTYPE##2, DTYPE##2); \
+  REGISTER_UNARY_OP(abs, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(log, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(log1p, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(log2, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(sinh, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(cosh, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(rsqrt, DTYPE##2, DTYPE##2);   \
@@ -360,61 +590,16 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2)
+  REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2);     \
+  REGISTER_UNARY_OP(asin, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(acos, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(atan, DTYPE##2, DTYPE##2)
 
 INSTANTIATE_UNARY_KERNELS_VEC2(half);
 INSTANTIATE_UNARY_KERNELS_VEC2(float);
 
-template <typename T>
-kernel void round_decimals_dense(
-    device T* output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant long& ndigits [[buffer(2)]],
-    uint index [[thread_position_in_grid]]) {
-  output[index] = static_cast<T>(
-      rint(exp10(float(ndigits)) * input[index]) * exp10(float(-ndigits)));
-}
-
-template <typename T>
-kernel void round_decimals_strided(
-    device T* output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant long* sizes [[buffer(2)]],
-    constant long* input_strides [[buffer(3)]],
-    constant long* output_strides [[buffer(4)]],
-    constant uint& ndim [[buffer(5)]],
-    constant long& ndigits [[buffer(6)]],
-    uint index [[thread_position_in_grid]]) {
-  int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
-  output[output_offs] = static_cast<T>(
-      rint(exp10(float(ndigits)) * input[input_offs]) * exp10(float(-ndigits)));
-}
-
-#define INSTANTIATE_ROUND_DECIMALS(DTYPE)                                    \
-  template                                                                   \
-      [[host_name("round_decimals_dense_" #DTYPE "_" #DTYPE)]] kernel void   \
-      round_decimals_dense(                                                  \
-          device DTYPE* output [[buffer(0)]],                                \
-          constant DTYPE* input [[buffer(1)]],                               \
-          constant long& ndigits [[buffer(2)]],                              \
-          uint index [[thread_position_in_grid]]);                           \
-  template                                                                   \
-      [[host_name("round_decimals_strided_" #DTYPE "_" #DTYPE)]] kernel void \
-      round_decimals_strided(                                                \
-          device DTYPE* output [[buffer(0)]],                                \
-          constant DTYPE* input [[buffer(1)]],                               \
-          constant long* sizes,                                              \
-          constant long* input_strides,                                      \
-          constant long* output_strides,                                     \
-          constant uint& ndim,                                               \
-          constant long& ndigits [[buffer(6)]],                              \
-          uint index)
-
-INSTANTIATE_ROUND_DECIMALS(float);
-INSTANTIATE_ROUND_DECIMALS(half);
+REGISTER_UNARY_ALPHA_OP(round_decimals, float, long, float);
+REGISTER_UNARY_ALPHA_OP(round_decimals, half, long, half);
 #if __METAL_VERSION__ >= 310
-INSTANTIATE_ROUND_DECIMALS(bfloat);
+REGISTER_UNARY_ALPHA_OP(round_decimals, bfloat, long, bfloat);
 #endif
