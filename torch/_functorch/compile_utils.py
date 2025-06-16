@@ -172,19 +172,19 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
 
 
 def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
-    def _is_getitem(node: fx.Node) -> bool:
-        return node.target is operator.getitem
 
     # Pre-create a list of nodes to iterate over, as modifying the node order
     # during the loop can lead to infinite loops if not handled properly.
-    nodes = list(gm.graph.nodes)
+    getitem_nodes = list(
+        gm.graph.find_nodes(op="call_function", target=operator.getitem)
+    )
 
-    # loop through all nodes in the graph and raise getitems to the parent node
-    for node in nodes:
-        if any(_is_getitem(user) for user in node.users):
-            for user in reversed(node.users):
-                assert _is_getitem(user)
-                node.append(user)
+    # loop through getitem nodes in the graph and raise them to the parent node
+    # in reverse order to perserve their original relative order
+    for node in reversed(getitem_nodes):
+        assert len(node.all_input_nodes) == 1
+        parent = node.all_input_nodes[0]
+        parent.append(node)
 
     gm.recompile()
     return gm
