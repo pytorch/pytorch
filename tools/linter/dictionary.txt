@@ -1,3 +1,6 @@
 coo
+hsa
+nd
+optins
 Raison
 thirdparty
