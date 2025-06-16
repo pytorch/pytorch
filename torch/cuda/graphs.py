@@ -143,6 +143,13 @@ class CUDAGraph(torch._C._CUDAGraph):
         return super().debug_dump(debug_path)
 
     def raw_cuda_graph(self):
+        r"""Returns the underlying cudaGraph_t. `keep_graph` must be True.
+        See the following for APIs for how to manipulate this object.
+
+        https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html
+
+        https://nvidia.github.io/cuda-python/cuda-bindings/latest/module/runtime.html#graph-management
+        """
         return super().raw_cuda_graph()
 
 
