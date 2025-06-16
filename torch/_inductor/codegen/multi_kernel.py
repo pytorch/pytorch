@@ -147,7 +147,7 @@ class MultiKernel:
     )
     ```
 
-    Here is an concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
+    Here is a concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
     """
 
     def __init__(self, kernels):
