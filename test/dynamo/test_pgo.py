@@ -12,7 +12,7 @@ import torch._inductor.mock_cache as mock_cache
 import torch.compiler.config
 import torch.nested
 from torch._dynamo.testing import CompileCounter
-from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
+from torch._inductor.utils import clear_caches, fresh_cache
 
 
 class PgoTest(torch._dynamo.test_case.TestCase):
@@ -24,7 +24,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             torch._dynamo.config.patch(automatic_dynamic_local_pgo=True)
         )
         if os.environ.get("INDUCTOR_TEST_DISABLE_FRESH_CACHE") != "1":
-            self._test_stack.enter_context(fresh_inductor_cache())
+            self._test_stack.enter_context(fresh_cache())
         mock_cache.PatchCaches.setUp()
 
     def tearDown(self):
@@ -35,7 +35,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
 
     def reset(self):
         torch._dynamo.reset()
-        clear_inductor_caches()
+        clear_caches()
 
     def test_basic(self):
         cnts = CompileCounter()
@@ -230,7 +230,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
 
         torch._dynamo.reset()
-        clear_inductor_caches()
+        clear_caches()
         cnts.clear()
 
         with torch.compiler.config.patch(job_id="foo"):
