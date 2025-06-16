@@ -450,10 +450,13 @@ class ExitDeviceContextManagerLine(WrapperLine):
 class ExternKernelAllocLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.ExternKernelAlloc
+    args: Optional[list[Any]] = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         node = self.node
-        args = [*node.codegen_args(), *node.codegen_kwargs()]
+        args = (
+            self.args if self.args else [*node.codegen_args(), *node.codegen_kwargs()]
+        )
         self.wrapper._generate_extern_kernel_alloc_helper(self.node, args)
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -915,7 +918,7 @@ class PythonWrapperCodegen(CodeGen):
             self.write_get_raw_stream
         )
 
-        @functools.lru_cache(None)
+        @functools.cache
         def add_import_once(line: str) -> None:
             self.imports.writeline(line)
             if config.triton.autotune_at_compile_time:
@@ -1302,8 +1305,10 @@ class PythonWrapperCodegen(CodeGen):
     def generate_end(self, result: IndentedBuffer) -> None:
         return
 
-    def generate_fallback_kernel(self, node: ir.FallbackKernel):
-        self.writeline(ExternKernelAllocLine(self, node))
+    def generate_fallback_kernel(
+        self, node: ir.FallbackKernel, args: Optional[list[Any]] = None
+    ):
+        self.writeline(ExternKernelAllocLine(self, node, args))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
@@ -1362,7 +1367,7 @@ class PythonWrapperCodegen(CodeGen):
         with debug_printer_manager:
             self.writeline(f"{kernel}({', '.join(args)})")
 
-    def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
+    def _generate_tma_descriptor_call_experimental(self, desc, apply_size_hints=False):
         dims = desc.dims
         block_dims = desc.block_dims
         if apply_size_hints:
@@ -1383,6 +1388,28 @@ class PythonWrapperCodegen(CodeGen):
         args = f"{ptr}, {dims}, {block_dims}, {element_size}"
         call = f"{fn}({args})"
         return call
+
+    def _generate_tma_descriptor_call_stable(self, desc, apply_size_hints=False):
+        block_shape = desc.block_shape
+        if apply_size_hints:
+            block_shape = tuple(
+                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_shape
+            )
+
+        prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
+        fn = f"{prefix}.from_tensor"
+        args = f"{desc.tensor.codegen_reference()}, {block_shape}"
+        call = f"{fn}({args})"
+        return call
+
+    def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
+        if isinstance(desc, ir.TMADescriptorExperimental):
+            return self._generate_tma_descriptor_call_experimental(
+                desc, apply_size_hints
+            )
+        else:
+            assert isinstance(desc, ir.TMADescriptorStable)
+            return self._generate_tma_descriptor_call_stable(desc, apply_size_hints)
 
     def generate_tma_descriptor(self, desc):
         call = self._generate_tma_descriptor_call(desc)
@@ -1625,12 +1652,12 @@ class PythonWrapperCodegen(CodeGen):
     ):
         code = self.prefix
 
-        @functools.lru_cache(None)
+        @functools.cache
         def sizeof(name):
             code.writeline(f"{name}_size = {name}.size()")
             return f"{name}_size"
 
-        @functools.lru_cache(None)
+        @functools.cache
         def strideof(name):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
@@ -2052,10 +2079,18 @@ class PythonWrapperCodegen(CodeGen):
                 add_arg(idx, ConstexprArg(name=key), equals_none=True)
             else:
                 if isinstance(arg, ir.TMADescriptor):
+                    api_type, block_shape, dtype = (
+                        ("stable", arg.block_shape, arg.tensor.get_dtype())
+                        if isinstance(arg, ir.TMADescriptorStable)
+                        else ("experimental", None, None)
+                    )
                     add_arg(
                         idx,
                         TMADescriptorArg(
                             name=key,
+                            api_type=api_type,
+                            block_shape=block_shape,
+                            dtype=dtype,
                         ),
                     )
                 elif isinstance(arg, ir.Buffer):
@@ -2362,7 +2397,7 @@ class PythonWrapperCodegen(CodeGen):
         if isinstance(arg_type, torch_dtype):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
-                buf_name = raw_arg.tensor.get_name()
+                buf_name = raw_arg.get_tensor().get_name()
                 buf = self.args_to_buffers[arg]
             elif self.args_to_buffers.get(arg):
                 buf_name = arg

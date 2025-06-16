@@ -2696,7 +2696,7 @@ class Scheduler:
         choice finalized through fusion. In the case of an extern choice, this will result
         in replacing the SchedulerNode.
 
-        If a MultiTemplateBuffer did not have any fusion opportunities, finalizing a choie
+        If a MultiTemplateBuffer did not have any fusion opportunities, finalizing a choice
         will force completion of compilation and benchmarking.
         """
 
@@ -3229,7 +3229,11 @@ class Scheduler:
 
         def check_all_pairs(nodes: list[BaseSchedulerNode]) -> None:
             for node1_index, node1 in enumerate(nodes):
-                for node2 in nodes[node1_index + 1 :]:
+                for node2 in nodes[
+                    node1_index + 1 : node1_index
+                    + 1
+                    + config.max_fusion_buffer_group_pairwise_attempts
+                ]:
                     key = (node1, node2)
                     if key in seen:
                         continue
