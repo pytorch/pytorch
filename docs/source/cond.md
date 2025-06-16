@@ -1,41 +1,39 @@
-.. _cond:
+(cond)=
 
-Control Flow - Cond
-====================
+# Control Flow - Cond
 
 `torch.cond` is a structured control flow operator. It can be used to specify if-else like control flow
 and can logically be seen as implemented as follows.
 
-.. code-block:: python
-
-    def cond(
-        pred: Union[bool, torch.Tensor],
-        true_fn: Callable,
-        false_fn: Callable,
-        operands: Tuple[torch.Tensor]
-    ):
-        if pred:
-            return true_fn(*operands)
-        else:
-            return false_fn(*operands)
+```python
+def cond(
+    pred: Union[bool, torch.Tensor],
+    true_fn: Callable,
+    false_fn: Callable,
+    operands: Tuple[torch.Tensor]
+):
+    if pred:
+        return true_fn(*operands)
+    else:
+        return false_fn(*operands)
+```
 
 Its unique power lies in its ability of expressing **data-dependent control flow**: it lowers to a conditional
 operator (`torch.ops.higher_order.cond`), which preserves predicate, true function and false functions.
 This unlocks great flexibility in writing and deploying models that change model architecture based on
 the **value** or **shape** of inputs or intermediate outputs of tensor operations.
 
-.. warning::
-    `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types and
-    doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
-    Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
+```{warning}
+`torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types and
+doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
+Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
+```
 
-Examples
-~~~~~~~~
+## Examples
 
 Below is an example that uses cond to branch based on input shape:
 
-.. code-block:: python
-
+```python
     import torch
 
     def true_fn(x: torch.Tensor):
@@ -62,29 +60,29 @@ Below is an example that uses cond to branch based on input shape:
             return torch.cond(x.shape[0] > 4, true_fn, false_fn, (x,))
 
     dyn_shape_mod = DynamicShapeCondPredicate()
+```
 
 We can eagerly run the model and expect the results vary based on input shape:
 
-.. code-block:: python
-
+```python
     inp = torch.randn(3)
     inp2 = torch.randn(5)
     assert torch.equal(dyn_shape_mod(inp), false_fn(inp))
     assert torch.equal(dyn_shape_mod(inp2), true_fn(inp2))
+```
 
 We can export the model for further transformations and deployment:
 
-.. code-block:: python
-
+```python
     inp = torch.randn(4, 3)
     dim_batch = torch.export.Dim("batch", min=2)
     ep = torch.export.export(DynamicShapeCondPredicate(), (inp,), {}, dynamic_shapes={"x": {0: dim_batch}})
     print(ep)
+```
 
 This gives us an exported program as shown below:
 
-.. code-block::
-
+```
     class GraphModule(torch.nn.Module):
         def forward(self, arg0_1: f32[s0, 3]):
             sym_size: Sym(s0) = torch.ops.aten.sym_size.int(arg0_1, 0)
@@ -105,14 +103,14 @@ This gives us an exported program as shown below:
             def forward(self, arg0_1: f32[s0, 3]):
                 sin: f32[s0, 3] = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
                 return sin
+```
 
 Notice that `torch.cond` is lowered to `torch.ops.higher_order.cond`, its predicate becomes a Symbolic expression over the shape of input,
 and branch functions becomes two sub-graph attributes of the top level graph module.
 
 Here is another example that showcases how to express a data-dependent control flow:
 
-.. code-block:: python
-
+```python
     class DataDependentCondPredicate(torch.nn.Module):
         """
         A basic usage of cond based on data dependent predicate.
@@ -122,11 +120,11 @@ Here is another example that showcases how to express a data-dependent control f
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             return torch.cond(x.sum() > 4.0, true_fn, false_fn, (x,))
+```
 
 The exported program we get after export:
 
-.. code-block::
-
+```
     class GraphModule(torch.nn.Module):
         def forward(self, arg0_1: f32[s0, 3]):
             sum_1: f32[] = torch.ops.aten.sum.default(arg0_1)
@@ -148,10 +146,9 @@ The exported program we get after export:
             def forward(self, arg0_1: f32[s0, 3]):
                 sin: f32[s0, 3] = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
                 return sin
+```
 
-
-Invariants of torch.ops.higher_order.cond
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## Invariants of torch.ops.higher_order.cond
 
 There are several useful invariants for `torch.ops.higher_order.cond`:
 
@@ -170,7 +167,8 @@ There are several useful invariants for `torch.ops.higher_order.cond`:
 
 - Nesting of `torch.cond` in user program becomes nested graph modules.
 
+## API Reference
 
-API Reference
--------------
+```{eval-rst}
 .. autofunction:: torch._higher_order_ops.cond.cond
+```
