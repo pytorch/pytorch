@@ -27,6 +27,12 @@ cmake --version
 echo "Environment variables:"
 env
 
+# The sccache wrapped version of nvcc gets put in /opt/cache/lib in docker since
+# there are some issues if it is always wrapped, so we need to add it to PATH
+# during CI builds.
+# https://github.com/pytorch/pytorch/blob/0b6c0898e6c352c8ea93daec854e704b41485375/.ci/docker/common/install_cache.sh#L97
+export PATH="/opt/cache/lib:$PATH"
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
   export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
