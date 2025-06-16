@@ -211,10 +211,10 @@ inline device T& ref_at_offs(device void* ptr, long offs) {
 // strided
 // - binary_dense_cast - inputs are dense, but of different dtypes
 // - binary_strided_cast - inputs or output are strided and of different dtypes
-// TODO: Looke like binary_dense_scalar are frequently used specialization that
-// should be added Pluse 4 variants of the same, but that accept optional
+// TODO: Look like binary_dense_scalar are frequently used specialization that
+// should be added Pulse 4 variants of the same, but that accept optional
 // `alpha` parameter
-//   (currnetly only used add/sub/lerp.Scalar)
+//   (currently only used add/sub/lerp.Scalar)
 // Note about accuracy (for more info see
 // https://github.com/pytorch/pytorch/issues/152736) Sometimes when kernel is
 // invoked to produce `half` output, but one of the arguments is float arguments
