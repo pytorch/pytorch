@@ -637,7 +637,7 @@ class PGOCacheArtifact(CacheArtifact):
         update the key to use the new MAST job's name and version.
         """
         if not original_key.startswith("mast:"):
-            # if original_key is overriden, then dont change it
+            # if original_key is overridden, then dont change it
             return original_key
         if (new_key := get_cache_key()) is not None:
             return new_key
@@ -663,7 +663,7 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
         trace_structured_artifact(
             f"get_{ty}_code_state",
             "string",
-            lambda: render_code_state(_CODE_STATE),
+            lambda: render_code_state(_CODE_STATE),  # type: ignore[arg-type]
         )
         set_feature_use("pgo", True)
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)

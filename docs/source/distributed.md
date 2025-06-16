@@ -1129,6 +1129,10 @@ If you are running single node training, it may be convenient to interactively b
 ```
 
 ```{eval-rst}
+.. py:module:: torch.distributed.checkpoint.hf_storage
+```
+
+```{eval-rst}
 .. py:module:: torch.distributed.checkpoint.metadata
 ```
 

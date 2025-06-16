@@ -1,8 +1,14 @@
-torch.cuda
-===================================
-.. automodule:: torch.cuda
-.. currentmodule:: torch.cuda
+# torch.cuda
 
+```{eval-rst}
+.. automodule:: torch.cuda
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -42,9 +48,11 @@ torch.cuda
     clock_rate
     AcceleratorError
     OutOfMemoryError
+```
 
-Random Number Generator
--------------------------
+## Random Number Generator
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -59,10 +67,11 @@ Random Number Generator
     seed_all
     initial_seed
 
+```
 
-Communication collectives
--------------------------
+## Communication collectives
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -73,9 +82,11 @@ Communication collectives
     comm.reduce_add_coalesced
     comm.scatter
     comm.gather
+```
 
-Streams and events
-------------------
+## Streams and events
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -83,9 +94,11 @@ Streams and events
     Stream
     ExternalStream
     Event
+```
 
-Graphs (beta)
--------------
+## Graphs (beta)
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -95,13 +108,21 @@ Graphs (beta)
     CUDAGraph
     graph
     make_graphed_callables
+```
 
-.. _cuda-memory-management-api:
+(cuda-memory-management-api)=
+
+```{eval-rst}
 .. automodule:: torch.cuda.memory
-.. currentmodule:: torch.cuda.memory
+```
 
-Memory management
------------------
+```{eval-rst}
+.. currentmodule:: torch.cuda.memory
+```
+
+## Memory management
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -135,23 +156,31 @@ Memory management
      CUDAPluggableAllocator
      change_current_allocator
      MemPool
+```
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     caching_allocator_enable
+```
 
+```{eval-rst}
 .. currentmodule:: torch.cuda
+```
+
+```{eval-rst}
 .. autoclass:: torch.cuda.use_mem_pool
+```
 
-.. FIXME The following doesn't seem to exist. Is it supposed to?
-   https://github.com/pytorch/pytorch/issues/27785
-   .. autofunction:: reset_max_memory_reserved
+% FIXME The following doesn't seem to exist. Is it supposed to?
+% https://github.com/pytorch/pytorch/issues/27785
+% .. autofunction:: reset_max_memory_reserved
 
-NVIDIA Tools Extension (NVTX)
------------------------------
+## NVIDIA Tools Extension (NVTX)
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -160,18 +189,20 @@ NVIDIA Tools Extension (NVTX)
     nvtx.range_push
     nvtx.range_pop
     nvtx.range
+```
 
-Jiterator (beta)
------------------------------
+## Jiterator (beta)
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     jiterator._create_jit_fn
     jiterator._create_multi_output_jit_fn
+```
 
-TunableOp
----------
+## TunableOp
 
 Some operations could be implemented using more than one library or more than
 one technique. For example, a GEMM could be implemented for CUDA or ROCm using
@@ -182,41 +213,43 @@ implemented using multiple strategies as Tunable Operators. At runtime, all
 strategies are profiled and the fastest is selected for all subsequent
 operations.
 
-See the :doc:`documentation <cuda.tunable>` for information on how to use it.
+See the {doc}`documentation <cuda.tunable>` for information on how to use it.
 
-.. toctree::
-    :hidden:
+```{toctree}
+:hidden: true
 
-    cuda.tunable
+cuda.tunable
+```
 
-
-Stream Sanitizer (prototype)
-----------------------------
+## Stream Sanitizer (prototype)
 
 CUDA Sanitizer is a prototype tool for detecting synchronization errors between streams in PyTorch.
-See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
+See the {doc}`documentation <cuda._sanitizer>` for information on how to use it.
 
-.. toctree::
-    :hidden:
+```{toctree}
+:hidden: true
 
-    cuda._sanitizer
+cuda._sanitizer
+```
 
+## GPUDirect Storage (prototype)
 
-GPUDirect Storage (prototype)
------------------------------
-
-The APIs in ``torch.cuda.gds`` provide thin wrappers around certain cuFile APIs that allow
+The APIs in `torch.cuda.gds` provide thin wrappers around certain cuFile APIs that allow
 direct memory access transfers between GPU memory and storage, avoiding a bounce buffer in the CPU. See the
-`cufile api documentation <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api>`_
+[cufile api documentation](https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api)
 for more details.
 
 These APIs can be used in versions greater than or equal to CUDA 12.6. In order to use these APIs, one must
 ensure that their system is appropriately configured to use GPUDirect Storage per the
-`GPUDirect Storage documentation <https://docs.nvidia.com/gpudirect-storage/troubleshooting-guide/contents.html>`_.
+[GPUDirect Storage documentation](https://docs.nvidia.com/gpudirect-storage/troubleshooting-guide/contents.html).
 
-See the docs for :class:`~torch.cuda.gds.GdsFile` for an example of how to use these.
+See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use these.
 
+```{eval-rst}
 .. currentmodule:: torch.cuda.gds
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -225,17 +258,52 @@ See the docs for :class:`~torch.cuda.gds.GdsFile` for an example of how to use t
     gds_deregister_buffer
     GdsFile
 
+```
 
-.. This module needs to be documented. Adding here in the meantime
-.. for tracking purposes
+% This module needs to be documented. Adding here in the meantime
+
+% for tracking purposes
+
+```{eval-rst}
 .. py:module:: torch.cuda.comm
+```
+
+```{eval-rst}
 .. py:module:: torch.cuda.error
+```
+
+```{eval-rst}
 .. py:module:: torch.cuda.gds
+```
+
+```{eval-rst}
 .. py:module:: torch.cuda.graphs
+```
+
+```{eval-rst}
 .. py:module:: torch.cuda.jiterator
+```
+
+```{eval-rst}
 .. py:module:: torch.cuda.nccl
+```
+
+```{eval-rst}
 .. py:module:: torch.cuda.nvtx
+```
+
+```{eval-rst}
 .. py:module:: torch.cuda.profiler
+```
+
+```{eval-rst}
 .. py:module:: torch.cuda.random
+```
+
+```{eval-rst}
 .. py:module:: torch.cuda.sparse
+```
+
+```{eval-rst}
 .. py:module:: torch.cuda.streams
+```

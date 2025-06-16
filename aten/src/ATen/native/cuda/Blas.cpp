@@ -36,6 +36,7 @@
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/dot_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/gelu.h>
 #include <ATen/ops/max.h>
 #include <ATen/ops/mm_native.h>
@@ -1249,6 +1250,16 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
        "scale_result must be a float scalar");
   TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
        " but got ", bias->numel());
+  TORCH_CHECK(
+      mat1.sizes()[1] % 16 == 0,
+      "Expected trailing dimension of mat1 to be divisible by 16 ",
+      "but got mat1 shape: (",
+      mat1.sizes()[0],
+      "x",
+      mat1.sizes()[1],
+      ").");
+  TORCH_CHECK(mat2.sizes()[0] % 16 == 0 && mat2.sizes()[1] % 16 == 0, "mat2 shape (", mat2.sizes()[0], "x",
+       mat2.sizes()[1], ") must be divisible by 16");
   // Check types
   TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
   TORCH_CHECK(isFloat8Type(mat1.scalar_type()) || mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2, "Expected mat1 to be Float8 or Float4_x2 matrix got ", mat1.scalar_type());
@@ -1504,9 +1515,14 @@ namespace {
     // 1, or aligned to 16 bytes.
     const auto last_dim = out_size.size() - 1;
     const auto alignment = 16 / c10::elementSize(out_dtype_);
-    const auto inner_size = out_size[last_dim];
-    out_size[last_dim] = (out_size[last_dim] + alignment - 1) / alignment * alignment;
-    Tensor out = at::empty(out_size, mat_a.options().dtype(out_dtype_)).narrow(last_dim, 0, inner_size);
+    const int64_t size_padded = (out_size[last_dim] + alignment - 1) / alignment * alignment;
+    std::vector<int64_t> out_stride;
+    if (a_is_2d != b_is_2d) {
+      out_stride = {size_padded, 1};
+    } else {
+      out_stride = {out_size[1] * size_padded, size_padded, 1};
+    }
+    auto out = at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype_));
 
     return out;
   }
@@ -1524,7 +1540,7 @@ namespace {
       TORCH_CHECK(tensor_strides[end_dim - 1] % alignment == 0, "strides should be multiple of 16 bytes");
       return false;
     } else {
-      TORCH_CHECK(false, "Tensor should have a contiguous dimension and not be self-overlapping, got ", mat.strides(), " for strides and ", mat.sizes(), " for sizes");
+      TORCH_CHECK(false, "Invalid strides/sizes, got ", mat.strides(), " for strides and ", mat.sizes(), " for sizes");
     }
   }
 
@@ -1601,6 +1617,18 @@ bool use_fast_accum) {
   TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
+  TORCH_CHECK(
+    mat_a.size(-1) % 16 == 0,
+    "Expected trailing dimension of mat_a to be divisible by 16 ",
+    "but got mat1 shape: (",
+    mat_a.sizes(),
+    ").");
+  TORCH_CHECK(mat_b.size(-2) % 16 == 0 && mat_b.size(-1) % 16 == 0,
+    "Expected mat_b shape to be divisible by 16 ",
+    "but got mat_b shape: (",
+    mat_b.sizes(),
+    ").");
+
 
   TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
   TORCH_CHECK(!scale_result.has_value(), "Scale result not supported yet");
@@ -1656,6 +1684,7 @@ std::optional<c10::ScalarType> out_dtype) {
   TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
+
   // check that the strides are valid, the fn will throw an error if not
   check_valid_strides_and_return_transposed(mat_a);
   check_valid_strides_and_return_transposed(mat_b);

@@ -7323,12 +7323,11 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
     out_dtype = out_dtype or mat1.dtype
 
     alignment = 16 // out_dtype.itemsize
-    inner_size = out_size[-1]
-    out_size[-1] = (out_size[-1] + alignment - 1) // alignment * alignment
-    out = torch.empty(out_size, dtype=out_dtype, device=mat1.device).narrow(
-        -1, 0, inner_size
-    )
-
+    size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
+    out_stride = (size_padded, 1)
+    if mat1_is_2d == mat2_is_2d:
+        out_stride = (out_size[1] * size_padded,) + out_stride
+    out = torch.empty_strided(out_size, out_stride, dtype=out_dtype, device=mat1.device)
     return out
 
 
@@ -7393,7 +7392,7 @@ def _meta_grouped_mm_common(
 
     def check_valid_strides(mat_name, mat):
         end_dim = mat.dim() - 1
-        alignment = 16 / mat.element_size()
+        alignment = 16 // mat.element_size()
         mat_stride = mat.stride()
         if mat_stride[end_dim - 1] == 1 and mat_stride[end_dim] >= max(
             1, mat.shape[end_dim - 1]
@@ -7412,7 +7411,7 @@ def _meta_grouped_mm_common(
         else:
             torch._check(
                 False,
-                lambda: f"Expected {mat_name} to have a contiguous dimension and not be mat_a-overlapping, got {mat_stride} for strides and {mat.shape} for sizes.",  # noqa: B950
+                lambda: f"Invalid strides/sizes, got {mat_stride} for strides and {mat.shape} for sizes.",  # noqa: B950
             )
 
     check_valid_strides("mat_a", mat_a)

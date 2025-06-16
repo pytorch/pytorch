@@ -120,7 +120,6 @@ def early_config_prune(g, m, configs, named_args):
     return pruned_configs
 
 
-# Copied from fbgemm grouped_gemm.py
 triton_grouped_mm_source = r"""
 {%- if SCALED %}
 {%- if A_IS_2D or B_IS_2D %}

@@ -1666,7 +1666,7 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize(
         "n_groups, m, n, k",
-        [(2, 1, 8, 16),
+        [(2, 1, 16, 16),
          (4, 16, 16, 16)],
         name_fn=lambda n_groups, m, n, k: f"{n_groups}_{m}_{n}_{k}",
     )
@@ -1706,7 +1706,7 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize(
         "n_groups, m, n, k",
-        [(2, 1, 8, 16),
+        [(2, 1, 16, 16),
          (4, 16, 16, 16)],
         name_fn=lambda n_groups, m, n, k: f"{n_groups}_{m}_{n}_{k}",
     )
@@ -1756,7 +1756,7 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize(
         "n_groups, m, n, k",
-        [(2, 1, 8, 16),
+        [(2, 1, 16, 16),
          (4, 16, 16, 16)],
         name_fn=lambda n_groups, m, n, k: f"{n_groups}_{m}_{n}_{k}",
     )
@@ -1791,7 +1791,7 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize(
         "n_groups, m, n, k",
-        [(2, 1, 8, 16),
+        [(2, 1, 16, 16),
          (4, 16, 16, 16)],
         name_fn=lambda n_groups, m, n, k: f"{n_groups}_{m}_{n}_{k}",
     )
