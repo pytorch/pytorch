@@ -1162,7 +1162,7 @@ build_update_message = """
     To develop locally:
       $ python setup.py develop
     To force cmake to re-generate native build files (off by default):
-      $ python setup.py develop --cmake
+      $ CMAKE_FRESH=1 python setup.py develop
 """
 
 
