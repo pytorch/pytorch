@@ -233,8 +233,7 @@ def run_ort(
 # The min onnx opset version to test for
 MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
-# TODO(after bumping onnxruntime to 1.22 in CI): Bump MAX_ONNX_OPSET_VERSION
-MAX_ONNX_OPSET_VERSION = 20
+MAX_ONNX_OPSET_VERSION = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
 
 BOOL_TYPES = (torch.bool,)

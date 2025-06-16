@@ -171,8 +171,8 @@ class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
     [
         {"opset_version": opset}
         for opset in range(
-            onnx_test_common.MIN_ONNX_OPSET_VERSION,
-            onnx_test_common.MAX_ONNX_OPSET_VERSION + 1,
+            _constants.ONNX_BASE_OPSET,
+            _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET + 1,
         )
     ],
     class_name_func=lambda cls,
