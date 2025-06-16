@@ -1145,16 +1145,16 @@ at::Tensor stream_write_value32_(
   c10::cuda::CUDAGuard guard(input.device());
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  static PFN_cuStreamWriteValue32_v2 pfn_cuStreamWriteValue32 = []() {
-    void *driver_ptr = c10::cuda::get_symbol("cuStreamWriteValue32");
-    return reinterpret_cast<PFN_cuStreamWriteValue32_v2>(driver_ptr);
-  }();
-  CUresult res = pfn_cuStreamWriteValue32(
+  auto driver_api = c10::cuda::DriverAPI::get();
+  // According to the documentation of CUstreamWriteValue_flags,
+  // cuStreamWriteValue32 will provide a memory fence before the write, which
+  // has similar semantics to __threadfence_system() but is scoped to the
+  // stream rather than a CUDA thread.
+  C10_CUDA_DRIVER_CHECK(driver_api->cuStreamWriteValue32_(
       at::cuda::getCurrentCUDAStream(),
       reinterpret_cast<CUdeviceptr>(addr),
       val,
-      0);
-  TORCH_CHECK(res == CUDA_SUCCESS, "cuStreamWriteValue32 failed: ", res);
+      0));
 #elif defined(USE_ROCM)
   C10_HIP_CHECK(hipStreamWriteValue32(
                                       at::cuda::getCurrentCUDAStream(),

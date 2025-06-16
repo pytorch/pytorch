@@ -10,20 +10,13 @@ namespace c10::cuda {
 namespace {
 
 DriverAPI create_driver_api() {
-  void* handle_0 = dlopen("libcuda.so.1", RTLD_LAZY | RTLD_NOLOAD);
-  TORCH_CHECK(handle_0, "Can't open libcuda.so.1: ", dlerror());
   void* handle_1 = DriverAPI::get_nvml_handle();
   DriverAPI r{};
 
-#define LOOKUP_LIBCUDA_ENTRY(name)                       \
-  r.name##_ = ((decltype(&name))dlsym(handle_0, #name)); \
-  TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name, ": ", dlerror())
+#define LOOKUP_LIBCUDA_ENTRY(name)                                  \
+  r.name##_ = reinterpret_cast<decltype(&name)>(get_symbol(#name)); \
+  TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name)
   C10_LIBCUDA_DRIVER_API(LOOKUP_LIBCUDA_ENTRY)
-#undef LOOKUP_LIBCUDA_ENTRY
-
-#define LOOKUP_LIBCUDA_ENTRY(name)                       \
-  r.name##_ = ((decltype(&name))dlsym(handle_0, #name)); \
-  dlerror();
   C10_LIBCUDA_DRIVER_API_12030(LOOKUP_LIBCUDA_ENTRY)
 #undef LOOKUP_LIBCUDA_ENTRY
 
@@ -60,7 +53,7 @@ typedef cudaError_t (*GetEntryPoint)(
     unsigned long long, // NOLINT(*)
     cudaDriverEntryPointQueryResult*);
 
-C10_EXPORT void* get_symbol(const char* symbol, int cuda_version) {
+void* get_symbol(const char* symbol, int cuda_version) {
   constexpr char driver_entrypoint[] = "cudaGetDriverEntryPoint";
   constexpr char driver_entrypoint_versioned[] =
       "cudaGetDriverEntryPointByVersion";
