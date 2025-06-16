@@ -671,23 +671,23 @@ class BackendPatternConfig:
         for d in backend_pattern_config_dict.get(DTYPE_CONFIGS_DICT_KEY, []):
             conf.add_dtype_config(_get_dtype_config(d))
         conf.set_root_module(
-            backend_pattern_config_dict.get(ROOT_MODULE_DICT_KEY, None)
+            backend_pattern_config_dict.get(ROOT_MODULE_DICT_KEY, None)  # type: ignore[arg-type]
         )
-        conf.set_qat_module(backend_pattern_config_dict.get(QAT_MODULE_DICT_KEY, None))
+        conf.set_qat_module(backend_pattern_config_dict.get(QAT_MODULE_DICT_KEY, None))  # type: ignore[arg-type]
         conf.set_reference_quantized_module(
-            backend_pattern_config_dict.get(REFERENCE_QUANTIZED_MODULE_DICT_KEY, None)
+            backend_pattern_config_dict.get(REFERENCE_QUANTIZED_MODULE_DICT_KEY, None)  # type: ignore[arg-type]
         )
         conf.set_fused_module(
-            backend_pattern_config_dict.get(FUSED_MODULE_DICT_KEY, None)
+            backend_pattern_config_dict.get(FUSED_MODULE_DICT_KEY, None)  # type: ignore[arg-type]
         )
         conf.set_fuser_method(
-            backend_pattern_config_dict.get(FUSER_METHOD_DICT_KEY, None)
+            backend_pattern_config_dict.get(FUSER_METHOD_DICT_KEY, None)  # type: ignore[arg-type]
         )
         conf._set_root_node_getter(
-            backend_pattern_config_dict.get(ROOT_NODE_GETTER_DICT_KEY, None)
+            backend_pattern_config_dict.get(ROOT_NODE_GETTER_DICT_KEY, None)  # type: ignore[arg-type]
         )
         conf._set_extra_inputs_getter(
-            backend_pattern_config_dict.get(EXTRA_INPUTS_GETTER_DICT_KEY, None)
+            backend_pattern_config_dict.get(EXTRA_INPUTS_GETTER_DICT_KEY, None)  # type: ignore[arg-type]
         )
         conf._set_num_tensor_args_to_observation_type(
             backend_pattern_config_dict.get(
