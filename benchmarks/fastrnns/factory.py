@@ -5,6 +5,7 @@ from torch import Tensor
 
 from .cells import flat_lstm_cell, lstm_cell, premul_lstm_cell, premul_lstm_cell_no_bias
 
+
 # list[list[T]] -> list[T]
 def flatten_list(lst):
     result = []
