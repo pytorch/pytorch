@@ -4042,7 +4042,7 @@ CUDAAllocator* allocator();
 
 struct BackendStaticInitializer {
   CUDAAllocator* parseEnvForBackend() {
-    if (c10::CachingAllocator::getAllocatorConfig().use_async_allocator()) {
+    if (c10::CachingAllocator::AllocatorConfig::use_async_allocator()) {
       return CudaMallocAsync::allocator();
     }
     return &Native::allocator;
@@ -4051,7 +4051,7 @@ struct BackendStaticInitializer {
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
     allocator.store(r);
-    c10::CachingAllocator::getAllocatorConfig().set_allocator_loaded();
+    c10::CachingAllocator::AllocatorConfig::set_allocator_loaded();
   }
 };
 
