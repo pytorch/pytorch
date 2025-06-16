@@ -287,15 +287,15 @@ class SideEffects:
     def is_attribute_mutation(self, item) -> TypeIs[AttributeMutation]:
         return isinstance(item.mutation_type, AttributeMutation)
 
-    def has_pending_mutation(self, item):
+    def has_pending_mutation(self, item) -> bool:
         return self.is_attribute_mutation(item) and bool(
-            self.store_attr_mutations.get(item)
+            self.store_attr_mutations.get(item)  # type: ignore[call-overload]
         )
 
-    def has_pending_mutation_of_attr(self, item, name):
+    def has_pending_mutation_of_attr(self, item, name) -> bool:
         return self.is_attribute_mutation(
             item
-        ) and name in self.store_attr_mutations.get(item, ())
+        ) and name in self.store_attr_mutations.get(item, ())  # type: ignore[call-overload]
 
     def is_modified(self, item) -> bool:
         if item.is_immutable():
@@ -1004,7 +1004,7 @@ class SideEffects:
                 # for this reversal, we iterate through the mutable attributes
                 # in reverse order.
                 for name, value in reversed(
-                    self.store_attr_mutations.get(var, {}).items()
+                    self.store_attr_mutations.get(var, {}).items()  # type: ignore[call-overload]
                 ):
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
@@ -1015,10 +1015,11 @@ class SideEffects:
                         )
                     elif isinstance(value, variables.DeletedVariable):
                         if isinstance(
-                            var.mutation_type, AttributeMutationExisting
+                            var.mutation_type,  # type: ignore[attr-defined]
+                            AttributeMutationExisting,
                         ) and hasattr(getattr(var, "value", None), name):
                             cg.tx.output.update_co_names(name)
-                            cg(var.source)
+                            cg(var.source)  # type: ignore[attr-defined]
                             suffixes.append(
                                 [create_instruction("DELETE_ATTR", argval=name)]
                             )
