@@ -335,13 +335,13 @@ if BUILD_PYTHON_ONLY:
 # Parameters parsed from environment
 ################################################################################
 
-VERBOSE_SCRIPT = True
+VERBOSE_SCRIPT = boolify(os.getenv("VERBOSE", "1"))
 RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE = False
-CMAKE_ONLY = False
+RERUN_CMAKE = boolify(os.getenv("CMAKE_FRESH"))
+CMAKE_ONLY = boolify(os.getenv("CMAKE_ONLY"))
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == "--cmake":
