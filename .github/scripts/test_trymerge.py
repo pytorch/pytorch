@@ -433,7 +433,7 @@ class TestTryMerge(TestCase):
         )
 
     def test_cancelled_gets_ignored(self, *args: Any) -> None:
-        """Tests that cancelled workflow does not override existing successfully status"""
+        """Tests that cancelled workflow does not override existing successful status"""
         pr = GitHubPR("pytorch", "pytorch", 110367)
         conclusions = pr.get_checkrun_conclusions()
         lint_checks = [name for name in conclusions.keys() if "Lint" in name]
