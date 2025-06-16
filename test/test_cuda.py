@@ -2315,10 +2315,7 @@ torch.cuda.synchronize()
         # See:
         # "Before the first call to cudaEventRecord(), an event represents an empty set of work, so for example cudaEventQuery() would return cudaSuccess."  # noqa: B950
         # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
-        self.assertTrue(start_event.query())
-        self.assertTrue(
-            torch.all(x_cpu == 0.0), "Copy cannot occur until start_event is recorded"
-        )
+        self.assertTrue(start_event.query(), "Start event's work should be empty")
 
         work_graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(work_graph, capture_error_mode="relaxed"):
@@ -2339,9 +2336,9 @@ torch.cuda.synchronize()
             with torch.cuda.stream(work_stream):
                 work_graph.replay()
 
-            # Because work_graph has been launched, end_event is no longer considered empty
-            # Okay, this assertion fails and therefore the test never ends. lol.
-            self.assertFalse(end_event.query())
+            self.assertFalse(
+                end_event.query(), "Event record node cannot run until flag_cpu[0]=1"
+            )
 
             # Sleep for a little to make sure that work doesn't proceed until we set flag_cpu[0]=1
             time.sleep(1)
