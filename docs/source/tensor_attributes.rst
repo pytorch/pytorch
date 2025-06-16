@@ -92,8 +92,8 @@ by finding the minimum dtype that satisfies the following rules:
 
 A floating point scalar operand has dtype `torch.get_default_dtype()` and an integral
 non-boolean scalar operand has dtype `torch.int64`. Unlike numpy, we do not inspect
-values when determining the minimum `dtypes` of an operand.  Quantized and complex types
-are not yet supported.
+values when determining the minimum `dtypes` of an operand.  Complex types
+are not yet supported. Promotion for shell dtypes is not defined.
 
 Promotion Examples::
 
