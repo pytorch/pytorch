@@ -928,6 +928,9 @@ enable_linear_binary_folding = (
     os.environ.get("TORCHINDUCTOR_ENABLE_LINEAR_BINARY_FOLDING", "0") == "1"
 )
 
+# generate multiple kernels at multiple hint levels
+# TODO: make this configurable by env var
+multi_kernel_hints: list[int] = [64, 256, 4096]
 
 # Adds NVTX annotations aroung training phases
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"

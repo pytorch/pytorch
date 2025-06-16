@@ -2809,7 +2809,6 @@ class Scheduler:
         If config.benchmark_fusion is False, always return True.
         Otherwise, return True if fusion can brings speedup.
         """
-
         is_multi_template = any(
             n.is_template()
             and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
@@ -4655,6 +4654,7 @@ class Scheduler:
             )
 
     def _codegen(self, nodes: list[BaseSchedulerNode]) -> None:
+        import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
         if config.check_stack_no_cycles_TESTING_ONLY:
             import torch._dynamo.convert_frame
 

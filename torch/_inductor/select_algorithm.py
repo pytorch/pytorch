@@ -331,6 +331,7 @@ class TritonTemplateKernel(TritonKernel):
         self.num_warps = num_warps
         self.num_consumer_groups = num_consumer_groups
         self.num_buffers_warp_spec = num_buffers_warp_spec
+        import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
         self.grid_fn = grid_fn
         self.meta = meta
         self.call_sizes = call_sizes
@@ -1275,6 +1276,7 @@ class TritonTemplate(KernelTemplate):
         prologue_loads_all_inputs=False,
     ) -> None:
         super().__init__(name)
+        import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
         self.grid = grid
         self.template = self._template_from_string(source)
         assert name not in self.all_templates, "duplicate template name"
@@ -2185,6 +2187,7 @@ class AlgorithmSelectorCache(PersistentCache):
             torch._inductor.autotune_process.get_tuning_process_pool()
 
         def do_autotuning(choices, precompile_fn):
+            print("DO AUTOTUNING")
             precompile_start_ts = time.time()
             with dynamo_timed(
                 f"{name}_template_precompiling",
@@ -2251,6 +2254,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
             def get_timings():
+                print("GET TIMINGS")
                 timings = do_autotuning(choices, precompile_fn)
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
@@ -2275,6 +2279,18 @@ class AlgorithmSelectorCache(PersistentCache):
             for c in choices:
                 if isinstance(c, TritonTemplateCaller):
                     allowed_prologue_inps |= c.allowed_prologue_inps
+
+            # if config.multi_kernel_hints:
+            #     return torch._inductor.ir.TensorBox.create(
+            #         torch._inductor.ir.MultiKernelTemplateBuffer(
+            #             config.multi_kernel_hints,
+            #             layout,
+            #             input_nodes,
+            #             get_timings,
+            #             choices,
+            #             allowed_prologue_inps,
+            #         )
+            #     )
 
             return torch._inductor.ir.TensorBox.create(
                 torch._inductor.ir.MultiTemplateBuffer(
@@ -2469,6 +2485,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        override: Optional[int] = None,
     ) -> AutotuneArgs:
         """
         Factory method to create AutotuneArgs from a list of ChoiceCallers.
@@ -2491,14 +2508,17 @@ class AlgorithmSelectorCache(PersistentCache):
                     V.graph.sizevars.size_hints(
                         input_node.get_size(),
                         fallback=config.unbacked_symint_fallback,
+                        override=override
                     ),
                     V.graph.sizevars.size_hints(
                         input_node.get_stride(),
                         fallback=config.unbacked_symint_fallback,
+                        override=override
                     ),
                     V.graph.sizevars.size_hint(
                         input_node.get_layout().offset,
                         fallback=config.unbacked_symint_fallback,
+                        override=override
                     ),
                 )
             )
@@ -2836,7 +2856,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
     @staticmethod
-    def benchmark_example_value(node):
+    def benchmark_example_value(node, override: Optional[int] = None):
         """
         Convert an ir.Buffer into a concrete torch.Tensor we can use for
         benchmarking.
@@ -2855,10 +2875,12 @@ class AlgorithmSelectorCache(PersistentCache):
             V.graph.sizevars.size_hints(
                 node.get_size(),
                 fallback=config.unbacked_symint_fallback,
+                override=override
             ),
             V.graph.sizevars.size_hints(
                 node.get_stride(),
                 fallback=config.unbacked_symint_fallback,
+                override=override
             ),
             node.get_device(),
             node.get_dtype(),
@@ -2866,6 +2888,7 @@ class AlgorithmSelectorCache(PersistentCache):
             V.graph.sizevars.size_hints(
                 V.graph.get_allocation_size(node),
                 fallback=config.unbacked_symint_fallback,
+                override=override
             ),
         )
 

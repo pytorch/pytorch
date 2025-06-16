@@ -1543,6 +1543,7 @@ class Reduction(Loops):
                 input_node,
             )
 
+
         return TensorBox.create(
             Reduction(
                 device=device,
@@ -4741,6 +4742,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         unfiltered_choices: list[ChoiceCaller],
         allowed_prologue_inps: OrderedSet[str],
     ) -> None:
+        print("INIT MULTI TEMPLATE BUFFE")
         super().__init__(
             layout=layout,
             inputs=inputs,

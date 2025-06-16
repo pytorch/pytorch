@@ -1320,6 +1320,7 @@ class _InProcessFxCompile(FxCompile):
                 # you don't start adding new ones in the lowering process
                 graph.freeze_runtime_asserts()
                 with V.set_graph_handler(graph):
+                    print("RUNNING LOWERING")
                     graph.run(*example_inputs)
                     output_strides: list[Optional[tuple[_StrideExprStr, ...]]] = []
                     if graph.graph_outputs is not None:
@@ -1399,6 +1400,7 @@ class _InProcessFxCompile(FxCompile):
                                     ],
                                 )
                         else:
+                            print("COMPILING TO MODULE")
                             compiled_module = graph.compile_to_module()
                             compiled_fn = compiled_module.call
                             compiled_fn_runner = getattr(
