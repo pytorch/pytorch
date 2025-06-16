@@ -1477,27 +1477,27 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         class M(torch.nn.Module):
             def __init__(self, w1, w2, w3):
                 super().__init__()
-                self.linear_weight1 = torch.nn.Parameter(w1, requires_grad=False)
-                self.linear_weight2 = torch.nn.Parameter(w2, requires_grad=False)
-                self.linear_weight3 = torch.nn.Parameter(w3, requires_grad=False)
+                self.w1 = torch.nn.Parameter(w1, requires_grad=False)
+                self.w2 = torch.nn.Parameter(w2, requires_grad=False)
+                self.w3 = torch.nn.Parameter(w3, requires_grad=False)
 
             def forward(self, x, scale1, scale2, scale3):
                 # Ref: _linear_fp_act_int8_weight_impl in torchao/dtypes/uintx/plain_layout.py
                 y1 = (
                     torch.mm(
-                        x.reshape(-1, x.shape[-1]), self.linear_weight1.t().to(x.dtype)
+                        x.reshape(-1, x.shape[-1]), self.w1.t().to(x.dtype)
                     )
                     * scale1
                 )
                 y2 = (
                     torch.mm(
-                        x.reshape(-1, x.shape[-1]), self.linear_weight2.t().to(x.dtype)
+                        x.reshape(-1, x.shape[-1]), self.w2.t().to(x.dtype)
                     )
                     * scale2
                 )
                 y3 = (
                     torch.mm(
-                        x.reshape(-1, x.shape[-1]), self.linear_weight3.t().to(x.dtype)
+                        x.reshape(-1, x.shape[-1]), self.w3.t().to(x.dtype)
                     )
                     * scale3
                 )
@@ -1514,11 +1514,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         w1 = torch.rand((out_features, in_features), dtype=dtype)
         w2 = torch.rand((out_features, in_features), dtype=dtype)
         w3 = torch.rand((out_features, in_features), dtype=dtype)
-        w_int8pack1, w_scales1 = _convert_weight_to_int8pack(w1)
-        w_int8pack2, w_scales2 = _convert_weight_to_int8pack(w2)
-        w_int8pack3, w_scales3 = _convert_weight_to_int8pack(w3)
-        mod = M(w_int8pack1, w_int8pack2, w_int8pack3).eval()
-        self.common(mod, (x, w_scales1, w_scales2, w_scales3))
+        w1_int8pack, w1_scales = _convert_weight_to_int8pack(w1)
+        w2_int8pack, w2_scales = _convert_weight_to_int8pack(w2)
+        w3_int8pack, w3_scales = _convert_weight_to_int8pack(w3)
+        mod = M(w1_int8pack, w2_int8pack, w3_int8pack).eval()
+        self.common(mod, (x, w1_scales, w2_scales, w3_scales))
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         if batch_size * mid_dim >= 16:
             vec_amx = VecAMX()
