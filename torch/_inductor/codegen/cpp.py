@@ -4986,7 +4986,7 @@ class CppScheduling(BaseScheduling):
                                 layout=local_buffer_layout,
                             )
                             local_buffers.append(local_buffer_used)
-                            local_to_global_buffers[local_buffer_used.name] = []
+                            local_to_global_buffers[local_buffer_used.name] = []  # type: ignore[index]
                         local_to_global_buffers[local_buffer_used.name].append(
                             global_buffer,
                         )
