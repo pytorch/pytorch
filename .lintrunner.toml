@@ -1161,7 +1161,6 @@ exclude_patterns = [
     'aten/**',
     'test/**',
     'torch/**',
-    'torchgen/**',
 ]
 init_command = [
     'python3',

@@ -506,7 +506,7 @@ def static_dispatch(
 ) -> str:
     """
     For a given `NativeFunction`, find out the corresponding backend and dispatch to it. If more than one
-    backends exsit, fallback to static dispatch by determining dispatch key from inputs.
+    backends exist, fallback to static dispatch by determining dispatch key from inputs.
     Arguments:
         sig: A CppSignature or DispatcherSignature for this native function we want to use.
         f: NativeFunction to generate static dispatch.
@@ -2611,7 +2611,7 @@ def gen_source_files(
     #     but they could theoretically be called from user code (I added these kernels for completeness,
     #     since the ops are part of the public API).
     # (2) A derivative formula for every {view}_copy operator
-    #     {view}_copy operators can re-use the same derivative formulas as their {view} op counterparts,
+    #     {view}_copy operators can reuse the same derivative formulas as their {view} op counterparts,
     #     so rather than stamping all of the entries out in derivatives.yaml,
     #     we codegen them in.
     #     This is similar to how autograd codegen doesn't require inplace ops to have a derivatives.yaml entry.

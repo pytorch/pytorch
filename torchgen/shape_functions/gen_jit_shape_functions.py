@@ -102,7 +102,7 @@ def gen_serialized_decompisitions() -> str:
     output_strs.append(curr_str)
 
     final_output = ""
-    # Windows compiler doesnt correctly handle adjacent
+    # Windows compiler doesn't correctly handle adjacent
     # string literals
     for output_str in output_strs:
         start = '+ std::string(R"=====('
