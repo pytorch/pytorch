@@ -107,24 +107,6 @@ aoti_torch_xpu_mkldnn__convolution_pointwise_binary_(
     const char** unary_algorithm,
     AtenTensorHandle* ret0);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu__linear_pointwise(
-    AtenTensorHandle X,
-    AtenTensorHandle W,
-    AtenTensorHandle* B,
-    const char* attr,
-    const double** scalars,
-    int64_t scalars_len_,
-    const char** algorithm,
-    AtenTensorHandle* ret0);
-
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu__linear_pointwise_binary(
-    AtenTensorHandle X,
-    AtenTensorHandle other,
-    AtenTensorHandle W,
-    AtenTensorHandle* B,
-    const char* attr,
-    AtenTensorHandle* ret0);
-
 #endif // AT_MKLDNN_ENABLED()
 #ifdef __cplusplus
 } // extern "C"

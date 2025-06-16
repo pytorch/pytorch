@@ -77,7 +77,6 @@ AOTITorchError aoti_torch_get_current_sycl_queue(void** ret) {
 
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/xpu/Conv.h>
-#include <ATen/native/mkldnn/xpu/Linear.h>
 
 AOTITorchError aoti_torch_xpu_mkldnn__convolution_pointwise_binary(
     AtenTensorHandle X,
@@ -202,47 +201,4 @@ AOTITorchError aoti_torch_xpu_mkldnn__convolution_pointwise(
   });
 }
 
-AOTITorchError aoti_torch_xpu__linear_pointwise(
-    AtenTensorHandle X,
-    AtenTensorHandle W,
-    AtenTensorHandle* B,
-    const char* attr,
-    const double** scalars,
-    int64_t scalars_len_,
-    const char** algorithm,
-    AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::List<std::optional<c10::Scalar>> scalars_list;
-    scalars_list.reserve(scalars_len_);
-    for (int64_t i = 0; i < scalars_len_; i++) {
-      scalars_list.emplace_back(pointer_to_optional(scalars[i]));
-    }
-    auto tmp_result = at::native::xpu::linear_pointwise(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(W),
-        pointer_to_optional<at::Tensor>(B),
-        attr,
-        scalars_list,
-        pointer_to_optional<std::string_view>(algorithm));
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
-}
-
-AOTITorchError aoti_torch_xpu__linear_pointwise_binary(
-    AtenTensorHandle X,
-    AtenTensorHandle other,
-    AtenTensorHandle W,
-    AtenTensorHandle* B,
-    const char* attr,
-    AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto tmp_result = at::native::xpu::linear_pointwise_binary(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(other),
-        *tensor_handle_to_tensor_pointer(W),
-        pointer_to_optional<at::Tensor>(B),
-        attr);
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
-}
 #endif // AT_MKLDNN_ENABLED()

@@ -1,7 +1,7 @@
 #include <ATen/DeviceGuard.h>
-#include <ATen/native/mkldnn/xpu/Linear.h>
-#include <FusionUtils.h>
 #include <torch/library.h>
+
+#include <FusionUtils.h>
 
 namespace at::native::xpu {
 
