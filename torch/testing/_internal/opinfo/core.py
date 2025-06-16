@@ -949,6 +949,13 @@ class OpInfo:
         candidate_name = self.name.split("torch.ops.aten.")[-1] if self.name.startswith("torch.ops.aten") else self.name
         self.aten_name = candidate_name if hasattr(torch.ops.aten, candidate_name) else None
 
+        self.overloads = {}
+        if self.aten_name is not None:
+            aten_module = getattr(torch.ops.aten, self.aten_name)
+            schema = aten_module._schema
+            for overload_name, overload_signiture in schema.items():
+                self.overloads[f'torch.ops.aten.{self.aten_name}.{overload_name}'] = overload_signiture
+
         # Attribute to verify dynamic_dtypes are used.
         self.dynamic_dtypes = any(
             isinstance(dtypes, utils._dynamic_dispatch_dtypes)
