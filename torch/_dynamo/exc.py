@@ -511,8 +511,7 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
     GRAPH_BREAK_SITE_URL = "https://compile-graph-break-site.vercel.app/gb/"
 
     script_dir = Path(__file__).resolve().parent
-    repo_root = script_dir.parent.parent
-    registry_path = repo_root / "tools" / "dynamo" / "graph_break_registry.json"
+    registry_path = script_dir / "graph_break_registry.json"
 
     with registry_path.open() as f:
         registry = json.load(f)
