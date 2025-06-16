@@ -102,6 +102,7 @@ def higher_order_scan(
     additional_inputs: Sequence[ir.Value] | None,
     reverse: bool = False,
 ) -> Sequence[ir.Value]:
+    """https://github.com/pytorch/pytorch/blob/66ac724b56e6c37a534f3e066423ef2f41d7477f/torch/_higher_order_ops/scan.py#L109"""
     subgraph_inputs = [
         *[
             ir.Value(
