@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfHpu,
     skipIfTorchDynamo,
     TEST_CUDA,
     TEST_HPU,
@@ -255,6 +256,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    @skipIfHpu
     def test_dtensor_dynamic(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -481,6 +483,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         self.assertEqual(fn(x3), opt_fn(x3))
         self.assertEqual(cnt.frame_count, 2)
 
+    @skipIfHpu
     def test_dtensor_partial_placement_redistribute_unbalanced_correct_strides(self):
         # Partial -> Shard on an unbalanced tensor results in:
         # - A contiguous DTensor
@@ -650,6 +653,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
 
+    @skipIfHpu
     def test_dynamo_dtensor_from_local_redistribute_async(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -721,6 +725,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         res = opt_fn(x_dt)
         self.assertEqual(ref, res)
 
+    @skipIfHpu
     def test_graph_input_is_async(self):
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
@@ -801,12 +806,7 @@ def forward(self, primals_1):
         out_dt = torch.matmul(tmp_dt, y_dt)
         out_dt.sum().backward()
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(1)
-    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-    @patch.object(torch._inductor.config, "compile_threads", 1)
-    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
-    def test_tp_compile_comm_reordering(self):
+    def _test_tp_compile_comm_reordering(self):
         class FakeAttention(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -875,6 +875,23 @@ def forward(self, primals_1):
         ).run(
             code
         )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(1)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
+    def test_tp_compile_comm_reordering(self):
+        self._test_tp_compile_comm_reordering()
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(1)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_tp_compile_comm_reordering_graph_partition(self):
+        self._test_tp_compile_comm_reordering()
 
 
 @instantiate_parametrized_tests
@@ -962,7 +979,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # 2-D mesh is [dp, tp]
         twod_mesh = init_device_mesh(
-            "cuda",
+            self.device_type,
             (data_parallel_size, self.world_size // data_parallel_size),
             mesh_dim_names=["dp", "tp"],
         )
@@ -1015,7 +1032,9 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # 2-D mesh is [dp, tp]
         mesh_2d = init_device_mesh(
-            "cuda", mesh_shape=(dp_degree, tp_degree), mesh_dim_names=("dp", "tp")
+            self.device_type,
+            mesh_shape=(dp_degree, tp_degree),
+            mesh_dim_names=("dp", "tp"),
         )
 
         inp = torch.rand(20, 10, device=self.device_type)
@@ -1061,7 +1080,9 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @parametrize("use_ca", [True, False])
     def test_compile_dtensor_redistribute_backward(self, use_ca):
-        mesh = DeviceMesh(device_type="cuda", mesh=torch.arange(self.world_size))
+        mesh = DeviceMesh(
+            device_type=self.device_type, mesh=torch.arange(self.world_size)
+        )
 
         def fn(x, y):
             dt = DTensor.from_local(x.reshape(2, 4), mesh, [Shard(0)], run_check=False)

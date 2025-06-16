@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 
+import pytest
 import transformers
 from onnxscript import ir
 
@@ -628,6 +629,35 @@ class DynamoExporterTest(common_utils.TestCase):
             "GroupNormalization",
             [node.op_type for node in onnx_program.model.graph],
         )
+
+    def test_graph_attention_opset_23(self):
+        class Model(torch.nn.Module):
+            def forward(self, query, key, value):
+                return torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value
+                )
+
+        query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+
+        onnx_program = self.export(Model(), (query, key, value), opset_version=23)
+        self.assertIn("Attention", [node.op_type for node in onnx_program.model.graph])
+
+    @pytest.mark.xfail(reason="Expected to fail until opset 23 is supported by ORT.")
+    def test_graph_accuracy_attention_opset_23(self):
+        class Model(torch.nn.Module):
+            def forward(self, query, key, value):
+                return torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value
+                )
+
+        query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+
+        onnx_program = self.export(Model(), (query, key, value), opset_version=23)
+        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
 
 if __name__ == "__main__":

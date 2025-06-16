@@ -10,6 +10,7 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     _maybe_reenter_make_fx,
     autograd_not_implemented,
+    redirect_to_mode,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -24,6 +25,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
+from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 # Duplicate of _inductor/kernel/flex_attention.py to avoid circular import
@@ -479,6 +481,11 @@ def flex_attention_fake_tensor_mode(
     with mode:
         out, logsumexp = flex_attention_fake_impl(query, value)
         return out, logsumexp
+
+
+# Registers dispatches for SAC
+redirect_to_mode(flex_attention, _CachingTorchDispatchMode)
+redirect_to_mode(flex_attention, _CachedTorchDispatchMode)
 
 
 # ---------------------------- Autograd Implementation ----------------------------

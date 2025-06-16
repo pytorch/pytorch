@@ -381,29 +381,15 @@ def save(
             f"The 'ep' parameter must be an instance of 'ExportedProgram', got '{type(ep).__name__}' instead."
         )
 
-    from torch._export.serde.schema import SCHEMA_VERSION
-    from torch._export.serde.serialize import serialize, SerializedArtifact
+    from torch.export.pt2_archive._package import package_pt2
 
-    artifact: SerializedArtifact = serialize(ep, opset_version, pickle_protocol)
-
-    if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
-
-    with zipfile.ZipFile(f, "w") as zipf:
-        # Save every field in the SerializedArtifact to a file.
-        assert isinstance(artifact.exported_program, bytes)
-        zipf.writestr("serialized_exported_program.json", artifact.exported_program)
-        zipf.writestr("serialized_state_dict.pt", artifact.state_dict)
-        zipf.writestr("serialized_constants.pt", artifact.constants)
-        zipf.writestr("serialized_example_inputs.pt", artifact.example_inputs)
-
-        zipf.writestr("version", ".".join(map(str, SCHEMA_VERSION)))
-
-        # Add extra files if provided
-        if extra_files:
-            for extra_file_name, content in extra_files.items():
-                encoded_content = content.encode("utf-8")
-                zipf.writestr(f"extra_files/{extra_file_name}", encoded_content)
+    package_pt2(
+        f,
+        exported_programs={"model": ep},
+        extra_files=extra_files,
+        pickle_protocol=pickle_protocol,
+        opset_version=opset_version,
+    )
 
 
 def load(
@@ -460,10 +446,32 @@ def load(
 
     extra_files = extra_files or {}
 
+    from torch.export.pt2_archive._package import load_pt2, PT2ArchiveContents
+
+    try:
+        pt2_contents = load_pt2(
+            f,
+            expected_opset_version=expected_opset_version,
+        )
+    except RuntimeError:
+        pt2_contents = PT2ArchiveContents({}, {}, {})
+
+    if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:
+        for k, v in pt2_contents.extra_files.items():
+            extra_files[k] = v
+
+        return pt2_contents.exported_programs["model"]
+
+    # TODO: For backward compatibility, we support loading a zip file from 2.7. Delete this path in 2.9(?)
+    warnings.warn(
+        "This version of file is deprecated. Please generate a new pt2 saved file."
+    )
     with zipfile.ZipFile(f, "r") as zipf:
         # Check the version
         version = zipf.read("version").decode().split(".")
-        from torch._export.serde.schema import SCHEMA_VERSION
+        from torch._export.serde.schema import (
+            SCHEMA_VERSION,  # todo change archive version to schema version
+        )
 
         assert len(version) == len(SCHEMA_VERSION)
         if version[0] != str(SCHEMA_VERSION[0]):

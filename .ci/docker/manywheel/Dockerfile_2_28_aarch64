@@ -58,6 +58,7 @@ RUN git config --global --add safe.directory "*"
 
 FROM base as openblas
 # Install openblas
+ARG OPENBLAS_VERSION
 ADD ./common/install_openblas.sh install_openblas.sh
 RUN bash ./install_openblas.sh && rm install_openblas.sh
 
