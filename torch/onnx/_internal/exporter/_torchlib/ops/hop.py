@@ -106,7 +106,7 @@ def higher_order_scan(
         *[
             ir.Value(
                 name=f"{inp.name}_{body_func.name}__subgraph_in",
-                shape=inp.shape,  # type: ignore[index]
+                shape=inp.shape,
                 type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
             )
             for inp in scan_inits
@@ -116,7 +116,7 @@ def higher_order_scan(
                 name=f"{inp.name}_{body_func.name}__subgraph_in",
                 # The iterated element passed to the body subgraph does not have a sequence axis.
                 # It will have a rank one less than the rank of the corresponding scan_input.
-                shape=ir.Shape(inp.shape[1:]),
+                shape=ir.Shape(inp.shape[1:]),  # type: ignore[index]
                 type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
             )
             for inp in scan_inputs
