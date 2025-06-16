@@ -37,6 +37,7 @@ inline std::string toStringConstantState(ConstantState state) {
   }
 }
 
+template <typename ModelT = AOTInductorModel>
 class AOTInductorModelContainer {
  public:
   AOTInductorModelContainer(
@@ -49,7 +50,7 @@ class AOTInductorModelContainer {
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
-      models_.push_back(AOTInductorModel::Create(
+      models_.push_back(ModelT::Create(
           constants_map_, constants_array_, device_str, cubin_dir));
       available_models_.push_back(models_.back().get());
     }
@@ -259,7 +260,7 @@ class AOTInductorModelContainer {
       bool inactive_buffer,
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    AOTInductorModel* model;
+    ModelT* model;
     ConstantState& const_folded = inactive_buffer == use_secondary_
         ? constant_folded_
         : constant_folded_secondary_;
@@ -632,15 +633,15 @@ class AOTInductorModelContainer {
   std::shared_ptr<std::vector<ConstantHandle>> constants_array_secondary_;
 
   // Holds all the AOTInductorModel instances owned by this container.
-  std::vector<std::unique_ptr<AOTInductorModel>> models_;
+  std::vector<std::unique_ptr<ModelT>> models_;
 
   // Holds the AOTInductorModel instances available for inference.
-  std::vector<AOTInductorModel*> available_models_;
+  std::vector<ModelT*> available_models_;
 
   // Holds the AOTInductorModel instances that have started running
   // inference and can be placed onto available_models_ upon their
   // completion.
-  std::deque<AOTInductorModel*> pending_models_;
+  std::deque<ModelT*> pending_models_;
 
   // Protects available_models_ and pending_models_.
   std::mutex models_mutex_;
@@ -648,7 +649,7 @@ class AOTInductorModelContainer {
   // Notified whenever a model is placed onto pending_models_.
   std::condition_variable pending_models_available_;
 
-  AOTInductorModel* get_available_model() {
+  ModelT* get_available_model() {
     std::unique_lock lk(models_mutex_);
     if (available_models_.empty()) {
       reclaim_finished_models(lk);
@@ -719,15 +720,15 @@ class AOTInductorModelContainer {
 #ifdef __aarch64__
     // push finished model instances to the end of pending_models_
     auto it = std::partition(
-        pending_models_.begin(),
-        pending_models_.end(),
-        [](AOTInductorModel* m) { return !m->is_finished(); });
+        pending_models_.begin(), pending_models_.end(), [](ModelT* m) {
+          return !m->is_finished();
+        });
 #else
     // push finished model instances to the end of pending_models_
     auto it = std::stable_partition(
-        pending_models_.begin(),
-        pending_models_.end(),
-        [](AOTInductorModel* m) { return !m->is_finished(); });
+        pending_models_.begin(), pending_models_.end(), [](ModelT* m) {
+          return !m->is_finished();
+        });
 #endif
 
     if (it != pending_models_.end()) {
