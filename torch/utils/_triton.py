@@ -18,44 +18,6 @@ def has_triton_package() -> bool:
 
 
 @functools.cache
-def has_triton(device: "Device" = None) -> bool:
-    """
-    Determine if Triton is available for use on this system for a given device
-    (if device is not None) or any available device type if no device is given.
-    """
-    import torch
-    from torch._dynamo.device_interface import (
-        DeviceInterface,
-        get_interface_for_device,
-        get_registered_device_interfaces,
-    )
-
-    if not has_triton_package():
-        return False
-
-    def device_has_triton(di: type[DeviceInterface]) -> bool:
-        if not di.is_available():
-            return False
-
-        try:
-            di.raise_if_triton_unavailable(device)
-        except RuntimeError:
-            return False
-
-        return True
-
-    if device is None:
-        return any(
-            device_has_triton(di) for _, di in get_registered_device_interfaces()
-        )
-
-    if not isinstance(device, (str, torch.device)):
-        device = torch.device(device)
-
-    return device_has_triton(get_interface_for_device(device))
-
-
-@functools.cache
 def _device_supports_tma() -> bool:
     import torch
 
@@ -145,6 +107,44 @@ def has_triton_stable_tma_api() -> bool:
             except ImportError:
                 pass
     return False
+
+
+@functools.cache
+def has_triton(device: "Device" = None) -> bool:
+    """
+    Determine if Triton is available for use on this system for a given device
+    (if device is not None) or any available device type if no device is given.
+    """
+    import torch
+    from torch._dynamo.device_interface import (
+        DeviceInterface,
+        get_interface_for_device,
+        get_registered_device_interfaces,
+    )
+
+    if not has_triton_package():
+        return False
+
+    def device_has_triton(di: type[DeviceInterface]) -> bool:
+        if not di.is_available():
+            return False
+
+        try:
+            di.raise_if_triton_unavailable(device)
+        except RuntimeError:
+            return False
+
+        return True
+
+    if device is None:
+        return any(
+            device_has_triton(di) for _, di in get_registered_device_interfaces()
+        )
+
+    if not isinstance(device, (str, torch.device)):
+        device = torch.device(device)
+
+    return device_has_triton(get_interface_for_device(device))
 
 
 @functools.cache
