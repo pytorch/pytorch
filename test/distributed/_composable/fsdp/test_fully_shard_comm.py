@@ -36,7 +36,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_multicast_support,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DoubleLinear,
@@ -1301,6 +1304,9 @@ class TestFullyShardAllocFromPG(FSDPTest):
         super()._run(*args, **kwargs)
 
     @skip_if_lt_x_gpu(2)
+    # The NCCL PG refuses to allocate tensors if multicast is unavailable, see
+    # https://github.com/pytorch/pytorch/blob/503362d019b3782581492af7767945dbd75ca1c9/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp#L5634
+    @requires_multicast_support()
     def test_fully_shard_alloc_from_pg(self):
         torch.manual_seed(42)
         model_args = ModelArgs()
