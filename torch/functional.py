@@ -1522,7 +1522,7 @@ def atleast_1d(*tensors):
     Input tensors with one or more dimensions are returned as-is.
 
     Args:
-        input (Tensor or list of Tensors)
+        input (Tensor or sequence of Tensors): tensor(s) to be converted to at least 1-dimensional.
 
     Returns:
         output (Tensor or tuple of Tensors)
@@ -1543,6 +1543,8 @@ def atleast_1d(*tensors):
         >>> y = torch.tensor(1.)
         >>> torch.atleast_1d((x, y))
         (tensor([0.5000]), tensor([1.]))
+        >>> torch.atleast_1d()
+        ()
     """
     # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
@@ -1558,7 +1560,7 @@ def atleast_2d(*tensors):
     Input tensors with two or more dimensions are returned as-is.
 
     Args:
-        input (Tensor or list of Tensors)
+        input (Tensor or sequence of Tensors): tensor(s) to be converted to at least 2-dimensional.
 
     Returns:
         output (Tensor or tuple of Tensors)
@@ -1581,6 +1583,8 @@ def atleast_2d(*tensors):
         >>> y = torch.tensor(1.)
         >>> torch.atleast_2d((x, y))
         (tensor([[0.5000]]), tensor([[1.]]))
+        >>> torch.atleast_2d()
+        ()
     """
     # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
@@ -1596,7 +1600,7 @@ def atleast_3d(*tensors):
     Input tensors with three or more dimensions are returned as-is.
 
     Args:
-        input (Tensor or list of Tensors)
+        input (Tensor or sequence of Tensors): tensor(s) to be converted to at least 3-dimensional.
 
     Returns:
         output (Tensor or tuple of Tensors)
@@ -1627,6 +1631,8 @@ def atleast_3d(*tensors):
         >>> y = torch.tensor(1.0)
         >>> torch.atleast_3d((x, y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
+        >>> torch.atleast_3d()
+        ()
     """
     # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
