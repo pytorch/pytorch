@@ -309,7 +309,7 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
                 return x + y
 
         dim0_x = torch.export.Dim("dim0_x", min=6)
-        dynamic_shapes = {"x": {0: dim0_x}}
+        dynamic_shapes = {"x": {0: dim0_x}, "y": torch.export.Dim.STATIC}
         # specialized input y to 5 during tracing
         onnx_program = self.export(
             Model(),
