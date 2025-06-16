@@ -17,23 +17,36 @@ torch.dtype
 A :class:`torch.dtype` is an object that represents the data type of a
 :class:`torch.Tensor`. PyTorch has several different data types:
 
-========================== ===========================================   ===========================
-Data type                  dtype                                         Legacy Constructors
-========================== ===========================================   ===========================
-32-bit floating point      ``torch.float32`` or ``torch.float``          ``torch.*.FloatTensor``
-64-bit floating point      ``torch.float64`` or ``torch.double``         ``torch.*.DoubleTensor``
-32-bit complex             ``torch.complex32`` or ``torch.chalf``
-64-bit complex             ``torch.complex64`` or ``torch.cfloat``
-128-bit complex            ``torch.complex128`` or ``torch.cdouble``
-16-bit floating point [1]_ ``torch.float16`` or ``torch.half``           ``torch.*.HalfTensor``
-16-bit floating point [2]_ ``torch.bfloat16``                            ``torch.*.BFloat16Tensor``
-8-bit integer (unsigned)   ``torch.uint8``                               ``torch.*.ByteTensor``
-8-bit integer (signed)     ``torch.int8``                                ``torch.*.CharTensor``
-16-bit integer (signed)    ``torch.int16`` or ``torch.short``            ``torch.*.ShortTensor``
-32-bit integer (signed)    ``torch.int32`` or ``torch.int``
-64-bit integer (signed)    ``torch.int64`` or ``torch.long``
-Boolean                    ``torch.bool``
-========================== ===========================================   ===========================
+**Floating point dtypes**
+
+=========================================  ===============================
+dtype                                      description
+=========================================  ===============================
+``torch.float32`` or ``torch.float``       32-bit floating point
+``torch.float64`` or ``torch.double``      64-bit floating point
+``torch.float16`` or ``torch.half``        16-bit floating point [1]_
+``torch.bfloat16``                         16-bit floating point [2]_
+``torch.complex32`` or ``torch.chalf``     32-bit complex
+``torch.complex64`` or ``torch.cfloat``    64-bit complex
+``torch.complex128`` or ``torch.cdouble``  128-bit complex
+=========================================  ===============================
+
+**Integer dtypes**
+
+=========================================  ===============================
+dtype                                      description
+=========================================  ===============================
+``torch.uint8``                            8-bit integer (unsigned)
+``torch.int8``                             8-bit integer (signed)
+``torch.uint16``                           16-bit integer (unsigned)
+``torch.int16`` or ``torch.short``         16-bit integer (signed)
+``torch.uint32``                           32-bit integer (unsigned)
+``torch.int32`` or ``torch.int``           32-bit integer (signed)
+``torch.uint64``                           64-bit integer (unsigned)
+``torch.int64`` or ``torch.long``          64-bit integer (signed)
+``torch.bool``                             Boolean
+=========================================  ===============================
+
 
 .. [1] Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
   significand bits. Useful when precision is important.
@@ -41,6 +54,10 @@ Boolean                    ``torch.bool``
 .. [2] Sometimes referred to as Brain Floating Point: use 1 sign, 8 exponent and 7
   significand bits. Useful when range is important, since it has the same
   number of exponent bits as ``float32``
+
+Note: legacy constructors such as ``torch.*.FloatTensor``, ``torch.*.DoubleTensor``, ``torch.*.HalfTensor``, 
+``torch.*.BFloat16Tensor``, ``torch.*.ByteTensor``, ``torch.*.CharTensor``, ``torch.*.ShortTensor``, ``torch.*.IntTensor``, 
+``torch.*.LongTensor``, ``torch.*.BoolTensor`` only remain for backwards compatibility and should no longer be used.
 
 To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
 can be used, which returns ``True`` if the data type is a floating point data type.
