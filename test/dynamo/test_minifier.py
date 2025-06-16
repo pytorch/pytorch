@@ -216,7 +216,7 @@ class Repro(torch.nn.Module):
         )
 
 
-devices = ["cuda", "xpu"]
+devices = ["cuda", "xpu", "cpu"]
 instantiate_device_type_tests(
     MinifierTests, globals(), only_for=devices, allow_xpu=True
 )
