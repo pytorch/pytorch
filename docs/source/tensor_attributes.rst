@@ -33,8 +33,8 @@ dtype                                      description
 ``torch.float8_e5m2`` [shell]_             8-bit floating point, S-E-M 1-5-2, from https://arxiv.org/abs/2209.05433
 ``torch.float8_e4m3fnuz`` [shell]_, [1]_   8-bit floating point, S-E-M 1-4-3, from https://arxiv.org/pdf/2206.02915
 ``torch.float8_e5m2fnuz`` [shell]_, [1]_   8-bit floating point, S-E-M 1-5-2, from https://arxiv.org/pdf/2206.02915
-``torch.float8_e8m0fnu`` [shell]_, [1]_    8-bit floating point, S-E-M 0-8-0, from the `MX OCP Spec 1.0<https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf>`_
-``torch.float4_e2m1fn_x2`` [shell]_, [1]_  packed 4-bit floating point, S-E-M 1-2-1, from `MX OCP Spec 1.0<https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf>`_
+``torch.float8_e8m0fnu`` [shell]_, [1]_    8-bit floating point, S-E-M 0-8-0, from https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
+``torch.float4_e2m1fn_x2`` [shell]_, [1]_  packed 4-bit floating point, S-E-M 1-2-1, from https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
 =========================================  ===============================
 
 **Integer dtypes**
