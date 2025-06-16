@@ -1148,7 +1148,7 @@ def forward(self, primals_1, primals_2, primals_3):
             """\
 def forward(self, arg0_1, arg1_1):
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-    copy_ = torch.ops.aten.copy_.default(arg1_1, sin);  sin = copy_ = None
+    _ = torch.ops.aten.copy_.default(arg1_1, sin);  sin = _ = None
     return (arg1_1,)""",
         )
 
@@ -1476,7 +1476,7 @@ def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(view, 2);  view = None
     view_1 = torch.ops.aten.view.default(mul, [4]);  mul = None
     add = torch.ops.aten.add.Tensor(view_1, 1)
-    copy_ = torch.ops.aten.copy_.default(primals_1, view_1);  primals_1 = view_1 = copy_ = None
+    _ = torch.ops.aten.copy_.default(primals_1, view_1);  primals_1 = view_1 = _ = None
     return (add,)""",
         )
 
@@ -1498,7 +1498,7 @@ def forward(self, primals_1):
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 2)
     add = torch.ops.aten.add.Tensor(mul, 3)
-    copy_ = torch.ops.aten.copy_.default(primals_1, mul);  primals_1 = mul = copy_ = None
+    _ = torch.ops.aten.copy_.default(primals_1, mul);  primals_1 = mul = _ = None
     return (add,)""",
         )
 
@@ -1520,7 +1520,7 @@ def forward(self, primals_1):
 def forward(self, arg0_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, 2)
     add = torch.ops.aten.add.Tensor(mul, 3)
-    copy_ = torch.ops.aten.copy_.default(arg0_1, mul);  arg0_1 = mul = copy_ = None
+    _ = torch.ops.aten.copy_.default(arg0_1, mul);  arg0_1 = mul = _ = None
     return (add,)""",
         )
 
@@ -3744,7 +3744,7 @@ def forward(self, primals_1, primals_2, primals_3):
     sum_1 = torch.ops.aten.sum.default(mm);  mm = None
     sum_2 = torch.ops.aten.sum.default(add)
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
-    copy_ = torch.ops.aten.copy_.default(primals_2, add);  primals_2 = add = copy_ = None
+    _ = torch.ops.aten.copy_.default(primals_2, add);  primals_2 = add = _ = None
     return (add_1, primals_1, primals_3)""",
         )
         self.assertEqual(out_ref, out_test)
@@ -3800,9 +3800,9 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals
     getitem_2 = _native_batch_norm_legit_functional[2]
     getitem_3 = _native_batch_norm_legit_functional[3]
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    copy_ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = copy_ = None
-    copy__1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = copy__1 = None
-    copy__2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = add = copy__2 = None
+    _ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = _ = None
+    __1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = __1 = None
+    __2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = add = __2 = None
     return (getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4)""",  # noqa: B950
         )
 
@@ -7870,7 +7870,7 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
             return x, y
 
         def inps():
-            return torch.ones(2, 3),
+            return (torch.ones(2, 3),)
 
         ref_y = fn(*inps())
         y = torch.compile(fn, backend="aot_eager", fullgraph=True)(*inps())

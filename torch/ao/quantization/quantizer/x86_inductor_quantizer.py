@@ -636,7 +636,11 @@ class X86InductorQuantizer(Quantizer):
         for partition in partition_list:
             if len(partition.output_nodes) > 1:
                 raise ValueError("Input partition has more than one output node")
-            output_node = partition.output_nodes[0]
+            if len(partition.output_nodes) == 0:
+                output_node = partition.nodes[0]
+            else:
+                output_node = partition.output_nodes[0]
+
             assert isinstance(output_node, Node)
             output_node_list.append(output_node)
         if len(output_node_list) != len(partition_list):
@@ -1109,9 +1113,6 @@ class X86InductorQuantizer(Quantizer):
             conv_node, binary_node = self._get_output_nodes_of_partitions(
                 [conv_partition, binary_partition]
             )
-            if len(conv_node.users) != 1:
-                # Conv Node should only has 1 user node
-                continue
             conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(
                 conv_node, binary_node
             )

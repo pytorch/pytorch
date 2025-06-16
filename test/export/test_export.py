@@ -6906,7 +6906,7 @@ def forward(self, x):
     bn_running_var = self.bn.running_var
     bn_num_batches_tracked = self.bn.num_batches_tracked
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
-    add_ = torch.ops.aten.add_.Tensor(bn_num_batches_tracked, 1);  bn_num_batches_tracked = add_ = None
+    _ = torch.ops.aten.add_.Tensor(bn_num_batches_tracked, 1);  bn_num_batches_tracked = _ = None
     batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05, True);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )

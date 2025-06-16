@@ -1428,7 +1428,7 @@ def forward(self, images_1, handedness_1, valid_1):
     eq = torch.ops.aten.eq.Scalar(index_1, 1);  index_1 = None
     index_2 = torch.ops.aten.index.Tensor(index, [eq])
     flip = torch.ops.aten.flip.default(index_2, [-1]);  index_2 = None
-    index_put_ = torch.ops.aten.index_put_.default(index, [eq], flip);  index = eq = flip = index_put_ = None
+    _ = torch.ops.aten.index_put_.default(index, [eq], flip);  index = eq = flip = _ = None
     return None""")
 
     def test_neg_shape(self):

@@ -770,6 +770,38 @@ def _maybe_record_pointwise_barrier(
     last_node.meta["low_precision_pointwise_barrier"] = True
 
 
+def _get_mutable_op_inplace_output_arg_index(func, args, kwargs):
+    is_mutable, maybe_mutable_schema = _is_mutable_operator(
+        func, args, kwargs, return_schema=True  # type: ignore[arg-type]
+    )
+    if not is_mutable:
+        return None
+
+    # For consequent inplace ops on the same Tensor
+    # we want them to be applied only on original tensor.
+    #
+    # def fn(primal, primal1, primal2):
+    #     primal = torch.ops.aten.copy_(primal, primal1)
+    #     primal = torch.ops.aten.copy_(primal, primal2)
+    #
+    # This is important for joint graph, where inplace mutations
+    # can be in forward and backward.
+    # In this case we want them to be independent,
+    # that partitioner can split them.
+    s = maybe_mutable_schema
+    # Support for now only ops with 1 return
+    if len(s.returns) == 1 and (r_alias_info := s.returns[0].alias_info):
+        for idx, s_arg in enumerate(s.arguments):
+            if not s_arg.alias_info:
+                continue
+            # if idx >= len(proxy_args):
+            #     # Ignore parsing proxy_kwargs for now
+            #     break
+            if r_alias_info.after_set == s_arg.alias_info.after_set:
+                return idx
+    return None
+
+
 def proxy_call(
     proxy_mode: ProxyTorchDispatchMode,
     func: OpOverload,
@@ -911,34 +943,10 @@ def proxy_call(
     # This is what the overload modification does.
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
-    proxy_arg_inplace_self = None
-    is_mutable, maybe_mutable_schema = _is_mutable_operator(
-        func, args, kwargs, return_schema=True  # type: ignore[arg-type]
+    # proxy_arg_inplace_self = None
+    proxy_arg_inplace_out_idx = _get_mutable_op_inplace_output_arg_index(
+        func, args, kwargs
     )
-    if is_mutable:
-        # For consequent inplace ops on the same Tensor
-        # we want them to be applied only on original tensor.
-        #
-        # def fn(primal, primal1, primal2):
-        #     primal = torch.ops.aten.copy_(primal, primal1)
-        #     primal = torch.ops.aten.copy_(primal, primal2)
-        #
-        # This is important for joint graph, where inplace mutations
-        # can be in forward and backward.
-        # In this case we want them to be independent,
-        # that partitioner can split them.
-        s = maybe_mutable_schema
-        # Support for now only ops with 1 return
-        if len(s.returns) == 1 and (r_alias_info := s.returns[0].alias_info):
-            for idx, s_arg in enumerate(s.arguments):
-                if not s_arg.alias_info:
-                    continue
-                if idx >= len(proxy_args):
-                    # Ignore parsing proxy_kwargs for now
-                    break
-                if r_alias_info.after_set == s_arg.alias_info.after_set:
-                    proxy_arg_inplace_self = proxy_args[idx]
-                    break
 
     proxy_out = proxy_mode.tracer.create_proxy(
         "call_function",
@@ -946,7 +954,7 @@ def proxy_call(
         proxy_args,
         proxy_kwargs,
         name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__)
-        if proxy_arg_inplace_self is None
+        if proxy_arg_inplace_out_idx is None
         else "_",
     )
 
@@ -1014,7 +1022,10 @@ def proxy_call(
     else:
         constant = None
 
-    if proxy_arg_inplace_self is not None:
+    if proxy_arg_inplace_out_idx is not None and proxy_arg_inplace_out_idx < len(
+        proxy_args
+    ):
+        proxy_arg_inplace_self = proxy_args[proxy_arg_inplace_out_idx]
         # Argument can be a real Tensor
         if isinstance(proxy_arg_inplace_self, Proxy):
             proxy_out = proxy_arg_inplace_self

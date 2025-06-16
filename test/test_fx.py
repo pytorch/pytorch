@@ -4176,8 +4176,8 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
         fx_fn.graph.eliminate_dead_code()
         py_code = fx_fn.recompile()
-        self.assertTrue("copy_ = torch.ops.aten.copy_.default" in py_code.src)
-        self.assertTrue("copy_ = None" in py_code.src)
+        self.assertTrue("_ = torch.ops.aten.copy_.default" in py_code.src)
+        self.assertTrue("_ = None" in py_code.src)
 
         # recorver mutable checking flag
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
