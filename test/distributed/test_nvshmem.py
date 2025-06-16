@@ -310,6 +310,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
         inp_hdl = symm_mem.rendezvous(inp, group=group_name)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
+        dist.barrier()
         peer = 1 - rank
         if rank == 1:
             # Rank 1 gets data from rank 0
@@ -322,7 +323,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
                 peer=peer,
                 extern_libs=nvshmem_lib,
             )
-        dist.barrier()
         if rank == 1:
             torch.testing.assert_close(
                 out, val * torch.ones(numel, dtype=dtype, device=self.device)
@@ -359,6 +359,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
         inp_hdl = symm_mem.rendezvous(inp, group=group_name)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
+        dist.barrier()
 
         # Ring topology: each rank gets data from the rank to its left
         # rank 0 gets from rank (world_size-1), rank 1 gets from rank 0, etc.
@@ -374,7 +375,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
             peer=peer,
             extern_libs=nvshmem_lib,
         )
-        dist.barrier()
 
         expected_value = peer
         torch.testing.assert_close(
