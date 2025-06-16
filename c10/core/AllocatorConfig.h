@@ -111,14 +111,14 @@ class C10_API AllocatorConfig {
     return instance().last_allocator_settings_;
   }
 
-  void parseArgs(const char* env);
+  void parseArgs(const std::optional<std::string>& env);
 
  private:
   AllocatorConfig();
 
   /* Internal functions */
 
-  void lexArgs(const char* env, std::vector<std::string>& config);
+  void lexArgs(const std::string& env, std::vector<std::string>& config);
 
   void consumeToken(
       const std::vector<std::string>& config,
