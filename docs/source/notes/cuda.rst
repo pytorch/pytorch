@@ -481,7 +481,7 @@ Available options:
   the native CUDACachingAllocator, the sizes are rounded up in multiple
   of blocks size of 512, so this works fine for smaller sizes. However, this
   can be inefficient for large near-by allocations as each will go to different
-  size of blocks and re-use of those blocks are minimized. This might create
+  size of blocks and reuse of those blocks are minimized. This might create
   lots of unused blocks and will waste GPU memory capacity. This option enables
   the rounding of allocation size to nearest power-2 division. For example, if
   we need to round-up size of 1200 and if number of divisions is 4,
@@ -497,10 +497,10 @@ Available options:
   ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
 * ``max_non_split_rounding_mb`` will allow non-split blocks for better reuse, eg,
-   a 1024MB cached block can be re-used for a 512MB allocation request. In the default
+   a 1024MB cached block can be reused for a 512MB allocation request. In the default
    case, we only allow up to 20MB of rounding of non-split blocks, so a 512MB block
    can only be served with between 512-532 MB size block. If we set the value of this
-   option to 1024, it will alow 512-1536 MB size blocks to be used for a 512MB block
+   option to 1024, it will allow 512-1536 MB size blocks to be used for a 512MB block
    which increases reuse of larger blocks. This will also help in reducing the stalls
    in avoiding expensive cudaMalloc calls.
 * ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
@@ -825,7 +825,7 @@ APIs can be used for debugging purposes:
        out_2 = torch.randn(nelem_1mb, device="cuda")
 
        # pool now should have 2 segments since the CUDACachingAllocator had
-       # to make a new 2 MB buffer to accomodate out_2
+       # to make a new 2 MB buffer to accommodate out_2
        assert len(pool.snapshot()) == 2
 
 

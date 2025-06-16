@@ -10,7 +10,7 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 :: able to see what our cl.exe commands are (since you can actually
 :: just copy-paste them into a local Windows setup to just rebuild a
 :: single file.)
-:: log sizes are too long, but leaving this here incase someone wants to use it locally
+:: log sizes are too long, but leaving this here in case someone wants to use it locally
 :: set CMAKE_VERBOSE_MAKEFILE=1
 
 
