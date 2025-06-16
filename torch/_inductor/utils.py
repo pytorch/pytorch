@@ -996,6 +996,25 @@ def output_node(gm: torch.fx.GraphModule) -> Node:
     return last_node
 
 
+def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
+    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
+    input_devices: OrderedSet[torch.device] = OrderedSet(
+        node.meta["val"].device
+        for node in placeholder_nodes
+        if isinstance(node.meta.get("val"), torch.Tensor)
+    )
+
+    out_arg = output_node(gm).args[0]  # type: ignore[union-attr]
+    out_args = out_arg if isinstance(out_arg, tuple) else (out_arg,)
+    out_devices: OrderedSet[torch.device] = OrderedSet(
+        arg.meta["val"].device
+        for arg in out_args
+        if isinstance(arg, torch.fx.Node)
+        and isinstance(arg.meta.get("val"), torch.Tensor)
+    )
+    return input_devices | out_devices
+
+
 _registered_caches: list[Any] = []
 
 
@@ -1578,6 +1597,14 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
+def _use_cutlass_for_op(op_name: str) -> bool:
+    """Check if CUTLASS should be used for the given operation."""
+    enabled_ops = config.cuda.cutlass_enabled_ops.upper()
+    if enabled_ops == "ALL":
+        return True
+    return op_name.upper() in [x.strip() for x in enabled_ops.split(",")]
+
+
 decompose_k_threshold = 32
 
 # To limit compile time
@@ -1810,9 +1837,9 @@ def use_cpp_gemm_template(
         use_4x2_dim=is_woq_int4,
     )
 
+    # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
-
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
 

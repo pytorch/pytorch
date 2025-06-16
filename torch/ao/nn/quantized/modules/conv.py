@@ -467,7 +467,7 @@ class Conv1d(_ConvNd):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
@@ -597,7 +597,7 @@ class Conv2d(_ConvNd):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
@@ -728,7 +728,7 @@ class Conv3d(_ConvNd):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
@@ -794,7 +794,7 @@ class _ConvTransposeNd(_ConvNd):
         return res
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module or qparams_dict.
         Args:
             mod (Module): a float module, either produced by torch.ao.quantization
@@ -841,7 +841,7 @@ class _ConvTransposeNd(_ConvNd):
             return qconv
 
     @staticmethod
-    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):  # type: ignore[override]
         r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
         Args:
             ref_qconvt (Module): a reference quantized  module, either produced by torch.ao.quantization
@@ -989,7 +989,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         )
 
     @classmethod
-    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):  # type: ignore[override]
         return _ConvTransposeNd.from_reference(
             cls, ref_qconvt, output_scale, output_zero_point
         )
@@ -1112,7 +1112,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         )
 
     @classmethod
-    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):  # type: ignore[override]
         return _ConvTransposeNd.from_reference(
             cls, ref_qconvt, output_scale, output_zero_point
         )
@@ -1237,7 +1237,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         )
 
     @classmethod
-    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):  # type: ignore[override]
         return _ConvTransposeNd.from_reference(
             cls, ref_qconvt, output_scale, output_zero_point
         )
