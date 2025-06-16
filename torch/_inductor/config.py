@@ -434,6 +434,7 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
+
 # As above, specify candidate backends for conv autotune.
 # NB: in some cases for 1x1 convs we emit as matmul,
 # which will use the backends of `max_autotune_gemm_backends`
@@ -581,6 +582,9 @@ max_epilogue_benchmarked_choices = 1
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
+
+# how many nodes to attempt pairwise fusion with in a buffer group
+max_fusion_buffer_group_pairwise_attempts = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
 max_pointwise_cat_inputs = 8
@@ -1356,10 +1360,9 @@ class aot_inductor:
     embed_kernel_binary: bool = False
 
     # Generate kernel files that support multiple archs
-    # Default it will emit multi arch kernels as asm files, e.g. PTX for CUDA.
+    # For CUDA, this means generating fatbin files for kernels, and the fatbin files
+    # contains PTX and SASS for the current architecture.
     emit_multi_arch_kernel: bool = False
-    # In addition to emit asm files, also emit binary files for current arch
-    emit_current_arch_binary: bool = False
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
@@ -1483,6 +1486,13 @@ class cuda:
     # Experimental. Prescreen top x configs before tuning on swizzle.
     cutlass_prescreening: bool = (
         os.environ.get("TORCHINDUCTOR_CUTLASS_PRESCREENING", "1") == "1"
+    )
+
+    # Specify which operations should use CUTLASS backend
+    # Comma-separated list like "mm,addmm,bmm", "all" for all operations, and "" for none.
+    # Acceptable operations: mm, int_mm, addmm, sparse_semi_structured_mm, bmm, scaled_mm
+    cutlass_enabled_ops: str = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_ENABLED_OPS", "all"
     )
 
 
@@ -1645,7 +1655,7 @@ class trace:
     compile_profile = False
 
     # Upload the .tar.gz file
-    # Needs to be overriden based on specific environment needs
+    # Needs to be overridden based on specific environment needs
     upload_tar: Optional[Callable[[str], None]] = None
 
     log_autotuning_results: bool = False
@@ -1664,6 +1674,8 @@ _save_config_ignore: list[str] = [
     "aot_inductor.dump_aoti_minifier",
     "post_grad_custom_pre_pass",
     "post_grad_custom_post_pass",
+    "_fuse_ddp_communication_passes",
+    "_pre_fusion_custom_pass",
 ]
 
 _cache_config_ignore_prefix: list[str] = [
@@ -1677,6 +1689,8 @@ _cache_config_ignore_prefix: list[str] = [
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
+    "_fuse_ddp_communication_passes",
+    "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
 ]

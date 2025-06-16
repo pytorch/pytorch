@@ -422,6 +422,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         alpha: float,
         beta: float,
         input_reorder: Optional[list[int]] = None,
+        use_fast_accum: Optional[bool] = None,
     ) -> None:
         """
         Args:
@@ -437,6 +438,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
         self.alpha = alpha
         self.beta = beta
+        self.use_fast_accum = use_fast_accum
         assert 2 <= len(input_nodes) <= 5
         assert self._are_inputs_layout_compatible(
             [node.get_layout() for node in input_nodes]
@@ -453,6 +455,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
         input_reorder: Optional[list[int]] = None,
+        use_fast_accum: Optional[bool] = None,
         **extra_kwargs,
     ) -> None:
         raise NotImplementedError
@@ -559,6 +562,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 self.maybe_append_choice(
                     choices, description=description, op=op, swizzle=swizzle
                 )
+
         if len(ops) == 0:
             input_layouts = [node.get_layout() for node in input_nodes]
             input_strides = [node.get_stride() for node in input_nodes]
@@ -873,6 +877,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         # TODO: update epilogue functor according to epilogues.
         op.element_epilogue = op.accumulator_type()
 
+        if self.use_fast_accum is not None:
+            is_op_fast_accum = "fastaccum" in op.configuration_name()
+            if self.use_fast_accum ^ is_op_fast_accum:
+                return None
+
         # Set bias layout and alignment.
         status = self._set_bias_layout_and_alignment(op)
         if not status:
@@ -1085,6 +1094,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
                 D_output_name = var_name_to_buffer_name["D"]
                 name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
+                for name in V.graph.constants.keys():
+                    name_to_buffer[name] = V.graph.add_tensor_constant(
+                        V.graph.constants[name], name
+                    )
                 D_output_buffer = name_to_buffer[D_output_name]
                 Y = D_output_buffer  # type: ignore[assignment]
                 # Interestingly, I don't think the rest of the layout matters here since we
@@ -1243,8 +1256,11 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         alpha: float,
         beta: float,
         input_reorder: Optional[list[int]] = None,
+        use_fast_accum: Optional[bool] = None,
     ):
-        super().__init__(input_nodes, layout, alpha, beta, input_reorder)
+        super().__init__(
+            input_nodes, layout, alpha, beta, input_reorder, use_fast_accum
+        )
 
     @staticmethod
     def add_cutlass_gemm_choices(
@@ -1254,10 +1270,16 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
         input_reorder: Optional[list[int]] = None,
+        use_fast_accum: Optional[bool] = None,
         **extra_kwargs,
     ) -> None:
         template = CUTLASS3xGemmTemplate(
-            input_nodes, layout, alpha, beta, input_reorder
+            input_nodes,
+            layout,
+            alpha,
+            beta,
+            input_reorder,
+            use_fast_accum,
         )
         template._add_cutlass_gemm_choices(
             choices, layout, input_nodes, alpha, beta, input_reorder, **extra_kwargs
@@ -1382,6 +1404,12 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         from .cutlass_lib_extensions.evt_extensions import create_example_tensors, trace
 
         name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
+
+        for name in V.graph.constants.keys():
+            name_to_buffer[name] = V.graph.add_tensor_constant(
+                V.graph.constants[name], name
+            )
+
         # handle the fake output buffer during lowering
         name_to_buffer[self.output_node.get_name()] = self.output_node  # type: ignore[assignment]
 
@@ -1626,6 +1654,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
         input_reorder: Optional[list[int]] = None,
+        use_fast_accum: Optional[bool] = False,
         **extra_kwargs,
     ) -> None:
         template = CUTLASS2xGemmTemplate(
