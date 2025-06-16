@@ -221,6 +221,8 @@
 #   BUILD_PYTHON_ONLY
 #      Builds pytorch as a wheel using libtorch.so from a separate wheel
 
+from __future__ import annotations
+
 import os
 import sys
 
@@ -265,43 +267,45 @@ from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
 from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 
-def boolify(value):
+def str2bool(value: str | None) -> None:
     """Convert environment variables to boolean values."""
     if not value:
         return False
-    if isinstance(value, str):
-        value = value.strip().lower()
-        if value in (
-            "1",
-            "true",
-            "t",
-            "yes",
-            "y",
-            "on",
-            "enable",
-            "enabled",
-            "found",
-        ):
-            return True
-        if value in (
-            "0",
-            "false",
-            "f",
-            "no",
-            "n",
-            "off",
-            "disable",
-            "disabled",
-            "notfound",
-            "none",
-            "null",
-            "nil",
-            "undefined",
-            "n/a",
-        ):
-            return False
-        raise ValueError(f"Invalid string value for boolean conversion: {value}")
-    return bool(value)
+    if not isinstance(value, str):
+        raise ValueError(
+            f"Expected a string value for boolean conversion, got {type(value)}"
+        )
+    value = value.strip().lower()
+    if value in (
+        "1",
+        "true",
+        "t",
+        "yes",
+        "y",
+        "on",
+        "enable",
+        "enabled",
+        "found",
+    ):
+        return True
+    if value in (
+        "0",
+        "false",
+        "f",
+        "no",
+        "n",
+        "off",
+        "disable",
+        "disabled",
+        "notfound",
+        "none",
+        "null",
+        "nil",
+        "undefined",
+        "n/a",
+    ):
+        return False
+    raise ValueError(f"Invalid string value for boolean conversion: {value}")
 
 
 def _get_package_path(package_name):
@@ -318,8 +322,8 @@ def _get_package_path(package_name):
     return None
 
 
-BUILD_LIBTORCH_WHL = boolify(os.getenv("BUILD_LIBTORCH_WHL"))
-BUILD_PYTHON_ONLY = boolify(os.getenv("BUILD_PYTHON_ONLY"))
+BUILD_LIBTORCH_WHL = str2bool(os.getenv("BUILD_LIBTORCH_WHL"))
+BUILD_PYTHON_ONLY = str2bool(os.getenv("BUILD_PYTHON_ONLY"))
 
 # set up appropriate env variables
 if BUILD_LIBTORCH_WHL:
@@ -451,7 +455,7 @@ def check_submodules():
             os.path.isdir(folder) and len(os.listdir(folder)) == 0
         )
 
-    if boolify(os.getenv("USE_SYSTEM_LIBS")):
+    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
         return
     folders = get_submodule_folders()
     # If none of the submodule folders exists, try to initialize them
@@ -786,7 +790,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
             # In ROCm on Windows case copy rocblas and hipblaslt files into
             # torch/lib/rocblas/library and torch/lib/hipblaslt/library
-            if boolify(os.getenv("USE_ROCM")):
+            if str2bool(os.getenv("USE_ROCM")):
                 rocm_dir_path = os.environ.get("ROCM_DIR")
                 rocm_bin_path = os.path.join(rocm_dir_path, "bin")
 
@@ -1183,7 +1187,7 @@ def main():
     if BUILD_PYTHON_ONLY:
         install_requires.append(f"{LIBTORCH_PKG_NAME}=={get_torch_version()}")
 
-    if boolify(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
+    if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
         gen_linker_script(
             filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
         )
