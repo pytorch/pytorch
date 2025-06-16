@@ -1158,7 +1158,6 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
-    '*',
     '.ci/**',
     '.circleci/**',
     '.github/**',
