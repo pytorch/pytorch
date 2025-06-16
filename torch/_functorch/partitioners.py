@@ -1052,7 +1052,7 @@ def _count_ops(graph: fx.Graph):
     log.info("%s", sorted(cnt.items(), key=operator.itemgetter(1), reverse=True))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def pointwise_ops():
     ops = []
     for attr_name in dir(torch.ops.aten):

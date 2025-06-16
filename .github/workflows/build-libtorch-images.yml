@@ -48,6 +48,7 @@ jobs:
       fail-fast: false
       matrix:
         include: [
+          { tag: "cuda12.9" },
           { tag: "cuda12.8" },
           { tag: "cuda12.6" },
           { tag: "rocm6.3"  },

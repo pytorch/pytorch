@@ -50,7 +50,7 @@ from collections import Counter, OrderedDict
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
-from types import MethodWrapperType
+from types import CodeType, MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -2369,7 +2369,7 @@ def is_safe_constant(v):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def common_constants():
     return {
         # We zero-one specialize shapes, so specialize these constants
@@ -3111,7 +3111,7 @@ seen_code_map = ExactWeakKeyDictionary()
 
 
 # return same dir unless user changes config between calls
-@functools.lru_cache(None)
+@functools.cache
 def _get_debug_dir(root_dir):
     dir_name = (
         "run_"
@@ -4660,6 +4660,7 @@ def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
     return node is None or "example_value" in node.meta or "val" in node.meta
 
 
+@torch._disable_dynamo
 def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     cm: AbstractContextManager[None] = (
         torch._C._profiler._RecordFunctionFast("Pregraph bytecode")
@@ -4670,5 +4671,14 @@ def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     return cm
 
 
+@torch._disable_dynamo
 def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
     cm.__exit__(None, None, None)
+
+
+# Returns a set of code objects present traced in the current TracingContext, or None
+# if there is no current TracingContext.
+def get_traced_code() -> list[CodeType]:
+    from torch._guards import TracingContext
+
+    return TracingContext.get_traced_code()

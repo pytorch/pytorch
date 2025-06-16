@@ -146,16 +146,14 @@ class GraphModule(torch.nn.Module):
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_9);  getitem_9 = None
         aot1_tangents_1: "f32[s21]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
 
-        new_grad_strided: "f32[s21]" = torch.empty_like(getitem_1);  getitem_1 = None
-
-        copy_: "f32[s21]" = new_grad_strided.copy_(aot1_tangents_1);  copy_ = None
+        accumulate_grad = torch__dynamo_compiled_autograd_ops_AccumulateGrad([aot1_tangents_1], getitem_1, None, False);  getitem_1 = None
+        getitem_11: "f32[s21]" = accumulate_grad[0];  accumulate_grad = None
 
         result: "f32[s21]" = aot1_tangents_1 * aot1_tangents_1;  aot1_tangents_1 = None
 
-        new_grad_strided_1: "f32[s21]" = torch.empty_like(getitem_2);  getitem_2 = None
-
-        copy__1: "f32[s21]" = new_grad_strided_1.copy_(result);  result = copy__1 = None
-        return (new_grad_strided, new_grad_strided_1)
+        accumulate_grad_1 = torch__dynamo_compiled_autograd_ops_AccumulateGrad([result], getitem_2, None, False);  result = getitem_2 = None
+        getitem_12: "f32[s21]" = accumulate_grad_1[0];  accumulate_grad_1 = None
+        return (getitem_11, getitem_12)
 """,
                 )
             elif backend == "inductor":
@@ -179,16 +177,14 @@ class GraphModule(torch.nn.Module):
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_9);  getitem_9 = None
         aot3_tangents_1: "f32[s21]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
 
-        new_grad_strided: "f32[s21]" = torch.empty_like(getitem_1);  getitem_1 = None
-
-        copy_: "f32[s21]" = new_grad_strided.copy_(aot3_tangents_1);  copy_ = None
+        accumulate_grad = torch__dynamo_compiled_autograd_ops_AccumulateGrad([aot3_tangents_1], getitem_1, None, False);  getitem_1 = None
+        getitem_11: "f32[s21]" = accumulate_grad[0];  accumulate_grad = None
 
         result: "f32[s21]" = aot3_tangents_1 * aot3_tangents_1;  aot3_tangents_1 = None
 
-        new_grad_strided_1: "f32[s21]" = torch.empty_like(getitem_2);  getitem_2 = None
-
-        copy__1: "f32[s21]" = new_grad_strided_1.copy_(result);  result = copy__1 = None
-        return (new_grad_strided, new_grad_strided_1)
+        accumulate_grad_1 = torch__dynamo_compiled_autograd_ops_AccumulateGrad([result], getitem_2, None, False);  result = getitem_2 = None
+        getitem_12: "f32[s21]" = accumulate_grad_1[0];  accumulate_grad_1 = None
+        return (getitem_11, getitem_12)
 """,
                 )
 
@@ -265,18 +261,16 @@ class GraphModule(torch.nn.Module):
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_9);  getitem_9 = None
         aot0_tangents_1: "f32[s21]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
 
-        new_grad_strided: "f32[s21]" = torch.empty_like(getitem_1);  getitem_1 = None
-
-        copy_: "f32[s21]" = new_grad_strided.copy_(aot0_tangents_1);  copy_ = None
+        accumulate_grad = torch__dynamo_compiled_autograd_ops_AccumulateGrad([aot0_tangents_1], getitem_1, None, False);  getitem_1 = None
+        getitem_11: "f32[s21]" = accumulate_grad[0];  accumulate_grad = None
 
         add: "Sym(s45 + 1)" = l_hooks_1_keywords_fn_keywords_obj_counter + 1;  l_hooks_1_keywords_fn_keywords_obj_counter = None
 
         result: "f32[s21]" = aot0_tangents_1 * aot0_tangents_1;  aot0_tangents_1 = None
 
-        new_grad_strided_1: "f32[s21]" = torch.empty_like(getitem_2);  getitem_2 = None
-
-        copy__1: "f32[s21]" = new_grad_strided_1.copy_(result);  result = copy__1 = None
-        return (new_grad_strided, new_grad_strided_1, add)
+        accumulate_grad_1 = torch__dynamo_compiled_autograd_ops_AccumulateGrad([result], getitem_2, None, False);  result = getitem_2 = None
+        getitem_12: "f32[s21]" = accumulate_grad_1[0];  accumulate_grad_1 = None
+        return (getitem_11, getitem_12, add)
 """,
                 )
 
