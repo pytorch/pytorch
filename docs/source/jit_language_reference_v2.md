@@ -302,23 +302,23 @@ This example illustrates a common mistake of annotating structural types, i.e., 
 classes from the `typing` module:
 
 ```python
-    import torch
+import torch
 
-    # ERROR: Tuple not recognized because not imported from typing
-    @torch.jit.export
-    def inc(x: Tuple[int, int]):
-        return (x[0]+1, x[1]+1)
+# ERROR: Tuple not recognized because not imported from typing
+@torch.jit.export
+def inc(x: Tuple[int, int]):
+    return (x[0]+1, x[1]+1)
 
-    m = torch.jit.script(inc)
-    print(m((1,2)))
+m = torch.jit.script(inc)
+print(m((1,2)))
 ```
 
 Running the above code yields the following scripting error:
 
 ```python
-    File "test-tuple.py", line 5, in <module>
-        def inc(x: Tuple[int, int]):
-    NameError: name 'Tuple' is not defined
+File "test-tuple.py", line 5, in <module>
+    def inc(x: Tuple[int, int]):
+NameError: name 'Tuple' is not defined
 ```
 
 The remedy is to add the line `from typing import Tuple` to the beginning of the code.
@@ -329,7 +329,7 @@ Nominal TorchScript types are Python classes. These types are called nominal bec
 name and are compared using class names. Nominal classes are further classified into the following categories:
 
 ```
-    TSNominalType ::= TSBuiltinClasses | TSCustomClass | TSEnum
+TSNominalType ::= TSBuiltinClasses | TSCustomClass | TSEnum
 ```
 
 Among them, `TSCustomClass` and `TSEnum` must be compilable to TorchScript Intermediate Representation (IR). This is enforced by the type-checker.
@@ -341,10 +341,10 @@ TorchScript defines the semantics of these built-in nominal types, and often sup
 attributes of its Python class definition.
 
 ```
-    TSBuiltinClass ::= TSTensor | "torch.device" | "torch.Stream" | "torch.dtype" |
-                       "torch.nn.ModuleList" | "torch.nn.ModuleDict" | ...
-    TSTensor       ::= "torch.Tensor" | "common.SubTensor" | "common.SubWithTorchFunction" |
-                       "torch.nn.parameter.Parameter" | and subclasses of torch.Tensor
+TSBuiltinClass ::= TSTensor | "torch.device" | "torch.Stream" | "torch.dtype" |
+                    "torch.nn.ModuleList" | "torch.nn.ModuleDict" | ...
+TSTensor       ::= "torch.Tensor" | "common.SubTensor" | "common.SubWithTorchFunction" |
+                    "torch.nn.parameter.Parameter" | and subclasses of torch.Tensor
 ```
 
 #### Special Note on torch.nn.ModuleList and torch.nn.ModuleDict
@@ -360,22 +360,22 @@ they behave more like tuples in TorchScript:
 The following example highlights the use of a few built-in Torchscript classes (`torch.*`):
 
 ```python
-    import torch
+import torch
 
-    @torch.jit.script
-    class A:
-        def __init__(self):
-            self.x = torch.rand(3)
+@torch.jit.script
+class A:
+    def __init__(self):
+        self.x = torch.rand(3)
 
-        def f(self, y: torch.device):
-            return self.x.to(device=y)
+    def f(self, y: torch.device):
+        return self.x.to(device=y)
 
-    def g():
-        a = A()
-        return a.f(torch.device("cpu"))
+def g():
+    a = A()
+    return a.f(torch.device("cpu"))
 
-    script_g = torch.jit.script(g)
-    print(script_g.graph)
+script_g = torch.jit.script(g)
+print(script_g.graph)
 ```
 
 ### Custom Class
@@ -383,11 +383,11 @@ The following example highlights the use of a few built-in Torchscript classes (
 Unlike built-in classes, semantics of custom classes are user-defined and the entire class definition must be compilable to TorchScript IR and subject to TorchScript type-checking rules.
 
 ```
-    TSClassDef ::= [ "@torch.jit.script" ]
-                     "class" ClassName [ "(object)" ]  ":"
-                        MethodDefinition |
-                    [ "@torch.jit.ignore" ] | [ "@torch.jit.unused" ]
-                        MethodDefinition
+TSClassDef ::= [ "@torch.jit.script" ]
+                  "class" ClassName [ "(object)" ]  ":"
+                    MethodDefinition |
+                [ "@torch.jit.ignore" ] | [ "@torch.jit.unused" ]
+                    MethodDefinition
 ```
 
 Where:
@@ -413,13 +413,13 @@ TorchScript custom classes are quite limited compared to their Python counterpar
 Python classes can be used in TorchScript if they are annotated with `@torch.jit.script`, similar to how a TorchScript function would be declared:
 
 ```python
-    @torch.jit.script
-    class MyClass:
-        def __init__(self, x: int):
-            self.x = x
+@torch.jit.script
+class MyClass:
+    def __init__(self, x: int):
+        self.x = x
 
-        def inc(self, val: int):
-            self.x += val
+    def inc(self, val: int):
+        self.x += val
 ```
 
 **Example 2**
@@ -427,26 +427,26 @@ Python classes can be used in TorchScript if they are annotated with `@torch.jit
 A TorchScript custom class type must "declare" all its instance attributes by assignments in `__init__()`. If an instance attribute is not defined in `__init__()` but accessed in other methods of the class, the class cannot be compiled as a TorchScript class, as shown in the following example:
 
 ```python
-    import torch
+import torch
 
-    @torch.jit.script
-    class foo:
-        def __init__(self):
-            self.y = 1
+@torch.jit.script
+class foo:
+    def __init__(self):
+        self.y = 1
 
-    # ERROR: self.x is not defined in __init__
-    def assign_x(self):
-        self.x = torch.rand(2, 3)
+# ERROR: self.x is not defined in __init__
+def assign_x(self):
+    self.x = torch.rand(2, 3)
 ```
 
 The class will fail to compile and issue the following error:
 
 ```
-    RuntimeError:
-    Tried to set nonexistent attribute: x. Did you forget to initialize it in __init__()?:
-    def assign_x(self):
-        self.x = torch.rand(2, 3)
-        ~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+RuntimeError:
+Tried to set nonexistent attribute: x. Did you forget to initialize it in __init__()?:
+def assign_x(self):
+    self.x = torch.rand(2, 3)
+    ~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
 ```
 
 **Example 3**
@@ -454,27 +454,27 @@ The class will fail to compile and issue the following error:
 In this example, a TorchScript custom class defines a class variable name, which is not allowed:
 
 ```python
-    import torch
+import torch
 
-    @torch.jit.script
-    class MyClass(object):
-        name = "MyClass"
-        def __init__(self, x: int):
-            self.x = x
+@torch.jit.script
+class MyClass(object):
+    name = "MyClass"
+    def __init__(self, x: int):
+        self.x = x
 
-    def fn(a: MyClass):
-        return a.name
+def fn(a: MyClass):
+    return a.name
 ```
 
 It leads to the following compile-time error:
 
 ```
-    RuntimeError:
-    '__torch__.MyClass' object has no attribute or method 'name'. Did you forget to initialize an attribute in __init__()?:
-        File "test-class2.py", line 10
-    def fn(a: MyClass):
-        return a.name
-            ~~~~~~ <--- HERE
+RuntimeError:
+'__torch__.MyClass' object has no attribute or method 'name'. Did you forget to initialize an attribute in __init__()?:
+    File "test-class2.py", line 10
+def fn(a: MyClass):
+    return a.name
+        ~~~~~~ <--- HERE
 ```
 
 ### Enum Type
@@ -482,9 +482,9 @@ It leads to the following compile-time error:
 Like custom classes, semantics of the enum type are user-defined and the entire class definition must be compilable to TorchScript IR and adhere to TorchScript type-checking rules.
 
 ```
-    TSEnumDef ::= "class" Identifier "(enum.Enum | TSEnumType)" ":"
-                   ( MemberIdentifier "=" Value )+
-                   ( MethodDefinition )*
+TSEnumDef ::= "class" Identifier "(enum.Enum | TSEnumType)" ":"
+                ( MemberIdentifier "=" Value )+
+                ( MethodDefinition )*
 ```
 
 Where:
@@ -503,22 +503,22 @@ Where:
 The following example defines the class `Color` as an `Enum` type:
 
 ```python
-    import torch
-    from enum import Enum
+import torch
+from enum import Enum
 
-    class Color(Enum):
-        RED = 1
-        GREEN = 2
+class Color(Enum):
+    RED = 1
+    GREEN = 2
 
-    def enum_fn(x: Color, y: Color) -> bool:
-        if x == Color.RED:
-            return True
-        return x == y
+def enum_fn(x: Color, y: Color) -> bool:
+    if x == Color.RED:
+        return True
+    return x == y
 
-    m = torch.jit.script(enum_fn)
+m = torch.jit.script(enum_fn)
 
-    print("Eager: ", enum_fn(Color.RED, Color.GREEN))
-    print("TorchScript: ", m(Color.RED, Color.GREEN))
+print("Eager: ", enum_fn(Color.RED, Color.GREEN))
+print("TorchScript: ", m(Color.RED, Color.GREEN))
 ```
 
 **Example 2**
@@ -526,26 +526,26 @@ The following example defines the class `Color` as an `Enum` type:
 The following example shows the case of restricted enum subclassing, where `BaseColor` does not define any member, thus can be subclassed by `Color`:
 
 ```python
-    import torch
-    from enum import Enum
+import torch
+from enum import Enum
 
-    class BaseColor(Enum):
-        def foo(self):
-            pass
+class BaseColor(Enum):
+    def foo(self):
+        pass
 
-    class Color(BaseColor):
-        RED = 1
-        GREEN = 2
+class Color(BaseColor):
+    RED = 1
+    GREEN = 2
 
-    def enum_fn(x: Color, y: Color) -> bool:
-        if x == Color.RED:
-            return True
-        return x == y
+def enum_fn(x: Color, y: Color) -> bool:
+    if x == Color.RED:
+        return True
+    return x == y
 
-    m = torch.jit.script(enum_fn)
+m = torch.jit.script(enum_fn)
 
-    print("TorchScript: ", m(Color.RED, Color.GREEN))
-    print("Eager: ", enum_fn(Color.RED, Color.GREEN))
+print("TorchScript: ", m(Color.RED, Color.GREEN))
+print("Eager: ", enum_fn(Color.RED, Color.GREEN))
 ```
 
 ### TorchScript Module Class
@@ -561,8 +561,8 @@ In this sense, `TSModuleType` is not really a static type. Therefore, for type s
 TorchScript module type represents the type schema of a user-defined PyTorch module instance. When scripting a PyTorch module, the module object is always created outside TorchScript (i.e., passed in as parameter to `forward`). The Python module class is treated as a module instance class, so the `__init__()` method of the Python module class is not subject to the type-checking rules of TorchScript.
 
 ```
-    TSModuleType ::= "class" Identifier "(torch.nn.Module)" ":"
-                        ClassBodyDefinition
+TSModuleType ::= "class" Identifier "(torch.nn.Module)" ":"
+                    ClassBodyDefinition
 ```
 
 Where:
@@ -667,10 +667,10 @@ TorchScript supports two styles for method and function signature type annotatio
 - **Python3-style** annotates types directly on the signature. As such, it allows individual parameters to be left unannotated (whose type will be the default type of `TensorType`), or allows the return type to be left unannotated (whose type will be automatically inferred).
 
 ```
-    Python3Annotation ::= "def" Identifier [ "(" ParamAnnot* ")" ] [ReturnAnnot] ":"
-                                FuncOrMethodBody
-    ParamAnnot        ::= Identifier [ ":" TSType ] ","
-    ReturnAnnot       ::= "->" TSType
+Python3Annotation ::= "def" Identifier [ "(" ParamAnnot* ")" ] [ReturnAnnot] ":"
+                            FuncOrMethodBody
+ParamAnnot        ::= Identifier [ ":" TSType ] ","
+ReturnAnnot       ::= "->" TSType
 ```
 
 Note that when using Python3 style, the type `self` is automatically inferred and should not be annotated.
@@ -678,9 +678,9 @@ Note that when using Python3 style, the type `self` is automatically inferred an
 - **Mypy style** annotates types as a comment right below the function/method declaration. In the Mypy style, since parameter names do not appear in the annotation, all parameters have to be annotated.
 
 ```
-    MyPyAnnotation ::= "# type:" "(" ParamAnnot* ")" [ ReturnAnnot ]
-    ParamAnnot     ::= TSType ","
-    ReturnAnnot    ::= "->" TSType
+MyPyAnnotation ::= "# type:" "(" ParamAnnot* ")" [ ReturnAnnot ]
+ParamAnnot     ::= TSType ","
+ReturnAnnot    ::= "->" TSType
 ```
 
 **Example 1**
@@ -692,13 +692,13 @@ In this example:
 - The return type is not annotated and is automatically inferred as type `TensorType` (based on the type of the value being returned).
 
 ```python
-    import torch
+import torch
 
-    def f(a, b: int):
-        return a+b
+def f(a, b: int):
+    return a+b
 
-    m = torch.jit.script(f)
-    print("TorchScript:", m(torch.ones([6]), 100))
+m = torch.jit.script(f)
+print("TorchScript:", m(torch.ones([6]), 100))
 ```
 
 **Example 2**
@@ -707,14 +707,14 @@ The following example uses Mypy style annotation. Note that parameters or return
 them assume the default type.
 
 ```python
-    import torch
+import torch
 
-    def f(a, b):
-        # type: (torch.Tensor, int) → torch.Tensor
-        return a+b
+def f(a, b):
+    # type: (torch.Tensor, int) → torch.Tensor
+    return a+b
 
-    m = torch.jit.script(f)
-    print("TorchScript:", m(torch.ones([6]), 100))
+m = torch.jit.script(f)
+print("TorchScript:", m(torch.ones([6]), 100))
 ```
 
 ### Annotate Variables and Data Attributes
@@ -728,7 +728,7 @@ type annotated as a *wider* type such as `Optional[int]` or `Any`.
 Local variables can be annotated according to Python3 typing module annotation rules, i.e.,
 
 ```
-    LocalVarAnnotation ::= Identifier [":" TSType] "=" Expr
+LocalVarAnnotation ::= Identifier [":" TSType] "=" Expr
 ```
 
 In general, types of local variables can be automatically inferred. In some cases, however, you may need to annotate a multi-type for local variables
@@ -737,17 +737,17 @@ that may be associated with different concrete types. Typical multi-types includ
 **Example**
 
 ```python
-    import torch
+import torch
 
-    def f(a, setVal: bool):
-        value: Optional[torch.Tensor] = None
-        if setVal:
-            value = a
-        return value
+def f(a, setVal: bool):
+    value: Optional[torch.Tensor] = None
+    if setVal:
+        value = a
+    return value
 
-    ones = torch.ones([6])
-    m = torch.jit.script(f)
-    print("TorchScript:", m(ones, True), m(ones, False))
+ones = torch.ones([6])
+m = torch.jit.script(f)
+print("TorchScript:", m(ones, True), m(ones, False))
 ```
 
 #### Instance Data Attributes
@@ -756,9 +756,9 @@ For `ModuleType` classes, instance data attributes can be annotated according to
 via `Final`.
 
 ```
-    "class" ClassIdentifier "(torch.nn.Module):"
-    InstanceAttrIdentifier ":" ["Final("] TSType [")"]
-    ...
+"class" ClassIdentifier "(torch.nn.Module):"
+InstanceAttrIdentifier ":" ["Final("] TSType [")"]
+...
 ```
 
 Where:
@@ -769,15 +769,15 @@ Where:
 **Example**
 
 ```python
-    import torch
+import torch
 
-    class MyModule(torch.nn.Module):
-        offset_: int
+class MyModule(torch.nn.Module):
+    offset_: int
 
-    def __init__(self, offset):
-        self.offset_ = offset
+def __init__(self, offset):
+    self.offset_ = offset
 
-    ...
+...
 ```
 
 ### Type Annotation APIs
@@ -794,20 +794,20 @@ the type of a module attribute in `__init__`; `torch.jit.Attribute` should be us
 In this example, `[]` is declared as a list of integers via `torch.jit.annotate` (instead of assuming `[]` to be the default type of `List[TensorType]`):
 
 ```python
-    import torch
-    from typing import List
+import torch
+from typing import List
 
-    def g(l: List[int], val: int):
-        l.append(val)
-        return l
+def g(l: List[int], val: int):
+    l.append(val)
+    return l
 
-    def f(val: int):
-        l = g(torch.jit.annotate(List[int], []), val)
-        return l
+def f(val: int):
+    l = g(torch.jit.annotate(List[int], []), val)
+    return l
 
-    m = torch.jit.script(f)
-    print("Eager:", f(3))
-    print("TorchScript:", m(3))
+m = torch.jit.script(f)
+print("Eager:", f(3))
+print("TorchScript:", m(3))
 ```
 
 See {meth}`torch.jit.annotate` for more information.
@@ -817,30 +817,30 @@ See {meth}`torch.jit.annotate` for more information.
 #### TorchScript Type System Definition
 
 ```
-    TSAllType       ::= TSType | TSModuleType
-    TSType          ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
+TSAllType       ::= TSType | TSModuleType
+TSType          ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
 
-    TSMetaType      ::= "Any"
-    TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
+TSMetaType      ::= "Any"
+TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
 
-    TSStructuralType ::= TSTuple | TSNamedTuple | TSList | TSDict | TSOptional |
-                        TSUnion | TSFuture | TSRRef | TSAwait
-    TSTuple         ::= "Tuple" "[" (TSType ",")* TSType "]"
-    TSNamedTuple    ::= "namedtuple" "(" (TSType ",")* TSType ")"
-    TSList          ::= "List" "[" TSType "]"
-    TSOptional      ::= "Optional" "[" TSType "]"
-    TSUnion         ::= "Union" "[" (TSType ",")* TSType "]"
-    TSFuture        ::= "Future" "[" TSType "]"
-    TSRRef          ::= "RRef" "[" TSType "]"
-    TSAwait         ::= "Await" "[" TSType "]"
-    TSDict          ::= "Dict" "[" KeyType "," TSType "]"
-    KeyType         ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
+TSStructuralType ::= TSTuple | TSNamedTuple | TSList | TSDict | TSOptional |
+                    TSUnion | TSFuture | TSRRef | TSAwait
+TSTuple         ::= "Tuple" "[" (TSType ",")* TSType "]"
+TSNamedTuple    ::= "namedtuple" "(" (TSType ",")* TSType ")"
+TSList          ::= "List" "[" TSType "]"
+TSOptional      ::= "Optional" "[" TSType "]"
+TSUnion         ::= "Union" "[" (TSType ",")* TSType "]"
+TSFuture        ::= "Future" "[" TSType "]"
+TSRRef          ::= "RRef" "[" TSType "]"
+TSAwait         ::= "Await" "[" TSType "]"
+TSDict          ::= "Dict" "[" KeyType "," TSType "]"
+KeyType         ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
 
-    TSNominalType   ::= TSBuiltinClasses | TSCustomClass | TSEnum
-    TSBuiltinClass  ::= TSTensor | "torch.device" | "torch.stream"|
-                        "torch.dtype" | "torch.nn.ModuleList" |
-                        "torch.nn.ModuleDict" | ...
-    TSTensor        ::= "torch.tensor" and subclasses
+TSNominalType   ::= TSBuiltinClasses | TSCustomClass | TSEnum
+TSBuiltinClass  ::= TSTensor | "torch.device" | "torch.stream"|
+                    "torch.dtype" | "torch.nn.ModuleList" |
+                    "torch.nn.ModuleDict" | ...
+TSTensor        ::= "torch.tensor" and subclasses
 ```
 
 #### Unsupported Typing Constructs
@@ -893,8 +893,8 @@ that accept primitive data types as arguments and can accept user-defined types 
 Atoms are the most basic elements of expressions.
 
 ```
-    atom      ::=  identifier | literal | enclosure
-    enclosure ::=  parenth_form | list_display | dict_display
+atom      ::=  identifier | literal | enclosure
+enclosure ::=  parenth_form | list_display | dict_display
 ```
 
 #### Identifiers
@@ -905,7 +905,7 @@ their [Python counterparts](https://docs.python.org/3/reference/lexical_analysis
 #### Literals
 
 ```
-    literal ::=  stringliteral | integer | floatnumber
+literal ::=  stringliteral | integer | floatnumber
 ```
 
 Evaluation of a literal yields an object of the appropriate type with the specific value
@@ -919,7 +919,7 @@ are defined in the same way as their Python counterparts.
 #### Parenthesized Forms
 
 ```
-    parenth_form ::=  '(' [expression_list] ')'
+parenth_form ::=  '(' [expression_list] ')'
 ```
 
 A parenthesized expression list yields whatever the expression list yields. If the list contains at least one
@@ -929,13 +929,13 @@ pair of parentheses yields an empty `Tuple` object (`Tuple[]`).
 #### List and Dictionary Displays
 
 ```
-    list_comprehension ::=  expression comp_for
-    comp_for           ::=  'for' target_list 'in' or_expr
-    list_display       ::=  '[' [expression_list | list_comprehension] ']'
-    dict_display       ::=  '{' [key_datum_list | dict_comprehension] '}'
-    key_datum_list     ::=  key_datum (',' key_datum)*
-    key_datum          ::=  expression ':' expression
-    dict_comprehension ::=  key_datum comp_for
+list_comprehension ::=  expression comp_for
+comp_for           ::=  'for' target_list 'in' or_expr
+list_display       ::=  '[' [expression_list | list_comprehension] ']'
+dict_display       ::=  '{' [key_datum_list | dict_comprehension] '}'
+key_datum_list     ::=  key_datum (',' key_datum)*
+key_datum          ::=  expression ':' expression
+dict_comprehension ::=  key_datum comp_for
 ```
 
 Lists and dicts can be constructed by either listing the container contents explicitly or by providing
@@ -949,13 +949,13 @@ resultant dictionary uses the value from the rightmost datum in the list that us
 ### Primaries
 
 ```
-    primary ::=  atom | attributeref | subscription | slicing | call
+primary ::=  atom | attributeref | subscription | slicing | call
 ```
 
 #### Attribute References
 
 ```
-    attributeref ::=  primary '.' identifier
+attributeref ::=  primary '.' identifier
 ```
 
 The `primary` must evaluate to an object of a type that supports attribute references that have an attribute named
@@ -964,7 +964,7 @@ The `primary` must evaluate to an object of a type that supports attribute refer
 #### Subscriptions
 
 ```
-    subscription ::=  primary '[' expression_list ']'
+subscription ::=  primary '[' expression_list ']'
 ```
 
 The `primary` must evaluate to an object that supports subscription.
@@ -980,10 +980,10 @@ A slicing selects a range of items in a `str`, `Tuple`, `List`, or `Tensor`. Sli
 expressions or targets in assignment or `del` statements.
 
 ```
-    slicing      ::=  primary '[' slice_list ']'
-    slice_list   ::=  slice_item (',' slice_item)* [',']
-    slice_item   ::=  expression | proper_slice
-    proper_slice ::=  [expression] ':' [expression] [':' [expression] ]
+slicing      ::=  primary '[' slice_list ']'
+slice_list   ::=  slice_item (',' slice_item)* [',']
+slice_item   ::=  expression | proper_slice
+proper_slice ::=  [expression] ':' [expression] [':' [expression] ]
 ```
 
 Slicings with more than one slice item in their slice lists can only be used with primaries that evaluate to an
@@ -992,12 +992,12 @@ object of type `Tensor`.
 #### Calls
 
 ```
-    call          ::=  primary '(' argument_list ')'
-    argument_list ::=  args [',' kwargs] | kwargs
-    args          ::=  [arg (',' arg)*]
-    kwargs        ::=  [kwarg (',' kwarg)*]
-    kwarg         ::=  arg '=' expression
-    arg           ::=  identifier
+call          ::=  primary '(' argument_list ')'
+argument_list ::=  args [',' kwargs] | kwargs
+args          ::=  [arg (',' arg)*]
+kwargs        ::=  [kwarg (',' kwarg)*]
+kwarg         ::=  arg '=' expression
+arg           ::=  identifier
 ```
 
 The `primary` must desugar or evaluate to a callable object. All argument expressions are evaluated
@@ -1006,7 +1006,7 @@ before the call is attempted.
 ### Power Operator
 
 ```
-    power ::=  primary ['**' u_expr]
+power ::=  primary ['**' u_expr]
 ```
 
 The power operator has the same semantics as the built-in pow function (not supported); it computes its
@@ -1018,7 +1018,7 @@ exponentiation operations, and tensor-tensor exponentiation is done elementwise 
 ### Unary and Arithmetic Bitwise Operations
 
 ```
-    u_expr ::=  power | '-' power | '~' power
+u_expr ::=  power | '-' power | '~' power
 ```
 
 The unary `-` operator yields the negation of its argument. The unary `~` operator yields the bitwise inversion
@@ -1028,8 +1028,8 @@ of its argument. `-` can be used with `int`, `float`, and `Tensor` of `int` and 
 ### Binary Arithmetic Operations
 
 ```
-    m_expr ::=  u_expr | m_expr '*' u_expr | m_expr '@' m_expr | m_expr '//' u_expr | m_expr '/' u_expr | m_expr '%' u_expr
-    a_expr ::=  m_expr | a_expr '+' m_expr | a_expr '-' m_expr
+m_expr ::=  u_expr | m_expr '*' u_expr | m_expr '@' m_expr | m_expr '//' u_expr | m_expr '/' u_expr | m_expr '%' u_expr
+a_expr ::=  m_expr | a_expr '+' m_expr | a_expr '-' m_expr
 ```
 
 The binary arithmetic operators can operate on `Tensor`, `int`, and `float`. For tensor-tensor ops, both arguments must
@@ -1042,7 +1042,7 @@ number of times.
 ### Shifting Operations
 
 ```
-    shift_expr ::=  a_expr | shift_expr ( '<<' | '>>' ) a_expr
+shift_expr ::=  a_expr | shift_expr ( '<<' | '>>' ) a_expr
 ```
 
 These operators accept two `int` arguments, two `Tensor` arguments, or a `Tensor` argument and an `int` or
@@ -1054,9 +1054,9 @@ the `Tensor`.
 ### Binary Bitwise Operations
 
 ```
-    and_expr ::=  shift_expr | and_expr '&' shift_expr
-    xor_expr ::=  and_expr | xor_expr '^' and_expr
-    or_expr  ::=  xor_expr | or_expr '|' xor_expr
+and_expr ::=  shift_expr | and_expr '&' shift_expr
+xor_expr ::=  and_expr | xor_expr '^' and_expr
+or_expr  ::=  xor_expr | or_expr '|' xor_expr
 ```
 
 The `&` operator computes the bitwise AND of its arguments, the `^` the bitwise XOR, and the `|` the bitwise OR.
@@ -1067,8 +1067,8 @@ the left operand is `Tensor`, the right operand is logically broadcast to match 
 ### Comparisons
 
 ```
-    comparison    ::=  or_expr (comp_operator or_expr)*
-    comp_operator ::=  '<' | '>' | '==' | '>=' | '<=' | '!=' | 'is' ['not'] | ['not'] 'in'
+comparison    ::=  or_expr (comp_operator or_expr)*
+comp_operator ::=  '<' | '>' | '==' | '>=' | '<=' | '!=' | 'is' ['not'] | ['not'] 'in'
 ```
 
 A comparison yields a boolean value (`True` or `False`), or if one of the operands is a `Tensor`, a boolean
@@ -1101,9 +1101,9 @@ comparing them using `==`. `x is not y` yields the inverse of `x is y`.
 ### Boolean Operations
 
 ```
-    or_test  ::=  and_test | or_test 'or' and_test
-    and_test ::=  not_test | and_test 'and' not_test
-    not_test ::=  'bool' '(' or_expr ')' | comparison | 'not' not_test
+or_test  ::=  and_test | or_test 'or' and_test
+and_test ::=  not_test | and_test 'and' not_test
+not_test ::=  'bool' '(' or_expr ')' | comparison | 'not' not_test
 ```
 
 User-defined objects can customize their conversion to `bool` by implementing a `__bool__` method. The operator `not`
@@ -1115,8 +1115,8 @@ first evaluates `x`; if it is `True`, its value (`True`) is returned; otherwise,
 ### Conditional Expressions
 
 ```
-    conditional_expression ::=  or_expr ['if' or_test 'else' conditional_expression]
-    expression            ::=  conditional_expression
+conditional_expression ::=  or_expr ['if' or_test 'else' conditional_expression]
+expression            ::=  conditional_expression
 ```
 
 The expression `x if c else y` first evaluates the condition `c` rather than x. If `c` is `True`, `x` is
@@ -1126,8 +1126,8 @@ evaluated and its value is returned; otherwise, `y` is evaluated and its value i
 ### Expression Lists
 
 ```
-    expression_list ::=  expression (',' expression)* [',']
-    starred_item    ::=  '*' primary
+expression_list ::=  expression (',' expression)* [',']
+starred_item    ::=  '*' primary
 ```
 
 A starred item can only appear on the left-hand side of an assignment statement, e.g., `a, *b, c = ...`.
@@ -1142,45 +1142,45 @@ It is modeled after [the simple statements chapter of the Python language refere
 ### Expression Statements
 
 ```
-    expression_stmt    ::=  starred_expression
-    starred_expression ::=  expression | (starred_item ",")* [starred_item]
-    starred_item       ::=  assignment_expression | "*" or_expr
+expression_stmt    ::=  starred_expression
+starred_expression ::=  expression | (starred_item ",")* [starred_item]
+starred_item       ::=  assignment_expression | "*" or_expr
 ```
 
 ### Assignment Statements
 
 ```
-    assignment_stmt ::=  (target_list "=")+ (starred_expression)
-    target_list     ::=  target ("," target)* [","]
-    target          ::=  identifier
-                        | "(" [target_list] ")"
-                        | "[" [target_list] "]"
-                        | attributeref
-                        | subscription
-                        | slicing
-                        | "*" target
+assignment_stmt ::=  (target_list "=")+ (starred_expression)
+target_list     ::=  target ("," target)* [","]
+target          ::=  identifier
+                    | "(" [target_list] ")"
+                    | "[" [target_list] "]"
+                    | attributeref
+                    | subscription
+                    | slicing
+                    | "*" target
 ```
 
 ### Augmented Assignment Statements
 
 ```
-    augmented_assignment_stmt ::= augtarget augop (expression_list)
-    augtarget                 ::= identifier | attributeref | subscription
-    augop                     ::= "+=" | "-=" | "*=" | "/=" | "//=" | "%=" |
-                                  "**="| ">>=" | "<<=" | "&=" | "^=" | "|="
+augmented_assignment_stmt ::= augtarget augop (expression_list)
+augtarget                 ::= identifier | attributeref | subscription
+augop                     ::= "+=" | "-=" | "*=" | "/=" | "//=" | "%=" |
+                              "**="| ">>=" | "<<=" | "&=" | "^=" | "|="
 ```
 
 ### Annotated Assignment Statements
 
 ```
-    annotated_assignment_stmt ::= augtarget ":" expression
-                                  ["=" (starred_expression)]
+annotated_assignment_stmt ::= augtarget ":" expression
+                              ["=" (starred_expression)]
 ```
 
 ### The `raise` Statement
 
 ```
-    raise_stmt ::=  "raise" [expression ["from" expression]]
+raise_stmt ::=  "raise" [expression ["from" expression]]
 ```
 
 Raise statements in TorchScript do not support `try\except\finally`.
@@ -1188,7 +1188,7 @@ Raise statements in TorchScript do not support `try\except\finally`.
 ### The `assert` Statement
 
 ```
-    assert_stmt ::=  "assert" expression ["," expression]
+assert_stmt ::=  "assert" expression ["," expression]
 ```
 
 Assert statements in TorchScript do not support `try\except\finally`.
@@ -1196,7 +1196,7 @@ Assert statements in TorchScript do not support `try\except\finally`.
 ### The `return` Statement
 
 ```
-    return_stmt ::=  "return" [expression_list]
+return_stmt ::=  "return" [expression_list]
 ```
 
 Return statements in TorchScript do not support `try\except\finally`.
@@ -1204,31 +1204,31 @@ Return statements in TorchScript do not support `try\except\finally`.
 ### The `del` Statement
 
 ```
-    del_stmt ::=  "del" target_list
+del_stmt ::=  "del" target_list
 ```
 
 ### The `pass` Statement
 
 ```
-    pass_stmt ::= "pass"
+pass_stmt ::= "pass"
 ```
 
 ### The `print` Statement
 
 ```
-    print_stmt ::= "print" "(" expression  [, expression] [.format{expression_list}] ")"
+print_stmt ::= "print" "(" expression  [, expression] [.format{expression_list}] ")"
 ```
 
 ### The `break` Statement
 
 ```
-    break_stmt ::= "break"
+break_stmt ::= "break"
 ```
 
 ### The `continue` Statement:
 
 ```
-    continue_stmt ::= "continue"
+continue_stmt ::= "continue"
 ```
 
 ## Compound Statements
@@ -1244,9 +1244,9 @@ Torchscript supports both basic `if/else` and ternary `if/else`.
 #### Basic `if/else` Statement
 
 ```
-    if_stmt ::= "if" assignment_expression ":" suite
-                ("elif" assignment_expression ":" suite)
-                ["else" ":" suite]
+if_stmt ::= "if" assignment_expression ":" suite
+            ("elif" assignment_expression ":" suite)
+            ["else" ":" suite]
 ```
 
 `elif` statements can repeat for an arbitrary number of times, but it needs to be before `else` statement.
@@ -1254,7 +1254,7 @@ Torchscript supports both basic `if/else` and ternary `if/else`.
 #### Ternary `if/else` Statement
 
 ```
-    if_stmt ::= return [expression_list] "if" assignment_expression "else" [expression_list]
+if_stmt ::= return [expression_list] "if" assignment_expression "else" [expression_list]
 ```
 
 **Example 1**
@@ -1287,32 +1287,32 @@ The example above produces the following output:
 A `tensor` with multi dimensions are not promoted to `bool`:
 
 ```python
-    import torch
+import torch
 
-    # Multi dimensional Tensors error out.
+# Multi dimensional Tensors error out.
 
-    @torch.jit.script
-    def fn():
-        if torch.rand(2):
-            print("Tensor is available")
+@torch.jit.script
+def fn():
+    if torch.rand(2):
+        print("Tensor is available")
 
-        if torch.rand(4,5,6):
-            print("Tensor is available")
+    if torch.rand(4,5,6):
+        print("Tensor is available")
 
-    print(fn())
+print(fn())
 ```
 
 Running the above code yields the following `RuntimeError`.
 
 ```
-    RuntimeError: The following operation failed in the TorchScript interpreter.
-    Traceback of TorchScript (most recent call last):
-    @torch.jit.script
-    def fn():
-        if torch.rand(2):
-          ~~~~~~~~~~~~ <--- HERE
-            print("Tensor is available")
-    RuntimeError: Boolean value of Tensor with more than one value is ambiguous
+RuntimeError: The following operation failed in the TorchScript interpreter.
+Traceback of TorchScript (most recent call last):
+@torch.jit.script
+def fn():
+    if torch.rand(2):
+      ~~~~~~~~~~~~ <--- HERE
+        print("Tensor is available")
+RuntimeError: Boolean value of Tensor with more than one value is ambiguous
 ```
 
 If a conditional variable is annotated as `final`, either the true or false branch is evaluated depending on the evaluation of the conditional variable.
@@ -1321,21 +1321,21 @@ If a conditional variable is annotated as `final`, either the true or false bran
 
 In this example, only the True branch is evaluated, since `a` is annotated as `final` and set to `True`:
 
-```
-    import torch
+```python
+import torch
 
-    a : torch.jit.final[Bool] = True
+a : torch.jit.final[Bool] = True
 
-    if a:
-        return torch.empty(2,3)
-    else:
-        return []
+if a:
+    return torch.empty(2,3)
+else:
+    return []
 ```
 
 ### The `while` Statement
 
 ```
-    while_stmt ::=  "while" assignment_expression ":" suite
+while_stmt ::=  "while" assignment_expression ":" suite
 ```
 
 `while...else` statements are not supported in Torchscript. It results in a `RuntimeError`.
@@ -1343,8 +1343,8 @@ In this example, only the True branch is evaluated, since `a` is annotated as `f
 ### The `for-in` Statement
 
 ```
-    for_stmt ::=  "for" target_list "in" expression_list ":" suite
-                  ["else" ":" suite]
+for_stmt ::=  "for" target_list "in" expression_list ":" suite
+              ["else" ":" suite]
 ```
 
 `for...else` statements are not supported in Torchscript. It results in a `RuntimeError`.
@@ -1387,25 +1387,25 @@ The example above produces the following output:
 For loops on lists: for loops over a `nn.ModuleList` will unroll the body of the loop at compile time, with each member of the module list.
 
 ```python
-    class SubModule(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.weight = nn.Parameter(torch.randn(2))
+class SubModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(2))
 
-        def forward(self, input):
-            return self.weight + input
+    def forward(self, input):
+        return self.weight + input
 
-    class MyModule(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.mods = torch.nn.ModuleList([SubModule() for i in range(10)])
+class MyModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mods = torch.nn.ModuleList([SubModule() for i in range(10)])
 
-        def forward(self, v):
-            for module in self.mods:
-                v = module(v)
-            return v
+    def forward(self, v):
+        for module in self.mods:
+            v = module(v)
+        return v
 
-    model = torch.jit.script(MyModule())
+model = torch.jit.script(MyModule())
 ```
 
 ### The `with` Statement
@@ -1413,8 +1413,8 @@ For loops on lists: for loops over a `nn.ModuleList` will unroll the body of the
 The `with` statement is used to wrap the execution of a block with methods defined by a context manager.
 
 ```
-    with_stmt ::=  "with" with_item ("," with_item) ":" suite
-    with_item ::=  expression ["as" target]
+with_stmt ::=  "with" with_item ("," with_item) ":" suite
+with_item ::=  expression ["as" target]
 ```
 
 - If a target was included in the `with` statement, the return value from the context manager’s `__enter__()` is assigned to it. Unlike python, if an exception caused the suite to be exited, its type, value, and traceback are not passed as arguments to `__exit__()`. Three `None` arguments are supplied.
@@ -1424,7 +1424,7 @@ The `with` statement is used to wrap the execution of a block with methods defin
 ### The `tuple` Statement
 
 ```
-    tuple_stmt ::= tuple([iterables])
+tuple_stmt ::= tuple([iterables])
 ```
 
 - Iterable types in TorchScript include `Tensors`, `lists`, `tuples`, `dictionaries`, `strings`, `torch.nn.ModuleList`, and `torch.nn.ModuleDict`.
@@ -1433,14 +1433,14 @@ The `with` statement is used to wrap the execution of a block with methods defin
 Unpacking all outputs into a tuple is covered by:
 
 ```
-    abc = func() # Function that returns a tuple
-    a,b = func()
+abc = func() # Function that returns a tuple
+a,b = func()
 ```
 
 ### The `getattr` Statement
 
 ```
-    getattr_stmt ::= getattr(object, name[, default])
+getattr_stmt ::= getattr(object, name[, default])
 ```
 
 - Attribute name must be a literal string.
@@ -1450,7 +1450,7 @@ Unpacking all outputs into a tuple is covered by:
 ### The `hasattr` Statement
 
 ```
-    hasattr_stmt ::= hasattr(object, name)
+hasattr_stmt ::= hasattr(object, name)
 ```
 
 - Attribute name must be a literal string.
@@ -1460,7 +1460,7 @@ Unpacking all outputs into a tuple is covered by:
 ### The `zip` Statement
 
 ```
-    zip_stmt ::= zip(iterable1, iterable2)
+zip_stmt ::= zip(iterable1, iterable2)
 ```
 
 - Arguments must be iterables.
@@ -1483,16 +1483,16 @@ Both the iterables must be of the same container type:
 This example fails because the iterables are of different container types:
 
 ```
-    a = (1, 2) # Tuple
-    b = [2, 3, 4] # List
-    zip(a, b) # Runtime error
+a = (1, 2) # Tuple
+b = [2, 3, 4] # List
+zip(a, b) # Runtime error
 ```
 
 Running the above code yields the following `RuntimeError`.
 
 ```
-    RuntimeError: Can not iterate over a module list or
-        tuple with a value that does not have a statically determinable length.
+RuntimeError: Can not iterate over a module list or
+    tuple with a value that does not have a statically determinable length.
 ```
 
 **Example 3**
@@ -1512,7 +1512,7 @@ Iterable types in TorchScript include `Tensors`, `lists`, `tuples`, `dictionarie
 ### The `enumerate` Statement
 
 ```
-    enumerate_stmt ::= enumerate([iterable])
+enumerate_stmt ::= enumerate([iterable])
 ```
 
 - Arguments must be iterables.

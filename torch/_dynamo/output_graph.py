@@ -1113,7 +1113,7 @@ class OutputGraph(OutputGraphGuardsState):
 
                 # A small codegen optimization because we might have different
                 # VariableTrackers that share the same source.
-                list_idx = x.source.index
+                list_idx = x.source.index  # type: ignore[attr-defined]
                 if list_idx not in visited:
                     alias_name = self.new_var(
                         f"{list_name}_ref"
