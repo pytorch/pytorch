@@ -24,11 +24,17 @@ dtype                                      description
 =========================================  ===============================
 ``torch.float32`` or ``torch.float``       32-bit floating point
 ``torch.float64`` or ``torch.double``      64-bit floating point
-``torch.float16`` or ``torch.half``        16-bit floating point [1]_
-``torch.bfloat16``                         16-bit floating point [2]_
+``torch.float16`` or ``torch.half``        16-bit floating point, sometimes referred to as binary16, S-E-M 1-5-10
+``torch.bfloat16``                         16-bit floating point, sometimes referred to as Brain floating point, S-E-M 1-8-7
 ``torch.complex32`` or ``torch.chalf``     32-bit complex
 ``torch.complex64`` or ``torch.cfloat``    64-bit complex
 ``torch.complex128`` or ``torch.cdouble``  128-bit complex
+``torch.float8_e4m3fn`` [shell]_, [1]_     8-bit floating point, S-E-M 1-4-3, from https://arxiv.org/abs/2209.05433
+``torch.float8_e5m2`` [shell]_             8-bit floating point, S-E-M 1-5-2, from https://arxiv.org/abs/2209.05433
+``torch.float8_e4m3fnuz`` [shell]_, [1]_   8-bit floating point, S-E-M 1-4-3, from https://arxiv.org/pdf/2206.02915
+``torch.float8_e5m2fnuz`` [shell]_, [1]_   8-bit floating point, S-E-M 1-5-2, from https://arxiv.org/pdf/2206.02915
+``torch.float8_e8m0fnu`` [shell]_, [1]_    8-bit floating point, S-E-M 0-8-0, from the `MX OCP Spec 1.0<https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf>`_
+``torch.float4_e2m1fn_x2`` [shell]_, [1]_  packed 4-bit floating point, S-E-M 1-2-1, from `MX OCP Spec 1.0<https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf>`_
 =========================================  ===============================
 
 **Integer dtypes**
@@ -47,15 +53,20 @@ dtype                                      description
 ``torch.bool``                             Boolean
 =========================================  ===============================
 
+.. [shell] a shell dtype a specialized dtype with limited op and backend support.  
+  Specifically, ops that support tensor creation (``torch.empty``, ``torch.fill``, ``torch.zeros``)
+  and operations which do not peek inside the data elements (``torch.cat``, ``torch.view``, ``torch.reshape``)
+  are supported.  Ops that peek inside the data elements such as casting,
+  matrix multiplication, nan/inf checks are supported only on a case by
+  case basis, depending on maturity and presence of hardware accelerated kernels
+  and established use cases.
 
-.. [1] Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
-  significand bits. Useful when precision is important.
+.. [1] The "fn", "fnu" and "fnuz" dtype suffixes mean: 
+  "f" - finite value encodings only, no infinity; 
+  "n" - nan value encodings differ from the IEEE spec; 
+  "uz" - "unsigned zero" only, i.e. no negative zero encoding
 
-.. [2] Sometimes referred to as Brain Floating Point: use 1 sign, 8 exponent and 7
-  significand bits. Useful when range is important, since it has the same
-  number of exponent bits as ``float32``
-
-Note: legacy constructors such as ``torch.*.FloatTensor``, ``torch.*.DoubleTensor``, ``torch.*.HalfTensor``, 
+**Note**: legacy constructors such as ``torch.*.FloatTensor``, ``torch.*.DoubleTensor``, ``torch.*.HalfTensor``, 
 ``torch.*.BFloat16Tensor``, ``torch.*.ByteTensor``, ``torch.*.CharTensor``, ``torch.*.ShortTensor``, ``torch.*.IntTensor``, 
 ``torch.*.LongTensor``, ``torch.*.BoolTensor`` only remain for backwards compatibility and should no longer be used.
 
