@@ -1569,12 +1569,10 @@ if TEST_WITH_TORCHDYNAMO:
     torch._dynamo.config.log_compilation_metrics = False
     # Silence 3.13.0 guard performance warnings
     torch._dynamo.config.issue_3_13_0_warning = False
+    torch._dynamo.config.compiled_autograd = True
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
-    else:
-        # only dynamo for now
-        torch._dynamo.config.compiled_autograd = True
 
 
 # seems like this is only used in test/torch_np
