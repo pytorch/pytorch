@@ -1623,6 +1623,42 @@ class TestMkldnn(TestCase):
         # Above should trigger no warnings regardless of configuration
         self.assertEqual(len(w), 0)
 
+    def test_mkldnn_error_on_zero_stride(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/149274
+        x = torch.rand(1, 2, 3, 3).to_mkldnn()
+        with self.assertRaises(ValueError):
+            torch.mkldnn_max_pool2d(x, kernel_size=3, stride=0)
+
+    def test_mkldnn_scaled_mm(self, device) -> None:
+        # test with input scale, weight scale and output_scale
+        M, N, K = 2, 13, 16
+        x = torch.randn((M, K), device=device) / K
+        y = torch.randn((N, K), device=device).t() / K
+        options = itertools.product(
+            [torch.float8_e4m3fn, torch.float8_e5m2],
+            [torch.float8_e4m3fn, torch.float8_e5m2],
+            [torch.float8_e4m3fn, torch.float8_e5m2, torch.bfloat16, torch.float16, torch.float32])
+        for x_dtype, y_dtype, out_dtype in options:
+            if out_dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+                if x_dtype != out_dtype:
+                    continue
+            x_fp8 = x.to(x_dtype)
+            y_fp8 = y.to(y_dtype)
+            scale_a = torch.randn(1, device=device)
+            scale_b = torch.randn(1, device=device)
+            scale_out = torch.randn(1, device=device)
+            out_fp32 = torch.mm(x_fp8.to(torch.float) * scale_a, y_fp8.to(torch.float) * scale_b)
+            if out_dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+                out_emulated = (out_fp32 / scale_out).to(out_dtype)
+            else:
+                out_emulated = out_fp32.to(out_dtype)
+
+            out = torch._scaled_mm(x_fp8, y_fp8, scale_a, scale_b, scale_result=scale_out, out_dtype=out_dtype)
+            if out_dtype is not None:
+                self.assertEqual(out_dtype, out.dtype)
+            self.assertEqual(out_emulated.float(), out.float(), atol=5e-2, rtol=5e-2)
+
+
 
 instantiate_device_type_tests(TestMkldnn, globals(), only_for=('cpu',))
 

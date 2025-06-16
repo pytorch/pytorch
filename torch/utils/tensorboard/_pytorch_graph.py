@@ -341,7 +341,7 @@ def graph(model, args, verbose=False, use_strict_trace=True):
     # and pass it correctly to TensorBoard.
     #
     # Definition of StepStats and DeviceStepStats can be found at
-    # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/graph/tf_graph_common/test/graph-test.ts
+    # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/graph/tf_graph_common/proto.ts
     # and
     # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/step_stats.proto
     stepstats = RunMetadata(

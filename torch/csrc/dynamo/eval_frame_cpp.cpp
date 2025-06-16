@@ -7,8 +7,8 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
+static constexpr const char* cache_lookup_profiler_str =
+    "TorchDynamo Cache Lookup";
 
 // Remember to update the type signature for DynamoCallbackFn.__call__ in
 // torch/_dynamo/types.py if this function's signature changes.

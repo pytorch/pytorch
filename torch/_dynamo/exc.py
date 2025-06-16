@@ -271,6 +271,10 @@ class FailOnRecompileLimitHit(Exception):
     pass
 
 
+class PackageError(TorchDynamoException):
+    pass
+
+
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
     pass
@@ -400,6 +404,7 @@ exceptions_allowed_to_be_fallback = (
     torch._subclasses.fake_tensor.DynamicOutputShapeException,
     torch._subclasses.fake_tensor.UnsupportedOperatorException,
     torch._subclasses.fake_tensor.UnsupportedFakeTensorException,
+    torch._subclasses.fake_tensor.UnsupportedMutationAliasingException,
 )
 
 

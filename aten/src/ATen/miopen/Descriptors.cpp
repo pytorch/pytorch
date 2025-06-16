@@ -17,7 +17,9 @@ inline miopenDataType_t getDataType(const at::Tensor& t) {
   } else if (scalar_type == at::kBFloat16) {
     return miopenBFloat16;
   } else {
-  throw std::runtime_error("TensorDescriptor only supports float, half and bfloat16 tensors");
+    TORCH_CHECK(
+        false,
+        "TensorDescriptor only supports float, half and bfloat16 tensors");
   }
 }
 
@@ -35,7 +37,11 @@ void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntAr
   if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
 #define _STR(X) #X
 #define STR(X) _STR(X)
-    throw std::runtime_error("MIOpen supports only up to " STR(MIOPEN_DIM_MAX) " dimensions");
+    TORCH_CHECK(
+        false,
+        "MIOpen supports only up to ",
+        STR(MIOPEN_DIM_MAX),
+        " dimensions");
 #undef _STR
 #undef STR
   int size[MIOPEN_DIM_MAX];
@@ -96,7 +102,11 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
   if (dim > static_cast<int64_t>(MIOPEN_DIM_MAX) || pad > static_cast<int64_t>(MIOPEN_DIM_MAX)) {
 #define _STR(X) #X
 #define STR(X) _STR(X)
-    throw std::runtime_error("MIOpen supports only up to " STR(MIOPEN_DIM_MAX) " dimensions");
+    TORCH_CHECK(
+        false,
+        "MIOpen supports only up to ",
+        STR(MIOPEN_DIM_MAX),
+        " dimensions");
 #undef _STR
 #undef STR
   }

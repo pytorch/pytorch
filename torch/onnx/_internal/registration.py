@@ -4,6 +4,7 @@
 import warnings
 from collections.abc import Collection, Sequence
 from typing import Callable, Generic, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 from torch.onnx import _constants, errors
 
@@ -51,6 +52,8 @@ def _dispatch_opset_version(
 
 _K = TypeVar("_K")
 _V = TypeVar("_V")
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
 
 
 class OverrideDict(Collection[_K], Generic[_K, _V]):
@@ -287,7 +290,7 @@ def onnx_symbolic(
         ValueError: If the separator '::' is not in the name.
     """
 
-    def wrapper(func: Callable) -> Callable:
+    def wrapper(func: Callable[_P, _R]) -> Callable[_P, _R]:
         decorated = func
         if decorate is not None:
             for decorate_func in decorate:

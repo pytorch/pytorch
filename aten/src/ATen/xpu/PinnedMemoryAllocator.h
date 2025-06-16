@@ -5,7 +5,7 @@
 
 namespace at::xpu {
 
-inline TORCH_XPU_API at::Allocator* getPinnedMemoryAllocator() {
-  return getCachingHostAllocator();
+inline TORCH_XPU_API at::HostAllocator* getPinnedMemoryAllocator() {
+  return at::getHostAllocator(at::kXPU);
 }
 } // namespace at::xpu

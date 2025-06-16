@@ -213,7 +213,7 @@ def _tcp_rendezvous_handler(
         return _rendezvous_error("tcp:// rendezvous: " + msg)
 
     result = urlparse(url)
-    if not result.port:
+    if result.port is None:
         raise _error("port number missing")
     query_dict = _query_to_dict(result.query)
     if "rank" not in query_dict:

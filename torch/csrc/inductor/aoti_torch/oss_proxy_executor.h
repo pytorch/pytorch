@@ -67,6 +67,16 @@ struct OSSOpKernel {
     return num_output_tensors;
   }
 
+  int num_output_ints() const {
+    int num_output_ints = 0;
+    for (const auto& output : outputs_) {
+      if (output.arg_type == DynamicArgType::IntType) {
+        num_output_ints += output.length;
+      }
+    }
+    return num_output_ints;
+  }
+
   virtual void run(std::vector<c10::IValue>& stack) = 0;
   virtual c10::FunctionSchema schema() const = 0;
   virtual ~OSSOpKernel() = default;
@@ -103,7 +113,7 @@ class OSSProxyExecutor : public ProxyExecutor {
  public:
   explicit OSSProxyExecutor(
       const std::string& json_path,
-      const std::string& device_str,
+      bool is_cpu,
       std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs =
           std::nullopt);
 

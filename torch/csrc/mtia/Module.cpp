@@ -84,6 +84,12 @@ void initModule(PyObject* module) {
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
 
+  m.def("_mtia_getDeviceProperties", [](c10::DeviceIndex device_index) {
+    PyObject* raw_pyobject =
+        at::detail::getMTIAHooks().getDeviceProperties(device_index);
+    return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
+
   m.def("_mtia_emptyCache", []() { at::detail::getMTIAHooks().emptyCache(); });
 
   m.def(
@@ -96,8 +102,14 @@ void initModule(PyObject* module) {
       });
 
   m.def("_mtia_memorySnapshot", []() {
-    PyObject* raw_pyobject = at::detail::getMTIAHooks().memorySnapshot();
+    PyObject* raw_pyobject =
+        at::detail::getMTIAHooks().memorySnapshot(std::nullopt);
     return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
+
+  m.def("_mtia_attachOutOfMemoryObserver", [](const py::function& observer) {
+    at::detail::getMTIAHooks().attachOutOfMemoryObserver(observer.ptr());
+    return;
   });
 
   m.def("_mtia_getDeviceCount", []() {

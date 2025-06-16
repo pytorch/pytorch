@@ -34,23 +34,23 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        rocm_version: ["63", "624"]
+        rocm_version: ["64", "63"]
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Build Magma Rocm
         working-directory: .ci/magma-rocm
         run: |
           # Produces artifacts under magma-rocm/output/linux-64/magma-rocm*.bz2
           make magma-rocm${{ matrix.rocm_version }}
       - name: Save as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           path: .ci/magma-rocm/output/linux-64/magma-rocm*.bz2
           name: artifact_${{ matrix.rocm_version }}
       - name: Configure AWS credentials(PyTorch account)
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_ossci_linux_windows_read_write
           aws-region: us-east-1
