@@ -68,7 +68,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
                   << ", exchanged_n_times: " << exchanged_n_times;
       }
     }
-    TORCH_CHECK(group_info.rank_to_global_rank.empty() == false);
+    TORCH_INTERNAL_ASSERT(!group_info.rank_to_global_rank.empty());
     rank_to_global_rank_ = group_info.rank_to_global_rank;
     for (int r = 0; r < world_size_; ++r) {
       buffers_.push_back(nvshmem_ptr(
