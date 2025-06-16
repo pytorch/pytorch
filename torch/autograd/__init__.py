@@ -138,7 +138,7 @@ def _make_grads(
                 shape_matches = expect_true(sym_eq(out_size, first_grad.size()))
 
             if not shape_matches:
-                out = cast(Union[torch.Tensor, graph.GradientEdge], out)
+                out = cast(Union[torch.Tensor, graph.GradientEdge], out)  # type: ignore[redundant-cast]
                 out_shape, grad_shape = _calculate_shape(
                     out, first_grad, is_grads_batched
                 )
