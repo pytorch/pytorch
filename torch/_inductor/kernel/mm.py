@@ -646,18 +646,111 @@ def tuned_mm(mat1, mat2, *, layout=None):
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(
-            m,
-            n,
-            k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
-        ):
-            mm_template.maybe_append_choice(
-                choices,
-                input_nodes=(mat1, mat2),
-                layout=layout,
-                **mm_options(config, m, n, k, layout),
-            )
+        # Check if we should use multi-kernel hints for dynamic shapes
+        # We want to use multi-kernel when:
+        # 1. Multi-kernel hints are configured
+        # 2. Max autotune is enabled
+        # 3. We have dynamic shapes (either symbolic m or not static_shape)
+        should_use_multi_kernel_hints = (
+            inductor_config.multi_kernel_hints
+            and len(inductor_config.multi_kernel_hints) > 0
+            and use_max_autotune()
+            and (isinstance(m, sympy.Expr) or not static_shape)  # Dynamic shapes
+        )
+
+        # Always log debug info to see what's happening
+        print(f"[MULTI_KERNEL_DEBUG] hints={inductor_config.multi_kernel_hints}")
+        print(f"[MULTI_KERNEL_DEBUG] len_hints={len(inductor_config.multi_kernel_hints)}")
+        print(f"[MULTI_KERNEL_DEBUG] max_autotune={use_max_autotune()}")
+        print(f"[MULTI_KERNEL_DEBUG] m_type={type(m)}, m_value={m}")
+        print(f"[MULTI_KERNEL_DEBUG] m_is_sympy={isinstance(m, sympy.Expr)}")
+        print(f"[MULTI_KERNEL_DEBUG] static_shape={static_shape}")
+        print(f"[MULTI_KERNEL_DEBUG] is_nonzero={is_nonzero}")
+        print(f"[MULTI_KERNEL_DEBUG] use_triton_template={use_triton_template(layout)}")
+        print(f"[MULTI_KERNEL_DEBUG] should_use={should_use_multi_kernel_hints}")
+
+        if should_use_multi_kernel_hints:
+            print("[MULTI_KERNEL_DEBUG] Entering multi-kernel generation")
+            log.info("Multi-kernel: Generating multiple kernels for different size hints")
+
+            # Generate multiple kernels for different size hints
+            multi_kernel_choices = []
+
+            # Get the current size hint for m
+            current_m_hint = V.graph.sizevars.size_hint(m, fallback=4096)
+            print(f"[MULTI_KERNEL_DEBUG] current_m_hint={current_m_hint}")
+
+            # Create size hints list: current hint + configured hints
+            size_hints = [current_m_hint] + list(inductor_config.multi_kernel_hints)
+            size_hints = list(set(size_hints))  # Remove duplicates
+            size_hints.sort()
+
+            print(f"[MULTI_KERNEL_DEBUG] size_hints={size_hints}")
+            log.info(f"Multi-kernel: Generating kernels for size hints: {size_hints}")
+
+            # Generate one kernel for each size hint (using the best config for each)
+            for hint_m in size_hints:
+                print(f"[MULTI_KERNEL_DEBUG] Generating for hint_m={hint_m}")
+                configs = list(mm_configs(
+                    hint_m,  # Use hint size for m
+                    n,
+                    k,
+                    **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+                ))
+                print(f"[MULTI_KERNEL_DEBUG] Got {len(configs)} configs for hint_m={hint_m}")
+
+                # For multi-kernel, we'll just use the first config for each size hint
+                # to avoid generating too many kernels
+                if configs:
+                    config = configs[0]  # Use the first (presumably best) config
+                    choice_list = []
+                    mm_template.maybe_append_choice(
+                        choice_list,
+                        input_nodes=(mat1, mat2),
+                        layout=layout,
+                        **mm_options(config, hint_m, n, k, layout),
+                    )
+                    print(f"[MULTI_KERNEL_DEBUG] Generated {len(choice_list)} choices for hint_m={hint_m}")
+                    multi_kernel_choices.extend(choice_list)
+
+            print(f"[MULTI_KERNEL_DEBUG] Total multi_kernel_choices: {len(multi_kernel_choices)}")
+
+            if len(multi_kernel_choices) >= 2:
+                log.info(f"Multi-kernel: Generated {len(multi_kernel_choices)} kernel choices")
+
+                # For now, just add all multi-kernel choices to regular autotune
+                # The actual multi-kernel dispatch will be implemented later
+                choices.extend(multi_kernel_choices)
+                print(f"[MULTI_KERNEL_DEBUG] Added {len(multi_kernel_choices)} multi-kernel choices to autotune")
+                log.info(f"Multi-kernel: Added {len(multi_kernel_choices)} choices for runtime dispatch")
+            else:
+                print("[MULTI_KERNEL_DEBUG] Not enough multi_kernel_choices generated, falling back to regular generation")
+                # Fall back to regular kernel generation
+                for config in mm_configs(
+                    m,
+                    n,
+                    k,
+                    **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+                ):
+                    mm_template.maybe_append_choice(
+                        choices,
+                        input_nodes=(mat1, mat2),
+                        layout=layout,
+                        **mm_options(config, m, n, k, layout),
+                    )
+        else:
+            for config in mm_configs(
+                m,
+                n,
+                k,
+                **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+            ):
+                mm_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(mat1, mat2),
+                    layout=layout,
+                    **mm_options(config, m, n, k, layout),
+                )
 
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(

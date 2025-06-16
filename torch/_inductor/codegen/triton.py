@@ -3825,16 +3825,123 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         for ws in self.args.workspace_args:
             wrapper.generate_workspace_allocation(ws)
 
-        wrapper.generate_kernel_call(
-            name,
-            call_args,
-            triton=True,
-            arg_types=arg_types,
-            triton_meta=self.triton_meta,
-        )
+        # Check if we should generate multi-kernel
+        from .multi_kernel_support import multi_kernel_manager
+        if multi_kernel_manager.should_use_multi_kernel(self):
+            multi_kernel_call_code = multi_kernel_manager.generate_multi_kernel_call(
+                self, name, call_args, arg_types
+            )
+            wrapper.writeline("# multi_kernel does the following:")
+            wrapper.writeline("# 1) it uses the cache key hash([s77])")
+            wrapper.writeline("# 2) given a cache key if we already know the best answer then we just run that")
+            wrapper.writeline("# 3) otherwise we run the first not yet run kernel and we record the time and return")
+            wrapper.writeline("# 4) if this is the last kernel that hasn't been run, we find the best kernel and set that to be the best answer")
+            wrapper.writeline(multi_kernel_call_code)
+        else:
+            wrapper.generate_kernel_call(
+                name,
+                call_args,
+                triton=True,
+                arg_types=arg_types,
+                triton_meta=self.triton_meta,
+            )
 
         for ws in reversed(self.args.workspace_args):
             wrapper.generate_workspace_deallocation(ws)
+
+
+    def _should_generate_multi_kernel(self) -> bool:
+        """Check if this kernel should use multi-kernel optimization"""
+        # Only enable for matmul-like operations with dynamic shapes
+        if not config.multi_kernel_hints:
+            return False
+
+        # Check if we have dynamic shapes that could benefit from multi-kernel
+        for tree in self.range_trees:
+            if hasattr(tree, 'numel') and isinstance(tree.numel, sympy.Symbol):
+                # Look for symbols that represent the first dimension (commonly M in matmul)
+                if str(tree.numel).startswith('s') and any(
+                    str(tree.numel) in str(size) for size in self.get_dynamic_sizes()
+                ):
+                    return True
+        return False
+
+    def get_dynamic_sizes(self):
+        """Get dynamic size symbols from the kernel"""
+        dynamic_sizes = set()
+        for tree in self.range_trees:
+            if hasattr(tree, 'numel') and isinstance(tree.numel, sympy.Expr):
+                dynamic_sizes.update(tree.numel.free_symbols)
+        return dynamic_sizes
+
+    def _generate_multi_kernel_call(self, name: str, call_args, arg_types):
+        """Generate multi-kernel call with different hint sizes"""
+        wrapper = V.graph.wrapper_code
+
+        # Generate kernels for each hint size plus the original
+        kernel_variants = []
+
+        # Get the dynamic size symbol (assume it's the first one for simplicity)
+        dynamic_symbols = self.get_dynamic_sizes()
+        if not dynamic_symbols:
+            # Fallback to regular kernel call
+            wrapper.generate_kernel_call(
+                name,
+                call_args,
+                triton=True,
+                arg_types=arg_types,
+                triton_meta=self.triton_meta,
+            )
+            return
+
+        primary_symbol = next(iter(dynamic_symbols))
+
+        # Generate kernel variants for each hint size
+        for i, hint_size in enumerate([None] + config.multi_kernel_hints):
+            variant_name = f"{name}_{i}" if hint_size is not None else name
+
+            # Create specialized triton_meta for this variant
+            variant_meta = self.triton_meta.copy()
+            if hint_size is not None:
+                # Add size hint to the meta
+                variant_meta['size_hints'] = variant_meta.get('size_hints', []) + [hint_size]
+
+            kernel_variants.append((variant_name, variant_meta))
+
+            # Define the specialized kernel
+            wrapper.define_kernel(
+                variant_name,
+                self._generate_kernel_body_for_hint(hint_size),
+                metadata=f"# Kernel variant for hint size: {hint_size}",
+            )
+
+        # Generate the multi-kernel call
+        cache_key_args = [str(primary_symbol)]
+        kernel_lambdas = []
+
+        for variant_name, variant_meta in kernel_variants:
+            # Create lambda for each kernel variant
+            lambda_args = ', '.join(str(arg) for arg in call_args)
+            kernel_lambdas.append(f"lambda args: {variant_name}.run(*args, stream=stream{V.graph.get_current_device_or_throw().index})")
+
+        # Generate the multi-kernel call
+        wrapper.writeline("# multi_kernel does the following:")
+        wrapper.writeline("# 1) it uses the cache key hash([s77])")
+        wrapper.writeline("# 2) given a cache key if we already know the best answer then we just run that")
+        wrapper.writeline("# 3) otherwise we run the first not yet run kernel and we record the time and return")
+        wrapper.writeline("# 4) if this is the last kernel that hasn't been run, we find the best kernel and set that to be the best answer")
+
+        multi_kernel_call = f"""multi_kernel(
+    {','.join(kernel_lambdas)},
+)({cache_key_args}, {', '.join(str(arg) for arg in call_args[1:])}) # cache_key, args"""
+
+        wrapper.writeline(multi_kernel_call)
+
+    def _generate_kernel_body_for_hint(self, hint_size):
+        """Generate kernel body specialized for a specific hint size"""
+        # For now, return the same kernel body
+        # In a full implementation, this would specialize the kernel based on hint_size
+        return self.codegen_kernel()
 
     def codegen_nan_check(self) -> None:
         wrapper = V.graph.wrapper_code
@@ -4315,6 +4422,58 @@ class TritonScheduling(SIMDScheduling):
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
         return self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
 
+    def _should_use_multi_kernel_hints(self, kernel: TritonKernel) -> bool:
+        """
+        Determine if this kernel should use multi-kernel hints based on dynamic shapes.
+        """
+        if not config.multi_kernel_hints:
+            return False
+
+        # Check if kernel has dynamic shapes (sympy symbols)
+        for tree in kernel.range_trees:
+            if hasattr(tree, 'numel') and isinstance(tree.numel, sympy.Basic):
+                # Check if it's a symbol (dynamic) rather than a concrete number
+                if tree.numel.free_symbols:
+                    log.debug(f"[MULTI_KERNEL_DEBUG] Found dynamic shape: {tree.numel}")
+                    return True
+
+        return False
+
+    def _generate_hint_kernels(self, kernel: TritonKernel, kernel_args: list[Any], kernel_kwargs: dict[str, Any]) -> list[TritonKernel]:
+        """
+        Generate additional kernels for each hint size in multi_kernel_hints.
+        """
+        hint_kernels = []
+
+        for hint_size in config.multi_kernel_hints:
+            log.debug(f"[MULTI_KERNEL_DEBUG] Generating kernel for hint size: {hint_size}")
+
+            # Create a copy of kernel_kwargs with hint-specific modifications
+            hint_kwargs = kernel_kwargs.copy()
+
+            # For matrix multiplication kernels, we might want to adjust block sizes
+            # based on the hint size. This is a heuristic approach.
+            if hasattr(kernel, 'features') and hasattr(kernel.features, 'reduction_numel'):
+                # Adjust block sizes based on hint size
+                if hint_size <= 64:
+                    # Small sizes - use smaller blocks
+                    hint_kwargs['override_block_config'] = {'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 128}
+                elif hint_size <= 256:
+                    # Medium sizes - use medium blocks
+                    hint_kwargs['override_block_config'] = {'BLOCK_M': 64, 'BLOCK_N': 64, 'BLOCK_K': 64}
+                else:
+                    # Large sizes - use larger blocks
+                    hint_kwargs['override_block_config'] = {'BLOCK_M': 128, 'BLOCK_N': 64, 'BLOCK_K': 32}
+
+            try:
+                hint_kernel = self.kernel_type(*kernel_args, **hint_kwargs)
+                hint_kernels.append(hint_kernel)
+            except Exception as e:
+                log.debug(f"[MULTI_KERNEL_DEBUG] Failed to create hint kernel for size {hint_size}: {e}")
+                continue
+
+        return hint_kernels
+
     def add_multi_kernel_choices(
         self,
         kernel: TritonKernel,
@@ -4324,6 +4483,19 @@ class TritonScheduling(SIMDScheduling):
         kernels: list[TritonKernel] = [kernel]
         if not config.triton.multi_kernel:
             return kernels
+
+        log.debug(f"[MULTI_KERNEL_DEBUG] hints={config.multi_kernel_hints}")
+        log.debug(f"[MULTI_KERNEL_DEBUG] max_autotune={config.max_autotune}")
+
+        # Check if this kernel has dynamic shapes that could benefit from multi-kernel hints
+        should_use_hints = self._should_use_multi_kernel_hints(kernel)
+        log.debug(f"[MULTI_KERNEL_DEBUG] should_use={should_use_hints}")
+
+        if should_use_hints:
+            # Generate kernels for each hint size
+            hint_kernels = self._generate_hint_kernels(kernel, kernel_args, kernel_kwargs)
+            kernels.extend(hint_kernels)
+            log.debug(f"[MULTI_KERNEL_DEBUG] Generated {len(hint_kernels)} hint kernels")
 
         optional_persistent = kernel.persistent_reduction and not kernel_kwargs.get(
             "override_persistent_reduction"
@@ -4367,6 +4539,88 @@ class TritonScheduling(SIMDScheduling):
             # persistent kernels must be generated last so must_keep_buffers works right
             kernels.sort(key=lambda k: k.persistent_reduction)
         return kernels
+
+    def _should_use_multi_kernel_hints(self, kernel: TritonKernel) -> bool:
+        """
+        Determine if this kernel should use multi-kernel hints.
+        We use hints for kernels with dynamic shapes, particularly matrix multiplications.
+        """
+        if not config.multi_kernel_hints:
+            return False
+
+        # Check if we have max_autotune enabled, which is required for multi-kernel
+        if not config.max_autotune:
+            return False
+
+        # Check if kernel has dynamic shapes by looking at the numels
+        has_dynamic_shape = False
+        for numel in kernel.numels.values():
+            if isinstance(numel, sympy.Symbol):
+                has_dynamic_shape = True
+                break
+
+        if not has_dynamic_shape:
+            return False
+
+        # Debug logging
+        log.debug(f"[MULTI_KERNEL_DEBUG] hints={config.multi_kernel_hints}")
+        log.debug(f"[MULTI_KERNEL_DEBUG] max_autotune={config.max_autotune}")
+
+        # Check for matrix multiplication patterns
+        if hasattr(kernel, 'features') and hasattr(kernel.features, 'node_schedule'):
+            for node in kernel.features.node_schedule:
+                if hasattr(node, 'node') and hasattr(node.node, 'target'):
+                    target_str = str(node.node.target)
+                    if 'mm' in target_str or 'matmul' in target_str:
+                        log.debug(f"[MULTI_KERNEL_DEBUG] Found mm/matmul node: {target_str}")
+                        return True
+
+        # Also check for dynamic shapes in the first dimension (common for batch size)
+        for prefix, numel in kernel.numels.items():
+            if isinstance(numel, sympy.Symbol):
+                log.debug(f"[MULTI_KERNEL_DEBUG] Found dynamic numel: {prefix}={numel}")
+                return True
+
+        return False
+
+    def _generate_hint_kernels(
+        self,
+        base_kernel: TritonKernel,
+        kernel_args: list[Any],
+        kernel_kwargs: dict[str, Any]
+    ) -> list[TritonKernel]:
+        """
+        Generate additional kernels for each hint size in multi_kernel_hints.
+        """
+        hint_kernels = []
+
+        log.debug(f"[MULTI_KERNEL_DEBUG] Generating hint kernels for sizes: {config.multi_kernel_hints}")
+
+        for hint_size in config.multi_kernel_hints:
+            # Create a modified kernel with size hints
+            hint_kernel_kwargs = kernel_kwargs.copy()
+
+            # Create a new kernel instance with the same arguments
+            hint_kernel = self.kernel_type(*kernel_args, **hint_kernel_kwargs)
+
+            # Set a hint size for this kernel variant - this will be used during codegen
+            hint_kernel._multi_kernel_hint_size = hint_size
+
+            # Modify the kernel's size hints to optimize for this specific size
+            if hasattr(hint_kernel, 'numels'):
+                for prefix, numel in hint_kernel.numels.items():
+                    if isinstance(numel, sympy.Symbol):
+                        # For dynamic symbols, we can set size hints that will influence
+                        # the kernel generation and optimization choices
+                        hint_kernel._size_hint_override = {str(numel): hint_size}
+                        break
+
+            log.debug(f"[MULTI_KERNEL_DEBUG] Created hint kernel for size {hint_size}")
+            hint_kernels.append(hint_kernel)
+
+        return hint_kernels
+
+        return hint_kernels
 
     def benchmark_combo_kernel(self, node_list):
         mod: ModuleType

@@ -1655,6 +1655,11 @@ _cache_config_ignore_prefix: list[str] = [
 # External callable for matmul tuning candidates
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
+# Multi-kernel hints for dynamic shape optimization
+# When compiling for the first time, compile separate kernels for each hint size
+# plus the user example value, then select the best at runtime
+multi_kernel_hints: list[int] = [64, 256, 4096]
+
 
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False

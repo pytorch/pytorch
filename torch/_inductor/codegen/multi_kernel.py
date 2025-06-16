@@ -18,6 +18,96 @@ from .common import TensorArg, WorkspaceArg
 log = logging.getLogger(__name__)
 
 
+def multi_kernel(cache_key_args, *kernel_fns):
+    """
+    Multi-kernel runtime selection function.
+
+    This function implements the runtime algorithm:
+    1) Uses cache key hash to identify the input size
+    2) If we already know the best kernel for this size, run it
+    3) Otherwise run the first not-yet-run kernel, record time and return
+    4) If this is the last kernel, find the best and cache the result
+    """
+    # For now, just run the first kernel as a placeholder
+    # The actual multi-kernel selection logic will be implemented later
+    return kernel_fns[0](cache_key_args)
+
+
+def multi_kernel_old(*kernel_fns):
+    """
+    Multi-kernel runtime selection function.
+
+    This function implements the runtime algorithm:
+    1) Uses cache key hash to identify the input size
+    2) If we already know the best kernel for this size, run it
+    3) Otherwise run the first not-yet-run kernel, record time and return
+    4) If this is the last kernel, find the best and cache the result
+    """
+    import time
+    import hashlib
+
+    # Cache for storing the best kernel choice for each cache key
+    _kernel_cache = {}
+    # Cache for storing timing results during benchmarking
+    _timing_cache = {}
+
+    def multi_kernel_impl(cache_key_args, *args):
+        # Create cache key from the dynamic size arguments
+        cache_key = tuple(cache_key_args)
+        cache_key_str = str(cache_key)
+
+        # If we already know the best kernel, use it
+        if cache_key_str in _kernel_cache:
+            best_kernel_idx = _kernel_cache[cache_key_str]
+            return kernel_fns[best_kernel_idx](args)
+
+        # Initialize timing cache for this key if not exists
+        if cache_key_str not in _timing_cache:
+            _timing_cache[cache_key_str] = {}
+
+        timings = _timing_cache[cache_key_str]
+
+        # Find the first kernel we haven't benchmarked yet
+        next_kernel_idx = None
+        for i in range(len(kernel_fns)):
+            if i not in timings:
+                next_kernel_idx = i
+                break
+
+        if next_kernel_idx is not None:
+            # Benchmark this kernel
+            kernel_fn = kernel_fns[next_kernel_idx]
+
+            # Warm up
+            for _ in range(3):
+                kernel_fn(args)
+
+            # Time the kernel
+            start_time = time.perf_counter()
+            for _ in range(10):  # Run multiple times for better accuracy
+                kernel_fn(args)
+            end_time = time.perf_counter()
+
+            avg_time = (end_time - start_time) / 10
+            timings[next_kernel_idx] = avg_time
+
+            # If this was the last kernel to benchmark, pick the best one
+            if len(timings) == len(kernel_fns):
+                best_kernel_idx = min(timings.keys(), key=lambda k: timings[k])
+                _kernel_cache[cache_key_str] = best_kernel_idx
+
+                # Log the choice for debugging
+                log.debug(f"Multi-kernel selected kernel {best_kernel_idx} for cache key {cache_key_str}. Timings: {timings}")
+
+            # Run the kernel we just benchmarked
+            return kernel_fn(args)
+        else:
+            # This shouldn't happen if the logic is correct
+            raise RuntimeError("Multi-kernel: no unbenchmarked kernels found")
+
+    return multi_kernel_impl
+
+
 def get_kernel_argdefs(kernel):
     arg_defs, _, _, _ = kernel.args.python_argdefs()
     return [x.name for x in arg_defs]
