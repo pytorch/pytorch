@@ -90,24 +90,12 @@ struct OpMathType<bfloat> {
 template <typename T>
 struct AccumulationType {
   using type = T;
-  static type to_accum(T val) {
-    return val;
-  }
-  static T from_accum(type val) {
-    return val;
-  }
 };
 
 // Specialization for half - promote to float for accumulation
 template <>
 struct AccumulationType<half> {
   using type = float;
-  static type to_accum(half val) {
-    return static_cast<float>(val);
-  }
-  static half from_accum(type val) {
-    return static_cast<half>(val);
-  }
 };
 
 #if __METAL_VERSION__ >= 310
@@ -115,12 +103,6 @@ struct AccumulationType<half> {
 template <>
 struct AccumulationType<bfloat> {
   using type = float;
-  static type to_accum(bfloat val) {
-    return static_cast<float>(val);
-  }
-  static bfloat from_accum(type val) {
-    return static_cast<bfloat>(val);
-  }
 };
 #endif
 
@@ -170,6 +152,9 @@ using vec4type_t = typename detail::vectypes<T>::type4;
 
 template <typename T>
 using opmath_t = typename detail::OpMathType<T>::type;
+
+template <typename T>
+using accum_t = typename detail::AccumulationType<T>::type;
 
 // TODO: Move it to type_traits header may be
 template <typename F, typename... Args>

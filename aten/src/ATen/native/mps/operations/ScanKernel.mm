@@ -23,11 +23,10 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #endif
 
 // Generic scan implementation that handles both simple scans and scans with indices
-template <typename scalar_t>
-void scan_mps_impl_generic(const Tensor& self,
-                           const std::vector<Tensor>& outputs,
-                           int64_t dim,
-                           const std::string& op_name) {
+static void scan_mps_impl(const Tensor& self,
+                          const std::vector<Tensor>& outputs,
+                          int64_t dim,
+                          const std::string& op_name) {
   if (outputs[0].numel() == 0) {
     return;
   }
@@ -142,34 +141,14 @@ void scan_mps_impl_generic(const Tensor& self,
   });
 }
 
-// Convenience wrapper for simple scans (cumsum, cumprod, logcumsumexp)
-template <typename scalar_t>
-void scan_mps_impl(const Tensor& self, const Tensor& result, int64_t dim, const std::string& op_name) {
-  scan_mps_impl_generic<scalar_t>(self, {result}, dim, op_name);
-}
-
-// Convenience wrapper for scans with indices (cummin, cummax)
-template <typename scalar_t>
-void scan_with_indices_mps_impl(const Tensor& self,
-                                const Tensor& values,
-                                const Tensor& indices,
-                                int64_t dim,
-                                const std::string& op_name) {
-  scan_mps_impl_generic<scalar_t>(self, {values, indices}, dim, op_name);
-}
-
 } // namespace mps
 
 static void cumsum_mps_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, self.scalar_type(), "cumsum_mps", [&]() {
-    mps::scan_mps_impl<scalar_t>(self, result, dim, "cumsum");
-  });
+  mps::scan_mps_impl(self, {result}, dim, "cumsum");
 }
 
 static void cumprod_mps_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, self.scalar_type(), "cumprod_mps", [&]() {
-    mps::scan_mps_impl<scalar_t>(self, result, dim, "cumprod");
-  });
+  mps::scan_mps_impl(self, {result}, dim, "cumprod");
 }
 
 Tensor& _logcumsumexp_out_mps(const Tensor& self, int64_t dim, Tensor& result) {
@@ -184,10 +163,7 @@ Tensor& _logcumsumexp_out_mps(const Tensor& self, int64_t dim, Tensor& result) {
     return result;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::Half, ScalarType::BFloat16, self.scalar_type(), "logcumsumexp_mps", [&]() {
-        mps::scan_mps_impl<scalar_t>(self, result, wrap_dim, "logcumsumexp");
-      });
+  mps::scan_mps_impl(self, {result}, wrap_dim, "logcumsumexp");
   return result;
 }
 
@@ -197,17 +173,11 @@ Tensor _logcumsumexp_mps(const Tensor& self, int64_t dim) {
 }
 
 void cummax_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND3(
-      at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "cummax_mps", [&]() {
-        mps::scan_with_indices_mps_impl<scalar_t>(self, values, indices, dim, "cummax");
-      });
+  mps::scan_mps_impl(self, {values, indices}, dim, "cummax");
 }
 
 void cummin_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND3(
-      at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "cummin_mps", [&]() {
-        mps::scan_with_indices_mps_impl<scalar_t>(self, values, indices, dim, "cummin");
-      });
+  mps::scan_mps_impl(self, {values, indices}, dim, "cummin");
 }
 
 // Register dispatch functions

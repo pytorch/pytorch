@@ -4,80 +4,72 @@ using namespace metal;
 #include <c10/metal/common.h>
 #include <c10/metal/utils.h>
 
-using c10::metal::detail::AccumulationType;
+using c10::metal::accum_t;
 
-template <typename T>
+template <typename T, typename acc_t = accum_t<T>>
 struct CumSumOp {
-  using AccumType = typename AccumulationType<T>::type;
-
-  static AccumType apply(AccumType a, AccumType b) {
+  static acc_t apply(acc_t a, acc_t b) {
     return a + b;
   }
-  static T identity() {
-    return T(0);
+  static acc_t identity() {
+    return acc_t(0);
   }
 };
 
-template <typename T>
+template <typename T, typename acc_t = accum_t<T>>
 struct CumProdOp {
-  using AccumType = typename AccumulationType<T>::type;
-
-  static AccumType apply(AccumType a, AccumType b) {
+  static acc_t apply(acc_t a, acc_t b) {
     return a * b;
   }
-  static T identity() {
-    return T(1);
+  static acc_t identity() {
+    return acc_t(1);
   }
 };
 
-template <typename T>
+template <typename T, typename acc_t = accum_t<T>>
 struct CumMinOp {
-  using AccumType = typename AccumulationType<T>::type;
-
-  static AccumType apply(AccumType a, AccumType b) {
+  static acc_t apply(acc_t a, acc_t b) {
     return metal::min(a, b);
   }
-  static T identity() {
-    return metal::is_floating_point_v<T> ? metal::numeric_limits<T>::infinity()
-                                         : metal::numeric_limits<T>::max();
+  static acc_t identity() {
+    return static_cast<acc_t>(
+        metal::is_floating_point_v<T> ? metal::numeric_limits<T>::infinity()
+                                      : metal::numeric_limits<T>::max());
   }
 };
 
-template <typename T>
+template <typename T, typename acc_t = accum_t<T>>
 struct CumMaxOp {
-  using AccumType = typename AccumulationType<T>::type;
-
-  static AccumType apply(AccumType a, AccumType b) {
+  static acc_t apply(acc_t a, acc_t b) {
     return metal::max(a, b);
   }
-  static T identity() {
-    return metal::is_floating_point_v<T> ? -metal::numeric_limits<T>::infinity()
-                                         : metal::numeric_limits<T>::lowest();
+  static acc_t identity() {
+    return static_cast<acc_t>(
+        metal::is_floating_point_v<T> ? -metal::numeric_limits<T>::infinity()
+                                      : metal::numeric_limits<T>::lowest());
   }
 };
 
-template <typename T>
+template <typename T, typename acc_t = accum_t<T>>
 struct LogCumSumExpOp {
-  using AccumType = typename AccumulationType<T>::type;
-
-  static AccumType apply(AccumType a, AccumType b) {
+  static acc_t apply(acc_t a, acc_t b) {
     if (metal::isinf(a) && a < 0) {
       return b;
     }
     if (metal::isinf(b) && b < 0) {
       return a;
     }
-    AccumType max_val = metal::max(a, b);
-    AccumType min_val = metal::min(a, b);
+    acc_t max_val = metal::max(a, b);
+    acc_t min_val = metal::min(a, b);
     return max_val + c10::metal::log1p(metal::exp(min_val - max_val));
   }
-  static T identity() {
-    return -metal::numeric_limits<T>::infinity();
+  static acc_t identity() {
+    return static_cast<acc_t>(-metal::numeric_limits<T>::infinity());
   }
 };
 
 // Inclusive scan along innermost dimension for contiguous tensors
-template <typename T, typename Op>
+template <typename T, typename Op, typename acc_t = accum_t<T>>
 kernel void scan_contiguous_innermost_dim(
     constant T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -89,19 +81,18 @@ kernel void scan_contiguous_innermost_dim(
 
   const uint offset = row * row_size;
 
-  using AccumType = typename AccumulationType<T>::type;
-  AccumType accumulator = AccumulationType<T>::to_accum(Op::identity());
+  acc_t accumulator = Op::identity();
 
   for (uint col = 0; col < row_size; col++) {
     T val = input[offset + col];
-    AccumType accum_val = AccumulationType<T>::to_accum(val);
+    acc_t accum_val = static_cast<acc_t>(val);
     accumulator = Op::apply(accumulator, accum_val);
-    output[offset + col] = AccumulationType<T>::from_accum(accumulator);
+    output[offset + col] = static_cast<T>(accumulator);
   }
 }
 
 // Inclusive scan along outer dimension for contiguous tensors
-template <typename T, typename Op>
+template <typename T, typename Op, typename acc_t = accum_t<T>>
 kernel void scan_contiguous_outer_dim(
     constant T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -115,20 +106,19 @@ kernel void scan_contiguous_outer_dim(
   if (orow >= num_orows || irow >= num_irows)
     return;
 
-  using AccumType = typename AccumulationType<T>::type;
-  AccumType accumulator = AccumulationType<T>::to_accum(Op::identity());
+  acc_t accumulator = Op::identity();
 
   const uint idx_base = orow * row_size * num_irows + irow;
   for (uint col = 0, idx = idx_base; col < row_size; col++, idx += num_irows) {
     T val = input[idx];
-    AccumType accum_val = AccumulationType<T>::to_accum(val);
+    acc_t accum_val = static_cast<acc_t>(val);
     accumulator = Op::apply(accumulator, accum_val);
-    output[idx] = AccumulationType<T>::from_accum(accumulator);
+    output[idx] = static_cast<T>(accumulator);
   }
 }
 
 // Inclusive scan with indices along innermost dimension for contiguous tensors
-template <typename T, typename Op>
+template <typename T, typename Op, typename acc_t = accum_t<T>>
 kernel void scan_with_indices_contiguous_innermost_dim(
     constant T* input [[buffer(0)]],
     device T* values [[buffer(1)]],
@@ -141,24 +131,23 @@ kernel void scan_with_indices_contiguous_innermost_dim(
 
   const uint offset = row * row_size;
 
-  using AccumType = typename AccumulationType<T>::type;
-  AccumType accumulator = AccumulationType<T>::to_accum(Op::identity());
+  acc_t accumulator = Op::identity();
   int64_t best_idx = 0;
 
   for (uint col = 0; col < row_size; col++) {
     T val = input[offset + col];
-    AccumType accum_val = AccumulationType<T>::to_accum(val);
+    acc_t accum_val = static_cast<acc_t>(val);
     if (col == 0 || Op::apply(accum_val, accumulator) == accum_val) {
       accumulator = accum_val;
       best_idx = col;
     }
-    values[offset + col] = AccumulationType<T>::from_accum(accumulator);
+    values[offset + col] = static_cast<T>(accumulator);
     indices[offset + col] = best_idx;
   }
 }
 
 // Inclusive scan with indices along outer dimension for contiguous tensors
-template <typename T, typename Op>
+template <typename T, typename Op, typename acc_t = accum_t<T>>
 kernel void scan_with_indices_contiguous_outer_dim(
     constant T* input [[buffer(0)]],
     device T* values [[buffer(1)]],
@@ -173,19 +162,18 @@ kernel void scan_with_indices_contiguous_outer_dim(
   if (orow >= num_orows || irow >= num_irows)
     return;
 
-  using AccumType = typename AccumulationType<T>::type;
-  AccumType accumulator = AccumulationType<T>::to_accum(Op::identity());
+  acc_t accumulator = Op::identity();
   int64_t best_idx = 0;
 
   const uint idx_base = orow * row_size * num_irows + irow;
   for (uint col = 0, idx = idx_base; col < row_size; col++, idx += num_irows) {
     T val = input[idx];
-    AccumType accum_val = AccumulationType<T>::to_accum(val);
+    acc_t accum_val = static_cast<acc_t>(val);
     if (col == 0 || Op::apply(accum_val, accumulator) == accum_val) {
       accumulator = accum_val;
       best_idx = col;
     }
-    values[idx] = AccumulationType<T>::from_accum(accumulator);
+    values[idx] = static_cast<T>(accumulator);
     indices[idx] = best_idx;
   }
 }
@@ -236,7 +224,7 @@ inline long calculate_base_offset(
 }
 
 // Generic strided scan kernel
-template <typename T, typename Op>
+template <typename T, typename Op, typename acc_t = accum_t<T>>
 kernel void scan_strided(
     constant T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -260,8 +248,7 @@ kernel void scan_strided(
   const long output_base_offset =
       calculate_base_offset(pos, output_strides, ndim, scan_dim);
 
-  using AccumType = typename AccumulationType<T>::type;
-  AccumType accumulator = AccumulationType<T>::to_accum(Op::identity());
+  acc_t accumulator = Op::identity();
   const long scan_size = sizes[scan_dim];
   const long input_scan_stride = input_strides[scan_dim];
   const long output_scan_stride = output_strides[scan_dim];
@@ -272,14 +259,14 @@ kernel void scan_strided(
         output_base_offset + scan_idx * output_scan_stride;
 
     T val = input[input_offset];
-    AccumType accum_val = AccumulationType<T>::to_accum(val);
+    acc_t accum_val = static_cast<acc_t>(val);
     accumulator = Op::apply(accumulator, accum_val);
-    output[output_offset] = AccumulationType<T>::from_accum(accumulator);
+    output[output_offset] = static_cast<T>(accumulator);
   }
 }
 
 // Generic strided scan with indices kernel
-template <typename T, typename Op>
+template <typename T, typename Op, typename acc_t = accum_t<T>>
 kernel void scan_with_indices_strided(
     constant T* input [[buffer(0)]],
     device T* values [[buffer(1)]],
@@ -307,8 +294,7 @@ kernel void scan_with_indices_strided(
   const long indices_base_offset =
       calculate_base_offset(pos, indices_strides, ndim, scan_dim);
 
-  using AccumType = typename AccumulationType<T>::type;
-  AccumType accumulator = AccumulationType<T>::to_accum(Op::identity());
+  acc_t accumulator = Op::identity();
   int64_t best_idx = 0;
   const long scan_size = sizes[scan_dim];
   const long input_scan_stride = input_strides[scan_dim];
@@ -323,12 +309,12 @@ kernel void scan_with_indices_strided(
         indices_base_offset + scan_idx * indices_scan_stride;
 
     T val = input[input_offset];
-    AccumType accum_val = AccumulationType<T>::to_accum(val);
+    acc_t accum_val = static_cast<acc_t>(val);
     if (scan_idx == 0 || Op::apply(accum_val, accumulator) == accum_val) {
       accumulator = accum_val;
       best_idx = scan_idx;
     }
-    values[values_offset] = AccumulationType<T>::from_accum(accumulator);
+    values[values_offset] = static_cast<T>(accumulator);
     indices[indices_offset] = best_idx;
   }
 }
