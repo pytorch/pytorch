@@ -1536,6 +1536,40 @@ else:
             'upsample_bilinear2d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
+    def test_no_nondeterministic_alert_interpolate_bilinear(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+
+        def fn():
+            res = torch.nn.functional.interpolate(
+                input,
+                size=12,
+                mode='bilinear',
+                align_corners=False)
+            grad = torch.ones_like(res)
+            return res.backward(grad)
+
+        self.check_nondeterministic_alert(
+            fn,
+            'upsample_bilinear2d_backward_out_cuda',
+            False)
+
+    def test_no_nondeterministic_alert_interpolate_trilinear(self, device):
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+
+        def fn():
+            res = torch.nn.functional.interpolate(
+                input,
+                size=12,
+                mode='trilinear',
+                align_corners=False)
+            grad = torch.ones_like(res)
+            return res.backward(grad)
+
+        self.check_nondeterministic_alert(
+            fn,
+            'upsample_trilinear3d_backward_out_cuda',
+            False)
+
     @skipIfTorchInductor("aot-autograd issue")
     def test_deterministic_replication_pad2d(self, device):
         test_cases = [
