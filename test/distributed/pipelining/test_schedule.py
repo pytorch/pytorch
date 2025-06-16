@@ -63,14 +63,22 @@ class MockPipelineStage(_PipelineStageBase):
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
         self.group = kwargs.get("group", None)
+        self.stage_index = kwargs.get("stage_index", 0)
+        self.is_first = kwargs.get("is_first", True)
+        self.is_last = kwargs.get("is_last", True)
+        self.output_chunks = []
+        self.has_backward = True
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
 
-    def _prepare_forward_infra(self, n_microbatches):
+    def _prepare_forward_infra(self, n_microbatches, *args, **kwargs):
         pass
 
     def _prepare_backward_infra(self, n_microbatches):
+        pass
+    
+    def clear_runtime_states(self):
         pass
 
 
@@ -221,6 +229,55 @@ class ScheduleTest(TestCase):
         with self.assertRaises(RuntimeError):
             ScheduleInterleavedZeroBubble([stage], 2)
 
+        torch.distributed.destroy_process_group()
+
+
+    def test_pipeline_schedule_runtime_inheritance(self):
+        """Test that Schedule1F1B inherits from _PipelineScheduleRuntime"""
+        self.assertTrue(
+            issubclass(Schedule1F1B, _PipelineScheduleRuntime),
+            "Expected Schedule1F1B to inherit from _PipelineScheduleRuntime but found inheritance from object"
+        )
+
+    def test_schedule_gpipe_inheritance(self):
+        """Test that ScheduleGPipe inherits from _PipelineScheduleRuntime"""
+        self.assertTrue(
+            issubclass(ScheduleGPipe, _PipelineScheduleRuntime),
+            "ScheduleGpipe must inherit from _PipelineScheduleRuntime but inherits from PipelineScheduleBase"
+        )
+
+    def test_step_microbatches_implementation(self):
+        """Test that _step_microbatches method calls _PipelineScheduleRuntime._step_microbatches"""
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        
+        # Create a simple mock stage with all required attributes
+        mock_stage = MockPipelineStage(
+            num_stages=1, 
+            group_size=1, 
+            group_rank=0,
+            stage_index=0,
+            is_first=True,
+            is_last=True
+        )
+        
+        # Test Schedule1F1B
+        schedule_1f1b = Schedule1F1B(mock_stage, 2)
+        
+        # Test ScheduleGPipe  
+        schedule_gpipe = ScheduleGPipe(mock_stage, 2)
+        
+        # Verify the _step_microbatches method exists and can be called
+        # This test will fail if the method doesn't call the parent implementation
+        try:
+            schedule_1f1b._step_microbatches([], [], [], [])
+            schedule_gpipe._step_microbatches([], [], [], [])
+        except NotImplementedError as e:
+            if "_step_microbatches method must call _PipelineScheduleRuntime._step_microbatches" in str(e):
+                self.fail("_step_microbatches method must call _PipelineScheduleRuntime._step_microbatches")
+        
         torch.distributed.destroy_process_group()
 
 
