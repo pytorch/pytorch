@@ -246,6 +246,7 @@ partition create_sdpa_graph_partition(
 
   op softmax{op_id++, op::kind::SoftMax, "softmax"};
   softmax.set_attr<int64_t>(op::attr::axis, -1);
+  softmax.set_attr<std::string>(op::attr::mode, "inf_as_zero");
 
   logical_tensor softmax_out{lt_id++, dtype};
   softmax.add_input(masked_qk_out.value_or(scaled_qk_out));
