@@ -583,8 +583,8 @@ ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {
     TORCH_WARN_ONCE(
         "TORCH_NCCL_AVOID_RECORD_STREAMS=1 is experimental for point-to-point "
         "collectives. To ensure safety, .wait() must be called on all "
-	"returned handles before they fall out of scope, including for isend() "
-	"calls.");
+        "returned handles before they fall out of scope, including for isend() "
+        "calls.");
     this->wait();
   }
 }
