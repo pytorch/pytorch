@@ -938,19 +938,16 @@ class OpInfo:
                 assert isinstance(val, _dispatch_dtypes)
                 self.dtypesIf[name] = set(val)
 
-        # check if the name includes torch.ops.aten already
-        if self.name.startswith("torch.ops.aten"):
-            # strip the torch.ops.aten prefix
-            candidate_name = self.name.split("torch.ops.aten.")[-1]
-            if hasattr(torch.ops.aten, candidate_name):
-                self.aten_name = candidate_name
-            else:
-                self.aten_name = None
-        elif self.aten_name is None:
-            if hasattr(torch.ops.aten, self.name):
-                self.aten_name = self.name
-            else:
-                self.aten_name = None
+        # throw an error if aten_name is set and the op is not in aten
+        if self.aten_name is not None and not hasattr(torch.ops.aten, self.aten_name):
+            raise ValueError(
+                f"OpInfo for {self.name} has aten_name {self.aten_name} but "
+                f"torch.ops.aten.{self.aten_name} does not exist"
+            )
+
+        # Set aten_name based on name with or without torch.ops.aten prefix
+        candidate_name = self.name.split("torch.ops.aten.")[-1] if self.name.startswith("torch.ops.aten") else self.name
+        self.aten_name = candidate_name if hasattr(torch.ops.aten, candidate_name) else None
 
         # Attribute to verify dynamic_dtypes are used.
         self.dynamic_dtypes = any(
