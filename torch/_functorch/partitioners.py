@@ -1052,7 +1052,7 @@ def _count_ops(graph: fx.Graph):
     log.info("%s", sorted(cnt.items(), key=operator.itemgetter(1), reverse=True))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def pointwise_ops():
     ops = []
     for attr_name in dir(torch.ops.aten):
@@ -1141,6 +1141,11 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
         return gm
 
     # Build the graph op-by-op by starting from the node all the way to the end
+    # copy_ can be not using tangents at all, we must copy it.
+    for node in list(gm.graph.nodes)[: order[first_node_in_bwd]]:
+        if node.op == "call_function" and node.target == torch.ops.aten.copy_.default:
+            insert_node_in_graph(node)
+
     for node in list(gm.graph.nodes)[order[first_node_in_bwd] :]:
         insert_node_in_graph(node)
 

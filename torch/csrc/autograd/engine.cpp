@@ -1471,7 +1471,7 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
   return graph_task->future_result_;
 }
 
-// note that when python is present, this base engine will be overriden
+// note that when python is present, this base engine will be overridden
 // with a PythonEngine. Because this typically happens before get_default_engine
 // is called, this base engine will never be created.
 Engine& Engine::get_base_engine() {
