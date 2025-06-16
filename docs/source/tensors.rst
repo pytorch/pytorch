@@ -6,7 +6,7 @@ torch.Tensor
 ===================================
 
 A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
-a single data type.
+a single data type. Please see :ref:`dtype-doc` for more details about dtype support.
 
 
 Data types
