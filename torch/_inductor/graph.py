@@ -2217,6 +2217,7 @@ class GraphLowering(torch.fx.Interpreter):
         from .scheduler import Scheduler
 
         with config.patch("triton.store_cubin", False):
+            print("SCHEDULING")
             self.scheduler = Scheduler(self.operations)
 
     def codegen(self) -> tuple[ValueWithLineMap, ValueWithLineMap]:

@@ -1602,6 +1602,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         fixed_config: Optional[FixedTritonConfig] = None,
         **kwargs,
     ) -> None:
+        torch._logging.trace_structured(
+            "pt2-viz",
+            metadata_fn=lambda: {
+                "beep": "beep",
+            },
+        )
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
         super().__init__(tiling, **kwargs)

@@ -519,7 +519,11 @@ class KernelCallLine(WrapperLine):
     graph_name: str
     original_fxnode_name: str
 
+    def __post_init__(self) -> None:
+        import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
+
     def codegen(self, code: IndentedBuffer) -> None:
+        import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
         self.wrapper._generate_kernel_call_helper(
             self.kernel_name,
             self.call_args,
