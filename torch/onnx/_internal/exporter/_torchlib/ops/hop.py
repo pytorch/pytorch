@@ -106,7 +106,7 @@ def higher_order_scan(
         *[
             ir.Value(
                 name=f"{inp.name}_{body_func.name}__subgraph_in",
-                shape=inp.shape,
+                shape=inp.shape,  # type: ignore[index]
                 type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
             )
             for inp in scan_inits
