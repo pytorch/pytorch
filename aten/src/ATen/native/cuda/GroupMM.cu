@@ -56,19 +56,19 @@ struct Schedule {
       cutlass::epilogue::PtrArrayTmaWarpSpecializedCooperative;
   using PongEpilogueSchedule =
       cutlass::epilogue::PtrArrayTmaWarpSpecializedPingpong;
-  using KernelScheduleSM90 =
-      cute::conditional_t<PONG, PongSchedule, CooperativeSchedule>;
-  using EpilogueScheduleSM90 = cute::
-      conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>;
-
   // SM100
   using MMA1SM_Schedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecialized1SmSm100;
   using MMA1SM_EpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized1Sm;
-  // using MMA2SM_KernelSchedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecialized2SmSm100;
-  // using MMA2_SMEpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized2Sm;
 
-  using KernelSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, MMA1SM_Schedule, KernelScheduleSM90>;
-  using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, MMA1SM_EpilogueSchedule, EpilogueScheduleSM90>;
+  using KernelSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, MMA1SM_Schedule,
+    cute::conditional_t<PONG, PongSchedule, CooperativeSchedule>>;
+  using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, MMA1SM_EpilogueSchedule, 
+    cute::conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>>;
+
+  // using KernelSchedule =
+  //     cute::conditional_t<PONG, PongSchedule, CooperativeSchedule>;
+  // using EpilogueSchedule = cute::
+  //     conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>;
 
 };
 
