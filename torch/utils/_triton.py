@@ -13,7 +13,7 @@ def has_triton_package() -> bool:
         from triton.compiler.compiler import triton_key
 
         return triton_key is not None
-    except ImportError:
+    except (ImportError, RuntimeError):
         return False
 
 
@@ -69,8 +69,6 @@ def has_triton_tma() -> bool:
 @functools.cache
 def has_triton_tma_device() -> bool:
     if has_triton_package():
-        import torch
-
         if _device_supports_tma():
             # old API
             try:
@@ -97,8 +95,6 @@ def has_triton_tma_device() -> bool:
 @functools.lru_cache(None)
 def has_triton_stable_tma_api() -> bool:
     if has_triton_package():
-        import torch
-
         if _device_supports_tma():
             try:
                 from triton.language import make_tensor_descriptor  # noqa: F401
