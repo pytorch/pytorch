@@ -94,7 +94,7 @@ class AHTrainDecisionTree(AHTrain):
 
     def get_grid_search_values(self):
         """
-        Standard values for grid search. Can be overriden.
+        Standard values for grid search. Can be overridden.
         """
         return {
             "max_depth": [5, 6, 7],
