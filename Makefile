@@ -57,13 +57,13 @@ setup-env-cuda:
 setup-env-rocm:
 	$(MAKE) setup-env PYTHON="$(PYTHON)" NIGHTLY_TOOL_OPTS="$(NIGHTLY_TOOL_OPTS) --rocm"
 
-.lintbin/.lintrunner.sha256: requirements.txt project.toml .lintrunner.toml
+.lintbin/.lintrunner.sha256: requirements.txt pyproject.toml .lintrunner.toml
 	@echo "Setting up lintrunner..."
 	$(PIP) install lintrunner
 	lintrunner init
 	@echo "Generating .lintrunner.sha256..."
 	@mkdir -p .lintbin
-	@sha256sum requirements.txt project.toml .lintrunner.toml > .lintbin/.lintrunner.sha256
+	@sha256sum requirements.txt pyproject.toml .lintrunner.toml > .lintbin/.lintrunner.sha256
 
 .PHONY: setup-lint
 setup-lint: .lintbin/.lintrunner.sha256
