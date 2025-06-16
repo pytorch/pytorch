@@ -2283,7 +2283,6 @@ torch.cuda.synchronize()
         torch.cuda.empty_cache()
 
         kernel_source = r"""
-        // #include <cuda/atomic>
         __global__ void wait_for_cpu(int *pinned_cpu_flag) {
             int flag = 0;
             do {
