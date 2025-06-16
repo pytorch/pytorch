@@ -5,7 +5,6 @@ from torch import Tensor
 
 from .cells import flat_lstm_cell, lstm_cell, premul_lstm_cell, premul_lstm_cell_no_bias
 
-
 # list[list[T]] -> list[T]
 def flatten_list(lst):
     result = []
@@ -315,7 +314,7 @@ def varlen_lstm_creator(script=False, **kwargs):
 
 
 # cudnn_layernorm_lstm: since cudnn does not have Layernorm LSTM, we cannot benchmark
-# the lowerbound directly. Instead, we only benchmark the forward pass by mimicing the
+# the lowerbound directly. Instead, we only benchmark the forward pass by mimicking the
 # computation of a cudnn lstm + seq_len * 3 layernorm computation. This should serve
 # as a perf lowerbound for the Layernorm LSTM forward pass(given that Layernorm itself
 # is invariant), the lowerbound of backward pass is hard to get since we lose the

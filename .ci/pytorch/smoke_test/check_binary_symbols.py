@@ -93,7 +93,7 @@ def check_lib_symbols_for_abi_correctness(lib: str) -> None:
             f"Found pre-cxx11 symbols, but there shouldn't be any, see: {pre_cxx11_symbols[:100]}"
         )
     if num_cxx11_symbols < 100:
-        raise RuntimeError("Didn't find enought cxx11 symbols")
+        raise RuntimeError("Didn't find enough cxx11 symbols")
 
 
 def main() -> None:
