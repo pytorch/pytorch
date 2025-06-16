@@ -115,17 +115,20 @@
 */
 #pragma once
 
+/* Defines to completely disable specific portions of miniz.c:
+   If all macros here are defined the only functionality remaining will be
+   CRC-32 and adler-32. */
 
-
-/* Defines to completely disable specific portions of miniz.c: 
-   If all macros here are defined the only functionality remaining will be CRC-32 and adler-32. */
-
-/* Define MINIZ_NO_STDIO to disable all usage and any functions which rely on stdio for file I/O. */
+/* Define MINIZ_NO_STDIO to disable all usage and any functions which rely on
+ * stdio for file I/O. */
 /*#define MINIZ_NO_STDIO */
 
-/* If MINIZ_NO_TIME is specified then the ZIP archive functions will not be able to get the current time, or */
-/* get/set file times, and the C run-time funcs that get/set times won't be called. */
-/* The current downside is the times written to your archives will be from 1979. */
+/* If MINIZ_NO_TIME is specified then the ZIP archive functions will not be able
+ * to get the current time, or */
+/* get/set file times, and the C run-time funcs that get/set times won't be
+ * called. */
+/* The current downside is the times written to your archives will be from 1979.
+ */
 #define MINIZ_NO_TIME
 
 /* Define MINIZ_NO_DEFLATE_APIS to disable all compression API's. */
@@ -137,19 +140,24 @@
 /* Define MINIZ_NO_ARCHIVE_APIS to disable all ZIP archive API's. */
 /*#define MINIZ_NO_ARCHIVE_APIS */
 
-/* Define MINIZ_NO_ARCHIVE_WRITING_APIS to disable all writing related ZIP archive API's. */
+/* Define MINIZ_NO_ARCHIVE_WRITING_APIS to disable all writing related ZIP
+ * archive API's. */
 /*#define MINIZ_NO_ARCHIVE_WRITING_APIS */
 
-/* Define MINIZ_NO_ZLIB_APIS to remove all ZLIB-style compression/decompression API's. */
+/* Define MINIZ_NO_ZLIB_APIS to remove all ZLIB-style compression/decompression
+ * API's. */
 /*#define MINIZ_NO_ZLIB_APIS */
 
-/* Define MINIZ_NO_ZLIB_COMPATIBLE_NAME to disable zlib names, to prevent conflicts against stock zlib. */
+/* Define MINIZ_NO_ZLIB_COMPATIBLE_NAME to disable zlib names, to prevent
+ * conflicts against stock zlib. */
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
 
-/* Define MINIZ_NO_MALLOC to disable all calls to malloc, free, and realloc. 
-   Note if MINIZ_NO_MALLOC is defined then the user must always provide custom user alloc/free/realloc
-   callbacks to the zlib and archive API's, and a few stand-alone helper API's which don't provide custom user
-   functions (such as tdefl_compress_mem_to_heap() and tinfl_decompress_mem_to_heap()) won't work. */
+/* Define MINIZ_NO_MALLOC to disable all calls to malloc, free, and realloc.
+   Note if MINIZ_NO_MALLOC is defined then the user must always provide custom
+   user alloc/free/realloc callbacks to the zlib and archive API's, and a few
+   stand-alone helper API's which don't provide custom user functions (such as
+   tdefl_compress_mem_to_heap() and tinfl_decompress_mem_to_heap()) won't work.
+ */
 /*#define MINIZ_NO_MALLOC */
 
 #ifdef MINIZ_NO_INFLATE_APIS
@@ -161,7 +169,8 @@
 #endif
 
 #if defined(__TINYC__) && (defined(__linux) || defined(__linux__))
-/* TODO: Work around "error: include file 'sys\utime.h' when compiling with tcc on Linux */
+/* TODO: Work around "error: include file 'sys\utime.h' when compiling with tcc
+ * on Linux */
 #define MINIZ_NO_TIME
 #endif
 
@@ -211,9 +220,9 @@
 #if !defined(MINIZ_USE_UNALIGNED_LOADS_AND_STORES)
 #if MINIZ_X86_OR_X64_CPU
 /* Set MINIZ_USE_UNALIGNED_LOADS_AND_STORES to 1 on CPU's that permit efficient integer loads and stores from unaligned addresses. */
-/* zdevito: ASAN doesn't like unligned loads and stores, and -O3 optimizes the unoptimized code pattern away anyawy */
+/* zdevito: ASAN doesn't like unligned loads and stores, and -O3 optimizes the unoptimized code pattern away anyway */
 #define MINIZ_USE_UNALIGNED_LOADS_AND_STORES 0
-/* zdevito: ASAN doesn't like unligned loads and stores, and -O3 optimizes the unoptimized code pattern away anyawy */
+/* zdevito: ASAN doesn't like unligned loads and stores, and -O3 optimizes the unoptimized code pattern away anyway */
 /*#define MINIZ_UNALIGNED_USE_MEMCPY*/
 #else
 #define MINIZ_USE_UNALIGNED_LOADS_AND_STORES 0
@@ -681,7 +690,8 @@ enum
 /*  flags: The max match finder probes (default is 128) logically OR'd against the above flags. Higher probes are slower but improve compression. */
 /* On return: */
 /*  Function returns a pointer to the compressed data, or NULL on failure. */
-/*  *pOut_len will be set to the compressed data's size, which could be larger than src_buf_len on uncompressible data. */
+/*  *pOut_len will be set to the compressed data's size, which could be larger
+ * than src_buf_len on incompressible data. */
 /*  The caller must free() the returned block when it's no longer needed. */
 MINIZ_EXPORT void *tdefl_compress_mem_to_heap(const void *pSrc_buf, size_t src_buf_len, size_t *pOut_len, int flags);
 
@@ -853,8 +863,10 @@ enum
 /*  pSrc_buf, src_buf_len: Pointer and size of the Deflate or zlib source data to decompress. */
 /* On return: */
 /*  Function returns a pointer to the decompressed data, or NULL on failure. */
-/*  *pOut_len will be set to the decompressed data's size, which could be larger than src_buf_len on uncompressible data. */
-/*  The caller must call mz_free() on the returned block when it's no longer needed. */
+/*  *pOut_len will be set to the decompressed data's size, which could be larger
+ * than src_buf_len on incompressible data. */
+/*  The caller must call mz_free() on the returned block when it's no longer
+ * needed. */
 MINIZ_EXPORT void *tinfl_decompress_mem_to_heap(const void *pSrc_buf, size_t src_buf_len, size_t *pOut_len, int flags);
 
 /* tinfl_decompress_mem_to_mem() decompresses a block in memory to another block in memory. */
@@ -973,7 +985,7 @@ struct tinfl_decompressor_tag
 #endif
 
 #endif /*#ifndef MINIZ_NO_INFLATE_APIS*/
- 
+
 #pragma once
 
 
@@ -1065,20 +1077,28 @@ typedef enum {
 } mz_zip_mode;
 
 typedef enum {
-    MZ_ZIP_FLAG_CASE_SENSITIVE = 0x0100,
-    MZ_ZIP_FLAG_IGNORE_PATH = 0x0200,
-    MZ_ZIP_FLAG_COMPRESSED_DATA = 0x0400,
-    MZ_ZIP_FLAG_DO_NOT_SORT_CENTRAL_DIRECTORY = 0x0800,
-    MZ_ZIP_FLAG_VALIDATE_LOCATE_FILE_FLAG = 0x1000, /* if enabled, mz_zip_reader_locate_file() will be called on each file as its validated to ensure the func finds the file in the central dir (intended for testing) */
-    MZ_ZIP_FLAG_VALIDATE_HEADERS_ONLY = 0x2000,     /* validate the local headers, but don't decompress the entire file and check the crc32 */
-    MZ_ZIP_FLAG_WRITE_ZIP64 = 0x4000,               /* always use the zip64 file format, instead of the original zip file format with automatic switch to zip64. Use as flags parameter with mz_zip_writer_init*_v2 */
-    MZ_ZIP_FLAG_WRITE_ALLOW_READING = 0x8000,
-    MZ_ZIP_FLAG_ASCII_FILENAME = 0x10000,
-    /*After adding a compressed file, seek back
-    to local file header and set the correct sizes*/
-    MZ_ZIP_FLAG_WRITE_HEADER_SET_SIZE = 0x20000,
-    MZ_ZIP_FLAG_DO_NOT_COMPUTE_CRC32 = 0x80000, 
-    /* don't compute the crc32 of file data that's being added. */
+  MZ_ZIP_FLAG_CASE_SENSITIVE = 0x0100,
+  MZ_ZIP_FLAG_IGNORE_PATH = 0x0200,
+  MZ_ZIP_FLAG_COMPRESSED_DATA = 0x0400,
+  MZ_ZIP_FLAG_DO_NOT_SORT_CENTRAL_DIRECTORY = 0x0800,
+  MZ_ZIP_FLAG_VALIDATE_LOCATE_FILE_FLAG =
+      0x1000, /* if enabled, mz_zip_reader_locate_file() will be called on each
+                 file as its validated to ensure the func finds the file in the
+                 central dir (intended for testing) */
+  MZ_ZIP_FLAG_VALIDATE_HEADERS_ONLY =
+      0x2000, /* validate the local headers, but don't decompress the entire
+                 file and check the crc32 */
+  MZ_ZIP_FLAG_WRITE_ZIP64 =
+      0x4000, /* always use the zip64 file format, instead of the original zip
+                 file format with automatic switch to zip64. Use as flags
+                 parameter with mz_zip_writer_init*_v2 */
+  MZ_ZIP_FLAG_WRITE_ALLOW_READING = 0x8000,
+  MZ_ZIP_FLAG_ASCII_FILENAME = 0x10000,
+  /*After adding a compressed file, seek back
+  to local file header and set the correct sizes*/
+  MZ_ZIP_FLAG_WRITE_HEADER_SET_SIZE = 0x20000,
+  MZ_ZIP_FLAG_DO_NOT_COMPUTE_CRC32 = 0x80000,
+  /* don't compute the crc32 of file data that's being added. */
 } mz_zip_flags;
 
 typedef enum {

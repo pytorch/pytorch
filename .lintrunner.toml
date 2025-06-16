@@ -1160,7 +1160,6 @@ exclude_patterns = [
     '.ci/**',
     '.circleci/**',
     '.github/**',
-    'third_party/**',
     'aten/**',
     'benchmarks/**',
     'c10/**',

@@ -4,7 +4,7 @@ queue (included in the benchmarks for comparison), Intel's TBB library (ditto),
 dlib::pipe (ditto),
 the CDSChecker tool (used for verification), the Relacy model checker (ditto),
 and Jeff Preshing's semaphore implementation (used in the blocking queue) which
-has a zlib license (embedded in lightweightsempahore.h).
+has a zlib license (embedded in lightweightsemaphore.h).
 
 ---
 
