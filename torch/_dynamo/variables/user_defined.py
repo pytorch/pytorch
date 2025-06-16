@@ -69,6 +69,7 @@ from ..utils import (
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
+    is_lru_cache_wrapped_function,
     is_namedtuple_cls,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -1247,6 +1248,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # e.g.: inspect.getattr_static({}, "fromkeys")
             func = subobj.__get__(self.value, None)
             return VariableTracker.build(tx, func, source)
+        elif is_lru_cache_wrapped_function(subobj):
+            # getattr_static returns the lru_wrapped function, and we cannot
+            # extract the underlying method from the wrapped function. To handle
+            # it, manually create a wrapped user method vt.
+            return variables.WrapperUserMethodVariable(
+                subobj, "__wrapped__", self, source=self.source
+            )
         elif inspect.getattr_static(
             type(subobj), "__get__", NO_SUCH_SUBOBJ
         ) is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(
