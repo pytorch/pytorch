@@ -30,7 +30,7 @@ Data type                  dtype                                         Legacy 
 8-bit integer (unsigned)   ``torch.uint8``                               ``torch.*.ByteTensor``
 8-bit integer (signed)     ``torch.int8``                                ``torch.*.CharTensor``
 16-bit integer (signed)    ``torch.int16`` or ``torch.short``            ``torch.*.ShortTensor``
-32-bit integer (signed)    ``torch.int32`` or ``torch.int``              ``torch.*.IntTensor``
+32-bit integer (signed)    ``torch.int32`` or ``torch.int``
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``
 Boolean                    ``torch.bool``
 ========================== ===========================================   ===========================
