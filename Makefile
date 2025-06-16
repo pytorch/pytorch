@@ -57,18 +57,28 @@ setup-env-cuda:
 setup-env-rocm:
 	$(MAKE) setup-env PYTHON="$(PYTHON)" NIGHTLY_TOOL_OPTS="$(NIGHTLY_TOOL_OPTS) --rocm"
 
-.PHONY: setup-lint
-setup-lint:
+.lintbin/.lintrunner.sha256: requirements.txt .lintrunner.toml
+	@echo "Setting up lintrunner..."
 	$(PIP) install lintrunner
 	lintrunner init
+	@echo "Generating .lintrunner.sha256..."
+	@mkdir -p .lintbin
+	@sha256sum requirements.txt .lintrunner.toml > .lintbin/.lintrunner.sha256
+
+.PHONY: setup-lint
+setup-lint: .lintbin/.lintrunner.sha256
 
 .PHONY: lint
-lint:
-	lintrunner
+lint: setup-lint
+	lintrunner --all-files
 
 .PHONY: quicklint
-quicklint:
+quicklint: setup-lint
 	lintrunner
+
+.PHONY: quickfix
+quickfix: setup-lint
+	lintrunner --apply-patches
 
 # Deprecated target aliases
 .PHONY: setup_env setup_env_cuda setup_env_rocm setup_lint
