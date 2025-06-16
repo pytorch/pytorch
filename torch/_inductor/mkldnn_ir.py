@@ -173,7 +173,7 @@ def _prepare_convolution_fusion_create(
     # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
     dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
     if (
-        dynamic_shapes or x.layout.device.type == "xpu"
+        dynamic_shapes or get_device_type(x) == "xpu"
     ) and is_contiguous_storage_and_layout(x):
         output_stride = FlexibleLayout.contiguous_strides(output_size)
     else:
