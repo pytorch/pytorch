@@ -54,7 +54,7 @@ class TestDocstringLinter(LinterTestCase):
             grandfather_file = f"{td}/grandfather.json"
             grandfather = f"--grandfather={grandfather_file}"
 
-            # Find some faiures
+            # Find some failures
             run("before.txt", grandfather)
 
             # Rewrite grandfather file
