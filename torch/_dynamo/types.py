@@ -114,6 +114,13 @@ class DynamoGuardHook(Protocol):
     ) -> None: ...
 
 
+class DynamoGuardCompleteHook(Protocol):
+    def __call__(
+        self,
+        cache_hit: bool,
+    ) -> bool: ...
+
+
 class ProfilerStartHook(Protocol):
     def __call__(
         self,

@@ -1280,7 +1280,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertExpectedInline(cnt.op_count, """4""")
         else:
             self.assertExpectedInline(cnt.frame_count, """2""")
-            self.assertExpectedInline(cnt.op_count, """20""")
+            self.assertExpectedInline(cnt.op_count, """19""")
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -5741,6 +5741,17 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.view_as_real(out_ref).sum().backward()
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
+
+    def test_add_complex_conj(self):
+        def f(x):
+            return x + x.conj()
+
+        x = torch.randn(4, dtype=torch.complex64, requires_grad=True)
+        out = torch.compile(f)(x)
+        expected_complex = (2 * x.real).to(dtype=out.dtype)
+
+        self.assertTrue(out.dtype == torch.complex64)
+        self.assertEqual(out, expected_complex)
 
     # https://github.com/pytorch/pytorch/issues/132200
     def test_partitioner_cse_respects_mutation_boundaries(self):

@@ -18,7 +18,7 @@ add_loop_inductor_gpu,compile_time_instruction_count,25900000000,0.015
 
 
 
-basic_modules_ListOfLinears_eager,compile_time_instruction_count,952700000,0.015
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,942514329,0.015
 
 
 
@@ -38,7 +38,7 @@ update_hint_regression,compile_time_instruction_count,1661000000,0.02
 
 
 
-sum_floordiv_regression,compile_time_instruction_count,998600000,0.015
+sum_floordiv_regression,compile_time_instruction_count,984411080,0.015
 
 
 

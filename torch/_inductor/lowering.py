@@ -2660,6 +2660,8 @@ make_fallback(aten._histogramdd_from_bin_cts.default)
 make_fallback(aten.addbmm)
 make_fallback(aten._addmm_activation, warn=False)
 
+make_fallback(aten._grouped_mm, require_dense)
+
 # Need templated kernel. Probably impossible to write efficiently
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)

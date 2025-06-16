@@ -64,9 +64,9 @@ class DefaultFuseHandler(FuseHandler):
         fuser_method_mapping: dict[Pattern, Union[torch.nn.Sequential, Callable]],
         is_qat: bool,
     ) -> Node:
-        assert (
-            root_node.op == "call_module"
-        ), "Expecting module node to be a call_module Node"
+        assert root_node.op == "call_module", (
+            "Expecting module node to be a call_module Node"
+        )
         root_module = named_modules[str(root_node.target)]
 
         def get_modules(pattern):
