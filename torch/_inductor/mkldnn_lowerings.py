@@ -342,7 +342,7 @@ def register_onednn_fusion_ops():
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
             choices: list[ChoiceCaller] = []
-            if (config.max_autotune or config.max_autotune_gemm)():
+            if (config.max_autotune or config.max_autotune_gemm):
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w = mm_args(x, transposed_w, layout=layout)
                 if use_cpp_gemm_template(layout, x, transposed_w):
@@ -405,7 +405,7 @@ def register_onednn_fusion_ops():
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
             choices: list[ChoiceCaller] = []
-            if (config.max_autotune or config.max_autotune_gemm)():
+            if (config.max_autotune or config.max_autotune_gemm):
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w, y = mm_args(
                     x, transposed_w, y, layout=layout
@@ -735,7 +735,7 @@ def register_onednn_fusion_ops():
             bias_dtype = None if bias is None else bias.get_dtype()
             choices: list[ChoiceCaller] = []
 
-            if (config.max_autotune or config.max_autotune_gemm)():
+            if (config.max_autotune or config.max_autotune_gemm):
                 *_, layout, x, packed_weight = mm_args(
                     x, packed_weight, layout=layout, out_dtype=output_dtype
                 )
@@ -1053,7 +1053,7 @@ def register_onednn_fusion_ops():
             bias_dtype = bias.get_dtype() if bias is not None else None
             choices: list[ChoiceCaller] = []
             if (
-                (config.max_autotune or config.max_autotune_gemm)() and binary_attr == "add"
+                (config.max_autotune or config.max_autotune_gemm) and binary_attr == "add"
             ):  # <TODO> Support inplace sum fusion
                 *_, layout, x, packed_weight, x2 = mm_args(
                     x, packed_weight, x2, layout=layout, out_dtype=output_dtype
@@ -1303,7 +1303,7 @@ def register_onednn_fusion_ops():
                 layout=None,
             ):
                 choices: list[ChoiceCaller] = []
-                if (config.max_autotune or config.max_autotune_gemm)():
+                if (config.max_autotune or config.max_autotune_gemm):
                     transposed_w = permute(orig_w, [1, 0])
                     *_, layout, x, transposed_w = mm_args(
                         x, transposed_w, layout=layout
