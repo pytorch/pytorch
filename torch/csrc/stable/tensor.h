@@ -69,6 +69,18 @@ class Tensor {
     return data_ptr;
   }
 
+  int64_t dim() const {
+    int64_t dim;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim(ath_.get(), &dim));
+    return dim;
+  }
+
+  int64_t numel() const {
+    int64_t numel;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_numel(ath_.get(), &numel));
+    return numel;
+  }
+
   int64_t stride(int64_t dim) const {
     int64_t stride;
     AOTI_TORCH_ERROR_CODE_CHECK(
