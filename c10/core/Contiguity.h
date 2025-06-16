@@ -12,7 +12,7 @@ namespace c10 {
 
 template <typename T>
 bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
-  if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(numel, 0))) {
+  if (sym_eq(numel, 0)) {
     return true;
   }
 
@@ -20,11 +20,11 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   // NB: make sure we do signed arithmetic
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
     const auto& size_d = sizes[d];
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(size_d, 1))) {
+    if (sym_eq(size_d, 1)) {
       continue;
     }
 
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(strides[d], expected_stride))) {
+    if (sym_ne(strides[d], expected_stride)) {
       return false;
     }
     expected_stride *= size_d;
@@ -36,7 +36,10 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
 // its not or if we can't determine if it is contiguous due to unbacked symbols
 // (it could be either in that case based on the actual runtime data).
 template <typename T>
-bool _definitely_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
+bool _compute_contiguous_or_false(
+    ArrayRef<T> sizes,
+    ArrayRef<T> strides,
+    T numel) {
   if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
     return true;
   }

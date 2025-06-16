@@ -827,12 +827,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_default(memory_format);
   }
 
-  bool definetly_contiguous(
+  // see Note [contiguous_or_false]
+  bool contiguous_or_false(
       at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
       if (C10_UNLIKELY(
               matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-        // shall we call definetly_contiguous here .
+        // shall we call contiguous_or_false here .
         return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
             this, memory_format);
       }

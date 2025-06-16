@@ -124,7 +124,7 @@ class TORCH_API TensorBase {
   }
 
   TensorBase contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const {
-    if (definetly_contiguous(memory_format)) {
+    if (contiguous_or_false(memory_format)) {
       return *this;
     } else {
       return __dispatch_contiguous(memory_format);
@@ -265,9 +265,17 @@ class TORCH_API TensorBase {
     return impl_->is_contiguous(memory_format);
   }
 
-
-  bool definetly_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
-    return impl_->definetly_contiguous(memory_format);
+  // Note [contiguous_or_false]
+  // Like is_contiguous, but more dynamic shape-friendly. Returns uncertain
+  // false instead of throwing data-dependent errors for tensors with unbacked
+  // sizes or strides that can be either contiguous or not. The property is
+  // cached, meaning that if some runtime assertions are added that can be used
+  // to infer that the tensor is always contiguous after caching, this can still
+  // return false. This should be used in places where the contiguity check is
+  // not material or when there is a general path even if less performant that
+  // can be taken (for example, clone path in reshape or contiguous call).
+  bool contiguous_or_false(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+    return impl_->contiguous_or_false(memory_format);
   }
 
   bool is_non_overlapping_and_dense() const {

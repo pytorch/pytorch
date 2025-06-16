@@ -72,18 +72,23 @@ normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
       std::move(base), std::move(size_nodes), std::move(stride_nodes));
 }
 
-// Special treatment because of numel
+// Special treatment due to numel
 SymBool SymbolicShapeMeta::compute_contiguous() const {
   if (!strides_valid_) {
     return false;
   }
   c10::SymIntArrayRef sizes(sizes_);
   c10::SymIntArrayRef strides(strides_);
-  // if a tensor is contiguous for sure then we stroe that property.
-  auto def_contig = _definitely_contiguous(sizes, strides, numel());
+  // In the case that sizes and strides are hinted, we could store the result,
+  // but we do not want to do that, in order not to specialize when
+  // backed_size_oblivious is on.
+  auto def_contig = _compute_contiguous_or_false(sizes, strides, numel());
   if (def_contig) {
     return true;
   }
+
+  // Otherwise, store the symbolic expression for contiguity, allowing users to
+  // guard on it and handle data-dependent errors
   return _compute_contiguous_sym(sizes, strides, numel());
 }
 
