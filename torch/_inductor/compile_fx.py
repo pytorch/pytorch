@@ -76,6 +76,7 @@ from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
     fresh_inductor_cache,
+    get_all_devices,
     InputType,
     is_gpu,
     should_assume_input_aligned,
@@ -238,12 +239,39 @@ def record_original_output_strides(gm: GraphModule) -> None:
     output_node.meta["original_output_strides"] = output_strides
 
 
+def _recursive_record_original_output_strides(gm: GraphModule) -> None:
+    # invoke_subgraph HOP requires output strides to be respected
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        subgraph = getattr(gm, node.args[0].target)
+        _recursive_record_original_output_strides(subgraph)
+
+    record_original_output_strides(gm)
+
+
+def _recursive_record_user_visible_output_idxs(gm: GraphModule) -> None:
+    # invoke_subgraph HOP requires output strides to be respected
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        subgraph = getattr(gm, node.args[0].target)
+
+        for node in subgraph.graph.find_nodes(op="output"):
+            node.meta["user_visible_output_idxs"] = [
+                idx
+                for idx in range(len(node.args[0]))
+                if isinstance(node.args[0][idx], torch.fx.Node)
+            ]
+        _recursive_record_user_visible_output_idxs(subgraph)
+
+
 @functools.lru_cache(None)
 def _step_logger() -> Callable[..., None]:
     return dynamo_logging.get_step_logger(log)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _warn_tf32_disabled() -> None:
     if (
         torch.cuda.is_available()
@@ -999,19 +1027,37 @@ def _compile_fx_inner(
     if log.isEnabledFor(logging.INFO):
         mm_table_data = []
         for key, value in counters["aten_mm_info"].items():
-            m, n, k = key.split("_")[-3:]
-            name = "_".join(key.split("_")[:-3])
-            mm_table_data.append([name, m, n, k, value])
+            parts = key.split("_")
+            if len(parts) < 3:
+                # Unexpected format, show as-is
+                mm_table_data.append([key, "-", "?", "?", "?", value])
+                continue
+
+            # Determine if this is a batched operation by checking the operation name
+            name = "_".join(parts[:-4]) if len(parts) >= 4 else "_".join(parts[:-3])
+            is_batched = name.endswith(("bmm", "baddbmm"))
+
+            if is_batched and len(parts) >= 4:
+                # Batched operation: last 4 parts are batch, m, n, k
+                batch, m, n, k = parts[-4:]
+                name = "_".join(parts[:-4])
+                mm_table_data.append([name, batch, m, n, k, value])
+            else:
+                # Non-batched operation: last 3 parts are m, n, k
+                m, n, k = parts[-3:]
+                name = "_".join(parts[:-3])
+                mm_table_data.append([name, "-", m, n, k, value])
+
         log.info("Overview info of inductor aten mms: ")
         log.info(
-            "{:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(  # noqa: G001
-                "Name", "M", "N", "K", "Count"
+            "{:<30} | {:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(  # noqa: G001
+                "Name", "B", "M", "N", "K", "Count"
             )
         )
-        log.info("-" * 100)
+        log.info("-" * 130)
         for row in mm_table_data:
-            log.info("{:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(*row))  # noqa: G001
-            log.info("-" * 100)
+            log.info("{:<30} | {:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(*row))  # noqa: G001
+            log.info("-" * 130)
 
     # Not strictly necessary, but good to clean up straggling futures
     # that are unused to reclaim memory.
@@ -1167,7 +1213,7 @@ class _InProcessFxCompile(FxCompile):
                 with torch.no_grad():
                     fake_mode = fake_tensor_prop(gm, example_inputs)
 
-            record_original_output_strides(gm)
+            _recursive_record_original_output_strides(gm)
 
             # pattern matcher passes might not preserve striding information
             # on node.meta["val"]. if in the future we rely on these being
@@ -1604,8 +1650,8 @@ def cudagraphify(
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
-                compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
-        return compiled_fn(new_inputs)
+                compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)  # type: ignore[arg-type]
+        return compiled_fn(new_inputs)  # type: ignore[arg-type]
 
     return run
 
@@ -1909,22 +1955,6 @@ def get_cpp_wrapper_config() -> dict[str, object]:
     }
 
 
-def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
-    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
-    input_devices: OrderedSet[torch.device] = OrderedSet(
-        node.meta["val"].device
-        for node in placeholder_nodes
-        if isinstance(node.meta.get("val"), torch.Tensor)
-    )
-
-    out_devices: OrderedSet[torch.device] = OrderedSet(
-        arg.meta["val"].device
-        for arg in output_node(gm).args[0]  # type: ignore[union-attr]
-        if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
-    )
-    return input_devices | out_devices
-
-
 def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
     """
     Returns a cuda device context manager if there is a single device in the graph
@@ -2210,6 +2240,11 @@ def compile_fx(
                     ]
                 else:
                     model_outputs_node.meta["user_visible_output_idxs"] = []
+
+                # We also mark the invoke_subgraph outputs as user_visible to
+                # force the outputs of invoke_subgraph subgraph to follow the
+                # original strides
+                _recursive_record_user_visible_output_idxs(gm)
 
                 return inner_compile(
                     gm,

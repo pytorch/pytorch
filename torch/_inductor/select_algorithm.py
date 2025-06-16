@@ -1124,7 +1124,7 @@ class TritonTemplateKernel(TritonKernel):
         ]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _jinja2_env():
     try:
         import jinja2
@@ -1726,7 +1726,7 @@ class ExternKernelChoice:
     def call_name(self):
         return f"extern_kernels.{self.name}"
 
-    @functools.lru_cache(None)  # noqa: B019
+    @functools.cache  # noqa: B019
     def hash_key(self):
         fn = self.to_callable()
         parts = [
@@ -1933,7 +1933,7 @@ class ExternKernelCaller(ChoiceCaller):
         return f"extern_{self.choice.name}"
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_mm_log_filename() -> Optional[str]:
     mm_file_name = os.environ.get("TORCHINDUCTOR_MM_LOGGING_FILE", None)
     if not mm_file_name:
@@ -2052,7 +2052,7 @@ class NoValidChoicesError(RuntimeError):
     pass
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_num_workers() -> int:
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
@@ -2194,7 +2194,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
-        @functools.lru_cache(None)
+        @functools.cache
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
@@ -2240,6 +2240,7 @@ class AlgorithmSelectorCache(PersistentCache):
             log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
 
             candidates = self.prescreen_choices(choices)
+            prescreening_elapse: Optional[float] = None
             if candidates:
                 prescreening_start_ts = time.time()
                 timings = self.lookup(
@@ -2277,7 +2278,12 @@ class AlgorithmSelectorCache(PersistentCache):
                 or config.trace.log_autotuning_results
             ):
                 self.log_results(
-                    name, input_nodes, timings, autotune_elapse, precompile_elapse
+                    name,
+                    input_nodes,
+                    timings,
+                    autotune_elapse,
+                    precompile_elapse,
+                    prescreening_elapse,
                 )
 
             def profiler_bench_function():
@@ -2506,7 +2512,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 future.add_done_callback(on_complete)
                 futures[future] = c
 
-        @functools.lru_cache(None)
+        @functools.cache
         @restore_stdout_stderr()
         def wait_on_futures():
             log.debug("Waiting on futures")
@@ -2798,6 +2804,31 @@ class AlgorithmSelectorCache(PersistentCache):
         sorted_candidates = sorted(
             candidate_timings.keys(), key=lambda choice: candidate_timings[choice]
         )
+
+        # Print prescreening timings
+        if (
+            candidate_timings
+            and PRINT_AUTOTUNE
+            and config.autotune_num_choices_displayed != 0
+        ):
+            n = config.autotune_num_choices_displayed
+            top_k = sorted_candidates[:n]
+            best = top_k[0]
+            best_time = candidate_timings[best]
+
+            lines = ["PRESCREENING CANDIDATE TIMINGS"]
+            for choice in top_k:
+                result = candidate_timings[choice]
+                if result:
+                    lines.append(
+                        f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {choice.description}"
+                    )
+                else:
+                    lines.append(
+                        f"  {choice.name} {result:.4f} ms <DIVIDED BY ZERO ERROR>"
+                    )
+
+            log.info("\n".join(lines))
         num_to_keep = max(int(math.sqrt(len(choices)) / 4), 8)
 
         # prune choices based on prescreening timings
@@ -2827,6 +2858,7 @@ class AlgorithmSelectorCache(PersistentCache):
         timings: dict[ChoiceCaller, float],
         elapse: float,
         precompile_elapse: float,
+        prescreening_elapse: Optional[float] = None,
     ):
         V.debug.log_autotuning_results(
             name, input_nodes, timings, elapse, precompile_elapse
@@ -2915,9 +2947,16 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
+        prescreening_msg = (
+            f" and {prescreening_elapse:.4f} seconds prescreening"
+            if prescreening_elapse is not None
+            else ""
+        )
         sys.stderr.write(
             f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f}"
-            f" seconds precompiling for {len(timings)} choices\n"
+            f" seconds precompiling for {len(timings)} choices"
+            + prescreening_msg
+            + "\n"
         )
 
     @staticmethod
