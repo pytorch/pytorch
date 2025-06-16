@@ -914,6 +914,8 @@ if torch.backends.mps.is_available():
             # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
             # Running `msort` with stable `sort` passes.
             "msort": [torch.float16],
+            # TopK fails with duplicate indices
+            "topk": [torch.float16],
         }
 
         ON_MPS_XFAILLIST = {
