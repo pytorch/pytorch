@@ -994,25 +994,6 @@ def output_node(gm: torch.fx.GraphModule) -> Node:
     return last_node
 
 
-def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
-    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
-    input_devices: OrderedSet[torch.device] = OrderedSet(
-        node.meta["val"].device
-        for node in placeholder_nodes
-        if isinstance(node.meta.get("val"), torch.Tensor)
-    )
-
-    out_arg = output_node(gm).args[0]  # type: ignore[union-attr]
-    out_args = out_arg if isinstance(out_arg, tuple) else (out_arg,)
-    out_devices: OrderedSet[torch.device] = OrderedSet(
-        arg.meta["val"].device
-        for arg in out_args
-        if isinstance(arg, torch.fx.Node)
-        and isinstance(arg.meta.get("val"), torch.Tensor)
-    )
-    return input_devices | out_devices
-
-
 _registered_caches: list[Any] = []
 
 
@@ -1757,6 +1738,16 @@ def use_ck_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
 
     return (
         _use_autotune_backend("CK")
+        and use_ck_template(layout)
+        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+    )
+
+
+def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
+    from .virtualized import V
+
+    return (
+        _use_autotune_backend("CKTILE")
         and use_ck_template(layout)
         and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
     )
@@ -3131,6 +3122,17 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
     )
 
 
+def dtype_from_size(size: int) -> torch.dtype:
+    from .virtualized import V
+
+    if V.graph.sizevars.statically_known_lt(
+        size, 2**31
+    ) and V.graph.sizevars.statically_known_geq(size, -(2**31)):
+        return torch.int32
+    else:
+        return torch.int64
+
+
 SUPPORTED_MKLDNN_DEVICES = ("cpu", "xpu")
 
 
@@ -3140,7 +3142,8 @@ def is_mkldnn_bf16_supported(device_type: str) -> bool:
     """
     if device_type == "cpu":
         return torch.ops.mkldnn._is_mkldnn_bf16_supported()
-    elif device_type == "xpu":
+    elif "xpu" in device_type:
+        # match "xpu", "xpu:0", "xpu:1", etc.
         return True
     return False
 
@@ -3151,6 +3154,7 @@ def is_mkldnn_fp16_supported(device_type: str) -> bool:
     """
     if device_type == "cpu":
         return torch.ops.mkldnn._is_mkldnn_fp16_supported()
-    elif device_type == "xpu":
+    elif "xpu" in device_type:
+        # match "xpu", "xpu:0", "xpu:1", etc.
         return True
     return False

@@ -307,7 +307,7 @@ def get_linux_pkg_version(run_lambda, pkg_name):
     cmd: str = str(grep_version[pkg_mgr]["command"])
     cmd = cmd.format(pkg_name)
     ret = run_and_read_all(run_lambda, cmd)
-    if ret == "":
+    if ret is None or ret == "":
         return "N/A"
     lst = re.sub(" +", " ", ret).split(" ")
     if len(lst) <= field_index:
@@ -323,6 +323,7 @@ def get_intel_gpu_driver_version(run_lambda):
             "dpkg": {
                 "intel-opencl-icd",
                 "libze1",
+                "level-zero",
             },
             "dnf": {
                 "intel-opencl",
@@ -338,7 +339,9 @@ def get_intel_gpu_driver_version(run_lambda):
             },
         }.get(_detect_linux_pkg_manager(), {})
         for pkg in pkgs:
-            lst.append(f"* {pkg}:\t{get_linux_pkg_version(run_lambda, pkg)}")
+            ver = get_linux_pkg_version(run_lambda, pkg)
+            if ver != "N/A":
+                lst.append(f"* {pkg}:\t{ver}")
     if platform in ["win32", "cygwin"]:
         txt = run_and_read_all(
             run_lambda,

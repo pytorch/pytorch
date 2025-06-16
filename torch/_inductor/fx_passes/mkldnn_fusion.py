@@ -139,11 +139,6 @@ if torch._C._has_mkldnn:
             )
 
     class XpuMkldnnDeviceOp(MkldnnDeviceOpBase):
-        def get_linear_transpose_weight(self, weight_node):
-            transpose_weight_node = weight_node
-            assert transpose_weight_node.target == aten.permute.default
-            return transpose_weight_node
-
         def pack_conv_weight(
             self,
             graph,
@@ -156,27 +151,6 @@ if torch._C._has_mkldnn:
                 "'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
             )
             return weight
-
-        def pack_linear_weight(
-            self, graph, is_lp_weight, transpose_weight_node, batch_size
-        ):
-            return transpose_weight_node
-
-        def pack_linear(
-            self, graph, is_lp_weight, batch_size, input, packed_weight_node, bias
-        ):
-            packed_linear_inputs: tuple[Any, ...] = (
-                input,
-                packed_weight_node,
-                bias,
-                "none",
-                [],
-                "",
-            )
-            packed_linear_op = mkldnn._linear_pointwise.default
-            return graph.create_node(
-                "call_function", packed_linear_op, packed_linear_inputs
-            )
 
     def _get_mkldnn_device_op(device_type: str) -> MkldnnDeviceOpBase:
         """
@@ -1264,7 +1238,7 @@ if torch._C._has_mkldnn:
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
                 meta_value is None
-                or meta_value.device.type not in SUPPORTED_MKLDNN_DEVICES
+                or meta_value.device.type != "cpu"
                 or meta_value.dim() != 2
             ):
                 return False
@@ -1272,7 +1246,7 @@ if torch._C._has_mkldnn:
             bias_meta_value = linear_node.args[0].meta.get("val")
             if (
                 bias_meta_value is None
-                or meta_value.device.type not in SUPPORTED_MKLDNN_DEVICES
+                or meta_value.device.type != "cpu"
                 or bias_meta_value.dim() != 1
                 or bias_meta_value.size(0) != weight_meta_value.size(1)
             ):
