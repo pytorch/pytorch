@@ -1508,7 +1508,7 @@ namespace {
       }
     }
 
-    const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+    const auto out_dtype_ = out_dtype.value_or(kBFloat16);
     TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
 
     // For TMA transfers, strides of output tensor have to be either

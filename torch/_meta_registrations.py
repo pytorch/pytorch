@@ -7324,9 +7324,10 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
 
     alignment = 16 // out_dtype.itemsize
     size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
-    out_stride = (size_padded, 1)
     if mat1_is_2d == mat2_is_2d:
-        out_stride = (out_size[1] * size_padded,) + out_stride
+        out_stride = [out_size[1] * size_padded, size_padded, 1]
+    else:
+        out_stride = [size_padded, 1]
     out = torch.empty_strided(out_size, out_stride, dtype=out_dtype, device=mat1.device)
     return out
 
