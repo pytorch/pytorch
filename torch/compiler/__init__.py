@@ -28,6 +28,10 @@ __all__ = [
     "is_exporting",
     "save_cache_artifacts",
     "load_cache_artifacts",
+    "skip_guard_on_inbuilt_nn_modules_unsafe",
+    "skip_guard_on_all_nn_modules_unsafe",
+    "keep_tensor_guards_unsafe",
+    "skip_guard_on_globals_unsafe",
 ]
 
 
@@ -284,6 +288,15 @@ def set_stance(
             - "eager_on_recompile": Run code eagerly when a recompile is necessary.
               If there is cached compiled code valid for the input, it will still be used.
             - "fail_on_recompile": Raise an error when recompiling a function.
+            - "eager_then_compile": Run the first invocation in eager mode, then compile on
+              subsequent calls. This is beneficial for dynamic shapes as it allows inferring
+              dynamism from the first two invocations instead of wasting a static compile on
+              the first invocation.
+            - "aot_eager_then_compile": Run the first invocation with AOT eager to get memory
+              benefits from activation checkpointing, then compile on subsequent calls. Like
+              eager_then_compile, this improves handling of dynamic shapes by avoiding an
+              initial static compile.
+
 
         skip_guard_eval_unsafe: A flag to run only differentiating guards.
             CAUTION - This flag is unsafe and should only be used if your setup
@@ -464,4 +477,92 @@ def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
     """
     from ._cache import CacheArtifactManager, CacheInfo
 
-    return CacheArtifactManager.deserialize(serialized_artifacts)
+    artifacts = CacheArtifactManager.deserialize(serialized_artifacts)
+    if artifacts is not None:
+        return CacheArtifactManager.populate_caches(artifacts)
+    return None
+
+
+def skip_guard_on_inbuilt_nn_modules_unsafe(guard_entries):
+    """
+    A common function to skip guards on the inbuilt nn modules like
+    torch.nn.Linear. This is unsafe to use by default. But for majority of
+    torch.compile users, the model code does not modify the inbuilt nn module
+    attributes. They can benefit from reduction in guard latency overhead using
+    this API.
+
+    To use this API, use guard_filter_fn argument while calling torch.compile
+
+    >> opt_mod = torch.compile(
+    >>     mod,
+    >>     options={"guard_filter_fn": torch.compiler.skip_guard_on_all_nn_modules_unsafe},
+    >> )
+    """
+    return [
+        not entry.orig_guard.source.is_unspecialized_builtin_nn_module()
+        for entry in guard_entries
+    ]
+
+
+def skip_guard_on_all_nn_modules_unsafe(guard_entries):
+    """
+    A common function to skip guards on all nn modules, both user defined as
+    well inbuilt nn modules (like torch.nn.Linear). This is unsafe to use by
+    default. But for majority of torch.compile users, the model code does not
+    modify the nn module attributes. They can benefit from reduction in guard
+    latency overhead using this API.
+
+    To use this API, use guard_filter_fn argument while calling torch.compile
+
+    >> opt_mod = torch.compile(
+    >>     mod,
+    >>     options={"guard_filter_fn": torch.compiler.skip_guard_on_all_nn_modules_unsafe},
+    >> )
+    """
+
+    return [
+        not entry.orig_guard.source.is_unspecialized_nn_module()
+        for entry in guard_entries
+    ]
+
+
+def keep_tensor_guards_unsafe(guard_entries, keep_parameters=False):
+    """
+    A common function to keep tensor guards on all tensors. This is unsafe to
+    use by default. But if you don't expect any changes in the model code, you
+    can just keep the tensor guards.
+
+
+    >> opt_mod = torch.compile(
+    >>     mod,
+    >>     options={"guard_filter_fn": torch.compiler.keep_tensor_guards},
+    >> )
+    """
+
+    keep_flags = []
+    for entry in guard_entries:
+        if entry.guard_type == "TENSOR_MATCH":
+            if not isinstance(entry.value, torch.nn.Parameter):
+                keep_flags.append(True)
+            elif keep_parameters:
+                keep_flags.append(True)
+            else:
+                keep_flags.append(False)
+        else:
+            keep_flags.append(False)
+    return keep_flags
+
+
+def skip_guard_on_globals_unsafe(guard_entries):
+    """
+    A common function to skip guards on all globals. This is unsafe to use by
+    default. But if you don't expect any changes in the globals, you can just
+    keep the tensor guards.
+
+    >> opt_mod = torch.compile(
+    >>     mod,
+    >>     options={"guard_filter_fn": torch.compiler.skip_guard_on_globals},
+    >> )
+    """
+
+    return [not entry.is_global for entry in guard_entries]

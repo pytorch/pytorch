@@ -3,7 +3,9 @@ import copy
 import dataclasses
 import functools
 import inspect
+import itertools
 import logging
+import operator
 import threading
 from collections import defaultdict
 from collections.abc import Sequence
@@ -63,19 +65,72 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("torch._dynamo")
 
-# TMADescriptorMetadata maps kernel parameter names to the metadata that allows
-# reconstructing TMA descriptors from the underlying tensors (passed as kernel
-# arguments in the fx graph, instead of the TMA descriptors). Namely: a tuple
-# conisting of list of dims, list of block dims, and element size. E.g., for this
-# call in host-side Triton TMA API ``create_2d_tma_descriptor(ptr, 50, 60, 32, 15, 4)``,
-# the metadata will look like ``([50, 60], [32, 15], 4)``. All ints can be SymInts.
-TMADescriptorMetadata = dict[
-    str,  # kernel parameter name
+# e.g. for a host-side Triton TMA API call ``create_2d_tma_descriptor(ptr, 50, 60, 32, 15, 4)``,
+# the metadata will look like ``("experimental", ([50, 60], [32, 15], 4))``
+TMAExperimentalMetadata = tuple[
+    str,  # type of TMA (should be "experimental")
     tuple[
         list[IntLikeType],  # dims
         list[IntLikeType],  # block_dims
         IntLikeType,  # element_size
     ],
+]
+
+# e.g. for host-side Triton TMA API call ``TensorDescriptor.from_tensor(ptr, [32, 64])``
+# the metadata will look like ``("stable", ([32, 64],))``
+TMAStableMetadata = tuple[
+    str,  # type of TMA ("experimental" or "stable")
+    tuple[list[IntLikeType],],  # block_shape
+]
+
+
+def create_tma_experimental_metadata(
+    dims: list[IntLikeType],
+    block_dims: list[IntLikeType],
+    element_size: IntLikeType,
+) -> TMAExperimentalMetadata:
+    return ("experimental", (dims, block_dims, element_size))
+
+
+def maybe_unpack_tma_experimental_metadata(
+    tma_meta: Union[TMAExperimentalMetadata, TMAStableMetadata]
+) -> Optional[tuple[list[IntLikeType], list[IntLikeType], IntLikeType]]:
+    if not tma_meta or len(tma_meta) != 2:
+        return None
+    if tma_meta[0] == "experimental":
+        return tma_meta[1]  # type: ignore[return-value]
+    return None
+
+
+def create_tma_stable_metadata(
+    block_shape: list[IntLikeType],
+) -> TMAStableMetadata:
+    return ("stable", (block_shape,))
+
+
+def maybe_unpack_tma_stable_metadata(
+    tma_meta: Union[TMAExperimentalMetadata, TMAStableMetadata]
+) -> Optional[tuple[list[IntLikeType]]]:
+    if not tma_meta or len(tma_meta) != 2:
+        return None
+    if tma_meta[0] == "stable":
+        return tma_meta[1]  # type: ignore[return-value]
+    return None
+
+
+# TMADescriptorMetadata maps kernel parameter names to the metadata that allows
+# reconstructing TMA descriptors from the underlying tensors (passed as kernel
+# arguments in the fx graph, instead of the TMA descriptors).
+#
+# Since there are two TMA APIs (the old "experimental" API and the new "stable" API),
+# each entry in the dict is a tuple that starts with a string, either "experimental"
+# or "stable". The second entry in the tuple is another tuple, with data that depends
+# on the API type (see TMAExperimentalMetadata and TMAStableMetadata above).
+#
+# These are stored as raw tuples (instead of classes) for ease of serialization.
+TMADescriptorMetadata = dict[
+    str,  # kernel parameter name
+    Union[TMAExperimentalMetadata, TMAStableMetadata],
 ]
 
 
@@ -172,7 +227,9 @@ class Op:
 
 
 def generate_ttir(
-    kernel: "TritonKernelType", kwargs: dict[str, Any]
+    kernel: "TritonKernelType",
+    kwargs: dict[str, Any],
+    tma_descriptor_metadata: TMADescriptorMetadata,
 ) -> tuple["TritonIRModule", list[str]]:
     """
     Uses Triton's internal code generation to create TTIR
@@ -189,6 +246,7 @@ def generate_ttir(
         triton_version_uses_attrs_dict,
         TritonAttrsDescriptorVersion,
     )
+    from torch.utils._triton import has_triton_tensor_descriptor_host_tma
 
     triton_version = get_triton_attrs_descriptor_version()
 
@@ -230,15 +288,69 @@ def generate_ttir(
         a = kwargs[name]
         if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool, sympy.Expr)):
             ordered_args[name] = 2
+        elif (
+            stable_meta := maybe_unpack_tma_stable_metadata(
+                tma_descriptor_metadata.get(name, None)
+            )
+        ) is not None:
+            from triton.tools.tensor_descriptor import TensorDescriptor
+
+            block_shape = stable_meta[0]
+            with torch._C._DisableTorchDispatch():
+                # need 16-byte aligned strides
+                elements_per_dim = max(1, 16 // a.dtype.itemsize)
+                base_tensor = torch.empty(
+                    [elements_per_dim] * len(block_shape), dtype=a.dtype
+                )
+            ordered_args[name] = TensorDescriptor.from_tensor(base_tensor, block_shape)
         elif isinstance(a, (FakeTensor, torch._inductor.ir.TensorBox)):
             with torch._C._DisableTorchDispatch():
                 ordered_args[name] = torch.empty(2, dtype=a.dtype)
         else:
             ordered_args[name] = a
 
-    ordered_tensor_names = [
-        name for name, arg in ordered_args.items() if isinstance(arg, Tensor)
-    ]
+    def is_stable_tensor_descriptor_arg(arg: Any) -> bool:
+        if has_triton_tensor_descriptor_host_tma():
+            from triton.tools.tensor_descriptor import TensorDescriptor
+
+            if isinstance(arg, TensorDescriptor):
+                return True
+        return False
+
+    def is_tensor_like_arg(arg: Any) -> bool:
+        if isinstance(arg, Tensor) or is_stable_tensor_descriptor_arg(arg):
+            return True
+        return False
+
+    # Note: one would expect that each input to the triton kernel maps to
+    # one input parameter in the TTIR. This is _not_ true for TMA descriptors:
+    # one TMA descriptor gets converted into:
+    #   * one TMA descriptor input
+    #   * N strides, for a rank-N tensor
+    #   * N sizes, for a rank-N tensor
+    # To account for this, we inject some fake arg names as placeholders for
+    # the stride and size parameters.
+    def get_tensor_names(name: str, arg: Any) -> list[str]:
+        if isinstance(arg, Tensor):
+            return [name]
+        if is_stable_tensor_descriptor_arg(arg):
+            stable_meta = maybe_unpack_tma_stable_metadata(
+                tma_descriptor_metadata[name]
+            )
+            assert stable_meta is not None
+            block_shape = stable_meta[0]
+            tensor_rank = len(block_shape)
+            names = [name]
+            names.extend(name + f" STRIDE PLACEHOLDER {i}" for i in range(tensor_rank))
+            names.extend(name + f" SIZE PLACEHOLDER {i}" for i in range(tensor_rank))
+            return names
+        return []
+
+    ordered_tensor_names = list(
+        itertools.chain.from_iterable(
+            get_tensor_names(name, arg) for name, arg in ordered_args.items()
+        )
+    )
 
     def _get_specialization(args):  # type: ignore[no-untyped-def]
         # Support multiple triton versions.
@@ -304,7 +416,7 @@ def generate_ttir(
 
     specialization = _get_specialization(ordered_args.values())
     constants = {
-        name: arg for name, arg in ordered_args.items() if not isinstance(arg, Tensor)
+        name: arg for name, arg in ordered_args.items() if not is_tensor_like_arg(arg)
     }
 
     if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
@@ -620,7 +732,7 @@ def ttir_to_functions(
 
 class MemoizeWithCycleCheck:
     fn: Callable[..., Any]
-    cache: dict[tuple[str, int], Any]
+    cache: dict[tuple[Any], Any]
 
     def __init__(self, fn: Callable[..., Any]) -> None:
         self.fn = fn
@@ -630,18 +742,73 @@ class MemoizeWithCycleCheck:
         self,
         functions: dict[str, dict[Intermediate, list[Op]]],
         fn_name: str,
-        num_args: int,
+        *args: Any,
     ) -> list[bool]:
-        key = (fn_name, num_args)
+        key: tuple[Any, ...] = (fn_name, *args)
         if key not in self.cache:
             self.cache[key] = None
-            self.cache[key] = self.fn(functions, fn_name, num_args)
+            self.cache[key] = self.fn(functions, fn_name, *args)
         if self.cache[key] is None:
             raise RuntimeError("Recursion is not supported")
         return self.cache[key]
 
     def reset(self) -> None:
         self.cache = {}
+
+
+@MemoizeWithCycleCheck
+def get_tma_stores(
+    functions: dict[str, dict[Intermediate, list[Op]]], fn_name: str
+) -> set[Union[Intermediate, Param]]:
+    """
+    Identifies all intermediates and parameters that are written to by a
+    `tt.experimental_descriptor_store`. It tracks only the specific values
+    written to via experimental_descriptor_store and the input values to
+    `tt.reinterpret_tensor_descriptor` used to construct the direct inputs
+    to tt.experimental_descriptor_store - not any recursive values
+    used to construct those values.
+
+    For example: for
+      tt.reinterpret_tensor_descriptor(Intermediate(idx=0), ...)
+      Intermediate(idx=1) = tt.experimental_descriptor_store(Intermediate(idx=0), ...)
+    this function will return [Intermediate(idx=0), Intermediate(idx=1)],
+
+    However
+      Intermediate(idx=4) = arith.addptr(Intermediate(idx=2), Intermediate(idx=3))
+      Intermediate(idx=5) = tt.experimental_descriptor_store(Intermediate(idx=4), ...)
+      tt.experimental_descriptor_store(Intermediate(idx=5), ...)
+    this function will mark only idx=4 and idx=5 (but not idx=2 or idx=3)
+
+    If an intermediate/parameter is passed into a function and is written to
+    via experimental_descriptor_store within that function, the argument to the
+    function will also be marked.
+    """
+
+    result: set[Union[Intermediate, Param]] = set()
+
+    ops = functions[fn_name]
+    for op_list in ops.values():
+        for op in op_list:
+            if op.name == "tt.call":
+                assert op.fn_call_name in functions
+                tma_stores = get_tma_stores(functions, op.fn_call_name)
+                for i, inp in enumerate(op.args):
+                    if Param(idx=i) in tma_stores:
+                        result.add(inp)
+            elif op.name == "tt.experimental_descriptor_store":
+                assert len(op.args) >= 1
+                result.add(op.args[0])
+
+    for val in list(result):
+        if val in ops:
+            if not isinstance(val, Intermediate):
+                continue
+            for op in ops[val]:
+                if op.name == "tt.reinterpret_tensor_descriptor":
+                    assert len(op.args) >= 1
+                    result.add(op.args[0])
+
+    return result
 
 
 @MemoizeWithCycleCheck
@@ -663,6 +830,8 @@ def analyze_kernel_mutations(
         "tt.atomic_cas": [0],
         "tt.atomic_rmw": [0],
         "tt.experimental_descriptor_store": [0],
+        "tt.experimental_tensormap_create": [0],
+        "tt.descriptor_store": [0],
     }
     # Ops that we want to bail out on
     UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
@@ -670,6 +839,8 @@ def analyze_kernel_mutations(
     stack: list[Union[Param, Intermediate]] = []
     visited = set()
     ops = functions[fn_name]
+    tma_stores = get_tma_stores(functions, fn_name)
+
     for op_list in ops.values():
         for op in op_list:
             # If we encounter an operation with effects that cannot be reliably analyzed
@@ -683,6 +854,19 @@ def analyze_kernel_mutations(
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
                 )
+
+            if op.name == "tt.experimental_tensormap_create":
+                # Note: this is how we implement experimental_descriptor_store mutation analysis.
+                # for on-device TMA.
+                # experimental_tensormap_store(a, b, ...) stores b to the location specified
+                # by descriptor in the memory of a.
+                # To track this, we first find all the intermediates/params to which we store via
+                # experimental_tensormap_store (get_tma_stores, called above). Then, during this
+                # analysis we wait to find the corresponding experimental_tensormap_create (if it
+                # exists), at which point we will mark the global_ptr as mutated (as done below).
+                assert len(op.args) >= 2
+                if op.args[0] in tma_stores:
+                    stack.append(op.args[1])
 
             if op.name == "tt.call":
                 assert op.fn_call_name in functions
@@ -716,7 +900,9 @@ def analyze_kernel_mutations(
 
 
 def identify_mutated_tensors(
-    kernel: "TritonKernelType", kwargs: dict[str, Any]
+    kernel: "TritonKernelType",
+    kwargs: dict[str, Any],
+    tma_descriptor_metadata: TMADescriptorMetadata,
 ) -> list[str]:
     """
     Given a triton kernel and the arguments for this kernel, this function
@@ -728,7 +914,9 @@ def identify_mutated_tensors(
     ttir_module = None
     functions = None
     try:
-        ttir_module, ordered_tensor_names = generate_ttir(kernel, kwargs)
+        ttir_module, ordered_tensor_names = generate_ttir(
+            kernel, kwargs, tma_descriptor_metadata
+        )
 
         # extract functions from TTIR using MLIR bindings exposed by Triton code
         functions = ttir_to_functions(ttir_module)
@@ -741,6 +929,7 @@ def identify_mutated_tensors(
         # The cache for analyze kernel mutations is mainly used for cycle
         # detection, so each top level invocation needs a clean cache
         analyze_kernel_mutations.reset()
+        get_tma_stores.reset()
         mutations = analyze_kernel_mutations(
             functions, kernel_name, len(ordered_tensor_names)
         )
@@ -845,11 +1034,6 @@ def triton_kernel_wrapper_mutation_dense(
         grid_fn = namespace[fn_name]
 
     if tma_descriptor_metadata:
-        from triton.tools.experimental_descriptor import (  # noqa: F401
-            create_1d_tma_descriptor,
-            create_2d_tma_descriptor,
-        )
-
         # as we need to launch the kernel here, we "unwrap" the
         # tma_descriptor_metadata, create the TMA descriptors
         # from it, and replace the tensors in the kwargs by the
@@ -857,16 +1041,32 @@ def triton_kernel_wrapper_mutation_dense(
         kwargs = kwargs.copy()
         for k, v in tma_descriptor_metadata.items():
             tensor = kwargs[k]
-            dims, block_dims, element_size = v
-            create_tma_descriptor = (
-                create_1d_tma_descriptor if len(dims) == 1 else create_2d_tma_descriptor
-            )
-            kwargs[k] = create_tma_descriptor(
-                tensor.data_ptr(),
-                *dims,
-                *block_dims,
-                element_size,
-            )
+            if (exp_meta := maybe_unpack_tma_experimental_metadata(v)) is not None:
+                from triton.tools.experimental_descriptor import (  # noqa: F401
+                    create_1d_tma_descriptor,
+                    create_2d_tma_descriptor,
+                )
+
+                dims, block_dims, element_size = exp_meta
+                create_tma_descriptor = (
+                    create_1d_tma_descriptor
+                    if len(dims) == 1
+                    else create_2d_tma_descriptor
+                )
+                kwargs[k] = create_tma_descriptor(
+                    tensor.data_ptr(),
+                    *dims,
+                    *block_dims,
+                    element_size,
+                )
+            else:
+                stable_meta = maybe_unpack_tma_stable_metadata(v)
+                assert stable_meta is not None
+                from triton.tools.tensor_descriptor import TensorDescriptor
+
+                block_shape = stable_meta[0]
+                kwargs[k] = TensorDescriptor.from_tensor(tensor, block_shape)
+
     # move as many positional arguments from dicts to args as we
     # can to circumvent the bug with the kwargs and pre_/post_hook:
     # https://github.com/triton-lang/triton/issues/5082
@@ -962,11 +1162,16 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
 
 
 def get_mutated_tensors(
-    kernel_idx: int, constant_args_idx: int, kwargs: dict[str, Any]
+    kernel_idx: int,
+    constant_args_idx: int,
+    kwargs: dict[str, Any],
+    tma_descriptor_metadata: TMADescriptorMetadata,
 ) -> list[str]:
     kernel = kernel_side_table.get_kernel(kernel_idx)
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
-    return identify_mutated_tensors(kernel, {**kwargs, **constant_args})
+    return identify_mutated_tensors(
+        kernel, {**kwargs, **constant_args}, tma_descriptor_metadata
+    )
 
 
 @triton_kernel_wrapper_mutation.py_functionalize_impl
@@ -984,7 +1189,7 @@ def triton_kernel_wrapper_mutation_functionalize(
     # they are no longer equal. Fix this by graph breaking on this condition
     # earlier in dynamo.
     tensors_to_clone = get_mutated_tensors(
-        kernel_idx, constant_args_idx, unwrapped_kwargs
+        kernel_idx, constant_args_idx, unwrapped_kwargs, tma_descriptor_metadata
     )
     with ctx.redispatch_to_next():
         unwrapped_outputs = triton_kernel_wrapper_functional(
@@ -1154,7 +1359,7 @@ class TritonHOPifier:
     to the HOP (which can then be traced).
 
     Because Dynamo has its own calling conventions for e.g. invoking a user-defined function
-    TritonHOPifier is an abstract class that can be overriden by its subclasses.
+    TritonHOPifier is an abstract class that can be overridden by its subclasses.
     """
 
     def raise_unsupported(self, msg: str) -> Never:
@@ -1246,7 +1451,7 @@ class TritonHOPifier:
                 ]
                 configs = [
                     config[0]
-                    for config in sorted(est_timing, key=lambda x: x[1])[:top_k]
+                    for config in sorted(est_timing, key=operator.itemgetter(1))[:top_k]
                 ]
         return configs
 
