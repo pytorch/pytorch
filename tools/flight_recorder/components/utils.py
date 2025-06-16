@@ -312,7 +312,7 @@ def match_coalesced_groups_with_non_p2p(
                 {first_rank},
             )
 
-            # Iterate through all the ranks and check if there is a mis-match for the current entry.
+            # Iterate through all the ranks and check if there is a mismatch for the current entry.
             check_current_entry_match(
                 all_coalesced_entries,
                 _pg_guids,

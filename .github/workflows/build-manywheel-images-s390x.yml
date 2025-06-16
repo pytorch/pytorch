@@ -53,7 +53,7 @@ jobs:
           docker tag "${CREATED_FULL_DOCKER_IMAGE_NAME}" "${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}"
           docker tag "${CREATED_FULL_DOCKER_IMAGE_NAME}" "${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}"
 
-          # Prety sure Github will mask tokens and I'm not sure if it will even be
+          # Pretty sure Github will mask tokens and I'm not sure if it will even be
           # printed due to pipe, but just in case
           set +x
           if [[ "${WITH_PUSH:-false}" == "true" ]]; then

@@ -158,7 +158,7 @@ jobs:
         uses: ./.github/actions/download-td-artifacts
 
       - name: Check for keep-going label and re-enabled test issues
-        # This uses the filter-test-configs action because it conviniently
+        # This uses the filter-test-configs action because it conveniently
         # checks for labels and re-enabled test issues.  It does not actually do
         # any filtering.  All filtering is done in the build step.
         id: keep-going

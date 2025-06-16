@@ -82,7 +82,7 @@ To access this path from the C++ side, we save it to a file for later retrieval 
 ## Inference in Python
 
 There are multiple ways to deploy the compiled artifact for inference, and one of that is using Python.
-We have provided a convinient utility API in Python {func}`torch._inductor.aoti_load_package` for loading
+We have provided a convenient utility API in Python {func}`torch._inductor.aoti_load_package` for loading
 and running the artifact, as shown in the following example:
 
 ```python
