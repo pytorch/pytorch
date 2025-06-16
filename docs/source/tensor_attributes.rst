@@ -32,7 +32,7 @@ Data type                  dtype                                         Legacy 
 16-bit integer (signed)    ``torch.int16`` or ``torch.short``            ``torch.*.ShortTensor``
 32-bit integer (signed)    ``torch.int32`` or ``torch.int``              ``torch.*.IntTensor``
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``             ``torch.*.LongTensor``
-Boolean                    ``torch.bool``                                ``torch.*.BoolTensor``
+Boolean                    ``torch.bool``
 ========================== ===========================================   ===========================
 
 .. [1] Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
