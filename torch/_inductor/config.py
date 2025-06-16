@@ -434,6 +434,7 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
+
 # As above, specify candidate backends for conv autotune.
 # NB: in some cases for 1x1 convs we emit as matmul,
 # which will use the backends of `max_autotune_gemm_backends`
@@ -1008,16 +1009,11 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_FALLBACK_SCATTER_REDUCE_SUM", "1") == "1"
     )
 
-    # Use funsafe-math-optimizations when compiling
-    enable_unsafe_math_opt_flag = (
-        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_UNSAFE_MATH_OPT_FLAG", "0") == "1"
-    )
-
     # Use ffp-contract when compiling
     # Options: "off" (default), "on", "fast"
     # Per https://godbolt.org/z/bf4bvfc9r , clang/gcc has different behavior for "fast"
     enable_floating_point_contract_flag = os.environ.get(
-        "TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "off"
+        "TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "fast"
     )
 
     # Disable the tiling select heuristic
@@ -1275,9 +1271,9 @@ class aot_inductor:
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
-    # to use which cpp compiler optimization level, default to O2.
-    compile_wrapper_opt_level = os.environ.get(
-        "AOT_INDUCTOR_COMPILE_WRAPPER_OPT_LEVEL", "O2"
+    # to use which cpp compiler optimization level, default to max optimization.
+    compile_wrapper_opt_level: str = os.environ.get(
+        "AOT_INDUCTOR_COMPILE_WRAPPER_OPT_LEVEL", "O3"
     )
 
     # option for debug printing/saving for intermediate tensor values for aot inductor
@@ -1487,6 +1483,13 @@ class cuda:
         os.environ.get("TORCHINDUCTOR_CUTLASS_PRESCREENING", "1") == "1"
     )
 
+    # Specify which operations should use CUTLASS backend
+    # Comma-separated list like "mm,addmm,bmm", "all" for all operations, and "" for none.
+    # Acceptable operations: mm, int_mm, addmm, sparse_semi_structured_mm, bmm, scaled_mm
+    cutlass_enabled_ops: str = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_ENABLED_OPS", "all"
+    )
+
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
@@ -1647,7 +1650,7 @@ class trace:
     compile_profile = False
 
     # Upload the .tar.gz file
-    # Needs to be overriden based on specific environment needs
+    # Needs to be overridden based on specific environment needs
     upload_tar: Optional[Callable[[str], None]] = None
 
     log_autotuning_results: bool = False

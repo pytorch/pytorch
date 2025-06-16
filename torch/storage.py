@@ -1523,7 +1523,7 @@ class _LegacyStorageMeta(type):
 
 class _LegacyStorage(TypedStorage, metaclass=_LegacyStorageMeta):
     @classmethod
-    def _new_shared(cls, size):
+    def _new_shared(cls, size):  # type: ignore[override]
         """Create a new storage in shared memory with the same data type."""
         untyped_storage = torch.UntypedStorage._new_shared(size * cls()._element_size())
         return cls(wrap_storage=untyped_storage)

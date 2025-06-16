@@ -52,6 +52,10 @@ from torch import SymInt, Tensor
 from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
+from torch._inductor.codegen.common import (
+    custom_backend_passes,
+    init_backend_registration,
+)
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
@@ -73,7 +77,11 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
-from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
+from torch._inductor.custom_graph_pass import (
+    CustomGraphModulePass,
+    CustomGraphPass,
+    CustomGraphPassType,
+)
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
@@ -161,7 +169,7 @@ def use_re_build() -> bool:
     """
     Use for CUTLASS compilation only right now.
     """
-    if config.is_fbcode() and not cuda_env.nvcc_exist():
+    if config.is_fbcode() and not cuda_env.nvcc_exist(_cuda_compiler()):
         from triton.fb.re_build_helper import should_build_locally
 
         return not should_build_locally()
@@ -902,6 +910,12 @@ class FxGraphHashDetails:
             config._fuse_ddp_communication_passes
         )
 
+        # Register indcutor backends and custom passes and get their UUIDs.
+        init_backend_registration()
+        self.custom_backend_passes = tuple(
+            map(self._get_custom_pass_detail, custom_backend_passes.values())
+        )
+
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
     # - _pre_fusion_custom_pass
@@ -927,11 +941,11 @@ class FxGraphHashDetails:
         raise AssertionError(f"unknown config type: {str(type(custom_pass))}")
 
     def _get_custom_pass_detail(
-        self, custom_pass: CustomGraphPassType
+        self, custom_pass: Union[CustomGraphPassType, CustomGraphModulePass]
     ) -> Optional[Any]:
         if not custom_pass:
             return None
-        assert isinstance(custom_pass, CustomGraphPass)
+        assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
         return custom_pass.uuid()
 
 
@@ -1967,10 +1981,8 @@ class AotCodeCompiler:
                 "use_relative_path": use_relative_path,
                 "vec_isa": picked_vec_isa,
             }
-            # If we're packaging via CMake, we build the whole code at max optimization.
             wrapper_build_options = CppTorchDeviceOptions(
                 compile_only=True,
-                min_optimize=not config.aot_inductor.package_cpp_only,
                 **compile_command,
             )
             kernel_build_options = CppTorchDeviceOptions(
@@ -1986,7 +1998,6 @@ class AotCodeCompiler:
                 wrapper_build_options.precompiled_header = _precompile_header(
                     header_file,
                     cpp_command,
-                    min_optimize=not config.aot_inductor.package_cpp_only,
                     **compile_command,
                 )
                 if cpp_prefix := _get_cpp_prefix_header(device_type):
@@ -2431,13 +2442,10 @@ class CppCodeCache:
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
-        # Note the distinction between the two booleans.  We do minimal optimization if
-        # the optimized_code argument is present at all, since that's how the user of
-        # this function opts in, but we do compilation and linking in one step if the
-        # optimized_code argument is empty (as a micro-optimization).
+        # Do compilation and linking in one step if the optimized_code argument is empty
+        # (as a micro-optimization).
         main_build_option = CppTorchDeviceOptions(
             compile_only=bool(optimized_code),
-            min_optimize=optimized_code is not None,
             **compile_command,
         )
         optimized_build_option = CppTorchDeviceOptions(
@@ -2469,7 +2477,6 @@ class CppCodeCache:
                     main_build_option.precompiled_header = _precompile_header(
                         header,
                         main_cmd_line,
-                        min_optimize=optimized_code is not None,
                         **compile_command,
                     )
 
