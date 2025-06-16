@@ -9,7 +9,6 @@ from typing import Callable
 
 import onnx
 
-import onnx_test_common
 import parameterized
 import pytorch_test_common
 import torchvision
@@ -23,7 +22,7 @@ from pytorch_test_common import (
 import torch
 import torch.onnx
 import torch.utils.cpp_extension
-from torch.onnx import OperatorExportTypes, TrainingMode, utils
+from torch.onnx import _constants, OperatorExportTypes, TrainingMode, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
