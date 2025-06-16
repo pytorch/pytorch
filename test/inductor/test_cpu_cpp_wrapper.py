@@ -220,9 +220,9 @@ if RUN_CPU:
         ],
         BaseTest("test_polar"),
         BaseTest(
-            "test_linear_binary_cpu",
+            "test_linear_binary",
             "",
-            test_mkldnn_pattern_matcher.TestPatternMatcherGenericCPU(),
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
             torch.backends.mkldnn.is_available()
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
