@@ -15,7 +15,7 @@ Features described in this documentation are classified by release status:
 **Stable (API-Stable):**
 These features will be maintained long-term and there should generally be no major performance limitations or gaps in documentation. We also expect to maintain backwards compatibility (although breaking changes can happen and notice will be given one release ahead of time).
 
-*Unstable (API-Unstable):*
+**Unstable (API-Unstable):**
 Encompasses all features that are under active development where APIs may change based on user feedback, requisite performance improvements or because coverage across operators is not yet complete.
 The APIs and performance characteristics of these features may change.
 
