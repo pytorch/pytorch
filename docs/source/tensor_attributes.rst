@@ -53,7 +53,7 @@ dtype                                      description
 ``torch.bool``                             Boolean
 =========================================  ===============================
 
-.. [shell] a shell dtype a specialized dtype with limited op and backend support.  
+.. [shell] a shell dtype a specialized dtype with limited op and backend support.
   Specifically, ops that support tensor creation (``torch.empty``, ``torch.fill``, ``torch.zeros``)
   and operations which do not peek inside the data elements (``torch.cat``, ``torch.view``, ``torch.reshape``)
   are supported.  Ops that peek inside the data elements such as casting,
@@ -61,9 +61,9 @@ dtype                                      description
   case basis, depending on maturity and presence of hardware accelerated kernels
   and established use cases.
 
-.. [1] The "fn", "fnu" and "fnuz" dtype suffixes mean: 
-  "f" - finite value encodings only, no infinity; 
-  "n" - nan value encodings differ from the IEEE spec; 
+.. [1] The "fn", "fnu" and "fnuz" dtype suffixes mean:
+  "f" - finite value encodings only, no infinity;
+  "n" - nan value encodings differ from the IEEE spec;
   "uz" - "unsigned zero" only, i.e. no negative zero encoding
 
 .. [2]
@@ -73,8 +73,8 @@ dtype                                      description
   we recommend using their signed variants instead.  See
   https://github.com/pytorch/pytorch/issues/58734 for more details.
 
-**Note**: legacy constructors such as ``torch.*.FloatTensor``, ``torch.*.DoubleTensor``, ``torch.*.HalfTensor``, 
-``torch.*.BFloat16Tensor``, ``torch.*.ByteTensor``, ``torch.*.CharTensor``, ``torch.*.ShortTensor``, ``torch.*.IntTensor``, 
+**Note**: legacy constructors such as ``torch.*.FloatTensor``, ``torch.*.DoubleTensor``, ``torch.*.HalfTensor``,
+``torch.*.BFloat16Tensor``, ``torch.*.ByteTensor``, ``torch.*.CharTensor``, ``torch.*.ShortTensor``, ``torch.*.IntTensor``,
 ``torch.*.LongTensor``, ``torch.*.BoolTensor`` only remain for backwards compatibility and should no longer be used.
 
 To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
