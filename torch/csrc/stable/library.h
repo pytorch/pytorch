@@ -31,7 +31,7 @@ namespace detail {
 // Specialization for general copyable types (catch-all) => StableIValue
 template <typename T>
 struct FromImpl {
-  static StableIValue call(T val) {
+  static StableIValue call(const T& val) {
     static_assert(
         sizeof(T) <= sizeof(StableIValue),
         "StableLibrary stack does not support parameter types larger than 64 bits.");
@@ -44,7 +44,7 @@ struct FromImpl {
     // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=107361) We have a
     // static_assert above that T is trivially copyable, which should be
     // enough.
-    std::memcpy(&result, reinterpret_cast<void*>(&val), sizeof(val));
+    std::memcpy(&result, reinterpret_cast<const void*>(&val), sizeof(val));
     return result;
   }
 };
@@ -52,7 +52,7 @@ struct FromImpl {
 // Specialization for std::nullopt_t => StableIValue
 template <>
 struct FromImpl<std::nullopt_t> {
-  static StableIValue call(std::nullopt_t val) {
+  static StableIValue call(const std::nullopt_t& val) {
     return from(nullptr);
   }
 };
@@ -88,7 +88,7 @@ struct FromImpl<std::nullopt_t> {
 // std::optional<T> or a std::nullopt.
 template <typename T>
 struct FromImpl<std::optional<T>> {
-  static StableIValue call(std::optional<T> val) {
+  static StableIValue call(const std::optional<T>& val) {
     if (!val.has_value()) {
       return from(std::nullopt);
     }
@@ -101,7 +101,7 @@ struct FromImpl<std::optional<T>> {
 // Returns a new owning reference of the underlying Tensor.
 template <>
 struct FromImpl<torch::stable::Tensor> {
-  static StableIValue call(torch::stable::Tensor val) {
+  static StableIValue call(const torch::stable::Tensor& val) {
     AtenTensorHandle new_ath;
     aoti_torch_new_tensor_handle(val.get(), &new_ath);
     return from(new_ath);
