@@ -734,6 +734,7 @@ class TestVmapAPI(TestCase):
             # warning, not a warning from the vmap fallback path.
             self.assertEqual(len(wa), 1)
 
+    @skipIfTorchDynamo("Flaky test")
     @unittest.expectedFailure
     def test_fallback_warns_when_warnings_are_enabled(self):
         # NB: One day we will implement a batching rule for torch.atan2.

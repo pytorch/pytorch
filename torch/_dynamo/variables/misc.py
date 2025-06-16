@@ -1518,10 +1518,16 @@ class StringFormatVariable(VariableTracker):
             x.is_python_constant()
             for x in itertools.chain(sym_args, sym_kwargs.values())
         ):
+
+            def decode(a: str | bytes) -> str:
+                return a.decode("utf-8") if isinstance(a, bytes) else a
+
             return variables.ConstantVariable.create(
                 format_string.format(
-                    *[v.as_python_constant() for v in sym_args],
-                    **{k: v.as_python_constant() for k, v in sym_kwargs.items()},
+                    *[decode(v.as_python_constant()) for v in sym_args],
+                    **{
+                        k: decode(v.as_python_constant()) for k, v in sym_kwargs.items()
+                    },
                 )
             )
         return cls(format_string, list(sym_args), dict(sym_kwargs))
