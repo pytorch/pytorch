@@ -164,7 +164,7 @@ def _prepare_convolution_fusion_create(
 
     x = cls.require_stride_order(x, req_stride_order)
 
-    # We won't do weight prepack for Conv if dynamic_shapes.
+    # We won't do weight prepack for Conv if dynamic_shapes or if is xpu.
     # In static shape cases, since weight is prepacked, we'll always force output to be channels last in the Conv kernel.
     # In dynamic shape cases, for input with channels = 1, like tensor of size (s0, 1, 28, 28) and stride (784, 784, 28, 1),
     # x = cls.require_stride_order(x, req_stride_order) where req_stride_order is in the channels last order
@@ -172,7 +172,9 @@ def _prepare_convolution_fusion_create(
     # this tensor is considered as channels first and the output will be in contiguous format.
     # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
     dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
-    if dynamic_shapes and is_contiguous_storage_and_layout(x):
+    if (
+        dynamic_shapes or x.layout.device.type == "xpu"
+    ) and is_contiguous_storage_and_layout(x):
         output_stride = FlexibleLayout.contiguous_strides(output_size)
     else:
         output_stride = make_channels_last_strides_for(output_size)
@@ -699,7 +701,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
-    def get_mutation_names(self) -> Sequence[str]:
+    def get_mutation_names(self):
         return [self.inputs[self.idx_for_inplace_sum].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -1060,7 +1062,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
-    def get_mutation_names(self) -> Sequence[str]:
+    def get_mutation_names(self):
         binary_post_op = self.constant_args[-5]
         if binary_post_op == "sum":
             return [self.inputs[self.idx_for_inplace_sum].get_name()]
