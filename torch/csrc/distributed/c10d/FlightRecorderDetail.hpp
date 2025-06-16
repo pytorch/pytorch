@@ -160,17 +160,19 @@ void FlightRecorder<EventType>::update_state(Entry& r) {
 template <typename EventType>
 std::vector<typename FlightRecorder<EventType>::Entry> FlightRecorder<
     EventType>::dump_entries() {
-  std::lock_guard<std::mutex> guard(mutex_);
   std::vector<Entry> result;
-  result.reserve(entries_.size());
-  result.insert(
-      result.end(),
-      entries_.begin() + static_cast<std::ptrdiff_t>(next_),
-      entries_.end());
-  result.insert(
-      result.end(),
-      entries_.begin(),
-      entries_.begin() + static_cast<std::ptrdiff_t>(next_));
+  {
+    std::lock_guard<std::mutex> guard(mutex_);
+    result.reserve(entries_.size());
+    result.insert(
+        result.end(),
+        entries_.begin() + static_cast<std::ptrdiff_t>(next_),
+        entries_.end());
+    result.insert(
+        result.end(),
+        entries_.begin(),
+        entries_.begin() + static_cast<std::ptrdiff_t>(next_));
+  }
   // query any remaining events
   for (auto& r : result) {
     update_state(r);
