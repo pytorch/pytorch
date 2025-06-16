@@ -1296,7 +1296,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
     def _run(cls, *args, **kwargs):
         cls.nccl_log_dir = tempfile.TemporaryDirectory()
         os.environ["NCCL_DEBUG"] = "INFO"
-        os.environ["NCCL_DEBUG_SUBSYS"] = "REG"
+        os.environ["NCCL_DEBUG_SUBSYS"] = "INIT,ENV,REG"
         os.environ["NCCL_DEBUG_FILE"] = cls.nccl_log_dir.name + "/nccl_log"
         super()._run(*args, **kwargs)
 
