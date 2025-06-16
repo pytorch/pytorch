@@ -119,7 +119,7 @@ def register_binary_folding_pattern(pattern, extra_check=_return_true):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def addmm_patterns_init():
     """
     addmm related patterns.
