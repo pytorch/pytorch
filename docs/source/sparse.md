@@ -1158,32 +1158,32 @@ scalar (float or 0-D PyTorch tensor), ``*`` is element-wise
 multiplication, and ``@`` is matrix multiplication.
 
 ```{csv-table}
-   :header: "PyTorch operation", "Sparse grad?", "Layout signature"
-   :widths: 20, 5, 60
-   :delim: ;
+:header: "PyTorch operation", "Sparse grad?", "Layout signature"
+:widths: 20, 5, 60
+:delim: ;
 
-   {func}`torch.mv`;no; ``M[sparse_coo] @ V[strided] -> V[strided]``
-   {func}`torch.mv`;no; ``M[sparse_csr] @ V[strided] -> V[strided]``
-   {func}`torch.matmul`; no; ``M[sparse_coo] @ M[strided] -> M[strided]``
-   {func}`torch.matmul`; no; ``M[sparse_csr] @ M[strided] -> M[strided]``
-   {func}`torch.matmul`; no; ``M[SparseSemiStructured] @ M[strided] -> M[strided]``
-   {func}`torch.matmul`; no; ``M[strided] @ M[SparseSemiStructured] -> M[strided]``
-   {func}`torch.mm`; no; ``M[sparse_coo] @ M[strided] -> M[strided]``
-   {func}`torch.mm`; no; ``M[SparseSemiStructured] @ M[strided] -> M[strided]``
-   {func}`torch.mm`; no; ``M[strided] @ M[SparseSemiStructured] -> M[strided]``
-   {func}`torch.sparse.mm`; yes; ``M[sparse_coo] @ M[strided] -> M[strided]``
-   {func}`torch.smm`; no; ``M[sparse_coo] @ M[strided] -> M[sparse_coo]``
-   {func}`torch.hspmm`; no; ``M[sparse_coo] @ M[strided] -> M[hybrid sparse_coo]``
-   {func}`torch.bmm`; no; ``T[sparse_coo] @ T[strided] -> T[strided]``
-   {func}`torch.addmm`; no; ``f * M[strided] + f * (M[sparse_coo] @ M[strided]) -> M[strided]``
-   {func}`torch.addmm`; no; ``f * M[strided] + f * (M[SparseSemiStructured] @ M[strided]) -> M[strided]``
-   {func}`torch.addmm`; no; ``f * M[strided] + f * (M[strided] @ M[SparseSemiStructured]) -> M[strided]``
-   {func}`torch.sparse.addmm`; yes; ``f * M[strided] + f * (M[sparse_coo] @ M[strided]) -> M[strided]``
-   {func}`torch.sparse.spsolve`; no; ``SOLVE(M[sparse_csr], V[strided]) -> V[strided]``
-   {func}`torch.sspaddmm`; no; ``f * M[sparse_coo] + f * (M[sparse_coo] @ M[strided]) -> M[sparse_coo]``
-   {func}`torch.lobpcg`; no; ``GENEIG(M[sparse_coo]) -> M[strided], M[strided]``
-   {func}`torch.pca_lowrank`; yes; ``PCA(M[sparse_coo]) -> M[strided], M[strided], M[strided]``
-   {func}`torch.svd_lowrank`; yes; ``SVD(M[sparse_coo]) -> M[strided], M[strided], M[strided]``
+{func}`torch.mv`;no; ``M[sparse_coo] @ V[strided] -> V[strided]``
+{func}`torch.mv`;no; ``M[sparse_csr] @ V[strided] -> V[strided]``
+{func}`torch.matmul`; no; ``M[sparse_coo] @ M[strided] -> M[strided]``
+{func}`torch.matmul`; no; ``M[sparse_csr] @ M[strided] -> M[strided]``
+{func}`torch.matmul`; no; ``M[SparseSemiStructured] @ M[strided] -> M[strided]``
+{func}`torch.matmul`; no; ``M[strided] @ M[SparseSemiStructured] -> M[strided]``
+{func}`torch.mm`; no; ``M[sparse_coo] @ M[strided] -> M[strided]``
+{func}`torch.mm`; no; ``M[SparseSemiStructured] @ M[strided] -> M[strided]``
+{func}`torch.mm`; no; ``M[strided] @ M[SparseSemiStructured] -> M[strided]``
+{func}`torch.sparse.mm`; yes; ``M[sparse_coo] @ M[strided] -> M[strided]``
+{func}`torch.smm`; no; ``M[sparse_coo] @ M[strided] -> M[sparse_coo]``
+{func}`torch.hspmm`; no; ``M[sparse_coo] @ M[strided] -> M[hybrid sparse_coo]``
+{func}`torch.bmm`; no; ``T[sparse_coo] @ T[strided] -> T[strided]``
+{func}`torch.addmm`; no; ``f * M[strided] + f * (M[sparse_coo] @ M[strided]) -> M[strided]``
+{func}`torch.addmm`; no; ``f * M[strided] + f * (M[SparseSemiStructured] @ M[strided]) -> M[strided]``
+{func}`torch.addmm`; no; ``f * M[strided] + f * (M[strided] @ M[SparseSemiStructured]) -> M[strided]``
+{func}`torch.sparse.addmm`; yes; ``f * M[strided] + f * (M[sparse_coo] @ M[strided]) -> M[strided]``
+{func}`torch.sparse.spsolve`; no; ``SOLVE(M[sparse_csr], V[strided]) -> V[strided]``
+{func}`torch.sspaddmm`; no; ``f * M[sparse_coo] + f * (M[sparse_coo] @ M[strided]) -> M[sparse_coo]``
+{func}`torch.lobpcg`; no; ``GENEIG(M[sparse_coo]) -> M[strided], M[strided]``
+{func}`torch.pca_lowrank`; yes; ``PCA(M[sparse_coo]) -> M[strided], M[strided], M[strided]``
+{func}`torch.svd_lowrank`; yes; ``SVD(M[sparse_coo]) -> M[strided], M[strided], M[strided]``
 ```
 
 where "Sparse grad?" column indicates if the PyTorch operation supports
