@@ -143,6 +143,7 @@ core_trainer_sources = [
     "torch/csrc/dynamo/compiled_autograd.cpp",
     "torch/csrc/jit/frontend/name_mangler.cpp",
     "torch/csrc/jit/ir/type_hashing.cpp",
+    "torch/csrc/jit/serialization/pickler_helper.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
     "torch/csrc/jit/serialization/type_name_uniquer.cpp",
 ]
@@ -627,6 +628,7 @@ libtorch_lite_eager_symbolication = [
     # Later we can split serialization and deserialization logic
     # to have better separation within build and only build relevant parts.
     "torch/csrc/jit/serialization/pickle.cpp",
+    "torch/csrc/jit/serialization/pickler_helper.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
