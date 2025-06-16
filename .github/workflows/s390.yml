@@ -2,8 +2,6 @@ name: s390
 
 on:
   push:
-    branches:
-      - main
     tags:
       - ciflow/s390/*
   workflow_dispatch:

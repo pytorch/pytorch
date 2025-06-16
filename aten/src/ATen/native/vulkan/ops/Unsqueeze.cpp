@@ -88,15 +88,13 @@ Tensor unsqueeze(const at::Tensor& self, int64_t dim) {
     }
 
     // Create the params buffer
-    struct Block block {
-      {
+    struct Block block{{
         // Dimension to unsqueeze
         static_cast<int32_t>(dim),
-            // Keep track of the channel in Image3D
-            static_cast<int32_t>(
-                std::ceil(static_cast<float>(output_size[channel_index]) / 4)),
-      }
-    };
+        // Keep track of the channel in Image3D
+        static_cast<int32_t>(
+            std::ceil(static_cast<float>(output_size[channel_index]) / 4)),
+    }};
 
     api::UniformParamsBuffer params(context, block);
 

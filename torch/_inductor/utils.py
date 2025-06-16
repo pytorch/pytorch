@@ -43,6 +43,7 @@ from typing_extensions import (
     dataclass_transform,
     ParamSpec,
     Self,
+    TypeAlias,
     TypeGuard,
 )
 from unittest import mock
@@ -54,6 +55,10 @@ from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
+
+OPTIMUS_EXCLUDE_POST_GRAD = [
+    "activation_quantization_aten_pass",
+]
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
@@ -86,7 +91,7 @@ T = TypeVar("T")
 
 # defines here before import torch._dynamo is for avoiding circular import
 # when get_gpu_type is imported from dynamo
-@functools.lru_cache(None)
+@functools.cache
 def get_gpu_type() -> str:
     avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
     assert len(avail_gpus) <= 1
@@ -283,6 +288,8 @@ def do_bench_using_profiling(
     for _ in range(n_warmup):
         fn()
 
+    torch.cuda.synchronize()
+
     with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CUDA,
@@ -333,7 +340,7 @@ def do_bench_using_profiling(
     return res
 
 
-@functools.lru_cache(None)
+@functools.cache
 def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
@@ -435,6 +442,23 @@ def convert_shape_to_inductor(
     return [sympy.sympify(i) for i in lst]
 
 
+def convert_to_symint(i: Union[int, sympy.Expr]) -> Union[int, torch.SymInt]:
+    """
+    Like convert_shape_to_symint, but operates on a single expression.
+    """
+    from .virtualized import V
+
+    return (
+        i
+        if isinstance(i, int)
+        else (
+            int(i)
+            if isinstance(i, sympy.Integer)
+            else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        )
+    )
+
+
 def convert_shape_to_symint(
     lst: Iterable[Union[int, sympy.Expr]],
 ) -> list[Union[int, torch.SymInt]]:
@@ -442,20 +466,7 @@ def convert_shape_to_symint(
     Takes a list of shapes from Inductor and converts them into symints (or just
     ints if all shapes are static).
     """
-    from .virtualized import V
-
-    return [
-        (
-            i
-            if isinstance(i, int)
-            else (
-                int(i)
-                if isinstance(i, sympy.Integer)
-                else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
-            )
-        )
-        for i in lst
-    ]
+    return [convert_to_symint(i) for i in lst]
 
 
 def is_view(op: torch._ops.OpOverload) -> bool:
@@ -985,6 +996,25 @@ def output_node(gm: torch.fx.GraphModule) -> Node:
     return last_node
 
 
+def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
+    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
+    input_devices: OrderedSet[torch.device] = OrderedSet(
+        node.meta["val"].device
+        for node in placeholder_nodes
+        if isinstance(node.meta.get("val"), torch.Tensor)
+    )
+
+    out_arg = output_node(gm).args[0]  # type: ignore[union-attr]
+    out_args = out_arg if isinstance(out_arg, tuple) else (out_arg,)
+    out_devices: OrderedSet[torch.device] = OrderedSet(
+        arg.meta["val"].device
+        for arg in out_args
+        if isinstance(arg, torch.fx.Node)
+        and isinstance(arg.meta.get("val"), torch.Tensor)
+    )
+    return input_devices | out_devices
+
+
 _registered_caches: list[Any] = []
 
 
@@ -1164,6 +1194,15 @@ class IndentedBuffer:
     def __init__(self, initial_indent: int = 0) -> None:
         self._lines: list[Union[DeferredLineBase, LineContext, str]] = []
         self._indent = initial_indent
+
+    @contextlib.contextmanager
+    def set_tabwidth(self, tabwidth: int) -> Iterator[None]:
+        prev = self.tabwidth
+        try:
+            self.tabwidth = tabwidth
+            yield
+        finally:
+            self.tabwidth = prev
 
     def getvaluewithlinemap(self) -> ValueWithLineMap:
         buf = StringIO()
@@ -1366,7 +1405,7 @@ class DelayReplaceLine(DeferredLineBase):
         return DelayReplaceLine(self.key, self.value_fn, line)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
@@ -1410,12 +1449,15 @@ def get_num_sms() -> int:
 def get_tma_workspace_arg(
     num_tma_descriptors: int,
     device: torch.device,
+    num_programs: Optional[int] = None,
 ) -> WorkspaceArg:
     """Builds and returns a WorkspaceArg for the device side TMA workspace buffer."""
     from .codegen.common import WorkspaceArg, WorkspaceZeroMode
 
+    if num_programs is None:
+        num_programs = get_num_sms()
     zero_mode = WorkspaceZeroMode.from_bool(False)
-    size = get_num_sms() * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
+    size = num_programs * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
     return WorkspaceArg(
         count=size,
         zero_mode=zero_mode,
@@ -1483,7 +1525,7 @@ def use_triton_template(
 
 
 def use_triton_tma_template(*matrices: IRNode) -> bool:
-    from torch.utils._triton import has_triton_tma_device
+    from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
     from .virtualized import V
 
@@ -1511,6 +1553,10 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
 
         inner_bytes = inner_dim * dtype.itemsize
         return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
+
+    if has_triton_stable_tma_api() and config.cpp_wrapper:
+        # TODO(dberard) remove this when we get AOTI support for new TMA APIs (#155047)
+        return False
 
     return (
         config.triton.enable_persistent_tma_matmul
@@ -1551,12 +1597,100 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
-@functools.lru_cache(None)
+def _use_cutlass_for_op(op_name: str) -> bool:
+    """Check if CUTLASS should be used for the given operation."""
+    enabled_ops = config.cuda.cutlass_enabled_ops.upper()
+    if enabled_ops == "ALL":
+        return True
+    return op_name.upper() in [x.strip() for x in enabled_ops.split(",")]
+
+
+decompose_k_threshold = 32
+
+# To limit compile time
+k_splits_limit = 5
+
+# Hand-tuned
+default_k_splits = [16, 32, 64, 128, 256]
+
+_IntLike: TypeAlias = Union[int, sympy.Expr]
+
+
+def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
+    from torch._inductor.virtualized import V
+
+    return (
+        V.graph.sizevars.statically_known_true(
+            sympy.And(
+                sympy.Ge(k, decompose_k_threshold * m),
+                sympy.Ge(k, decompose_k_threshold * n),
+            )
+        )
+        and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
+        and not V.graph.cpp_wrapper
+        and not config.disable_decompose_k
+    )
+
+
+@functools.cache
+def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
+    # If k is a sympy expression, we can't do any splitting
+    if isinstance(k, sympy.Expr) and not k.is_number:
+        return default_k_splits
+
+    if (isinstance(m, sympy.Expr) and not m.is_number) or (
+        isinstance(n, sympy.Expr) and not n.is_number
+    ):
+        max_k_split = 256
+    else:
+        max_k_split = min(k // m, k // n)
+
+    min_k_split = 2
+    # Get all divisors of k, k has to be divisible by kPart
+    divisors = sympy.divisors(k)
+
+    divisors = [
+        divisor
+        for divisor in divisors
+        if divisor <= max_k_split and divisor >= min_k_split
+    ]
+
+    pow_of_2_divisors, mul_of_32_divisors, rest_of_splits = [], [], []
+
+    for d in divisors:
+        kPart = k // d
+
+        # Smaller than 128 might not even fit in a single tile, BLOCK_K can be 128
+        if kPart < 128:
+            continue
+
+        # Power of 2 divisors are best performing, conform to hardware
+        if (kPart & kPart - 1) == 0 and kPart >= 128:
+            pow_of_2_divisors.append(d)
+        # Else check if creates a multiple of 32
+        elif kPart % 32 == 0:
+            mul_of_32_divisors.append(d)
+        # otherwise, take the smallest values
+        else:
+            rest_of_splits.append(d)
+
+    # If the # of power of 2 divisors are greater than k_splits_limit, return all
+    # This should be ok for compile time, all perfect squares between 128 and min(k / m, k / n)
+    # should never be a massive amount
+    if len(pow_of_2_divisors) >= k_splits_limit:
+        return pow_of_2_divisors
+    else:
+        best_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
+        # Otherwise, conform results to k_splits_limit
+        return best_splits[:k_splits_limit]
+
+
+@functools.cache
 def _rocm_native_device_arch_name(device: str) -> str:
     return torch.cuda.get_device_properties(device).gcnArchName
 
 
-@functools.lru_cache(None)
+@functools.cache
 def try_import_ck_lib() -> tuple[
     Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
 ]:
@@ -1637,6 +1771,16 @@ def use_ck_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
 
     return (
         _use_autotune_backend("CK")
+        and use_ck_template(layout)
+        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+    )
+
+
+def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
+    from .virtualized import V
+
+    return (
+        _use_autotune_backend("CKTILE")
         and use_ck_template(layout)
         and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
     )
@@ -1995,7 +2139,7 @@ def parallel_num_threads() -> int:
     return threads
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_backend_num_stages() -> int:
     from .runtime.triton_helpers import get_backend_options
 
@@ -2003,7 +2147,7 @@ def get_backend_num_stages() -> int:
     return options.get("num_stages", 2 if torch.version.hip else 3)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_device_tflops(dtype: torch.dtype) -> int:
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
@@ -2031,7 +2175,7 @@ def get_device_tflops(dtype: torch.dtype) -> int:
             return get_max_simd_tflops(torch.float32)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_gpu_dram_gbps() -> int:
     from triton.testing import get_dram_gbps
 
@@ -2375,7 +2519,7 @@ def is_gpu(device: Optional[str]) -> bool:
 
 
 def device_need_guard(device: str) -> bool:
-    return is_gpu(device)
+    return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
@@ -2552,13 +2696,23 @@ def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
 def align_inputs_from_check_idxs(
     model: Callable[[list[InputType]], _T],
     inputs_to_check: Sequence[int],
+    mutated_input_idxs: OrderedSet[int],
 ) -> Callable[[list[InputType]], _T]:
     if len(inputs_to_check) == 0:
         return model
 
     def run(new_inputs: list[InputType]) -> Any:
-        copy_misaligned_inputs(new_inputs, inputs_to_check)
-        return model(new_inputs)
+        old_tensors, new_tensors = copy_misaligned_inputs(
+            new_inputs, inputs_to_check, mutated_input_idxs
+        )
+        out = model(new_inputs)
+
+        # If a mutated tensor was cloned to be aligned, we need to reflect back the mutation to the
+        # original tensor.
+        if len(old_tensors):
+            torch._foreach_copy_(old_tensors, new_tensors)
+
+        return out
 
     return run
 
@@ -2576,13 +2730,31 @@ def clone_preserve_strides(x: torch.Tensor) -> torch.Tensor:
 
 
 def copy_misaligned_inputs(
-    new_inputs: list[InputType], check_inputs_idxs: Sequence[int]
-) -> None:
+    new_inputs: list[InputType],
+    check_inputs_idxs: Sequence[int],
+    return_pair_idxs: Optional[OrderedSet[int]] = None,
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    """
+    Clones misaligned tensors which we inferred were aligned. Returns a tuple of [old_tensors], [new_tensors] for every
+    cloned tensor which is in `return_pair_idxs`.
+    """
+
+    old_tensors: list[torch.Tensor] = []
+    new_tensors: list[torch.Tensor] = []
+
+    # hoist above loop because this is on the hot path
+    ret_pair_defined = return_pair_idxs is not None
     for i in check_inputs_idxs:
         _inp = new_inputs[i]
         assert isinstance(_inp, torch.Tensor)
         if _inp.data_ptr() % ALIGNMENT:
             new_inputs[i] = clone_preserve_strides(_inp)
+
+            if ret_pair_defined and i in return_pair_idxs:  # type: ignore[operator]
+                old_tensors.append(_inp)
+                new_tensors.append(new_inputs[i])  # type: ignore[arg-type]
+
+    return old_tensors, new_tensors
 
 
 def remove_unaligned_input_idxs(
@@ -2612,7 +2784,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
 
     # Allow for unhinted e as long as we can still statically prove
     # (e.g., via ValueRanges) that it is still in bounds
-    if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
+    if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
     # Otherwise, the hint MUST exist and be in range
     return has_hint(e) and size_hint(e) <= int_max
@@ -2723,7 +2895,7 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor) -> bool:
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def boolean_ops() -> tuple[str, ...]:
     return (
         "isinf",
@@ -2912,7 +3084,7 @@ class TritonAttrsDescriptorVersion(enum.Enum):
     V4_DICT = 4  # a raw dict
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
     if importlib.util.find_spec("triton") is None:
         return TritonAttrsDescriptorVersion.V0_NO_TRITON
@@ -2972,3 +3144,23 @@ def get_ld_library_path() -> str:
             path = os.pathsep.join([lib_path, path]) if path else lib_path
 
     return path
+
+
+def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
+    from torch._inductor.codegen.wrapper import SubgraphPythonWrapperCodegen
+
+    return (
+        isinstance(wrapper, SubgraphPythonWrapperCodegen)
+        and wrapper.partition_signatures is not None
+    )
+
+
+def dtype_from_size(size: int) -> torch.dtype:
+    from .virtualized import V
+
+    if V.graph.sizevars.statically_known_lt(
+        size, 2**31
+    ) and V.graph.sizevars.statically_known_geq(size, -(2**31)):
+        return torch.int32
+    else:
+        return torch.int64

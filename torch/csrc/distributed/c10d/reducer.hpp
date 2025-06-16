@@ -58,7 +58,8 @@ class TORCH_API Reducer {
       bool gradient_as_bucket_view,
       std::unordered_map<size_t, std::string> param_names,
       int64_t first_bucket_bytes_cap,
-      bool skip_all_reduce_unused_params);
+      bool skip_all_reduce_unused_params,
+      bool use_python_reducer);
 
   ~Reducer() noexcept(false);
 
@@ -562,6 +563,9 @@ class TORCH_API Reducer {
   void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
   // Retrieves parameter corresponding to the given VariableIndex.
   at::Tensor& get_param_from_index(size_t index);
+  // Python reducer keeps C++ reducer initialized. To remove this flag,
+  // we need to refactor the DDP wrapper's initilization.
+  bool use_python_reducer_;
 
   // Cached bucket index to model parameter mapping. Populated after buckets
   // are rebuilt after which this mapping is static.

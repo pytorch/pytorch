@@ -43,20 +43,75 @@ def _create_module():
     def current_device():
         return torch.accelerator.current_device_index()
 
-    def get_rng_state(device):
-        return torch.empty(4, 4, device="openreg")
+    def get_rng_state(device="openreg"):
+        if isinstance(device, str):
+            device = torch.device(device)
+        elif isinstance(device, int):
+            device = torch.device("openreg", device)
+        idx = device.index
+        if idx is None:
+            idx = current_device()
+        default_generator = pytorch_openreg._C._get_default_generator(idx)
+        return default_generator.get_state()
 
-    def set_rng_state(new_state, device):
-        pass
+    def set_rng_state(new_state, device="openreg"):
+        if isinstance(device, str):
+            device = torch.device(device)
+        elif isinstance(device, int):
+            device = torch.device("openreg", device)
+        idx = device.index
+        if idx is None:
+            idx = current_device()
+        default_generator = pytorch_openreg._C._get_default_generator(idx)
+        default_generator.set_state(new_state)
+
+    def initial_seed() -> int:
+        _lazy_init()
+        idx = current_device()
+        default_generator = pytorch_openreg._C._get_default_generator(idx)
+        return default_generator.initial_seed()
+
+    def manual_seed(seed: int) -> None:
+        seed = int(seed)
+
+        idx = current_device()
+        default_generator = pytorch_openreg._C._get_default_generator(idx)
+        default_generator.manual_seed(seed)
+
+    def manual_seed_all(seed: int) -> None:
+        seed = int(seed)
+
+        for idx in range(device_count()):
+            default_generator = pytorch_openreg._C._get_default_generator(idx)
+            default_generator.manual_seed(seed)
+
+    def is_initialized():
+        return module._initialized
+
+    def _is_in_bad_fork():
+        return False
+
+    def _lazy_init():
+        if is_initialized():
+            return
+        pytorch_openreg._C._init()
+        module._initialized = True
+
+    module.is_available = is_available  # type: ignore[assignment]
+
+    module._initialized = False  # type: ignore[assignment]
+    module._lazy_init = _lazy_init  # type: ignore[assignment]
+    module.is_initialized = is_initialized  # type: ignore[assignment]
 
     module.device = device  # type: ignore[assignment]
     module.device_count = device_count  # type: ignore[assignment]
-    module.is_available = is_available  # type: ignore[assignment]
     module.current_device = current_device  # type: ignore[assignment]
     module.get_rng_state = get_rng_state  # type: ignore[assignment]
     module.set_rng_state = set_rng_state  # type: ignore[assignment]
-    module._lazy_init = lambda: None  # type: ignore[assignment]
-    module.is_initialized = lambda: True  # type: ignore[assignment]
+    module._is_in_bad_fork = _is_in_bad_fork  # type: ignore[assignment]
+    module.initial_seed = initial_seed  # type: ignore[assignment]
+    module.manual_seed = manual_seed  # type: ignore[assignment]
+    module.manual_seed_all = manual_seed_all  # type: ignore[assignment]
 
     return module
 
@@ -64,3 +119,4 @@ def _create_module():
 # Set all the appropriate state on PyTorch
 torch.utils.rename_privateuse1_backend("openreg")
 torch._register_device_module("openreg", _create_module())
+torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)

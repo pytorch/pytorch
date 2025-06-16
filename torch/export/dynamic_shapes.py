@@ -17,6 +17,7 @@ from torch.utils._pytree import (
     SequenceKey,
     SUPPORTED_NODES,
     tree_flatten,
+    tree_map,
     tree_map_with_path,
 )
 
@@ -198,11 +199,11 @@ class _StaticDim(Dim):
         self.value = value
 
     @property
-    def min(self):
+    def min(self):  # type: ignore[override]
         return self.value  # type: ignore[attr-defined]
 
     @property
-    def max(self):
+    def max(self):  # type: ignore[override]
         return self.value  # type: ignore[attr-defined]
 
 
@@ -228,7 +229,7 @@ class _DerivedDim(Dim):
         self.fn = fn
 
     @property
-    def min(self):
+    def min(self):  # type: ignore[override]
         # assume that self.fn is an increasing function
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
@@ -248,7 +249,7 @@ class _DerivedDim(Dim):
         return int(_min_symint)
 
     @property
-    def max(self):
+    def max(self):  # type: ignore[override]
         # assume that self.fn is an increasing function
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
@@ -805,12 +806,28 @@ class AdditionalInputs:
             for args, kwargs in [(args, kwargs), *self._examples]
         ]
 
-        return tree_map_with_path(
-            lambda path, dim, *other_dims: (
-                dim
-                if all(other_dim == dim for other_dim in other_dims)
-                else Dim.DYNAMIC
-            ),
+        def _mark_dynamism(v, *other_vs):
+            if not all(type(v) == type(other) for other in other_vs):
+                raise ValueError(
+                    "The following inputs were found to have differing types, "
+                    f"so they cannot be marked as dynamic: {(v,) + other_vs}."
+                )
+
+            if isinstance(v, int) and not isinstance(v, bool):
+                if all(other_v == v for other_v in other_vs):
+                    return None
+                else:
+                    return Dim.DYNAMIC
+            else:
+                if not all(other_v == v for other_v in other_vs):
+                    raise ValueError(
+                        "The following inputs were found to have differing values, "
+                        f"but they cannot be marked as dynamic: {(v,) + other_vs}."
+                    )
+                return None
+
+        return tree_map(
+            _mark_dynamism,
             dynamic_shapes,
             *other_dynamic_shapes,
             is_leaf=lambda i: type(i) is int,

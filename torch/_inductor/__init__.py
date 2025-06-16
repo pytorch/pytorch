@@ -235,7 +235,9 @@ def _aoti_compile_and_package_inner(
     return package_path
 
 
-def aoti_load_package(path: FileLike, run_single_threaded: bool = False) -> Any:  # type: ignore[type-arg]
+def aoti_load_package(
+    path: FileLike, run_single_threaded: bool = False, device_index: int = -1
+) -> Any:  # type: ignore[type-arg]
     """
     Loads the model from the PT2 package.
 
@@ -254,10 +256,16 @@ def aoti_load_package(path: FileLike, run_single_threaded: bool = False) -> Any:
         run_single_threaded (bool): Whether the model should be run without
             thread synchronization logic. This is useful to avoid conflicts with
             CUDAGraphs.
+        device_index (int): The index of the device to which the PT2 package is
+            to be loaded. By default, `device_index=-1` is used, which corresponds
+            to the device `cuda` when using CUDA. Passing `device_index=1` would
+            load the package to `cuda:1`, for example.
     """
     from torch._inductor.package import load_package
 
-    return load_package(path, run_single_threaded=run_single_threaded)
+    return load_package(
+        path, run_single_threaded=run_single_threaded, device_index=device_index
+    )
 
 
 def aot_compile(

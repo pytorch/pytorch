@@ -40,7 +40,10 @@ def create_int8_compensation(
     weight_compens = None
     x_w_scale = None
     if all(
-        isinstance(item, ir.TensorBox) and item.get_name() in V.graph.constants
+        isinstance(item, ir.TensorBox)
+        and item.get_name() in V.graph.constants
+        and hasattr(item.data, "data")
+        and isinstance(item.data.data, ir.ConstantBuffer)
         for item in [x_scale, x_zp, w_scale]
     ):
         use_int8_fast_compensation_path = True
@@ -146,7 +149,7 @@ def grouped_gemm_lowering(
         has_bias=[bias is not None for bias in b],
         trans_w=True,
         epilogue_creator=None,
-        act_mapping={num: x for num in range(num_gemm)},
+        act_mapping=dict.fromkeys(range(num_gemm), x),
     )
 
     input_nodes = [x, *w]
