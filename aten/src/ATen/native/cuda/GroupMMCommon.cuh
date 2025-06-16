@@ -59,10 +59,16 @@ __global__ void prepare_grouped_gemm_data(
     if (tid < blockDim.x - 1) {
       // Check this requirement for input tensors, in case group
       // addresses are increased along the dynamic dimension.
-      if ((K < 0 && (a_row_major || !b_row_major)) ||  // 2D/2D: check along K dimension
-          (M < 0 && !a_row_major) ||                   // 2D/3D: check along M dimension
-          (N < 0 && b_row_major)) {                    // 3D/2D: check along N dimension
+      if ((K < 0 && a_row_major) ||       // 2D/2D: check along K dimension
+          (M < 0 && !a_row_major)) {      // 3D/2D: check along N dimension
         int align = 128 / cutlass::sizeof_bits<DtypeA>::value;
+        CUDA_KERNEL_ASSERT(
+                           delta % align == 0 &&
+                           "expected input tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+      }
+      if ((K < 0 && !b_row_major) ||      // 2D/2D: check along K dimension
+          (N < 0 && b_row_major)) {       // 3D/2D: check along N dimension
+        int align = 128 / cutlass::sizeof_bits<DtypeB>::value;
         CUDA_KERNEL_ASSERT(
                            delta % align == 0 &&
                            "expected input tensor dynamic dimension byte size to be non-negative multiple of 16\n");
