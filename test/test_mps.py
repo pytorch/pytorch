@@ -8423,7 +8423,6 @@ class TestTopK(TestCase):
             e_string = str(e)
             self.assertEqual(e_string, "Issue on MPSGraph topk when ndims() - axis > 4. Upgrade to MacOS14.0+ to enable the op.")
 
-
 class TestNNMPS(NNTestCase):
 
     def _create_basic_net(self):
