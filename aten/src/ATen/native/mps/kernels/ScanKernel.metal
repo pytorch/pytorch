@@ -103,9 +103,6 @@ kernel void scan_contiguous_outer_dim(
   const uint orow = thread_index / num_irows;
   const uint irow = thread_index % num_irows;
 
-  if (orow >= num_orows || irow >= num_irows)
-    return;
-
   acc_t accumulator = Op::identity();
 
   const uint idx_base = orow * row_size * num_irows + irow;
@@ -158,9 +155,6 @@ kernel void scan_with_indices_contiguous_outer_dim(
     uint thread_index [[thread_position_in_grid]]) {
   const uint orow = thread_index / num_irows;
   const uint irow = thread_index % num_irows;
-
-  if (orow >= num_orows || irow >= num_irows)
-    return;
 
   acc_t accumulator = Op::identity();
   int64_t best_idx = 0;
