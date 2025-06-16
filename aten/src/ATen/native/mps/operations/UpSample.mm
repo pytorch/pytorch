@@ -40,6 +40,10 @@
 #include <ATen/ops/upsample_nearest2d_backward.h>
 #include <ATen/ops/upsample_nearest2d_backward_native.h>
 #include <ATen/ops/upsample_nearest2d_native.h>
+#include <ATen/ops/_upsample_nearest_exact3d_backward_native.h>
+#include <ATen/ops/_upsample_nearest_exact3d_native.h>
+#include <ATen/ops/upsample_nearest3d_backward_native.h>
+#include <ATen/ops/upsample_nearest3d_native.h>
 #endif
 namespace at::native {
 namespace mps {
@@ -480,6 +484,47 @@ TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_mps)
   TORCH_CHECK(at::isFloatingType(input.scalar_type()),
               "_upsample_bicubic2d_aa_out_mps only supports floating-point dtypes");
   mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bicubic2d_aa");
+}
+
+TORCH_IMPL_FUNC(upsample_nearest3d_out_mps) (
+    const Tensor& input,
+    IntArrayRef output_size,
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
+    const Tensor& output
+) {
+}
+
+TORCH_IMPL_FUNC(_upsample_nearest_exact3d_out_mps) (
+    const Tensor& input,
+    IntArrayRef output_size,
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
+    const Tensor& output
+) {
+}
+
+TORCH_IMPL_FUNC(upsample_nearest3d_backward_out_mps) (
+    const Tensor& grad_output,
+    IntArrayRef output_size,
+    IntArrayRef input_size,
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
+    const Tensor& grad_input) {
+  grad_input.zero_();
+}
+TORCH_IMPL_FUNC(_upsample_nearest_exact3d_backward_out_mps) (
+    const Tensor& grad_output,
+    IntArrayRef output_size,
+    IntArrayRef input_size,
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
+    const Tensor& grad_input) {
+  grad_input.zero_();
 }
 
 TORCH_IMPL_FUNC(upsample_trilinear3d_out_mps) (
