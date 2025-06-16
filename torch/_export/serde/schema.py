@@ -7,6 +7,7 @@ from typing import Annotated, Optional
 
 from torch._export.serde.union import _Union
 
+
 # NOTE: Please update this value if any modifications are made to the schema
 SCHEMA_VERSION = (8, 8)
 TREESPEC_VERSION = 1
@@ -81,6 +82,7 @@ class SymInt(_Union):
     as_expr: Annotated[SymExpr, 10]
     as_int: Annotated[int, 20]
 
+
 @dataclass(repr=False)
 class SymFloat(_Union):
     as_expr: Annotated[SymExpr, 10]
@@ -115,6 +117,7 @@ class SymIntArgument(_Union):
     as_name: Annotated[str, 10]
     as_int: Annotated[int, 20]
 
+
 # In most cases we will use the "as_name" field to store arguments which are
 # SymFloats.
 # The "as_float" field is used in the case where we have a list containing a mix
@@ -125,6 +128,7 @@ class SymIntArgument(_Union):
 class SymFloatArgument(_Union):
     as_name: Annotated[str, 10]
     as_float: Annotated[float, 20]
+
 
 # In most cases we will use the "as_name" field to store arguments which are
 # SymBools.
@@ -161,7 +165,7 @@ class OptionalTensorArgument(_Union):
 @dataclass
 class GraphArgument:
     name: Annotated[str, 10]
-    graph: Annotated['Graph', 20]
+    graph: Annotated["Graph", 20]
 
 
 @dataclass
@@ -198,6 +202,7 @@ class Argument(_Union):
     as_operator: Annotated[str, 220]
     as_sym_float: Annotated[SymFloatArgument, 230]
     as_sym_floats: Annotated[list[SymFloatArgument], 240]
+    as_optional_tensor: Annotated[OptionalTensorArgument, 250]
 
 
 class ArgumentKind(IntEnum):
@@ -236,8 +241,11 @@ class Graph:
     # tensor, rather than following export schema and returning a singleton
     # list.
     is_single_tensor_return: Annotated[bool, 70] = False
-    custom_obj_values: Annotated[dict[str, CustomObjArgument], 80] = field(default_factory=dict)
+    custom_obj_values: Annotated[dict[str, CustomObjArgument], 80] = field(
+        default_factory=dict
+    )
     sym_float_values: Annotated[dict[str, SymFloat], 90] = field(default_factory=dict)
+
 
 @dataclass
 class UserInputSpec:
@@ -271,7 +279,6 @@ class InputToBufferSpec:
     arg: Annotated[TensorArgument, 10]
     buffer_name: Annotated[str, 20]
     persistent: Annotated[bool, 30]
-
 
 
 @dataclass
@@ -400,15 +407,21 @@ class GraphModule:
     module_call_graph: Annotated[list[ModuleCallEntry], 60]
     metadata: Annotated[dict[str, str], 40] = field(default_factory=dict)
     # Mapping of namedtuple types to namedtuple field names, used for BC
-    treespec_namedtuple_fields: Annotated[dict[str, NamedTupleDef], 70] = field(default_factory=dict)
+    treespec_namedtuple_fields: Annotated[dict[str, NamedTupleDef], 70] = field(
+        default_factory=dict
+    )
 
 
 # Invariant: Every time a change is made to the schema, one of the versions
 #            should be upadted.
 @dataclass
 class SchemaVersion:
-    major: Annotated[int, 10]  # Major version number is bumped every time a breaking change is made.
-    minor: Annotated[int, 20]  # Minor version number is bumped when a compatible change is made.
+    major: Annotated[
+        int, 10
+    ]  # Major version number is bumped every time a breaking change is made.
+    minor: Annotated[
+        int, 20
+    ]  # Minor version number is bumped when a compatible change is made.
 
 
 @dataclass
@@ -421,13 +434,16 @@ class ExportedProgram:
     verifiers: Annotated[list[str], 70] = field(default_factory=list)
     torch_version: Annotated[str, 80] = "<=2.4"
 
+
 #########################################################################
 # Container types for inference tasks, not being used directly for export.
 #########################################################################
 
+
 @dataclass
 class Program:
     methods: Annotated[dict[str, ExportedProgram], 200]
+
 
 # This is the top-level model definition that be will serialized into the package
 @dataclass
@@ -447,6 +463,7 @@ class Model:
     # key is the FQN of constant in exported program (constant tensor or torchbind objs)
     # value is the archive path of serialized constants
     constantPaths: Annotated[dict[str, str], 70]
+
 
 #
 # The structure is used to serialize instances of AOTInductorModel to pass
@@ -475,13 +492,14 @@ class AOTInductorModelPickleData:
     # Whether AOTInductor runtime is for CPU.
     aot_inductor_model_is_cpu: Annotated[Optional[bool], 6] = None
 
+
 @dataclass
 class ExternKernelNode:
     # name is not the unique identifier of the node
     name: Annotated[str, 10]
     node: Annotated[Node, 20]
 
+
 @dataclass
 class ExternKernelNodes:
     nodes: Annotated[list[ExternKernelNode], 10]
-    protocol: Annotated[Optional[str], 20] = None

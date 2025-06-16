@@ -17,7 +17,7 @@ bool file_exists(std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc {};
+  struct stat rc{};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
@@ -112,7 +112,7 @@ consider rebuild your model with the latest AOTInductor.");
 
   if (file_exists(json_filename)) {
     proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
-        json_filename, device_str);
+        json_filename, device_str == "cpu");
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
   } else {

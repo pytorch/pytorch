@@ -123,6 +123,8 @@
   - torch/*docs.py
   approved_by:
   - svekars
+  - sekyondaMeta
+  - AlannaBurke
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -393,19 +395,23 @@
   - torch/_inductor/mkldnn_lowerings.py
   - torch/_inductor/fx_passes/mkldnn_fusion.py
   - torch/_inductor/fx_passes/quantization.py
-  - torch/_inductor/codegen/cpp_prefix.h
   - torch/_inductor/codegen/cpp.py
   - torch/_inductor/codegen/cpp_utils.py
   - torch/_inductor/codegen/cpp_micro_gemm.py
   - torch/_inductor/codegen/cpp_template_kernel.py
   - torch/_inductor/codegen/cpp_template.py
+  - torch/_inductor/codegen/cpp_bmm_template.py
   - torch/_inductor/codegen/cpp_gemm_template.py
+  - torch/_inductor/codegen/cpp_grouped_gemm_template.py
+  - torch/_inductor/codegen/cpp_flex_attention_template.py
+  - torch/csrc/inductor/cpp_prefix.h
   - test/inductor/test_mkldnn_pattern_matcher.py
   - test/inductor/test_cpu_repro.py
   - test/inductor/test_cpu_cpp_wrapper.py
   - test/inductor/test_cpu_select_algorithm.py
   - aten/src/ATen/cpu/**
   - aten/src/ATen/native/quantized/cpu/**
+  - aten/src/ATen/test/vec_test_all_types.*
   - test/quantization/core/test_quantized_op.py
   - torch/ao/quantization/quantizer/x86_inductor_quantizer.py
   - test/quantization/pt2e/test_x86inductor_quantizer.py
@@ -413,6 +419,7 @@
   - leslie-fang-intel
   - jgong5
   - EikanWang
+  - CaoE
   mandatory_checks_name:
   - EasyCLA
   - Lint

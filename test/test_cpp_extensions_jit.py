@@ -3,8 +3,10 @@
 import glob
 import locale
 import os
+import random
 import re
 import shutil
+import string
 import subprocess
 import sys
 import tempfile
@@ -116,11 +118,13 @@ class TestCppExtensionJIT(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
-    @unittest.skipIf(not (TEST_XPU), "XPU not found")
-    def test_jit_xpu_extension(self):
-        # NOTE: The name of the extension must equal the name of the module.
+    def _test_jit_xpu_extension(self):
+        name = "torch_test_xpu_extension_"
+        # randomizing name for the case when we test building few extensions
+        # in a row using this function
+        name += "".join(random.sample(string.ascii_letters, 5))
         module = torch.utils.cpp_extension.load(
-            name="torch_test_xpu_extension",
+            name=name,
             sources=[
                 "cpp_extensions/xpu_extension.sycl",
             ],
@@ -135,6 +139,31 @@ class TestCppExtensionJIT(common.TestCase):
 
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
+
+    @unittest.skipIf(not (TEST_XPU), "XPU not found")
+    def test_jit_xpu_extension(self):
+        # NOTE: this test can be affected by setting TORCH_XPU_ARCH_LIST
+        self._test_jit_xpu_extension()
+
+    @unittest.skipIf(not (TEST_XPU), "XPU not found")
+    def test_jit_xpu_archlists(self):
+        # NOTE: in this test we explicitly test few different options
+        # for TORCH_XPU_ARCH_LIST. Setting TORCH_XPU_ARCH_LIST in the
+        # environment before the test won't affect it.
+        archlists = [
+            "",  # expecting JIT compilation
+            ",".join(torch.xpu.get_arch_list()),
+        ]
+        old_envvar = os.environ.get("TORCH_XPU_ARCH_LIST", None)
+        try:
+            for al in archlists:
+                os.environ["TORCH_XPU_ARCH_LIST"] = al
+                self._test_jit_xpu_extension()
+        finally:
+            if old_envvar is None:
+                os.environ.pop("TORCH_XPU_ARCH_LIST")
+            else:
+                os.environ["TORCH_XPU_ARCH_LIST"] = old_envvar
 
     @unittest.skipIf(not TEST_MPS, "MPS not found")
     def test_mps_extension(self):
@@ -180,7 +209,9 @@ class TestCppExtensionJIT(common.TestCase):
                 )
 
             actual_arches = sorted(re.findall(r"sm_\d+", output))
-            expected_arches = sorted(["sm_" + xx for xx in expected_values])
+            expected_arches = sorted(
+                ["sm_" + xx.replace("121", "120") for xx in expected_values]
+            )
             self.assertEqual(
                 actual_arches,
                 expected_arches,
@@ -1162,6 +1193,48 @@ class TestCppExtensionJIT(common.TestCase):
         abs_t = module.my_abs(t)
         self.assertEqual(abs_t, torch.abs(t))
         self.assertEqual(floor_t, torch.floor(t))
+
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
+    def test_cuda_pluggable_allocator_include(self):
+        """
+        This method creates a minimal example to replicate the apex setup.py to build nccl_allocator extension
+        """
+
+        # the cpp source includes CUDAPluggableAllocator and has an empty exported function
+        cpp_source = """
+                #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+                #include <torch/extension.h>
+                int get_nccl_allocator() {
+                    return 0;
+                }
+                PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+                    m.def("get_nccl_allocator", []() { return get_nccl_allocator(); });
+                }
+                """
+
+        build_dir = tempfile.mkdtemp()
+        src_path = os.path.join(build_dir, "NCCLAllocator.cpp")
+
+        with open(src_path, mode="w") as f:
+            f.write(cpp_source)
+
+        # initially success is false
+        success = False
+        try:
+            # try to build the module
+            torch.utils.cpp_extension.load(
+                name="nccl_allocator",
+                sources=src_path,
+                verbose=True,
+                with_cuda=True,
+            )
+            # set success as true if built successfully
+            success = True
+        except Exception as e:
+            print(f"Failed to load the module: {e}")
+
+        # test if build was successful
+        self.assertEqual(success, True)
 
 
 if __name__ == "__main__":

@@ -183,6 +183,7 @@ static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
 static struct PyGetSetDef THCPEvent_properties[] = {
     {"device", (getter)THCPEvent_get_device, nullptr, nullptr, nullptr},
     {"cuda_event", (getter)THCPEvent_get_cuda_event, nullptr, nullptr, nullptr},
+    {"event_id", (getter)THCPEvent_get_cuda_event, nullptr, nullptr, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(*c-arrays*, *global-variables)

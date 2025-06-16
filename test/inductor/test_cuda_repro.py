@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
 )
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
 if TEST_WITH_ROCM:
@@ -580,7 +581,7 @@ class CudaReproTests(TestCase):
         """
         This UT tests autotune on an inplace kernel. The autotune should not contaminate
         the input buffers when tuning with multiple configs. For more details, refer to
-        https://github.com/openai/triton/issues/781
+        https://github.com/triton-lang/triton/issues/781
         https://github.com/pytorch/torchdynamo/issues/1670
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
@@ -920,6 +921,43 @@ class CudaReproTests(TestCase):
             out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
         )
 
+    def test_libdevice_routing(self):
+        def foo(x):
+            return x.exp()
+
+        inp = torch.ones(64, device="cuda").to(torch.float64)
+
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check("libdevice.exp").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        inp = inp.to(torch.float)
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check_not("libdevice.exp").check("tl_math.exp").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        def foo(x):
+            return x.sigmoid()
+
+        inp = torch.ones(64, device="cuda").to(torch.float64)
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check("libdevice.exp").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+    def test_uint_view_copy(self):
+        @torch.compile
+        def view_copy(target, source):
+            assert target.dtype == torch.bfloat16
+            assert source.dtype == torch.uint16
+            target.view(torch.uint16).copy_(source)
+
+        target = torch.ones(1024, dtype=torch.bfloat16, device="cuda")
+        source = torch.full_like(target, 4, dtype=torch.uint16)
+
+        out = target.view(torch.uint16).copy_(source).clone()
+        view_copy(target, source)
+        self.assertEqual(out, target.view(torch.uint16))
+
     def test_embedding_var_mean(self):
         def forward(arg0_1):
             full = torch.ops.aten.full.default(
@@ -1096,6 +1134,9 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expect, actual)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch(
         {
             "max_autotune_gemm_backends": "TRITON",
@@ -1528,6 +1569,19 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(o1, o2)
 
+    def test_sorted_masks(self):
+        @torch.compile()
+        def foo(x, y):
+            return (x + y).sum(dim=1)
+
+        x = torch.rand([255, 255], device="cuda")
+        y = torch.rand([255, 255], device="cuda")
+
+        _, code = run_and_get_code(foo, x, y)
+        FileCheck().check("tl.load").check_same("r0_mask").check_same("xmask").run(
+            code[0]
+        )
+
     def test_cat_int8_one_kernel(self):
         @torch.compile()
         def cat(inps):
@@ -1546,7 +1600,7 @@ class CudaReproTests(TestCase):
 
     @config.patch("triton.use_block_ptr", True)
     def test_selecsls42b_misaligned_address(self):
-        # https://github.com/openai/triton/issues/2836
+        # https://github.com/triton-lang/triton/issues/2836
 
         @torch.compile(fullgraph=True)
         def fn(arg207_1, arg208_1, convert_element_type_40, expand, full, mul_3):
@@ -1585,6 +1639,24 @@ class CudaReproTests(TestCase):
         ]
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
+
+    def test_mutated_aligned_tensor(self):
+        t = torch.rand(4096, device="cuda", dtype=torch.float16)
+
+        def foo(x):
+            return x.add_(1)
+
+        foo_c = torch.compile(dynamic=False)(foo)
+
+        t_orig = t.clone()
+
+        # First invocation, assume alignment, second invocation,
+        # copy to alignment and then mutate after fn invocation
+        self.assertEqual(foo_c(t[:-1]), foo(t_orig[:-1]))
+        self.assertEqual(t, t_orig)
+
+        self.assertEqual(foo_c(t[1:]), foo(t_orig[1:]))
+        self.assertEqual(t, t_orig)
 
     def test_non_commutative_scan_op(self):
         from torch._higher_order_ops.associative_scan import associative_scan
@@ -1890,16 +1962,19 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         def foo(x0):
             x1 = x0 + 1
-            x2 = x1.view(dtype)
+            x2 = x1.view(dtype).view([16 * 16])
             return x2
 
         x0 = torch.randint(0, 255, (16, 16), device=device, dtype=torch.uint8)
         foo_c = torch.compile(foo, backend="inductor", fullgraph=True)
 
         with torch.no_grad():
-            y_c = foo_c(x0)
+            result, code = run_and_get_code(foo_c, x0)
 
-        self.assertEqual(foo(x0), y_c)
+        FileCheck().check("call").check_not("torch.ops.aten.reshape.default(").run(
+            code[0]
+        )
+        self.assertEqual(foo(x0), result)
 
     @unittest.skipIf(
         not config.is_fbcode(),
@@ -1922,6 +1997,32 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x, y))
         fc = FileCheck()
         fc.check("tl.atomic_add")
+        fc.run(bw_code)
+
+        self.assertEqual(f(x_ref, y_ref), out)
+
+    @unittest.skipIf(
+        not config.is_fbcode(),
+        "bfloat16 atomic add is only supported in fbcode today #97016",
+    )
+    @skipCUDAIf(
+        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+    )
+    @config.patch({"bfloat16_atomic_adds_enabled": False})
+    def test_atomic_add_bfloat16_config(self):
+        def f(x, y):
+            return torch.index_select(x, 0, y)
+
+        x = torch.randn(
+            2000, 384, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+        y = torch.ones(713268, dtype=torch.int64, device="cuda")
+        x_ref = x.clone().detach().requires_grad_(True)
+        y_ref = y.clone().detach()
+
+        out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x, y))
+        fc = FileCheck()
+        fc.check_not("tl.atomic_add")
         fc.run(bw_code)
 
         self.assertEqual(f(x_ref, y_ref), out)
@@ -2022,6 +2123,49 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         out_eager = interpolate_chunked(x)
         out_compiled = torch.compile(interpolate_chunked)(x)
         self.assertEqual(out_eager, out_compiled)
+
+    def test_max_autotune_nograd(self):
+        """
+        https://github.com/pytorch/pytorch/issues/155688
+        Smallest repro for max-autotune not working with no_grad
+        Before adding __int__ function to torch.utils._sympy.functions.Identity,
+        running the max_autotune mode would raise an error:
+        TypeError: Expected a number but got Identity
+        """
+
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.linear_layers = nn.ModuleList(
+                    [
+                        nn.Linear(4, 1, bias=True),
+                        nn.Linear(5, 1, bias=True),
+                        nn.Linear(6, 1, bias=True),
+                        nn.Linear(7, 1, bias=True),
+                        nn.Linear(8, 1, bias=True),
+                    ]
+                )
+
+            def forward(self, x):
+                for layer in self.linear_layers:
+                    x2 = layer(x)
+                    x2 = F.relu(x2)
+                    x = torch.cat((x, x2), dim=1)
+
+                return x
+
+        model = ToyModel().to("cuda")
+        input_tensor = torch.randn((2, 4)).to("cuda")
+
+        compile_default = torch.compile(model, mode="default")
+        compile_max_autotune = torch.compile(model, mode="max-autotune")
+
+        with torch.no_grad():
+            default_output = compile_default(input_tensor)
+            max_autotune_output = compile_max_autotune(input_tensor)
+
+        self.assertEqual(default_output, max_autotune_output)
 
 
 if __name__ == "__main__":

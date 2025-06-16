@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeAlias
 
 import torch
 from torch import sym_float, Tensor
@@ -12,9 +12,10 @@ from torch.masked.maskedtensor.creation import as_masked_tensor
 
 
 if TYPE_CHECKING:
+    from torch._prims_common import DimsType
     from torch.types import _dtype as DType
 
-    DimOrDims = Optional[Union[int, tuple[int, ...], list[int]]]
+    DimOrDims: TypeAlias = Optional[DimsType]
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
@@ -793,7 +794,7 @@ def _sparse_csr_segment_reduction_helper(
                 0,
             )
             new_nnz = new_crow_indices[-1]
-            new_col_indices = col_indices.new_zeros(new_nnz)
+            new_col_indices = col_indices.new_zeros(new_nnz)  # type: ignore[call-overload]
             new_values = torch._segment_reduce(values, reduce, offsets=crow_indices)  # type: ignore[attr-defined]
             new_shape = [mask_input.size(0), 1]
     else:

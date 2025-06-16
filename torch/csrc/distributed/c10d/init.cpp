@@ -1,8 +1,8 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/control_collectives/ControlCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
+#include <string_view>
 #include <utility>
 #include <vector>
 #ifndef _WIN32
@@ -31,7 +32,7 @@
 #ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -44,9 +45,10 @@
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
-#include <torch/csrc/distributed/c10d/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -190,6 +192,10 @@ using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
 template <typename T>
 using intrusive_ptr_no_gil_destructor_class_ =
     py::class_<T, IntrusivePtrNoGilDestructor<T>>;
+
+template <typename T, typename Trampoline>
+using intrusive_ptr_no_gil_destructor_trampoline_class_ =
+    py::class_<T, IntrusivePtrNoGilDestructor<T>, Trampoline>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -559,7 +565,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                  bool find_unused_parameters,
                  bool gradient_as_bucket_view,
                  std::unordered_map<size_t, std::string> param_to_name_mapping,
-                 int64_t first_bucket_bytes_cap) {
+                 int64_t first_bucket_bytes_cap,
+                 bool skip_all_reduce_unused_params,
+                 bool use_python_reducer) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
@@ -573,7 +581,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                     find_unused_parameters,
                     gradient_as_bucket_view,
                     std::move(param_to_name_mapping),
-                    first_bucket_bytes_cap);
+                    first_bucket_bytes_cap,
+                    skip_all_reduce_unused_params,
+                    use_python_reducer);
               }),
           py::arg("params"),
           py::arg("bucket_indices"),
@@ -585,7 +595,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("gradient_as_bucket_view") = false,
           py::arg("param_to_name_mapping") =
               std::unordered_map<size_t, std::string>(),
-          py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes)
+          py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes,
+          py::arg("skip_all_reduce_unused_params") = false,
+          py::arg("use_python_reducer") = false)
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
@@ -993,6 +1005,15 @@ This class does not support ``__members__`` property.)");
     return ::c10d::unregister_all_process_groups();
   });
 
+  // Intializes the device state in CUmodule so that it’s able to perform
+  // NVSHMEM operations.
+#ifdef USE_NVSHMEM
+  module.def(
+      "_nvshmemx_cumodule_init",
+      ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
+      py::arg("module"));
+#endif
+
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
@@ -1347,7 +1368,7 @@ Calling :meth:`~torch.distributed.store.check` with a list of keys that
 one wants to check whether stored in the store or not.
 
 Arguments:
-    keys (lisr[str]): The keys to query whether stored in the store.
+    keys (list[str]): The keys to query whether stored in the store.
 
 Example::
     >>> import torch.distributed as dist
@@ -1554,6 +1575,63 @@ Example::
     >>> store.multi_set(["first_key", "second_key"], ["po", "tato"])
     >>> # Should return b"po"
     >>> store.get("first_key")
+)")
+          .def(
+              "queue_push",
+              [](::c10d::Store& store,
+                 const std::string& key,
+                 const std::string& value) {
+                store.queuePush(key, toVec8(value));
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Pushes a value into the specified queue.
+
+Using the same key for queues and set/get operations may result in unexpected
+behavior.
+
+wait/check operations are supported for queues.
+
+wait with queues will only wake one waiting worker rather than all.
+
+Arguments:
+    key (str): The key of the queue to push to.
+    value (str): The value to push into the queue.
+)")
+          .def(
+              "queue_pop",
+              [](::c10d::Store& store, const std::string& key, bool block) {
+                auto out = [&]() {
+                  py::gil_scoped_release guard;
+                  return store.queuePop(key, block);
+                }();
+                return toPyBytes(out);
+              },
+              py::arg("key"),
+              py::arg("block") = true,
+              R"(
+Pops a value from the specified queue or waits until timeout if the queue is empty.
+
+See queue_push for more details.
+
+If block is False, a dist.QueueEmptyError will be raised if the queue is empty.
+
+Arguments:
+    key (str): The key of the queue to pop from.
+    block (bool): Whether to block waiting for the key or immediately return.
+)")
+          .def(
+              "queue_len",
+              &::c10d::Store::queueLen,
+              R"(
+Returns the length of the specified queue.
+
+If the queue doesn't exist it returns 0.
+
+See queue_push for more details.
+
+Arguments:
+    key (str): The key of the queue to get the length.
 )")
           .def(
               "has_extended_api",
@@ -1947,10 +2025,8 @@ communication mechanism.
           py::arg("world_size"));
 
   auto processGroup =
-      py::class_<
-          ::c10d::ProcessGroup,
-          c10::intrusive_ptr<::c10d::ProcessGroup>,
-          ::c10d::PyProcessGroup>(module, "ProcessGroup",
+      intrusive_ptr_no_gil_destructor_trampoline_class_<
+          ::c10d::ProcessGroup, ::c10d::PyProcessGroup>(module, "ProcessGroup",
           R"(A ProcessGroup is a communication primitive that allows for
           collective operations across a group of processes.
 
@@ -2858,7 +2934,12 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       processGroupGloo, "_Options", backendOptions)
       .def(py::init<>())
       .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
-      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
+      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads)
+      .def_readwrite(
+          "global_ranks_in_group",
+          &::c10d::ProcessGroupGloo::Options::global_ranks_in_group)
+      .def_readwrite(
+          "group_name", &::c10d::ProcessGroupGloo::Options::group_name);
 
   processGroupGloo
       .def_static(
@@ -2927,9 +3008,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             bool lazyInit = ::c10d::getDefaultGlooLazyInit();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv && strlen(ifnameEnv) > 1) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
+            auto ifnameEnv =
+                c10::utils::get_env(GLOO_SOCKET_IFNAME_ENV.c_str());
+            if (ifnameEnv && ifnameEnv->size() > 1) {
+              for (const auto& iface : ::c10d::split(',', ifnameEnv->c_str())) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(
                         iface, lazyInit));
@@ -3030,6 +3112,20 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("size"),
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               R"(Create a new ProcessGroupNCCL instance.)")
+          .def(
+              "_comm_ptr",
+              &::c10d::ProcessGroupNCCL::getCommPtr,
+              R"(
+            Get the communicator of the current device.
+
+            .. warning ::
+                Unsafe to use. The collectives launched into the communicator
+                externally outside ProcessGroupNCCL are not monitored by the
+                watchdog. Please do not modify or free the communicator as the
+                communicator is managed by the ProcessGroupNCCL. Please also
+                check the readiness of the communicator before launching any
+                collectives into the communicator.
+            )")
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def(
@@ -3088,6 +3184,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "get_error",
               &::c10d::ProcessGroupNCCL::getError,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_set_enable_nan_check",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 bool enable_nan_check) {
+                self->setEnableNanCheck(enable_nan_check);
+              },
+              py::arg("enable_nan_check"),
               py::call_guard<py::gil_scoped_release>());
 
   module.def(
@@ -3110,6 +3214,18 @@ for details.
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
 #ifdef NCCL_HAS_COMM_SPLIT
       .def_readwrite("split_share", &ncclConfig_t::splitShare)
+#endif
+#ifdef NCCL_HAS_QOS
+      .def_readwrite("traffic_class", &ncclConfig_t::trafficClass)
+#endif
+#ifdef NCCL_HAS_COLLNET
+      .def_readwrite("collnet_enable", &ncclConfig_t::collnetEnable)
+#endif
+#ifdef NCCL_HAS_CTA_POLICY
+      .def_readwrite("cta_policy", &ncclConfig_t::CTAPolicy)
+#endif
+#ifdef NCCL_HAS_NVLS_CTAS
+      .def_readwrite("nvls_ctas", &ncclConfig_t::nvlsCTAs)
 #endif
       .def_property(
           "net_name",
@@ -3699,6 +3815,46 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
       )");
 #endif
+
+  module.def(
+      "_dump_fr_trace_json",
+      [](std::optional<bool> includeCollectives,
+         std::optional<bool> onlyActive) {
+        return py::bytes(::c10d::dump_fr_trace_json(
+            includeCollectives.value_or(true), onlyActive.value_or(false)));
+      },
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      R"(
+        Arguments:
+                includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+                onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+        Returns:
+                Stringified json work traces.
+                Default settings return everything.
+    )");
+  module.def(
+      "_dump_fr_trace",
+      [](std::optional<bool> includeCollectives,
+         std::optional<bool> includeStackTraces,
+         std::optional<bool> onlyActive) {
+        return py::bytes(::c10d::dump_fr_trace(
+            includeCollectives.value_or(true),
+            includeStackTraces.value_or(true),
+            onlyActive.value_or(false)));
+      },
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("includeStackTraces") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      R"(
+            Arguments:
+                includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+                includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
+                onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+            Returns:
+                Stringified pickle work traces.
+                Default settings return everything.
+        )");
 
   intrusive_ptr_class_<::c10d::control_plane::WorkerServer>(
       module, "_WorkerServer", R"(

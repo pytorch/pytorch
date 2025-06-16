@@ -772,7 +772,7 @@ void dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 template <>
 void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  c10::string_view arch(dprops->gcnArchName);
+  std::string_view arch(dprops->gcnArchName);
   if (arch == "gfx1100") {
     dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGS(at::BFloat16));
   } else{

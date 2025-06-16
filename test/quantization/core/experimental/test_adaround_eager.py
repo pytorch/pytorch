@@ -134,3 +134,10 @@ class TestAdaround(QuantizationTestCase):
             ada_loss = F.mse_loss(ada_out, float_out)
             fq_loss = F.mse_loss(fq_out, float_out)
             self.assertTrue(ada_loss.item() < fq_loss.item())
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

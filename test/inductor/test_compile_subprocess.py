@@ -16,7 +16,7 @@ import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_CPU, RUN_GPU
 
 
 # Make the helper files in test/ importable
@@ -37,6 +37,11 @@ importlib.import_module("filelock")
 test_failures = {
     # TypeError: cannot pickle 'generator' object
     "test_layer_norm": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_remove_noop_slice": TestFailure(("xpu"), is_skip=True),
+    "test_remove_noop_slice1": TestFailure(("xpu"), is_skip=True),
+    "test_remove_noop_slice_scatter": TestFailure(("xpu"), is_skip=True),
+    "test_remove_noop_view_default": TestFailure(("xpu"), is_skip=True),
+    "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
 }
 
 
@@ -127,7 +132,7 @@ class TestSubprocess(TestCase):
             self.assertEqual(_AsyncFxCompile._stat_bg_finished, 1)
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class CpuTests(TestSubprocess):
         common = check_model
@@ -137,7 +142,7 @@ if HAS_CPU:
         inductor.test_torchinductor.CommonTemplate, CpuTests, "cpu", test_failures
     )
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if RUN_GPU and not TEST_WITH_ASAN:
 
     class GPUTests(TestSubprocess):
         common = check_model_gpu
@@ -151,5 +156,5 @@ if HAS_GPU and not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if RUN_CPU or RUN_GPU:
         run_tests(needs="filelock")
