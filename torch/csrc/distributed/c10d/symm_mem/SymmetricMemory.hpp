@@ -125,9 +125,13 @@ struct GroupInfo {
   int rank;
   int world_size;
   c10::intrusive_ptr<c10d::Store> store;
+  // Note this field is not automatically populated by set_group_info().  If a
+  // SymmetricMemory implementation needs to use it, it must be populated by a
+  // call to exchange_global_ranks() first.
+  std::vector<int> rank_to_global_rank;
 };
 
-C10_EXPORT const GroupInfo& get_group_info(const std::string& group_name);
+C10_EXPORT GroupInfo& get_group_info(const std::string& group_name);
 
 // Identical to empty_strided, but allows symmetric memory access to be
 // established for the allocated tensor via SymmetricMemory::rendezvous(). This
