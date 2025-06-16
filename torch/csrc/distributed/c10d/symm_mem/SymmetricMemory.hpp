@@ -72,7 +72,7 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
   virtual int get_rank() = 0;
   virtual int get_world_size() = 0;
 
-  virtual std::vector<int> get_rank_to_global_rank() {
+  virtual const std::vector<int>& get_rank_to_global_rank() {
     TORCH_CHECK(false, "NYI");
   }
 

@@ -239,7 +239,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return world_size_;
   }
 
-  virtual std::vector<int> get_rank_to_global_rank() override {
+  virtual const std::vector<int>& get_rank_to_global_rank() override {
     return rank_to_global_rank_;
   };
 
