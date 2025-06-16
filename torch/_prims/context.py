@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import functools
 from contextlib import nullcontext
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 
 if TYPE_CHECKING:
@@ -19,7 +20,11 @@ import torch.overrides
 from torch._prims_common import torch_function_passthrough
 
 
-@functools.lru_cache(None)
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+@functools.cache
 def torch_to_refs_map() -> dict[Any, Any]:
     """
     Mapping of torch API functions to torch._refs functions.
@@ -74,7 +79,7 @@ def torch_to_refs_map() -> dict[Any, Any]:
     return r
 
 
-@functools.lru_cache(None)
+@functools.cache
 def all_prims() -> set[Any]:
     """
     Set of all prim functions, e.g., torch._prims.add in all_prims()
@@ -109,7 +114,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
 
     def __torch_function__(
         self,
-        orig_func: Callable[..., Any],
+        orig_func: Callable[_P, _R],
         types: Sequence[type],
         args: Sequence[Any] = (),
         kwargs: dict[str, Any] | None = None,

@@ -1169,7 +1169,9 @@ class GetAttrVariable(VariableTracker):
         elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
             if isinstance(self.obj, variables.UserDefinedObjectVariable):
                 # Bypass any custom setattr as we are updating the `__dict__` itself
-                return self.obj.method_setattr_standard(tx, args[0], args[1])
+                return self.obj.method_setattr_standard(
+                    tx, args[0], args[1], directly_update_dict=True
+                )
             if isinstance(self.obj, variables.NNModuleVariable):
                 # This matches how `setattr` is handled for NNModuleVariable
                 self.obj.convert_to_unspecialized(tx)
@@ -1756,7 +1758,7 @@ class RandomVariable(VariableTracker):
     """random.Random()
 
     Implemented by wrapping a VariableTracker around a random.Random object.
-    The supported methods for the random.Random object cannot be overriden.
+    The supported methods for the random.Random object cannot be overridden.
     Assumes that random objects behave the same given a set seed or state.
     """
 
