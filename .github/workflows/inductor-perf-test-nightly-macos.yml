@@ -45,7 +45,9 @@ jobs:
       python-version: 3.12.7
       test-matrix: |
         { include: [
-          { config: "perf_smoketest", shard: 1, num_shards: 1, runner: "macos-m2-15" },
+          { config: "perf_smoketest", shard: 1, num_shards: 3, runner: "macos-m2-15" },
+          { config: "perf_smoketest", shard: 2, num_shards: 3, runner: "macos-m2-15" },
+          { config: "perf_smoketest", shard: 3, num_shards: 3, runner: "macos-m2-15" },
         ]}
     secrets: inherit
 
