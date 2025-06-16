@@ -31,7 +31,7 @@ namespace detail {
 // Specialization for general copyable types (catch-all) => StableIValue
 template <typename T>
 struct FromImpl {
-  static StableIValue call(const T& val) {
+  static StableIValue call(T val) {
     static_assert(
         sizeof(T) <= sizeof(StableIValue),
         "StableLibrary stack does not support parameter types larger than 64 bits.");
@@ -52,7 +52,7 @@ struct FromImpl {
 // Specialization for std::nullopt_t => StableIValue
 template <>
 struct FromImpl<std::nullopt_t> {
-  static StableIValue call(const std::nullopt_t& val) {
+  static StableIValue call(std::nullopt_t val) {
     return from(nullptr);
   }
 };
