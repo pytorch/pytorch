@@ -914,8 +914,11 @@ if torch.backends.mps.is_available():
             # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
             # Running `msort` with stable `sort` passes.
             "msort": [torch.float16],
+        }
+
+        MACOS_13_X_XFAILLIST = {
             # TopK fails with duplicate indices
-            "topk": [torch.float16],
+            "topk": [torch.float16]
         }
 
         ON_MPS_XFAILLIST = {
@@ -964,6 +967,15 @@ if torch.backends.mps.is_available():
                     op,
                     DecorateInfo(
                         unittest.expectedFailure, dtypes=MACOS_13_3_XFAILLIST_GRAD[key]
+                    ),
+                )
+            if key in MACOS_13_X_XFAILLIST and (
+                MACOS_VERSION >= 13.0 and MACOS_VERSION < 14.0
+            ):
+                addDecorator(
+                    op,
+                    DecorateInfo(
+                        unittest.expectedFailure, dtypes=MACOS_13_X_XFAILLIST[key]
                     ),
                 )
         return ops
