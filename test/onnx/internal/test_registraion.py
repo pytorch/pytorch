@@ -144,7 +144,7 @@ class TestOverrideDict(common_utils.TestCase):
         self.assertEqual(len(self.override_dict), 0)
         self.assertNotIn("a", self.override_dict)
 
-    def test_overriden_key_precededs_base_key_regardless_of_insert_order(self):
+    def test_overridden_key_precedes_base_key_regardless_of_insert_order(self):
         self.override_dict.set_base("a", 42)
         self.override_dict.override("a", 100)
         self.override_dict.set_base("a", 0)

@@ -247,9 +247,9 @@ class _ConvNd(WeightedQuantizedModule):
         if weight_post_process is None:
             weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
-        assert (
-            weight_post_process.dtype == torch.qint8
-        ), "Weight observer must have a dtype of qint8"
+        assert weight_post_process.dtype == torch.qint8, (
+            "Weight observer must have a dtype of qint8"
+        )
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         # the __init__ call used is the one from derived classes and not the one from _ConvNd
         qconv = cls(
@@ -290,9 +290,9 @@ class _ConvNd(WeightedQuantizedModule):
                     mod.bn.weight,
                     mod.bn.bias,
                 )
-            assert hasattr(
-                mod, "activation_post_process"
-            ), "Input QAT module must have observer attached"
+            assert hasattr(mod, "activation_post_process"), (
+                "Input QAT module must have observer attached"
+            )
             weight_post_process = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:
@@ -304,9 +304,9 @@ class _ConvNd(WeightedQuantizedModule):
                 + " but got:"
                 + str(type(mod))
             )
-            assert hasattr(
-                mod, "qconfig"
-            ), "Input float module must have qconfig defined."
+            assert hasattr(mod, "qconfig"), (
+                "Input float module must have qconfig defined."
+            )
             activation_post_process = (
                 None
                 if not hasattr(mod, "activation_post_process")
@@ -467,7 +467,7 @@ class Conv1d(_ConvNd):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
@@ -517,6 +517,7 @@ class Conv2d(_ConvNd):
         >>> output = m(q_input)
 
     """
+
     _FLOAT_MODULE: ClassVar[type[nn.Conv2d]] = nn.Conv2d
     _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = nniqat.ConvBn2d
     _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nni.ConvReLU2d
@@ -596,7 +597,7 @@ class Conv2d(_ConvNd):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
@@ -646,6 +647,7 @@ class Conv3d(_ConvNd):
         >>> output = m(q_input)
 
     """
+
     _FLOAT_MODULE: ClassVar[type[nn.Conv3d]] = nn.Conv3d
     _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = nniqat.ConvBn3d
     _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nni.ConvReLU3d
@@ -726,7 +728,7 @@ class Conv3d(_ConvNd):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
@@ -792,7 +794,7 @@ class _ConvTransposeNd(_ConvNd):
         return res
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module or qparams_dict.
         Args:
             mod (Module): a float module, either produced by torch.ao.quantization
@@ -809,9 +811,9 @@ class _ConvTransposeNd(_ConvNd):
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined."
         weight_post_process = mod.qconfig.weight()  # type: ignore[operator, union-attr]
         weight_post_process(mod.weight)
-        assert (
-            weight_post_process.dtype == torch.qint8
-        ), "Weight observer must have a dtype of qint8"
+        assert weight_post_process.dtype == torch.qint8, (
+            "Weight observer must have a dtype of qint8"
+        )
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         # the __init__ call used is the one from derived classes and not the one from _ConvTransposeNd
         qconv = cls(
@@ -839,7 +841,7 @@ class _ConvTransposeNd(_ConvNd):
             return qconv
 
     @staticmethod
-    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):  # type: ignore[override]
         r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
         Args:
             ref_qconvt (Module): a reference quantized  module, either produced by torch.ao.quantization
@@ -987,7 +989,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         )
 
     @classmethod
-    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):  # type: ignore[override]
         return _ConvTransposeNd.from_reference(
             cls, ref_qconvt, output_scale, output_zero_point
         )
@@ -1110,7 +1112,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         )
 
     @classmethod
-    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):  # type: ignore[override]
         return _ConvTransposeNd.from_reference(
             cls, ref_qconvt, output_scale, output_zero_point
         )
@@ -1235,7 +1237,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         )
 
     @classmethod
-    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):  # type: ignore[override]
         return _ConvTransposeNd.from_reference(
             cls, ref_qconvt, output_scale, output_zero_point
         )

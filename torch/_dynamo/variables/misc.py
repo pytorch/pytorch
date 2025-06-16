@@ -1758,7 +1758,7 @@ class RandomVariable(VariableTracker):
     """random.Random()
 
     Implemented by wrapping a VariableTracker around a random.Random object.
-    The supported methods for the random.Random object cannot be overriden.
+    The supported methods for the random.Random object cannot be overridden.
     Assumes that random objects behave the same given a set seed or state.
     """
 

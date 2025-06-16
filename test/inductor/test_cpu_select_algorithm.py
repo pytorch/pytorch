@@ -1552,7 +1552,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 return y.reshape(*x_shape[:-1], out_features)
 
         counters.clear()
-        seq_len = 8
+        seq_len = 4
         x = torch.rand((batch_size, seq_len, in_features), dtype=dtype)
         mod = M(in_features, out_features, group_size).eval()
         self.common(mod, (x,), reference_in_float=False)
@@ -1570,7 +1570,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
-    @parametrize("batch_size", (4, 6))
+    @parametrize("batch_size", (1, 4, 6))
     @parametrize("in_features", (128, 1024))
     @parametrize("out_features", (128, 1024))
     @parametrize("group_size", (32, 64, 128))

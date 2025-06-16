@@ -56,7 +56,7 @@ def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
     return content
 
 
-@functools.lru_cache(None)
+@functools.cache
 def try_import_cutlass() -> bool:
     """
     We want to support three ways of passing in CUTLASS:
@@ -251,7 +251,7 @@ class CUTLASSArgs:
 
 
 @clear_on_fresh_inductor_cache
-@functools.lru_cache(None)
+@functools.cache
 def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     # Note: Cache needs to be specific for cuda architecture and version
 
@@ -314,7 +314,7 @@ DTYPE_TO_CUTLASS_TYPE = {
     **DTYPE_TO_CPP,
     torch.float16: "__half",
     torch.bfloat16: "__nv_bfloat16",
-    torch.float8_e4m3fn: "cutlass::float_e4m3_t",
+    torch.float8_e4m3fn: "__nv_fp8_e4m3",
 }
 
 

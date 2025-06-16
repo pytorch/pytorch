@@ -1022,6 +1022,12 @@ def _try_get_metadata_from_dynamo(
         aot_autograd_arg_pos_to_source: used to dedup params and their guards
         static_input_indices: used to identify static inputs for cudagraphs
     """
+    # Note [Assumption on Dynamo Metadata]
+    # This function assumes a graph module from dynamo provides `dynamo_compiled_id`,
+    # _param_name_to_source, and every placeholder node has `_dynamo_source` attributes.
+    # When gm is modified (e.g., DDPOptimizer via split_module), metadata needs to
+    # be propagated in order to be recognized as a dynamo graph
+
     if not (isinstance(mod, torch.fx.GraphModule) and "dynamo_compile_id" in mod.meta):
         # graph was not captured by dynamo
         return None, []
@@ -1055,7 +1061,10 @@ def _try_get_metadata_from_dynamo(
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
         assert hasattr(node, "_dynamo_source")
         source = node._dynamo_source
-        assert source not in seen_sources, source
+        # `source`` specifies the source from user code. ddp optimizer may have
+        # intermediate values becoming submodule placeholders which does not
+        # have a source
+        assert source is None or source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
         source_name = source.name() if source else str(source)

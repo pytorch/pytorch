@@ -5,6 +5,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
+#include <c10/core/Contiguity.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/MaybeOwned.h>
@@ -92,9 +93,10 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
   if (bias->defined() && !input.is_xla()) {
     // Also hit the fused path for contiguous 3D input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
-    if (input.is_contiguous() && input_dim == 3) {
+    bool is_contiguous = definitely_contiguous(input.sym_sizes(), input.sym_strides(), input.sym_numel());
+    if (is_contiguous && input_dim == 3) {
       return _flatten_nd_linear(input, weight, *bias);
-    } else if (input.is_contiguous() && input.layout() == c10::kStrided && weight.layout() == c10::kStrided && bias->dim() == 1) {
+    } else if (is_contiguous && input.layout() == c10::kStrided && weight.layout() == c10::kStrided && bias->dim() == 1) {
       return _flatten_nd_linear(input, weight, *bias);
     } else if (parseLinearFlatten3d() && input_dim == 3) {
       // If user forces flattening via env var

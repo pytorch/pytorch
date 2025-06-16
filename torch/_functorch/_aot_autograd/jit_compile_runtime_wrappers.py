@@ -759,6 +759,11 @@ def run_joint_graph_passes_on_hops(
                 ),
             )
             propagate_meta_info(new_bw_hop_gm, new_bw_node, bw_node)
+            # Since the partitioner is run after the graph passes, we have lost
+            # the eager information and cannot faithfully extract the eager
+            # inputs for the new partitioned backward graph. For the forward
+            # graph, it was fine because the input signature remains same.
+            new_bw_node.meta.pop("eager_input_vals", None)
 
         bw_node.replace_all_uses_with(new_bw_node)
         joint_gm.graph.erase_node(bw_node)

@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
 log = logging.getLogger(__name__)
+hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 
 # TODO: Hack to unblock https://github.com/pytorch/pytorch/pull/108186
 # Proper fix tracked by https://github.com/pytorch/pytorch/issues/120105
@@ -118,6 +119,11 @@ class DataDependentOutputException(RuntimeError):
 @dataclass
 class UnsupportedOperatorException(RuntimeError):
     func: OpOverload
+
+
+@dataclass
+class UnsupportedMutationAliasingException(RuntimeError):
+    reason: str
 
 
 @dataclass
@@ -227,7 +233,7 @@ def maybe_get_fake_mode(t: object) -> Optional[FakeTensorMode]:
     return None
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
     return torch._C._SchemaInfo(func._schema)
 
@@ -237,7 +243,7 @@ def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
 # torch/_decomp/decompositions.py.
 # decomps are used for aot autograd tracing so we would like to unify on their
 # implementation and add additional testing to them
-@functools.lru_cache(None)
+@functools.cache
 def torch_decomp_decompositions(func: OpOverload) -> bool:
     from torch._decomp import decomposition_table
 
@@ -505,7 +511,7 @@ class FakeTensorConverter:
         return out
 
 
-@functools.lru_cache(None)
+@functools.cache
 def init_gpu_context(device: torch.device) -> None:
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available() or torch.xpu.is_available():
@@ -1433,6 +1439,15 @@ class FakeTensorMode(TorchDispatchMode):
             key = self._cache_key(state, func, args, kwargs)
         except _BypassDispatchCache as e:
             # We couldn't create the cache key at all
+            if (
+                isinstance(func, torch._ops.HigherOrderOperator)
+                and func.name() == "invoke_subgraph"
+            ):
+                hc_log.debug(
+                    "Fake tensor cache failed: identifier = %s, reason = %s",
+                    args[1],
+                    e.reason,
+                )
             FakeTensorMode.cache_bypasses[e.reason] += 1
 
         if key is None:
@@ -1477,6 +1492,15 @@ class FakeTensorMode(TorchDispatchMode):
             # We ran "extra" checks on the cache key and determined that it's no
             # good. Record the reason and mark it so we don't bother validating
             # again.
+            if (
+                isinstance(func, torch._ops.HigherOrderOperator)
+                and func.name() == "invoke_subgraph"
+            ):
+                hc_log.debug(
+                    "Fake tensor cache failed: identifier = %s, reason = %s",
+                    args[1],
+                    e.reason,
+                )
             FakeTensorMode.cache_bypasses[e.reason] += 1
             set_cache_key(cache, key, _DispatchCacheBypassEntry(e.reason))
             return output

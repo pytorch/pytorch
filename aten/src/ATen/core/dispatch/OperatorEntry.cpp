@@ -353,7 +353,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //   CompositExplicitAutogradNonFunctional > CompositeExplicitAutograd > CompositeImplicitAutograd > Autograd
   // Note [CompositeExplicitAutograd and CompositeImplicitAutograd]
   //   When there're registrations to both CompositeExplicitAutograd & CompositeImplicitAutograd & Autograd, from (2.2) we know CompositeExplicitAutograd
-  //   and Autograd kernels will be picked up and CompositeImplicitAutograd is overriden.
+  //   and Autograd kernels will be picked up and CompositeImplicitAutograd is overridden.
   //   This is fine and in practice CompositeExplicitAutograd and CompositeImplicitAutograd shouldn't co-exist for an op.
   // TODO: Update alias key precedence after we add new alias keys AutogradDispatchCPUOrCUDA .
 

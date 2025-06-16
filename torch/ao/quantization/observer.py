@@ -255,9 +255,11 @@ class UniformQuantizationObserverBase(ObserverBase):
             torch.per_channel_affine,
             torch.per_channel_symmetric,
             torch.per_channel_affine_float_qparams,
-        ), "Default Observer only works for per_tensor_affine, \
+        ), (
+            "Default Observer only works for per_tensor_affine, \
                 per_tensor_symmetric, per_channel_affine, \
                 per_channel_symmetric and per_channel_float_qparams quantization scheme"
+        )
 
         _ALLOWED_DTYPES = (
             torch.qint8,
@@ -273,9 +275,9 @@ class UniformQuantizationObserverBase(ObserverBase):
             torch.uint16,
         )
 
-        assert (
-            self.dtype in _ALLOWED_DTYPES
-        ), f"Default Observer only works for {_ALLOWED_DTYPES} data type"
+        assert self.dtype in _ALLOWED_DTYPES, (
+            f"Default Observer only works for {_ALLOWED_DTYPES} data type"
+        )
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:
             validate_qmin_qmax(quant_min, quant_max)
@@ -331,12 +333,12 @@ class UniformQuantizationObserverBase(ObserverBase):
         """
         # The variable names are prefixed with "initial" because their values (qmin and qmax) might be adjusted
         # based on whether quantization range is reduced and the datatype (signed/unsigned) used by the observer.
-        assert (
-            quant_min <= 0 <= quant_max
-        ), "Used-specified quantization range must include 0."
-        assert (
-            quant_min < quant_max
-        ), "qmin must be strictly less than qmax for user-specified quantization range."
+        assert quant_min <= 0 <= quant_max, (
+            "Used-specified quantization range must include 0."
+        )
+        assert quant_min < quant_max, (
+            "qmin must be strictly less than qmax for user-specified quantization range."
+        )
 
     @torch.jit.export
     def _calculate_qparams(
@@ -562,7 +564,7 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         return x_orig
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         r"""Calculates the quantization parameters."""
         return self._calculate_qparams(self.min_val, self.max_val)
 
@@ -785,7 +787,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         return x_orig
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         return self._calculate_qparams(self.min_val, self.max_val)
 
     def extra_repr(self):
@@ -1268,9 +1270,9 @@ class HistogramObserver(UniformQuantizationObserverBase):
         self.min_val.copy_(min_val)
         self.max_val.resize_(max_val.shape)
         self.max_val.copy_(max_val)
-        assert (
-            min_val.numel() == 1 and max_val.numel() == 1
-        ), "histogram min/max values must be scalar."
+        assert min_val.numel() == 1 and max_val.numel() == 1, (
+            "histogram min/max values must be scalar."
+        )
         new_histogram = torch.histc(x, self.bins, min=min_val, max=max_val)  # type: ignore[arg-type]
         self.histogram.detach_().resize_(new_histogram.shape)
         self.histogram.copy_(new_histogram)
@@ -1305,7 +1307,10 @@ class HistogramObserver(UniformQuantizationObserverBase):
             # new_min and new_max should already have requires_grad set to False
             new_min, new_max = new_min.detach(), new_max.detach()
             update_histogram = torch.histc(
-                x, self.bins, min=new_min, max=new_max  # type: ignore[arg-type]
+                x,
+                self.bins,
+                min=new_min,  # type: ignore[arg-type]
+                max=new_max,  # type: ignore[arg-type]
             ).to(self.histogram.device)
             if new_min == current_min and new_max == current_max:
                 combined_histogram = self.histogram + update_histogram
@@ -1330,7 +1335,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         return x_orig
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         is_uninitialized = self.min_val == float("inf") and self.max_val == float(
             "-inf"
         )
@@ -1443,7 +1448,7 @@ class FixedQParamsObserver(ObserverBase):
         return X
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         return self.scale, self.zero_point
 
 
@@ -1512,7 +1517,7 @@ class PlaceholderObserver(ObserverBase):
         return f"dtype={self.dtype}, is_dynamic={self.is_dynamic}"
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         raise Exception(  # noqa: TRY002
             "calculate_qparams should not be called for PlaceholderObserver"
         )
@@ -1539,7 +1544,7 @@ class RecordingObserver(ObserverBase):
         return x
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         raise Exception(  # noqa: TRY002
             "calculate_qparams should not be called for RecordingObserver"
         )
@@ -1572,7 +1577,7 @@ class NoopObserver(ObserverBase):
         return x
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         raise Exception(  # noqa: TRY002
             "calculate_qparams should not be called for NoopObserver"
         )
@@ -1599,7 +1604,7 @@ class ReuseInputObserver(ObserverBase):
         return x
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         raise Exception(  # noqa: TRY002
             "calculate_qparams should not be called for ReuseInputObserver"
         )
@@ -1777,9 +1782,9 @@ def get_block_size(
         input_shape: The input tensor shape possibly more than 2 dimensions
         granularity: The granularity type of the quantization
     """
-    assert isinstance(
-        granularity, Granularity
-    ), "Please provide an instance of Granularity, not subclass of it"
+    assert isinstance(granularity, Granularity), (
+        "Please provide an instance of Granularity, not subclass of it"
+    )
     if isinstance(granularity, PerTensor):
         return input_shape
     elif isinstance(granularity, PerAxis):
@@ -1789,9 +1794,9 @@ def get_block_size(
     elif isinstance(granularity, PerRow):
         return (1,) * (len(input_shape) - 1) + (input_shape[-1],)
     elif isinstance(granularity, PerGroup):
-        assert (
-            len(input_shape) == 2
-        ), f"Expecting input shape dim to be 2 for per group quantization, gotinput shape: {input_shape}"
+        assert len(input_shape) == 2, (
+            f"Expecting input shape dim to be 2 for per group quantization, gotinput shape: {input_shape}"
+        )
         return (1, granularity.group_size)
     elif isinstance(granularity, PerToken):
         block_size = [1] * len(input_shape)
@@ -1868,9 +1873,9 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
 
         with model.graph.inserting_before(observer_node):
             assert self.block_size is not None, "Expecting block_size to be populated"
-            assert (
-                self.original_dtype is not None
-            ), "Expecting original_dtype to be populated"
+            assert self.original_dtype is not None, (
+                "Expecting original_dtype to be populated"
+            )
             if hasattr(self, "is_dynamic") and self.is_dynamic:
                 choose_qparams_affine = model.graph.call_function(
                     torch.ops.pt2e_quant.choose_qparams_affine,

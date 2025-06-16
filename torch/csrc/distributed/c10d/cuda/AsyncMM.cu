@@ -157,7 +157,7 @@ at::Tensor async_input_mm_impl(
   };
 
   TORCH_CHECK(
-      a_chunk_signals.sizes().size() == 1,
+      a_chunk_signals.dim() == 1,
       "async_input_mm: `a_chunk_signals` must be a 1D tensor.");
   size_t num_chunks_M = a_chunk_signals.numel();
 

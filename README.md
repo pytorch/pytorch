@@ -189,6 +189,11 @@ $ conda activate <CONDA_NAME>
 $ call "C:\Program Files\Microsoft Visual Studio\<VERSION>\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
 ```
 
+A conda environment is not required.  You can also do a PyTorch build in a
+standard virtual environment, e.g., created with tools like `uv`, provided
+your system has installed all the necessary dependencies unavailable as pip
+packages (e.g., CUDA, MKL.)
+
 ##### NVIDIA CUDA Support
 If you want to compile with CUDA support, [select a supported version of CUDA from our support matrix](https://pytorch.org/get-started/locally/), then install the following:
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads)
@@ -198,7 +203,9 @@ If you want to compile with CUDA support, [select a supported version of CUDA fr
 Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/backend/latest/reference/support-matrix.html) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardware
 
 If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
-Other potentially useful environment variables may be found in `setup.py`.
+Other potentially useful environment variables may be found in `setup.py`.  If
+CUDA is installed in a non-standard location, set PATH so that the nvcc you
+want to use can be found (e.g., `export PATH=/usr/local/cuda-12.8/bin:$PATH`).
 
 If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to install PyTorch for Jetson Nano are [available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 

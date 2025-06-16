@@ -87,8 +87,8 @@ namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
-const static int kInvalidOpsetVersion = -1;
-const static int kMainOpsetVersion = 20;
+constexpr int kInvalidOpsetVersion = -1;
+constexpr int kMainOpsetVersion = 23;
 // Based on OP_SET_ID_VERSION_MAP in
 // https://github.com/onnx/onnx/blob/master/onnx/helper.py.
 constexpr static std::array<int64_t, kMainOpsetVersion + 1>
@@ -114,6 +114,9 @@ constexpr static std::array<int64_t, kMainOpsetVersion + 1>
         8, // opset 18
         9, // opset 19
         9, // opset 20
+        10, // opset 21
+        10, // opset 22
+        11, // opset 23
 };
 
 std::string getNodeStackTraceString(const Node* n) {

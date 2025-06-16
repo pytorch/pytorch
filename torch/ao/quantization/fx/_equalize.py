@@ -360,9 +360,11 @@ def get_op_node_and_weight_eq_obs(
             model, "equalization_node_name_to_qconfig"
         )
         assert maybe_equalization_node_name_to_config is not None
-        equalization_node_name_to_qconfig: dict[str, Any] = maybe_equalization_node_name_to_config  # type: ignore[assignment]
+        equalization_node_name_to_qconfig: dict[str, Any] = (
+            maybe_equalization_node_name_to_config  # type: ignore[assignment]
+        )
         assert equalization_node_name_to_qconfig.get(op_node.name, None) is not None
-        weight_eq_obs = equalization_node_name_to_qconfig.get(
+        weight_eq_obs = equalization_node_name_to_qconfig.get(  # type: ignore[union-attr]
             op_node.name, None
         ).weight()
 
@@ -843,7 +845,7 @@ def convert_eq_obs(
 
                 # Erase the weight equalization observer node
                 prev_node = weight_eq_obs_node.args[0]
-                remove_node(model, weight_eq_obs_node, prev_node)
+                remove_node(model, weight_eq_obs_node, prev_node)  # type: ignore[arg-type]
             else:
                 raise ValueError(
                     "Expected operation node to be 'call_module' or 'call_function"

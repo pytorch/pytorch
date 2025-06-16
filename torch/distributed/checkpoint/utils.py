@@ -119,7 +119,7 @@ class _DistWrapper:
             dist.broadcast_object_list(
                 object_list=object_list,
                 group=self.group,
-                src=self.coordinator_rank,
+                src=self.global_coordinator_rank,
             )
         return cast(T, object_list[0])
 

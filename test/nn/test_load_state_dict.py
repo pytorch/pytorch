@@ -470,9 +470,9 @@ def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
                         return cls(src._data)
                     return cls(src)
         else:
-            assert isinstance(
-                src, cls
-            ), f"Expected isinstance(src, {cls}) but got {type(src)}"
+            assert isinstance(src, cls), (
+                f"Expected isinstance(src, {cls}) but got {type(src)}"
+            )
             assert (
                 type(dest) == torch.Tensor
                 or type(dest) == torch.nn.Parameter

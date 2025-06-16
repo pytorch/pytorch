@@ -34,7 +34,7 @@ class Benchmark:
         for method in dir(self.engine):
             if not callable(getattr(self.engine, method)):
                 continue
-            # don't forward if this function is overriden here
+            # don't forward if this function is overridden here
             if hasattr(self, method):
                 continue
             # don't forward if it is a internal function

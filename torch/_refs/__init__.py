@@ -20,6 +20,7 @@ from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
     definitely_contiguous,
+    definitely_contiguous_for_memory_format,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -2768,7 +2769,10 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_size_oblivious,
+    )
 
     # This is a bit tricky.  Naively, you would expect to just pick one
     # arbitrary tensor and check that all tensors match this tensor.  However,
@@ -2829,7 +2833,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
             )
         else:
             # Remove inputs that are 1-D, zero size
-            if tensor.ndim == 1 and guard_size_oblivious(tensor.shape[0] == 0):
+            if tensor.ndim == 1 and guard_or_false(tensor.shape[0] == 0):
                 continue
             # Don't bother checking size match, prims.cat will handle it
             filtered.append(tensor)
@@ -2975,7 +2979,8 @@ def contiguous(
         lambda: "preserve memory format is unsupported by the contiguous operator",
     )
 
-    if utils.is_contiguous_for_memory_format(a, memory_format=memory_format):
+    # TODO: make logic consistent with aten contiguous
+    if definitely_contiguous_for_memory_format(a, memory_format=memory_format):
         return a
 
     return torch.clone(a, memory_format=memory_format)
@@ -3298,11 +3303,11 @@ def native_layer_norm(
         + str(input.shape),
     )
 
-    input = input.contiguous()
+    input = contiguous(input)
     if weight is not None:
-        weight = weight.contiguous()
+        weight = contiguous(weight)
     if bias is not None:
-        bias = bias.contiguous()
+        bias = contiguous(bias)
 
     axis = input.ndim - normalized_ndim
     reduction_dims = list(range(axis, input.ndim))
@@ -3979,7 +3984,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return _a
 
-    if a.is_contiguous():
+    if definitely_contiguous(a):
         # Special-cases for nd_to_1d
         if len(shape) == 1 and a.ndim > 1:
             return torch.as_strided(a, [a.numel()], [1])

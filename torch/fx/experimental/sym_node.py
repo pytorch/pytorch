@@ -1415,7 +1415,7 @@ def _make_node_magic(method, func):
             out,
             self.shape_env,
             pytype,
-            out_hint,
+            out_hint,  # type: ignore[arg-type]
             fx_node=fx_node,
             optimized_summation=optimized_summation,  # see Note [optimized_summation]
         )

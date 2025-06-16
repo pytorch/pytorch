@@ -9,8 +9,6 @@ on:
     tags:
       - ciflow/periodic/*
       - ciflow/s390/*
-    branches:
-      - release/*
   workflow_dispatch:
 
 concurrency:

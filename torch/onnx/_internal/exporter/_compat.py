@@ -159,7 +159,7 @@ def export_compat(
                 export_params=export_params,
                 input_names=input_names,
                 output_names=output_names,
-                opset_version=17,  # TODO(justinchuby): Hard coded to 17 for now
+                opset_version=opset_version,
                 dynamic_axes=dynamic_axes,
                 keep_initializers_as_inputs=keep_initializers_as_inputs,
             )
