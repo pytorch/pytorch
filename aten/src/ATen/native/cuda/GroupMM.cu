@@ -56,6 +56,10 @@ struct Schedule {
       cutlass::epilogue::PtrArrayTmaWarpSpecializedCooperative;
   using PongEpilogueSchedule =
       cutlass::epilogue::PtrArrayTmaWarpSpecializedPingpong;
+  using KernelScheduleSM90 =
+      cute::conditional_t<PONG, PongSchedule, CooperativeSchedule>;
+  using EpilogueScheduleSM90 = cute::
+      conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>;
 
   // SM100
   using MMA1SM_Schedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecialized1SmSm100;
@@ -63,13 +67,9 @@ struct Schedule {
   // using MMA2SM_KernelSchedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecialized2SmSm100;
   // using MMA2_SMEpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized2Sm;
 
-  using KernelSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, MMA1SM_Schedule, cute::conditional_t<PONG, PongSchedule, CooperativeSchedule>>;
-  using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, MMA1SM_EpilogueSchedule, conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>>;
+  using KernelSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, MMA1SM_Schedule, KernelScheduleSM90>;
+  using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, MMA1SM_EpilogueSchedule, EpilogueScheduleSM90>;
 
-  // using KernelSchedule =
-  //     cute::conditional_t<PONG, PongSchedule, CooperativeSchedule>;
-  // using EpilogueSchedule = cute::
-  //     conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>;
 };
 
 int ceildiv(int a, int b) {
@@ -115,9 +115,9 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
   using TileShape = cute::Shape<TB_M, TB_N, TB_K>;
   using ClusterShape = cute::Shape<cute::_2, cute::_1, cute::_1>;
   using KernelSchedule =
-      typename Schedule<Pong, TB_M, TB_N, TB_K>::KernelSchedule;
+      typename Schedule<ArchTag, Pong, TB_M, TB_N, TB_K>::KernelSchedule;
   using EpilogueSchedule =
-      typename Schedule<Pong, TB_M, TB_N, TB_K>::EpilogueSchedule;
+      typename Schedule<ArchTag, Pong, TB_M, TB_N, TB_K>::EpilogueSchedule;
   using ProblemShape = cutlass::gemm::GroupProblemShape<
       cute::Shape<int32_t, int32_t, int32_t>>; // <M,N,K> per
                                                // group
