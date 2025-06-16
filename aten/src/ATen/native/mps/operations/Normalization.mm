@@ -103,7 +103,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
 
   const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
   const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
-  TORCH_CHECK(has_running_mean == has_running_var);
+  TORCH_CHECK_VALUE(has_running_mean == has_running_var,
+                    "running_mean and running_var must either both be None or neither be None");
 
   const bool has_weight = (weight_opt.has_value() && weight_opt->defined());
   const bool has_bias = (bias_opt.has_value() && bias_opt->defined());
@@ -587,10 +588,12 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 
   const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
   const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
-  TORCH_CHECK(has_running_mean == has_running_var);
+  TORCH_CHECK_VALUE(has_running_mean == has_running_var,
+                    "running_mean and running_var must either both be None or neither be None");
   const bool has_save_mean = (save_mean_opt.has_value() && save_mean_opt->defined());
   const bool has_save_var = (save_var_opt.has_value() && save_var_opt->defined());
-  TORCH_CHECK(has_save_mean == has_save_var);
+  TORCH_CHECK_VALUE(has_save_mean == has_save_var,
+                    "save_mean and save_var must either both be None or neither be None");
 
   const bool has_weight = (weight_opt.has_value() && weight_opt->defined());
 

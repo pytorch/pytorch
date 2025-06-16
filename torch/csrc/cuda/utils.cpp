@@ -4,7 +4,6 @@
 #include <cstdarg>
 #include <string>
 
-#ifdef USE_CUDA
 // NB: It's a list of *optional* CUDAStream; when nullopt, that means to use
 // whatever the current stream of the device the input is associated with was.
 std::vector<std::optional<at::cuda::CUDAStream>>
@@ -41,5 +40,3 @@ THPUtils_PySequence_to_CUDAStreamList(PyObject* obj) {
   }
   return streams;
 }
-
-#endif

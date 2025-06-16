@@ -202,8 +202,8 @@ struct TensorDescriptorListParams {
     int64_t input_size;
     int64_t batch_sizes_sum;
 
-    bool is_input_packed() const {
-        return batch_sizes.size() != 0;
+    [[nodiscard]] bool is_input_packed() const {
+        return !batch_sizes.empty();
     }
 
     void set(IntArrayRef input_sizes, IntArrayRef batch_sizes_, bool batch_first) {
@@ -227,8 +227,7 @@ struct TensorDescriptorListParams {
     }
 
     std::vector<TensorDescriptor> descriptors(Tensor x) const {
-        auto is_input_packed = batch_sizes.size() != 0;
-        if (is_input_packed) {
+        if (is_input_packed()) {
             return rnn_descriptor_sequence(x, batch_sizes);
         } else {
             return rnn_descriptor(x[0], seq_length);
@@ -545,7 +544,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         TORCH_CHECK(!cx.defined(), "miopen_rnn: illegal defined cx for non-LSTM RNN.");
     }
 
-    auto is_input_packed = fn.tensors.batch_sizes.size() != 0;
+    auto is_input_packed = !fn.tensors.batch_sizes.empty();
     if (batch_first && !is_input_packed) {
         input = input.transpose(0, 1);
     }
@@ -656,7 +655,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
         TORCH_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
     }
 
-    auto is_input_packed = fn_batch_sizes.size() != 0;
+    auto is_input_packed = !fn_batch_sizes.empty();
     if (batch_first && !is_input_packed) {
         input = input.transpose(0, 1);
         grad_output = grad_output.transpose(0, 1);
@@ -773,7 +772,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
         TORCH_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
     }
 
-    auto is_input_packed = fn_batch_sizes.size() != 0;
+    auto is_input_packed = !fn_batch_sizes.empty();
     if (batch_first && !is_input_packed) {
         input = input.transpose(0, 1);
         output = output.transpose(0, 1);

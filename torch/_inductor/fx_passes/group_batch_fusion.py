@@ -7,7 +7,7 @@ from collections.abc import Iterable, Iterator
 from typing import Any, Optional
 
 import torch
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._logging import trace_structured
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
@@ -18,6 +18,7 @@ from ..pattern_matcher import (
     get_arg_value,
     stable_topological_sort,
 )
+from ..utils import OPTIMUS_EXCLUDE_POST_GRAD
 
 
 try:
@@ -572,10 +573,6 @@ class BatchLinearLHSFusion(BatchFusion):
             new_node.meta.update(node.meta)
             graph.erase_node(node)  # type: ignore[operator]
         counters["inductor"]["batch_linear_lhs"] += 1
-
-
-def is_node_meta_valid(node: Optional[torch.fx.Node]):
-    return node is None or "example_value" in node.meta or "val" in node.meta
 
 
 # Poor person's check for if a node in the graph mutates its input.
@@ -1403,7 +1400,10 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
         fbgemm_fusion_keys = [
             x
             for x in config.post_grad_fusion_options
-            if config.post_grad_fusion_options[x].get("require_fbgemm", False)
+            if (
+                x not in OPTIMUS_EXCLUDE_POST_GRAD
+                and config.post_grad_fusion_options[x].get("require_fbgemm", False)
+            )
         ]
         fbgemm_fusions = {
             fusion: config.post_grad_fusion_options[fusion]
