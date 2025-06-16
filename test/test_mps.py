@@ -8421,7 +8421,7 @@ class TestTopK(TestCase):
             t_mps = torch.ops.aten.topk(a, k=5, dim=0)
         except Exception as e:
             e_string = str(e)
-            self.assertEqual(e_string, "On-going issue on MPSGraph topk when ndims() - axis > 4, see issue #154890")
+            self.assertEqual(e_string, "Issue on MPSGraph topk when ndims() - axis > 4. Upgrade to MacOS14.0+ to enable the op.")
 
 
 class TestNNMPS(NNTestCase):
