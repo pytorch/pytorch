@@ -35,7 +35,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   MempoolId_t pool();
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
-
   cudaGraph_t raw_cuda_graph();
 
  protected:
@@ -43,6 +42,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaGraphExec_t graph_exec_ = nullptr;
 
   // internal states so reset() can do its best cleaning up
+
   // Set to true in capture_end if cudaStreamEndCapture succeeded
   // Set back to false after instantiate() unless keep_graph=True or
   // enable_debug_mode() was called on any CUDAGraph instance.

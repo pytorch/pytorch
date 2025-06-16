@@ -95,9 +95,9 @@ void THCPGraph_init(PyObject* module) {
           "raw_cuda_graph",
           [](::at::cuda::CUDAGraph& self) {
             cudaGraph_t graph = self.raw_cuda_graph();
-            // We return a raw int here, since otherwise pybind11
-            // will try to return the underlying struct that
-            // cudaGraph_t, which is opaque and therefore causes a
+            // We return a raw int here, since otherwise pybind11 will
+            // try to return the underlying struct of cudaGraph_t
+            // points to, which is opaque and therefore causes a
             // compile error.
             return reinterpret_cast<uintptr_t>(graph);
           },
