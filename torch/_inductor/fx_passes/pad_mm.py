@@ -249,7 +249,7 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
     return arithmetic_intensity > machine_balance
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_pad_cache() -> torch._inductor.codecache.LocalCache:
     return torch._inductor.codecache.LocalCache()
 
@@ -857,7 +857,7 @@ def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _pad_mm_init() -> None:
     from .joint_graph import patterns
 

@@ -39,7 +39,7 @@ from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
-from .fx_utils import count_flops_fx
+from .fx_utils import count_flops_fx, countable_fx
 from .ir import (
     get_device_type,
     GraphPartitionSignature,
@@ -790,12 +790,12 @@ class BaseSchedulerNode:
         fx_node = self.node.get_origin_node()
         if fx_node is None:
             return None
-
-        flops = count_flops_fx(fx_node)
-        if flops is None:
+        if not countable_fx(fx_node):
             return None
 
-        resolved_flops = V.graph.sizevars.size_hint(flops, fallback=0)
+        flops = count_flops_fx(fx_node)
+
+        resolved_flops = V.graph.sizevars.size_hints((flops,), fallback=0)[0]
         counters["inductor"]["flop_count"] += resolved_flops
         return resolved_flops
 
@@ -2696,7 +2696,7 @@ class Scheduler:
         choice finalized through fusion. In the case of an extern choice, this will result
         in replacing the SchedulerNode.
 
-        If a MultiTemplateBuffer did not have any fusion opportunities, finalizing a choie
+        If a MultiTemplateBuffer did not have any fusion opportunities, finalizing a choice
         will force completion of compilation and benchmarking.
         """
 

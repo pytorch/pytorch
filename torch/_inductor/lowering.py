@@ -494,7 +494,7 @@ def broadcast_symbolic_shapes(a, b):
         ):
             output.append(y)
         else:
-            V.graph.sizevars.guard_equals(x, y)
+            V.graph.sizevars.check_equals(x, y)
             if len(sympy.expand(y).free_symbols) < len(sympy.expand(x).free_symbols):
                 output.append(y)  # prefer shorter formula
             else:
@@ -1809,8 +1809,8 @@ def unfold(x, dimension, size, step):
 
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
-    sizevars.guard_leq(size, dim_size)
-    sizevars.guard_lt(0, step)  # type: ignore[arg-type]
+    sizevars.check_leq(size, dim_size)
+    sizevars.check_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
     if sizevars.size_hint(dim_size) > 0:
@@ -1879,7 +1879,7 @@ def fallback_handler(kernel, add_to_fallback_set=True):
     return handler
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _warn_complex_not_supported():
     warnings.warn(
         "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
@@ -2660,6 +2660,8 @@ make_fallback(aten._histogramdd_from_bin_cts.default)
 make_fallback(aten.addbmm)
 make_fallback(aten._addmm_activation, warn=False)
 
+make_fallback(aten._grouped_mm, require_dense)
+
 # Need templated kernel. Probably impossible to write efficiently
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
@@ -2904,8 +2906,8 @@ def select_scatter(x, src, dim: int, index: int):
     dim = _validate_dim(x, dim, 0)
     if V.graph.sizevars.evaluate_expr(sympy.Lt(index, 0)):
         index = index + x.get_size()[dim]
-    V.graph.sizevars.guard_leq(0, index)  # type: ignore[arg-type]
-    V.graph.sizevars.guard_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
+    V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
+    V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -4341,10 +4343,10 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode, *, dilation=None
         if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
             # Sliding windows must start within the input or left padding
             x_alt -= 1  # type: ignore[assignment]
-            V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
+            V.graph.sizevars.check_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
         if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
             # ceil mode is actually a no-op, lets guard on that
-            V.graph.sizevars.guard_equals(x_out, x_alt)
+            V.graph.sizevars.check_equals(x_out, x_alt)
             ceil_mode = False
         else:
             x_out = x_alt
