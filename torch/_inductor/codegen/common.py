@@ -2384,7 +2384,7 @@ class CSEProxy(DefaultHandler):
             output_dtype = V.interpreter.current_node.meta.get(
                 OptimizationContext.key, None
             ).dtype
-        elif backend in ("triton", "cpp"):
+        elif backend in ("triton", "cpp", "mps"):
             dtype_op = getattr(dtype_handler, name)
             output_dtype = dtype_op(*args, **kwargs)
 
