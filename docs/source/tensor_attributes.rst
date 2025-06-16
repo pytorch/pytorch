@@ -44,11 +44,11 @@ dtype                                      description
 =========================================  ===============================
 ``torch.uint8``                            8-bit integer (unsigned)
 ``torch.int8``                             8-bit integer (signed)
-``torch.uint16``                           16-bit integer (unsigned)
+``torch.uint16`` [2]_                      16-bit integer (unsigned)
 ``torch.int16`` or ``torch.short``         16-bit integer (signed)
-``torch.uint32``                           32-bit integer (unsigned)
+``torch.uint32`` [2]_                      32-bit integer (unsigned)
 ``torch.int32`` or ``torch.int``           32-bit integer (signed)
-``torch.uint64``                           64-bit integer (unsigned)
+``torch.uint64`` [2]_                      64-bit integer (unsigned)
 ``torch.int64`` or ``torch.long``          64-bit integer (signed)
 ``torch.bool``                             Boolean
 =========================================  ===============================
@@ -65,6 +65,13 @@ dtype                                      description
   "f" - finite value encodings only, no infinity; 
   "n" - nan value encodings differ from the IEEE spec; 
   "uz" - "unsigned zero" only, i.e. no negative zero encoding
+
+.. [2]
+  Unsigned types asides from ``uint8`` are currently planned to only have
+  limited support in eager mode (they primarily exist to assist usage with
+  torch.compile); if you need eager support and the extra range is not needed,
+  we recommend using their signed variants instead.  See
+  https://github.com/pytorch/pytorch/issues/58734 for more details.
 
 **Note**: legacy constructors such as ``torch.*.FloatTensor``, ``torch.*.DoubleTensor``, ``torch.*.HalfTensor``, 
 ``torch.*.BFloat16Tensor``, ``torch.*.ByteTensor``, ``torch.*.CharTensor``, ``torch.*.ShortTensor``, ``torch.*.IntTensor``, 
