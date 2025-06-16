@@ -497,7 +497,7 @@ class SizeVarAllocator:
             return expr
         val = self.size_hint(expr)
         self.check_equals(expr, sympy.Integer(val))
-        return int(expr)
+        return int(val)
 
     def guard_int_seq(self, left: Sequence[Union[Expr, int]]) -> list[int]:
         """
