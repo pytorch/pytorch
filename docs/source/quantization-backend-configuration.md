@@ -7,7 +7,6 @@ of their backend.
 In the future, this document will contain a detailed spec of
 these configurations.
 
-
 ## Default values for native configurations
 
 Below is the output of the configuration for quantization of ops

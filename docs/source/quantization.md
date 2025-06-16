@@ -99,7 +99,7 @@ Operator coverage varies between dynamic and static quantization and is captured
 
 ### Eager Mode Quantization
 
-For a general introduction to the quantization flow, including different types of quantization, please take a look at [General Quantization Flow](#general-quantization-flow).
+For a general introduction to the quantization flow, including different types of quantization, please take a look at {ref}`general-quantization-flow`.
 
 #### Post Training Dynamic Quantization
 
@@ -110,7 +110,7 @@ is dominated by loading weights from memory rather than computing the matrix
 multiplications. This is true for LSTM and Transformer type models with
 small batch size.
 
-Diagram::
+Diagram:
 
 ```python
   # original model
@@ -126,7 +126,7 @@ Diagram::
      linear_weight_int8
 ```
 
-PTDQ API Example::
+PTDQ API Example:
 
 ```python
   import torch
@@ -165,9 +165,9 @@ parameters for activations. Post Training Static Quantization is typically used 
 both memory bandwidth and compute savings are important with CNNs being a
 typical use case.
 
-We may need to modify the model before applying post training static quantization. Please see [Model Preparation for Eager Mode Static Quantization](#model-preparation-for-eager-mode-static-quantization).
+We may need to modify the model before applying post training static quantization. Please see {ref}`model-preparation-for-eager-mode-static-quantization`.
 
-Diagram::
+Diagram:
 
 ```python
     # original model
@@ -183,7 +183,7 @@ Diagram::
       linear_weight_int8
 ```
 
-PTSQ API Example::
+PTSQ API Example:
 
 ```python
   import torch
@@ -263,9 +263,9 @@ activations are quantized, and activations are fused into the preceding layer
 where possible.  It is commonly used with CNNs and yields a higher accuracy
 compared to static quantization.
 
-We may need to modify the model before applying post training static quantization. Please see [Model Preparation for Eager Mode Static Quantization](#model-preparation-for-eager-mode-static-quantization).
+We may need to modify the model before applying post training static quantization. Please see {ref}`model-preparation-for-eager-mode-static-quantization`.
 
-Diagram::
+Diagram:
 
 ```python
   # original model
@@ -286,7 +286,7 @@ Diagram::
      linear_weight_int8
 ```
 
-QAT API Example::
+QAT API Example:
 
 ```python
   import torch
@@ -391,7 +391,7 @@ to do the following in addition:
 
 There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_mapping` (an argument of the `prepare_fx` function).
 
-FXPTQ API Example::
+FXPTQ API Example:
 
 ```python
   import torch
@@ -462,7 +462,7 @@ Please follow the tutorials below to learn more about FX Graph Mode Quantization
 
 ### (Prototype) PyTorch 2 Export Quantization
 
-API Example::
+API Example:
 
 ```python
   import torch
@@ -733,27 +733,27 @@ during the quantization passes. The qengine controls whether `x86` or `qnnpack`
 specific packing function is used when packing weights for
 linear and convolution functions and modules. For example:
 
-Default settings for x86::
+Default settings for x86:
 
 ```python
-    # set the qconfig for PTQ
-    # Note: the old 'fbgemm' is still available but 'x86' is the recommended default on x86 CPUs
-    qconfig = torch.ao.quantization.get_default_qconfig('x86')
-    # or, set the qconfig for QAT
-    qconfig = torch.ao.quantization.get_default_qat_qconfig('x86')
-    # set the qengine to control weight packing
-    torch.backends.quantized.engine = 'x86'
+# set the qconfig for PTQ
+# Note: the old 'fbgemm' is still available but 'x86' is the recommended default on x86 CPUs
+qconfig = torch.ao.quantization.get_default_qconfig('x86')
+# or, set the qconfig for QAT
+qconfig = torch.ao.quantization.get_default_qat_qconfig('x86')
+# set the qengine to control weight packing
+torch.backends.quantized.engine = 'x86'
 ```
 
-Default settings for qnnpack::
+Default settings for qnnpack:
 
 ```python
-    # set the qconfig for PTQ
-    qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
-    # or, set the qconfig for QAT
-    qconfig = torch.ao.quantization.get_default_qat_qconfig('qnnpack')
-    # set the qengine to control weight packing
-    torch.backends.quantized.engine = 'qnnpack'
+# set the qconfig for PTQ
+qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
+# or, set the qconfig for QAT
+qconfig = torch.ao.quantization.get_default_qat_qconfig('qnnpack')
+# set the qengine to control weight packing
+torch.backends.quantized.engine = 'qnnpack'
 ```
 
 ### Operator Support
@@ -860,7 +860,7 @@ on that output. The observer will be stored under the `activation_post_process` 
 as an attribute of the custom module instance. Relaxing these restrictions may
 be done at a future time.
 
-Custom API Example::
+Custom API Example:
 
 ```python
   import torch
@@ -983,10 +983,10 @@ Custom API Example::
 
    If you encounter issues with ONNX Runtime, open an issue at [GitHub - microsoft/onnxruntime](https://github.com/microsoft/onnxruntime/issues/).
 
-3. How can I use quantization with LSTM's?:
+3. How can I use quantization with LSTM's?
 
    LSTM is supported through our custom module api in both eager mode and fx graph mode quantization. Examples can be found at:
-   
+
    * Eager Mode: [pytorch/test_quantized_op.py TestQuantizedOps.test_custom_module_lstm](https://github.com/pytorch/pytorch/blob/9b88dcf248e717ca6c3f8c5e11f600825547a561/test/quantization/core/test_quantized_op.py#L2782).
    * FX Graph Mode: [pytorch/test_quantize_fx.py TestQuantizeFx.test_static_lstm](https://github.com/pytorch/pytorch/blob/9b88dcf248e717ca6c3f8c5e11f600825547a561/test/quantization/fx/test_quantize_fx.py#L4116).
 
@@ -994,7 +994,7 @@ Custom API Example::
 
 ### Passing a non-quantized Tensor into a quantized kernel
 
-If you see an error similar to::
+If you see an error similar to:
 
 ```console
 RuntimeError: Could not run 'quantized::some_operator' with arguments from the 'CPU' backend...
@@ -1003,7 +1003,7 @@ RuntimeError: Could not run 'quantized::some_operator' with arguments from the '
 This means that you are trying to pass a non-quantized Tensor to a quantized
 kernel. A common workaround is to use `torch.ao.quantization.QuantStub` to
 quantize the tensor.  This needs to be done manually in Eager mode quantization.
-An e2e example::
+An e2e example:
 
 ```python
   class M(torch.nn.Module):
@@ -1022,7 +1022,7 @@ An e2e example::
 
 ### Passing a quantized Tensor into a non-quantized kernel
 
-If you see an error similar to::
+If you see an error similar to:
 
 ```console
 RuntimeError: Could not run 'aten::thnn_conv2d_forward' with arguments from the 'QuantizedCPU' backend.
@@ -1031,7 +1031,7 @@ RuntimeError: Could not run 'aten::thnn_conv2d_forward' with arguments from the 
 This means that you are trying to pass a quantized Tensor to a non-quantized
 kernel. A common workaround is to use `torch.ao.quantization.DeQuantStub` to
 dequantize the tensor.  This needs to be done manually in Eager mode quantization.
-An e2e example::
+An e2e example:
 
 ```python
   class M(torch.nn.Module):
@@ -1062,7 +1062,7 @@ An e2e example::
 
 ### Saving and Loading Quantized models
 
-When calling `torch.load` on a quantized model, if you see an error like::
+When calling `torch.load` on a quantized model, if you see an error like:
 
 ```console
 AttributeError: 'LinearPackedParams' object has no attribute '_modules'
@@ -1124,7 +1124,7 @@ is not supported. To save/load quantized models, the following ways can be used:
 
 ### Symbolic Trace Error when using FX Graph Mode Quantization
 
-Symbolic traceability is a requirement for [(Prototype - maintenance mode) FX Graph Mode Quantization](#prototype---maintenance-mode-fx-graph-mode-quantization), so if you pass a PyTorch Model that is not symbolically traceable to `torch.ao.quantization.prepare_fx` or `torch.ao.quantization.prepare_qat_fx`, we might see an error like the following:
+Symbolic traceability is a requirement for {ref}`prototype---maintenance-mode-fx-graph-mode-quantization`, so if you pass a PyTorch Model that is not symbolically traceable to `torch.ao.quantization.prepare_fx` or `torch.ao.quantization.prepare_qat_fx`, we might see an error like the following:
 
 ```console
 torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
