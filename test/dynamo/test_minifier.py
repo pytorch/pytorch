@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
 
 requires_gpu = unittest.skipUnless(torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu")
-device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cuda"
+device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 
 class MinifierTests(MinifierTestBase):
     # Test that compile, runtime, and accuracy errors after dynamo can be repro'd (both CPU and CUDA/XPU)
