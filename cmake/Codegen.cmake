@@ -35,7 +35,7 @@ endfunction()
 
 ################################################################################
 
-# -- [ Deterine commit hash
+# -- [ Determine commit hash
 execute_process(
     COMMAND "${Python_EXECUTABLE}" -c "from tools.generate_torch_version import get_sha;print(get_sha('.'), end='')"
     OUTPUT_VARIABLE COMMIT_SHA
@@ -81,7 +81,7 @@ if(INTERN_BUILD_ATEN_OPS)
   if(USE_CUDA)
     # The stable/nightly builds do not enable some SM architectures,
     # like 89/90a/100a.  Still, some files need to be built for these
-    # architecturs specifically.  This function makes it possible to
+    # architectures specifically.  This function makes it possible to
     # enable building given file for a specific such architecture, in
     # case if PyTorch is built for corresponding other architecture;
     # for example, it will enable building for SM 90a in case PyTorch
@@ -403,7 +403,7 @@ if(INTERN_BUILD_ATEN_OPS)
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
 
-  # The sources list might get reordered later based on the capabilites.
+  # The sources list might get reordered later based on the capabilities.
   # See NOTE [ Linking AVX and non-AVX files ]
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
     function(process_vec NAME)
