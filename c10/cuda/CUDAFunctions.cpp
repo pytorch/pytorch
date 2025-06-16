@@ -232,7 +232,7 @@ cudaError_t GetDevice(DeviceIndex* device) {
 }
 
 cudaError_t SetDevice(DeviceIndex device, const bool force) {
-  TORCH_CHECK(device >= 0, "device id must be positive!", device);
+  TORCH_CHECK(device >= 0, "device id must be non-negative!", device);
   if (force) {
     return cudaSetDevice(device);
   }
@@ -313,7 +313,7 @@ cudaError_t GetDevice(DeviceIndex* device) {
 }
 
 cudaError_t SetDevice(DeviceIndex device, const bool force) {
-  TORCH_CHECK(device >= 0, "device id must be positive!", device);
+  TORCH_CHECK(device >= 0, "device id must be non-negative!", device);
   if (force) {
     return cudaSetDevice(device);
   }
