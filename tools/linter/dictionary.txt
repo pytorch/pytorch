@@ -1,4 +1,6 @@
 coo
+Din
+Dout
 hsa
 multipy
 nd
