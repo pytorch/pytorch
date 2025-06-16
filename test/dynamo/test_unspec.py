@@ -884,7 +884,9 @@ class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
 
 
 devices = ["cuda", "hpu", "xpu"]
-instantiate_device_type_tests(UnspecTestsDevice, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(
+    UnspecTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
