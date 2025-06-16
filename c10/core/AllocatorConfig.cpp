@@ -1,6 +1,7 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/CallOnce.h>
+#include <c10/util/env.h>
 
 #include <array>
 #include <cstdlib>
@@ -19,8 +20,8 @@ AllocatorConfig& AllocatorConfig::instance() {
   static AllocatorConfig instance;
   c10::once_flag init_once;
 #define C10_ALLOCATOR_CONFIG_PARSE_ARGS(env)                                \
-  const char* env##_name = std::getenv(#env);                               \
-  if (env##_name && strcmp(#env, "PYTORCH_ALLOC_CONF") != 0) {              \
+  auto env##_name = c10::utils::get_env(#env);                              \
+  if (env##_name.has_value() && strcmp(#env, "PYTORCH_ALLOC_CONF") != 0) {  \
     TORCH_WARN_ONCE(#env " is deprecated, use PYTORCH_ALLOC_CONF instead"); \
     instance.parseArgs(env##_name);                                         \
     return;                                                                 \
@@ -63,20 +64,19 @@ size_t AllocatorConfig::pinned_max_register_threads() {
 }
 
 void AllocatorConfig::lexArgs(
-    const char* env,
+    const std::string& env,
     std::vector<std::string>& config) {
   std::vector<char> buf;
 
-  size_t env_length = strlen(env);
-  for (size_t i = 0; i < env_length; i++) {
-    if (env[i] == ',' || env[i] == ':' || env[i] == '[' || env[i] == ']') {
+  for (char ch : env) {
+    if (ch == ',' || ch == ':' || ch == '[' || ch == ']') {
       if (!buf.empty()) {
         config.emplace_back(buf.begin(), buf.end());
         buf.clear();
       }
-      config.emplace_back(1, env[i]);
-    } else if (env[i] != ' ') {
-      buf.emplace_back(static_cast<char>(env[i]));
+      config.emplace_back(1, ch);
+    } else if (ch != ' ') {
+      buf.emplace_back(ch);
     }
   }
   if (!buf.empty()) {
@@ -344,7 +344,7 @@ size_t AllocatorConfig::parsePinnedUseBackgroundThreads(
   return i;
 }
 
-void AllocatorConfig::parseArgs(const char* env) {
+void AllocatorConfig::parseArgs(const std::optional<std::string>& env) {
   // The following option will be reset to its default value if not explicitly
   // set each time.
   max_split_size_ = std::numeric_limits<size_t>::max();
@@ -354,16 +354,16 @@ void AllocatorConfig::parseArgs(const char* env) {
 
   bool used_native_specific_option = false;
 
-  if (env == nullptr) {
+  if (!env.has_value()) {
     return;
   }
   {
     std::lock_guard<std::mutex> lock(last_allocator_settings_mutex_);
-    last_allocator_settings_ = env;
+    last_allocator_settings_ = env.value();
   }
 
   std::vector<std::string> config;
-  lexArgs(env, config);
+  lexArgs(env.value(), config);
 
   for (size_t i = 0; i < config.size(); i++) {
     std::string_view config_item_view(config[i]);
