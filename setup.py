@@ -267,7 +267,7 @@ from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
 from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 
-def str2bool(value: str | None) -> None:
+def str2bool(value: str | None) -> bool:
     """Convert environment variables to boolean values."""
     if not value:
         return False
