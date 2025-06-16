@@ -316,6 +316,8 @@ class OptimizedModule(torch.nn.Module):
         "__dict__",
         "named_children_walk",
         "_super_module_initialized",
+        "save_package",
+        "load_package",
     }
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx) -> None:
@@ -621,6 +623,32 @@ class _TorchDynamoContext:
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
             new_mod.get_compiler_config = get_compiler_config
+
+            def _save_package(path):
+                from torch._dynamo.package import DiskDynamoStore
+                package = self._package
+                assert package is not None
+                store = DiskDynamoStore(path)
+                store.save_package(package, package.source_id)
+
+            def _load_package(path):
+                from torch._dynamo.package import DiskDynamoStore, CompilePackage
+                store = DiskDynamoStore(path)
+                package = self._package
+                if package is not None:
+                    package.uninstall()
+                else:
+                    package = CompilePackage(mod.forward)  # TODO unhack source_id
+                package, backends = store.load_package(mod.forward, package.source_id)
+                self._package = package
+                package.install(backends)
+                return package
+
+            # TODO on free function as well.
+            assert not hasattr(new_mod, "save_package")
+            assert not hasattr(new_mod, "load_package")
+            new_mod.save_package = _save_package
+            new_mod.load_package = _load_package
 
             return new_mod
 
