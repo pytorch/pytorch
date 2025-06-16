@@ -580,7 +580,12 @@ def _sfdp_replacement_20(query, key, value, attn_mask, dropout_p):
         scale=1.0 / math.sqrt(query.size(-1)),
     )
 
-def _sfdp_pattern_21(query, key, value, attention_mask):
+def _sfdp_pattern_24(query, key, value, attention_mask):
+    """
+    this pattern is for MBartForCausalLM/PLBartForCausalLM.
+    attn_mask has a differnt dtype with QKV.
+    there is no scale in sdpa.
+    """
     bs = query.size(0)
     n_head = query.size(1)
     seq_len= query.size(2)
@@ -598,7 +603,7 @@ def _sfdp_pattern_21(query, key, value, attention_mask):
     attn_output = attn_output.view(bs, n_head, seq_len, head_size)
     return attn_output
 
-def _sfdp_replacement_21(query, key, value, attention_mask):
+def _sfdp_replacement_24(query, key, value, attention_mask):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query,
@@ -1032,8 +1037,8 @@ def _get_sfdp_patterns():
                 _sfdp_params_check,
             ),
             (
-                _sfdp_pattern_21,
-                _sfdp_replacement_21,
+                _sfdp_pattern_24,
+                _sfdp_replacement_24,
                 [g(), g(), g(), b_float()],
                 {},
                 _sfdp_extra_check,
