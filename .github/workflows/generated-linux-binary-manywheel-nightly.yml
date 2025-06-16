@@ -433,7 +433,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_9-rocm6_4-build:
+  manywheel-py3_9-rocm6_4_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -442,22 +442,22 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_9-rocm6_4
+      build_name: manywheel-py3_9-rocm6_4_1
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-rocm6_4-test:  # Testing
+  manywheel-py3_9-rocm6_4_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_9-rocm6_4-build
+      - manywheel-py3_9-rocm6_4_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: 240
@@ -466,12 +466,12 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.9"
     steps:
@@ -480,7 +480,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_9-rocm6_4
+          name: manywheel-py3_9-rocm6_4_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -511,7 +511,7 @@ jobs:
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
-          custom-tag-prefix: rocm6.4
+          custom-tag-prefix: rocm6.4.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
@@ -524,25 +524,25 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_9-rocm6_4-upload:  # Uploading
+  manywheel-py3_9-rocm6_4_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_9-rocm6_4-test
+    needs: manywheel-py3_9-rocm6_4_1-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-rocm6_4
+      build_name: manywheel-py3_9-rocm6_4_1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -1046,7 +1046,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_10-rocm6_4-build:
+  manywheel-py3_10-rocm6_4_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -1055,22 +1055,22 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_10-rocm6_4
+      build_name: manywheel-py3_10-rocm6_4_1
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-rocm6_4-test:  # Testing
+  manywheel-py3_10-rocm6_4_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_10-rocm6_4-build
+      - manywheel-py3_10-rocm6_4_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: 240
@@ -1079,12 +1079,12 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.10"
     steps:
@@ -1093,7 +1093,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_10-rocm6_4
+          name: manywheel-py3_10-rocm6_4_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -1124,7 +1124,7 @@ jobs:
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
-          custom-tag-prefix: rocm6.4
+          custom-tag-prefix: rocm6.4.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
@@ -1137,25 +1137,25 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_10-rocm6_4-upload:  # Uploading
+  manywheel-py3_10-rocm6_4_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_10-rocm6_4-test
+    needs: manywheel-py3_10-rocm6_4_1-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-rocm6_4
+      build_name: manywheel-py3_10-rocm6_4_1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -1727,7 +1727,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_11-rocm6_4-build:
+  manywheel-py3_11-rocm6_4_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -1736,22 +1736,22 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_11-rocm6_4
+      build_name: manywheel-py3_11-rocm6_4_1
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-rocm6_4-test:  # Testing
+  manywheel-py3_11-rocm6_4_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_11-rocm6_4-build
+      - manywheel-py3_11-rocm6_4_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: 240
@@ -1760,12 +1760,12 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.11"
     steps:
@@ -1774,7 +1774,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_11-rocm6_4
+          name: manywheel-py3_11-rocm6_4_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -1805,7 +1805,7 @@ jobs:
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
-          custom-tag-prefix: rocm6.4
+          custom-tag-prefix: rocm6.4.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
@@ -1818,25 +1818,25 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_11-rocm6_4-upload:  # Uploading
+  manywheel-py3_11-rocm6_4_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_11-rocm6_4-test
+    needs: manywheel-py3_11-rocm6_4_1-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-rocm6_4
+      build_name: manywheel-py3_11-rocm6_4_1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -2340,7 +2340,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_12-rocm6_4-build:
+  manywheel-py3_12-rocm6_4_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -2349,22 +2349,22 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_12-rocm6_4
+      build_name: manywheel-py3_12-rocm6_4_1
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-rocm6_4-test:  # Testing
+  manywheel-py3_12-rocm6_4_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_12-rocm6_4-build
+      - manywheel-py3_12-rocm6_4_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: 240
@@ -2373,12 +2373,12 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.12"
     steps:
@@ -2387,7 +2387,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_12-rocm6_4
+          name: manywheel-py3_12-rocm6_4_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -2418,7 +2418,7 @@ jobs:
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
-          custom-tag-prefix: rocm6.4
+          custom-tag-prefix: rocm6.4.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
@@ -2431,25 +2431,25 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_12-rocm6_4-upload:  # Uploading
+  manywheel-py3_12-rocm6_4_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_12-rocm6_4-test
+    needs: manywheel-py3_12-rocm6_4_1-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-rocm6_4
+      build_name: manywheel-py3_12-rocm6_4_1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -2953,7 +2953,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_13-rocm6_4-build:
+  manywheel-py3_13-rocm6_4_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -2962,22 +2962,22 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_13-rocm6_4
+      build_name: manywheel-py3_13-rocm6_4_1
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-rocm6_4-test:  # Testing
+  manywheel-py3_13-rocm6_4_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_13-rocm6_4-build
+      - manywheel-py3_13-rocm6_4_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: 240
@@ -2986,12 +2986,12 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.13"
     steps:
@@ -3000,7 +3000,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_13-rocm6_4
+          name: manywheel-py3_13-rocm6_4_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -3031,7 +3031,7 @@ jobs:
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
-          custom-tag-prefix: rocm6.4
+          custom-tag-prefix: rocm6.4.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
@@ -3044,25 +3044,25 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_13-rocm6_4-upload:  # Uploading
+  manywheel-py3_13-rocm6_4_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_13-rocm6_4-test
+    needs: manywheel-py3_13-rocm6_4_1-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.13"
-      build_name: manywheel-py3_13-rocm6_4
+      build_name: manywheel-py3_13-rocm6_4_1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -3566,7 +3566,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_13t-rocm6_4-build:
+  manywheel-py3_13t-rocm6_4_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -3575,22 +3575,22 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_13t-rocm6_4
+      build_name: manywheel-py3_13t-rocm6_4_1
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13t-rocm6_4-test:  # Testing
+  manywheel-py3_13t-rocm6_4_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_13t-rocm6_4-build
+      - manywheel-py3_13t-rocm6_4_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: 240
@@ -3599,12 +3599,12 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
     steps:
@@ -3613,7 +3613,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_13t-rocm6_4
+          name: manywheel-py3_13t-rocm6_4_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -3644,7 +3644,7 @@ jobs:
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
-          custom-tag-prefix: rocm6.4
+          custom-tag-prefix: rocm6.4.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
@@ -3657,25 +3657,25 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_13t-rocm6_4-upload:  # Uploading
+  manywheel-py3_13t-rocm6_4_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_13t-rocm6_4-test
+    needs: manywheel-py3_13t-rocm6_4_1-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      DESIRED_CUDA: rocm6.4.1
+      GPU_ARCH_VERSION: 6.4.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm6.4.1
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
-      build_name: manywheel-py3_13t-rocm6_4
+      build_name: manywheel-py3_13t-rocm6_4_1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
