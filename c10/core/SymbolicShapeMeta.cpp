@@ -79,7 +79,12 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   }
   c10::SymIntArrayRef sizes(sizes_);
   c10::SymIntArrayRef strides(strides_);
-  return _compute_contiguous(sizes, strides, numel());
+  // if a tensor is contiguous for sure then we stroe that property.
+  auto def_contig = _definitely_contiguous(sizes, strides, numel());
+  if (def_contig) {
+    return true;
+  }
+  return _compute_contiguous_sym(sizes, strides, numel());
 }
 
 // The rest of them

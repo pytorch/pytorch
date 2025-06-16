@@ -827,20 +827,31 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_default(memory_format);
   }
 
+  bool definetly_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
+    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+      if (C10_UNLIKELY(
+              matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+        // shall we call definetly_contiguous here .
+        return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
+            this, memory_format);
+      }
+    }
+    return is_contiguous_default(memory_format, true);
+  }
+
   // These are factored into separate functions in case subclasses
   // want to use them
-  bool is_contiguous_default(at::MemoryFormat memory_format) const {
+  bool is_contiguous_default(
+      at::MemoryFormat memory_format,
+      bool false_if_dde = false) const {
     if (has_symbolic_sizes_strides_) {
-      if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return symbolic_shape_meta().is_channels_last_contiguous().guard_bool(
-            __FILE__, __LINE__);
-      } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return symbolic_shape_meta()
-            .is_channels_last_3d_contiguous()
-            .guard_bool(__FILE__, __LINE__);
+      auto& symblic_contig = symbolic_shape_meta().is_contiguous(memory_format);
+      if (false_if_dde) {
+        return symblic_contig.guard_or_false(__FILE__, __LINE__);
+      } else {
+        return symblic_contig.guard_bool(__FILE__, __LINE__);
       }
-      return symbolic_shape_meta().is_contiguous().guard_bool(
-          __FILE__, __LINE__);
     }
 
     if (memory_format == at::MemoryFormat::ChannelsLast) {

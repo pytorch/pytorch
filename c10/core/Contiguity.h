@@ -36,7 +36,7 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
 // its not or if we can't determine if it is contiguous due to unbacked symbols
 // (it could be either in that case based on the actual runtime data).
 template <typename T>
-bool definitely_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
+bool _definitely_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
     return true;
   }
@@ -55,6 +55,25 @@ bool definitely_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
     expected_stride *= size_d;
   }
   return true;
+}
+
+// Return a SymInt with underlying symbolic expression that represents
+// contiguity.
+inline static c10::SymBool _compute_contiguous_sym(
+    ArrayRef<c10::SymInt> sizes,
+    ArrayRef<c10::SymInt> strides,
+    const c10::SymInt& numel) {
+  c10::SymBool is_empty = sym_eq(numel, 0);
+  c10::SymBool is_contiguous_cond = true;
+
+  c10::SymInt expected_stride = 1;
+  for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
+    const auto& size_d = sizes[d];
+    is_contiguous_cond = is_contiguous_cond.sym_and(
+        size_d.sym_eq(1).sym_or(sym_eq(strides[d], expected_stride)));
+    expected_stride = size_d;
+  }
+  return is_contiguous_cond.sym_or(is_empty);
 }
 
 template <typename T>

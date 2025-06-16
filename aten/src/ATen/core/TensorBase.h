@@ -124,7 +124,7 @@ class TORCH_API TensorBase {
   }
 
   TensorBase contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const {
-    if (is_contiguous(memory_format)) {
+    if (definetly_contiguous(memory_format)) {
       return *this;
     } else {
       return __dispatch_contiguous(memory_format);
@@ -263,6 +263,11 @@ class TORCH_API TensorBase {
 
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     return impl_->is_contiguous(memory_format);
+  }
+
+
+  bool definetly_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+    return impl_->definetly_contiguous(memory_format);
   }
 
   bool is_non_overlapping_and_dense() const {
