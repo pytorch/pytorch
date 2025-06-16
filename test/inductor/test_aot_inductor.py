@@ -70,6 +70,8 @@ if HAS_GPU:
         add_kernel_2d_autotuned,
         add_kernel_autotuned,
         add_kernel_autotuned_weird_param_order,
+        add_kernel_on_device_tma_new_api,
+        add_kernel_on_device_tma_old_api,
         add_kernel_with_none_param_and_equal_to_1_arg,
         add_kernel_with_optional_param,
         add_kernel_with_scaling,
@@ -410,6 +412,71 @@ class AOTInductorTestsTemplate:
         ep = torch.export.export(model, input1, dynamic_shapes=None, strict=False)
         torch._inductor.aoti_compile_and_package(
             ep, inductor_configs={"aot_inductor.use_runtime_constant_folding": True}
+        )
+
+    @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("tma_version", ["new", "old"])
+    def test_triton_kernel_on_device_tma(self, dynamic, tma_version):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+        if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+        if tma_version == "old" and not has_triton_experimental_host_tma():
+            self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+
+        kernel = (
+            add_kernel_on_device_tma_new_api
+            if tma_version == "new"
+            else add_kernel_on_device_tma_old_api
+        )
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, a, b):
+                BLOCK_SIZE = 32
+                out = torch.zeros_like(a)
+                m, n = out.size()
+
+                # Allocate workspace for on-device TMA descriptors
+                # Need 128 bytes per descriptor, 3 descriptors total
+                workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+
+                kernel[(1,)](
+                    a,
+                    b,
+                    out,
+                    m,
+                    n,
+                    workspace,
+                    BLOCK_SIZE=BLOCK_SIZE,
+                )
+
+                return out
+
+        a = torch.randn((32, 32), device=self.device)
+        b = torch.randn((32, 32), device=self.device)
+        example_inputs = (a, b)
+
+        triton.set_allocator(
+            lambda size, align, stream: torch.empty(
+                size, dtype=torch.int8, device="cuda"
+            )
+        )
+
+        dynamic_shapes = None
+        if dynamic:
+            dim0_ab = Dim("s0", min=2, max=1024)
+            dynamic_shapes = {
+                "a": {0: dim0_ab, 1: None},
+                "b": {0: dim0_ab, 1: None},
+            }
+
+        self.check_model(
+            Model(),
+            example_inputs=example_inputs,
+            dynamic_shapes=dynamic_shapes,
         )
 
     @requires_gpu

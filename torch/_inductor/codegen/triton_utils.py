@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+from typing import Any, Optional, Union
+from typing_extensions import TypeIs
 
 import sympy
-from typing_extensions import TypeIs
 
 import torch
 
@@ -21,7 +21,7 @@ from .common import (
 )
 
 
-def is_static_int(expr: sympy.Expr) -> TypeIs[sympy.Integer | int]:
+def is_static_int(expr: sympy.Expr) -> TypeIs[Union[sympy.Integer, int]]:
     return isinstance(expr, (sympy.Integer, int))
 
 
@@ -95,7 +95,15 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
     if isinstance(arg, WorkspaceArg):
         return _type_of(arg.dtype)
     if isinstance(arg, TMADescriptorArg):
-        return "nvTmaDesc"
+        if arg.api_type == "experimental":
+            return "nvTmaDesc"
+        else:
+            # https://github.com/triton-lang/triton/blob/9695baed9b46cf957e08b157bb4133f4a4b331c5/python/triton/runtime/jit.py#L360-L363
+            assert arg.api_type == "stable"
+            assert arg.block_shape is not None
+            assert arg.dtype is not None
+            inner = _type_of(arg.dtype)[1:]  # strip the `*`: *fp32 -> fp32
+            return f"tensordesc<{inner}{list(arg.block_shape)}>"
     if isinstance(arg, ConstexprArg):
         return "constexpr"
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
