@@ -30,13 +30,19 @@
 #   CC
 #     the C/C++ compiler to use
 #
+#   CMAKE_FRESH=1
+#     force a fresh cmake run and ignore the existing cmake cache
+#
+#   CMAKE_ONLY=1
+#     run cmake and stop; do not build the project
+#
 # Environment variables for feature toggles:
 #
 #   DEBUG_CUDA=1
 #     if used in conjunction with DEBUG or REL_WITH_DEB_INFO, will also
 #     build CUDA kernels with -lineinfo --source-in-ptx.  Note that
 #     on CUDA 12 this may cause nvcc to OOM, so this is disabled by default.
-
+#
 #   USE_CUDNN=0
 #     disables the cuDNN build
 #
