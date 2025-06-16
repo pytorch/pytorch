@@ -1285,7 +1285,13 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
             self.assertEqual(ref_param, param)
 
 
-class TestFullyShardMempool(FSDPTest):
+class TestFullyShardAllocFromPG(FSDPTest):
+    # The messages might change when we move to a different NCCL version.
+    # Please update this test if it starts failing.
+    MEMORY_REGISTER_RE = (
+        "NCCL INFO register comm 0x[0-9a-f]+ buffer 0x[0-9a-f]+ size [0-9]+"
+    )
+
     @classmethod
     def _run(cls, *args, **kwargs):
         cls.nccl_log_dir = tempfile.TemporaryDirectory()
@@ -1295,20 +1301,18 @@ class TestFullyShardMempool(FSDPTest):
         super()._run(*args, **kwargs)
 
     @skip_if_lt_x_gpu(2)
-    def test_fully_shard_mempool(self):
+    def test_fully_shard_alloc_from_pg(self):
         torch.manual_seed(42)
         model_args = ModelArgs()
         model = Transformer(model_args)
-        fully_shard_fn = functools.partial(
-            fully_shard, allocate_memory_from_process_group=True
-        )
         for module in model.modules():
             if isinstance(module, TransformerBlock):
-                fully_shard_fn(module)
-        fully_shard_fn(model)
+                fully_shard(module)
+        fully_shard(model)
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+
         loss = model(inp)
         loss.sum().backward()
 
@@ -1316,13 +1320,21 @@ class TestFullyShardMempool(FSDPTest):
         torch.cuda.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
-            logs = f.read()
+            self.assertNotRegex(f.read(), self.MEMORY_REGISTER_RE)
 
-        # The messages might change when we move to a different NCCL version.
-        # Please update this test if it starts failing.
-        self.assertRegex(
-            logs, "NCCL INFO register comm 0x[0-9a-f]+ buffer 0x[0-9a-f]+ size [0-9]+"
-        )
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                module.set_allocate_memory_from_process_group_for_comm(True)
+        model.set_allocate_memory_from_process_group_for_comm(True)
+
+        loss = model(inp)
+        loss.sum().backward()
+
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
+
+        with open(self.nccl_log_dir.name + "/nccl_log") as f:
+            self.assertRegex(f.read(), self.MEMORY_REGISTER_RE)
 
 
 if __name__ == "__main__":

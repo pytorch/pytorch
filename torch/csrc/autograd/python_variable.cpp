@@ -238,7 +238,7 @@ void registerPythonTensorClass(
   c10::Device dev(device);
 
   TORCH_CHECK(
-      dev.type() == kXLA, "Only the python class for XLA can be overriden");
+      dev.type() == kXLA, "Only the python class for XLA can be overridden");
   if (device_to_py_class_[static_cast<size_t>(dev.type())] != nullptr) {
     TORCH_WARN(
         "Overriding a previously registered python class for ", dev.str());
@@ -409,13 +409,13 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
 
 static int THPFake_traverse(THPVariable* self, visitproc visit, void* arg) {
   TORCH_INTERNAL_ASSERT(
-      false, "TensorBase tp_traverse function was not overriden properly");
+      false, "TensorBase tp_traverse function was not overridden properly");
   return 0;
 }
 
 static int THPFake_clear(THPVariable* self) {
   TORCH_INTERNAL_ASSERT(
-      false, "TensorBase tp_clear function was not overriden properly");
+      false, "TensorBase tp_clear function was not overridden properly");
   return 0;
 }
 
@@ -2330,7 +2330,7 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
   if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
     return -1;
   }
-  // It is important for all three of these to be overriden correctly for the
+  // It is important for all three of these to be overridden correctly for the
   // resurrection checks to properly happen. In particular, an older version
   // was not overriding tp_clear here. This lead to the default subtype_clear
   // running on the Tensor object (as only TensorBase tp_clear was custom),

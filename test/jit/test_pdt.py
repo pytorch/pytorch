@@ -6,7 +6,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple  # noqa: F401
 
 import torch
 from torch.jit._monkeytype_config import _IS_MONKEYTYPE_INSTALLED
-from torch.testing._internal.common_utils import NoTest
+from torch.testing._internal.common_utils import NoTest, raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
@@ -20,13 +20,6 @@ if not _IS_MONKEYTYPE_INSTALLED:
         file=sys.stderr,
     )
     JitTestCase = NoTest  # type: ignore[misc, assignment] # noqa: F811
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestPDT(JitTestCase):
@@ -896,3 +889,7 @@ class TestPDT(JitTestCase):
                 torch.ones(1),
             ),
         )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")
