@@ -1094,6 +1094,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
                 D_output_name = var_name_to_buffer_name["D"]
                 name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
+                for name in V.graph.constants.keys():
+                    name_to_buffer[name] = V.graph.add_tensor_constant(
+                        V.graph.constants[name], name
+                    )
                 D_output_buffer = name_to_buffer[D_output_name]
                 Y = D_output_buffer  # type: ignore[assignment]
                 # Interestingly, I don't think the rest of the layout matters here since we
@@ -1400,6 +1404,12 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         from .cutlass_lib_extensions.evt_extensions import create_example_tensors, trace
 
         name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
+
+        for name in V.graph.constants.keys():
+            name_to_buffer[name] = V.graph.add_tensor_constant(
+                V.graph.constants[name], name
+            )
+
         # handle the fake output buffer during lowering
         name_to_buffer[self.output_node.get_name()] = self.output_node  # type: ignore[assignment]
 
