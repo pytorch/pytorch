@@ -674,7 +674,6 @@ class CommonTemplate:
             ((5, 5), 1, 1, torch.var_mean),  # Reduction + pointwise fusion.
         ],
     )
-    @config.patch(min_num_split=1)
     def test_2d_reduction_odd_shapes(
         self,
         view_size: tuple[int],

@@ -427,7 +427,7 @@ def check_submodules():
             end = time.time()
             report(f" --- Submodule initialization took {end - start:.2f} sec")
         except Exception:
-            report(" --- Submodule initalization failed")
+            report(" --- Submodule initialization failed")
             report("Please run:\n\tgit submodule update --init --recursive")
             sys.exit(1)
     for folder in folders:
