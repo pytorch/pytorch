@@ -1511,7 +1511,7 @@ class Reduction(Loops):
 
         def _maybe_increase_split(split: int) -> int:
             # don't apply min_num_split constraint for static shape case.
-            if _is_static(reduction_numel) and all(_is_static(x) for x in ranges):
+            if _is_static(reduction_numel):
                 return split
             if split > 1:
                 return max(split, config.min_num_split)
