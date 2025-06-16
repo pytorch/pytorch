@@ -253,7 +253,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
 
     def handle_views(node: torch.fx.Node):
         inp = node.args[0]
-        node_to_view_base[node] = node_to_view_base.get(inp, inp)  # type: ignore[arg-type]
+        node_to_view_base[node] = node_to_view_base.get(inp, inp)  # type: ignore[arg-type, assignment]
         node_to_view_op[node] = [
             *node_to_view_op[inp],  # type: ignore[index]
             ViewOp(

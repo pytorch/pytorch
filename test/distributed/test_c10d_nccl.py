@@ -1108,7 +1108,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def test_non_blocking_with_eager_init(self):
         # Test creating a pg eagerly with nonblocking mode when
         # we've passed a specific device_id to init_process_group.
-        raise SkipTest("Skip due to https://github.com/pytorch/pytorch/issues/153517")
         os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
         os.environ["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = "100"
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -4258,7 +4257,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 class NCCLTraceTest(NCCLTraceTestBase):
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.7")
+        self.assertEqual(ver, "2.8")
         nccl_version = t["nccl_version"]
         torch_nccl_version = torch.cuda.nccl.version()
         self.assertEqual(nccl_version, ".".join(str(v) for v in torch_nccl_version))

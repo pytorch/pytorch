@@ -73,9 +73,9 @@ def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
     """
     from torch._prims_common import canonicalize_dims
 
-    assert isinstance(
-        dims, (tuple, list)
-    ), f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
+    assert isinstance(dims, (tuple, list)), (
+        f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
+    )
 
     wrapped_dims = [
         canonicalize_dims(ndim, d) for d in dims
@@ -535,9 +535,9 @@ def clone_default(func, *args, **kwargs):
             from .nested_tensor import jagged_from_list
 
             # TODO: We probably want the output to have the same ragged structure / nested int.
-            assert (
-                inp._ragged_idx == 1
-            ), "NJT with ragged_idx != 1 not supported for contiguous clone"
+            assert inp._ragged_idx == 1, (
+                "NJT with ragged_idx != 1 not supported for contiguous clone"
+            )
             contig, _ = jagged_from_list(inp.unbind(), offsets=None)
             return contig
 
@@ -1730,8 +1730,8 @@ def native_layer_norm_default(func, *args, **kwargs):
         )  # a sum over (1, 2) ensures layer norm, whereas a sum over (1) would be an instance norm
 
         padded_normalized = (
-            padded_input - mean
-        ) * padded_mask  # mask elements outside of the ragged dimension size for correct variance calculation
+            (padded_input - mean) * padded_mask
+        )  # mask elements outside of the ragged dimension size for correct variance calculation
 
         variance = (
             torch.sum(

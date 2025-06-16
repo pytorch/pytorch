@@ -279,7 +279,7 @@ class ModelReportObserver(ObserverBase):
         self.constant_channels = torch.tensor([], device=device)
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         raise Exception(  # noqa: TRY002
             "calculate_qparams should not be called for ModelReportObserver"
         )
