@@ -82,8 +82,16 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
       DistBackendError, THPException_DistBackendError, retstmnt)              \
   _CATCH_GENERIC_ERROR(                                                       \
       DistNetworkError, THPException_DistNetworkError, retstmnt)              \
+  _CATCH_GENERIC_ERROR(                                                       \
+      DistQueueEmptyError, THPException_DistQueueEmptyError, retstmnt)        \
   _CATCH_GENERIC_ERROR(DistStoreError, THPException_DistStoreError, retstmnt) \
   _CATCH_GENERIC_ERROR(DistError, THPException_DistError, retstmnt)           \
+  catch (c10::AcceleratorError & e) {                                         \
+    auto exc = torch::detail::_new_accelerator_error_object(e);               \
+    PyErr_SetObject(THPException_AcceleratorError, exc);                      \
+    Py_XDECREF(exc);                                                          \
+    retstmnt;                                                                 \
+  }                                                                           \
   _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)                   \
   catch (torch::PyTorchError & e) {                                           \
     auto msg = torch::processErrorMsg(e.what());                              \
@@ -139,7 +147,8 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
     *THPException_OutOfMemoryError, *THPException_DistError,
     *THPException_DistBackendError, *THPException_DistNetworkError,
-    *THPException_DistStoreError;
+    *THPException_DistStoreError, *THPException_DistQueueEmptyError,
+    *THPException_AcceleratorError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
@@ -294,7 +303,7 @@ struct TypeError : public PyTorchError {
 
 // Translates to Python AttributeError
 struct AttributeError : public PyTorchError {
-  AttributeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  using PyTorchError::PyTorchError;
   PyObject* python_type() override {
     return PyExc_AttributeError;
   }
@@ -367,6 +376,8 @@ auto wrap_pybind_function_impl_(
     END_HANDLE_TH_ERRORS_PYBIND
   };
 }
+
+PyObject* _new_accelerator_error_object(const c10::AcceleratorError&);
 } // namespace detail
 
 // Wrap a function with TH error and warning handling.

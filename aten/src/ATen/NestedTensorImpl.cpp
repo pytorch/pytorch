@@ -182,7 +182,7 @@ NestedTensorImpl::NestedTensorImpl(
       "coverage, and works with torch.compile.");
   auto storage_device = storage_.device();
   TORCH_INTERNAL_ASSERT(
-      storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_xpu() || storage_device.is_privateuseone(),
+      storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_xpu() || storage_device.is_hpu() || storage_device.is_privateuseone(),
       "NestedTensorImpl storage must be either CUDA, CPU, XPU or ", get_privateuse1_backend(), " but got ",
       storage_device);
   validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);

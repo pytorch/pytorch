@@ -1,9 +1,8 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
-#include <chrono>
 #include <list>
-#include <sstream>
 #include <utility>
+#include <c10/util/env.h>
 
 #ifdef FBCODE_CAFFE2
 #include <c10/util/static_tracepoint.h>
@@ -17,13 +16,13 @@ TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
 #endif
 
 bool show_dispatch_trace() {
-  static auto envar = std::getenv("TORCH_SHOW_DISPATCH_TRACE");
+  static auto envar = c10::utils::get_env("TORCH_SHOW_DISPATCH_TRACE");
 
-  if (envar) {
-    if (strcmp(envar, "0") == 0) {
+  if (envar.has_value()) {
+    if (envar == "0") {
       return false;
     }
-    if (strcmp(envar, "1") == 0) {
+    if (envar == "1") {
       return true;
     }
     TORCH_WARN(

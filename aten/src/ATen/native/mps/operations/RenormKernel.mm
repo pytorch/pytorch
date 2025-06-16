@@ -38,7 +38,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
   id<MTLBuffer> normBuffer = getMTLBufferStorage(norm);
   id<MTLBuffer> factorBuffer = getMTLBufferStorage(factor);
 
-  string key = "renorm_" + scalarToMetalTypeString(self);
+  std::string key = "renorm_" + scalarToMetalTypeString(self);
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
   id<MTLComputePipelineState> renormPSO = lib.getPipelineStateForFunc(key);

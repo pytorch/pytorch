@@ -1,7 +1,7 @@
 SHELL=/usr/bin/env bash
 
 DOCKER_CMD ?= docker
-DESIRED_ROCM ?= 6.3
+DESIRED_ROCM ?= 6.4
 DESIRED_ROCM_SHORT = $(subst .,,$(DESIRED_ROCM))
 PACKAGE_NAME = magma-rocm
 # inherit this from underlying docker image, do not pass this env var to docker
@@ -12,24 +12,24 @@ DOCKER_RUN = set -eou pipefail; ${DOCKER_CMD} run --rm -i \
 	-w /builder \
 	-e PACKAGE_NAME=${PACKAGE_NAME}${DESIRED_ROCM_SHORT} \
 	-e DESIRED_ROCM=${DESIRED_ROCM} \
-	"pytorch/manylinux2_28-builder:rocm${DESIRED_ROCM}-main" \
+	"pytorch/almalinux-builder:rocm${DESIRED_ROCM}" \
 	magma-rocm/build_magma.sh
 
 .PHONY: all
+all: magma-rocm64
 all: magma-rocm63
-all: magma-rocm624
 
 .PHONY:
 clean:
 	$(RM) -r magma-*
 	$(RM) -r output
 
+.PHONY: magma-rocm64
+magma-rocm64: DESIRED_ROCM := 6.4
+magma-rocm64:
+	$(DOCKER_RUN)
+
 .PHONY: magma-rocm63
 magma-rocm63: DESIRED_ROCM := 6.3
 magma-rocm63:
-	$(DOCKER_RUN)
-
-.PHONY: magma-rocm624
-magma-rocm624: DESIRED_ROCM := 6.2.4
-magma-rocm624:
 	$(DOCKER_RUN)

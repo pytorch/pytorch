@@ -151,6 +151,13 @@ bool _use_cudnn_ctc_loss_tensor(
         }
       }
     } else {
+      if (target_lengths.device().type() != at::kCUDA ||
+          input_lengths.device().type() != at::kCUDA) {
+        TORCH_CHECK(
+            false,
+            "CTCLoss cannot be graph captured with CPU length tensors. "
+            "Move CPU length tensors to GPU memory to enable graph capture.")
+      }
       at::_assert_async(at::lt(input_lengths.max(), 256));
       at::_assert_async(at::le(target_lengths, input_lengths).all());
     }
@@ -253,9 +260,18 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
     bool deterministic,
     bool zero_infinity) {
   Tensor targets_t_ = targets_t;
+  Tensor input_lengths_ = input_lengths;
+  Tensor target_lengths_ = target_lengths;
   if (targets_t.device().type() == at::kCPU) {
     targets_t_ = targets_t.to(Device(at::kCUDA));
   }
+  if (input_lengths.device().type() == at::kCPU) {
+    input_lengths_ = input_lengths.to(Device(at::kCUDA));
+  }
+  if (input_lengths.device().type() == at::kCPU) {
+    target_lengths_ = target_lengths.to(Device(at::kCUDA));
+  }
+
   const CheckedFrom c = "cudnn_ctc_loss";
   const TensorArg log_probs{log_probs_t, "log_probs", 1};
   const TensorArg targets{targets_t_, "targets", 2};
@@ -268,9 +284,9 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
   checkBackend(c, {*targets}, Backend::CUDA);
   const auto batch_size = log_probs->size(1);
   int64_t input_lengths_size =
-      input_lengths.sizes().size() ? input_lengths.size(0) : 1;
+      input_lengths_.sizes().size() ? input_lengths_.size(0) : 1;
   int64_t target_lengths_size =
-      target_lengths.sizes().size() ? target_lengths.size(0) : 1;
+      target_lengths_.sizes().size() ? target_lengths_.size(0) : 1;
   TORCH_CHECK(
       input_lengths_size == batch_size,
       "input_lengths needs to have size to match batch_size");
@@ -319,8 +335,8 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
       log_probs_desc.desc(),
       log_probs_t.data_ptr(),
       targets_t_.data_ptr<int>(),
-      target_lengths.data_ptr<int>(),
-      input_lengths.data_ptr<int>(),
+      target_lengths_.data_ptr<int>(),
+      input_lengths_.data_ptr<int>(),
       costs.data_ptr(),
       grad_desc.desc(),
       grad.data_ptr(),

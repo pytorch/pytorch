@@ -130,11 +130,15 @@ class TORCH_API PyTorchStreamReader final {
   explicit PyTorchStreamReader(std::shared_ptr<ReadAdapterInterface> in);
 
   // return dataptr, size
-  std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
+  // set allocator to override default cpu allocator
+  std::tuple<at::DataPtr, size_t> getRecord(
+      const std::string& name,
+      std::optional<at::Allocator*> allocator = std::nullopt);
   // multi-thread getRecord
   std::tuple<at::DataPtr, size_t> getRecord(
       const std::string& name,
-      std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders);
+      std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders,
+      std::optional<at::Allocator*> allocator = std::nullopt);
   // inplace memory writing
   size_t getRecord(const std::string& name, void* dst, size_t n);
   // inplace memory writing, multi-threads.

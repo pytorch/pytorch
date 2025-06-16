@@ -15,7 +15,7 @@ import torch.overrides
 from torch._prims_common import torch_function_passthrough
 
 
-@functools.lru_cache(None)
+@functools.cache
 def torch_to_refs_map():
     """
     Mapping of torch API functions to torch._refs functions.
@@ -70,7 +70,7 @@ def torch_to_refs_map():
     return r
 
 
-@functools.lru_cache(None)
+@functools.cache
 def all_prims():
     """
     Set of all prim functions, e.g., torch._prims.add in all_prims()

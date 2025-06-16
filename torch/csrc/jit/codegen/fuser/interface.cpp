@@ -15,11 +15,11 @@ namespace detail {
 #ifdef TORCH_ENABLE_LLVM
 bool cpu_fuser_enabled = true;
 #else
-bool cpu_fuser_enabled = false;
+static bool cpu_fuser_enabled = false;
 #endif
 
 // note: this doesn't necessarily enable NNC because NVFuser might override it
-bool gpu_fuser_enabled = true;
+static bool gpu_fuser_enabled = true;
 
 } // namespace detail
 

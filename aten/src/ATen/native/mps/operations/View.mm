@@ -215,7 +215,7 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self,
   // when we create/run the view graph.
   IntArrayRef base_shape = mps::updateTensorBaseShape(self);
   TORCH_INTERNAL_ASSERT(
-      base_shape.size() > 0, "Failed to update the base shape of tensor's buffer at ", self.storage().data());
+      !base_shape.empty(), "Failed to update the base shape of tensor's buffer at ", self.storage().data());
 
   return result;
 }

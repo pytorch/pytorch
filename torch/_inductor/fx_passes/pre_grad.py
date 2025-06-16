@@ -148,6 +148,14 @@ def use_triton_lce_replace_normal_LCE(graph):
     return use_triton_lce_replace_simple_LCE_helper(graph.owning_module, shape_prop)
 
 
+def use_matmul_lce_replace_normal_LCE(graph):
+    return None
+
+
+def use_matmul_fuse_lce_replace_first_LCE(graph):
+    return None
+
+
 @init_once_fakemode
 def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401
@@ -161,7 +169,7 @@ def _get_pass_name_func(p):
         pass_name = p.pass_name
         pass_func = p.apply
     elif isinstance(p, types.FunctionType):
-        pass_name = p.__name__
+        pass_name = p.__name__.lstrip("_")
         pass_func = p
     else:
         pass_name = None
@@ -201,6 +209,8 @@ def _run_pre_dispatch_passes(
         use_triton_dot_compress,
         use_triton_lce_replace_simple_LCE,
         use_triton_lce_replace_normal_LCE,
+        use_matmul_fuse_lce_replace_first_LCE,
+        use_matmul_lce_replace_normal_LCE,
     ]
 
     log.info(
@@ -287,16 +297,6 @@ def pre_grad_passes(
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "before_recompile_pre_grad",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
-            )
             # We should always do the normalization_pass first
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
@@ -339,16 +339,6 @@ def pre_grad_passes(
 
     gm.graph.lint()
     gm.recompile()
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "after_recompile_pre_grad",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        ),
-    )
 
     if (
         config.pattern_matcher

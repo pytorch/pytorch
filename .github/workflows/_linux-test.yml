@@ -55,6 +55,18 @@ on:
         required: false
         type: boolean
         default: false
+      monitor-log-interval:
+        description: |
+          Set the interval for the monitor script to log utilization.
+        required: false
+        type: number
+        default: 5
+      monitor-data-collect-interval:
+        description: |
+          Set the interval for the monitor script to collect data.
+        required: false
+        type: number
+        default: 1
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -99,7 +111,7 @@ jobs:
 
       - name: configure aws credentials
         if : ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
           role-session-name: gha-linux-test
@@ -172,9 +184,11 @@ jobs:
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           WORKFLOW_NAME: ${{ github.workflow }}
           WORKFLOW_RUN_ID: ${{github.run_id}}
+          MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
+          MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84 dataclasses_json==0.6.7
-          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
+          python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
@@ -362,7 +376,7 @@ jobs:
       - name: Upload pytest cache if tests failed
         uses: ./.github/actions/pytest-cache-upload
         continue-on-error: true
-        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure' && inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           cache_dir: .pytest_cache
           shard: ${{ matrix.shard }}
@@ -408,7 +422,7 @@ jobs:
           find . -iname "core.[1-9]*" -exec docker exec "${DOCKER_CONTAINER_ID}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
 
       - name: Store Core dumps on S3
-        uses: seemethere/upload-artifact-s3@v5
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         if: failure()
         with:
           name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
@@ -417,7 +431,7 @@ jobs:
           path: ./**/core.[1-9]*
 
       - name: Upload utilization stats
-        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
+        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
