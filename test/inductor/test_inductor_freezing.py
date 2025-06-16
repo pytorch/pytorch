@@ -328,20 +328,13 @@ class OptimizeForInferenceTemplate(TestCase):
                     mm_invoke = "mkldnn._linear_pointwise.default("
                 elif torch._C.has_mkl:
                     mm_invoke = "mkl_linear.default("
-            elif self.device == "xpu":
-                mm_invoke = "mkldnn._linear_pointwise.default("
 
             with torch.no_grad():
                 out_eager = mod(inp)
                 out, code = run_and_get_code(foo, mod, inp)
-                if self.device == "xpu":
-                    FileCheck().check_count(mm_invoke, count=1, exactly=True).run(
-                        code[0]
-                    )
-                else:
-                    FileCheck().check_not(kernel_invoke).check_count(
-                        mm_invoke, count=1, exactly=True
-                    ).run(code[0])
+                FileCheck().check_not(kernel_invoke).check_count(
+                    mm_invoke, count=1, exactly=True
+                ).run(code[0])
                 self.assertEqual(out_eager, out)
 
             mod2 = mod_fn()
@@ -358,14 +351,9 @@ class OptimizeForInferenceTemplate(TestCase):
             with torch.no_grad():
                 out_eager = mod2(inp)
                 out, code = run_and_get_code(foo, mod2, inp)
-                if self.device == "xpu":
-                    FileCheck().check_count(mm_invoke, count=count, exactly=True).run(
-                        code[0]
-                    )
-                else:
-                    FileCheck().check_not(kernel_invoke).check_count(
-                        mm_invoke, count=count, exactly=True
-                    ).run(code[0])
+                FileCheck().check_not(kernel_invoke).check_count(
+                    mm_invoke, count=count, exactly=True
+                ).run(code[0])
                 self.assertEqual(out_eager, out)
 
     # With inlining of inbuilt nn modules, Dynamo traces the innards of inbuilt

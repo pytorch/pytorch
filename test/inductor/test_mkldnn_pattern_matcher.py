@@ -355,203 +355,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         self.device = device
         self._test_conv_unary_base(dim=5)
 
-    def test_linear_unary(self, device):
-        self.device = device
-
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-                unary_fn,
-                in_features,
-                out_features,
-                bias,
-                **kwargs,
-            ):
-                super().__init__()
-                self.linear = torch.nn.Linear(
-                    in_features,
-                    out_features,
-                    bias,
-                    **kwargs,
-                )
-                self.unary_fn = unary_fn
-
-            def forward(self, x):
-                x = self.linear(x)
-                return self.unary_fn(x)
-
-        dtypes = []
-        if is_mkldnn_bf16_supported(self.device):
-            dtypes.append(torch.bfloat16)
-        if is_mkldnn_fp16_supported(self.device):
-            dtypes.append(torch.float16)
-        options = itertools.product(unary_list, [True, False], dtypes)
-        for unary_fn, bias, dtype in options:
-            metrics.reset()
-            mod = M(unary_fn, 10, 30, bias=bias).eval()
-            # only fuse for linear when the dtype is bf16
-            mod = mod
-            v = torch.randn(2, 10)
-
-            def matcher_check_fn():
-                match_nodes = unary_list[unary_fn]
-                if self._check_unary_is_decomposed(unary_fn):
-                    # Has extra dtype conversion nodes for autocast.
-                    match_nodes += 2
-                self.assertEqual(
-                    counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                    0 if TEST_ACL else match_nodes,
-                )
-                self.assertEqual(
-                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 1
-                )
-
-            self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
-            # only generated 1 kernel for "to"
-            self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
-
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
-    def test_linear_fp32(self, device):
-        self.device = device
-
-        class M(torch.nn.Module):
-            def __init__(self, bias):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 30, bias)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        for bias in [True, False]:
-            mod = M(bias=bias).eval()
-            v = torch.randn(2, 10)
-
-            # packing pass.
-            def matcher_check_fn():
-                self.assertEqual(
-                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 1
-                )
-
-            self._test_common(mod, (v,), matcher_check_fn)
-
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
-    def test_linear_input_non_contiguous_3D_wo_bias(self, device):
-        self.device = device
-
-        # Activation is 3D, non-contiguous and without Bias
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4096, 1024, bias=False)
-
-            def forward(self, x):
-                x = torch.ops.aten.permute.default(x, [0, 2, 1, 3])
-                x = torch.ops.aten.reshape.default(x, [4, 1, 4096])
-                return self.linear(x)
-
-        mod = M().eval()
-        v = torch.randn(4, 32, 1, 128)
-
-        dtypes = [torch.float]
-        if is_mkldnn_bf16_supported(self.device):
-            dtypes.append(torch.bfloat16)
-        if is_mkldnn_fp16_supported(self.device):
-            dtypes.append(torch.float16)
-
-        for dtype in dtypes:
-            torch._dynamo.reset()
-            autocast_enabled = (
-                True if dtype in [torch.bfloat16, torch.float16] else False
-            )
-            with torch.no_grad(), torch.autocast(
-                device_type="cpu", enabled=autocast_enabled, dtype=dtype
-            ):
-                expected = mod(v)
-                actual, (source_code,) = run_and_get_code(
-                    torch.compile(mod, fullgraph=True),
-                    v,
-                )
-                self.assertIn(
-                    "torch.ops.mkldnn._linear_pointwise.default"
-                    if autocast_enabled
-                    else "torch.ops.mkl._mkl_linear.default",
-                    source_code,
-                )
-                torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
-
-    @skipIfXpu(
-        msg="Different with CPU, two linears will be concat on XPU for better performance"
-    )
-    def test_linear_add_bias(self, device):
-        self.device = device
-
-        class M(torch.nn.Module):
-            def __init__(self, device, dtype, unary_fn, cast_bias):
-                super().__init__()
-                self.linear1 = torch.nn.Linear(10, 64, bias=False)
-                self.bias1 = torch.randn(64, device=device)
-                self.linear2 = torch.nn.Linear(10, 64, bias=False)
-                self.bias2 = torch.randn(64, device=device)
-                if cast_bias:
-                    self.bias1 = self.bias1.to(dtype=dtype, device=device)
-                    self.bias2 = self.bias2.to(dtype=dtype, device=device)
-                self.unary_fn = unary_fn
-
-            def forward(self, x):
-                a = self.linear1(x) + self.bias1
-                b = self.linear2(x) + self.bias2
-                return self.unary_fn(a), self.unary_fn(b)
-
-        dtypes = []
-        if is_mkldnn_bf16_supported(self.device):
-            dtypes.append(torch.bfloat16)
-        if is_mkldnn_fp16_supported(self.device):
-            dtypes.append(torch.float16)
-        options = itertools.product(unary_list, dtypes)
-        for unary_fn, dtype in options:
-            metrics.reset()
-            fold_mod = M(self.device, dtype, unary_fn, cast_bias=True).eval()
-            v = torch.randn(2, 10)
-
-            def folder_matcher_check_fn():
-                match_nodes = unary_list[unary_fn]
-                if self._check_unary_is_decomposed(unary_fn):
-                    # Has extra dtype conversion nodes for autocast.
-                    match_nodes += 2
-                # we have 2 linears, so we double the matcher_count/nodes
-                self.assertEqual(
-                    counters["inductor"]["mkldnn_unary_fusion_matcher_count"],
-                    0 if TEST_ACL else 2,
-                )
-                self.assertEqual(
-                    counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                    0 if TEST_ACL else match_nodes * 2,
-                )
-                self.assertEqual(
-                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 2
-                )
-
-            self._test_common(
-                fold_mod,
-                (v,),
-                folder_matcher_check_fn,
-                check_autocast=dtype,
-            )
-            self.assertEqual(metrics.generated_kernel_count, 3 if TEST_ACL else 1)
-            # we won't fold the bias if bias is not same dtype with weight
-            # https://github.com/pytorch/pytorch/pull/129138
-            metrics.reset()
-            mod = M(self.device, dtype, unary_fn, cast_bias=False).eval()
-
-            def matcher_check_fn():
-                self.assertEqual(
-                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 2
-                )
-
-            self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
-            # 1 kernel for "to_lowp", 2 kernels for unary ops
-            self.assertEqual(metrics.generated_kernel_count, 3)
-
     def _test_conv_transpose_unary_base(self, dim=4):
         assert dim == 4 or dim == 5
 
@@ -846,7 +649,239 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         self.device = device
         self._test_conv_binary_broadcast_shapes_base(dim=5)
 
-    def test_linear_binary(self, device):
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
+    def test_conv2d_linear_add_broadcast_shapes(self, device):
+        self.device = device
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
+                self.linear = torch.nn.Linear(3, 16)
+
+            def forward(self, x1, x2):
+                return self.conv(x1) + self.linear(x2)[:, :, None, None]
+
+        metrics.reset()
+        mod = M().eval()
+        x1 = torch.randn(2, 3, 56, 56)
+        x2 = torch.randn(2, 3)
+
+        def matcher_check_fn():
+            match_nodes = 0 if TEST_ACL else 2
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"],
+                match_nodes,
+            )
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_weight_pack_matcher_nodes"], 1
+            )
+
+        self._test_common(mod, (x1, x2), matcher_check_fn)
+
+
+class TestPatternMatcher(TestPatternMatcherBase):
+    def test_linear_unary(self, device="cpu"):
+        self.device = device
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                unary_fn,
+                in_features,
+                out_features,
+                bias,
+                **kwargs,
+            ):
+                super().__init__()
+                self.linear = torch.nn.Linear(
+                    in_features,
+                    out_features,
+                    bias,
+                    **kwargs,
+                )
+                self.unary_fn = unary_fn
+
+            def forward(self, x):
+                x = self.linear(x)
+                return self.unary_fn(x)
+
+        dtypes = []
+        if is_mkldnn_bf16_supported(self.device):
+            dtypes.append(torch.bfloat16)
+        if is_mkldnn_fp16_supported(self.device):
+            dtypes.append(torch.float16)
+        options = itertools.product(unary_list, [True, False], dtypes)
+        for unary_fn, bias, dtype in options:
+            metrics.reset()
+            mod = M(unary_fn, 10, 30, bias=bias).eval()
+            # only fuse for linear when the dtype is bf16
+            mod = mod
+            v = torch.randn(2, 10)
+
+            def matcher_check_fn():
+                match_nodes = unary_list[unary_fn]
+                if self._check_unary_is_decomposed(unary_fn):
+                    # Has extra dtype conversion nodes for autocast.
+                    match_nodes += 2
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
+                    0 if TEST_ACL else match_nodes,
+                )
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 1
+                )
+
+            self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
+            # only generated 1 kernel for "to"
+            self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
+
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_linear_fp32(self, device="cpu"):
+        self.device = device
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 30, bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        for bias in [True, False]:
+            mod = M(bias=bias).eval()
+            v = torch.randn(2, 10)
+
+            # packing pass.
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 1
+                )
+
+            self._test_common(mod, (v,), matcher_check_fn)
+
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_linear_input_non_contiguous_3D_wo_bias(self, device="cpu"):
+        self.device = device
+
+        # Activation is 3D, non-contiguous and without Bias
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4096, 1024, bias=False)
+
+            def forward(self, x):
+                x = torch.ops.aten.permute.default(x, [0, 2, 1, 3])
+                x = torch.ops.aten.reshape.default(x, [4, 1, 4096])
+                return self.linear(x)
+
+        mod = M().eval()
+        v = torch.randn(4, 32, 1, 128)
+
+        dtypes = [torch.float]
+        if is_mkldnn_bf16_supported(self.device):
+            dtypes.append(torch.bfloat16)
+        if is_mkldnn_fp16_supported(self.device):
+            dtypes.append(torch.float16)
+
+        for dtype in dtypes:
+            torch._dynamo.reset()
+            autocast_enabled = (
+                True if dtype in [torch.bfloat16, torch.float16] else False
+            )
+            with torch.no_grad(), torch.autocast(
+                device_type="cpu", enabled=autocast_enabled, dtype=dtype
+            ):
+                expected = mod(v)
+                actual, (source_code,) = run_and_get_code(
+                    torch.compile(mod, fullgraph=True),
+                    v,
+                )
+                self.assertIn(
+                    "torch.ops.mkldnn._linear_pointwise.default"
+                    if autocast_enabled
+                    else "torch.ops.mkl._mkl_linear.default",
+                    source_code,
+                )
+                torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+
+    @skipIfXpu(
+        msg="Different with CPU, two linears will be concat on XPU for better performance"
+    )
+    def test_linear_add_bias(self, device="cpu"):
+        self.device = device
+
+        class M(torch.nn.Module):
+            def __init__(self, device, dtype, unary_fn, cast_bias):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(10, 64, bias=False)
+                self.bias1 = torch.randn(64, device=device)
+                self.linear2 = torch.nn.Linear(10, 64, bias=False)
+                self.bias2 = torch.randn(64, device=device)
+                if cast_bias:
+                    self.bias1 = self.bias1.to(dtype=dtype, device=device)
+                    self.bias2 = self.bias2.to(dtype=dtype, device=device)
+                self.unary_fn = unary_fn
+
+            def forward(self, x):
+                a = self.linear1(x) + self.bias1
+                b = self.linear2(x) + self.bias2
+                return self.unary_fn(a), self.unary_fn(b)
+
+        dtypes = []
+        if is_mkldnn_bf16_supported(self.device):
+            dtypes.append(torch.bfloat16)
+        if is_mkldnn_fp16_supported(self.device):
+            dtypes.append(torch.float16)
+        options = itertools.product(unary_list, dtypes)
+        for unary_fn, dtype in options:
+            metrics.reset()
+            fold_mod = M(self.device, dtype, unary_fn, cast_bias=True).eval()
+            v = torch.randn(2, 10)
+
+            def folder_matcher_check_fn():
+                match_nodes = unary_list[unary_fn]
+                if self._check_unary_is_decomposed(unary_fn):
+                    # Has extra dtype conversion nodes for autocast.
+                    match_nodes += 2
+                # we have 2 linears, so we double the matcher_count/nodes
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_unary_fusion_matcher_count"],
+                    0 if TEST_ACL else 2,
+                )
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
+                    0 if TEST_ACL else match_nodes * 2,
+                )
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 2
+                )
+
+            self._test_common(
+                fold_mod,
+                (v,),
+                folder_matcher_check_fn,
+                check_autocast=dtype,
+            )
+            self.assertEqual(metrics.generated_kernel_count, 3 if TEST_ACL else 1)
+            # we won't fold the bias if bias is not same dtype with weight
+            # https://github.com/pytorch/pytorch/pull/129138
+            metrics.reset()
+            mod = M(self.device, dtype, unary_fn, cast_bias=False).eval()
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 2
+                )
+
+            self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
+            # 1 kernel for "to_lowp", 2 kernels for unary ops
+            self.assertEqual(metrics.generated_kernel_count, 3)
+
+    def test_linear_binary(self, device="cpu"):
         self.device = device
 
         class M(torch.nn.Module):
@@ -905,7 +940,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             )
             self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
 
-    def test_linear_binary_broadcast_shapes(self, device):
+    def test_linear_binary_broadcast_shapes(self, device="cpu"):
         self.device = device
 
         class M(torch.nn.Module):
@@ -970,39 +1005,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             )
             self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
 
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
-    def test_conv2d_linear_add_broadcast_shapes(self, device):
-        self.device = device
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
-                self.linear = torch.nn.Linear(3, 16)
-
-            def forward(self, x1, x2):
-                return self.conv(x1) + self.linear(x2)[:, :, None, None]
-
-        metrics.reset()
-        mod = M().eval()
-        x1 = torch.randn(2, 3, 56, 56)
-        x2 = torch.randn(2, 3)
-
-        def matcher_check_fn():
-            match_nodes = 0 if TEST_ACL else 2
-            self.assertEqual(
-                counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"],
-                match_nodes,
-            )
-            self.assertEqual(
-                counters["inductor"]["mkldnn_conv_weight_pack_matcher_nodes"], 1
-            )
-
-        self._test_common(mod, (x1, x2), matcher_check_fn)
-
     @skipIfXpu(
         msg="Different with CPU, two linears will be concat on XPU for better performance"
     )
@@ -1048,8 +1050,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             v = torch.randn(2, 4, 16).to(dtype)
             self._test_common(mod, (v,), matcher_check_fn, rtol=1e-2, atol=1e-2)
 
-
-class TestPatternMatcher(TestPatternMatcherBase):
     def _qconv2d_test_helper(self, device="cpu", int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(
@@ -4267,10 +4267,6 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
     _test_conv_binary_base = TestPatternMatcherGeneric._test_conv_binary_base
     test_conv2d_binary_dynamic_shapes = TestPatternMatcherGeneric.test_conv2d_binary
     test_conv3d_binary_dynamic_shapes = TestPatternMatcherGeneric.test_conv3d_binary
-    test_linear_unary_dynamic_shapes = TestPatternMatcherGeneric.test_linear_unary
-    test_linear_input_non_contiguous_3D_wo_bias_dynamic_shapes = (
-        TestPatternMatcherGeneric.test_linear_input_non_contiguous_3D_wo_bias
-    )
 
     def test_conv_transpose2d_dynamic_shapes(self, device):
         self.device = device
@@ -4345,6 +4341,11 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
 
 
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
+    test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
+    test_linear_input_non_contiguous_3D_wo_bias_dynamic_shapes = (
+        TestPatternMatcher.test_linear_input_non_contiguous_3D_wo_bias
+    )
+
     def setUp(self):
         super().setUp()
         self.ctx_stack.enter_context(
