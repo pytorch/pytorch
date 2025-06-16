@@ -1008,7 +1008,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfXpu(
         msg="Different with CPU, two linears will be concat on XPU for better performance"
     )
-    def test_multi_linear_share_same_input(self, device):
+    def test_multi_linear_share_same_input(self, device="cpu"):
         self.device = device
 
         # llama pattern.
