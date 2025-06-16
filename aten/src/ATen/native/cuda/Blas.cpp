@@ -1606,8 +1606,8 @@ const std::optional<at::Tensor>& scale_result,
 std::optional<c10::ScalarType> out_dtype,
 bool use_fast_accum) {
 #ifndef USE_ROCM
-  bool allowed_device = _scaled_mm_allowed_device(/*sm90_sm100_only*/true);
-  TORCH_CHECK(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = 9.0 or 10.0");
+  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true);
+  TORCH_CHECK(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = 9.0");
 
   TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
   TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
@@ -1675,8 +1675,8 @@ const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
 #ifndef USE_ROCM
-  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true);
-  TORCH_CHECK(allowed_device, "torch._grouped_mm is only supported on CUDA devices with compute capability = 9.0");
+  bool allowed_device = _scaled_mm_allowed_device(/*sm90_sm100_only*/true);
+  TORCH_CHECK(allowed_device, "torch._grouped_mm is only supported on CUDA devices with compute capability = 9.0, 10.0");
 
   TORCH_CHECK(mat_a.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_a.scalar_type());
   TORCH_CHECK(mat_b.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_b.scalar_type());
