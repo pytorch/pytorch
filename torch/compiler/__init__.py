@@ -473,4 +473,7 @@ def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
     """
     from ._cache import CacheArtifactManager, CacheInfo
 
-    return CacheArtifactManager.deserialize(serialized_artifacts)
+    artifacts = CacheArtifactManager.deserialize(serialized_artifacts)
+    if artifacts is not None:
+        return CacheArtifactManager.populate_caches(artifacts)
+    return None
