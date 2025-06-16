@@ -1491,7 +1491,7 @@ class StringLikeTest(BaseTest):
         self.checkequal(('http', '://', 'www.python.org'), S, 'partition', '://')
         self.checkequal(('http://www.python.org', '', ''), S, 'partition', '?')
         self.checkequal(('', 'http://', 'www.python.org'), S, 'partition', 'http://')
-        self.checkequal(('http://www.python.', 'org', ''), S, 'partition', 'org')
+        self.checkequal(('http://www.python.', 'org', ''), S, 'partition', 'org')  # @lint-ignore
 
         self.checkraises(ValueError, S, 'partition', '')
         self.checkraises(TypeError, S, 'partition', None)

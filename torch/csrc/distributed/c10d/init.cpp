@@ -2,6 +2,7 @@
 
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
@@ -31,7 +32,7 @@
 #ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -44,9 +45,10 @@
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
-#include <torch/csrc/distributed/c10d/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -190,6 +192,10 @@ using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
 template <typename T>
 using intrusive_ptr_no_gil_destructor_class_ =
     py::class_<T, IntrusivePtrNoGilDestructor<T>>;
+
+template <typename T, typename Trampoline>
+using intrusive_ptr_no_gil_destructor_trampoline_class_ =
+    py::class_<T, IntrusivePtrNoGilDestructor<T>, Trampoline>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -998,6 +1004,15 @@ This class does not support ``__members__`` property.)");
   module.def("_unregister_all_process_groups", []() {
     return ::c10d::unregister_all_process_groups();
   });
+
+  // Intializes the device state in CUmodule so that it’s able to perform
+  // NVSHMEM operations.
+#ifdef USE_NVSHMEM
+  module.def(
+      "_nvshmemx_cumodule_init",
+      ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
+      py::arg("module"));
+#endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
@@ -2010,10 +2025,8 @@ communication mechanism.
           py::arg("world_size"));
 
   auto processGroup =
-      py::class_<
-          ::c10d::ProcessGroup,
-          c10::intrusive_ptr<::c10d::ProcessGroup>,
-          ::c10d::PyProcessGroup>(module, "ProcessGroup",
+      intrusive_ptr_no_gil_destructor_trampoline_class_<
+          ::c10d::ProcessGroup, ::c10d::PyProcessGroup>(module, "ProcessGroup",
           R"(A ProcessGroup is a communication primitive that allows for
           collective operations across a group of processes.
 
@@ -2921,7 +2934,12 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       processGroupGloo, "_Options", backendOptions)
       .def(py::init<>())
       .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
-      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
+      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads)
+      .def_readwrite(
+          "global_ranks_in_group",
+          &::c10d::ProcessGroupGloo::Options::global_ranks_in_group)
+      .def_readwrite(
+          "group_name", &::c10d::ProcessGroupGloo::Options::group_name);
 
   processGroupGloo
       .def_static(
@@ -3199,6 +3217,15 @@ for details.
 #endif
 #ifdef NCCL_HAS_QOS
       .def_readwrite("traffic_class", &ncclConfig_t::trafficClass)
+#endif
+#ifdef NCCL_HAS_COLLNET
+      .def_readwrite("collnet_enable", &ncclConfig_t::collnetEnable)
+#endif
+#ifdef NCCL_HAS_CTA_POLICY
+      .def_readwrite("cta_policy", &ncclConfig_t::CTAPolicy)
+#endif
+#ifdef NCCL_HAS_NVLS_CTAS
+      .def_readwrite("nvls_ctas", &ncclConfig_t::nvlsCTAs)
 #endif
       .def_property(
           "net_name",
@@ -3788,6 +3815,46 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
       )");
 #endif
+
+  module.def(
+      "_dump_fr_trace_json",
+      [](std::optional<bool> includeCollectives,
+         std::optional<bool> onlyActive) {
+        return py::bytes(::c10d::dump_fr_trace_json(
+            includeCollectives.value_or(true), onlyActive.value_or(false)));
+      },
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      R"(
+        Arguments:
+                includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+                onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+        Returns:
+                Stringified json work traces.
+                Default settings return everything.
+    )");
+  module.def(
+      "_dump_fr_trace",
+      [](std::optional<bool> includeCollectives,
+         std::optional<bool> includeStackTraces,
+         std::optional<bool> onlyActive) {
+        return py::bytes(::c10d::dump_fr_trace(
+            includeCollectives.value_or(true),
+            includeStackTraces.value_or(true),
+            onlyActive.value_or(false)));
+      },
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("includeStackTraces") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      R"(
+            Arguments:
+                includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+                includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
+                onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+            Returns:
+                Stringified pickle work traces.
+                Default settings return everything.
+        )");
 
   intrusive_ptr_class_<::c10d::control_plane::WorkerServer>(
       module, "_WorkerServer", R"(

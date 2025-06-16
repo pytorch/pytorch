@@ -19,7 +19,7 @@ while IFS=: read -r filepath url; do
     code=$(curl -k -gsLm30 --retry 3 --retry-delay 3 --retry-connrefused -o /dev/null -w "%{http_code}" -I "$url") || code=000
     if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
       sleep 1
-      code=$(curl -k -gsLm30 --retry 3 --retry-delay 3 --retry-connrefused -o /dev/null -w "%{http_code}" -r 0-0 -A "$user_agent" "$url") || code=000
+      code=$(curl -k -gsLm30 --retry 3 --retry-delay 3 --retry-connrefused -o /dev/null -w "%{http_code}" -r 0-0 -A "$user_agent" -H "Accept-Language: en-US,en" -H "Connection: keep-alive" "$url") || code=000
     fi
     if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
       sleep 1
@@ -62,7 +62,7 @@ while IFS=: read -r filepath url; do
     sleep 1
   done
 done < <(
-  pattern='(?!.*@lint-ignore)(?<!git\+)(?<!\$\{)https?://(?![^/]*@)(?![^\s<>\")]*[<>\{\}\$])[^[:space:]<>")\[\]\\|]+'
+  pattern='(?!.*@lint-ignore)(?<!git\+)(?<!\$\{)https?://(?![^/]*@)(?![^\s<>\")]*[<>\{\}\$])[[:alnum:]][^[:space:]<>")\[\]\\|]*'
   excludes=(
     ':(exclude,glob)**/.*'
     ':(exclude,glob)**/*.lock'
@@ -72,7 +72,6 @@ done < <(
     ':(exclude,glob)**/*gradle*'
     ':(exclude,glob)**/third-party/**'
     ':(exclude,glob)**/third_party/**'
-    ':(exclude,glob)**/test/dynamo/cpython/**'
   )
   if [ $# -eq 2 ]; then
     for filename in $(git diff --name-only --unified=0 "$1...$2"); do

@@ -39,6 +39,7 @@ from typing import (
     Any,
     Callable,
     cast,
+    Generic,
     NamedTuple,
     NoReturn,
     Optional,
@@ -46,7 +47,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, TypeAlias, TypeGuard
+from typing_extensions import deprecated, ParamSpec, TypeAlias, TypeGuard
 
 import torch
 import torch.fx
@@ -103,6 +104,7 @@ if TYPE_CHECKING:
     import types
 
     from torch import Tensor
+    from torch._dynamo.source import TensorPropertySource
     from torch._subclasses.fake_tensor import FakeTensor
     from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
@@ -170,6 +172,7 @@ __all__ = [
     "is_accessor_node",
     "ValueRangesSLoc",
     "SymIntEqByExpr",
+    "Specialization",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -244,7 +247,7 @@ class SymIntEqByExpr:
 
 
 def _nested_int_aware_sort(
-    tup: tuple[IntLikeType, int]
+    tup: tuple[IntLikeType, int],
 ) -> tuple[int, IntLikeType, int]:
     return (
         # Order nested ints by their coefficients.
@@ -1016,6 +1019,20 @@ def find_symbol_binding_fx_nodes(
     return r
 
 
+@dataclass(frozen=True)
+class Specialization:
+    """
+    This class is used in multi-graph compilation contexts where we generate
+    multiple specialized graphs and dispatch to the appropriate one at runtime.
+    This allows us to optimize the trade-off between performance and generality
+    by creating specialized versions for common patterns (e.g., x.shape[0] % 16 == 0)
+    while maintaining a general fallback.
+    """
+
+    source: TensorPropertySource
+    check_fn: Callable
+
+
 # Analogous to ConvertIntSource
 @dataclass(frozen=True)
 class ConvertIntKey:
@@ -1318,6 +1335,7 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
+# Note [guard_or_]
 # The following two functions are common utilities used while defining unbacked semantics
 # of various framework code. Those would be used in situations you prefer to guard and know
 # the result of the expression over not guarding, but in case you hit a data dependent error
@@ -1445,11 +1463,9 @@ def sym_and(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
     """
     and, but for symbolic expressions, without bool casting.
     """
-    assert isinstance(x, (bool, SymBool))
     if len(others) == 0:
         return x
     for y in others:
-        assert isinstance(y, (bool, SymBool))
         x = operator.and_(x, y)
     return x
 
@@ -1473,17 +1489,15 @@ def sym_or(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
     """
     or, but for symbolic expressions, without bool casting.
     """
-    assert isinstance(x, (bool, SymBool))
     if len(others) == 0:
         return x
     for y in others:
-        assert isinstance(y, (bool, SymBool))
         x = operator.or_(x, y)
     return x
 
 
 def guard_scalar(
-    a: Union[SymBool, SymInt, SymFloat, int, bool, float]
+    a: Union[SymBool, SymInt, SymFloat, int, bool, float],
 ) -> Union[bool, int, float]:
     """
     Guard a scalar value, which can be a symbolic or concrete boolean, integer, or float.
@@ -2017,8 +2031,12 @@ class SymIntSymbolicContext(SymbolicContext):
     constraint: DimConstraint
 
 
+_P1 = ParamSpec("_P1")
+_T1 = TypeVar("_T1")
+
+
 @dataclass(frozen=True)
-class StatelessSymbolicContext(SymbolicContext):
+class StatelessSymbolicContext(Generic[_P1, _T1], SymbolicContext):
     """
     Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
     a symbolic_context determination as given by ``DimDynamic`` and ``DimConstraint``.
@@ -2029,6 +2047,7 @@ class StatelessSymbolicContext(SymbolicContext):
     dynamic_strides: DimList[DimDynamic] = None  # type: ignore[assignment]
     constraint_sizes: DimList[DimConstraint] = None  # type: ignore[assignment]
     constraint_strides: DimList[DimConstraint] = None  # type: ignore[assignment]
+    specialize_on: Optional[list[list[Callable[_P1, _T1]]]] = None
     # If the tensor is a view, this should be populated for the base. It contains
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
@@ -2036,6 +2055,12 @@ class StatelessSymbolicContext(SymbolicContext):
     # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self) -> None:
+        if self.specialize_on is None:
+            object.__setattr__(
+                self,
+                "specialize_on",
+                [[]] * len(self.dynamic_sizes),
+            )
         if self.dynamic_strides is None:
             object.__setattr__(
                 self,
@@ -2150,7 +2175,7 @@ class TrackedFake:
 
 
 def is_symbolic(
-    val: Union[int, SymInt, float, SymFloat, bool, SymBool]
+    val: Union[int, SymInt, float, SymFloat, bool, SymBool],
 ) -> TypeGuard[Union[SymInt, SymFloat, SymBool]]:
     if isinstance(val, (int, float, bool)):
         return False
@@ -2429,7 +2454,7 @@ def _sympy_cast_symbool_to_symint_guardless(x: SympyBoolean) -> sympy.Expr:
 
 
 def cast_symbool_to_symint_guardless(
-    symbool: Union[bool, torch.SymBool]
+    symbool: Union[bool, torch.SymBool],
 ) -> Union[int, torch.SymInt]:
     """
     Converts a SymBool or bool to a SymInt or int without introducing guards.
@@ -3809,9 +3834,12 @@ class ShapeEnv:
         # with something like effect token tracking.
         self.unbacked_alloc_order: dict[sympy.Symbol, int] = {}
 
-        self.specialization_stacks: dict[Source, traceback.StackSummary] = {}
+        self.user_specialization_stacks: dict[Source, traceback.StackSummary] = {}
+        self.framework_specialization_stacks: dict[Source, traceback.StackSummary] = {}
 
         self.trace_asserts = trace_asserts
+
+        self.specializations: OrderedSet[Specialization] = OrderedSet()
 
         from torch.fx.experimental.validator import translation_validation_enabled
 
@@ -3864,6 +3892,52 @@ class ShapeEnv:
     def allow_complex_guards_as_runtime_asserts(self) -> bool:
         return self.settings.allow_complex_guards_as_runtime_asserts
 
+    @contextmanager
+    def patch_source_specialization(
+        self, source: Source, check_fn: Callable[[sympy.Symbol], sympy.Expr]
+    ) -> Iterator[None]:
+        """
+        Temporarily add symbol-level axioms to the ShapeEnv. This is useful when you want to "fork"
+        and have parallel universes of ShapeEnvs. For example, we use this when doing multi-graph
+        compile so we can support various graphs with varying levels of specializations.
+
+        This context manager allows for temporarily adding constraints to the shape environment
+        based on a specialization function applied to a symbol associated with a source.
+
+        Args:
+            source: The source of the symbol to specialize
+            check_fn: A function that takes a sympy Symbol and returns a sympy expression
+                     representing a constraint/specialization to be applied
+        """
+        name = source.name()
+        sym = self.source_to_var[name]
+        expr = check_fn(SymInt(SymNode(sym, self, int, None))).node._expr
+        new_axioms = dict(self.get_implications(self.simplify(expr)))
+        added_replacements = {}
+
+        for axiom in new_axioms:
+            if (
+                isinstance(axiom, sympy.Eq)
+                and isinstance(axiom.lhs, sympy.Symbol)
+                and isinstance(axiom.rhs, sympy.Integer)
+                and axiom.lhs not in self.replacements
+            ):
+                self.replacements[axiom.lhs] = axiom.rhs
+                added_replacements[axiom.lhs] = axiom.rhs
+        self.axioms.update(new_axioms)
+
+        # We need to freeze the ShapeEnv becuase any additional modification of
+        # the ShapeEnv will cause unsoundness for subsequent specialization calls.
+        self.frozen = True
+        try:
+            yield
+        finally:
+            for k in new_axioms:
+                self.axioms.pop(k, None)
+            for k in added_replacements:
+                self.replacements.pop(k, None)
+            self.frozen = False
+
     def check_equal(self, other: ShapeEnv) -> None:
         """Compare another ShapeEnv for equivalence"""
         # ShapeEnv fields that are not relevant for the outcome of
@@ -3892,7 +3966,8 @@ class ShapeEnv:
             "replacements_slocs",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
-            "specialization_stacks",
+            "user_specialization_stacks",
+            "framework_specialization_stacks",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -4297,6 +4372,17 @@ class ShapeEnv:
                 do_not_specialize_zero_one=config.backed_size_oblivious,
                 symbolic_context=symbolic_context,
             )
+            if (
+                isinstance(symbolic_context, StatelessSymbolicContext)
+                and symbolic_context.specialize_on
+            ):
+                for specialization in symbolic_context.specialize_on[i]:
+                    self.specializations.add(
+                        Specialization(
+                            TensorPropertySource(source, TensorProperty.SIZE, i),
+                            specialization,
+                        )
+                    )
             if (
                 config.backed_size_oblivious
                 and isinstance(sym, sympy.Symbol)  # could be static
@@ -5428,11 +5514,20 @@ class ShapeEnv:
                     var_with_range = self._render_range_for_constraint_violation(
                         source, constraint
                     )
-                    user_stack = self.specialization_stacks.get(source, None)
+                    user_stack = self.user_specialization_stacks.get(source, None)
+                    framework_stack = self.framework_specialization_stacks.get(
+                        source, None
+                    )
                     msg = (
                         f"You marked {self._debug_name(source)} as dynamic but your code "
-                        f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
-                        f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        f"specialized it to be a constant ({val}). If you're using mark_dynamic, "
+                        f"either remove it or use maybe_mark_dynamic. If you're using Dim.DYNAMIC, "
+                        f"replace it with either Dim.STATIC or Dim.AUTO."
+                        + (
+                            "\n\nFramework stack:\n" + "".join(framework_stack.format())
+                            if framework_stack
+                            else ""
+                        )
                         + (
                             "\n\nUser stack:\n" + "".join(user_stack.format())
                             if user_stack
@@ -6655,7 +6750,10 @@ class ShapeEnv:
 
             for source in self.var_to_sources.get(a, []):
                 if user_tb:
-                    self.specialization_stacks[source] = user_tb
+                    self.user_specialization_stacks[source] = user_tb
+                self.framework_specialization_stacks[
+                    source
+                ] = CapturedTraceback.extract(cpp=True)
 
             if config.print_specializations:
                 self.log.warning(
@@ -6699,12 +6797,20 @@ class ShapeEnv:
         return self.replacements[a]
 
     @lru_cache(256)
-    def _maybe_guard_rel(self, expr: sympy.Rel) -> None:
+    def _maybe_guard_rel(self, expr: sympy.Expr) -> None:
         """
         The relational guard is guarded to be true.  Use this information to
         simplify shapes (i.e. a == b or a % 5 == 0)
         """
-        assert isinstance(expr, sympy.Rel)
+        if isinstance(expr, sympy.And):
+            for arg in expr.args:
+                self._maybe_guard_rel(arg)
+            return
+        elif not isinstance(expr, sympy.Rel):
+            log.warning(
+                "_maybe_guard_rel() was called on non-relation expression %s", expr
+            )
+            return
 
         # A good example of what goes wrong if you don't do this is
         # python test/functorch/test_aotdispatch.py -k
@@ -6898,13 +7004,12 @@ class ShapeEnv:
                 stack_info=True if log.getEffectiveLevel() < logging.WARNING else False,
             )
 
-    def _get_user_frame(self) -> types.FrameType:
+    def _get_user_frame(self) -> Optional[types.FrameType]:
         frame = inspect.currentframe()
         while frame is not None:
             if frame.f_code.co_filename not in uninteresting_files():
                 return frame
             frame = frame.f_back
-        assert frame is not None
         return frame
 
     def _get_stack_summary(
@@ -6914,11 +7019,12 @@ class ShapeEnv:
         if floc is None:
             frame = self._get_user_frame()
             try:
-                floc = traceback.FrameSummary(
-                    frame.f_code.co_filename,
-                    frame.f_lineno,
-                    frame.f_code.co_name,
-                )
+                if frame is not None:
+                    floc = traceback.FrameSummary(
+                        frame.f_code.co_filename,
+                        frame.f_lineno,
+                        frame.f_code.co_name,
+                    )
             finally:
                 del frame
 
@@ -7184,8 +7290,6 @@ class ShapeEnv:
             },
         )
 
-    @lru_cache(256)
-    @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_expr(
         self,
         orig_expr: sympy.Basic,
@@ -7275,8 +7379,9 @@ class ShapeEnv:
         ):
             return orig_expr
 
-        # Don't track this one
-        @functools.lru_cache(None)
+        # Don't track this one. (Because this cache is inside this function the
+        # cache only lasts for the invocation of this function call)
+        @functools.cache
         def compute_concrete_val() -> sympy.Basic:
             if hint is None:
                 # This is only ever called for expressions WITHOUT unbacked
@@ -7356,9 +7461,11 @@ class ShapeEnv:
             if static_expr is not None:
                 self.log.debug(
                     "eval %s == %s [statically known]",
-                    f"size_oblivious({orig_expr})"
-                    if size_oblivious
-                    else size_oblivious,
+                    (
+                        f"size_oblivious({orig_expr})"
+                        if size_oblivious
+                        else size_oblivious
+                    ),
                     static_expr,
                 )
                 if (
@@ -7485,15 +7592,14 @@ class ShapeEnv:
             if not self._suppress_guards_tls():
                 self._log_guard("eval", g, forcing_spec=forcing_spec)
 
-                if isinstance(g, sympy.Rel):
-                    # TODO: If we successfully eliminate a symbol via equality, it
-                    # is not actually necessary to save a guard for the equality,
-                    # as we will implicitly generate a guard when we match that
-                    # input against the symbol.  Probably the easiest way to
-                    # implement this is to have maybe_guard_rel return a bool
-                    # saying if it "subsumed" the guard (and therefore the guard
-                    # is no longer necessary)
-                    self._maybe_guard_rel(g)
+                # TODO: If we successfully eliminate a symbol via equality, it
+                # is not actually necessary to save a guard for the equality,
+                # as we will implicitly generate a guard when we match that
+                # input against the symbol.  Probably the easiest way to
+                # implement this is to have maybe_guard_rel return a bool
+                # saying if it "subsumed" the guard (and therefore the guard
+                # is no longer necessary)
+                self._maybe_guard_rel(g)
 
                 if not self.allow_complex_guards_as_runtime_asserts:
                     # at this point, we've evaluated the concrete expr value, and have
@@ -7607,8 +7713,7 @@ class ShapeEnv:
                 log.debug("runtime_asserts_frozen but then got %s", expr)
             self._check_frozen(expr, sympy.true)
             # eliminate symbols on equality tests / refine ranges
-            if isinstance(expr, sympy.Rel):
-                self._maybe_guard_rel(expr)
+            self._maybe_guard_rel(expr)
 
             # canonicalise to remove equations that are trivially equal
             orig_expr = expr

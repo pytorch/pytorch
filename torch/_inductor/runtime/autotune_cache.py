@@ -1,3 +1,28 @@
+"""
+PyTorch Inductor Autotuning Cache System
+
+This module implements a caching system for autotuning configurations in PyTorch's Inductor compiler.
+It provides mechanisms to store and retrieve optimal kernel configurations both locally and remotely,
+which significantly speeds up compilation by reusing previously discovered optimal parameters.
+
+The caching system includes:
+- Local filesystem caching for individual machine reuse
+- Remote caching for sharing optimizations across machines
+- Bundled caching to efficiently store multiple related configurations
+- Cache invalidation based on PyTorch versions and backend changes
+- Serialization/deserialization support for worker processes
+
+Key components:
+- AutotuneCache: Main class for managing cache access and storage
+- AutotuneCacheBundler: Bundles multiple cache entries for efficient storage
+- LocalAutotuneCache: Handles filesystem-based caching
+- _LocalAutotuneCacheBackend: Low-level file operations for cache storage
+- AutotuneCacheArtifact: Integration with PyTorch's artifact system
+
+This caching system is critical for performance as it eliminates the need to re-run
+expensive autotuning operations when the same kernels are compiled multiple times.
+"""
+
 from __future__ import annotations
 
 import dataclasses
@@ -242,7 +267,11 @@ class AutotuneCache:
 
     # Save the config in the caches
     def save(
-        self, config: Config, time_taken_ns: int, found_by_coordesc: bool = False
+        self,
+        config: Config,
+        time_taken_ns: int,
+        found_by_coordesc: bool = False,
+        triton_cache_hash: Optional[str] = None,
     ) -> None:
         data = {
             **config.kwargs,
@@ -251,6 +280,7 @@ class AutotuneCache:
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
+            "triton_cache_hash": triton_cache_hash,
         }
         if HAS_WARP_SPEC:
             data.update(
@@ -513,6 +543,8 @@ def _load_cached_autotuning(
 
     # Remove time taken for comparison
     best_config.pop("time_taken_ms", None)
+
+    best_config.pop("triton_cache_hash", None)
 
     if inductor_meta.get("coordinate_descent_tuning") and best_config.pop(
         "found_by_coordesc", False

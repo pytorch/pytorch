@@ -1079,7 +1079,7 @@ class SymmMemSingleProcTest(TestCase):
         "stream_write_value32 currently only supports cuda version>=12.0",
     )
     @skipIf(
-        _get_torch_cuda_version() == (12, 6),
+        _get_torch_cuda_version() >= (12, 6),
         "https://github.com/pytorch/pytorch/issues/154073",
     )
     @runOnRocmArch(MI300_ARCH)
