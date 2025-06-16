@@ -1077,6 +1077,7 @@ def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):
     finally:
         tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val
 
+
 @contextlib.contextmanager
 def allow_side_effects(tx: "InstructionTranslator"):
     orig_val = tx.output.current_tracer.allow_side_effects
