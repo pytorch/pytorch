@@ -9,6 +9,9 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
+#include <utility>
+
+#include <nvshmem.h>
 
 namespace c10d {
 namespace symmetric_memory {
@@ -24,6 +27,15 @@ struct NVSHMEMAllocation {
 
   NVSHMEMAllocation(void* ptr, size_t buffer_size, int device_idx)
       : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
+
+  ~NVSHMEMAllocation() {
+    // Avoid calling CUDA functions after driver shutting down
+    if (is_finalizing()) {
+      return;
+    }
+    c10::cuda::CUDAGuard guard(device_idx);
+    nvshmem_free(ptr);  // nvshmem_free has no return value
+  }
 };
 
 class NVSHMEMSymmetricMemory : public SymmetricMemory {
@@ -48,16 +60,16 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
               << "rank_to_global_rank: " << rank_to_global_rank_;
 
     for (int r = 0; r < world_size_; ++r) {
-      buffers_.push_back(nvshmem_extension::nvshmem_ptr(
+      buffers_.push_back(nvshmem_ptr(
           allocation->ptr, rank_to_global_rank_[r]));
     }
 
     // TODO: use the same allocation for signal pad
-    void* signal_pad_ptr = nvshmem_extension::nvshmem_malloc(signal_pad_size);
+    void* signal_pad_ptr = nvshmem_malloc(signal_pad_size);
     AT_CUDA_CHECK(cudaMemset(signal_pad_ptr, 0, signal_pad_size));
 
     for (int r = 0; r < world_size_; ++r) {
-      signal_pads_.push_back(nvshmem_extension::nvshmem_ptr(
+      signal_pads_.push_back(nvshmem_ptr(
           signal_pad_ptr, rank_to_global_rank_[r]));
     }
 
@@ -257,26 +269,26 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     int world_size = group_info.world_size;
 
     nvshmem_extension::initialize_nvshmem_with_store(store, rank, world_size);
-    auto ptr = nvshmem_extension::nvshmem_malloc(size);
+    auto ptr = nvshmem_malloc(size);
     auto allocation =
         std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
     // TODO: thread safety
-    allocations_.emplace(ptr, allocation);
+    allocations_.try_emplace(ptr, std::move(allocation));
     return ptr;
   }
 
   void free(void* ptr) override {
     // TODO: thread safety
-    ptr_to_symm_mem_.erase(ptr);
+    allocations_.erase(ptr);
   };
 
   size_t get_alloc_size(void* ptr) override {
-    auto it = ptr_to_symm_mem_.find(ptr);
-    if (it == ptr_to_symm_mem_.end()) {
+    auto it = allocations_.find(ptr);
+    if (it == allocations_.end()) {
       TORCH_CHECK(
           false, ptr, " is not allocated with NVSHMEMSymmetricMemoryAllocator");
     }
-    return it->second->get_buffer_size();
+    return it->second->buffer_size;
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
@@ -304,9 +316,6 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
  private:
-  std::unordered_map<void*, c10::intrusive_ptr<SymmetricMemory>>
-      ptr_to_symm_mem_;
-
   std::unordered_map<void*, std::shared_ptr<NVSHMEMAllocation>> allocations_;
   std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
       symm_mems_;
