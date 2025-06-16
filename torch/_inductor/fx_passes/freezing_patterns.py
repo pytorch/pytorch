@@ -133,7 +133,10 @@ def addmm_patterns_init():
 
     def check_woq_concat_linear_weights(match):
         is_cpu = match.kwargs["inp"].meta["val"].is_cpu
-        if is_cpu and not config.cpp.enable_concat_linear:
+        if not is_cpu:
+            # Currently, this pattern is only supported on CPU
+            return False
+        elif is_cpu and not config.cpp.enable_concat_linear:
             return False
 
         weight_inputs = ["w1", "w2"]
@@ -162,7 +165,6 @@ def addmm_patterns_init():
         equal_shape_inputs = [weight_inputs]
         for equal_shape_group in equal_shape_inputs:
             inps = [match.kwargs[name] for name in equal_shape_group]
-
             if not all(
                 inp.meta["val"].shape == inps[0].meta["val"].shape for inp in inps
             ):
