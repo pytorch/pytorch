@@ -81,7 +81,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             # no hint: we'll see if we know that this is a 32-bit int, and guard if possible.
             int_max = torch.iinfo(torch.int32).max
             if expr_fits_within_32bit(arg.expr):
-                V.graph.sizevars.guard_leq(arg.expr, int_max)
+                V.graph.sizevars.check_leq(arg.expr, int_max)
                 return "i32"
             else:
                 return "i64"
@@ -90,7 +90,15 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
     if isinstance(arg, WorkspaceArg):
         return _type_of(arg.dtype)
     if isinstance(arg, TMADescriptorArg):
-        return "nvTmaDesc"
+        if arg.api_type == "experimental":
+            return "nvTmaDesc"
+        else:
+            # https://github.com/triton-lang/triton/blob/9695baed9b46cf957e08b157bb4133f4a4b331c5/python/triton/runtime/jit.py#L360-L363
+            assert arg.api_type == "stable"
+            assert arg.block_shape is not None
+            assert arg.dtype is not None
+            inner = _type_of(arg.dtype)[1:]  # strip the `*`: *fp32 -> fp32
+            return f"tensordesc<{inner}{list(arg.block_shape)}>"
     if isinstance(arg, ConstexprArg):
         return "constexpr"
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")

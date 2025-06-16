@@ -1,7 +1,12 @@
-torch.nn.attention.experimental
-===============================
-.. currentmodule:: torch.nn.attention.experimental
-.. py:module:: torch.nn.attention.experimental
+# torch.nn.attention.experimental
 
-.. warning::
+```{eval-rst}
+.. currentmodule:: torch.nn.attention.experimental
+```
+```{eval-rst}
+.. py:module:: torch.nn.attention.experimental
+```
+
+```{warning}
    These APIs are experimental and subject to change without notice.
+```

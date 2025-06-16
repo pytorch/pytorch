@@ -160,7 +160,7 @@ class FunctionalTensor(torch.Tensor):
                 assert out._inference_mode_base is not None
         return out
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):  # type: ignore[override]
         unrecognized_types = [
             t
             for t in types
@@ -291,7 +291,7 @@ class FunctionalTensor(torch.Tensor):
         return self.elem.to_dense()
 
     @property
-    def layout(self):
+    def layout(self):  # type: ignore[override]
         return self.elem.layout
 
     def __bool__(self):
