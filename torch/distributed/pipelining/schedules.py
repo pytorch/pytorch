@@ -685,7 +685,7 @@ class ScheduleGPipe(_PipelineScheduleRuntime):
             microbatches: list of microbatch args.
         """
         # Call the parent _PipelineScheduleRuntime._step_microbatches method
-        super()._step_microbatches(arg_mbs, kwarg_mbs, target_mbs, losses)
+        _PipelineScheduleRuntime._step_microbatches(self, arg_mbs, kwarg_mbs, target_mbs, losses)
 
 
 class Schedule1F1B(_PipelineScheduleRuntime):
@@ -813,7 +813,7 @@ class Schedule1F1B(_PipelineScheduleRuntime):
             microbatches: list of microbatch args.
         """
         # Call the parent _PipelineScheduleRuntime._step_microbatches method
-        super()._step_microbatches(arg_mbs, kwarg_mbs, target_mbs, losses)
+        _PipelineScheduleRuntime._step_microbatches(self, arg_mbs, kwarg_mbs, target_mbs, losses)
 
 
 def _add_unshard_reshard(
