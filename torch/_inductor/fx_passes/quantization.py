@@ -361,7 +361,9 @@ def _is_valid_quantized_conv_optimization_pattern() -> Callable[[Match], bool]:
     return fn
 
 
-def _is_valid_qconv_post_op_fusion_pattern(has_binary_post_op=False) -> bool:
+def _is_valid_qconv_post_op_fusion_pattern(
+    has_binary_post_op=False,
+) -> Callable[[Match], bool]:
     return (
         _is_valid_qconv_binary_optimization_pattern()
         if has_binary_post_op
@@ -451,8 +453,8 @@ def _register_quantized_conv_lowering(
     return qconv
 
 
-def _is_valid_quantized_linear_optimization_pattern() -> bool:
-    def fn(match):
+def _is_valid_quantized_linear_optimization_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         output_dtype = _get_pattern_output_dtype(match)
         if output_dtype in [torch.float32, torch.bfloat16]:
             # Only keep matched pattern with same output_dtype
@@ -467,7 +469,9 @@ def _is_valid_quantized_linear_optimization_pattern() -> bool:
     return fn
 
 
-def _is_valid_qlinear_post_op_fusion_pattern(has_binary_post_op=False) -> bool:
+def _is_valid_qlinear_post_op_fusion_pattern(
+    has_binary_post_op=False,
+) -> Callable[[Match], bool]:
     return (
         _is_valid_qlinear_binary_optimization_pattern()
         if has_binary_post_op
@@ -628,13 +632,13 @@ def _register_quantized_linear_binary_lowering(
     return qlinear_binary
 
 
-def _is_valid_qconv_binary_optimization_pattern() -> bool:
+def _is_valid_qconv_binary_optimization_pattern() -> Callable[[Match], bool]:
     return _is_valid_quantized_op_binary_optimization_pattern(
         torch.ops.onednn.qconv_pointwise
     )
 
 
-def _is_valid_qlinear_binary_optimization_pattern() -> bool:
+def _is_valid_qlinear_binary_optimization_pattern() -> Callable[[Match], bool]:
     return _is_valid_quantized_op_binary_optimization_pattern(
         torch.ops.onednn.qlinear_pointwise,
         # we don't insert q-dq for extra input due to accuracy issues
@@ -853,7 +857,9 @@ def _is_valid_quantized_maxpool2d_optimization_pattern() -> Callable[[Match], bo
         # Only match the pattern which max_pool2d_with_indices returns value
         # instead of indices.
         get_item_node = filter_nodes(match.nodes, operator.getitem)[0]
-        return get_item_node.args[1] == 0
+        arg = get_item_node.args[1]
+        assert not isinstance(arg, torch.Tensor)
+        return arg == 0
 
     return fn
 
