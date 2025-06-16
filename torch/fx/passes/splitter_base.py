@@ -798,7 +798,65 @@ class _SplitterBase:
             # If nothing was found, then it's time to flip the mode and start a new subgraph
             if node is None:
                 if not current_subgraph_nodes:
-                    raise FxNetSplitterInternalError("Subgraph can't be empty")
+                    example_cycle: NodeList = []
+                    external_deps: NodeSet = set()
+
+                    def get_remaining_deps(n):
+                        return self.deps[n] - visited_nodes
+
+                    def analyze_deps():
+                        remaining_nodes = current_acc_nodes | current_cpu_nodes
+
+                        def dfs(
+                            node: torch.fx.Node,
+                            visited: NodeSet,
+                            rec_stack: NodeList,
+                        ):
+                            nonlocal example_cycle
+                            # Mark the current node as visited and add it to the recursion stack
+                            visited.add(node)
+                            rec_stack.append(node)
+                            # Check for all the dependencies of the current node
+                            rem_deps = get_remaining_deps(node)
+                            for d in rem_deps:
+                                if d not in remaining_nodes:
+                                    external_deps.add(d)
+                                    continue
+                                if d not in visited:
+                                    # If the neighbor hasn't been visited, recursively visit it
+                                    dfs(d, visited, rec_stack)
+                                elif d in rec_stack:
+                                    # If the neighbor is in the recursion stack, a cycle is detected
+                                    cycle_start_index = rec_stack.index(d)
+                                    cycle = rec_stack[cycle_start_index:]
+                                    if len(example_cycle) == 0 or len(cycle) < len(
+                                        example_cycle
+                                    ):
+                                        example_cycle = cycle
+                            # Remove the node from the recursion stack before returning
+                            rec_stack.pop()
+
+                        visited: NodeSet = set()
+                        rec_stack: NodeList = []
+                        for n in remaining_nodes:
+                            if n not in visited:
+                                dfs(n, visited, rec_stack)
+
+                    msg = ""
+                    try:
+                        analyze_deps()
+                        if example_cycle:
+                            names = [n.name for n in example_cycle]
+                            msg = f"Found a cycle: {names}."
+                        for n in external_deps:
+                            if len(get_remaining_deps(n)) == 0:
+                                msg += (
+                                    f"\nFound external node with 0 dependency: {n.name}"
+                                )
+                                break
+                    except Exception:
+                        msg = "Failed to provide details about this issue."
+                    raise FxNetSplitterInternalError(f"Subgraph can't be empty. {msg}")
 
                 subgraphs.append(
                     Subgraph(is_acc=acc_subgraph, nodes=current_subgraph_nodes)
