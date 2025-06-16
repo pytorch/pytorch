@@ -194,7 +194,6 @@ rpc.init_rpc(
 ```
 
 ```{note}
-The TensorPipe backend is the default backend since PyTorch v1.8.0.
 The RPC framework does not automatically retry any
 {meth}`~torch.distributed.rpc.rpc_sync`,
 {meth}`~torch.distributed.rpc.rpc_async` and
