@@ -1903,15 +1903,19 @@ class WeakRefVariable(VariableTracker):
     @staticmethod
     def build(tx, weakref_value, **options):
         source = options.get("source", None)
+        callback = weakref_value.__callback__
+        callback_source = source and AttrSource(source, "__callback__")
+        callback_vt = VariableTracker.build(tx, callback, callback_source)
         referent = weakref_value()
         source = source and WeakRefCallSource(source)
         referent_vt = VariableTracker.build(tx, referent, source)
         options["source"] = source
-        return WeakRefVariable(referent_vt, **options)
+        return WeakRefVariable(referent_vt, callback_vt, **options)
 
-    def __init__(self, referent_vt, **options):
+    def __init__(self, referent_vt, callback_vt, **options):
         super().__init__(**options)
         self.referent_vt = referent_vt
+        self.callback_vt = callback_vt
 
     def call_function(
         self,
@@ -1924,4 +1928,5 @@ class WeakRefVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(lambda: codegen.load_import_from("weakref", "ref"))
         codegen(self.referent_vt)
-        codegen.extend_output(create_call_function(1, False))
+        codegen(self.callback_vt)
+        codegen.extend_output(create_call_function(2, False))

@@ -134,6 +134,7 @@ html_theme_options = {
         "json_url": "https://docs.pytorch.org/docs/pytorch-versions.json",
         "version_match": switcher_version,
     },
+    "show_toc_level": 2,
     "navigation_with_keys": False,
     "external_links": [
         {
