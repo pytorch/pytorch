@@ -1,6 +1,8 @@
 coo
 Din
 Dout
+dOut
+fro
 hsa
 nd
 optins
