@@ -2891,6 +2891,27 @@ Arguments:
               "_end_coalescing",
               &::c10d::Backend::endCoalescing,
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "supports_tensor_alloc",
+              [](::c10d::Backend& self, c10::Device device) {
+                return self.supportsTensorAlloc(device.index());
+              },
+              py::arg("device"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "allocate_tensor",
+              [](::c10d::Backend& self,
+                 long size,
+                 c10::ScalarType dtype,
+                 c10::Device device) {
+                return self.allocateTensor(
+                    size, at::TensorOptions().dtype(dtype).device(device));
+              },
+              py::arg("size"),
+              py::kw_only(),
+              py::arg("dtype"),
+              py::arg("device"),
+              py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "mem_allocator", &::c10d::Backend::getMemAllocator);
 
@@ -3504,7 +3525,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 
             Example::
                 Below is an example of a simple allreduce DDP communication hook that uses
-                ``get_future` API to retrieve a Future associated with the completion of
+                ``get_future`` API to retrieve a Future associated with the completion of
                 ``allreduce``.
 
                 >>> def allreduce(process_group: dist.ProcessGroup, bucket: dist.GradBucket): -> torch.futures.Future

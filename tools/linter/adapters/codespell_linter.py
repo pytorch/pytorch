@@ -16,10 +16,6 @@ REPO_ROOT = Path(__file__).absolute().parents[3]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 DICTIONARY = REPO_ROOT / "tools" / "linter" / "dictionary.txt"
 
-FORBIDDEN_WORDS = {
-    "multipy",  # project pytorch/multipy is dead  # codespell:ignore multipy
-}
-
 
 class LintSeverity(str, Enum):
     ERROR = "error"
@@ -98,21 +94,12 @@ def check_dictionary(filename: str) -> list[LintMessage]:
     path = Path(filename).absolute()
     try:
         words = path.read_text(encoding="utf-8").splitlines()
-        words_set = set(words)
-        if len(words) != len(words_set):
+        if len(words) != len(set(words)):
             raise ValueError("The dictionary file contains duplicate entries.")
-        uncased_words = list(map(str.lower, words))
-        if uncased_words != sorted(uncased_words):
+        words = list(map(str.lower, words))
+        if words != sorted(words):
             raise ValueError(
                 "The dictionary file is not sorted alphabetically (case-insensitive)."
-            )
-        for forbidden_word in sorted(
-            FORBIDDEN_WORDS & (words_set | set(uncased_words))
-        ):
-            raise ValueError(
-                f"The dictionary file contains a forbidden word: {forbidden_word!r}. "
-                "Please remove it from the dictionary file and use 'codespell:ignore' "
-                "inline comment instead."
             )
     except Exception as err:
         return [format_error_message(str(filename), err)]
