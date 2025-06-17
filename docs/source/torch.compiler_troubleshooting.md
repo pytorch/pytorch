@@ -61,44 +61,44 @@ Below is an example of a graph break due to the function `copy.deepcopy` from a 
 (exact output may differ).
 
 ```py
-    import torch
+import torch
 
-    @torch.compile
-    def fn(x):
-        x = x + 1
-        with open("test.txt", "r") as f:
-            return x + len(f.read())
+@torch.compile
+def fn(x):
+    x = x + 1
+    with open("test.txt", "r") as f:
+        return x + len(f.read())
 
-    fn(torch.ones(3, 3))
+fn(torch.ones(3, 3))
 ```
 
 ```
-    $TORCH_LOGS="graph_breaks" python playground.py
-    Graph break in user code at /data/users/williamwen/pytorch/playground.py:7
-    Reason: Unsupported: builtin: open [<class 'torch._dynamo.variables.constant.ConstantVariable'>, <class 'torch._dynamo.variables.constant.ConstantVariable'>] False
-    User code traceback:
-    File "/data/users/williamwen/pytorch/playground.py", line 7, in fn
-        with open("test.txt", "r") as f:
-    Traceback (most recent call last):
-    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 635, in wrapper
-        return inner_fn(self, inst)
-            ^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2414, in CALL
-        self._call(inst)
-    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2408, in _call
-        self.call_function(fn, args, kwargs)
-    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 962, in call_function
-        self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/builtin.py", line 997, in call_function
-        return handler(tx, args, kwargs)
-            ^^^^^^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/builtin.py", line 831, in <lambda>
-        return lambda *args: unimplemented(error_msg)
-                            ^^^^^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/exc.py", line 313, in unimplemented
-        raise Unsupported(msg, case_name=case_name)
-    torch._dynamo.exc.Unsupported: builtin: open [<class 'torch._dynamo.variables.constant.ConstantVariable'>, <class 'torch._dynamo.variables.constant.ConstantVariable'>] False
+$TORCH_LOGS="graph_breaks" python playground.py
+Graph break in user code at /data/users/williamwen/pytorch/playground.py:7
+Reason: Unsupported: builtin: open [<class 'torch._dynamo.variables.constant.ConstantVariable'>, <class 'torch._dynamo.variables.constant.ConstantVariable'>] False
+User code traceback:
+File "/data/users/williamwen/pytorch/playground.py", line 7, in fn
+    with open("test.txt", "r") as f:
+Traceback (most recent call last):
+File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 635, in wrapper
+    return inner_fn(self, inst)
+        ^^^^^^^^^^^^^^^^^^^^
+File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2414, in CALL
+    self._call(inst)
+File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2408, in _call
+    self.call_function(fn, args, kwargs)
+File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 962, in call_function
+    self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/data/users/williamwen/pytorch/torch/_dynamo/variables/builtin.py", line 997, in call_function
+    return handler(tx, args, kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/data/users/williamwen/pytorch/torch/_dynamo/variables/builtin.py", line 831, in <lambda>
+    return lambda *args: unimplemented(error_msg)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^
+File "/data/users/williamwen/pytorch/torch/_dynamo/exc.py", line 313, in unimplemented
+    raise Unsupported(msg, case_name=case_name)
+torch._dynamo.exc.Unsupported: builtin: open [<class 'torch._dynamo.variables.constant.ConstantVariable'>, <class 'torch._dynamo.variables.constant.ConstantVariable'>] False
 ```
 
 ### Guards
@@ -111,27 +111,27 @@ Examples of runtime checks are constant values, types, and object IDs.
 Below is an example of generated guards. The `TENSOR_MATCH` guard checks for the input's type, device, dtype, shape, etc.
 
 ```py
-    import torch
+import torch
 
-    @torch.compile
-    def fn(x):
-        return x + 1
+@torch.compile
+def fn(x):
+    return x + 1
 
-    fn(torch.ones(3, 3))
+fn(torch.ones(3, 3))
 ```
 
 ```
-    $ TORCH_LOGS="guards" python playground.py
-    GUARDS:
+$ TORCH_LOGS="guards" python playground.py
+GUARDS:
 
-    TREE_GUARD_MANAGER:
-    +- RootGuardManager
-    | +- DEFAULT_DEVICE: utils_device.CURRENT_DEVICE == None                           # _dynamo/output_graph.py:471 in init_ambient_guards
-    | +- GLOBAL_STATE: ___check_global_state()
-    | +- TORCH_FUNCTION_MODE_STACK: ___check_torch_function_mode_stack()
-    | +- GuardManager: source=L['x'], accessed_by=DictGetItemGuardAccessor(x)
-    | | +- TENSOR_MATCH: check_tensor(L['x'], Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[3, 3], stride=[3, 1])  # return x + 1  # playground.py:6 in fn
-    | | +- NO_HASATTR: hasattr(L['x'], '_dynamo_dynamic_indices') == False           # return x + 1  # playground.py:6 in fn
+TREE_GUARD_MANAGER:
++- RootGuardManager
+| +- DEFAULT_DEVICE: utils_device.CURRENT_DEVICE == None                           # _dynamo/output_graph.py:471 in init_ambient_guards
+| +- GLOBAL_STATE: ___check_global_state()
+| +- TORCH_FUNCTION_MODE_STACK: ___check_torch_function_mode_stack()
+| +- GuardManager: source=L['x'], accessed_by=DictGetItemGuardAccessor(x)
+| | +- TENSOR_MATCH: check_tensor(L['x'], Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[3, 3], stride=[3, 1])  # return x + 1  # playground.py:6 in fn
+| | +- NO_HASATTR: hasattr(L['x'], '_dynamo_dynamic_indices') == False           # return x + 1  # playground.py:6 in fn
 ```
 
 ### Recompilation
@@ -142,21 +142,21 @@ then `torch.compile` must "recompile" the function, requiring the original code 
 In the example below, recompilation is necessary because the guard checking the tensor argument's shape failed.
 
 ```py
-    import torch
+import torch
 
-    @torch.compile
-    def fn(x):
-        return x + 1
+@torch.compile
+def fn(x):
+    return x + 1
 
-    fn(torch.ones(3, 3))
-    fn(torch.ones(4, 4))
+fn(torch.ones(3, 3))
+fn(torch.ones(4, 4))
 ```
 
 ```
-    $ TORCH_LOGS="recompiles" python playground.py
-    Recompiling function fn in /data/users/williamwen/pytorch/playground.py:3
-        triggered by the following guard failure(s):
-        - 0/0: tensor 'L['x']' size mismatch at index 0. expected 3, actual 4
+$ TORCH_LOGS="recompiles" python playground.py
+Recompiling function fn in /data/users/williamwen/pytorch/playground.py:3
+    triggered by the following guard failure(s):
+    - 0/0: tensor 'L['x']' size mismatch at index 0. expected 3, actual 4
 ```
 
 ### Dynamic Shapes
@@ -171,21 +171,21 @@ Dynamic shapes can also be fully enabled `dynamic=True` or disabled `dynamic=Fal
 Below, we enable dynamic shapes and note that we no longer need to recompile.
 
 ```py
-    import torch
+import torch
 
-    @torch.compile(dynamic=True)
-    def fn(x):
-        return x + 1
+@torch.compile(dynamic=True)
+def fn(x):
+    return x + 1
 
-    fn(torch.ones(3, 3))
-    fn(torch.ones(4, 4))
+fn(torch.ones(3, 3))
+fn(torch.ones(4, 4))
 ```
 
 ```
-    $ TORCH_LOGS="dynamic,recompiles" python playground.py
-    create_symbol s0 = 3 for L['x'].size()[0] [2, int_oo] at playground.py:5 in fn (_dynamo/variables/builder.py:2718 in <lambda>), for more info run with TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="s0"
-    produce_guards
-    produce_guards
+$ TORCH_LOGS="dynamic,recompiles" python playground.py
+create_symbol s0 = 3 for L['x'].size()[0] [2, int_oo] at playground.py:5 in fn (_dynamo/variables/builder.py:2718 in <lambda>), for more info run with TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="s0"
+produce_guards
+produce_guards
 ```
 
 For more information on dynamic shapes, see [The dynamic shapes manual](https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.fh8zzonyw8ng).
@@ -200,9 +200,9 @@ For more information on dynamic shapes, see [The dynamic shapes manual](https://
 Traces are very easy to collect. To collect a trace, run your reproduction command with
 
 ```
-    TORCH_TRACE="/tmp/tracedir" python foo.py
-    pip install tlparse
-    tlparse /tmp/tracedir
+TORCH_TRACE="/tmp/tracedir" python foo.py
+pip install tlparse
+tlparse /tmp/tracedir
 ```
 
 This approach works even if you are running a distributed job, providing a trace for each rank.
@@ -258,7 +258,7 @@ You can use the `TORCH_LOGS` environment variable to selectively enable parts of
 `TORCH_LOGS` is in fact the source of logs for `tlparse`. The format of the `TORCH_LOGS` environment variable looks like this:
 
 ```
-    TORCH_LOGS="<option1>,<option2>,..." python foo.py
+TORCH_LOGS="<option1>,<option2>,..." python foo.py
 ```
 
 Useful high-level options include:
@@ -271,9 +271,9 @@ Useful high-level options include:
 Also, you can programmatically set logging options using `torch._logging.set_logs`:
 
 ```py
-    import logging
-    torch._logging.set_logs(graph_breaks=True)
-    ...
+import logging
+torch._logging.set_logs(graph_breaks=True)
+...
 ```
 
 More `TORCH_LOGS` options are {ref}`troubleshooting-torch-logs-options`.
@@ -300,42 +300,42 @@ or some sub-``` nn.Module``s. ``torch.compile ``` specifically doesn't handle di
 DDP or FSDP very well, so consider applying `torch.compile` to the inner module passed to the wrapper.
 
 ```py
-    # inference
-    model = ...
-    opt_model = torch.compile(model)
+# inference
+model = ...
+opt_model = torch.compile(model)
 
-    for _ in range(N_ITERS):
-        inp = ...
-        out = opt_model(inp)
+for _ in range(N_ITERS):
+    inp = ...
+    out = opt_model(inp)
 ```
 
 ```py
-    # training
-    model = ...
-    opt = torch.optim.Adam(model.parameters())
+# training
+model = ...
+opt = torch.optim.Adam(model.parameters())
 
-    @torch.compile
-    def train(mod, data):
-        opt.zero_grad(True)
-        pred = mod(data[0])
-        loss = torch.nn.CrossEntropyLoss()(pred, data[1])
-        loss.backward()
-        opt.step()
+@torch.compile
+def train(mod, data):
+    opt.zero_grad(True)
+    pred = mod(data[0])
+    loss = torch.nn.CrossEntropyLoss()(pred, data[1])
+    loss.backward()
+    opt.step()
 
-    for _ in range(N_ITERS):
-        inp = ...
-        train(model, inp)
+for _ in range(N_ITERS):
+    inp = ...
+    train(model, inp)
 ```
 
 ```py
-    # DistributedDataParallel
-    model = ...
-    opt_model = torch.compile(model)
-    model_ddp = DistributedDataParallel(opt_model, ...)
+# DistributedDataParallel
+model = ...
+opt_model = torch.compile(model)
+model_ddp = DistributedDataParallel(opt_model, ...)
 
-    for _ in range(N_ITERS):
-        inp = ...
-        out = model_ddp(inp)
+for _ in range(N_ITERS):
+    inp = ...
+    out = model_ddp(inp)
 ```
 
 ### Disabling and Suppressing Errors
@@ -349,29 +349,29 @@ By default, all recursive calls made from a disabled function are also disabled.
 option to allow compilation for recursive calls.
 
 ```py
-    def bad1_inner(...):
-        # skipped
+def bad1_inner(...):
+    # skipped
 
-    @torch.compiler.disable
-    def bad1_outer(...):
-        # skipped
-        bad1_inner(...)
+@torch.compiler.disable
+def bad1_outer(...):
+    # skipped
+    bad1_inner(...)
 
-    def bad2_inner(...)
-        # traced
+def bad2_inner(...)
+    # traced
 
-    @torch.compiler.disable(recursive=False)
-    def bad2_outer(...):
-        # skipped
-        bad2_inner(...)
+@torch.compiler.disable(recursive=False)
+def bad2_outer(...):
+    # skipped
+    bad2_inner(...)
 
-    @torch.compile
-    def fn(...):
-        # graph break
-        bad1_outer(...)
+@torch.compile
+def fn(...):
+    # graph break
+    bad1_outer(...)
         ...
-        # graph break
-        bad2_outer(...)
+    # graph break
+    bad2_outer(...)
 ```
 
 For example, we use `torch.compiler.disable` to disable `torch.compile` on sparse architecture in
@@ -417,53 +417,53 @@ Below are some common graph breaks and some workarounds.
 (if-statements, loops with tensors) and direct tensor data accesses (`.item`, `.data_ptr`).
 
 ```py
-    import torch
+import torch
 
-    @torch.compile
-    def fn(x):
-        y = x.sum()
-        if y > 0:
-            return x + y.item()
-        return x - y.item()
-
-    fn(torch.ones(3, 3))
-```
-
-```
-    $ TORCH_LOGS="graph_breaks" python playground.py
-    Graph break in user code at /data/users/williamwen/pytorch/playground.py:6
-    Reason: Data-dependent jump
-    User code traceback:
-    File "/data/users/williamwen/pytorch/playground.py", line 6, in fn
-        if y > 0:
-
-    Graph break in user code at /data/users/williamwen/pytorch/playground.py:7
-    Reason: Unsupported: Tensor.item
-    User code traceback:
-    File "/data/users/williamwen/pytorch/playground.py", line 7, in torch_dynamo_resume_in_fn_at_6
+@torch.compile
+def fn(x):
+    y = x.sum()
+    if y > 0:
         return x + y.item()
-    Traceback (most recent call last):
-    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 616, in wrapper
-        return inner_fn(self, inst)
-            ^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2288, in CALL
-        self._call(inst)
-    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2282, in _call
-        self.call_function(fn, args, kwargs)
-    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 838, in call_function
-        self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/misc.py", line 1038, in call_function
-        return self.obj.call_method(tx, self.name, args, kwargs)
-            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/tensor.py", line 527, in call_method
-        result = handler_method(*args, **kwargs)
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/tensor.py", line 773, in method_item
-        unimplemented("Tensor.item")
-    File "/data/users/williamwen/pytorch/torch/_dynamo/exc.py", line 304, in unimplemented
-        raise Unsupported(msg, case_name=case_name)
-    torch._dynamo.exc.Unsupported: Tensor.item
+    return x - y.item()
+
+fn(torch.ones(3, 3))
+```
+
+```
+$ TORCH_LOGS="graph_breaks" python playground.py
+Graph break in user code at /data/users/williamwen/pytorch/playground.py:6
+Reason: Data-dependent jump
+User code traceback:
+File "/data/users/williamwen/pytorch/playground.py", line 6, in fn
+    if y > 0:
+
+Graph break in user code at /data/users/williamwen/pytorch/playground.py:7
+Reason: Unsupported: Tensor.item
+User code traceback:
+File "/data/users/williamwen/pytorch/playground.py", line 7, in torch_dynamo_resume_in_fn_at_6
+    return x + y.item()
+Traceback (most recent call last):
+File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 616, in wrapper
+    return inner_fn(self, inst)
+        ^^^^^^^^^^^^^^^^^^^^
+File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2288, in CALL
+    self._call(inst)
+File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2282, in _call
+    self.call_function(fn, args, kwargs)
+File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 838, in call_function
+    self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/data/users/williamwen/pytorch/torch/_dynamo/variables/misc.py", line 1038, in call_function
+    return self.obj.call_method(tx, self.name, args, kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/data/users/williamwen/pytorch/torch/_dynamo/variables/tensor.py", line 527, in call_method
+    result = handler_method(*args, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/data/users/williamwen/pytorch/torch/_dynamo/variables/tensor.py", line 773, in method_item
+    unimplemented("Tensor.item")
+File "/data/users/williamwen/pytorch/torch/_dynamo/exc.py", line 304, in unimplemented
+    raise Unsupported(msg, case_name=case_name)
+torch._dynamo.exc.Unsupported: Tensor.item
 ```
 
 The general workaround for these graph breaks is to avoid doing data-dependent operations. Some specific workarounds are:
@@ -471,45 +471,45 @@ The general workaround for these graph breaks is to avoid doing data-dependent o
 - If your control flow doesn't actually depend on data values, consider modifying your code to perform control flow on constants.
 
 ```py
-    # old
-    x = torch.randn(3, 3)
-    @torch.compile
-    def fn(y):
-        if x.sum() > 0:
-            return y + x
-        else:
-            return y - x
+# old
+x = torch.randn(3, 3)
+@torch.compile
+def fn(y):
+    if x.sum() > 0:
+        return y + x
+    else:
+        return y - x
 
-    # new
-    x = torch.randn(3, 3)
-    cond = (x.sum() > 0).item()
-    @torch.compile
-    def fn(y):
-        if cond:
-            return y + x
-        else:
-            return y - x
+# new
+x = torch.randn(3, 3)
+cond = (x.sum() > 0).item()
+@torch.compile
+def fn(y):
+    if cond:
+        return y + x
+    else:
+        return y - x
 ```
 
 - Use higher-order ops like `torch.cond` (<https://pytorch.org/docs/main/cond.html>) in place of data-dependent control flow
 
 ```py
-    # old
-    @torch.compile
-    def fn(x):
-        if x.sum() > 0:
-            return x + 1
-        return x - 1
+# old
+@torch.compile
+def fn(x):
+    if x.sum() > 0:
+        return x + 1
+    return x - 1
 
-    # new
-    @torch.compile
-    def fn(x):
-        return torch.cond(
-            x.sum() > 0,
-            lambda x: x + 1,
-            lambda x: x - 1,
-            (x,),
-        )
+# new
+@torch.compile
+def fn(x):
+    return torch.cond(
+        x.sum() > 0,
+        lambda x: x + 1,
+        lambda x: x - 1,
+        (x,),
+    )
 ```
 
 - If you have a `.item()` call, try `torch._dynamo.config.capture_scalar_outputs = True` or `TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1`
@@ -533,22 +533,22 @@ This config is used to reorder logging functions so that they are called at the 
 thus avoiding a graph break. However, the logged contents may differ if, for example, a mutation occurs.
 
 ```py
-    import torch
+import torch
 
-    torch._dynamo.config.reorderable_logging_functions.add(print)
+torch._dynamo.config.reorderable_logging_functions.add(print)
 
-    @torch.compile
-    def fn(x):
-        x += 1
-        print("log!")
-        return torch.sin(x)
+@torch.compile
+def fn(x):
+    x += 1
+    print("log!")
+    return torch.sin(x)
 
-    fn(torch.ones(3, 3))
+fn(torch.ones(3, 3))
 ```
 
 ```
-    $ TORCH_LOGS="graph_breaks" python playground.py
-    log!
+$ TORCH_LOGS="graph_breaks" python playground.py
+log!
 ```
 
 #### Incorrect code
@@ -557,23 +557,23 @@ Your code may be wrong, or is otherwise encountering an error from outside `torc
 In the code below, we made a typo in the `torch.sin` call by providing an extra argument.
 
 ```py
-    import torch
+import torch
 
-    @torch.compile
-    def fn(x):
-        y = torch.sin(x, x)
-        return y
+@torch.compile
+def fn(x):
+    y = torch.sin(x, x)
+    return y
 
-    fn(torch.ones(3, 3))
+fn(torch.ones(3, 3))
 ```
 
 ```
-    $ TORCH_LOGS="graph_breaks" python playground.py
-    Graph break in user code at /data/users/williamwen/pytorch/playground.py:5
-    Reason: Unsupported: TypeError <built-in method sin of type object at 0x7fd6fd764600>: sin() takes 1 positional argument but 2 were given
-    User code traceback:
-    File "/data/users/williamwen/pytorch/playground.py", line 5, in fn
-        y = torch.sin(x, x)
+$ TORCH_LOGS="graph_breaks" python playground.py
+Graph break in user code at /data/users/williamwen/pytorch/playground.py:5
+Reason: Unsupported: TypeError <built-in method sin of type object at 0x7fd6fd764600>: sin() takes 1 positional argument but 2 were given
+User code traceback:
+File "/data/users/williamwen/pytorch/playground.py", line 5, in fn
+    y = torch.sin(x, x)
 ...
 ```
 
@@ -589,7 +589,7 @@ You can view recompilations and their reasons using `tlparse` or `TORCH_LOGS=rec
 Recompilations due to mismatched shapes are in the form:
 
 ```
-    tensor 'L['x']' size mismatch at index 0. expected 3, actual 4
+tensor 'L['x']' size mismatch at index 0. expected 3, actual 4
 ```
 
 Make sure that the `dynamic` option of `torch.compile` is not set to `False`.
@@ -608,21 +608,21 @@ In the example below, each function call results in a recompile attempt.
 When we hit the cache size limit (8), we stop attempting to recompile.
 
 ```py
-    import torch
+import torch
 
-    @torch.compile(dynamic=False)
-    def fn(x):
-        return x + 1
+@torch.compile(dynamic=False)
+def fn(x):
+    return x + 1
 
-    for i in range(1, 10):
-        fn(torch.ones(i))
+for i in range(1, 10):
+    fn(torch.ones(i))
 ```
 
 ```
-    $ python playground.py
-    torch._dynamo hit config.recompile_limit (8)
-        function: 'fn' (/data/users/williamwen/pytorch/playground.py:5)
-        last reason: 0/0: tensor 'L['x']' size mismatch at index 0. expected 1, actual 9
+$ python playground.py
+torch._dynamo hit config.recompile_limit (8)
+    function: 'fn' (/data/users/williamwen/pytorch/playground.py:5)
+    last reason: 0/0: tensor 'L['x']' size mismatch at index 0. expected 1, actual 9
 ```
 
 If you know that the number of recompilations has a reasonable constant upper bound, you can raise the cache size limit.
@@ -634,81 +634,81 @@ By default, `int` / `float` variables are treated as constants and are guarded a
 In the below example, we have a recompilation for each function call.
 
 ```py
-    import torch
+import torch
 
-    @torch.compile
-    def fn(x, c):
-        return x + c
+@torch.compile
+def fn(x, c):
+    return x + c
 
-    for i in range(1, 10):
-        fn(torch.ones(i), 0.5 + i)
+for i in range(1, 10):
+    fn(torch.ones(i), 0.5 + i)
 ```
 
 ```
-    $ TORCH_LOGS="recompiles" python playground.py
-    Recompiling function fn in /data/users/williamwen/pytorch/playground.py:3
-        triggered by the following guard failure(s):
-        - 0/7: L['c'] == 8.5
-        - 0/6: L['c'] == 7.5
-        - 0/5: L['c'] == 6.5
-        - 0/4: L['c'] == 5.5
-        - 0/3: L['c'] == 4.5
-        - 0/2: L['c'] == 3.5
-        - 0/1: L['c'] == 2.5
-        - 0/0: L['c'] == 1.5
-    torch._dynamo hit config.recompile_limit (8)
-        function: 'fn' (/data/users/williamwen/pytorch/playground.py:3)
-        last reason: 0/0: L['c'] == 1.5
+$ TORCH_LOGS="recompiles" python playground.py
+Recompiling function fn in /data/users/williamwen/pytorch/playground.py:3
+    triggered by the following guard failure(s):
+    - 0/7: L['c'] == 8.5
+    - 0/6: L['c'] == 7.5
+    - 0/5: L['c'] == 6.5
+    - 0/4: L['c'] == 5.5
+    - 0/3: L['c'] == 4.5
+    - 0/2: L['c'] == 3.5
+    - 0/1: L['c'] == 2.5
+    - 0/0: L['c'] == 1.5
+torch._dynamo hit config.recompile_limit (8)
+    function: 'fn' (/data/users/williamwen/pytorch/playground.py:3)
+    last reason: 0/0: L['c'] == 1.5
 ```
 
 In particular, for LR schedulers, initializing with a constant can lead to recompilations:
 
 ```py
-    import torch
+import torch
 
-    mod = torch.nn.Linear(3, 3)
-    opt = torch.optim.Adam(mod.parameters(), lr=0.01)
-    sched = torch.optim.lr_scheduler.ExponentialLR(opt, 0.9)
+mod = torch.nn.Linear(3, 3)
+opt = torch.optim.Adam(mod.parameters(), lr=0.01)
+sched = torch.optim.lr_scheduler.ExponentialLR(opt, 0.9)
 
-    @torch.compile
-    def fn(inp):
-        opt.zero_grad(True)
-        out = mod(inp).sum()
-        out.backward()
-        opt.step()
-        sched.step()
+@torch.compile
+def fn(inp):
+    opt.zero_grad(True)
+    out = mod(inp).sum()
+    out.backward()
+    opt.step()
+    sched.step()
 
-    for i in range(1, 10):
-        fn(torch.ones(3, 3))
+for i in range(1, 10):
+    fn(torch.ones(3, 3))
 ```
 
 ```
-    $ TORCH_LOGS="recompiles" python playground.py
-    Recompiling function step in /data/users/williamwen/pytorch/torch/optim/adam.py:189
-        triggered by the following guard failure(s):
-        - 3/7: L['self'].param_groups[0]['lr'] == 0.004782969000000002
-        - 3/6: L['self'].param_groups[0]['lr'] == 0.005314410000000002
-        - 3/5: L['self'].param_groups[0]['lr'] == 0.005904900000000002
-        - 3/4: L['self'].param_groups[0]['lr'] == 0.006561000000000002
-        - 3/3: L['self'].param_groups[0]['lr'] == 0.007290000000000001
-        - 3/2: L['self'].param_groups[0]['lr'] == 0.008100000000000001
-        - 3/1: L['self'].param_groups[0]['lr'] == 0.009000000000000001
-        - 3/0: L['self'].param_groups[0]['lr'] == 0.01
-    torch._dynamo hit config.recompile_limit (8)
-        function: 'step' (/data/users/williamwen/pytorch/torch/optim/adam.py:189)
-        last reason: 3/0: L['self'].param_groups[0]['lr'] == 0.01
+$ TORCH_LOGS="recompiles" python playground.py
+Recompiling function step in /data/users/williamwen/pytorch/torch/optim/adam.py:189
+    triggered by the following guard failure(s):
+    - 3/7: L['self'].param_groups[0]['lr'] == 0.004782969000000002
+    - 3/6: L['self'].param_groups[0]['lr'] == 0.005314410000000002
+    - 3/5: L['self'].param_groups[0]['lr'] == 0.005904900000000002
+    - 3/4: L['self'].param_groups[0]['lr'] == 0.006561000000000002
+    - 3/3: L['self'].param_groups[0]['lr'] == 0.007290000000000001
+    - 3/2: L['self'].param_groups[0]['lr'] == 0.008100000000000001
+    - 3/1: L['self'].param_groups[0]['lr'] == 0.009000000000000001
+    - 3/0: L['self'].param_groups[0]['lr'] == 0.01
+torch._dynamo hit config.recompile_limit (8)
+    function: 'step' (/data/users/williamwen/pytorch/torch/optim/adam.py:189)
+    last reason: 3/0: L['self'].param_groups[0]['lr'] == 0.01
 ```
 
 In both examples, we can wrap float variables in tensors in order to prevent recompilations.
 
 ```py
-    # first example
-    for i in range(1, 10):
-        fn(torch.ones(i), torch.tensor(0.5 + i))
+# first example
+for i in range(1, 10):
+    fn(torch.ones(i), torch.tensor(0.5 + i))
 
-    # second example
-    opt = torch.optim.Adam(mod.parameters(), lr=torch.tensor(0.01))
-    sched = torch.optim.lr_scheduler.ExponentialLR(opt, torch.tensor(0.9))
+# second example
+opt = torch.optim.Adam(mod.parameters(), lr=torch.tensor(0.01))
+sched = torch.optim.lr_scheduler.ExponentialLR(opt, torch.tensor(0.9))
 ```
 
 ## Reporting Issues
@@ -834,64 +834,64 @@ Finally, you can use `TORCH_LOGS=graph_code` to see the Python code representing
 You can view this code to double check that the correct ops are being traced.
 
 ```py
-    import torch
+import torch
 
-    def g(x, y):
-        return x + y
+def g(x, y):
+    return x + y
 
+@torch.compile(backend="eager")
+def f(x):
+    x = torch.sin(x)
+    x = g(x, x)
+    return x
+
+f(torch.ones(3, 3))
+```
+
+```
+$ TORCH_LOGS="trace_bytecode,trace_source,graph_code" python playground.py
+TRACE starts_line /data/users/williamwen/pytorch/playground.py:6 in f ()
     @torch.compile(backend="eager")
-    def f(x):
+TRACE RESUME 0 []
+TRACE starts_line /data/users/williamwen/pytorch/playground.py:8 in f (f)
         x = torch.sin(x)
+TRACE LOAD_GLOBAL torch []
+TRACE LOAD_ATTR sin [NullVariable(), PythonModuleVariable(<module 'torch' from '/data/users/williamwen/pytorch/torch/__init__.py'>)]
+TRACE LOAD_FAST x [NullVariable(), TorchInGraphFunctionVariable(<built-in method sin of type object at 0x7f00f6964600>)]
+TRACE CALL 1 [NullVariable(), TorchInGraphFunctionVariable(<built-in method sin of type object at 0x7f00f6964600>), LazyVariableTracker()]
+TRACE STORE_FAST x [TensorVariable()]
+TRACE starts_line /data/users/williamwen/pytorch/playground.py:9 in f (f)
         x = g(x, x)
+TRACE LOAD_GLOBAL g []
+TRACE LOAD_FAST x [NullVariable(), UserFunctionVariable()]
+TRACE LOAD_FAST x [NullVariable(), UserFunctionVariable(), TensorVariable()]
+TRACE CALL 2 [NullVariable(), UserFunctionVariable(), TensorVariable(), TensorVariable()]
+TRACE starts_line /data/users/williamwen/pytorch/playground.py:3 in g (g) (inline depth: 1)
+    def g(x, y):
+TRACE RESUME 0 []
+TRACE starts_line /data/users/williamwen/pytorch/playground.py:4 in g (g) (inline depth: 1)
+        return x + y
+TRACE LOAD_FAST x []
+TRACE LOAD_FAST y [TensorVariable()]
+TRACE BINARY_OP 0 [TensorVariable(), TensorVariable()]
+TRACE RETURN_VALUE None [TensorVariable()]
+TRACE STORE_FAST x [TensorVariable()]
+TRACE starts_line /data/users/williamwen/pytorch/playground.py:10 in f (f)
         return x
+TRACE LOAD_FAST x []
+TRACE RETURN_VALUE None [TensorVariable()]
+TRACED GRAPH
+===== __compiled_fn_1 =====
+/data/users/williamwen/pytorch/torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 3][3, 1]cpu"):
+        l_x_ = L_x_
 
-    f(torch.ones(3, 3))
-```
+        # File: /data/users/williamwen/pytorch/playground.py:8 in f, code: x = torch.sin(x)
+        x: "f32[3, 3][3, 1]cpu" = torch.sin(l_x_);  l_x_ = None
 
-```
-    $ TORCH_LOGS="trace_bytecode,trace_source,graph_code" python playground.py
-    TRACE starts_line /data/users/williamwen/pytorch/playground.py:6 in f ()
-        @torch.compile(backend="eager")
-    TRACE RESUME 0 []
-    TRACE starts_line /data/users/williamwen/pytorch/playground.py:8 in f (f)
-            x = torch.sin(x)
-    TRACE LOAD_GLOBAL torch []
-    TRACE LOAD_ATTR sin [NullVariable(), PythonModuleVariable(<module 'torch' from '/data/users/williamwen/pytorch/torch/__init__.py'>)]
-    TRACE LOAD_FAST x [NullVariable(), TorchInGraphFunctionVariable(<built-in method sin of type object at 0x7f00f6964600>)]
-    TRACE CALL 1 [NullVariable(), TorchInGraphFunctionVariable(<built-in method sin of type object at 0x7f00f6964600>), LazyVariableTracker()]
-    TRACE STORE_FAST x [TensorVariable()]
-    TRACE starts_line /data/users/williamwen/pytorch/playground.py:9 in f (f)
-            x = g(x, x)
-    TRACE LOAD_GLOBAL g []
-    TRACE LOAD_FAST x [NullVariable(), UserFunctionVariable()]
-    TRACE LOAD_FAST x [NullVariable(), UserFunctionVariable(), TensorVariable()]
-    TRACE CALL 2 [NullVariable(), UserFunctionVariable(), TensorVariable(), TensorVariable()]
-    TRACE starts_line /data/users/williamwen/pytorch/playground.py:3 in g (g) (inline depth: 1)
-        def g(x, y):
-    TRACE RESUME 0 []
-    TRACE starts_line /data/users/williamwen/pytorch/playground.py:4 in g (g) (inline depth: 1)
-            return x + y
-    TRACE LOAD_FAST x []
-    TRACE LOAD_FAST y [TensorVariable()]
-    TRACE BINARY_OP 0 [TensorVariable(), TensorVariable()]
-    TRACE RETURN_VALUE None [TensorVariable()]
-    TRACE STORE_FAST x [TensorVariable()]
-    TRACE starts_line /data/users/williamwen/pytorch/playground.py:10 in f (f)
-            return x
-    TRACE LOAD_FAST x []
-    TRACE RETURN_VALUE None [TensorVariable()]
-    TRACED GRAPH
-    ===== __compiled_fn_1 =====
-    /data/users/williamwen/pytorch/torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
-        def forward(self, L_x_: "f32[3, 3][3, 1]cpu"):
-            l_x_ = L_x_
-
-            # File: /data/users/williamwen/pytorch/playground.py:8 in f, code: x = torch.sin(x)
-            x: "f32[3, 3][3, 1]cpu" = torch.sin(l_x_);  l_x_ = None
-
-            # File: /data/users/williamwen/pytorch/playground.py:4 in g, code: return x + y
-            x_1: "f32[3, 3][3, 1]cpu" = x + x;  x = None
-            return (x_1,)
+        # File: /data/users/williamwen/pytorch/playground.py:4 in g, code: return x + y
+        x_1: "f32[3, 3][3, 1]cpu" = x + x;  x = None
+        return (x_1,)
 ```
 
 #### Breakpointing Dynamo tracing
@@ -912,13 +912,13 @@ The first method for setting a breakpoint is to insert it within the Dynamo sour
 The second way to insert a breakpoint is to use `torch._dynamo.comptime.comptime.breakpoint`:
 
 ```py
-    from torch._dynamo.comptime import comptime
+from torch._dynamo.comptime import comptime
 
-    @torch.compile
-    def f(...):
-        ...
-        comptime.breakpoint()
-        ...
+@torch.compile
+def f(...):
+    ...
+    comptime.breakpoint()
+    ...
 ```
 
 A comptime breakpoint is convenient as it enables you to inspect the Dynamo state at a specific location within the user code being traced.
@@ -933,48 +933,48 @@ When a comptime breakpoint is triggered, you can do the following:
 - Use standard `pdb` commands, such as `bt/u/d/n/s/r`, - you can go up the `pdb` stack to inspect more Dynamo internals
 
 ```py
-    import torch
-    from torch._dynamo.comptime import comptime
+import torch
+from torch._dynamo.comptime import comptime
 
-    @torch.compile(backend="eager")
-    def f(x):
-        y = x + 1
-        comptime.breakpoint()
-        y = y + 1
-        return y
+@torch.compile(backend="eager")
+def f(x):
+    y = x + 1
+    comptime.breakpoint()
+    y = y + 1
+    return y
 
-    f(torch.ones(3, 3))
+f(torch.ones(3, 3))
 ```
 
 ```
-    $ python playground.py
-    --Return--
-    > /data/users/williamwen/pytorch/torch/_dynamo/comptime.py(392)inner()->None
-    -> builtins.breakpoint()
-    (Pdb) ctx.print_bt()
-    File "/data/users/williamwen/pytorch/playground.py", line 7, in f
-        comptime.breakpoint()
+$ python playground.py
+--Return--
+> /data/users/williamwen/pytorch/torch/_dynamo/comptime.py(392)inner()->None
+-> builtins.breakpoint()
+(Pdb) ctx.print_bt()
+File "/data/users/williamwen/pytorch/playground.py", line 7, in f
+    comptime.breakpoint()
 
-    (Pdb) ctx.print_locals()
-    x = FakeTensor(..., size=(3, 3))
-    y = FakeTensor(..., size=(3, 3))
-    (Pdb) bt
-    ...
-    /data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py(826)call_function()
-    -> self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
-    /data/users/williamwen/pytorch/torch/_dynamo/variables/misc.py(331)call_function()
-    -> func(ComptimeContext(tx))
-    > /data/users/williamwen/pytorch/torch/_dynamo/comptime.py(392)inner()->None
-    -> builtins.breakpoint()
-    (Pdb) ctx.print_graph()
+(Pdb) ctx.print_locals()
+x = FakeTensor(..., size=(3, 3))
+y = FakeTensor(..., size=(3, 3))
+(Pdb) bt
+...
+/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py(826)call_function()
+-> self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+/data/users/williamwen/pytorch/torch/_dynamo/variables/misc.py(331)call_function()
+-> func(ComptimeContext(tx))
+> /data/users/williamwen/pytorch/torch/_dynamo/comptime.py(392)inner()->None
+-> builtins.breakpoint()
+(Pdb) ctx.print_graph()
 
 
 
-    def forward(self, L_x_: "f32[3, 3]"):
-        l_x_ = L_x_
+def forward(self, L_x_: "f32[3, 3]"):
+    l_x_ = L_x_
 
-        # File: /data/users/williamwen/pytorch/playground.py:6 in f, code: y = x + 1
-        y: "f32[3, 3]" = l_x_ + 1;  l_x_ = y = None
+    # File: /data/users/williamwen/pytorch/playground.py:6 in f, code: y = x + 1
+    y: "f32[3, 3]" = l_x_ + 1;  l_x_ = y = None
 ```
 
 % TODO(uncomment/update once we improve this API)

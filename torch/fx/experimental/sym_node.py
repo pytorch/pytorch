@@ -149,9 +149,9 @@ class SymNode:
                 # This is technically not TV, but this assert is expensive so
                 # let's only do it when we're already doing expensive things
                 computed_hint = compute_hint()
-                assert (
-                    hint == computed_hint
-                ), f"{hint} != {computed_hint} (for {self.expr})"
+                assert hint == computed_hint, (
+                    f"{hint} != {computed_hint} (for {self.expr})"
+                )
         else:
             hint = compute_hint()
         self._hint = hint
@@ -460,7 +460,9 @@ class SymNode:
         return self.float_pow(other)
 
     def is_non_overlapping_and_dense(self, sizes, strides):
-        return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(to_node(self, 1))  # type: ignore[attr-defined]
+        return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(
+            to_node(self, 1)
+        )  # type: ignore[attr-defined]
 
     def int_(self):
         return self.guard_int("", 0)  # NB: uses Python backtrace
@@ -1415,7 +1417,7 @@ def _make_node_magic(method, func):
             out,
             self.shape_env,
             pytype,
-            out_hint,
+            out_hint,  # type: ignore[arg-type]
             fx_node=fx_node,
             optimized_summation=optimized_summation,  # see Note [optimized_summation]
         )

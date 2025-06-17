@@ -919,9 +919,9 @@ class CompiledOptimizerTests(TestCase):
         import torch._dynamo
         import torch._inductor
         from torch._dynamo.debug_utils import aot_graph_input_parser
-        from torch._inductor.utils import fresh_inductor_cache
+        from torch._inductor.utils import fresh_cache
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             kwargs = aot_graph_input_parser(forward)
             torch.compile(forward)(**kwargs)
 

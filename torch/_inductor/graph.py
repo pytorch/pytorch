@@ -65,7 +65,6 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .fx_utils import count_flops_fx
 from .ir import (
     Constant,
     DonatedBuffer,
@@ -218,7 +217,6 @@ def mark_nodes_dislike_padding(
             aten.convolution,
             aten.convolution_backward,
             aten._scaled_mm,
-            aten._scaled_grouped_mm,
         ]
     )
     # what's a better way to collect the reduction ops?
@@ -659,24 +657,32 @@ class GraphLowering(torch.fx.Interpreter):
 
         # only grouped convolutions benchmarked as slower in conv samples for inference only
         if is_inference:
+            from torch.utils.flop_counter import FlopCounterMode
+
             flop_counts: dict[str, float] = defaultdict(float)
             for node in conv_nodes:
-                counted_flops = count_flops_fx(node)
-                if counted_flops is None:
-                    continue
+                success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(
+                    node
+                )
 
-                if is_grouped(node):
-                    node_type = "grouped"
-                elif is_small_channel(node):
-                    node_type = "small"
-                elif is_in_out_channel(node):
-                    node_type = "in_out"
+                if success:
+                    with FlopCounterMode(display=False) as flop_counter_mode:
+                        with V.fake_mode:
+                            node.target(*args, **kwargs)
+
+                    counted_flops = flop_counter_mode.get_total_flops()
+                    if is_grouped(node):
+                        node_type = "grouped"
+                    elif is_small_channel(node):
+                        node_type = "small"
+                    elif is_in_out_channel(node):
+                        node_type = "in_out"
+                    else:
+                        node_type = "default"
+
+                    flop_counts[node_type] += counted_flops
                 else:
-                    node_type = "default"
-
-                flop_counts[node_type] += counted_flops
-            else:
-                log.debug("Conv inputs meta not found")
+                    log.debug("Conv inputs meta not found")
 
             # average benchmarked channels last speedup / slowdown, < 1 is speedup.
             # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/
@@ -1467,6 +1473,7 @@ class GraphLowering(torch.fx.Interpreter):
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
+                old_kwargs["tma_descriptor_metadata"],
             )
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
@@ -1534,7 +1541,8 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             if (
                 n.op == "call_function"
-                and n.target is not operator.getitem
+                and n.target
+                not in (operator.getitem, torch._higher_order_ops.invoke_subgraph)
                 and (
                     fallback_node_due_to_unsupported_type(n)
                     or CompilerBisector.disable_subsystem(
@@ -2041,6 +2049,7 @@ class GraphLowering(torch.fx.Interpreter):
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
+                node.kwargs["tma_descriptor_metadata"],
             )
 
             new_kwargs: dict[str, int] = {}
