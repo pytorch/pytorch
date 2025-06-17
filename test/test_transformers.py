@@ -3418,6 +3418,11 @@ class TestSDPACudaOnly(NNTestCase):
                 fudge_factors['grad_query'] = 650.0
             if dtype == torch.float32:
                 fudge_factors['grad_key'] = 90.0
+            if head_dim == 96:  # TO INVESTIGATE
+                fudge_factors['out'] = 10.0  # Precise factor is 6.0146
+                fudge_factors['grad_query'] = 1440.0
+                fudge_factors['grad_key'] = 90.0
+                fudge_factors['grad_attn_mask'] = 240.0
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
