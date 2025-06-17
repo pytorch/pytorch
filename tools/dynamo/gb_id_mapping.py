@@ -293,9 +293,8 @@ def create_registry(dynamo_dir, registry_path):
 
 
 def main():
-    script_dir = Path(__file__).resolve().parent
-    repo_root = script_dir.parent.parent
-    registry_path = script_dir / "graph_break_registry.json"
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    registry_path = repo_root / "torch" / "_dynamo" / "graph_break_registry.json"
 
     try:
         import torch._dynamo

@@ -222,7 +222,7 @@
     {
       "Gb_type": "Builtin `operator.*` comparison with constant `self` failed",
       "Context": "call_method {self} {name} {args} {kwargs}",
-      "Explanation": "\"Failed to compare {self} with {other}, because {other} is not a Python constant or its mutation check fails.\"",
+      "Explanation": "\"Failed to compare {self} with {other}, \"                     + f\"because {other} is not a Python constant or its mutation check fails.\"",
       "Hints": []
     }
   ],
@@ -1658,6 +1658,12 @@
     }
   ],
   "GB0170": [
+    {
+      "Gb_type": "Data-dependent branching",
+      "Context": "attempted to jump with {value}",
+      "Explanation": "_explanation",
+      "Hints": []
+    },
     {
       "Gb_type": "_gb_type",
       "Context": "attempted to jump with {value}",
