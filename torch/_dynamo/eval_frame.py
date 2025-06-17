@@ -543,7 +543,6 @@ class _TorchDynamoContext:
         self._dynamic = dynamic
         self.compiler_config = compiler_config
         self.cleanup_fns: list[Callable[[], Any]] = []
-        self.enter_exit_hooks = []
         self._package = package
         patch_fn()
 
@@ -551,25 +550,18 @@ class _TorchDynamoContext:
         backend = innermost_fn(callback)
         cached_backends.setdefault(id(backend), backend)
 
-        if dynamic is not None:
-            self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
+        # Hard-coded hook flags for performance optimization
+        self._has_dynamic_hook = dynamic is not None
+        self._dynamic_cleanup = None
+        if self._has_dynamic_hook:
+            self._dynamic_hook = make_set_enable_dynamic(dynamic)
 
-        if on_enter is not nothing:
-            # this case is not common
-            def call_on_enter():
-                on_enter()
-                return nothing
+        self._has_on_enter_hook = on_enter is not nothing
+        self._on_enter_fn = on_enter if self._has_on_enter_hook else None
 
-            self.enter_exit_hooks.append(call_on_enter)
-
-        if backend_ctx_ctor is not contextlib.nullcontext:
-            # this case is not common
-            def call_backend_ctx():
-                ctx = backend_ctx_ctor()
-                ctx.__enter__()
-                return functools.partial(ctx.__exit__, None, None, None)
-
-            self.enter_exit_hooks.append(call_backend_ctx)
+        self._has_backend_ctx_hook = backend_ctx_ctor is not contextlib.nullcontext
+        self._backend_ctx_ctor = backend_ctx_ctor if self._has_backend_ctx_hook else None
+        self._backend_ctx = None
 
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:
@@ -579,7 +571,18 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.prior = set_eval_frame(None)
-        self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
+
+        # Hard-coded hook execution for performance
+        if self._has_dynamic_hook:
+            self._dynamic_cleanup = self._dynamic_hook()
+
+        if self._has_on_enter_hook:
+            self._on_enter_fn()
+
+        if self._has_backend_ctx_hook:
+            self._backend_ctx = self._backend_ctx_ctor()
+            self._backend_ctx.__enter__()
+
         self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
             _is_skip_guard_eval_unsafe_stance()
         )
@@ -589,9 +592,16 @@ class _TorchDynamoContext:
         assert self.prior is not unset
         set_eval_frame(None)
         set_skip_guard_eval_unsafe(self.prior_skip_guard_eval_unsafe)
-        for cleanup in self.cleanup_fns:
-            cleanup()
-        self.cleanup_fns.clear()
+
+        # Hard-coded cleanup execution for performance
+        if self._has_backend_ctx_hook and self._backend_ctx is not None:
+            self._backend_ctx.__exit__(None, None, None)
+            self._backend_ctx = None
+
+        if self._has_dynamic_hook and self._dynamic_cleanup is not None:
+            self._dynamic_cleanup()
+            self._dynamic_cleanup = None
+
         _maybe_set_eval_frame(_callback_from_stance(self.prior))
         self.prior = unset
 
@@ -683,7 +693,21 @@ class _TorchDynamoContext:
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
 
-                cleanups = [enter() for enter in self.enter_exit_hooks]
+                # Hard-coded hook execution for performance
+                cleanups = []
+                if self._has_dynamic_hook:
+                    cleanup = self._dynamic_hook()
+                    if cleanup is not None:
+                        cleanups.append(cleanup)
+
+                if self._has_on_enter_hook:
+                    self._on_enter_fn()
+
+                if self._has_backend_ctx_hook:
+                    ctx = self._backend_ctx_ctor()
+                    ctx.__enter__()
+                    cleanups.append(functools.partial(ctx.__exit__, None, None, None))
+
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
@@ -811,21 +835,39 @@ class OptimizeContext(_TorchDynamoContext):
             package=package,
         )
 
-        if config.compiled_autograd:
+        # Hard-coded compiled autograd hook for performance optimization
+        self._has_compiled_autograd_hook = config.compiled_autograd
+        self._compiled_autograd_ctx = None
+        if self._has_compiled_autograd_hook:
             _dynamic = self._dynamic
             if _dynamic is None:
                 _dynamic = not torch._dynamo.config.assume_static_by_default
+            self._compiled_autograd_dynamic = _dynamic
+            self._compiled_autograd_rebuild_ctx = rebuild_ctx
 
-            def call_compiled_autograd():
-                assert rebuild_ctx is not None
-                compiler_fn = rebuild_ctx()
-                ctx = torch._dynamo.compiled_autograd._enable(
-                    compiler_fn, dynamic=_dynamic, ignore_active_disable_ctx=False
-                )
-                ctx.__enter__()
-                return functools.partial(ctx.__exit__, None, None, None)
+    def __enter__(self):
+        # Call parent's __enter__ first
+        result = super().__enter__()
 
-            self.enter_exit_hooks.append(call_compiled_autograd)
+        # Handle compiled autograd hook
+        if self._has_compiled_autograd_hook:
+            assert self._compiled_autograd_rebuild_ctx is not None
+            compiler_fn = self._compiled_autograd_rebuild_ctx()
+            self._compiled_autograd_ctx = torch._dynamo.compiled_autograd._enable(
+                compiler_fn, dynamic=self._compiled_autograd_dynamic, ignore_active_disable_ctx=False
+            )
+            self._compiled_autograd_ctx.__enter__()
+
+        return result
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Handle compiled autograd cleanup first
+        if self._has_compiled_autograd_hook and self._compiled_autograd_ctx is not None:
+            self._compiled_autograd_ctx.__exit__(None, None, None)
+            self._compiled_autograd_ctx = None
+
+        # Call parent's __exit__
+        return super().__exit__(exc_type, exc_val, exc_tb)
 
     def __reduce__(self):
         return (
