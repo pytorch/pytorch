@@ -389,6 +389,7 @@ to do the following in addition:
    to be fused. We currently support the following fusions:
    `[Conv, Relu]`, `[Conv, BatchNorm]`, `[Conv, BatchNorm, Relu]`, `[Linear, Relu]`
 
+(prototype-maintenance-mode-fx-graph-mode-quantization)=
 ### (Prototype - maintenance mode) FX Graph Mode Quantization
 
 There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_mapping` (an argument of the `prepare_fx` function).
