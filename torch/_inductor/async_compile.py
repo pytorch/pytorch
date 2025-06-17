@@ -287,11 +287,30 @@ class AsyncCompile:
         if get_compile_threads() <= 1:
             return
         _compile_start()
-        # Pool is created on first access. Note for SubprocPools, the sidecar process starts,
+        # Pool is created on first access. Note for a SubprocPool, the sidecar process starts,
         # but its ProcessPoolExecutor does not initialize until a wakeup() call or the first
         # job is submitted.
         cls.process_pool()
         _compile_end()
+
+    @classmethod
+    def submit(cls, task: Callable[..., Any]) -> Any:
+        if get_compile_threads() <= 1:
+            return task()
+        return cls.pool().submit(task)
+
+    @classmethod
+    def use_process_pool(cls):
+        if get_compile_threads() <= 1:
+            return False
+
+        # Set an attribute to check if the pool is ready. Submit the ready job here instead
+        # of at pool creation so we don't launch the full pool of worker subprocesses until
+        # we're sure they're needed.
+        pool = cls.process_pool()
+        if not hasattr(pool, "ready_future"):
+            pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[union-attr]
+        return pool.ready_future.done()  # type: ignore[union-attr]
 
     @classmethod
     def quiesce(cls) -> None:
@@ -300,7 +319,9 @@ class AsyncCompile:
         ProcessPoolExecutor.
         """
         # Don't inadvertently create a process pool if it doesn't already exist:
-        if cls.process_pool.cache_info().currsize and config.quiesce_async_compile_pool:
+        if not cls.process_pool.cache_info().currsize:
+            return
+        if config.quiesce_async_compile_pool:
             pool = cls.process_pool()
             if isinstance(pool, SubprocPool):
                 pool.quiesce()
@@ -311,27 +332,11 @@ class AsyncCompile:
         If using a SubprocPool, signal the sidecar process to start up its
         ProcessPoolExecutor.
         """
-        if get_compile_threads() > 1:
-            pool = cls.process_pool()
-            if isinstance(pool, SubprocPool):
-                pool.wakeup()
-
-            # Set an attribute we can check if the pool is ready.
-            if not hasattr(pool, "ready_future"):
-                pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[union-attr]
-
-    @classmethod
-    def submit(cls, task: Callable[..., Any]) -> Any:
-        if get_compile_threads() <= 1:
-            return task()
-        return cls.pool().submit(task)
-
-    def use_process_pool(self):
-        return (
-            get_compile_threads() > 1
-            and hasattr(self.process_pool(), "ready_future")
-            and self.process_pool().ready_future.done()  # type: ignore[union-attr]
-        )
+        if not cls.use_process_pool():
+            return
+        pool = cls.process_pool()
+        if isinstance(pool, SubprocPool):
+            pool.wakeup()
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
         """
