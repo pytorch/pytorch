@@ -36,7 +36,7 @@ C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
   return __builtin_mul_overflow(a, b, out);
 #else
   *out = a * b;
-  // This test isn't exact, but avoids doing integer division
+  // This test isnt exact, but avoids doing integer division
   return (
       (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) < 64);
 #endif
@@ -77,7 +77,7 @@ bool safe_multiplies_u64(It first, It last, uint64_t* out) {
     prod_log2 += c10::llvm::Log2_64_Ceil(x);
   }
   *out = prod;
-  // This test isn't exact, but avoids doing integer division
+  // This test isnt exact, but avoids doing integer division
   return !is_zero && (prod_log2 >= 64);
 #endif
 }
