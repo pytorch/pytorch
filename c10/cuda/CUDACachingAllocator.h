@@ -51,8 +51,6 @@ namespace c10::cuda::CUDACachingAllocator {
 // NOLINTNEXTLINE(misc-unused-using-decls)
 using c10::CachingDeviceAllocator::DeviceStats;
 
-extern const size_t kLargeBuffer;
-
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
 
 // Struct containing info of an allocation block (i.e. a fractional part of a
@@ -270,6 +268,9 @@ class CUDAAllocator : public Allocator {
   }
   virtual ShareableHandle shareIpcHandle(void* ptr) = 0;
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
+  virtual bool isExpandableSegmentEnabled() {
+    return false;
+  }
   virtual bool isHistoryEnabled() {
     TORCH_CHECK(
         false,
