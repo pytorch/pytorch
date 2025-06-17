@@ -693,7 +693,21 @@ class _TorchDynamoContext:
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
 
-                cleanups = [enter() for enter in self.enter_exit_hooks]
+                # Hard-coded hook execution for performance
+                cleanups = []
+                if self._has_dynamic_hook:
+                    cleanup = self._dynamic_hook()
+                    if cleanup is not None:
+                        cleanups.append(cleanup)
+
+                if self._has_on_enter_hook:
+                    self._on_enter_fn()
+
+                if self._has_backend_ctx_hook:
+                    ctx = self._backend_ctx_ctor()
+                    ctx.__enter__()
+                    cleanups.append(functools.partial(ctx.__exit__, None, None, None))
+
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
@@ -821,21 +835,39 @@ class OptimizeContext(_TorchDynamoContext):
             package=package,
         )
 
-        if config.compiled_autograd:
+        # Hard-coded compiled autograd hook for performance optimization
+        self._has_compiled_autograd_hook = config.compiled_autograd
+        self._compiled_autograd_ctx = None
+        if self._has_compiled_autograd_hook:
             _dynamic = self._dynamic
             if _dynamic is None:
                 _dynamic = not torch._dynamo.config.assume_static_by_default
+            self._compiled_autograd_dynamic = _dynamic
+            self._compiled_autograd_rebuild_ctx = rebuild_ctx
 
-            def call_compiled_autograd():
-                assert rebuild_ctx is not None
-                compiler_fn = rebuild_ctx()
-                ctx = torch._dynamo.compiled_autograd._enable(
-                    compiler_fn, dynamic=_dynamic, ignore_active_disable_ctx=False
-                )
-                ctx.__enter__()
-                return functools.partial(ctx.__exit__, None, None, None)
+    def __enter__(self):
+        # Call parent's __enter__ first
+        result = super().__enter__()
 
-            self.enter_exit_hooks.append(call_compiled_autograd)
+        # Handle compiled autograd hook
+        if self._has_compiled_autograd_hook:
+            assert self._compiled_autograd_rebuild_ctx is not None
+            compiler_fn = self._compiled_autograd_rebuild_ctx()
+            self._compiled_autograd_ctx = torch._dynamo.compiled_autograd._enable(
+                compiler_fn, dynamic=self._compiled_autograd_dynamic, ignore_active_disable_ctx=False
+            )
+            self._compiled_autograd_ctx.__enter__()
+
+        return result
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Handle compiled autograd cleanup first
+        if self._has_compiled_autograd_hook and self._compiled_autograd_ctx is not None:
+            self._compiled_autograd_ctx.__exit__(None, None, None)
+            self._compiled_autograd_ctx = None
+
+        # Call parent's __exit__
+        return super().__exit__(exc_type, exc_val, exc_tb)
 
     def __reduce__(self):
         return (
