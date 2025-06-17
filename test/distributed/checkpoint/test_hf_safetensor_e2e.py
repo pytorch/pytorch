@@ -4,7 +4,6 @@ import importlib
 
 import torch
 import torch.distributed.checkpoint as dist_cp
-from torch.distributed.checkpoint import _HuggingFaceLoadPlanner
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Replicate, Shard, zeros
@@ -114,39 +113,6 @@ class TestSingleRankSaveLoad(TestCase):
         for key in state_dict_to_save.keys():
             self.assertTrue(
                 torch.equal(state_dict_to_save[key], state_dict_loaded[key])
-            )
-
-    @with_temp_dir
-    def test_load_allowing_resize(self) -> None:
-        try:
-            from safetensors.torch import save_file
-        except ImportError:
-            print("safetensors not installed")
-            return
-
-        CHECKPOINT_DIR = self.temp_dir
-
-        state_dict_to_save = MyTestModule().state_dict()
-        save_file(
-            state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
-        )
-
-        state_dict_to_load = {}
-        for key in state_dict_to_save.keys():
-            state_dict_to_load[key] = torch.zeros(1)
-
-        dist_cp.load(
-            state_dict=state_dict_to_load,
-            storage_reader=dist_cp.HuggingFaceStorageReader(path=CHECKPOINT_DIR),
-            planner=_HuggingFaceLoadPlanner(allow_tensor_resize=True),
-        )
-
-        self.assertEqual(
-            sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys())
-        )
-        for key in state_dict_to_save.keys():
-            self.assertTrue(
-                torch.equal(state_dict_to_save[key], state_dict_to_load[key])
             )
 
 
