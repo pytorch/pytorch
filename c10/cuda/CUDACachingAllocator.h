@@ -270,9 +270,6 @@ class CUDAAllocator : public Allocator {
   }
   virtual ShareableHandle shareIpcHandle(void* ptr) = 0;
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
-  virtual bool isExpandableSegmentEnabled() {
-    return false;
-  }
   virtual bool isHistoryEnabled() {
     TORCH_CHECK(
         false,
