@@ -140,15 +140,19 @@ def main() -> None:
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
     parser.add_argument("--with-clang-ldd", action="store_true")
-    parser.add_argument("--triton-version", type=str, default=read_triton_version())
+    parser.add_argument("--triton-version", type=str, default=None)
     args = parser.parse_args()
+
+    triton_version = read_triton_version(args.device)
+    if args.triton_version:
+        triton_version = args.triton_version
 
     build_triton(
         device=args.device,
         commit_hash=(
             args.commit_hash if args.commit_hash else read_triton_pin(args.device)
         ),
-        version=args.triton_version,
+        version=triton_version,
         py_version=args.py_version,
         release=args.release,
         with_clang_ldd=args.with_clang_ldd,

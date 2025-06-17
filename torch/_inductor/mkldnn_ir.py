@@ -690,7 +690,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
-    def get_mutation_names(self):
+    def get_mutation_names(self) -> Sequence[str]:
         return [self.inputs[self.idx_for_inplace_sum].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -1045,7 +1045,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
-    def get_mutation_names(self):
+    def get_mutation_names(self) -> Sequence[str]:
         binary_post_op = self.constant_args[-5]
         if binary_post_op == "sum":
             return [self.inputs[self.idx_for_inplace_sum].get_name()]
