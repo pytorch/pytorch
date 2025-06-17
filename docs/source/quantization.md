@@ -354,6 +354,8 @@ QAT API Example:
 To learn more about quantization aware training, please see the
 [QAT tutorial](https://pytorch.org/tutorials/advanced/static_quantization_tutorial.html).
 
+(model-preparation-for-eager-mode-static-quantization)=
+
 #### Model Preparation for Eager Mode Static Quantization
 
 It is necessary to currently make some modifications to the model definition
