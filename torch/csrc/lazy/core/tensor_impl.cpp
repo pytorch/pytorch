@@ -195,7 +195,7 @@ bool LTCTensorImpl::is_strides_like_custom(
   return false;
 }
 
-bool LTCTensorImpl::is_non_overlapping_and_dense_custom() const {
+bool LTCTensorImpl::is_non_overlapping_and_dense_custom(bool) const {
   // This should be true, but false as a temporary fix for a PyTorch core issue,
   // according to https://github.com/pytorch/xla/pull/2682.
   return false;
