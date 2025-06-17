@@ -815,7 +815,7 @@ class NestedIOFunction(Function):
         self._to_save_nested = args
 
     @property
-    def saved_tensors(self):
+    def saved_tensors(self):  # type: ignore[override]
         r"""
         See :meth:`Function.saved_tensors`.
         """
