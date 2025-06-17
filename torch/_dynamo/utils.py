@@ -105,6 +105,7 @@ if typing.TYPE_CHECKING:
         ValuesView,
     )
 
+    import torch.utils.checkpoint
 
 try:
     import numpy as np
@@ -999,7 +1000,7 @@ if sys.version_info >= (3, 12):
     )
 
 
-def is_typing(value):
+def is_typing(value) -> bool:
     # _Final catches most of typing classes:
     #   - Any
     #   - Callable
@@ -1013,7 +1014,7 @@ def is_typing(value):
     return isinstance(value, typing._Final) or value is typing.Generic  # type: ignore[attr-defined]
 
 
-def is_numpy_int_type(value):
+def is_numpy_int_type(value) -> bool:
     if not np:
         return False
 
@@ -1032,7 +1033,7 @@ def is_numpy_int_type(value):
     )
 
 
-def is_numpy_float_type(value):
+def is_numpy_float_type(value) -> bool:
     if not np:
         return False
 
@@ -1159,7 +1160,7 @@ def unwrap_with_attr_name_if_wrapper(fn):
     return fn, attr_name
 
 
-def is_numpy_ndarray(value):
+def is_numpy_ndarray(value) -> bool:
     if not np:
         return False
 
@@ -1177,7 +1178,7 @@ def istensor(obj):
     return istype(obj, tensor_list)
 
 
-def is_lazy_module(mod):
+def is_lazy_module(mod) -> bool:
     return isinstance(mod, LazyModuleMixin)
 
 
@@ -2202,12 +2203,12 @@ def getfile(obj):
         return None
 
 
-def is_namedtuple(obj):
+def is_namedtuple(obj) -> bool:
     """Test if an object is a namedtuple or a torch.return_types.* quasi-namedtuple"""
     return is_namedtuple_cls(type(obj))
 
 
-def is_namedtuple_cls(cls):
+def is_namedtuple_cls(cls) -> bool:
     """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
     try:
         if issubclass(cls, tuple):
@@ -2351,7 +2352,7 @@ if has_triton_package():
 """
 
 
-def is_safe_constant(v):
+def is_safe_constant(v) -> bool:
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return isinstance(
@@ -2385,7 +2386,7 @@ def is_torch_sym(value: Any) -> TypeGuard[Union[torch.SymBool, torch.SymInt]]:
     )
 
 
-def is_int_specialization_case(value, source):
+def is_int_specialization_case(value, source) -> bool:
     from .source import is_from_defaults
 
     return not TracingContext.get().force_unspec_int_unbacked_size_like and (
@@ -3843,14 +3844,14 @@ def defake(x):
     return y
 
 
-def is_utils_checkpoint(obj):
+def is_utils_checkpoint(obj) -> bool:
     # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
 
     return obj is torch.utils.checkpoint.checkpoint
 
 
-def is_invoke_subgraph(obj):
+def is_invoke_subgraph(obj) -> bool:
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
 
     return obj is invoke_subgraph_placeholder
@@ -3884,7 +3885,7 @@ def build_checkpoint_variable(**options):
     )
 
 
-def is_compile_supported(device_type):
+def is_compile_supported(device_type) -> bool:
     from .eval_frame import is_dynamo_supported
 
     type = torch.device(device_type).type
@@ -4184,7 +4185,7 @@ def get_static_address_type(t):
     return None
 
 
-def is_rng_state_getter_or_setter(value):
+def is_rng_state_getter_or_setter(value) -> bool:
     getters = (
         # The following two functions are not identical, so don't remove anyone!
         torch._C.Generator.get_state,
@@ -4201,7 +4202,7 @@ def is_rng_state_getter_or_setter(value):
     return value in (*setters, *getters)
 
 
-def is_tensor_base_attr_getter(value):
+def is_tensor_base_attr_getter(value) -> TypeGuard[types.MethodWrapperType]:
     return (
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
@@ -4209,7 +4210,7 @@ def is_tensor_base_attr_getter(value):
     )
 
 
-def is_tensor_getset_descriptor(name):
+def is_tensor_getset_descriptor(name) -> bool:
     try:
         attr = inspect.getattr_static(torch.Tensor, name)
         return type(attr) is types.GetSetDescriptorType
@@ -4217,7 +4218,7 @@ def is_tensor_getset_descriptor(name):
         return False
 
 
-def is_torch_function_object(value):
+def is_torch_function_object(value) -> bool:
     return hasattr(value, "__torch_function__")
 
 
@@ -4265,7 +4266,7 @@ def to_fake_tensor(t, fake_mode):
 
 
 # NB: this works for both classes and instances
-def is_frozen_dataclass(value):
+def is_frozen_dataclass(value) -> bool:
     return (
         not object_has_getattribute(value)
         and not class_has_getattribute(value)
@@ -4436,7 +4437,7 @@ def _disable_saved_tensors_hooks_during_tracing():
         torch._C._autograd._saved_tensors_hooks_set_tracing(prior)
 
 
-def is_parameter_freezing():
+def is_parameter_freezing() -> bool:
     return torch._inductor.config.freezing and not torch.is_grad_enabled()
 
 

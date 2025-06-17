@@ -31,6 +31,7 @@ import weakref
 from collections.abc import MutableMapping
 from types import CellType
 from typing import Any, Optional, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 import torch.nn
 
@@ -175,19 +176,19 @@ class SideEffects:
     def __getitem__(self, item):
         return self.id_to_variable[id(item)]
 
-    def should_allow_side_effects_under_checkpoint(self):
+    def should_allow_side_effects_under_checkpoint(self) -> bool:
         output_graph = self.output_graph_weakref()
         return (
-            output_graph
+            output_graph is not None
             and output_graph.current_tx.output.current_tracer.under_activation_checkpoint
             and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
         )
 
-    def is_reconstructing_generator(self):
+    def is_reconstructing_generator(self) -> bool:
         output_graph = self.output_graph_weakref()
 
         return (
-            output_graph
+            output_graph is not None
             and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
@@ -283,20 +284,20 @@ class SideEffects:
             BaseException.__getattribute__,
         )
 
-    def is_attribute_mutation(self, item):
+    def is_attribute_mutation(self, item) -> TypeIs[AttributeMutation]:
         return isinstance(item.mutation_type, AttributeMutation)
 
-    def has_pending_mutation(self, item):
+    def has_pending_mutation(self, item) -> bool:
         return self.is_attribute_mutation(item) and bool(
-            self.store_attr_mutations.get(item)
+            self.store_attr_mutations.get(item)  # type: ignore[call-overload]
         )
 
-    def has_pending_mutation_of_attr(self, item, name):
+    def has_pending_mutation_of_attr(self, item, name) -> bool:
         return self.is_attribute_mutation(
             item
-        ) and name in self.store_attr_mutations.get(item, ())
+        ) and name in self.store_attr_mutations.get(item, ())  # type: ignore[call-overload]
 
-    def is_modified(self, item):
+    def is_modified(self, item) -> bool:
         if item.is_immutable():
             return False
         if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
@@ -537,7 +538,7 @@ class SideEffects:
                     self.store_attr_mutations[var],
                 )
 
-        def is_live(var: VariableTracker):
+        def is_live(var: VariableTracker) -> bool:
             if isinstance(var.mutation_type, AttributeMutationNew):
                 return var in live_new_objects
             return True
@@ -1003,7 +1004,7 @@ class SideEffects:
                 # for this reversal, we iterate through the mutable attributes
                 # in reverse order.
                 for name, value in reversed(
-                    self.store_attr_mutations.get(var, {}).items()
+                    self.store_attr_mutations.get(var, {}).items()  # type: ignore[call-overload]
                 ):
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
@@ -1014,10 +1015,11 @@ class SideEffects:
                         )
                     elif isinstance(value, variables.DeletedVariable):
                         if isinstance(
-                            var.mutation_type, AttributeMutationExisting
+                            var.mutation_type,  # type: ignore[attr-defined]
+                            AttributeMutationExisting,
                         ) and hasattr(getattr(var, "value", None), name):
                             cg.tx.output.update_co_names(name)
-                            cg(var.source)
+                            cg(var.source)  # type: ignore[attr-defined]
                             suffixes.append(
                                 [create_instruction("DELETE_ATTR", argval=name)]
                             )
@@ -1086,7 +1088,7 @@ class SideEffects:
         for suffix in reversed(suffixes):
             cg.extend_output(suffix)
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
         return not (
             any(map(self.is_modified, self.id_to_variable.values()))
             or self.tensor_hooks
