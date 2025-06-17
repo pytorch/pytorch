@@ -29,12 +29,10 @@
     experimental
 ```
 
-<!-- Hidden toctree for submodules -->
-```{eval-rst}
-.. toctree::
-    :hidden:
+```{toctree}
+:hidden:
 
-    nn.attention.flex_attention
-    nn.attention.bias
-    nn.attention.experimental
+nn.attention.flex_attention
+nn.attention.bias
+nn.attention.experimental
 ```
