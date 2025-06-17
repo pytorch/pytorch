@@ -3665,11 +3665,7 @@ class AOTInductorTestsTemplate:
             def __init__(self) -> None:
                 super().__init__()
 
-            def forward(
-                self,
-                inp: torch.Tensor,
-                scalar: float
-            ):
+            def forward(self, inp: torch.Tensor, scalar: float):
                 torch.ops.aten.fill_(inp, scalar)
                 return inp
 
