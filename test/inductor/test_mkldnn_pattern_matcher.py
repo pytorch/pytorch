@@ -4099,10 +4099,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 nodes_count = 10 if has_bias else 7
             else:
                 nodes_count = 7 if has_bias else 6
-            self.assertEqual(
-                counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
-                nodes_count,
-            )
+            if counters["inductor"]["removed_pointless_view_pair"] == 0:
+                # Removing pointless view pairs affect how the pattern
+                # for this test is matched.
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    nodes_count,
+                )
 
         self._test_common(
             mod,

@@ -628,11 +628,17 @@ def _revlist_to_prs(
     rc: list[tuple[GitHubPR, str]] = []
     for idx, rev in enumerate(rev_list):
         msg = repo.commit_message(rev)
-        m = RE_PULL_REQUEST_RESOLVED.search(msg)
-        if m is None:
+        # findall doesn't return named captures, so we need to use finditer
+        all_matches = list(RE_PULL_REQUEST_RESOLVED.finditer(msg))
+        if len(all_matches) != 1:
             raise RuntimeError(
-                f"Could not find PR-resolved string in {msg} of ghstacked PR {pr.pr_num}"
+                f"Found an unexpected number of PRs mentioned in commit {rev}: "
+                f"{len(all_matches)}.  This is probably because you are using an "
+                "old verion of ghstack.  Please update ghstack and resubmit "
+                "your PRs"
             )
+
+        m = all_matches[0]
         if pr.org != m.group("owner") or pr.project != m.group("repo"):
             raise RuntimeError(
                 f"PR {m.group('number')} resolved to wrong owner/repo pair"
@@ -666,6 +672,9 @@ def get_ghstack_prs(
 
     assert pr.is_ghstack_pr()
     entire_stack = _revlist_to_prs(repo, pr, reversed(rev_list), skip_func)
+    print(
+        f"Found {len(entire_stack)} PRs in the stack for {pr.pr_num}: {[x[0].pr_num for x in entire_stack]}"
+    )
 
     for stacked_pr, rev in entire_stack:
         if stacked_pr.is_closed():
