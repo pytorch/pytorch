@@ -712,7 +712,7 @@ def triton_builtin(f: Callable[..., _T]) -> Callable[..., _T]:
         wrapper = f  # type: ignore[assignment]
 
     wrapper.__triton_builtin__ = True  # type: ignore[attr-defined]
-    return f
+    return wrapper
 
 
 @triton_builtin
