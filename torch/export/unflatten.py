@@ -143,7 +143,7 @@ class InterpreterModule(_SubmoduleBase, torch.nn.Module):
         super().__init__()
         self.graph = graph
         self._ty = ty
-        self.graph.owning_module = self
+        self.graph.owning_module = self  # type: ignore[assignment]
         self._run_with_interpreter = RUN_WITH_INTERPRETER
 
     def forward(self, *args, **kwargs):
@@ -296,7 +296,7 @@ class UnflattenedModule(torch.nn.Module):
         export_graph = deepcopy(export_module.graph)
         self.graph_signature = deepcopy(export_module.graph_signature)
         self.graph = torch.fx.Graph()
-        self.graph.owning_module = self
+        self.graph.owning_module = self  # type: ignore[assignment]
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         self.flat_args_adapter = flat_args_adapter
 
