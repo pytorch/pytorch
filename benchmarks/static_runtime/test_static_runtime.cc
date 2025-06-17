@@ -2513,7 +2513,7 @@ TEST(StaticRuntime, LinalgNorm_StringOrd) {
   testStaticRuntime(linalg_norm_ord_str, args0);
 
   auto b = at::randn({3, 2, 17});
-  std::vector<IValue> args1{b, "fro", dim, true, dtype}; 
+  std::vector<IValue> args1{b, "fro", dim, true, dtype};
   testStaticRuntime(linalg_norm_ord_str, args0, args1);
 }
 
