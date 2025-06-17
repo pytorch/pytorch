@@ -12,11 +12,10 @@
 
 These are the basic building blocks for graphs:
 
-```{eval-rst}
-.. contents:: torch.nn
-    :depth: 2
-    :local:
-    :backlinks: top
+```{contents} torch.nn
+local: true
+depth: 2
+backlinks: top
 ```
 
 ```{eval-rst}
