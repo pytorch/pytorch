@@ -261,7 +261,7 @@ def sig_for_ops(opname: str) -> list[str]:
             ]
         return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
     elif name in logic_ops:
-        return [f"def {opname}(self, other: Tensor | _bool) -> Tensor: ..."]
+        return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
     elif name in shift_ops:
         return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
     elif name in symmetric_comparison_ops:
@@ -412,6 +412,16 @@ def gen_nn_functional(fm: FileManager) -> None:
                         "tuple[Tensor, Tensor]",
                     )
                 ],
+                f"adaptive_avg_pool{d}d": [
+                    defs(
+                        f"adaptive_avg_pool{d}d",
+                        [
+                            INPUT,
+                            "output_size: _int | _size",
+                        ],
+                        "Tensor",
+                    )
+                ],
             }
         )
 
@@ -512,6 +522,31 @@ def gen_nn_functional(fm: FileManager) -> None:
                         "is_causal: bool = False",
                         "scale: float | None = None",
                         "enable_gqa: bool = False",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "binary_cross_entropy": [
+                defs(
+                    "binary_cross_entropy",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "weight: Tensor | None = None",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "col2im": [
+                defs(
+                    "col2im",
+                    [
+                        INPUT,
+                        "output_size: _int | _size",
+                        KERNEL_SIZE,
+                        "dilation: _int | _size",
+                        *STRIDE_PADDING,
                     ],
                     "Tensor",
                 )
