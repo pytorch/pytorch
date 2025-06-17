@@ -1160,7 +1160,6 @@ exclude_patterns = [
     # as necessary
     'aten/**',
     'c10/**',
-    'cmake/**',
     'docs/**',
     'functorch/**',
     'scripts/**',
