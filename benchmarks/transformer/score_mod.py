@@ -271,9 +271,9 @@ def run_single_backend_sdpa(
         if config.calculate_bwd_time:
             # TODO: debug backward pass for njt
             if eager_sdpa and not config.attn_type == "document_mask":
-                dOut = torch.randn_like(out_eager.transpose(1, 2)).transpose(1, 2)
+                d_out = torch.randn_like(out_eager.transpose(1, 2)).transpose(1, 2)
                 backward_eager_time = benchmark_torch_function_in_microseconds(
-                    out_eager.backward, dOut, retain_graph=True
+                    out_eager.backward, d_out, retain_graph=True
                 )
             else:
                 backward_eager_time = float("nan")
@@ -340,9 +340,9 @@ def run_single_backend_FA(
 
     if config.calculate_bwd_time:
         if FA:
-            dOut = torch.randn_like(out_FA)
+            d_out = torch.randn_like(out_FA)
             backward_FA_time = benchmark_torch_function_in_microseconds(
-                out_FA.backward, dOut, retain_graph=True
+                out_FA.backward, d_out, retain_graph=True
             )
         else:
             backward_FA_time = float("nan")
@@ -432,9 +432,9 @@ def run_single_experiment(
             )
 
     if config.calculate_bwd_time:
-        dOut = torch.randn_like(out_compile)
+        d_out = torch.randn_like(out_compile)
         backward_compile_time = benchmark_torch_function_in_microseconds(
-            out_compile.backward, dOut, retain_graph=True
+            out_compile.backward, d_out, retain_graph=True
         )
     sparsity = block_mask.sparsity() / 100.0 if block_mask is not None else 0.0
     sparsity = sparsity if config.attn_type != "document_mask" else 0.5
