@@ -69,6 +69,7 @@ if torch.backends.mps.is_available():
             "flatten",
             "fill",
             "full",
+            "full_like",
             "H",
             "hsplit",
             "imag",
@@ -312,13 +313,6 @@ if torch.backends.mps.is_available():
             # The values of the sorted tensor match the CPU,
             # but in case of the returned indices this results in undefined behaviour.
             "sort": [torch.int8, torch.uint8, torch.bool, torch.float16],
-            # Unsupported dtypes
-            "cumsum": [torch.int64],
-            "cumprod": [torch.int64],
-            "cumulative_trapezoid": [torch.int64],
-            "masked.cumsum": [torch.int64],
-            "masked.cumprod": [torch.int64],
-            "linalg.vander": [torch.int64],
             # Fail with `Expected 1.0 but got nan.` for empty tensors
             # Caused by sample input at index 23: SampleInput(
             #     input=Tensor[size=(), device="mps:0", dtype=torch.float32],
@@ -376,7 +370,6 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST = {
             # Failures due to lack of op implementation on MPS backend
-            "login": None,
             "logspace": None,
             "logspacetensor_overload": None,
             "linalg.eig": None,
@@ -386,8 +379,6 @@ if torch.backends.mps.is_available():
             "cauchy": None,
             "cholesky_inverse": None,
             "cholesky_solve": None,
-            "cummax": None,
-            "cummin": None,
             "frexp": None,
             "gcd": None,
             "geqrf": None,
@@ -438,13 +429,6 @@ if torch.backends.mps.is_available():
             "nn.functional.avg_pool3d": None,
             "nn.functional.ctc_loss": None,
             "nn.functional.embedding_bag": None,
-            "nn.functional.hardshrink": [
-                torch.uint8,
-                torch.int8,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-            ],
             "nn.functional.max_pool3d": None,
             "nn.functional.max_unpool1d": None,
             "nn.functional.max_unpool2d": None,
@@ -499,7 +483,6 @@ if torch.backends.mps.is_available():
             "log_softmaxwith_dtype": None,
             "softmaxwith_dtype": None,
             "float_power": None,
-            "full_like": None,
             "linalg.matrix_rankhermitian": None,
             "linalg.pinvhermitian": None,
             "nonzero_static": None,

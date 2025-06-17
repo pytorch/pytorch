@@ -20,24 +20,24 @@ What is an FX transform? Essentially, it's a function that looks like this.
 
 ```python
 
-    import torch
-    import torch.fx
+import torch
+import torch.fx
 
-    def transform(m: nn.Module,
-                  tracer_class : type = torch.fx.Tracer) -> torch.nn.Module:
-        # Step 1: Acquire a Graph representing the code in `m`
+def transform(m: nn.Module,
+                tracer_class : type = torch.fx.Tracer) -> torch.nn.Module:
+    # Step 1: Acquire a Graph representing the code in `m`
 
-        # NOTE: torch.fx.symbolic_trace is a wrapper around a call to
-        # fx.Tracer.trace and constructing a GraphModule. We'll
-        # split that out in our transform to allow the caller to
-        # customize tracing behavior.
-        graph : torch.fx.Graph = tracer_class().trace(m)
+    # NOTE: torch.fx.symbolic_trace is a wrapper around a call to
+    # fx.Tracer.trace and constructing a GraphModule. We'll
+    # split that out in our transform to allow the caller to
+    # customize tracing behavior.
+    graph : torch.fx.Graph = tracer_class().trace(m)
 
-        # Step 2: Modify this Graph or create a new one
-        graph = ...
+    # Step 2: Modify this Graph or create a new one
+    graph = ...
 
-        # Step 3: Construct a Module to return
-        return torch.fx.GraphModule(m, graph)
+    # Step 3: Construct a Module to return
+    return torch.fx.GraphModule(m, graph)
 ```
 
 Your transform will take in a {class}`torch.nn.Module`, acquire a {class}`Graph`
@@ -54,19 +54,19 @@ It is also possible to modify an existing {class}`GraphModule` instead of
 creating a new one, like so:
 
 ```python
-    import torch
-    import torch.fx
+import torch
+import torch.fx
 
-    def transform(m : nn.Module) -> nn.Module:
-        gm : torch.fx.GraphModule = torch.fx.symbolic_trace(m)
+def transform(m : nn.Module) -> nn.Module:
+    gm : torch.fx.GraphModule = torch.fx.symbolic_trace(m)
 
-        # Modify gm.graph
-        # <...>
+    # Modify gm.graph
+    # <...>
 
-        # Recompile the forward() method of `gm` from its Graph
-        gm.recompile()
+    # Recompile the forward() method of `gm` from its Graph
+    gm.recompile()
 
-        return gm
+    return gm
 ```
 
 Note that you MUST call {meth}`GraphModule.recompile` to bring the generated
@@ -92,23 +92,23 @@ Let's see what we mean by that with a short example:
 
 ```python
 
-    import torch
-    import torch.fx
+import torch
+import torch.fx
 
-    class MyModule(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.param = torch.nn.Parameter(torch.rand(3, 4))
-            self.linear = torch.nn.Linear(4, 5)
+class MyModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.rand(3, 4))
+        self.linear = torch.nn.Linear(4, 5)
 
-        def forward(self, x):
-            return torch.topk(torch.sum(
-                self.linear(x + self.linear.weight).relu(), dim=-1), 3)
+    def forward(self, x):
+        return torch.topk(torch.sum(
+            self.linear(x + self.linear.weight).relu(), dim=-1), 3)
 
-    m = MyModule()
-    gm = torch.fx.symbolic_trace(m)
+m = MyModule()
+gm = torch.fx.symbolic_trace(m)
 
-    gm.graph.print_tabular()
+gm.graph.print_tabular()
 ```
 
 Here we define a module `MyModule` for demonstration purposes, instantiate it,
@@ -191,17 +191,17 @@ can be found below.
 
 ```python
 
-    # Specifies the insertion point. Any nodes added to the
-    # Graph within this scope will be inserted after `node`
-    with traced.graph.inserting_after(node):
-        # Insert a new `call_function` node calling `torch.relu`
-        new_node = traced.graph.call_function(
-            torch.relu, args=(node,))
+# Specifies the insertion point. Any nodes added to the
+# Graph within this scope will be inserted after `node`
+with traced.graph.inserting_after(node):
+    # Insert a new `call_function` node calling `torch.relu`
+    new_node = traced.graph.call_function(
+        torch.relu, args=(node,))
 
-        # We want all places that used the value of `node` to
-        # now use that value after the `relu` call we've added.
-        # We use the `replace_all_uses_with` API to do this.
-        node.replace_all_uses_with(new_node)
+    # We want all places that used the value of `node` to
+    # now use that value after the `relu` call we've added.
+    # We use the `replace_all_uses_with` API to do this.
+    node.replace_all_uses_with(new_node)
 ```
 
 For simple transformations that only consist of substitutions, you can also
@@ -438,29 +438,29 @@ example:
 
 ```python
 
-    import torch
-    import torch.fx
-    import torchvision.models as models
+import torch
+import torch.fx
+import torchvision.models as models
 
-    def transform(m : torch.nn.Module) -> torch.nn.Module:
-        gm = torch.fx.symbolic_trace(m)
+def transform(m : torch.nn.Module) -> torch.nn.Module:
+    gm = torch.fx.symbolic_trace(m)
 
-        # Imagine we're doing some transforms here
-        # <...>
+    # Imagine we're doing some transforms here
+    # <...>
 
-        gm.recompile()
+    gm.recompile()
 
-        return gm
+    return gm
 
-    resnet18 = models.resnet18()
-    transformed_resnet18 = transform(resnet18)
+resnet18 = models.resnet18()
+transformed_resnet18 = transform(resnet18)
 
-    input_image = torch.randn(5, 3, 224, 224)
+input_image = torch.randn(5, 3, 224, 224)
 
-    assert resnet18(input_image) == transformed_resnet18(input_image)
-    """
-    RuntimeError: Boolean value of Tensor with more than one value is ambiguous
-    """
+assert resnet18(input_image) == transformed_resnet18(input_image)
+"""
+RuntimeError: Boolean value of Tensor with more than one value is ambiguous
+"""
 ```
 
 Here, we've tried to check equality of the values of two deep learning
@@ -475,7 +475,7 @@ us an approximate comparison taking into account a relative and
 absolute tolerance threshold:
 
 ```python
-    assert torch.allclose(resnet18(input_image), transformed_resnet18(input_image))
+assert torch.allclose(resnet18(input_image), transformed_resnet18(input_image))
 ```
 This is the first tool in our toolbox to check if transformed modules are
 behaving as we expect compared to a reference implementation.
@@ -494,29 +494,29 @@ into it manually using `pdb` when the forward pass is invoked.
 
 ```python
 
-    import torch
-    import torch.fx
-    import torchvision.models as models
+import torch
+import torch.fx
+import torchvision.models as models
 
-    def my_pass(inp: torch.nn.Module, tracer_class : type = fx.Tracer) -> torch.nn.Module:
-        graph = tracer_class().trace(inp)
-        # Transformation logic here
-        # <...>
+def my_pass(inp: torch.nn.Module, tracer_class : type = fx.Tracer) -> torch.nn.Module:
+    graph = tracer_class().trace(inp)
+    # Transformation logic here
+    # <...>
 
-        # Return new Module
-        return fx.GraphModule(inp, graph)
+    # Return new Module
+    return fx.GraphModule(inp, graph)
 
-    my_module = models.resnet18()
-    my_module_transformed = my_pass(my_module)
+my_module = models.resnet18()
+my_module_transformed = my_pass(my_module)
 
-    input_value = torch.randn(5, 3, 224, 224)
+input_value = torch.randn(5, 3, 224, 224)
 
-    # When this line is executed at runtime, we will be dropped into an
-    # interactive `pdb` prompt. We can use the `step` or `s` command to
-    # step into the execution of the next line
-    import pdb; pdb.set_trace()
+# When this line is executed at runtime, we will be dropped into an
+# interactive `pdb` prompt. We can use the `step` or `s` command to
+# step into the execution of the next line
+import pdb; pdb.set_trace()
 
-    my_module_transformed(input_value)
+my_module_transformed(input_value)
 ```
 (Print the Generated Code)=
 
@@ -528,36 +528,36 @@ your code and examine it from there.
 
 ```python
 
-    # Assume that `traced` is a GraphModule that has undergone some
-    # number of transforms
+# Assume that `traced` is a GraphModule that has undergone some
+# number of transforms
 
-    # Copy this code for later
-    print(traced)
-    # Print the code generated from symbolic tracing. This outputs:
-    """
+# Copy this code for later
+print(traced)
+# Print the code generated from symbolic tracing. This outputs:
+"""
+def forward(self, y):
+    x = self.x
+    add_1 = x + y;  x = y = None
+    return add_1
+"""
+
+# Subclass the original Module
+class SubclassM(M):
+    def __init__(self):
+        super().__init__()
+
+    # Paste the generated `forward` function (the one we printed and
+    # copied above) here
     def forward(self, y):
         x = self.x
         add_1 = x + y;  x = y = None
         return add_1
-    """
 
-    # Subclass the original Module
-    class SubclassM(M):
-        def __init__(self):
-            super().__init__()
-
-        # Paste the generated `forward` function (the one we printed and
-        # copied above) here
-        def forward(self, y):
-            x = self.x
-            add_1 = x + y;  x = y = None
-            return add_1
-
-    # Create an instance of the original, untraced Module. Then, create an
-    # instance of the Module with the copied `forward` function. We can
-    # now compare the output of both the original and the traced version.
-    pre_trace = M()
-    post_trace = SubclassM()
+# Create an instance of the original, untraced Module. Then, create an
+# instance of the Module with the copied `forward` function. We can
+# now compare the output of both the original and the traced version.
+pre_trace = M()
+post_trace = SubclassM()
 ```
 #### Use the `to_folder` Function From `GraphModule`
 {meth}`GraphModule.to_folder` is a method in `GraphModule` that allows
@@ -567,10 +567,10 @@ it may be easier to examine modules and parameters using `to_folder`.
 
 ```python
 
-    m = symbolic_trace(M())
-    m.to_folder("foo", "Bar")
-    from foo import Bar
-    y = Bar()
+m = symbolic_trace(M())
+m.to_folder("foo", "Bar")
+from foo import Bar
+y = Bar()
 ```
 After running the above example, we can then look at the code within
 `foo/module.py` and modify it as desired (e.g. adding `print`
@@ -589,51 +589,51 @@ examine our traced module:
 
 ```python
 
-    # Sample Module
-    class M(torch.nn.Module):
-        def forward(self, x, y):
-            return x + y
-
-    # Create an instance of `M`
-    m = M()
-
-    # Symbolically trace an instance of `M` (returns a GraphModule). In
-    # this example, we'll only be discussing how to inspect a
-    # GraphModule, so we aren't showing any sample transforms for the
-    # sake of brevity.
-    traced = symbolic_trace(m)
-
-    # Print the code produced by tracing the module.
-    print(traced)
-    # The generated `forward` function is:
-    """
+# Sample Module
+class M(torch.nn.Module):
     def forward(self, x, y):
-        add = x + y;  x = y = None
-        return add
-    """
+        return x + y
 
-    # Print the internal Graph.
-    print(traced.graph)
-    # This print-out returns:
-    """
-    graph():
-        %x : [num_users=1] = placeholder[target=x]
-        %y : [num_users=1] = placeholder[target=y]
-        %add : [num_users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
-        return add
-    """
+# Create an instance of `M`
+m = M()
 
-    # Print a tabular representation of the internal Graph.
-    traced.graph.print_tabular()
-    # This gives us:
-    """
-    opcode         name    target                   args    kwargs
-    -------------  ------  -----------------------  ------  --------
-    placeholder    x       x                        ()      {}
-    placeholder    y       y                        ()      {}
-    call_function  add     <built-in function add>  (x, y)  {}
-    output         output  output                   (add,)  {}
-    """
+# Symbolically trace an instance of `M` (returns a GraphModule). In
+# this example, we'll only be discussing how to inspect a
+# GraphModule, so we aren't showing any sample transforms for the
+# sake of brevity.
+traced = symbolic_trace(m)
+
+# Print the code produced by tracing the module.
+print(traced)
+# The generated `forward` function is:
+"""
+def forward(self, x, y):
+    add = x + y;  x = y = None
+    return add
+"""
+
+# Print the internal Graph.
+print(traced.graph)
+# This print-out returns:
+"""
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %y : [num_users=1] = placeholder[target=y]
+    %add : [num_users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
+    return add
+"""
+
+# Print a tabular representation of the internal Graph.
+traced.graph.print_tabular()
+# This gives us:
+"""
+opcode         name    target                   args    kwargs
+-------------  ------  -----------------------  ------  --------
+placeholder    x       x                        ()      {}
+placeholder    y       y                        ()      {}
+call_function  add     <built-in function add>  (x, y)  {}
+output         output  output                   (add,)  {}
+"""
 ```
 Using the utility functions above, we can compare our traced Module
 before and after we've applied our transformations. Sometimes, a
@@ -645,23 +645,23 @@ Going off of the example above, consider the following code:
 
 ```python
 
-    # Sample user-defined function
-    def transform_graph(module: torch.nn.Module, tracer_class : type = fx.Tracer) -> torch.nn.Module:
-        # Get the Graph from our traced Module
-        g = tracer_class().trace(module)
+# Sample user-defined function
+def transform_graph(module: torch.nn.Module, tracer_class : type = fx.Tracer) -> torch.nn.Module:
+    # Get the Graph from our traced Module
+    g = tracer_class().trace(module)
 
-        """
-        Transformations on `g` go here
-        """
+    """
+    Transformations on `g` go here
+    """
 
-        return fx.GraphModule(module, g)
+    return fx.GraphModule(module, g)
 
-    # Transform the Graph
-    transformed = transform_graph(traced)
+# Transform the Graph
+transformed = transform_graph(traced)
 
-    # Print the new code after our transforms. Check to see if it was
-    # what we expected
-    print(transformed)
+# Print the new code after our transforms. Check to see if it was
+# what we expected
+print(transformed)
 ```
 Using the above example, let’s say that the call to `print(traced)`
 showed us that there was an error in our transforms. We want to find
@@ -729,24 +729,24 @@ For example, let’s examine the following program:
 
 ```python
 
-    def func_to_trace(x):
-        if x.sum() > 0:
-            return torch.relu(x)
-        else:
+def func_to_trace(x):
+    if x.sum() > 0:
+        return torch.relu(x)
+    else:
 
-            return torch.neg(x)
+        return torch.neg(x)
 
-    traced = torch.fx.symbolic_trace(func_to_trace)
-    """
-      <...>
-      File "dyn.py", line 6, in func_to_trace
-        if x.sum() > 0:
-      File "pytorch/torch/fx/proxy.py", line 155, in __bool__
-        return self.tracer.to_bool(self)
-      File "pytorch/torch/fx/proxy.py", line 85, in to_bool
-        raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
-    torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
-    """
+traced = torch.fx.symbolic_trace(func_to_trace)
+"""
+    <...>
+    File "dyn.py", line 6, in func_to_trace
+    if x.sum() > 0:
+    File "pytorch/torch/fx/proxy.py", line 155, in __bool__
+    return self.tracer.to_bool(self)
+    File "pytorch/torch/fx/proxy.py", line 85, in to_bool
+    raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
+torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
+"""
 ```
 The condition to the `if` statement relies on the value of `x.sum()`,
 which relies on the value of `x`, a function input. Since
@@ -764,43 +764,43 @@ hyper-parameters. As a concrete example:
 
 ```python
 
-    import torch
-    import torch.fx
+import torch
+import torch.fx
 
-    class MyModule(torch.nn.Module):
-        def __init__(self, do_activation : bool = False):
-            super().__init__()
-            self.do_activation = do_activation
-            self.linear = torch.nn.Linear(512, 512)
+class MyModule(torch.nn.Module):
+    def __init__(self, do_activation : bool = False):
+        super().__init__()
+        self.do_activation = do_activation
+        self.linear = torch.nn.Linear(512, 512)
 
-        def forward(self, x):
-            x = self.linear(x)
-            # This if-statement is so-called static control flow.
-            # Its condition does not depend on any input values
-            if self.do_activation:
-                x = torch.relu(x)
-            return x
-
-    without_activation = MyModule(do_activation=False)
-    with_activation = MyModule(do_activation=True)
-
-    traced_without_activation = torch.fx.symbolic_trace(without_activation)
-    print(traced_without_activation.code)
-    """
     def forward(self, x):
-        linear_1 = self.linear(x);  x = None
-        return linear_1
-    """
+        x = self.linear(x)
+        # This if-statement is so-called static control flow.
+        # Its condition does not depend on any input values
+        if self.do_activation:
+            x = torch.relu(x)
+        return x
 
-    traced_with_activation = torch.fx.symbolic_trace(with_activation)
-    print(traced_with_activation.code)
-    """
-    import torch
-    def forward(self, x):
-        linear_1 = self.linear(x);  x = None
-        relu_1 = torch.relu(linear_1);  linear_1 = None
-        return relu_1
-    """
+without_activation = MyModule(do_activation=False)
+with_activation = MyModule(do_activation=True)
+
+traced_without_activation = torch.fx.symbolic_trace(without_activation)
+print(traced_without_activation.code)
+"""
+def forward(self, x):
+    linear_1 = self.linear(x);  x = None
+    return linear_1
+"""
+
+traced_with_activation = torch.fx.symbolic_trace(with_activation)
+print(traced_with_activation.code)
+"""
+import torch
+def forward(self, x):
+    linear_1 = self.linear(x);  x = None
+    relu_1 = torch.relu(linear_1);  linear_1 = None
+    return relu_1
+"""
 ```
 The if-statement `if self.do_activation` does not depend on any
 function inputs, thus it is static. `do_activation` can be considered
@@ -816,13 +816,13 @@ during symbolic tracing:
 
 ```python
 
-        def f(x, flag):
-            if flag: return x
-            else: return x*2
+def f(x, flag):
+    if flag: return x
+    else: return x*2
 
-        fx.symbolic_trace(f) # Fails!
+fx.symbolic_trace(f) # Fails!
 
-        fx.symbolic_trace(f, concrete_args={'flag': True})
+fx.symbolic_trace(f, concrete_args={'flag': True})
 ```
 In the case of truly dynamic control flow, the sections of the program
 that contain this code can be traced as calls to the Method (see
@@ -841,28 +841,28 @@ symbolic tracing. For example:
 
 ```python
 
-    import torch
-    import torch.fx
-    from math import sqrt
+import torch
+import torch.fx
+from math import sqrt
 
-    def normalize(x):
-        """
-        Normalize `x` by the size of the batch dimension
-        """
-        return x / sqrt(len(x))
-
-    # It's valid Python code
-    normalize(torch.rand(3, 4))
-
-    traced = torch.fx.symbolic_trace(normalize)
+def normalize(x):
     """
-      <...>
-      File "sqrt.py", line 9, in normalize
-        return x / sqrt(len(x))
-      File "pytorch/torch/fx/proxy.py", line 161, in __len__
-        raise RuntimeError("'len' is not supported in symbolic tracing by default. If you want "
-    RuntimeError: 'len' is not supported in symbolic tracing by default. If you want this call to be recorded, please call torch.fx.wrap('len') at module scope
+    Normalize `x` by the size of the batch dimension
     """
+    return x / sqrt(len(x))
+
+# It's valid Python code
+normalize(torch.rand(3, 4))
+
+traced = torch.fx.symbolic_trace(normalize)
+"""
+    <...>
+    File "sqrt.py", line 9, in normalize
+    return x / sqrt(len(x))
+    File "pytorch/torch/fx/proxy.py", line 161, in __len__
+    raise RuntimeError("'len' is not supported in symbolic tracing by default. If you want "
+RuntimeError: 'len' is not supported in symbolic tracing by default. If you want this call to be recorded, please call torch.fx.wrap('len') at module scope
+"""
 ```
 The error tells us that the built-in function `len` is not supported.
 We can make it so that functions like this are recorded in the trace as
@@ -870,20 +870,20 @@ direct calls using the {func}`wrap` API:
 
 ```python
 
-    torch.fx.wrap('len')
-    torch.fx.wrap('sqrt')
+torch.fx.wrap('len')
+torch.fx.wrap('sqrt')
 
-    traced = torch.fx.symbolic_trace(normalize)
+traced = torch.fx.symbolic_trace(normalize)
 
-    print(traced.code)
-    """
-    import math
-    def forward(self, x):
-        len_1 = len(x)
-        sqrt_1 = math.sqrt(len_1);  len_1 = None
-        truediv = x / sqrt_1;  x = sqrt_1 = None
-        return truediv
-    """
+print(traced.code)
+"""
+import math
+def forward(self, x):
+    len_1 = len(x)
+    sqrt_1 = math.sqrt(len_1);  len_1 = None
+    truediv = x / sqrt_1;  x = sqrt_1 = None
+    return truediv
+"""
 ```
 (Customizing Tracing)=
 
@@ -895,24 +895,24 @@ customized by subclassing Tracer, like so:
 
 ```python
 
-    class MyCustomTracer(torch.fx.Tracer):
-        # Inside here you can override various methods
-        # to customize tracing. See the `Tracer` API
-        # reference
-        pass
+class MyCustomTracer(torch.fx.Tracer):
+    # Inside here you can override various methods
+    # to customize tracing. See the `Tracer` API
+    # reference
+    pass
 
 
-    # Let's use this custom tracer to trace through this module
-    class MyModule(torch.nn.Module):
-        def forward(self, x):
-            return torch.relu(x) + torch.ones(3, 4)
+# Let's use this custom tracer to trace through this module
+class MyModule(torch.nn.Module):
+    def forward(self, x):
+        return torch.relu(x) + torch.ones(3, 4)
 
-    mod = MyModule()
+mod = MyModule()
 
-    traced_graph = MyCustomTracer().trace(mod)
-    # trace() returns a Graph. Let's wrap it up in a
-    # GraphModule to make it runnable
-    traced = torch.fx.GraphModule(mod, traced_graph)
+traced_graph = MyCustomTracer().trace(mod)
+# trace() returns a Graph. Let's wrap it up in a
+# GraphModule to make it runnable
+traced = torch.fx.GraphModule(mod, traced_graph)
 ```
 ## Leaf Modules
 
@@ -922,31 +922,31 @@ set of standard `torch.nn` module instances. For example:
 
 ```python
 
-    class MySpecialSubmodule(torch.nn.Module):
-        def forward(self, x):
-            return torch.neg(x)
-
-    class MyModule(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.linear = torch.nn.Linear(3, 4)
-            self.submod = MySpecialSubmodule()
-
-        def forward(self, x):
-            return self.submod(self.linear(x))
-
-    traced = torch.fx.symbolic_trace(MyModule())
-    print(traced.code)
-    # `linear` is preserved as a call, yet `submod` is traced though.
-    # This is because the default set of "Leaf Modules" includes all
-    # standard `torch.nn` modules.
-    """
-    import torch
+class MySpecialSubmodule(torch.nn.Module):
     def forward(self, x):
-        linear_1 = self.linear(x);  x = None
-        neg_1 = torch.neg(linear_1);  linear_1 = None
-        return neg_1
-    """
+        return torch.neg(x)
+
+class MyModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(3, 4)
+        self.submod = MySpecialSubmodule()
+
+    def forward(self, x):
+        return self.submod(self.linear(x))
+
+traced = torch.fx.symbolic_trace(MyModule())
+print(traced.code)
+# `linear` is preserved as a call, yet `submod` is traced though.
+# This is because the default set of "Leaf Modules" includes all
+# standard `torch.nn` modules.
+"""
+import torch
+def forward(self, x):
+    linear_1 = self.linear(x);  x = None
+    neg_1 = torch.neg(linear_1);  linear_1 = None
+    return neg_1
+"""
 ```
 The set of leaf modules can be customized by overriding
 {meth}`Tracer.is_leaf_module`.
@@ -968,13 +968,13 @@ The set of leaf modules can be customized by overriding
 
     ```python
 
-        @torch.fx.wrap
-        def torch_randn(x, shape):
-            return torch.randn(shape)
+    @torch.fx.wrap
+    def torch_randn(x, shape):
+        return torch.randn(shape)
 
-        def f(x):
-            return x + torch_randn(x, 5)
-        fx.symbolic_trace(f)
+    def f(x):
+        return x + torch_randn(x, 5)
+    fx.symbolic_trace(f)
     ```
    -  This behavior may be fixed in a future release.
 
@@ -996,58 +996,58 @@ The set of leaf modules can be customized by overriding
 
     ```python
 
-        import torch
-        import torch.fx
+    import torch
+    import torch.fx
 
-        class DropoutRepro(torch.nn.Module):
-          def forward(self, x):
-            return torch.nn.functional.dropout(x, training=self.training)
-
-
-        traced = torch.fx.symbolic_trace(DropoutRepro())
-        print(traced.code)
-        """
+    class DropoutRepro(torch.nn.Module):
         def forward(self, x):
-          dropout = torch.nn.functional.dropout(x, p = 0.5, training = True, inplace = False);  x = None
-          return dropout
-        """
+        return torch.nn.functional.dropout(x, training=self.training)
 
-        traced.eval()
 
-        x = torch.randn(5, 3)
-        torch.testing.assert_close(traced(x), x)
-        """
-        AssertionError: Tensor-likes are not close!
+    traced = torch.fx.symbolic_trace(DropoutRepro())
+    print(traced.code)
+    """
+    def forward(self, x):
+        dropout = torch.nn.functional.dropout(x, p = 0.5, training = True, inplace = False);  x = None
+        return dropout
+    """
 
-        Mismatched elements: 15 / 15 (100.0%)
-        Greatest absolute difference: 1.6207983493804932 at index (0, 2) (up to 1e-05 allowed)
-        Greatest relative difference: 1.0 at index (0, 0) (up to 0.0001 allowed)
-        """
+    traced.eval()
+
+    x = torch.randn(5, 3)
+    torch.testing.assert_close(traced(x), x)
+    """
+    AssertionError: Tensor-likes are not close!
+
+    Mismatched elements: 15 / 15 (100.0%)
+    Greatest absolute difference: 1.6207983493804932 at index (0, 2) (up to 1e-05 allowed)
+    Greatest relative difference: 1.0 at index (0, 0) (up to 0.0001 allowed)
+    """
     ```
    - However, when the standard `nn.Dropout()` submodule is used, the training flag is encapsulated and--because of the preservation of the `nn.Module` object model--can be changed.
 
     ```python
 
-        class DropoutRepro2(torch.nn.Module):
-          def __init__(self):
-            super().__init__()
-            self.drop = torch.nn.Dropout()
+    class DropoutRepro2(torch.nn.Module):
+        def __init__(self):
+        super().__init__()
+        self.drop = torch.nn.Dropout()
 
-          def forward(self, x):
-            return self.drop(x)
-
-        traced = torch.fx.symbolic_trace(DropoutRepro2())
-        print(traced.code)
-        """
         def forward(self, x):
-          drop = self.drop(x);  x = None
-          return drop
-        """
+        return self.drop(x)
 
-        traced.eval()
+    traced = torch.fx.symbolic_trace(DropoutRepro2())
+    print(traced.code)
+    """
+    def forward(self, x):
+        drop = self.drop(x);  x = None
+        return drop
+    """
 
-        x = torch.randn(5, 3)
-        torch.testing.assert_close(traced(x), x)
+    traced.eval()
+
+    x = torch.randn(5, 3)
+    torch.testing.assert_close(traced(x), x)
     ```
   - Because of this difference, consider marking modules that interact with the `training` flag dynamically as leaf modules.
 
