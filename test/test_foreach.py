@@ -190,9 +190,9 @@ class TestForeach(TestCase):
                         zero_size=True,
                     )
 
-    # Skip CUDA version 12.6 as the upgrade makes profiler results flaky
+    # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
     # https://github.com/pytorch/pytorch/issues/148681
-    @skipCUDAVersionIn([(12, 6)])
+    @skipCUDAVersionIn([(12, 8)])
     @skipIfRocmVersionLessThan((6, 0))
     @ops(
         foreach_unary_op_db
@@ -305,9 +305,9 @@ class TestForeach(TestCase):
                 else:
                     self.assertEqual(expected, actual)
 
-    # Skip CUDA version 12.6 as the upgrade makes profiler results flaky
+    # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
     # https://github.com/pytorch/pytorch/issues/148681
-    @skipCUDAVersionIn([(12, 6)])
+    @skipCUDAVersionIn([(12, 8)])
     @ops(filter(lambda op: op.supports_scalar_self_arg, foreach_binary_op_db))
     @parametrize("is_fastpath", (True, False))
     def test_binary_op_with_scalar_self_support(self, device, dtype, op, is_fastpath):
@@ -365,9 +365,9 @@ class TestForeach(TestCase):
 
     @ops(foreach_pointwise_op_db)
     @parametrize("is_fastpath", (True, False))
-    # Skip CUDA version 12.6 as the upgrade makes profiler results flaky
+    # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
     # https://github.com/pytorch/pytorch/issues/148681
-    @skipCUDAVersionIn([(12, 6)])
+    @skipCUDAVersionIn([(12, 8)])
     def test_pointwise_op_with_tensor_of_scalarlist_overload(
         self, device, dtype, op, is_fastpath
     ):
@@ -705,9 +705,9 @@ class TestForeach(TestCase):
                 ):
                     foreach_op_([tensor1], [tensor2])
 
-    # Skip CUDA version 12.6 as the upgrade makes profiler results flaky
+    # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
     # https://github.com/pytorch/pytorch/issues/148681
-    @skipCUDAVersionIn([(12, 6)])
+    @skipCUDAVersionIn([(12, 8)])
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
     @ops(
         filter(lambda op: op.supports_out, foreach_binary_op_db),
@@ -823,9 +823,9 @@ class TestForeach(TestCase):
             scalar_self_arg=False,
         )
 
-    # Skip CUDA version 12.6 as the upgrade makes profiler results flaky
+    # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
     # https://github.com/pytorch/pytorch/issues/148681
-    @skipCUDAVersionIn([(12, 6)])
+    @skipCUDAVersionIn([(12, 8)])
     @ops(
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=floating_types_and(torch.half, torch.bfloat16),
@@ -1349,9 +1349,9 @@ class TestForeach(TestCase):
                         copy_(t, s, non_blocking)
                     self.assertEqual(ref_input, sample.input)
 
-    # Skip CUDA version 12.6 as the upgrade makes profiler results flaky
+    # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
     # https://github.com/pytorch/pytorch/issues/148681
-    @skipCUDAVersionIn([(12, 6)])
+    @skipCUDAVersionIn([(12, 8)])
     @onlyCUDA
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):

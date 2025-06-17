@@ -196,6 +196,12 @@ class set_grad_enabled(_DecoratorContextManager):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
 
+    def __str__(self) -> str:
+        return f"{torch.typename(self)}(mode={self.mode})"
+
+    def __repr__(self) -> str:
+        return str(self)
+
     def clone(self) -> "set_grad_enabled":
         r"""
         Create a copy of this class

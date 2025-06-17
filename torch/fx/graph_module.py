@@ -204,6 +204,14 @@ def _deserialize_graph_module(
     tracer_extras = body.get("_tracer_extras", {})
     graph = KeepModules().trace(com, **tracer_extras)
 
+    # Recover node.meta["stack_trace"] after re-tracing
+    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace", None)
+    if node_meta_stack_trace is not None:
+        del body["_graphmodule_graph_node_meta_stack_trace"]
+        for node in graph.nodes:
+            if node_meta_stack_trace.get(node.name, None) is not None:
+                node.meta["stack_trace"] = node_meta_stack_trace[node.name]
+
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
     graph._tracer_cls = tracer_cls
@@ -858,6 +866,16 @@ class {module_name}(torch.nn.Module):
         dict_without_graph = self.__dict__.copy()
         dict_without_graph["_graphmodule_cls_name"] = self.__class__.__name__
         del dict_without_graph["_graph"]
+
+        # Store node.meta["stack_trace"] so we can recover them after re-tracing during deserialization
+        node_meta_stack_trace = {
+            node.name: node.meta["stack_trace"]
+            for node in self.graph.nodes
+            if "stack_trace" in node.meta
+        }
+        dict_without_graph[
+            "_graphmodule_graph_node_meta_stack_trace"
+        ] = node_meta_stack_trace
 
         generated_module_name = f"fx-generated._{exporter.get_unique_id()}"
         python_code = self.recompile()
