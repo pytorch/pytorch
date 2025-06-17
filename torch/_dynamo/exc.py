@@ -510,17 +510,21 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
     """
     GRAPH_BREAK_SITE_URL = "https://compile-graph-break-site.vercel.app/gb/"
 
-    script_dir = Path(__file__).resolve().parent
-    registry_path = script_dir / "graph_break_registry.json"
+    try:
+        script_dir = Path(__file__).resolve().parent
+        registry_path = script_dir / "graph_break_registry.json"
 
-    with registry_path.open() as f:
-        registry = json.load(f)
+        with registry_path.open() as f:
+            registry = json.load(f)
 
-    for k, v in registry.items():
-        if v and v[0].get("Gb_type") == gb_type:
-            return f"{GRAPH_BREAK_SITE_URL}{k}"
+        for k, v in registry.items():
+            if v and v[0].get("Gb_type") == gb_type:
+                return f"{GRAPH_BREAK_SITE_URL}{k}"
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        log.error(f"Error accessing the registry file: {e}")
+        return None
 
-    return "None"
+    return None
 
 
 # TODO replace old unimplemented later
