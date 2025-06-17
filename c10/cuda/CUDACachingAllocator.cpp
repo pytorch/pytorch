@@ -1171,7 +1171,7 @@ class DeviceCachingAllocator {
     }
     return false;
 #else
-    return true;
+    return AllocatorConfig::use_expandable_segments();
 #endif
   }
 
@@ -3563,12 +3563,6 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->popCompileContext();
   }
 
-  bool isExpandableSegmentEnabled() override {
-    c10::DeviceIndex device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    return device_allocator[device]->isExpandableSegmentEnabled();
-  }
-
   bool isHistoryEnabled() override {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
@@ -3673,7 +3667,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     md.max_split_size = CUDAAllocatorConfig::max_split_size();
     md.pinned_num_register_threads =
         CUDAAllocatorConfig::pinned_num_register_threads();
-    md.expandable_segments = isExpandableSegmentEnabled();
+    md.expandable_segments = CUDAAllocatorConfig::expandable_segments();
     md.release_lock_on_malloc =
         CUDAAllocatorConfig::release_lock_on_cudamalloc();
     md.pinned_use_host_register =
