@@ -138,7 +138,7 @@ class C10_API SymbolicShapeMeta {
     return is_non_overlapping_and_dense_;
   }
 
-  // Note[definitely_contiguous_fast]
+  // Note[contiguous_or_false]
   // Like is_contiguous, but more dynamic shape-friendly. Returns uncertain
   // false instead of throwing data-dependent errors for tensors with unbacked
   // sizes or strides that can be either contiguous or not. The property is
@@ -147,7 +147,7 @@ class C10_API SymbolicShapeMeta {
   // return false. This should be used in places where the contiguity check is
   // not material or when there is a general path even if less performant that
   // can be taken (for example, clone path in reshape or contiguous call).
-  const SymBool& definitely_contiguous_fast() const {
+  const SymBool& contiguous_or_false() const {
     if (C10_UNLIKELY(!has_def_contiguous())) {
       init_def_contiguous();
     }

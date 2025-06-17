@@ -38,11 +38,6 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
     return true;
   }
 
-  bool definitely_contiguous_fast_custom(
-      c10::MemoryFormat memory_format) const override {
-    return this->is_contiguous_custom(memory_format);
-  }
-
  private:
   const char* tensorimpl_type_name() const override {
     return "VulkanOpaqueTensorImpl";
