@@ -14839,6 +14839,43 @@ class TestAutogradMultipleDispatch(TestCase):
         self.assertEqual(y.grad, 2 * torch.ones_like(x))
         self.assertEqual(z.grad, torch.ones_like(x))
 
+    @onlyCUDA
+    def test_single_device_threading_optimization(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                thread_ids.add(threading.get_ident())
+                return grad_output
+
+        thread_ids = set()
+        x_cuda = torch.randn(10, device="cuda", requires_grad=True)
+        y_cuda = torch.randn(10, device="cuda", requires_grad=True)
+        a = Func.apply(x_cuda)
+        b = Func.apply(y_cuda)
+        c = Func.apply(a + b)
+        d = Func.apply(c * 2)
+        d.sum().backward()
+        # Also include the calling thread
+        thread_ids.add(threading.get_ident())
+        self.assertEqual(len(thread_ids), 1)
+
+        thread_ids = set()
+        x_cpu = torch.randn(10, requires_grad=True)
+        x_cuda = torch.randn(10, device="cuda", requires_grad=True)
+        a_cpu = Func.apply(x_cpu)
+        a_cuda = Func.apply(x_cuda)
+        b_cpu = Func.apply(a_cpu * 2)
+        b_cuda = Func.apply(a_cuda * 3)
+        loss = b_cpu.sum() + b_cuda.cpu().sum()
+        loss.backward()
+        # Also include the calling thread
+        thread_ids.add(threading.get_ident())
+        self.assertEqual(len(thread_ids), 2)
+
 
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence

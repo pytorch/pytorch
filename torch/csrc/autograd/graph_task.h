@@ -192,6 +192,9 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
 
   uint64_t id_;
 
+  // See Note [ Engine threading optimization when single device ]
+  int num_distinct_devices_{0};
+
   GraphTask(
       bool keep_graph,
       bool grad_mode,

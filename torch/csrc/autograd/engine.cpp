@@ -1248,6 +1248,11 @@ auto Engine::compute_dependencies(
   std::vector<Node*> queue{root};
   bool will_use_accelerator = false;
 
+  // See Note [ Engine threading optimization when single device ]
+  // NB: We could be more accurate by recomputing distinct_devices in
+  // init_to_execute in the situation where user specifies input=.
+  std::unordered_set<at::Device> distinct_devices;
+
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
   auto& dependencies = task.dependencies_;
@@ -1260,6 +1265,7 @@ auto Engine::compute_dependencies(
     if (!will_use_accelerator) {
       will_use_accelerator = fn->stream().has_value();
     }
+    distinct_devices.insert(fn->device());
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
@@ -1276,6 +1282,8 @@ auto Engine::compute_dependencies(
     // leaf_streams.
     task.stash_current_streams();
   }
+  task.num_distinct_devices_ = distinct_devices.size();
+  TORCH_INTERNAL_ASSERT(task.num_distinct_devices_ >= 1);
 }
 
 auto Engine::execute(
@@ -1403,7 +1411,9 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
-  auto queue = ready_queue(graph_task->cpu_ready_queue_, graph_root->device());
+  auto queue = graph_task->num_distinct_devices_ == 1
+      ? graph_task->cpu_ready_queue_
+      : ready_queue(graph_task->cpu_ready_queue_, graph_root->device());
 
   // worker_device == NO_DEVICE it's a CPU thread and it's trying to drive the
   // autograd engine with corresponding GraphTask, and its NOT a re-entrant call
@@ -1531,7 +1541,19 @@ auto Engine::ready_queue(
     at::Device device) -> std::shared_ptr<ReadyQueue> {
   bool multithreading_disabled =
       !c10::AutogradState::get_tls_state().get_multithreading_enabled();
-  if (multithreading_disabled || should_run_in_cpu_ready_queue(device.type())) {
+  // Note [ Engine threading optimization when single device ]
+  //
+  // If during graph discovery, we find that there is only a single distinct
+  // device, we will reuse the calling thread. This can improve cache locality,
+  // etc.
+  //
+  // The only situation current_graph_task is not yet set is when
+  // execute_with_graph_task enqueues the very first task. We manually check
+  // num_distinct_devices_ there.
+  auto only_single_device =
+      current_graph_task && current_graph_task->num_distinct_devices_ == 1;
+  if (multithreading_disabled || only_single_device ||
+      should_run_in_cpu_ready_queue(device.type())) {
     // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
@@ -1765,3 +1787,4 @@ void GraphTask::init_to_execute(
 }
 
 } // namespace torch::autograd
+ 
