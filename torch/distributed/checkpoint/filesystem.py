@@ -444,6 +444,7 @@ def _write_files_from_queue(
                             metadata={
                                 "DCP_SHARDING_INFO": json.dumps(metadata_dict),
                                 "DCP_VERSION": "1.0",
+                                "format": "pt",
                             },
                         )
                     )
