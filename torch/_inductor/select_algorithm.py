@@ -2066,7 +2066,7 @@ def get_num_workers() -> int:
 
     # Get the number of GPUs
     num_gpus = torch.cuda.device_count()
-    if num_gpus > 0:
+    if config.is_fbcode() and num_gpus > 0:
         cpu_count = cpu_count // num_gpus
 
     return cpu_count
