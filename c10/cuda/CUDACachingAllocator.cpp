@@ -6,6 +6,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Gauge.h>
+#include <c10/util/Logging.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/env.h>
@@ -508,7 +509,7 @@ struct ExpandableSegment {
           C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
               &fd, handle.handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
           handle.shareable_handle = fd;
-          TORCH_WARN_ONCE("use posix fd to share expandable segments.");
+          LOG(INFO) << "use posix fd to share expandable segments.";
         }
         TORCH_CHECK(
             handle.shareable_handle != std::nullopt,
@@ -520,7 +521,7 @@ struct ExpandableSegment {
           C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
               &fabric_handle, handle.handle, CU_MEM_HANDLE_TYPE_FABRIC, 0));
           handle.shareable_handle = fabric_handle;
-          TORCH_WARN_ONCE("use fabric handle to share expandable segments.");
+          LOG(INFO) << "use fabric handle to share expandable segments.";
         }
         TORCH_CHECK(
             handle.shareable_handle != std::nullopt,
@@ -586,7 +587,7 @@ struct ExpandableSegment {
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
             (void*)(uintptr_t)myfd,
             CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
-        TORCH_WARN_ONCE("use posix fd to import expandable segments.");
+        LOG(INFO) << "use posix fd to import expandable segments.";
         close((int)myfd);
         segment->handles_.emplace_back(Handle{handle, std::nullopt});
       }
@@ -602,7 +603,7 @@ struct ExpandableSegment {
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
             (void*)&fabric_handle,
             CU_MEM_HANDLE_TYPE_FABRIC));
-        TORCH_WARN_ONCE("use fabric handle to import expandable segments.");
+        LOG(INFO) << "use fabric handle to import expandable segments.";
         segment->handles_.emplace_back(Handle{handle, std::nullopt});
       }
     }
