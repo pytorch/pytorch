@@ -125,6 +125,7 @@ from .utils import (
     get_unique_name_wrt,
     graph_break_reasons,
     increment_op_count,
+    istype,
     lazy_format_graph_code,
     LazyString,
     nn_module_proxy,
@@ -209,7 +210,7 @@ class VariableTrackerCache:
         self.cache.clear()
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
 
@@ -367,6 +368,7 @@ class OutputGraph(OutputGraphGuardsState):
         global_scope: Scope,
         f_code,
         torch_function_mode_stack,
+        package,
     ):
         super().__init__(
             local_scope,
@@ -391,8 +393,8 @@ class OutputGraph(OutputGraphGuardsState):
         # Set of globals installed via install_global* APIs
         self.installed_globals: set[str] = set()
 
-        self.f_code = f_code
-        # TODO: maybe should only store the entire f_code
+        # TODO: maybe should just pass the entire f_code in here?  Not
+        # sure...
         self.co_fields = {
             "co_name": f_code.co_name,
             "co_filename": f_code.co_filename,
@@ -436,6 +438,7 @@ class OutputGraph(OutputGraphGuardsState):
                 export=self.export,
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.tracing_context.traced_code.append(f_code)
         self.dynamo_compile_id: Optional[CompileId] = (
             CompileContext.current_compile_id()
         )
@@ -469,6 +472,7 @@ class OutputGraph(OutputGraphGuardsState):
         self.compiler_fn: Optional[CompilerFn] = compiler_fn
         self.root_tx = root_tx
 
+        self.package = package
         # Given a source, what are the user stacks of all locations that
         # accessed it?
         #
@@ -1109,7 +1113,7 @@ class OutputGraph(OutputGraphGuardsState):
 
                 # A small codegen optimization because we might have different
                 # VariableTrackers that share the same source.
-                list_idx = x.source.index
+                list_idx = x.source.index  # type: ignore[attr-defined]
                 if list_idx not in visited:
                     alias_name = self.new_var(
                         f"{list_name}_ref"
@@ -1394,12 +1398,20 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.codegen_suffix(tx, stack_values_flat, pass1)
 
-            # one more time now that we have established tempvars
+            # Use `pass1.uses` to selectively cache multi-user variables into a
+            # temporary local source. This (a). speeds up loading VTs with long
+            # chained source, and (b). avoids redundantly saving single-user VT
+            # into a temporary local.
+            tempvars = {}  # type: ignore[var-annotated]
+            for val, count in pass1.uses.items():
+                # If it's already a local source, no need to cache it
+                if count > 1 and not istype(val, (SyntheticLocalSource, LocalSource)):
+                    tempvars[val] = None
             pass2 = PyCodegen(
                 self.root_tx,
                 root,
                 graph_output_var,
-                tempvars={val: None for val, count in pass1.uses.items() if count > 1},
+                tempvars=tempvars,
                 overridden_sources=overridden_sources,
             )
             self.codegen_suffix(tx, stack_values_flat, pass2)
@@ -1704,6 +1716,9 @@ class OutputGraph(OutputGraphGuardsState):
                 if not isinstance(compiled_fn, _LazyGraphModule):
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
+
+            if self.package is not None:
+                self.package.add_backend_id(name, compiled_fn)
 
             compiled_fn = disable(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"

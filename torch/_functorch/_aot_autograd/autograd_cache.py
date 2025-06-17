@@ -21,6 +21,7 @@ from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Uni
 from typing_extensions import override
 
 import torch
+from torch._dynamo.precompile_context import PrecompileCacheArtifact, PrecompileContext
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import (
     chromium_event_log_active,
@@ -589,6 +590,15 @@ class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoa
     def _is_backward(self) -> bool:
         return True
 
+    def post_compile(
+        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
+    ) -> CompiledFxGraph:
+        compiled_bw = super().post_compile(result, fx_config)
+        # See note [Wrapping bw_compiler in disable]
+        # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
+        # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
+        return torch._dynamo.disable(compiled_bw, reason="do not trace generated backwards pass")  # type: ignore[return-value]
+
 
 # Forward types don't have any extra parameters, so this is just a TypeAlias, in essence
 class BundledCompiledForward(CompiledFxGraphLoadable):
@@ -599,7 +609,14 @@ class BundledCompiledForward(CompiledFxGraphLoadable):
 class BundledCompiledBackward(
     GenericCompiledBackward[CompiledFxGraph], CompiledFxGraphLoadable
 ):
-    pass
+    def post_compile(
+        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
+    ) -> CompiledFxGraph:
+        compiled_bw = super().post_compile(result, fx_config)
+        # See note [Wrapping bw_compiler in disable]
+        # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
+        # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
+        return torch._dynamo.disable(compiled_bw, reason="do not trace generated backwards pass")  # type: ignore[return-value]
 
 
 TForward = TypeVar("TForward", bound=InductorOutput)
@@ -900,6 +917,21 @@ class AOTAutogradCacheArtifact(CacheArtifact):
         return "aot_autograd"
 
 
+@CacheArtifactFactory.register
+class BundledAOTAutogradCacheArtifact(
+    PrecompileCacheArtifact[BundledAOTAutogradCacheEntry]
+):
+    @override
+    @staticmethod
+    def type():
+        return "precompile_aot_autograd"
+
+    @override
+    def after_deserialization(self) -> BundledAOTAutogradCacheEntry:
+        entry = pickle.loads(self.content)
+        return entry
+
+
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
     """
     Caches the results of running AOTAutograd. This class mostly handles the save and load logic, whereas
@@ -1151,6 +1183,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 CacheArtifactManager.record_artifact(
                     AOTAutogradCacheArtifact.type(), key, pickled_content
                 )
+                if config.bundled_autograd_cache:
+                    PrecompileContext.record_artifact(
+                        BundledAOTAutogradCacheArtifact.type(), key, pickled_content
+                    )
         except Exception as e:
             log.info("AOTAutograd cache unable to load compiled graph: %s", e)
             if config.strict_autograd_cache:
@@ -1180,6 +1216,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             CacheArtifactManager.record_artifact(
                 AOTAutogradCacheArtifact.type(), key, content
             )
+            if config.bundled_autograd_cache:
+                # TODO: the key here isn't correct
+                PrecompileContext.record_artifact(
+                    BundledAOTAutogradCacheArtifact.type(), key, content
+                )
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
@@ -1213,7 +1254,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 remote_cache.put(key, cache_data)
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
         """
         Attempts to load the remote cache, returns None on error.
