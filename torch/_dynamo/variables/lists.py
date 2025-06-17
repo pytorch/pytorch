@@ -506,13 +506,15 @@ class ListVariable(CommonListMethodsVariable):
         args: list["VariableTracker"],
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
-        if (
-            name == "__setitem__"
-            and self.is_mutable()
-        ):
+        if name == "__setitem__" and self.is_mutable():
             if kwargs or len(args) != 2:
                 raise_args_mismatch(tx, name)
             key, value = args
+
+            if not key.is_python_constant():
+                # probably will graph-break
+                super().call_method(tx, name, args, kwargs)
+
             tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
                 if not value.has_force_unpack_var_sequence(tx):
