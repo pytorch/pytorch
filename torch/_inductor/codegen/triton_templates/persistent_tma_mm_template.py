@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Any
+from typing import Any, Optional
 
 from torch._inductor.kernel.mm_common import persistent_mm_grid
 from torch._inductor.select_algorithm import TritonTemplate
@@ -13,7 +13,16 @@ from ...utils import get_tma_workspace_arg
 
 
 class PersistentTMATritonTemplate(TritonTemplate):
-    def maybe_append_choice(self, choices: list[Any], **kwargs: Any):
+    """
+    Triton template for persistent matrix multiplication using TMA descriptors.
+
+    This template allows passing TMA workspace arguments as extra parameters that are
+    not dependent on any particular config choice.
+    """
+
+    def maybe_append_choice(
+        self, choices: list[Any], **kwargs: Any
+    ) -> Optional[NotImplementedError]:
         input_nodes = kwargs.get("input_nodes", None)
         if (
             input_nodes is None

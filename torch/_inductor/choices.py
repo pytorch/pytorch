@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
-    from .kernel.kernel_params import KernelTemplateParams
+    from .kernel_params.params import KernelTemplateParams
 
 
 class Sortable(typing.Protocol):
@@ -127,21 +127,21 @@ class InductorChoices:
     ) -> partial[Generator[KernelTemplateParams, None, None]]:
         mm_heuristics = self.get_config_heuristics(device_type)
         if config.max_autotune_gemm_search_space != "EXHAUSTIVE":
-            return mm_heuristics.get_mm_params()
+            return mm_heuristics.get_mm_params()  # type: ignore[return-value] # Generator invariance
         else:
-            return mm_heuristics.get_exhaustive_mm_params()
+            return mm_heuristics.get_exhaustive_mm_params()  # type: ignore[return-value] # Generator invariance
 
     def get_exhaustive_mm_params(
         self, device_type: Optional[str] = "cuda"
     ) -> partial[Generator[KernelTemplateParams, None, None]]:
         mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_exhaustive_mm_params()
+        return mm_heuristics.get_exhaustive_mm_params()  # type: ignore[return-value] # Generator invariance
 
     def get_persistent_mm_params(
         self, device_type: Optional[str] = "cuda"
     ) -> partial[Generator[KernelTemplateParams, None, None]]:
         mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_persistent_mm_params()
+        return mm_heuristics.get_persistent_mm_params()  # type: ignore[return-value] # Generator invariance
 
     # Conv configs
     def get_conv_configs(
