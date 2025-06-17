@@ -1253,7 +1253,7 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32) -> Callable[[Match]
                     0
                 ]  # pattern: linear <- reshape <- dequant
                 if dtype == torch.float32
-                else dequant_pattern_end_node.args[0].args[
+                else dequant_pattern_end_node.args[0].args[  # type: ignore[union-attr]
                     0
                 ]  # pattern: linear <- reshape <- to_bf16 <- dequant
             )
@@ -1267,7 +1267,7 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32) -> Callable[[Match]
             )
 
         if (
-            dequant_node.target
+            dequant_node.target  # type: ignore[union-attr]
             in [
                 quantized_decomposed.dequantize_per_tensor.default,
                 quantized_decomposed.dequantize_per_tensor.tensor,
@@ -1390,8 +1390,8 @@ def _is_valid_dequant_conv_pattern(dtype) -> Callable[[Match], bool]:
         # insert weight prepack node into the matched pattern.
         conv_node = match.output_node()
         assert conv_node.target is aten.convolution.default
-        input_meta_value = conv_node.args[0].meta.get("val")
-        weight_meta_value = conv_node.args[1].meta.get("val")
+        input_meta_value = conv_node.args[0].meta.get("val")  # type: ignore[union-attr]
+        weight_meta_value = conv_node.args[1].meta.get("val")  # type: ignore[union-attr]
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
                 meta_value is None
@@ -1407,9 +1407,9 @@ def _is_valid_dequant_conv_pattern(dtype) -> Callable[[Match], bool]:
             dequant_node = conv_node.args[0]
         else:
             convert_to_bf16 = conv_node.args[0]
-            dequant_node = convert_to_bf16.args[0]
+            dequant_node = convert_to_bf16.args[0]  # type: ignore[union-attr]
 
-        if len(list(dequant_node.users)) != 1:
+        if len(list(dequant_node.users)) != 1:  # type: ignore[union-attr]
             # Ensure the dequant pattern only has 1 user
             # since we will delete the dequant pattern here
             return False

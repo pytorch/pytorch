@@ -421,13 +421,13 @@ def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> b
         return False
 
     aligned_strides = all(
-        (V.graph.sizevars.size_hint(x.get_stride()[i]) % alignment) == 0
+        (V.graph.sizevars.size_hint_or_throw(x.get_stride()[i]) % alignment) == 0
         for i in range(len(x.get_stride()) - 1)
     )
     # if the last dim size is <= 1, stride doesnt matter
     aligned_last_dim = (
-        V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
-        or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
+        V.graph.sizevars.size_hint_or_throw(x.get_stride()[-1]) == 1
+        or V.graph.sizevars.size_hint_or_throw(x.get_size()[-1]) <= 1
     )
     return aligned_last_dim and aligned_strides
 
@@ -1480,7 +1480,7 @@ class Reduction(Loops):
 
         if (
             isinstance(reduction_numel, Integer)
-            and V.graph.sizevars.size_hint(reduction_numel)
+            and V.graph.sizevars.size_hint_or_throw(reduction_numel)
             < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
         ):
@@ -3033,7 +3033,7 @@ class View(GenericView):
                 new_size[i] = CleanDiv(sympy_product(old_size), sympy_product(new_size))
                 break
 
-        V.graph.sizevars.check_equals(sympy_product(old_size), sympy_product(new_size))
+        V.graph.sizevars.guard_equals(sympy_product(old_size), sympy_product(new_size))
         return old_size, new_size
 
     @classmethod
@@ -3090,14 +3090,14 @@ class View(GenericView):
                 stack_old.append(size_old)  # re-add
             elif size_hint(size_new) == size_hint(size_old):
                 view_expr.append(var)
-                V.graph.sizevars.check_equals(size_new, size_old)
+                V.graph.sizevars.guard_equals(size_new, size_old)
             elif size_hint(size_new) < size_hint(size_old):
                 while size_hint(size_new) < size_hint(size_old):
                     var2, size_new2 = stack_new.pop()
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
-                V.graph.sizevars.check_equals(size_new, size_old)
+                V.graph.sizevars.guard_equals(size_new, size_old)
             elif size_hint(size_new) > size_hint(size_old):
                 divisor = sympy.S.One
                 modulus = size_old
@@ -3108,18 +3108,18 @@ class View(GenericView):
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
                     size_old = size_old * modulus
-                V.graph.sizevars.check_equals(size_new, size_old)
+                V.graph.sizevars.guard_equals(size_new, size_old)
             else:
                 raise AssertionError
 
         while stack_old:
             size_old = stack_old.pop()
-            V.graph.sizevars.check_equals(size_old, 1)
+            V.graph.sizevars.guard_equals(size_old, 1)
             view_expr.append(sympy.S.Zero)
 
         while stack_new:
             var, size_new = stack_new.pop()
-            V.graph.sizevars.check_equals(size_new, 1)
+            V.graph.sizevars.guard_equals(size_new, 1)
 
         if dense_dim is not None and len(new_size) == 1:
             view_expr.reverse()
@@ -3160,7 +3160,7 @@ class ReinterpretView(BaseView):
 
     __repr__ = __str__
 
-    def get_name(self):  # type: ignore[no-untyped-def]
+    def get_name(self) -> str:
         return self.data.get_name()
 
     def get_device(self) -> Optional[torch.device]:
@@ -3736,7 +3736,7 @@ class FlexibleLayout(Layout):
         the fill order should be [1, 3, 2, 0]
         """
         assert len(sizes) == len(stride)
-        stride = [V.graph.sizevars.size_hint(x) for x in stride]
+        stride = [V.graph.sizevars.size_hint_or_throw(x) for x in stride]
         fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
@@ -3957,7 +3957,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
                 dtype=src.get_dtype(),
                 inner_fn=src.make_loader(),
                 ranges=[
-                    V.graph.sizevars.check_equals(a, b)
+                    V.graph.sizevars.guard_equals(a, b)
                     for a, b in zip(src.get_size(), dst.get_size())
                 ],
             ).data
@@ -4947,7 +4947,7 @@ class ConcatKernel(NopKernel):
                 if j == dim:
                     new_size[j] = new_size[j] + input_size[j]
                 else:
-                    new_size[j] = V.graph.sizevars.check_equals(
+                    new_size[j] = V.graph.sizevars.guard_equals(
                         new_size[j], input_size[j]
                     )
             offsets_end.append(new_size[dim])
@@ -5084,7 +5084,7 @@ class ConcatKernel(NopKernel):
             dtype=src.get_dtype(),
             inner_fn=src.make_loader(),
             ranges=[
-                V.graph.sizevars.check_equals(a, b)
+                V.graph.sizevars.guard_equals(a, b)
                 for a, b in zip(src.get_size(), dst.get_size())
             ],
         )
@@ -5186,6 +5186,8 @@ class ExternKernel(InputsKernel):
             self.schema_kwargs = [
                 x for x in self.op_overload._schema.arguments if x.kwarg_only
             ]
+        else:
+            self.schema_kwargs = []
 
     def decide_layout(self):  # type: ignore[no-untyped-def]
         if isinstance(self.layout, FlexibleLayout):
@@ -6054,7 +6056,7 @@ class MutationOutput(Buffer):
     def get_defining_op(self) -> Operation:
         return self.mutating_node
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         return self.mutation_names
 
     def should_allocate(self) -> bool:
@@ -6435,7 +6437,7 @@ class InplaceBernoulliFallback(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6467,7 +6469,7 @@ class InplaceCopyFallback(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6520,7 +6522,7 @@ class MutatingFirstArgExternKernel(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6602,7 +6604,7 @@ class ScatterFallback(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -6666,7 +6668,7 @@ class IndexPutFallback(ExternKernel):
     def should_allocate(self) -> bool:
         return False
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -7015,7 +7017,7 @@ class FallbackKernel(ExternKernelAlloc):
     def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
         return self.alias_names
 
-    def get_mutation_names(self):  # type: ignore[no-untyped-def]
+    def get_mutation_names(self) -> Sequence[str]:
         assert len(self.mutation_names) <= 1
         return self.mutation_names
 
@@ -7156,51 +7158,55 @@ class FallbackKernel(ExternKernelAlloc):
                 kernel not in config.aot_inductor.custom_ops_to_c_shims
             )
 
-        def do_runtime_dispatch() -> None:
-            args = None
-            exported_args = self.export_extern_kernel_node()
+        # Handle the special case where a complex number is input to a C-shim kernel for
+        # a scalar input.  The torchgen'ed shim API will use type "double", which is
+        # incompatible with complex numbers, forcing a fallback to runtime dispatch.
+        if (
+            V.graph.cpp_wrapper
+            and isinstance(kernel, torch._ops.OpOverload)
+            and not self.use_runtime_dispatch
+        ):
 
+            def is_number(t: torch.JitType) -> bool:
+                if isinstance(t, torch.OptionalType):
+                    return is_number(t.getElementType())
+                return isinstance(t, torch.NumberType)
+
+            # Using unflatten_args is a bit of a hack, but all the complex arguments we
+            # care about are in self.constant_args, and calling unflatten_args puts them
+            # in the correct order without triggering codegen.
+            args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+            # Append kwarg values to args.  ordered_kwargs_for_cpp_kernel is guaranteed
+            # to be set, since this is an OpOverload kernel.
+            args_iter = itertools.chain(
+                args,
+                (
+                    self.get_kwargs_value(k, **kwargs)
+                    for k in self.ordered_kwargs_for_cpp_kernel
+                ),
+            )
+            self.use_runtime_dispatch = any(
+                isinstance(v, complex) and is_number(a.real_type)
+                for v, a in zip(args_iter, kernel._schema.arguments)
+            )
+
+        self.codegen_comment(wrapper)
+        if self.use_runtime_dispatch:
+            exported_args = self.export_extern_kernel_node()
             wrapper.generate_fallback_kernel_with_runtime_lookup(
                 self.get_name(),
                 self.python_kernel_name,
-                self.cpp_kernel_name,
-                args,
+                lambda: [*self.codegen_args(), *self.codegen_kwargs()],
                 self.op_overload,
                 exported_args,
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
                 self.outputs if self.outputs else self.mutation_outputs,
             )
-
-        def is_number(t: torch.JitType) -> bool:
-            return isinstance(t, torch.NumberType) or (
-                isinstance(t, torch.OptionalType)
-                and isinstance(t.getElementType(), torch.NumberType)
-            )
-
-        self.codegen_comment(wrapper)
-        if self.use_runtime_dispatch:
-            do_runtime_dispatch()
         else:
-            args = [*self.codegen_args(), *self.codegen_kwargs()]
-            if (
-                V.graph.cpp_wrapper
-                and isinstance(kernel, torch._ops.OpOverload)
-                and any(
-                    "c10::complex" in arg_str and is_number(op_arg.real_type)
-                    for arg_str, op_arg in zip(args, kernel._schema.arguments)
-                )
-            ):
-                # Handle the special case where a complex number is input to a
-                # cpp_wrapper C-shim kernel.  If the corresponding argument is a number,
-                # the torchgen-created shim API will use type "double", which cannot be
-                # converted to from a c10::complex.  In these cases, fallback to runtime
-                # dispatch.
-                do_runtime_dispatch()
-            else:
-                wrapper.generate_fallback_kernel(self, args)
-                if isinstance(self.layout, Layout):
-                    self.codegen_size_asserts(wrapper)
-                    self.codegen_alignment_asserts(wrapper)
+            wrapper.generate_fallback_kernel(self)
+            if isinstance(self.layout, Layout):
+                self.codegen_size_asserts(wrapper)
+                self.codegen_alignment_asserts(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
 
@@ -8042,7 +8048,7 @@ class WhileLoop(ExternKernel):
                 rhs_exprs: Sequence[Union[int, Any]],
             ) -> None:
                 for lhs, rhs in zip(lhs_exprs, rhs_exprs):
-                    V.graph.sizevars.check_equals(lhs, rhs)
+                    V.graph.sizevars.guard_equals(lhs, rhs)
 
             _guard_list_equals(op.get_size(), bo.get_size())
             _guard_list_equals(op.get_stride(), bo.get_stride())
@@ -8172,7 +8178,7 @@ class TorchBindObject(NonTensorObj):
     name: str
     value: Union[FakeScriptObject, torch.ScriptObject]
 
-    def get_name(self):  # type: ignore[no-untyped-def]
+    def get_name(self) -> str:
         return self.name
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
@@ -8205,7 +8211,7 @@ class GeneratorState(NonTensorObj):
     name: str
     device: torch.device
 
-    def get_name(self):  # type: ignore[no-untyped-def]
+    def get_name(self) -> str:
         return self.name
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
