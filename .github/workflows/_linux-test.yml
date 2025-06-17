@@ -386,6 +386,7 @@ jobs:
 
       - name: Upload the benchmark results
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false
