@@ -1164,6 +1164,17 @@ class DeviceCachingAllocator {
     }
   }
 
+  bool isExpandableSegmentEnabled() {
+#ifndef PYTORCH_C10_DRIVER_API_SUPPORTED
+    if (AllocatorConfig::use_expandable_segments()) {
+      TORCH_WARN_ONCE("expandable_segments not supported on this platform")
+    }
+    return false;
+#else
+    return true;
+#endif
+  }
+
   bool isHistoryEnabled() {
     return record_history;
   }
@@ -3553,14 +3564,9 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   bool isExpandableSegmentEnabled() override {
-#ifndef PYTORCH_C10_DRIVER_API_SUPPORTED
-    if (AllocatorConfig::use_expandable_segments()) {
-      TORCH_WARN_ONCE("expandable_segments not supported on this platform")
-    }
-    return false;
-#else
-    return true;
-#endif
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    return device_allocator[device]->isExpandableSegmentEnabled();
   }
 
   bool isHistoryEnabled() override {
