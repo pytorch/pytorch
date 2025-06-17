@@ -812,7 +812,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
-  // Returns contiguity a
   c10::SymBool sym_is_contiguous(
       at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
@@ -989,7 +988,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * NB: dim is overrideable separately from sizes because it is possible
    * for a tensor to have rank, but not well defined sizes.
    */
-
   // sizes_strides_policy_ >= CustomStrides
 
   virtual bool is_strides_like_custom(at::MemoryFormat memory_format) const;
