@@ -18,7 +18,7 @@ import torch
 from torch._inductor.codecache import get_kernel_bin_format
 from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -136,7 +136,7 @@ class TestAOTInductorPackage(TestCase):
 
     def test_remove_intermediate_files(self):
         # For CUDA, generated cpp files contain absolute path to the generated cubin files.
-        # With the package artifact, that cubin path should be overriden at the run time,
+        # With the package artifact, that cubin path should be overridden at the run time,
         # so removing those intermeidate files in this test to verify that.
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -157,7 +157,7 @@ class TestAOTInductorPackage(TestCase):
             torch.manual_seed(0)
             with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
                 ep = torch.export.export(model, example_inputs, strict=True)
-                with fresh_inductor_cache():
+                with fresh_cache():
                     # cubin files are removed when exiting this context
                     package_path = torch._inductor.aoti_compile_and_package(
                         ep,
@@ -517,8 +517,8 @@ class TestAOTInductorPackage(TestCase):
             )
 
     @skipif(
-        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
-        "No support for cpp only and cpu",
+        lambda device, package_cpp_only: package_cpp_only,
+        "No support for cpp only",
     )
     def test_package_without_weight(self):
         class Model(torch.nn.Module):
@@ -551,8 +551,8 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(expected, output)
 
     @skipif(
-        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
-        "No support for cpp only and cpu",
+        lambda device, package_cpp_only: package_cpp_only,
+        "No support for cpp only",
     )
     def test_package_user_managed_weight(self):
         class Model(torch.nn.Module):
@@ -630,8 +630,8 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(expected, output_copy)
 
     @skipif(
-        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
-        "No support for cpp only and cpu",
+        lambda device, package_cpp_only: package_cpp_only,
+        "No support for cpp only",
     )
     def test_update_weights(self):
         class Model(torch.nn.Module):

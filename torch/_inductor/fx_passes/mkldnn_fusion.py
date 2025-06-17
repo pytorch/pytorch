@@ -1398,7 +1398,7 @@ if torch._C._has_mkldnn:
                         user_node.replace_all_uses_with(node)
                         gm.graph.erase_node(user_node)
 
-    @functools.lru_cache(None)
+    @functools.cache
     def _mkldnn_fusion_init():
         # TODO: aarch64: enable op fusion for acl once it supports fused operators. Disabling it for now.
         # Otherwise even the matmul or innerproduct can not be accelerated with acl
@@ -1414,7 +1414,7 @@ if torch._C._has_mkldnn:
             _register_quantization_lowerings()
             _register_woq_lowerings()
 
-    @functools.lru_cache(None)
+    @functools.cache
     def _mkldnn_weight_pack_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_weight_pack_pass()
