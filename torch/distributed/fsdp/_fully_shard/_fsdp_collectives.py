@@ -5,6 +5,11 @@ import torch
 import torch.distributed as dist
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
+from torch.distributed.fsdp._fully_shard._fsdp_api import (
+    AllGather,
+    BaseComm,
+    ReduceScatter,
+)
 from torch.distributed.tensor import DTensor
 
 from ._fsdp_common import (
@@ -35,30 +40,57 @@ lib.define(
     """
     all_gather_copy_in(
         Tensor[] all_gather_inputs,
+        Tensor all_gather_output,
         SymInt[] inp_split_sizes,
         SymInt all_gather_input_numel,
-        SymInt world_size,
-        SymInt rank,
-        ScalarType dtype,
-        Device device
+        SymInt rank
     ) -> (Tensor, Tensor)
     """
 )
 
 
+class DefaultAllGather(BaseComm, AllGather):
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        all_gather_group: dist.ProcessGroup,
+        async_op: bool = False,
+    ) -> Optional[dist.Work]:
+        return dist.all_gather_into_tensor(
+            output_tensor,
+            input_tensor,
+            group=all_gather_group,
+            async_op=async_op,
+        )
+
+
+class DefaultReduceScatter(BaseComm, ReduceScatter):
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        reduce_scatter_group: dist.ProcessGroup,
+        op: dist.ReduceOp,
+        async_op: bool = False,
+    ) -> dist.Work:
+        return dist.reduce_scatter_tensor(
+            output=output_tensor,
+            input=input_tensor,
+            group=reduce_scatter_group,
+            op=op,
+            async_op=async_op,
+        )
+
+
 @torch.library.impl(lib, "all_gather_copy_in", "Meta")
 def all_gather_copy_in_meta(
     all_gather_inputs: list[torch.Tensor],
+    all_gather_output: torch.Tensor,
     inp_split_sizes: list[int],
     all_gather_input_numel: int,
-    world_size: int,
     rank: int,
-    dtype: torch.dtype,
-    device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    all_gather_output = torch.empty(
-        (all_gather_input_numel * world_size,), dtype=dtype, device="meta"
-    )
     all_gather_input = all_gather_output.narrow(
         0, all_gather_input_numel * rank, all_gather_input_numel
     )
@@ -73,16 +105,11 @@ def all_gather_copy_in_meta(
 @torch.library.impl(lib, "all_gather_copy_in", "PrivateUse1")
 def all_gather_copy_in_cuda(
     all_gather_inputs: list[torch.Tensor],
+    all_gather_output: torch.Tensor,
     inp_split_sizes: list[int],
     all_gather_input_numel: int,
-    world_size: int,
     rank: int,
-    dtype: torch.dtype,
-    device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    all_gather_output = torch.empty(
-        (all_gather_input_numel * world_size,), dtype=dtype, device=device
-    )
     all_gather_input = all_gather_output.narrow(
         0, all_gather_input_numel * rank, all_gather_input_numel
     )
@@ -144,6 +171,7 @@ def foreach_all_gather(
     all_gather_copy_in_stream: torch.Stream,
     all_gather_stream: torch.Stream,
     device: torch.device,
+    all_gather_comm: AllGather,
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
@@ -162,23 +190,24 @@ def foreach_all_gather(
             all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
+        all_gather_output = all_gather_comm.allocate(
+            (all_gather_input_numel * world_size,), dtype=dtype, device=device
+        )
         all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
             all_gather_inputs,
+            all_gather_output,
             inp_split_sizes,
             all_gather_input_numel,
-            world_size,
             rank,
-            dtype,
-            device,
         )
         del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with device_handle.stream(all_gather_stream):
-        all_gather_work = dist.all_gather_into_tensor(
-            output_tensor=all_gather_output,
-            input_tensor=all_gather_input,
-            group=group,
-            async_op=async_op,
+        all_gather_work = all_gather_comm(
+            all_gather_output,
+            all_gather_input,
+            group,
+            async_op,
         )
         all_gather_event = all_gather_stream.record_event()
         return AllGatherResult(
