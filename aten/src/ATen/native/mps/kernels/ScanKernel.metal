@@ -52,16 +52,19 @@ struct CumMaxOp {
 
 template <typename T, typename acc_t = accum_t<T>>
 struct LogCumSumExpOp {
-  static acc_t apply(acc_t a, acc_t b) {
-    if (metal::isinf(a) && a < 0) {
-      return b;
+  static acc_t apply(acc_t x, acc_t y) {
+    // Reference: https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
+    // metal::min/max return first arg if one of the args is nan
+    acc_t min_val = metal::isnan(y) ? y : metal::min(x, y);
+    acc_t max_val = metal::isnan(y) ? y : metal::max(x, y);
+
+    if (min_val != max_val || metal::isfinite(min_val)) {
+      // nan will be propagated here
+      return c10::metal::log1p(metal::exp(min_val - max_val)) + max_val;
+    } else {
+      // special case to correctly handle infinite cases
+      return x;
     }
-    if (metal::isinf(b) && b < 0) {
-      return a;
-    }
-    acc_t max_val = metal::max(a, b);
-    acc_t min_val = metal::min(a, b);
-    return max_val + c10::metal::log1p(metal::exp(min_val - max_val));
   }
   static acc_t identity() {
     return static_cast<acc_t>(-metal::numeric_limits<T>::infinity());
