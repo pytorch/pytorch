@@ -5742,6 +5742,17 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
 
+    def test_add_complex_conj(self):
+        def f(x):
+            return x + x.conj()
+
+        x = torch.randn(4, dtype=torch.complex64, requires_grad=True)
+        out = torch.compile(f)(x)
+        expected_complex = (2 * x.real).to(dtype=out.dtype)
+
+        self.assertTrue(out.dtype == torch.complex64)
+        self.assertEqual(out, expected_complex)
+
     # https://github.com/pytorch/pytorch/issues/132200
     def test_partitioner_cse_respects_mutation_boundaries(self):
         set_available = hasattr(torch.ops, "fsdp") and hasattr(torch.ops.fsdp, "set_")
