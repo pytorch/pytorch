@@ -174,7 +174,7 @@ class BaseListVariable(VariableTracker):
                 raise_args_mismatch(tx, name)
             return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
-            if len(args) != 1:
+            if not len(args):
                 raise_args_mismatch(tx, name)
 
             return tx.inline_user_function_return(
