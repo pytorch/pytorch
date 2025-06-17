@@ -95,7 +95,7 @@ def run():
         "--no-nnc-dynamic",
         dest="nnc_dynamic",
         action="store_false",
-        help="don't benchmark nnc with dynamic shapes",
+        help="DONT't benchmark nnc with dynamic shapes",
     )
     parser.set_defaults(nnc_dynamic=False)
 
