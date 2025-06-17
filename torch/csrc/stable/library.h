@@ -186,6 +186,7 @@ StableIValue from(const std::optional<T>& val) {
 }
 
 // The below overload is used! See https://godbolt.org/z/859cshxrW
+// We are suppressing the warning for versions clang12- and gcc11-
 [[maybe_unused]] StableIValue from(const torch::stable::Tensor& val) {
   return detail::FromImpl<torch::stable::Tensor>::call(val);
 }
