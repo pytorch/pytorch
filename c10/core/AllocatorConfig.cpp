@@ -19,18 +19,20 @@ constexpr size_t kPinnedMaxRegisterThreads = 128;
 AllocatorConfig& AllocatorConfig::instance() {
   static AllocatorConfig instance;
   c10::once_flag init_once;
-#define C10_ALLOCATOR_CONFIG_PARSE_ARGS(env)                                \
-  auto env##_name = c10::utils::get_env(#env);                              \
-  if (env##_name.has_value() && strcmp(#env, "PYTORCH_ALLOC_CONF") != 0) {  \
-    TORCH_WARN_ONCE(#env " is deprecated, use PYTORCH_ALLOC_CONF instead"); \
-    instance.parseArgs(env##_name);                                         \
-    return;                                                                 \
+#define C10_ALLOCATOR_CONFIG_PARSE_ENV(env, deprecated)                       \
+  auto env##_name = c10::utils::get_env(#env);                                \
+  if (env##_name.has_value()) {                                               \
+    if (deprecated) {                                                         \
+      TORCH_WARN_ONCE(#env " is deprecated, use PYTORCH_ALLOC_CONF instead"); \
+    }                                                                         \
+    instance.parseArgs(env##_name);                                           \
+    return;                                                                   \
   }
   c10::call_once(init_once, []() {
-    C10_ALLOCATOR_CONFIG_PARSE_ARGS(PYTORCH_ALLOC_CONF)
+    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_ALLOC_CONF, false)
     // Keep this for backwards compatibility
-    C10_ALLOCATOR_CONFIG_PARSE_ARGS(PYTORCH_CUDA_ALLOC_CONF)
-    C10_ALLOCATOR_CONFIG_PARSE_ARGS(PYTORCH_HIP_ALLOC_CONF)
+    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_CUDA_ALLOC_CONF, /*deprecated=*/true)
+    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_HIP_ALLOC_CONF, /*deprecated=*/true)
   });
   return instance;
 }
