@@ -1164,7 +1164,6 @@ exclude_patterns = [
     'functorch/**',
     'scripts/**',
     'test/**',
-    'tools/**',
     'torch/**',
     'torchgen/**',
 ]
