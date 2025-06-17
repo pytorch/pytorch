@@ -2652,6 +2652,7 @@ class CommonTemplate:
                 inp = torch.full((2, n), float("inf"), device=self.device, dtype=_dtype)
                 self.assertEqual(cfn(inp), fn(inp))
 
+    @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     def test_logcumsumexp(self):
         def fn(x):
@@ -2678,6 +2679,7 @@ class CommonTemplate:
             rtol=1e-5,
         )
 
+    @xfail_if_mps_unimplemented
     def test_logcumsumexp_zero_dim(self):
         def fn(x):
             return x.logcumsumexp(0), x.logcumsumexp(-1)

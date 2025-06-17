@@ -10,7 +10,6 @@
 #else
 #include <ATen/ops/_cummax_helper_native.h>
 #include <ATen/ops/_cummin_helper_native.h>
-#include <ATen/ops/_logcumsumexp_native.h>
 #endif
 
 namespace at::native {
@@ -97,7 +96,7 @@ static void scan_mps_impl(const Tensor& self,
         // Contiguous kernels
         if (is_innermost) {
           if (outputs.size() == 1) {
-            // Simple scan (cumsum, cumprod, logcumsumexp)
+            // Simple scan (cumsum, cumprod)
             mtl_setArgs<2>(computeEncoder, num_rows, static_cast<uint32_t>(row_size));
           } else {
             // Scan with indices (cummin, cummax)
@@ -105,7 +104,7 @@ static void scan_mps_impl(const Tensor& self,
           }
         } else {
           if (outputs.size() == 1) {
-            // Simple scan (cumsum, cumprod, logcumsumexp)
+            // Simple scan (cumsum, cumprod)
             mtl_setArgs<2>(computeEncoder, num_orows, num_irows, static_cast<uint32_t>(row_size));
           } else {
             // Scan with indices (cummin, cummax)
@@ -115,7 +114,7 @@ static void scan_mps_impl(const Tensor& self,
       } else {
         // Strided kernels - pass full tensor information
         if (outputs.size() == 1) {
-          // Simple scan (cumsum, cumprod, logcumsumexp)
+          // Simple scan (cumsum, cumprod)
           mtl_setArgs<2>(computeEncoder,
                          self.sizes(),
                          self.strides(),
@@ -149,27 +148,6 @@ static void cumsum_mps_kernel(const Tensor& result, const Tensor& self, int64_t 
 
 static void cumprod_mps_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   mps::scan_mps_impl(self, {result}, dim, "cumprod");
-}
-
-Tensor& _logcumsumexp_out_mps(const Tensor& self, int64_t dim, Tensor& result) {
-  const auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-  result.resize_(self.sizes());
-  if (self.dim() == 0) {
-    result.fill_(self);
-    return result;
-  }
-  if (self.numel() == 0) {
-    result.zero_();
-    return result;
-  }
-
-  mps::scan_mps_impl(self, {result}, wrap_dim, "logcumsumexp");
-  return result;
-}
-
-Tensor _logcumsumexp_mps(const Tensor& self, int64_t dim) {
-  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _logcumsumexp_out_mps(self, dim, result);
 }
 
 void cummax_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {

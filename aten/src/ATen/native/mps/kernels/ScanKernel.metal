@@ -50,27 +50,6 @@ struct CumMaxOp {
   }
 };
 
-template <typename T, typename acc_t = accum_t<T>>
-struct LogCumSumExpOp {
-  static acc_t apply(acc_t x, acc_t y) {
-    // Reference: https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
-    // metal::min/max return first arg if one of the args is nan
-    acc_t min_val = metal::isnan(y) ? y : metal::min(x, y);
-    acc_t max_val = metal::isnan(y) ? y : metal::max(x, y);
-
-    if (min_val != max_val || metal::isfinite(min_val)) {
-      // nan will be propagated here
-      return c10::metal::log1p(metal::exp(min_val - max_val)) + max_val;
-    } else {
-      // special case to correctly handle infinite cases
-      return x;
-    }
-  }
-  static acc_t identity() {
-    return static_cast<acc_t>(-metal::numeric_limits<T>::infinity());
-  }
-};
-
 // Inclusive scan along innermost dimension for contiguous tensors
 template <typename T, typename Op, typename acc_t = accum_t<T>>
 kernel void scan_contiguous_innermost_dim(
@@ -401,9 +380,6 @@ REGISTER_SCAN_OP(cumprod, CumProdOp, short);
 REGISTER_SCAN_OP(cumprod, CumProdOp, char);
 REGISTER_SCAN_OP(cumprod, CumProdOp, uchar);
 
-REGISTER_SCAN_OP(logcumsumexp, LogCumSumExpOp, float);
-REGISTER_SCAN_OP(logcumsumexp, LogCumSumExpOp, half);
-
 // Scan operations with indices
 REGISTER_SCAN_WITH_INDICES_OP(cummin, CumMinOp, float);
 REGISTER_SCAN_WITH_INDICES_OP(cummin, CumMinOp, half);
@@ -426,7 +402,6 @@ REGISTER_SCAN_WITH_INDICES_OP(cummax, CumMaxOp, bool);
 #if __METAL_VERSION__ >= 310
 REGISTER_SCAN_OP(cumsum, CumSumOp, bfloat);
 REGISTER_SCAN_OP(cumprod, CumProdOp, bfloat);
-REGISTER_SCAN_OP(logcumsumexp, LogCumSumExpOp, bfloat);
 REGISTER_SCAN_WITH_INDICES_OP(cummin, CumMinOp, bfloat);
 REGISTER_SCAN_WITH_INDICES_OP(cummax, CumMaxOp, bfloat);
 #endif

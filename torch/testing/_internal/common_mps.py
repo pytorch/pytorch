@@ -416,6 +416,7 @@ if torch.backends.mps.is_available():
             "linalg.qr": None,
             "linalg.svdvals": None,
             "linalg.vecdot": None,
+            "logcumsumexp": None,
             "lu_solve": None,
             "masked.median": None,
             "matrix_exp": None,
@@ -1001,6 +1002,8 @@ if torch.backends.mps.is_available():
             "aminmax",
             # memory overlapping checks
             "index_select",
+            # unimplemented
+            "logcumsumexp",
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
