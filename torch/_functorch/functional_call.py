@@ -251,3 +251,118 @@ def construct_stacked_leaf(
     if all_requires_grad:
         result = result.detach().requires_grad_()
     return result
+
+
+@exposed_in("torch.func")
+class ScannedModule(nn.Module):
+    r"""
+    Iteratively execute a specified nn.Module, `stacked_len` times.
+    This is equivalent to stacking `stacked_len` modules together,
+    where the models are identical, but their parameters are different.
+    The first nn.Module receives the user specified input, while the subsequent
+    nn.Modules, receive the outputs of the pervious nn.Module execution.
+
+    .. warning::
+        `torch.func.ScannedModule` is a prototype feature in PyTorch.
+        Potentially it is not fully supported yet and you may run into miscompiles.
+        Read more about feature classification at:
+        https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
+
+    This operator requires runtime code generation and so requires support for
+    ``torch.compile``. Further, only CUDA device codegen is supported at the moment.
+
+    Args:
+        nn_module_cls (nn.Module): The nn.Module which will be stacked.
+            The configuration of all the stacked nn.Modules will identical,
+            but they can have different parameters.
+        stacked_len (int): The amount of how often the `nn_module_cls` gets stacked.
+
+
+    Example::
+
+        out = torch.func.ScannedModule(torch.nn.Linear, 2)
+
+    """
+
+    def __init__(self, nn_module: nn.Module, stacked_len: int):
+        super().__init__()
+
+        if not isinstance(nn_module, nn.Module):
+            raise ValueError(
+                f"nn_module is expected to be of type nn.Module, but got {type(nn_module)}"
+            )
+        self.single_mod = nn_module
+
+        if not isinstance(stacked_len, int):
+            raise ValueError(
+                f"stacked_len is expected to be of type int, but got {type(stacked_len)}"
+            )
+        self.stacked_len = stacked_len
+
+        # Extract the parameters and buffers from the single module
+        single_params = dict(self.single_mod.named_parameters())
+        single_buffers = dict(self.single_mod.named_buffers())
+
+        # Create the individual parameters and buffers for the module and stack them
+        all_parameters = [
+            {
+                n: p.detach().clone().requires_grad_(p.requires_grad)
+                for n, p in single_params.items()
+            }
+            for ind in range(self.stacked_len)
+        ]
+        self._parameters = {
+            k: construct_stacked_leaf(tuple(params[k] for params in all_parameters), k)
+            for k in all_parameters[0]
+        }
+
+        all_buffers = [
+            {
+                n: p.detach().clone().requires_grad_(p.requires_grad)
+                for n, p in single_buffers.items()
+            }
+            for ind in range(self.stacked_len)
+        ]
+        self._buffers = {
+            k: construct_stacked_leaf(tuple(buffers[k] for buffers in all_buffers), k)
+            for k in all_buffers[0]
+        }
+
+    def _mask_parameters_or_buffers(self, parameters_or_buffers, prefix):
+        for n, p in parameters_or_buffers:
+            if not n.startswith(prefix + "single_mod."):
+                yield n, p
+
+    def named_parameters(self, prefix="", recurse=True, remove_duplicate=True):
+        params = super().named_parameters(prefix, recurse, remove_duplicate)
+        return self._mask_parameters_or_buffers(params, prefix)
+
+    def named_buffers(self, prefix="", recurse=True, remove_duplicate=True):
+        buffers = super().named_buffers(prefix, recurse, remove_duplicate)
+        return self._mask_parameters_or_buffers(buffers, prefix)
+
+    def select_sliced_parameters_and_buffers(self, idx):
+        import torch.utils._pytree as pytree
+
+        int_idx = idx.item()
+        torch._check(int_idx >= 0)
+        torch._check(int_idx < self.stacked_len)
+        parameters_and_buffers = pytree.tree_map(
+            lambda x: x.select(0, int_idx), self._parameters
+        )
+        parameters_and_buffers.update(
+            pytree.tree_map(lambda x: x.select(0, int_idx), self._buffers)
+        )
+        return parameters_and_buffers
+
+    def forward(self, xs):
+        from torch._higher_order_ops.scan import scan
+
+        def combine_fn(init, idx):
+            new_carry = torch.func.functional_call(
+                self.single_mod, self.select_sliced_parameters_and_buffers(idx), init
+            )
+            return new_carry, torch.empty_like(new_carry)
+
+        last_carry, _ = scan(combine_fn, xs, torch.arange(self.stacked_len))
+        return last_carry
