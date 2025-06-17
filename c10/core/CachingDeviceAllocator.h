@@ -84,7 +84,7 @@ struct C10_API DeviceAllocator : public c10::Allocator {
   // Associates a memory allocation with a stream to establish dependency
   // tracking. Prevents memory reuse until all operations on the specified
   // stream complete
-  virtual void recordStream(const DataPtr&, c10::Stream stream) = 0;
+  virtual void recordStream(const DataPtr& ptr, c10::Stream stream) = 0;
 
   // Retrieves comprehensive memory statistics for the specified device,
   // including allocation patterns, usage metrics
