@@ -1102,14 +1102,14 @@ def materialize_callable_in_args(op: HopInstance, args, kwargs):
 
 def has_user_subclass(args, allowed_subclasses):
     """Check if any tensor arguments are user subclasses.
-    
-    This is used to determine if tensor subclasses should get a chance to run 
+
+    This is used to determine if tensor subclasses should get a chance to run
     their own implementation first before falling back to the default implementation.
-    
+
     Args:
         args: Arguments to check (will be flattened with pytree)
         allowed_subclasses: Tuple of allowed subclass types
-        
+
     Returns:
         True if user tensor subclasses are found, False otherwise
     """

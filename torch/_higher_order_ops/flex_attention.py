@@ -401,7 +401,6 @@ def flex_attention_functionalize(
     """
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
-
     if has_user_subclass(
         (
             query,
@@ -479,7 +478,6 @@ def flex_attention_fake_impl(
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
 ) -> tuple[torch.Tensor, torch.Tensor]:
-
     if has_user_subclass(
         (
             query,
@@ -1215,7 +1213,6 @@ def flex_attention_backward_fake_tensor_mode(
 ) -> tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
-
     if has_user_subclass(
         (
             query,
