@@ -8,6 +8,8 @@ fro
 froms
 hsa
 nd
+nin
+nout
 optins
 OT
 rebuild
