@@ -7713,6 +7713,10 @@ class InvokeSubgraph(ExternKernel):
 
 @ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
+    """The IR node for torch.cond. It first lowers the subgraph then output the
+    final subgraph output.
+    """
+
     predicate: Optional[IRNode] = None
     operands: Optional[list[Union[TensorBox, ShapeAsConstantBuffer]]] = None
     true_subgraph: Optional[Subgraph] = None
@@ -7755,10 +7759,12 @@ class Conditional(ExternKernel):
         false_fn: Subgraph,
         operands: list[Union[TensorBox, ShapeAsConstantBuffer]],
     ):
+        """The classmethod that's used to create Conditional IR node. Input mutation is allowed."""
         predicate = cls.realize_input(predicate)
         operands = [cls.realize_input(x) for x in operands]
         fx_operands = V.graph.current_node.args[-1]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
+        fake_predicate = V.graph.current_node.args[0].meta["val"]  # type: ignore[union-attr]
 
         for subgraph in (true_fn, false_fn):
             if subgraph.graph is None:
@@ -7771,6 +7777,9 @@ class Conditional(ExternKernel):
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
 
+        cond_schema = torch.ops.higher_order.cond.gen_schema(
+            fake_predicate, true_fn.graph_module, false_fn.graph_module, fake_operands
+        )
         true_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
         false_outputs = false_fn.graph.graph_outputs  # type: ignore[union-attr]
 
@@ -7832,6 +7841,28 @@ class Conditional(ExternKernel):
         ]
 
         conditional.outputs = outputs  # type: ignore[assignment]
+
+        def _compute_mutated_inputs(
+            schema: torch._higher_order_ops.schema.HopSchema, args: Any, kwargs: Any
+        ) -> list[Any]:
+            flattened_args, spec = pytree.tree_flatten((args, kwargs))
+            assert spec == schema.tree_spec, (
+                f"schema doesn't match {spec} vs {schema.tree_spec}"
+            )
+            mutation_output = []
+            for arg_spec, arg_node in zip(schema.arguments, flattened_args):
+                if arg_spec.is_write:
+                    mutation_output.append(arg_node)
+            return mutation_output
+
+        conditional.mutation_outputs = [
+            MutationOutput(inp.layout, inp, conditional)  # type: ignore[union-attr]
+            for inp in _compute_mutated_inputs(
+                cond_schema,
+                (predicate, true_fn, false_fn, operands),
+                {},
+            )
+        ]
         return outputs
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]

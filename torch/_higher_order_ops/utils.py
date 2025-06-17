@@ -851,6 +851,9 @@ def check_input_alias_and_mutation_return_outputs(
     with ExitStack() as ctx_stack:
         ctx_stack.enter_context(_disable_current_modes())
         ctx_stack.enter_context(suspend_functionalization())
+        # It turns out disabling functional tensor mode and suspend_functionalization
+        # is not enough. See test_cond_functionalized. We also need to disable functorch.
+        ctx_stack.enter_context(torch._C._DisableFuncTorch())
         ctx_stack.enter_context(new_fake_mode)
         # We need to temporarily turn inference_mode off because
         # under inference mode, tensor version counter is not tracked.
