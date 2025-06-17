@@ -1289,7 +1289,7 @@ class CrossEntropyLoss(_WeightedLoss):
           target must be the same shape input, and each value should be between :math:`[0, 1]`. This means the target
           data type is required to be float when using class probabilities. Note that PyTorch does not strictly enforce
           probability constraints on the class probabilities and that it is the user's responsibility to ensure
-          `target` contains valid probability distributions (see below examples section for more details).
+          ``target`` contains valid probability distributions (see below examples section for more details).
         - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
 
@@ -1318,7 +1318,7 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> output.backward()
 
     .. note::
-        When `target` contains class probabilities, it should consist of soft labels—that is,
+        When ``target`` contains class probabilities, it should consist of soft labels—that is,
         each `target` entry should represent a probability distribution over the possible classes for a given data sample,
         with individual probabilities between `[0,1]` and the total distribution summing to 1.
         This is why the :func:`softmax()` function is applied to the ``target`` in the class probabilities example above.
