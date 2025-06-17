@@ -6876,8 +6876,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         fn(Model(), x)
 
 
-
-
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
         @torch.compile(backend="aot_eager")
@@ -7366,6 +7364,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         with mock.patch("torch.cuda.is_initialized", lambda: False):
             self.assertEqual(f(inp), inp + 2)
+
 
 instantiate_parametrized_tests(ReproTests)
 
