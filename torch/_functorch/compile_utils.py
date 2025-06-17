@@ -172,7 +172,6 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
 
 
 def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
-
     # Pre-create a list of nodes to iterate over, as modifying the node order
     # during the loop can lead to infinite loops if not handled properly.
     getitem_nodes = list(
