@@ -438,6 +438,7 @@ class FSDPParamGroup:
                 all_reduce_stream = self._all_reduce_hook_stream
             else:
                 all_reduce_stream = self.comm_ctx.all_reduce_stream
+
             self._wait_for_post_backward()
             (
                 reduce_scatter_input,
