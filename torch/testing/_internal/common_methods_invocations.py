@@ -97,6 +97,7 @@ from torch.testing._internal.opinfo.core import (  # noqa: F401
     sample_inputs_foreach,
     ForeachFuncInfo,
     gradcheck_wrapper_hermitian_input,
+    gradcheck_wrapper_ctc_loss,
     gradcheck_wrapper_triangular_input,
     gradcheck_wrapper_triangular_input_real_positive_diagonal,
     gradcheck_wrapper_masked_operation,
@@ -8377,7 +8378,9 @@ def sample_inputs_ctc_loss(op_info, device, dtype, requires_grad, **kwargs):
             input_lengths = input_lengths.tolist()
             target_lengths = target_lengths.tolist()
 
-        yield SampleInput(log_probs, args=(targets, input_lengths, target_lengths,), kwargs=dict(reduction=r, zero_infinity=z))
+        yield SampleInput(log_probs, args=(targets, input_lengths, target_lengths,),
+                          kwargs=dict(reduction=r, zero_infinity=z))
+
 
 def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     shape = (2, 3)
@@ -21350,15 +21353,9 @@ op_db: list[OpInfo] = [
         dtypes=floating_types(),
         supports_out=False,
         sample_inputs_func=sample_inputs_ctc_loss,
+        # gradcheck_wrapper, see https://github.com/pytorch/pytorch/issues/52241
+        gradcheck_wrapper=gradcheck_wrapper_ctc_loss,
         skips=(
-            # https://github.com/pytorch/pytorch/issues/67462
-            # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 0
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestBwdGradients",
-                "test_fn_grad",
-                dtypes=(torch.float64,),
-            ),
             # RuntimeError: derivative for aten::_ctc_loss_backward is not implemented
             DecorateInfo(
                 unittest.expectedFailure,
