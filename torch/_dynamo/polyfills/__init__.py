@@ -63,6 +63,10 @@ def index(iterator, item, start=0, end=None):
     raise ValueError(f"{item} is not in {type(iterator)}")
 
 
+def count(iterator, value):
+    return sum(it is value or it == value for it in iterator)
+
+
 def repeat(item, count):
     for _ in range(count):
         yield item
@@ -198,6 +202,10 @@ def mapping_get(obj, key, value=None):
         return obj.__getitem__(key)
     except KeyError:
         return value
+
+
+def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
+    self_.assertTrue(seq1 == seq2, msg)
 
 
 def instantiate_user_defined_class_object(cls, /, *args, **kwargs):

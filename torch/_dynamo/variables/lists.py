@@ -37,7 +37,9 @@ from ..utils import (
     Lit,
     namedtuple_fields,
     odict_values,
+    raise_args_mismatch,
     set_example_value,
+    slice_length,
 )
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
@@ -108,6 +110,9 @@ class BaseListVariable(VariableTracker):
             index = arg.as_python_constant()
 
         if isinstance(index, slice):
+            if index.step == 0:
+                msg = ConstantVariable.create("slice step cannot be zero")
+                raise_observed_exception(ValueError, tx, args=[msg])
             # Set source to None because slicing a list gives a new local
             return self.clone(
                 items=self.items[index],
@@ -116,6 +121,11 @@ class BaseListVariable(VariableTracker):
             )
         else:
             assert isinstance(index, (int, torch.SymInt))
+
+            if index >= len(self.items) or index < -len(self.items):
+                msg = ConstantVariable.create("list index out of range")
+                raise_observed_exception(IndexError, tx, args=[msg])
+
             return self.items[index]
 
     def unpack_var_sequence(self, tx):
@@ -130,6 +140,12 @@ class BaseListVariable(VariableTracker):
     ) -> "VariableTracker":
         if name == "__getitem__":
             from .tensor import TensorVariable
+
+            if len(args) != 1:
+                msg = ConstantVariable.create(
+                    f"{name} takes exactly one argument ({len(args)} given)"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
 
             assert not kwargs and len(args) == 1
             if isinstance(args[0], TensorVariable):
@@ -147,18 +163,38 @@ class BaseListVariable(VariableTracker):
                     )
             else:
                 value = args[0]
+
+            if value.python_type() not in (int, slice):
+                msg = f"indices must be integers or slices, not {value.python_type()}"
+                raise_observed_exception(TypeError, tx, args=[ConstantVariable(msg)])
+
             return self.getitem_const(tx, value)
         elif name == "__contains__":
-            assert len(args) == 1
-            assert not kwargs
+            if len(args) != 1 or kwargs:
+                raise_args_mismatch(tx, name)
             return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
+
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )
+        elif name == "count":
+            if len(args) != 1:
+                msg = f"{name} takes exactly one argument ({len(args)} given)"
+                raise_observed_exception(TypeError, tx, args=[ConstantVariable(msg)])
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.count),
+                [self] + list(args),
+                kwargs,
+            )
         elif name in cmp_name_to_op_mapping:
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
+
             left = self
             right = args[0]
             # TODO this type check logic mirrors the following
@@ -374,24 +410,28 @@ class CommonListMethodsVariable(BaseListVariable):
 
         if name == "append" and self.is_mutable():
             assert not kwargs
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
             (arg,) = args
             tx.output.side_effects.mutation(self)
             self.items.append(arg)
             return ConstantVariable.create(None)
-        elif (
-            name == "extend"
-            and self.is_mutable()
-            and args
-            and args[0].has_force_unpack_var_sequence(tx)
-        ):
-            assert not kwargs
+        elif name == "extend" and self.is_mutable():
+            if len(args) != 1 or kwargs:
+                raise_args_mismatch(tx, name)
+
+            if not args[0].has_force_unpack_var_sequence(tx):
+                msg = ConstantVariable.create(f"{type(args[0])} object is not iterable")
+                raise_observed_exception(TypeError, tx, args=[msg])
+
             (arg,) = args
             arg.force_apply_to_var_sequence(
                 tx, lambda item: self.call_method(tx, "append", [item], {})
             )
             return ConstantVariable.create(None)
         elif name == "insert" and self.is_mutable():
-            assert not kwargs
+            if kwargs or len(args) != 2:
+                raise_args_mismatch(tx, name)
             idx, value = args
             if isinstance(idx, SymNodeVariable):
                 const_idx = idx.evaluate_expr()
@@ -402,10 +442,23 @@ class CommonListMethodsVariable(BaseListVariable):
             return ConstantVariable.create(None)
         elif name == "pop" and self.is_mutable():
             assert not kwargs
+            if kwargs or len(args) > 1:
+                raise_args_mismatch(tx, name)
+
+            if len(self.items) == 0:
+                msg = ConstantVariable.create("pop from empty list")
+                raise_observed_exception(IndexError, tx, args=[msg])
+
+            if len(args):
+                idx = args[0].as_python_constant()
+                if idx > len(self.items):
+                    msg = ConstantVariable.create("pop index out of range")
+                    raise_observed_exception(IndexError, tx, args=[msg])
             tx.output.side_effects.mutation(self)
             return self.items.pop(*[a.as_python_constant() for a in args])
         elif name == "clear" and self.is_mutable():
-            assert not kwargs and not args
+            if args or kwargs:
+                raise_observed_exception(TypeError, tx)
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
@@ -425,13 +478,13 @@ class CommonListMethodsVariable(BaseListVariable):
             return ConstantVariable.create(None)
         elif name == "copy":
             # List copy() doesn't have args and kwargs
-            assert not kwargs
-            assert not args
+            if args or kwargs:
+                raise_args_mismatch(tx, name)
             items = list(self.items)
             return self.modified(items, mutation_type=ValueMutationNew())
         elif name == "reverse" and self.is_mutable():
-            assert not kwargs
-            assert not args
+            if args or kwargs:
+                raise_args_mismatch(tx, name)
             self.items.reverse()
             tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
@@ -460,28 +513,39 @@ class ListVariable(CommonListMethodsVariable):
         args: list["VariableTracker"],
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
-        if (
-            name == "__setitem__"
-            and self.is_mutable()
-            and args
-            and args[0].is_python_constant()
-        ):
-            assert not kwargs
+        if name == "__setitem__" and self.is_mutable():
+            if kwargs or len(args) != 2:
+                raise_args_mismatch(tx, name)
             key, value = args
+
+            if not key.is_python_constant():
+                # probably will graph-break
+                super().call_method(tx, name, args, kwargs)
+
             tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
                 if not value.has_force_unpack_var_sequence(tx):
-                    unimplemented_v2(
-                        gb_type="Unsupported conversion for slice assignment",
-                        context=f"call_method {self} {name} {args}",
-                        explanation=f"Missing dynamo support for converting {value} into a list for slice assignment.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
+                    msg = ConstantVariable.create("can only assign an iterable")
+                    raise_observed_exception(TypeError, tx, args=[msg])
+
+                key = key.as_python_constant()
+                if key.step == 0:
+                    msg = ConstantVariable.create("slice step cannot be zero")
+                    raise_observed_exception(ValueError, tx, args=[msg])
+
+                value = value.force_unpack_var_sequence(tx)
+                if (sz := slice_length(key, len(self.items))) and sz > len(value):
+                    msg = ConstantVariable.create(
+                        f"attempt to assign a sequence of size {len(value)} to extended slice of size {sz}"
                     )
-                self.items[key.as_python_constant()] = value.force_unpack_var_sequence(
-                    tx
-                )
+                    raise_observed_exception(ValueError, tx, args=[msg])
+                self.items[key] = value
             else:
-                self.items[key.as_python_constant()] = value
+                key = key.as_python_constant()
+                if key >= len(self.items) or key < -len(self.items):
+                    msg = ConstantVariable.create("list index out of range")
+                    raise_observed_exception(IndexError, tx, args=[msg])
+                self.items[key] = value
             return ConstantVariable.create(None)
 
         if name == "sort" and self.is_mutable():
