@@ -3,7 +3,7 @@
 import sys
 from pathlib import Path
 
-from .gb_id_mapping import find_unimplemented_v2_calls, load_registry
+from tools.dynamo.gb_id_mapping import find_unimplemented_v2_calls, load_registry
 
 
 def test_verify_gb_id_mapping():

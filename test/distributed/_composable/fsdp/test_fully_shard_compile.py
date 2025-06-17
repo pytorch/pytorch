@@ -552,8 +552,7 @@ Unsupported Tensor.backward() call
 
   Developer debug context: call_method TensorVariable() backward () {}
 
-  For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0123
-""",  # noqa: B950
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0123""",  # noqa: B950
                     )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
