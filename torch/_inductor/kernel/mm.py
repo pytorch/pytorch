@@ -44,6 +44,7 @@ from ..select_algorithm import (
     realize_inputs,
 )
 from ..utils import (
+    _use_cutlass_for_op,
     get_k_splits,
     get_tma_workspace_arg,
     use_aten_gemm_kernels,
@@ -270,7 +271,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
             k_splits = get_k_splits(m, n, k)
             for k_split in k_splits:
-                if not V.graph.sizevars.is_expr_static_and_true(
+                if not V.graph.sizevars.statically_known_true(
                     sympy.Eq(sympy.Mod(k, k_split), 0)
                 ):
                     continue
@@ -292,7 +293,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     layout=layout,
                 )
 
-    if is_nonzero and use_cutlass_template(layout, m, n, k):
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("mm")
+    ):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
@@ -387,7 +392,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     )
 
-    if use_cutlass:
+    if use_cutlass and _use_cutlass_for_op("int_mm"):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
@@ -511,7 +516,11 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 )
 
-    if is_nonzero and use_cutlass_template(layout, m, n, k):
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("addmm")
+    ):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
@@ -581,7 +590,11 @@ def tuned_sparse_semi_structured_mm(
         else []
     )
 
-    if m * n != 0 and use_cutlass_template(layout, m, n, k):
+    if (
+        m * n != 0
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("sparse_semi_structured_mm")
+    ):
         CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2, mat1_meta], fuseable=True, non_fuseable=True
         )
@@ -606,6 +619,21 @@ def tuned_scaled_mm(
     use_fast_accum=False,
     layout=None,
 ):
+    """
+    Performs an optimized matrix multiplication where scaling factors are applied
+    to the inputs and/or output.
+
+    Args:
+        mat1 (Tensor): First input matrix
+        mat2 (Tensor): Second input matrix
+        scale1 (Tensor): Scale factor applied to mat1 (supports broadcasting)
+        scale2 (Tensor): Scale factor applied to mat2 (supports broadcasting)
+        bias (Tensor, optional): Optional bias tensor to add to the result
+        layout: Layout hint for optimization
+
+    Returns:
+        Tensor: The result of the scaled matrix multiplication
+    """
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
@@ -733,7 +761,11 @@ def tuned_scaled_mm(
                 epilogue_fn_hash="scale_mm_epilogue",
             )
 
-    if is_nonzero and use_cutlass_template(layout, m, n, k):
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("scaled_mm")
+    ):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,

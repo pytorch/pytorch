@@ -1647,6 +1647,62 @@ def forward(self, x_1, output_1):
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("tma_version", ["new", "old"])
+    def test_on_device_tma(self, dynamic, tma_version):
+        if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+        if tma_version == "old" and not has_triton_experimental_host_tma():
+            self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+
+        kernel = (
+            add_kernel_on_device_tma_new_api
+            if tma_version == "new"
+            else add_kernel_on_device_tma_old_api
+        )
+
+        def f(a, b):
+            BLOCK_SIZE = 32
+            out = torch.zeros_like(a)
+            m, n = out.size()
+
+            # Allocate workspace for on-device TMA descriptors
+            # Need 128 bytes per descriptor, 3 descriptors total
+            workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+
+            grid = lambda meta: (
+                triton.cdiv(m, meta["BLOCK_SIZE"]),
+                triton.cdiv(n, meta["BLOCK_SIZE"]),
+            )
+
+            kernel[grid](
+                a,
+                b,
+                out,
+                m,
+                n,
+                workspace,
+                BLOCK_SIZE=BLOCK_SIZE,
+            )
+
+            return out
+
+        a = torch.randn((32, 32), device=GPU_TYPE)
+        b = torch.randn((32, 32), device=GPU_TYPE)
+
+        expected_out = a + b
+        triton.set_allocator(
+            lambda size, align, stream: torch.empty(
+                size, dtype=torch.int8, device=GPU_TYPE
+            )
+        )
+        eager_out = f(a, b)
+        compiled_out = torch.compile(f, fullgraph=True, dynamic=dynamic)(a, b)
+
+        self.assertEqual(eager_out, expected_out)
+        self.assertEqual(compiled_out, expected_out)
+
+    @requires_gpu
+    @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_multiple_outputs(self, dynamic, backend):
         @triton.jit
@@ -1739,28 +1795,53 @@ def forward(self, x_1, output_1):
         )(a, b)
 
         if dynamic:
-            self.assertExpectedInline(
-                backend.fw_graphs[0].code.strip(),
-                """\
+            if tma_version == "new":
+                self.assertExpectedInline(
+                    backend.fw_graphs[0].code.strip(),
+                    """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    zeros_like = torch.ops.aten.zeros_like.default(arg1_1, pin_memory = False)
+    add_2 = arg0_1 + 256;  arg0_1 = None
+    sub_1 = add_2 - 1;  add_2 = None
+    floordiv = sub_1 // 256;  sub_1 = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg1_1 = arg2_1 = zeros_like = None
+    getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
+    return (getitem,)""",
+                )
+            elif tma_version == "old":
+                self.assertExpectedInline(
+                    backend.fw_graphs[0].code.strip(),
+                    """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg1_1, pin_memory = False)
     add_2 = arg0_1 + 256
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ([arg0_1], [256], 4), 'in_desc_ptr1': ([arg0_1], [256], 4), 'out_desc_ptr': ([arg0_1], [256], 4)}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([arg0_1], [256], 4)), 'in_desc_ptr1': ('experimental', ([arg0_1], [256], 4)), 'out_desc_ptr': ('experimental', ([arg0_1], [256], 4))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
-            )
+                )
         else:
-            self.assertExpectedInline(
-                backend.fw_graphs[0].code.strip(),
-                """\
+            if tma_version == "new":
+                self.assertExpectedInline(
+                    backend.fw_graphs[0].code.strip(),
+                    """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ([301], [256], 4), 'in_desc_ptr1': ([301], [256], 4), 'out_desc_ptr': ([301], [256], 4)}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
-            )
+                )
+            elif tma_version == "old":
+                self.assertExpectedInline(
+                    backend.fw_graphs[0].code.strip(),
+                    """\
+def forward(self, arg0_1, arg1_1):
+    zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([301], [256], 4)), 'in_desc_ptr1': ('experimental', ([301], [256], 4)), 'out_desc_ptr': ('experimental', ([301], [256], 4))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
+    getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
+    return (getitem,)""",
+                )
 
     @requires_gpu
     @common_utils.parametrize("after_data_ptr", [False, True])
@@ -1926,7 +2007,10 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(compiled_out, expected_out)
 
         # 2 calls: one for two inputs (dedupped), one for the output
-        self.assertEqual(code.count("create_1d_tma_descriptor("), 2)
+        if tma_version == "new":
+            self.assertEqual(code.count("TensorDescriptor.from_tensor("), 2)
+        else:
+            self.assertEqual(code.count("create_1d_tma_descriptor("), 2)
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
@@ -1961,7 +2045,7 @@ def forward(self, arg0_1, arg1_1):
                 triton.cdiv(x_size, meta["BLOCK_SIZE_X"]),
                 triton.cdiv(y_size, meta["BLOCK_SIZE_Y"]),
             )
-            add_kernel_with_tma_2d[grid](
+            kernel[grid](
                 desc_a,
                 desc_b,
                 desc_out,
@@ -2385,9 +2469,9 @@ def make_mutation_test(fn):
     def test_fn(self):
         from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
 
-        kernel, inputs, outputs = fn()
+        kernel, inputs, tma_descriptor_metadata, outputs = fn()
         self.assertListEqual(
-            identify_mutated_tensors(kernel, inputs),
+            identify_mutated_tensors(kernel, inputs, tma_descriptor_metadata),
             outputs,
         )
 
@@ -2439,6 +2523,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2470,6 +2555,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2500,7 +2586,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         # old TTIR string parsing-based one). remove this gating
         # and use ["c_ptr"] as `expected` after the new Triton
         # pin lands both in OSS and internally.
-        ttir_module, _ = generate_ttir(kernel, kwargs)
+        ttir_module, _ = generate_ttir(kernel, kwargs, tma_descriptor_metadata={})
         if hasattr(ttir_module, "walk"):
             # with MLIR-based Triton analysis pass
             expected = ["c_ptr"]
@@ -2511,6 +2597,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         return (
             kernel,
             kwargs,
+            {},
             expected,
         )
 
@@ -2541,7 +2628,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         # old TTIR string parsing-based one). remove this gating
         # and use ["c_ptr"] as `expected` after the new Triton
         # pin lands both in OSS and internally.
-        ttir_module, _ = generate_ttir(kernel, kwargs)
+        ttir_module, _ = generate_ttir(kernel, kwargs, tma_descriptor_metadata={})
         if hasattr(ttir_module, "walk"):
             # with MLIR-based Triton analysis pass
             expected = ["c_ptr"]
@@ -2552,6 +2639,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         return (
             kernel,
             kwargs,
+            {},
             expected,
         )
 
@@ -2597,7 +2685,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         # old TTIR string parsing-based one). remove this gating
         # and use ["out_ptr"] as `expected` after the new Triton
         # pin lands both in OSS and internally.
-        ttir_module, _ = generate_ttir(kernel, kwargs)
+        ttir_module, _ = generate_ttir(kernel, kwargs, tma_descriptor_metadata={})
         if hasattr(ttir_module, "walk"):
             # with MLIR-based Triton analysis pass
             expected = ["out_ptr"]
@@ -2608,6 +2696,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         return (
             kernel,
             kwargs,
+            {},
             expected,
         )
 
@@ -2641,6 +2730,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2673,6 +2763,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2709,6 +2800,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2743,6 +2835,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2777,6 +2870,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2812,6 +2906,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2850,6 +2945,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2884,6 +2980,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -2943,6 +3040,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "BLOCK_SIZE_M": 64,
                 "BLOCK_SIZE_C2": 64,
             },
+            {},
             ["O_ptr"],
         )
 
@@ -3002,6 +3100,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "BLOCK_M": M,
                 "BLOCK_N": N,
             },
+            {},
             ["o_ptr"],
         )
 
@@ -3063,6 +3162,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "BLOCK_M": M,
                 "BLOCK_N": N,
             },
+            {},
             ["o_ptr"],
         )
 
@@ -3108,6 +3208,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 14,
                 "BLOCK_SIZE": 16,
             },
+            {},
             ["out_ptr"],
         )
 
@@ -3160,58 +3261,56 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(get_tma_stores(functions, "main"), {Param(idx=0)})
 
+    @unittest.skipIf(
+        not has_triton_experimental_host_tma(),
+        "requires experimental TMA descriptor API",
+    )
     @make_mutation_test
-    def test_on_device_tma_store_old_api():
-        @triton.jit
-        def on_device_tma_kernel(A, B, workspace_ptr, m, n, BLOCK_SIZE: tl.constexpr):
-            workspace_ptr_A = workspace_ptr
-            workspace_ptr_B = workspace_ptr + 128
-            tl.extra.cuda.experimental_device_tensormap_create2d(
-                desc_ptr=workspace_ptr_A,
-                global_address=A,
-                load_size=[BLOCK_SIZE, BLOCK_SIZE],
-                global_size=[m, n],
-                element_ty=A.dtype.element_ty,
-            )
-            tl.extra.cuda.experimental_device_tensormap_create2d(
-                desc_ptr=workspace_ptr_B,
-                global_address=B,
-                load_size=[BLOCK_SIZE, BLOCK_SIZE],
-                global_size=[m, n],
-                element_ty=A.dtype.element_ty,
-            )
-
-            pid = tl.program_id(0)
-            n_blocks = tl.cdiv(n, BLOCK_SIZE)
-            m_block_id = pid // n_blocks
-            n_block_id = pid % n_blocks
-
-            data = tl._experimental_descriptor_load(
-                workspace_ptr_A,
-                [m_block_id * BLOCK_SIZE, n_block_id * BLOCK_SIZE],
-                [BLOCK_SIZE, BLOCK_SIZE],
-                A.dtype.element_ty,
-            )
-            tl._experimental_descriptor_store(
-                workspace_ptr_B,
-                data,
-                [m_block_id * BLOCK_SIZE, n_block_id * BLOCK_SIZE],
-            )
-
-        B = torch.randn(1024, 1024)
-        A = torch.empty(1024, 1024)
-        workspace = torch.empty(256, dtype=torch.int8)
+    def test_add_kernel_on_device_tma_old_api():
+        a = torch.randn(1024, 1024)
+        b = torch.randn(1024, 1024)
+        c = torch.empty(1024, 1024)
+        workspace = torch.empty(128 * 3, dtype=torch.int8)
         return (
-            on_device_tma_kernel,
+            add_kernel_on_device_tma_old_api,
             {
-                "A": A,
-                "B": B,
-                "workspace_ptr": workspace,
+                "a_ptr": a,
+                "b_ptr": b,
+                "c_ptr": c,
                 "m": 1024,
                 "n": 1024,
+                "workspace": workspace,
                 "BLOCK_SIZE": 32,
             },
-            ["B", "workspace_ptr"],
+            {},
+            ["c_ptr", "workspace"],
+        )
+
+    @unittest.skipIf(
+        not has_triton_tensor_descriptor_host_tma(),
+        "requires TensorDescriptor API in Triton",
+    )
+    @make_mutation_test
+    def test_add_kernel_on_device_tma_new_api():
+        a = torch.randn(1024, 1024)
+        b = torch.randn(1024, 1024)
+        c = torch.empty(1024, 1024)
+        workspace = torch.empty(
+            128 * 3, dtype=torch.int8
+        )  # Not used by the new API but kept for consistency
+        return (
+            add_kernel_on_device_tma_new_api,
+            {
+                "a_ptr": a,
+                "b_ptr": b,
+                "c_ptr": c,
+                "m": 1024,
+                "n": 1024,
+                "workspace": workspace,
+                "BLOCK_SIZE": 32,
+            },
+            {},
+            ["c_ptr"],
         )
 
 
@@ -3228,6 +3327,7 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         ],
         [
@@ -3239,6 +3339,7 @@ if HAS_GPU:
                 "x_elements": 4,
                 "y_elements": 4,
             },
+            {},
             ["out_ptr"],
         ],
         [
@@ -3250,6 +3351,7 @@ if HAS_GPU:
                 "BLOCK_SIZE": 4,
                 "ACTIVATION": "mul2_inplace_kernel",
             },
+            {},
             ["in_ptr0", "out_ptr"],
         ],
         [
@@ -3261,21 +3363,25 @@ if HAS_GPU:
                 "BLOCK_SIZE": 4,
                 "ACTIVATION": "add_kernel",
             },
+            {},
             ["out_ptr"],
         ],
         [
             mul2_inplace_kernel,
             {"ptr": t, "n_elements": 4, "BLOCK_SIZE": 4},
+            {},
             ["ptr"],
         ],
         [
             inline_asm_kernel_is_pure_true,
             {"X": t, "Y": t, "Z": t, "n": 4, "BLOCK": 4},
+            {},
             ["Z"],
         ],
         [
             inline_asm_kernel_is_pure_false,
             {"X": t, "Y": t, "Z": t, "n": 4, "BLOCK": 4},
+            {},
             ["X", "Y", "Z"],
         ],
         [
@@ -3287,6 +3393,7 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["output_ptr"],
         ],
         [
@@ -3297,6 +3404,7 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["output_ptr"],
         ],
         [
@@ -3308,6 +3416,7 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         ],
         [
@@ -3319,6 +3428,7 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         ],
         [
@@ -3330,6 +3440,7 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         ],
         [
@@ -3341,16 +3452,18 @@ if HAS_GPU:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
             ["out_ptr"],
         ],
     ]
-    for kernel, inputs, outputs in tests:
+    for kernel, inputs, tma_descriptor_metadata, outputs in tests:
         fn = make_mutation_test(
             # Add default arguments to avoid Python lambda capture pitfall
             # This forces the capture at lambda creation
-            lambda kernel=kernel, inputs=inputs, outputs=outputs: (
+            lambda kernel=kernel, inputs=inputs, tma_descriptor_metadata=tma_descriptor_metadata, outputs=outputs: (
                 kernel,
                 inputs,
+                tma_descriptor_metadata,
                 outputs,
             )
         )

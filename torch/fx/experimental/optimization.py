@@ -471,7 +471,7 @@ def optimize_for_inference(
         if not use_mkl_heuristic(graph):
             for node in graph.start_nodes + graph.end_nodes:
                 prv = node.args[0]
-                node.replace_all_uses_with(prv)
+                node.replace_all_uses_with(prv)  # type: ignore[arg-type]
                 fx_graph.erase_node(node)
             reset_modules(graph.nodes, modules, old_modules)
 
