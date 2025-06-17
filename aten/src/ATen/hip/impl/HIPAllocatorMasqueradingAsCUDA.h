@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/Allocator.h>
+#include <c10/core/CachingDeviceAllocator.h>
 #include <c10/core/DeviceType.h>
 
 // Use of c10::hip namespace here makes hipification easier, because
@@ -10,7 +10,7 @@ namespace c10::hip {
 // Takes a valid HIPAllocator (of any sort) and turns it into
 // an allocator pretending to be a CUDA allocator.  See
 // Note [Masquerading as CUDA]
-class HIPAllocatorMasqueradingAsCUDA final : public Allocator {
+class HIPAllocatorMasqueradingAsCUDA final : public DeviceAllocator {
   Allocator* allocator_;
 public:
   explicit HIPAllocatorMasqueradingAsCUDA(Allocator* allocator)
