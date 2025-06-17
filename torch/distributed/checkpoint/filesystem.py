@@ -2,6 +2,7 @@
 import collections
 import dataclasses
 import io
+import json
 import operator
 import os
 import pickle
@@ -416,6 +417,7 @@ def _write_files_from_queue(
                     )
 
                 tensor_dict = {}
+                metadata_dict = {}
                 for tensor, write_item in loader.values():
                     assert tensor.is_cpu
                     write_results.append(
@@ -423,17 +425,28 @@ def _write_files_from_queue(
                             transforms,
                             stream,
                             tensor,
-                            write_item,
+                            write_item,  # type: ignore[arg-type]
                             storage_key,
                             serialization_format,
                         )
                     )
-                    tensor_dict[write_item.index.fqn] = tensor
+                    tensor_dict[write_item.index.fqn] = tensor  # type: ignore[attr-defined]
+                    metadata_dict[write_item.index.fqn] = {  # type: ignore[attr-defined]
+                        "saved_offsets": write_item.tensor_data.chunk.offsets  # type: ignore[attr-defined]
+                    }
 
                 if serialization_format == SerializationFormat.SAFETENSORS:
                     from safetensors.torch import save  # type: ignore[import-not-found]
 
-                    stream.write(save(tensor_dict))
+                    stream.write(
+                        save(
+                            tensor_dict,
+                            metadata={
+                                "DCP_SHARDING_INFO": json.dumps(metadata_dict),
+                                "DCP_VERSION": "1.0",
+                            },
+                        )
+                    )
 
                 if use_fsync:
                     try:

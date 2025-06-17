@@ -18,6 +18,7 @@ cmake_policy(SET CMP0012 NEW)
 #############################################
 
 set(ATen_CPU_SRCS)
+set(ATen_MTIA_SRCS)
 set(ATen_XPU_SRCS)
 set(ATen_XPU_INCLUDE)
 set(ATen_CPU_TEST_SRCS)
@@ -115,6 +116,7 @@ add_subdirectory(src/ATen)
 # Pass source, includes, and libs to parent
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
+set(ATen_MTIA_SRCS ${ATen_MTIA_SRCS} PARENT_SCOPE)
 set(ATen_XPU_SRCS ${ATen_XPU_SRCS} PARENT_SCOPE)
 set(ATen_XPU_INCLUDE ${ATen_XPU_INCLUDE} PARENT_SCOPE)
 set(ATen_CUDA_CU_SRCS ${ATen_CUDA_CU_SRCS} PARENT_SCOPE)
