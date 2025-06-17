@@ -91,6 +91,9 @@ def define_targets(rules):
                 "ssize.h",
             ],
         ),
+        deps = [
+            "//:torch_standalone_headers",
+        ],
         visibility = ["//visibility:public"],
     )
 
