@@ -1076,7 +1076,7 @@ def _register_quantization_reshape():
     )
 
 
-def _is_valid_concat_linear_woq_optimization_pattern():
+def _is_valid_concat_linear_int8_woq_optimization_pattern():
     def fn(match):
         assert all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales"))
         if not all(
@@ -1143,10 +1143,12 @@ def _is_valid_woq_optimization_pattern():
     return fn
 
 
-def _register_concat_linear_woq_lowering(pattern, computation_woq, computation_reshape):
+def _register_concat_linear_int8_woq_lowering(
+    pattern, computation_woq, computation_reshape
+):
     @register_freezing_graph_pattern(
         pattern,
-        extra_check=_is_valid_concat_linear_woq_optimization_pattern(),
+        extra_check=_is_valid_concat_linear_int8_woq_optimization_pattern(),
         pass_number=4,
     )
     def woq(match: Match, *args, **kwargs):
@@ -1177,10 +1179,11 @@ def _register_concat_linear_woq_lowering(pattern, computation_woq, computation_r
         _, cat_wgt_node = mm_node_of_x._input_nodes
         scaling_node = next(iter(mm_node_of_x.users.keys()))
         user_of_scaling_node = next(iter(scaling_node.users.keys()))
-        # Some other pass is making some changes that entials
+        # Some other pass is making some changes that entails
         # adding a node before it's used, but it can only be found when
         # lint is run. stable_topological_sort() is being run before lint,
-        # so that error isn't being discovered
+        # so that error was not being being discovered.
+        # We call stable_topological_sort here as a workaround.
         stable_topological_sort(match.graph)
         with match.graph.inserting_before(user_of_scaling_node):
             new_cat_node = match.graph.call_function(
@@ -1327,7 +1330,7 @@ def _register_woq_mm_int8_pattern4():
     _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
 
 
-def _register_woq_concat_linear_pattern():
+def _register_int8_woq_concat_linear_pattern():
     def _create_wgt_node(wgt_node_name: str):
         return CallFunction(
             prims.convert_element_type.default,
@@ -1348,7 +1351,7 @@ def _register_woq_concat_linear_pattern():
         CallFunction(aten.mm.default, KeywordArg("x"), cat_wgt),
         KeywordArg("scales"),
     )
-    _register_concat_linear_woq_lowering(
+    _register_concat_linear_int8_woq_lowering(
         _woq_pattern, aten._weight_int8pack_mm.default, aten.reshape
     )
 

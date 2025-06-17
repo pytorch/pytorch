@@ -1484,21 +1484,15 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             def forward(self, x, scale1, scale2, scale3):
                 # Ref: _linear_fp_act_int8_weight_impl in torchao/dtypes/uintx/plain_layout.py
                 y1 = (
-                    torch.mm(
-                        x.reshape(-1, x.shape[-1]), self.w1.t().to(x.dtype)
-                    )
+                    torch.mm(x.reshape(-1, x.shape[-1]), self.w1.t().to(x.dtype))
                     * scale1
                 )
                 y2 = (
-                    torch.mm(
-                        x.reshape(-1, x.shape[-1]), self.w2.t().to(x.dtype)
-                    )
+                    torch.mm(x.reshape(-1, x.shape[-1]), self.w2.t().to(x.dtype))
                     * scale2
                 )
                 y3 = (
-                    torch.mm(
-                        x.reshape(-1, x.shape[-1]), self.w3.t().to(x.dtype)
-                    )
+                    torch.mm(x.reshape(-1, x.shape[-1]), self.w3.t().to(x.dtype))
                     * scale3
                 )
                 return (

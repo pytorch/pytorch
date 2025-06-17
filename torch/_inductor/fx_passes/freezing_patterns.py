@@ -131,7 +131,7 @@ def addmm_patterns_init():
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
     scale = functools.partial(torch.empty, (10,), device=device, requires_grad=False)
 
-    def check_woq_concat_linear_weights(match):
+    def check_int8_woq_concat_linear_weights(match):
         is_cpu = match.kwargs["inp"].meta["val"].is_cpu
         if not is_cpu:
             # Currently, this pattern is only supported on CPU
@@ -215,7 +215,7 @@ def addmm_patterns_init():
         [val(), val(), val(), val(), scale(), scale(), scale()],
         fwd_only,
         pass_patterns[0],
-        extra_check=check_woq_concat_linear_weights,
+        extra_check=check_int8_woq_concat_linear_weights,
         exclusive_arg_names=("w1", "w2", "w3", "s1", "s2", "s3"),
     )
 
