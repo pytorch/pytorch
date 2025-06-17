@@ -184,7 +184,7 @@ The following metadata fields are added to each ONNX node:
   *Example:*
   `File "torch/fx/passes/runtime_assert.py", line 24, in insert_deferred_runtime_asserts`
 
-- **"pkg.torch.onnx.input_names**
+- **pkg.torch.onnx.input_names**
 
   The inputs for a node:
 
