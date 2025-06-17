@@ -1606,7 +1606,7 @@ if(USE_CUDA)
   # Even worse, it never declares that it depends on cudart, but calls the API, see
   # https://github.com/pytorch/kineto/blob/aef2f5c0f15e3be52406ac0b885e8689de6bc9f6/libkineto/src/CudaDeviceProperties.cpp#L24
   if(USE_KINETO AND NOT LIBKINETO_NOCUPTI)
-    target_link_libraries(torch_cpu PRIVATE torch::cudart)
+    target_link_libraries(torch_cpu PRIVATE torch::cudart CUDA::nvperf_host)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
   target_link_libraries(torch_cuda PUBLIC c10_cuda)
