@@ -10,6 +10,7 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     _maybe_reenter_make_fx,
     autograd_not_implemented,
+    has_user_subclass,
     redirect_to_mode,
     reenter_make_fx,
     register_fake,
@@ -400,7 +401,8 @@ def flex_attention_functionalize(
     """
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
-    flat_args, _ = pytree.tree_flatten(
+
+    if has_user_subclass(
         (
             query,
             key,
@@ -411,14 +413,8 @@ def flex_attention_functionalize(
             kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
-        )
-    )
-    # For tensor subclasses, give the subclass a chance to run first
-    if any(
-        isinstance(a, torch.Tensor)
-        and type(a) is not torch.Tensor
-        and not isinstance(a, (FakeTensor, FunctionalTensor))
-        for a in flat_args
+        ),
+        allowed_subclasses=(FakeTensor, FunctionalTensor),
     ):
         return NotImplemented
 
@@ -483,7 +479,8 @@ def flex_attention_fake_impl(
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    flat_args, _ = pytree.tree_flatten(
+
+    if has_user_subclass(
         (
             query,
             key,
@@ -494,14 +491,8 @@ def flex_attention_fake_impl(
             kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
-        )
-    )
-    # For tensor subclasses, give the subclass a chance to run first
-    if any(
-        isinstance(a, torch.Tensor)
-        and type(a) is not torch.Tensor
-        and not isinstance(a, FakeTensor)
-        for a in flat_args
+        ),
+        allowed_subclasses=(FakeTensor,),
     ):
         return NotImplemented
 
@@ -1134,7 +1125,8 @@ def flex_attention_backward_functionalize(
     since we know that the forward score mod function is assured to be free of mutations
     to the other_buffers, we skip that mutate check and go straight to redispatching.
     """
-    flat_args, _ = pytree.tree_flatten(
+
+    if has_user_subclass(
         (
             query,
             key,
@@ -1148,14 +1140,8 @@ def flex_attention_backward_functionalize(
             kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
-        )
-    )
-    # For tensor subclasses, give the subclass a chance to run first
-    if any(
-        isinstance(a, torch.Tensor)
-        and type(a) is not torch.Tensor
-        and not isinstance(a, (FakeTensor, FunctionalTensor))
-        for a in flat_args
+        ),
+        allowed_subclasses=(FakeTensor, FunctionalTensor),
     ):
         return NotImplemented
     query_unwrapped = ctx.unwrap_tensors(query)
@@ -1229,7 +1215,8 @@ def flex_attention_backward_fake_tensor_mode(
 ) -> tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
-    flat_args, _ = pytree.tree_flatten(
+
+    if has_user_subclass(
         (
             query,
             key,
@@ -1243,14 +1230,8 @@ def flex_attention_backward_fake_tensor_mode(
             kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
-        )
-    )
-    # For tensor subclasses, give the subclass a chance to run first
-    if any(
-        isinstance(a, torch.Tensor)
-        and type(a) is not torch.Tensor
-        and not isinstance(a, FakeTensor)
-        for a in flat_args
+        ),
+        allowed_subclasses=(FakeTensor,),
     ):
         return NotImplemented
     Bq, _, _, qk_head_dim = query.shape
