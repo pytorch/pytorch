@@ -1289,7 +1289,7 @@ def cross(a: ArrayLike, b: ArrayLike, axisa=-1, axisb=-1, axisc=-1, axis=None):
 
 def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=False):
     # Have to manually normalize *operands and **kwargs, following the NumPy signature
-    # We have a local import to avoid poluting the global space, as it will be then
+    # We have a local import to avoid polluting the global space, as it will be then
     # exported in funcs.py
     from ._ndarray import ndarray
     from ._normalizations import (

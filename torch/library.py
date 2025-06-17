@@ -418,7 +418,7 @@ class Library:
 
         if self.ns != "_":
             raise RuntimeError(
-                f"""Fallback can only be registered using libary fragment on the global namespace "_" but it is {self.ns}"""
+                f"""Fallback can only be registered using library fragment on the global namespace "_" but it is {self.ns}"""
             )
 
         assert dispatch_key != ""
