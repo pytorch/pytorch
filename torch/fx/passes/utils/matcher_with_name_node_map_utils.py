@@ -18,17 +18,17 @@ def _split_to_graph_and_name_node_map(
         if n.op == "output":
             assert gm._out_spec is not None
             output = tree_unflatten(n.args[0], gm._out_spec)
-            assert isinstance(
-                output, tuple
-            ), "Expecting the pattern graph to return a tuple"
-            assert (
-                len(output) >= 2
-            ), "Expecting the pattern graph to have at least two outputs"
+            assert isinstance(output, tuple), (
+                "Expecting the pattern graph to return a tuple"
+            )
+            assert len(output) >= 2, (
+                "Expecting the pattern graph to have at least two outputs"
+            )
             *out, name_node_map = output
             flattened, out_spec = tree_flatten(out)
-            assert isinstance(
-                name_node_map, dict
-            ), "Expecting the input graph to have a dict output as the last element"
+            assert isinstance(name_node_map, dict), (
+                "Expecting the input graph to have a dict output as the last element"
+            )
             n.args = (flattened,)
             orig_pytree_info = gm._graph._codegen.pytree_info  # type: ignore[attr-defined]
             gm._graph._codegen.pytree_info = _PyTreeInfo(  # type: ignore[attr-defined]
@@ -53,11 +53,13 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
             relu = F.relu(conv)
             return relu, {"conv": conv, "relu": relu}
 
+
         def target_graph(x, weight):
             conv = F.conv2d(x, weight)
             relu = F.relu(conv)
             relu *= 2
             return relu
+
 
         pattern_gm = export_for_training(pattern, example_inputs).module()
         target_gm = export_for_training(target_graph, example_inputs).module()
