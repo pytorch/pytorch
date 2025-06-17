@@ -4413,6 +4413,105 @@ class TestLinalg(TestCase):
             for A, B, left, upper, uni in gen_inputs((b, n, k), dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
+    def test_linalg_solve_triangular_device_mismatch(self):
+        """Test device mismatch detection in linalg.solve_triangular"""
+        
+        # Test with CPU and MPS if available
+        devices = ['cpu']
+        if torch.backends.mps.is_available():
+            devices.append('mps')
+        if torch.cuda.is_available():
+            devices.append('cuda')
+        
+        if len(devices) < 2:
+            self.skipTest("Need at least two device types for device mismatch testing")
+        
+        # Test all device combinations
+        for device_a in devices:
+            for device_b in devices:
+                if device_a != device_b:
+                    with self.subTest(device_a=device_a, device_b=device_b):
+                        A = torch.randn(3, 3, device=device_a)
+                        A = torch.triu(A) + torch.eye(3, device=device_a)  # Make non-singular upper triangular
+                        B = torch.randn(3, 2, device=device_b)
+                        
+                        with self.assertRaisesRegex(RuntimeError, 
+                                                  r"Expected all tensors to be on the same device.*" + 
+                                                  re.escape(str(A.device)) + r".*" + re.escape(str(B.device))):
+                            torch.linalg.solve_triangular(A, B, upper=True)
+
+    def test_linalg_solve_triangular_out_device_mismatch(self):
+        """Test device mismatch detection in linalg.solve_triangular with out parameter"""
+        
+        devices = ['cpu']
+        if torch.backends.mps.is_available():
+            devices.append('mps')
+        if torch.cuda.is_available():
+            devices.append('cuda')
+        
+        if len(devices) < 2:
+            self.skipTest("Need at least two device types for device mismatch testing")
+        
+        # Test output tensor device mismatch
+        for device_input in devices:
+            for device_out in devices:
+                if device_input != device_out:
+                    with self.subTest(device_input=device_input, device_out=device_out):
+                        A = torch.randn(3, 3, device=device_input)
+                        A = torch.triu(A) + torch.eye(3, device=device_input)
+                        B = torch.randn(3, 2, device=device_input)
+                        out = torch.empty(3, 2, device=device_out)
+                        
+                        with self.assertRaisesRegex(RuntimeError, r"Expected.*same device"):
+                            torch.linalg.solve_triangular(A, B, upper=True, out=out)
+
+    def test_linalg_solve_triangular_edge_cases_device_mismatch(self):
+        """Test device mismatch detection with edge cases"""
+        
+        devices = ['cpu']
+        if torch.backends.mps.is_available():
+            devices.append('mps')
+        if torch.cuda.is_available():
+            devices.append('cuda')
+        
+        if len(devices) < 2:
+            self.skipTest("Need at least two device types for device mismatch testing")
+        
+        device_a, device_b = devices[0], devices[1]
+        
+        # Test with batched tensors
+        with self.subTest("batched"):
+            A = torch.randn(2, 3, 3, device=device_a)
+            A = torch.triu(A) + torch.eye(3, device=device_a).unsqueeze(0)
+            B = torch.randn(2, 3, 4, device=device_b)
+            
+            with self.assertRaises(RuntimeError):
+                torch.linalg.solve_triangular(A, B, upper=True)
+        
+        # Test with empty tensors
+        with self.subTest("empty"):
+            A = torch.empty(0, 0, device=device_a)
+            B = torch.empty(0, 5, device=device_b)
+            
+            with self.assertRaises(RuntimeError):
+                torch.linalg.solve_triangular(A, B, upper=True)
+        
+        # Test with different left/upper configurations
+        for left, upper in [(True, True), (True, False), (False, True), (False, False)]:
+            with self.subTest(left=left, upper=upper):
+                if left:
+                    A = torch.randn(3, 3, device=device_a)
+                    B = torch.randn(3, 2, device=device_b)
+                else:
+                    A = torch.randn(2, 2, device=device_a)
+                    B = torch.randn(3, 2, device=device_b)
+                
+                A = torch.triu(A) if upper else torch.tril(A)
+                A = A + torch.eye(A.size(-1), device=device_a)  # Make non-singular
+                
+                with self.assertRaises(RuntimeError):
+                    torch.linalg.solve_triangular(A, B, upper=upper, left=left)
+
     @slowTest
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
     @onlyCUDA
