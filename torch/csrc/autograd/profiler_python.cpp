@@ -749,7 +749,7 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
 #define PROFILER_ID 2
 #define PY_MONITORING_EVENT_CALL 4
 
-static bool should_compensate_c_call_event() {
+static bool should_compensate_c_call_events() {
   static const bool result = []() {
     const char* version = Py_GetVersion();
     const char micro = version[5];
@@ -810,7 +810,7 @@ static PyObject* c_call_callback(
 }
 
 static void registerMonitoringCallback() {
-  if (!should_compensate_c_call_event()) {
+  if (!should_compensate_c_call_events()) {
     return;
   }
 
@@ -862,7 +862,7 @@ static void registerMonitoringCallback() {
 }
 
 static void unregisterMonitoringCallback() {
-  if (!should_compensate_c_call_event()) {
+  if (!should_compensate_c_call_events()) {
     return;
   }
 
