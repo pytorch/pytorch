@@ -8,7 +8,11 @@ using namespace metal;
 #endif
 
 template <unsigned N = 5>
-struct TensorShapes {
-  array<ulong, N> sizes;
-  array<ulong, N> strides;
+struct UpsampleParams {
+  array<ulong, N> input_strides;
+  array<ulong, N> input_sizes;
+  array<ulong, N> output_strides;
+  array<ulong, N> output_sizes;
+  array<float, N - 2> scales;
+  bool align_corners;
 };

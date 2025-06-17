@@ -310,11 +310,15 @@ static void upsample_kernel_out_template(const Tensor& input,
   if (output.numel() == 0) {
     return;
   }
-  std::array<float, 3> scales = {
-      area_pixel_compute_scale<float>(input.size(-1), output.size(-1), align_corners, scale_w_opt),
-      area_pixel_compute_scale<float>(input.size(2), output.size(2), align_corners, scale_h_opt),
-      area_pixel_compute_scale<float>(input.size(3), output.size(3), align_corners, scale_w_opt),
-  };
+  UpsampleParams<5> params;
+  memcpy(params.input_sizes.data(), input.sizes().data(), 5 * sizeof(long));
+  memcpy(params.input_strides.data(), input.strides().data(), 5 * sizeof(long));
+  memcpy(params.output_strides.data(), output.strides().data(), 5 * sizeof(long));
+  memcpy(params.output_sizes.data(), output.sizes().data(), 5 * sizeof(long));
+  params.scales[0] = area_pixel_compute_scale<float>(input.size(4), output.size(4), align_corners, scale_w_opt);
+  params.scales[1] = area_pixel_compute_scale<float>(input.size(3), output.size(3), align_corners, scale_h_opt);
+  params.scales[2] = area_pixel_compute_scale<float>(input.size(2), output.size(2), align_corners, scale_d_opt);
+  params.align_corners = align_corners;
   auto upsamplePSO = lib.getPipelineStateForFunc(fmt::format("upsample_{}_{}", name, scalarToMetalTypeString(input)));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -324,17 +328,8 @@ static void upsample_kernel_out_template(const Tensor& input,
       mtl_setArgs(computeEncoder,
                   input,
                   output,
-                  input.strides(),
-                  output.strides(),
-                  input.sizes(),
-                  output.sizes(),
-                  scales,
-                  align_corners);
-      if (output.ndimension() == 4) {
-        mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1]);
-      } else {
-        mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0]);
-      }
+                  params);
+      mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1] * output_size[2]);
     }
   });
 }
