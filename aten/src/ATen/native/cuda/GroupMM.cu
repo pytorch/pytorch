@@ -339,7 +339,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
       cute::_64,
       cute::_128,
       cute::_128>(mat_a, mat_b, offs, bias, out);
-# elif __CUDA_ARCH__ >= 900 && __CUDA_ARCH__ < 1000
+#elif __CUDA_ARCH__ >= 900 && __CUDA_ARCH__ < 1000
   if (small) {
     bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm90,
