@@ -11,9 +11,9 @@ namespace c10::hip {
 // an allocator pretending to be a CUDA allocator.  See
 // Note [Masquerading as CUDA]
 class HIPAllocatorMasqueradingAsCUDA final : public DeviceAllocator {
-  Allocator* allocator_;
+  DeviceAllocator* allocator_;
 public:
-  explicit HIPAllocatorMasqueradingAsCUDA(Allocator* allocator)
+  explicit HIPAllocatorMasqueradingAsCUDA(DeviceAllocator* allocator)
     : allocator_(allocator) {}
   DataPtr allocate(size_t size) override {
     DataPtr r = allocator_->allocate(size);
@@ -25,6 +25,24 @@ public:
   }
   void copy_data(void* dest, const void* src, std::size_t count) const final {
     allocator_->copy_data(dest, src, count);
+  }
+  bool initialized() override {
+    return allocator_->initialized();
+  }
+  void emptyCache(MempoolId_t mempool_id = {0, 0}) {
+    allocator_->emptyCache(mempool_id);
+  }
+  void recordStream(const DataPtr& ptr, c10::Stream stream) {
+    allocator_->recordStream(ptr, stream);
+  }
+  CachingDeviceAllocator::DeviceStats getDeviceStats(c10::DeviceIndex device) {
+    return allocator_->getDeviceStats(device);
+  }
+  void resetAccumulatedStats(c10::DeviceIndex device) {
+    allocator_->resetAccumulatedStats(device);
+  }
+  void resetPeakStats(c10::DeviceIndex device) {
+    allocator_->resetPeakStats(device);
   }
 };
 
