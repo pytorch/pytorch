@@ -1551,7 +1551,7 @@ class KernelArgs:
     def size(self, name: sympy.Symbol) -> str:
         assert isinstance(name, sympy.Symbol), (type(name), name)
         if name.name == "seed":
-            self.sizevars[name] = "seed"  # dont' manage the name of seeds
+            self.sizevars[name] = "seed"  # don't manage the name of seeds
             return "seed"
         return self._lookup("ks", self.sizevars, name)
 
