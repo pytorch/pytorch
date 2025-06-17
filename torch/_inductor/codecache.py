@@ -3689,7 +3689,6 @@ class CUDACodeCache:
     def cache_clear() -> None:
         CUDACodeCache.cache.clear()
         CUDACodeCache.aot_kernels_o.clear()
-        
     @classmethod
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
         """
