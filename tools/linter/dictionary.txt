@@ -1,12 +1,17 @@
 coo
+Din
+Dout
+dOut
 fro
 froms
 hsa
 nd
 optins
+OT
 rebuild
 rebuilt
 reenable
 reenabled
 requestor
+supercedes
 te
