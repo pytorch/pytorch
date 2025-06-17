@@ -43,7 +43,7 @@ def prettify_stack(stack: list[dict[str, str]], str_to_filename: dict[int, str])
             continue
 
         res += f"""
-        File {str_to_filename[frame['filename']]}, lineno {frame['line']}, in {frame['name']}"""  # type: ignore[index]
+        File {str_to_filename[frame["filename"]]}, lineno {frame["line"]}, in {frame["name"]}"""  # type: ignore[index]
 
     res += f"\n            {stack[-1]['loc']}"
     return res
@@ -327,12 +327,12 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
                         # We don't want to log all expression_created logs, only
                         # the ones that are relevant to the
                         # guards/propagate_real_tensor
-                        self.expression_created_logs[
-                            metadata[key]["result_id"]
-                        ] = ExpressionCreatedNode(
-                            metadata[key]["result_id"],
-                            metadata[key].get("argument_ids", []),
-                            record,
+                        self.expression_created_logs[metadata[key]["result_id"]] = (
+                            ExpressionCreatedNode(
+                                metadata[key]["result_id"],
+                                metadata[key].get("argument_ids", []),
+                                record,
+                            )
                         )
                         return
 
@@ -374,10 +374,13 @@ def draft_export(
 
     capture_structured_log = CaptureStructuredTrace()
 
-    with torch._functorch.config.patch(
-        fake_tensor_propagate_real_tensors=True,
-        generate_fake_kernels_from_real_mismatches=True,
-    ), capture_structured_log:
+    with (
+        torch._functorch.config.patch(
+            fake_tensor_propagate_real_tensors=True,
+            generate_fake_kernels_from_real_mismatches=True,
+        ),
+        capture_structured_log,
+    ):
         try:
             new_shapes = None
             ep = _export(
@@ -424,10 +427,10 @@ def draft_export(
                 continue
 
             elif log_name == "propagate_real_tensors_provenance":
-                log_contents[
-                    "occurrences"
-                ] = capture_structured_log.log_record.get_log_count(
-                    (log_name, log_contents)
+                log_contents["occurrences"] = (
+                    capture_structured_log.log_record.get_log_count(
+                        (log_name, log_contents)
+                    )
                 )
 
                 failure_type = FailureType.DATA_DEPENDENT_ERROR
