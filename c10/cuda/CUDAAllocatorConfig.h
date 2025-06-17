@@ -8,7 +8,8 @@
 namespace c10::cuda::CUDACachingAllocator {
 
 // Keep this for backwards compatibility
-class C10_CUDA_API CUDAAllocatorConfig : CachingAllocator::AllocatorConfig {
+class C10_CUDA_API CUDAAllocatorConfig
+    : public CachingAllocator::AllocatorConfig {
  public:
   static bool expandable_segments() {
     return CachingAllocator::AllocatorConfig::use_expandable_segments();
