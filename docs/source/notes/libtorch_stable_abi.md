@@ -47,4 +47,4 @@ You can always work with StableIValue abstractions in your custom kernel for typ
 
 2. The stack always has ownership of the objects it holds.
     a. When calling a stack API, you must give owning references to the calling stack and steal references from the returned stack.
-    b. When registering your function to be called with a stack, YOU must steal references from your argument stack and push onto the stack new references.
+    b. When registering your function to be called with a stack, you must steal references from your argument stack and push onto the stack new references.
