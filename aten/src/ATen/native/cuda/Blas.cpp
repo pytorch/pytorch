@@ -1045,7 +1045,6 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
 }
 
 static bool _scaled_mm_allowed_device(bool sm90_sm100_only=false) {
-  std::cout << "is this being compiled" << std::endl;
 #ifdef USE_ROCM
     static const std::vector<std::string> archs = {
         "gfx942",
