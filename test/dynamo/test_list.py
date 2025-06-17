@@ -2,7 +2,6 @@
 
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
-import math
 import unittest
 
 import torch
@@ -45,14 +44,14 @@ class ListTests(torch._dynamo.test_case.TestCase):
     def assertEqual(self, a, b):
         return self.assertTrue(a == b, f"{a} != {b}")
 
-    def assertNotEqual(self, x, y, msg = None, *, atol = None, rtol = None, **kwargs):
+    def assertNotEqual(self, x, y, msg=None, *, atol=None, rtol=None, **kwargs):
         return self.assertTrue(x != y, f"{x} == {y}")
 
     @make_dynamo_test
     def test_append(self):
-        p = self.thetype('abc')
-        self.assertIsNone(p.append('d'))
-        self.assertEqual(p, ['a', 'b', 'c', 'd'])
+        p = self.thetype("abc")
+        self.assertIsNone(p.append("d"))
+        self.assertEqual(p, ["a", "b", "c", "d"])
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.append)
@@ -60,7 +59,7 @@ class ListTests(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_copy(self):
-        p = self.thetype('abc')
+        p = self.thetype("abc")
         self.assertEqual(p.copy(), p)
 
         # Wrong number of arguments
@@ -129,7 +128,6 @@ class ListTests(torch._dynamo.test_case.TestCase):
         # Wrong number of arguments
         self.assertRaises(TypeError, p.pop, 2, 3)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_remove(self):
         p = self.thetype("abad")
