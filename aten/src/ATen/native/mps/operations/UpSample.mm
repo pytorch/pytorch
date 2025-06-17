@@ -533,7 +533,10 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact3d_out_mps)(const Tensor& input,
                                                    std::optional<double> scales_d,
                                                    std::optional<double> scales_h,
                                                    std::optional<double> scales_w,
-                                                   const Tensor& output) {}
+                                                   const Tensor& output) {
+  mps::upsample_kernel_out_template(
+      input, output_size, false, scales_d, scales_h, scales_w, output, "nearest_exact_3d");
+}
 
 TORCH_IMPL_FUNC(upsample_nearest3d_backward_out_mps)(const Tensor& grad_output,
                                                      IntArrayRef output_size,
