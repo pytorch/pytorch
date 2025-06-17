@@ -136,7 +136,7 @@ class DeviceProperties(typing.NamedTuple):
     warp_size: Optional[int] = None
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def create(cls, device) -> DeviceProperties:
         import torch
         from torch._dynamo.device_interface import get_interface_for_device
