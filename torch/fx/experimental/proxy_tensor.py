@@ -1011,7 +1011,7 @@ class _SymNodeDict:
     ) -> _PySymProxyType:
         # dict.get()'s annotation doesn't accept `None` when the value type
         # isn't Optional.
-        return self.sym_node_dict.get(key.node, default)  # type: ignore[arg-type]
+        return self.sym_node_dict.get(key.node, default)  # type: ignore[arg-type, return-value]
 
     def __iter__(self) -> Any:
         raise NotImplementedError
@@ -1145,6 +1145,13 @@ class PythonKeyTracer(Tracer):
                 ):  # empty list for strict mode, dynamo should handle stack_trace
                     stack_trace = traceback.StackSummary.from_list(stack_trace)
                     node.meta["stack_trace"] = "".join(stack_trace.format()).strip()
+
+        if kind == "get_attr":
+            assert isinstance(target, str)
+            attr = getattr(self.root, target)
+            if isinstance(attr, torch.Tensor):
+                with disable_proxy_modes_tracing():
+                    node.meta["val"] = extract_val(attr)
 
         def map_fn(v: Any) -> Optional[_ExtractValType]:
             if not isinstance(v, torch.fx.Node) or "val" not in v.meta:

@@ -1069,7 +1069,9 @@ def expand(x, sizes):
         return x
 
     if not free_unbacked_symbols(x.get_size()):
-        x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
+        x_size_product = V.graph.sizevars.size_hint_or_throw(
+            sympy_product(x.get_size())
+        )
         # TODO: It would be better to realize the input if any of its sizes
         # are unbacked, because typically the size will be non-zero.  However,
         # this cannot be done directly as below as we'll choke on the size_hint
@@ -1077,7 +1079,8 @@ def expand(x, sizes):
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # maybe realize input before broadcasting it
             x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product
+                V.graph.sizevars.size_hint_or_throw(sympy_product(sizes))
+                // x_size_product
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
@@ -1136,12 +1139,13 @@ def repeat(x, repeats):
         return x_loader(index)
 
     if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
-        old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
+        old_size_product = V.graph.sizevars.size_hint_or_throw(sympy_product(old_size))
         if old_size_product > 0:
             # maybe realize the input but skip for unbacked symints since it'll
             # choke on the size hint.
             x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
+                V.graph.sizevars.size_hint_or_throw(sympy_product(new_size))
+                // old_size_product
             )
 
     x_loader = x.make_loader()
@@ -1813,8 +1817,10 @@ def unfold(x, dimension, size, step):
     sizevars.guard_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
-    if sizevars.size_hint(dim_size) > 0:
-        x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, dim_size)))
+    if sizevars.size_hint_or_throw(dim_size) > 0:
+        x.mark_reuse(
+            sizevars.size_hint_or_throw(CeilDiv(new_dim_size * size, dim_size))
+        )
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
 
@@ -2660,6 +2666,8 @@ make_fallback(aten._histogramdd_from_bin_cts.default)
 make_fallback(aten.addbmm)
 make_fallback(aten._addmm_activation, warn=False)
 
+make_fallback(aten._grouped_mm, require_dense)
+
 # Need templated kernel. Probably impossible to write efficiently
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
@@ -3335,7 +3343,7 @@ def new_empty_strided(
 
 @register_lowering(prims.copy_strided.default)
 def copy_strided(x, stride):
-    stride = [V.graph.sizevars.size_hint(s) for s in stride]
+    stride = [V.graph.sizevars.size_hint_or_throw(s) for s in stride]
     stride_order = sorted(range(len(stride)), key=stride.__getitem__)
     return ir.ExternKernel.require_stride_order(x, stride_order)
 

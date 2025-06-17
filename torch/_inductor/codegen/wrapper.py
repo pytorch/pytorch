@@ -1302,7 +1302,7 @@ class PythonWrapperCodegen(CodeGen):
     def generate_end(self, result: IndentedBuffer) -> None:
         return
 
-    def generate_fallback_kernel(self, node: ir.FallbackKernel):
+    def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
         self.writeline(ExternKernelAllocLine(self, node))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
@@ -1362,7 +1362,7 @@ class PythonWrapperCodegen(CodeGen):
         with debug_printer_manager:
             self.writeline(f"{kernel}({', '.join(args)})")
 
-    def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
+    def _generate_tma_descriptor_call_experimental(self, desc, apply_size_hints=False):
         dims = desc.dims
         block_dims = desc.block_dims
         if apply_size_hints:
@@ -1383,6 +1383,28 @@ class PythonWrapperCodegen(CodeGen):
         args = f"{ptr}, {dims}, {block_dims}, {element_size}"
         call = f"{fn}({args})"
         return call
+
+    def _generate_tma_descriptor_call_stable(self, desc, apply_size_hints=False):
+        block_shape = desc.block_shape
+        if apply_size_hints:
+            block_shape = tuple(
+                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_shape
+            )
+
+        prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
+        fn = f"{prefix}.from_tensor"
+        args = f"{desc.tensor.codegen_reference()}, {block_shape}"
+        call = f"{fn}({args})"
+        return call
+
+    def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
+        if isinstance(desc, ir.TMADescriptorExperimental):
+            return self._generate_tma_descriptor_call_experimental(
+                desc, apply_size_hints
+            )
+        else:
+            assert isinstance(desc, ir.TMADescriptorStable)
+            return self._generate_tma_descriptor_call_stable(desc, apply_size_hints)
 
     def generate_tma_descriptor(self, desc):
         call = self._generate_tma_descriptor_call(desc)
@@ -1417,13 +1439,12 @@ class PythonWrapperCodegen(CodeGen):
         self,
         buf_name: str,
         python_kernel_name: str,
-        cpp_kernel_name: str,
-        codegen_args: list[str],
-        op_overload: Optional[torch._ops.OpOverload] = None,
-        raw_args=None,
-        outputs=None,
-    ):
-        self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
+        get_args: Callable[[], Sequence[str]],
+        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        raw_args: Sequence[Any],
+        outputs: Sequence[ir.Buffer],
+    ) -> None:
+        self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(get_args())})")
 
     def generate(self, is_inference):
         with dynamo_timed("PythonWrapperCodegen.generate"):
@@ -2052,10 +2073,18 @@ class PythonWrapperCodegen(CodeGen):
                 add_arg(idx, ConstexprArg(name=key), equals_none=True)
             else:
                 if isinstance(arg, ir.TMADescriptor):
+                    api_type, block_shape, dtype = (
+                        ("stable", arg.block_shape, arg.tensor.get_dtype())
+                        if isinstance(arg, ir.TMADescriptorStable)
+                        else ("experimental", None, None)
+                    )
                     add_arg(
                         idx,
                         TMADescriptorArg(
                             name=key,
+                            api_type=api_type,
+                            block_shape=block_shape,
+                            dtype=dtype,
                         ),
                     )
                 elif isinstance(arg, ir.Buffer):
@@ -2362,7 +2391,7 @@ class PythonWrapperCodegen(CodeGen):
         if isinstance(arg_type, torch_dtype):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
-                buf_name = raw_arg.tensor.get_name()
+                buf_name = raw_arg.get_tensor().get_name()
                 buf = self.args_to_buffers[arg]
             elif self.args_to_buffers.get(arg):
                 buf_name = arg

@@ -2696,7 +2696,7 @@ class Scheduler:
         choice finalized through fusion. In the case of an extern choice, this will result
         in replacing the SchedulerNode.
 
-        If a MultiTemplateBuffer did not have any fusion opportunities, finalizing a choie
+        If a MultiTemplateBuffer did not have any fusion opportunities, finalizing a choice
         will force completion of compilation and benchmarking.
         """
 
