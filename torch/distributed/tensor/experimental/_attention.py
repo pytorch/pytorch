@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import contextlib
+import functools
 import itertools
 import logging
 import types
@@ -16,9 +17,22 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
 from torch import nn
+from torch._higher_order_ops.flex_attention import (
+    flex_attention,
+    flex_attention_backward,
+    FlexAttentionBackwardHOP,
+    FlexAttentionHOP,
+)
+from torch._prims_common import DeviceLikeType
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel.style import ParallelStyle
+from torch.fx.graph_module import GraphModule
+from torch.nn.attention.flex_attention import (
+    _mask_mod_signature,
+    BlockMask,
+    create_block_mask,
+)
 from torch.overrides import TorchFunctionMode
 
 
@@ -60,6 +74,211 @@ class _ContextParallelOptions:
 
 
 _cp_options = _ContextParallelOptions()
+
+
+@dataclass
+class _FlexAttentionMetadata:
+    shard_dim: int = 0
+    device_mesh: Optional[DeviceMesh] = None
+
+
+_flex_meta = _FlexAttentionMetadata()
+original_flex_attention = FlexAttentionHOP.__call__
+original_flex_attention_backward = FlexAttentionBackwardHOP.__call__
+
+
+# hack for flex_attention + CP
+def _cp_flex_attention(
+    self,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple = (),
+    mask_mod_other_buffers: tuple = (),
+) -> tuple[torch.Tensor, torch.Tensor]:
+    print("cp_flex_attention")
+    device_mesh = _flex_meta.device_mesh
+    assert device_mesh is not None
+    shard_dim = _flex_meta.shard_dim
+
+    def unshard(x: torch.Tensor, mesh: DeviceMesh, shard_dim: int) -> torch.Tensor:
+        x = x.contiguous()
+        all_xs = [torch.empty_like(x) for _ in range(mesh.size())]
+        ft_c.all_gather_inplace(all_xs, x, mesh)
+        return torch.cat(all_xs, dim=shard_dim)
+
+    def rewrite_context_parallel_block_mask(
+        block_mask: BlockMask, device_mesh: DeviceMesh
+    ) -> BlockMask:
+        def _rewrite_mask_mod(
+            mask_mod: _mask_mod_signature,
+            rank: int,
+            world_size: int,
+            block_size: int,
+            local_q_size: int,
+        ) -> _mask_mod_signature:
+            def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
+                # calculate local block_idx and block_offset
+                local_blk_idx, local_blk_offset = (
+                    local_q_idx // block_size,
+                    local_q_idx % block_size,
+                )
+                # NOTE: load balancing is not used
+                local_num_blocks = local_q_size // block_size
+                blk_idx = local_num_blocks * rank + local_blk_idx
+                return blk_idx * block_size + local_blk_offset
+
+            return lambda b, h, q_idx, kv_idx: mask_mod(
+                b, h, local_q_idx_to_q_idx(q_idx), kv_idx
+            )
+
+        def _create_block_mask(
+            mask_mod: _mask_mod_signature,
+            B: int,
+            H: int,
+            M: int,
+            N: int,
+            device: DeviceLikeType,
+            BLOCK_SIZE: Union[int, tuple[int, int]],
+        ) -> BlockMask:
+            return create_block_mask(
+                mask_mod, B, H, M, N, device=device, BLOCK_SIZE=BLOCK_SIZE
+            )
+
+        Q_LEN, KV_LEN = block_mask.seq_lengths
+        Q_BLOCK_SIZE, KV_BLOCK_SIZE = block_mask.BLOCK_SIZE
+        # TODO: support other KV block sizes
+        assert Q_BLOCK_SIZE == KV_BLOCK_SIZE
+        mask_mod = block_mask.mask_mod
+
+        # resolve CP device mesh info
+        assert device_mesh.ndim == 1
+        cp_rank = device_mesh.get_local_rank()
+        cp_group_size = device_mesh.size()
+        device_type = device_mesh.device_type
+
+        # rewrite block_mask's mask_mod
+        cp_mask_mod = _rewrite_mask_mod(
+            mask_mod, cp_rank, cp_group_size, Q_BLOCK_SIZE, Q_LEN
+        )
+
+        return _create_block_mask(
+            cp_mask_mod,
+            B=1,
+            H=1,
+            M=Q_LEN // cp_group_size,
+            N=KV_LEN,
+            device=device_type,
+            BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
+        )
+
+    print(f"query={query}")
+
+    # all-gather KV
+    global_key = unshard(key, device_mesh, shard_dim)
+    global_value = unshard(value, device_mesh, shard_dim)
+    q_len, kv_len = block_mask[0], block_mask[1]
+    block_size_q, block_size_kv = block_mask[-3], block_mask[-2]
+    block_mask_obj = BlockMask(
+        (q_len, kv_len),  # seq_lengths
+        *block_mask[2:-3],
+        (block_size_q, block_size_kv),  # block_sizes
+        block_mask[-1],
+    )
+    cp_block_mask = rewrite_context_parallel_block_mask(block_mask_obj, device_mesh)
+
+    return original_flex_attention(
+        self,
+        query,
+        global_key,
+        global_value,
+        score_mod,
+        cp_block_mask.as_tuple(),
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
+
+
+def _cp_flex_attention_backward(
+    self,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    logsumexp: torch.Tensor,
+    grad_out: torch.Tensor,
+    grad_logsumexp: torch.Tensor,
+    fw_graph: Union[Callable, GraphModule],
+    joint_graph: GraphModule,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple = (),
+    mask_mod_other_buffers: tuple = (),
+) -> tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
+]:
+    grad_query, grad_key, grad_value, others = original_flex_attention_backward(
+        self,
+        query,
+        key,
+        value,
+        out,
+        logsumexp,
+        grad_out,
+        grad_logsumexp,
+        fw_graph,
+        joint_graph,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
+
+    device_mesh = _flex_meta.device_mesh
+    assert device_mesh is not None
+    shard_dim = _flex_meta.shard_dim
+
+    # reduce-scatter KV grads
+    grad_key = ft_c.reduce_scatter_tensor(
+        grad_key, reduceOp="sum", scatter_dim=shard_dim, group=device_mesh
+    )
+    grad_value = ft_c.reduce_scatter_tensor(
+        grad_value, reduceOp="sum", scatter_dim=shard_dim, group=device_mesh
+    )
+    return grad_query, grad_key, grad_value, others
+
+
+def _replace_flex_attention_hop_impl(
+    device_mesh: DeviceMesh, shard_dim: int
+) -> tuple[Callable, Callable]:
+    print("replace_flex_attention_hop_impl")
+    _flex_meta.device_mesh = device_mesh
+    _flex_meta.shard_dim = shard_dim
+
+    origin_forward, origin_backward = (
+        FlexAttentionHOP.__call__,
+        FlexAttentionBackwardHOP.__call__,
+    )
+
+    FlexAttentionHOP.__call__ = _cp_flex_attention
+    FlexAttentionBackwardHOP.__call__ = _cp_flex_attention_backward
+
+    return origin_forward, origin_backward
+
+
+def _restore_flex_attention_hop_impl(
+    origin_forward: Callable, origin_backward: Callable
+) -> None:
+    FlexAttentionHOP.__call__ = origin_forward
+    FlexAttentionBackwardHOP.__call__ = origin_backward
 
 
 def _is_causal_behavior(
@@ -1216,9 +1435,11 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             attention_input_fn,
             attention_output_fn,
         )
+        fw, bw = _replace_flex_attention_hop_impl(mesh, seq_dim)
         with _enable_cp_dispatcher():
             yield
         _restore_function(F.scaled_dot_product_attention, F)
+        _restore_flex_attention_hop_impl(fw, bw)
     elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
         with DistributeFunction(
             F.scaled_dot_product_attention,
@@ -1285,9 +1506,9 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert cls.ROUND_ROBIN_CYCLE == 2, (
-            "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
-        )
+        assert (
+            cls.ROUND_ROBIN_CYCLE == 2
+        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
         cp_world_size = mesh.size()
         cp_rank = mesh.get_local_rank()
         assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
@@ -1301,9 +1522,9 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert cls.ROUND_ROBIN_CYCLE == 2, (
-            "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
-        )
+        assert (
+            cls.ROUND_ROBIN_CYCLE == 2
+        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
 
