@@ -975,9 +975,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *
    * NB: dim is overrideable separately from sizes because it is possible
    * for a tensor to have rank, but not well defined sizes.
-   * when guard_or_false is true, its ok if the function return false to avoid
-   * data dependent error even if the actual result at runtime are true.
-   /
+   * when guard_or_false is true, it's ok if the function returns false to avoid
+   * a data dependent error even if the actual results at runtime are true.
+   */
   // sizes_strides_policy_ >= CustomStrides
   virtual bool is_contiguous_custom(
       at::MemoryFormat memory_format,
