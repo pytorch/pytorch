@@ -184,7 +184,60 @@ The following metadata fields are added to each ONNX node:
   *Example:*
   `File "torch/fx/passes/runtime_assert.py", line 24, in insert_deferred_runtime_asserts`
 
+- **"pkg.torch.onnx.input_names**
+
+  The inputs for a node:
+
+  *Example:*
+  `[2]`
+
 These metadata fields are stored in the metadata_props attribute of each ONNX node and can be inspected using Netron or programmatically.
+
+Each input value in the ONNX graph may have the following metadata property:
+
+- **pkg.torch.export.graph_signature.InputSpec.kind**
+
+  The kind of input, as defined by PyTorch's InputKind enum.
+
+  *Example values:*
+  - "USER_INPUT": A user-provided input to the model.
+  - "PARAMETER": A model parameter (e.g., weight).
+  - "BUFFER": A model buffer (e.g., running mean in BatchNorm).
+  - "CONSTANT_TENSOR": A constant tensor argument.
+  - "CUSTOM_OBJ": A custom object input.
+  - "TOKEN": A token input.
+
+- **pkg.torch.export.graph_signature.InputSpec.persistent**
+
+  Indicates whether the input is persistent (i.e., should be saved as part of the model's state).
+  
+  *Example values:*
+  - "True"
+  - "False"
+
+Each output value in the ONNX graph may have the following metadata property:
+
+- **pkg.torch.export.graph_signature.OutputSpec.kind**
+
+  The kind of input, as defined by PyTorch's OutputKind enum.
+
+  *Example values:*
+  - "USER_OUTPUT": A user-visible output.
+  - "LOSS_OUTPUT": A loss value output.
+  - "BUFFER_MUTATION": Indicates a buffer was mutated.
+  - "GRADIENT_TO_PARAMETER": Gradient output for a parameter.
+  - "GRADIENT_TO_USER_INPUT": Gradient output for a user input.
+  - "USER_INPUT_MUTATION": Indicates a user input was mutated.
+  - "TOKEN": A token output.
+
+Each initializer, input, output has the following metadata:
+
+- **pkg.torch.onnx.original_node_name**
+  
+  The original name of the node in the PyTorch FX graph that produced this initializer. This helps trace initializers back to their source in the original model.
+
+  *Example:*
+  `fc1.weight`
 
 ## API Reference
 
