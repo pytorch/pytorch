@@ -133,10 +133,8 @@ def addmm_patterns_init():
 
     def check_int8_woq_concat_linear_weights(match):
         is_cpu = match.kwargs["inp"].meta["val"].is_cpu
-        if not is_cpu:
-            # Currently, this pattern is only supported on CPU
-            return False
-        elif is_cpu and not config.cpp.enable_concat_linear:
+        if not is_cpu or not config.cpp.enable_concat_linear:
+             # Currently, this pattern is only supported on CPU
             return False
 
         weight_inputs = ["w1", "w2"]
