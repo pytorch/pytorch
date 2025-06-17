@@ -2789,14 +2789,14 @@ class AlgorithmSelectorCache(PersistentCache):
         # Create a cache key for prescreening results
         prescreen_key = f"{name}:{inputs_key}"
 
-        # Check if we have cached prescreening results (candidate hashes)
+        # Check if we have cached prescreening results (prescreen_winners)
         if prescreen_key in prescreen_cache:
-            candidates = [
+            prescreen_winners = [
                 choice
                 for choice in choices
                 if choice.hash_key() in prescreen_cache[prescreen_key]
             ]
-            return candidates
+            return prescreen_winners
 
         # prescreen cutlass
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
@@ -2839,14 +2839,16 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Check if we have cached postscreen results
         if prescreen_key in prescreen_cache:
-            # candidate_timings are choices that have been prescreened
-            good_hash = [candidate.kernel_hash_key() for candidate in candidate_timings]
+            # candidate_timings are from choices that have won prescreening already
+            winner_kernel_hashes = [
+                candidate.kernel_hash_key() for candidate in candidate_timings
+            ]
 
             pruned_choices = [
                 choice
                 for choice in choices
                 if not isinstance(choice, CUDATemplateCaller)
-                or choice.kernel_hash_key() in good_hash
+                or choice.kernel_hash_key() in winner_kernel_hashes
             ]
             return pruned_choices
 
@@ -2885,7 +2887,7 @@ class AlgorithmSelectorCache(PersistentCache):
         candidates_to_prune = OrderedSet(
             candidate.kernel_hash_key() for candidate in sorted_candidates[num_to_keep:]
         )
-        winner_hashes = OrderedSet()
+        winner_hashes: OrderedSet[str] = OrderedSet()
         for candidate in sorted_candidates[:num_to_keep]:
             if candidate_timings[candidate] == float("inf"):
                 candidates_to_prune.add(candidate.kernel_hash_key())
