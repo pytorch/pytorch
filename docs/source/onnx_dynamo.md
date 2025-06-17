@@ -252,7 +252,6 @@ Each initializer, input, output has the following metadata:
   *Example:*
   `fc1.weight`
 
-## Metadata
 
 The `ExportedProgram` class is a representation of a PyTorch model that has been exported to ONNX format. It contains the model's computation graph, which includes the operations performed on the input tensors, their types, and shapes. The `ExportedProgram` class consists of:
 - The `GraphModule` class, a PyTorch module that represents the exported program. It includes a `forward` method that defines the computation graph.
