@@ -51,7 +51,7 @@ from torch._logging.scribe import open_source_signpost
 
 try:
     from torch._dynamo.utils import clone_inputs, graph_break_reasons
-    from torch._inductor.utils import fresh_inductor_cache
+    from torch._inductor.utils import fresh_cache
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
 
@@ -3416,7 +3416,7 @@ def maybe_fresh_cache(args):
     if not cache_dir_assigned and (
         args.cold_start_latency or args.warm_start_latency or args.ci
     ):
-        return fresh_inductor_cache()
+        return fresh_cache()
     else:
         return contextlib.nullcontext()
 

@@ -8,19 +8,13 @@ from typing import Any, List
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class OrigModule(nn.Module):
@@ -701,3 +695,7 @@ class TestModuleInterface(JitTestCase):
 
         with self.assertRaisesRegex(Exception, "Could not compile"):
             scripted_mod = torch.jit.script(TestModule())
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")
