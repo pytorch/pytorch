@@ -38,7 +38,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    skipIfRocm,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
