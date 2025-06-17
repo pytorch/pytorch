@@ -558,5 +558,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
                 flag, torch.tensor([SIGNAL_VAL], dtype=torch.int64, device=self.device)
             )
 
+
 if __name__ == "__main__":
     run_tests()
