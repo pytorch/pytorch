@@ -334,7 +334,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
   const bool sm9x = properties != nullptr && properties->major == 9;
   const bool sm10x = properties != nullptr && properties->major == 10;
 
-  if(sm10x){
+  if constexpr (sm10x) {
     bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm100,
         a_row_major,
@@ -343,24 +343,26 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         cute::_64,
         cute::_128,
         cute::_128>(mat_a, mat_b, offs, bias, out);
-  } else if (small) {
-    bf16bf16_grouped_gemm_impl_sm90_sm100<
-        cutlass::arch::Sm90,
-        a_row_major,
-        b_row_major,
-        /*Pong*/ true,
-        cute::_64,
-        cute::_128,
-        cute::_128>(mat_a, mat_b, offs, bias, out);
   } else {
-    bf16bf16_grouped_gemm_impl_sm90_sm100<
-        cutlass::arch::Sm90,
-        a_row_major,
-        b_row_major,
-        /*Pong*/ false,
-        cute::_128,
-        cute::_256,
-        cute::_64>(mat_a, mat_b, offs, bias, out);
+    if (small) {
+      bf16bf16_grouped_gemm_impl_sm90_sm100<
+          cutlass::arch::Sm90,
+          a_row_major,
+          b_row_major,
+          /*Pong*/ true,
+          cute::_64,
+          cute::_128,
+          cute::_128>(mat_a, mat_b, offs, bias, out);
+    } else {
+      bf16bf16_grouped_gemm_impl_sm90_sm100<
+          cutlass::arch::Sm90,
+          a_row_major,
+          b_row_major,
+          /*Pong*/ false,
+          cute::_128,
+          cute::_256,
+          cute::_64>(mat_a, mat_b, offs, bias, out);
+    }
   }
 }
 
