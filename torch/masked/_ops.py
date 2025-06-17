@@ -794,7 +794,7 @@ def _sparse_csr_segment_reduction_helper(
                 0,
             )
             new_nnz = new_crow_indices[-1]
-            new_col_indices = col_indices.new_zeros(new_nnz)
+            new_col_indices = col_indices.new_zeros(new_nnz)  # type: ignore[call-overload]
             new_values = torch._segment_reduce(values, reduce, offsets=crow_indices)  # type: ignore[attr-defined]
             new_shape = [mask_input.size(0), 1]
     else:
