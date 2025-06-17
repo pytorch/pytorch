@@ -521,10 +521,9 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
             if v and v[0].get("Gb_type") == gb_type:
                 return f"{GRAPH_BREAK_SITE_URL}{k}"
     except (FileNotFoundError, json.JSONDecodeError) as e:
-        log.error(f"Error accessing the registry file: {e}")
-        return None
+        log.error("Error accessing the registry file: %s", e)
 
-    return None
+    return "None"
 
 
 # TODO replace old unimplemented later
