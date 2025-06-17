@@ -61,6 +61,7 @@ if torch.backends.mps.is_available():
             "empty_permuted",
             "empty_strided",
             "exp",
+            "expm1",
             "exp2",
             "expand",
             "expand_as",
@@ -68,6 +69,7 @@ if torch.backends.mps.is_available():
             "flatten",
             "fill",
             "full",
+            "full_like",
             "H",
             "hsplit",
             "imag",
@@ -209,7 +211,6 @@ if torch.backends.mps.is_available():
             "einsum",
             "eq",
             "equal",
-            "expm1",
             "eye",
             "fft.fft",
             "fft.fft2",
@@ -376,7 +377,6 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST = {
             # Failures due to lack of op implementation on MPS backend
-            "login": None,
             "logspace": None,
             "logspacetensor_overload": None,
             "linalg.eig": None,
@@ -438,13 +438,6 @@ if torch.backends.mps.is_available():
             "nn.functional.avg_pool3d": None,
             "nn.functional.ctc_loss": None,
             "nn.functional.embedding_bag": None,
-            "nn.functional.hardshrink": [
-                torch.uint8,
-                torch.int8,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-            ],
             "nn.functional.max_pool3d": None,
             "nn.functional.max_unpool1d": None,
             "nn.functional.max_unpool2d": None,
@@ -499,7 +492,6 @@ if torch.backends.mps.is_available():
             "log_softmaxwith_dtype": None,
             "softmaxwith_dtype": None,
             "float_power": None,
-            "full_like": None,
             "linalg.matrix_rankhermitian": None,
             "linalg.pinvhermitian": None,
             "nonzero_static": None,
