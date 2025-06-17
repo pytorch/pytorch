@@ -199,11 +199,11 @@ class _StaticDim(Dim):
         self.value = value
 
     @property
-    def min(self):
+    def min(self):  # type: ignore[override]
         return self.value  # type: ignore[attr-defined]
 
     @property
-    def max(self):
+    def max(self):  # type: ignore[override]
         return self.value  # type: ignore[attr-defined]
 
 
@@ -229,7 +229,7 @@ class _DerivedDim(Dim):
         self.fn = fn
 
     @property
-    def min(self):
+    def min(self):  # type: ignore[override]
         # assume that self.fn is an increasing function
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
@@ -249,7 +249,7 @@ class _DerivedDim(Dim):
         return int(_min_symint)
 
     @property
-    def max(self):
+    def max(self):  # type: ignore[override]
         # assume that self.fn is an increasing function
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
