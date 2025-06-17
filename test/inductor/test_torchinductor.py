@@ -13914,6 +13914,37 @@ if RUN_GPU:
             # there are a couple extra tensors created in `insertable_tensor_check`
             self.assertTrue(max_live_tensors == 3)
 
+        def test_constant_folding_mutable_buffer(self):
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("buf", torch.randn(1, 2, 3, 3))
+
+                def forward(self, x):
+                    self.buf = torch.abs(self.buf)
+                    self.buf.add_(x)
+                    return self.buf
+
+            # Generated graph:
+            # opcode         name           target              args          kwargs
+            # -------------  -------------  ------------------  ------------  --------
+            # get_attr       buf            buf                 ()            {}
+            # placeholder    x              x                   ()            {}
+            # call_function  abs_1          aten.abs.default    (buf,)        {}
+            # call_function  add_           aten.add_.Tensor    (abs_1, x)    {}
+            # call_function  copy__default  aten.copy_.default  (buf, abs_1)  {}
+            # output         output         output              ((add_,),)    {}
+
+            m = M().eval()
+            example_inputs = (torch.randn(1, 2, 3, 3),)
+            ep = torch.export.export(m, example_inputs)
+
+            gm = ep.module()
+            self.assertTrue(len([n for n in gm.graph.nodes if n.op == "call_function" and torch.ops.aten.abs.default]) == 1)
+            constant_fold(gm)
+            # The mutable buffer shoudn't be folded with the abs op, because it's a mutable buffer
+            self.assertTrue(len([n for n in gm.graph.nodes if n.op == "call_function" and torch.ops.aten.abs.default]) == 1)
+
         # See https://github.com/pytorch/pytorch/issues/100348
         @parametrize("backend", ["aot_eager", "inductor"])
         def test_inductor_detach_view(self, backend):
