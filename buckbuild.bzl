@@ -738,7 +738,6 @@ def vulkan_spv_shader_library(name, spv_filegroup):
         },
         cmd = " ".join(genrule_cmd),
         default_outs = ["."],
-        labels = ["uses_dotslash"],
     )
 
     fb_xplat_cxx_library(

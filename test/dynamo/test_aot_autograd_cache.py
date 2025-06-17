@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import copy
 import os
 import shutil
 import unittest
@@ -821,6 +822,44 @@ class AOTAutogradCacheTests(InductorTestCase):
         compiled_fn(a2, b2).sum().backward()
         self.assertEqual(a.grad, a2.grad)
         self.assertEqual(b.grad, b2.grad)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch({"fx_graph_cache": True})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"strict_autograd_cache": True})
+    def test_autograd_no_dynamo_trace_backward(self):
+        """
+        Test that dynamo does not trace into the backward compiled function,
+        even on cache hit.
+        """
+        torch._dynamo.eval_frame.clear_dynamo_tls()
+
+        @torch.compile
+        def fn(x):
+            # Calls x.sum().backward() during forward execution of fn
+            (x_grad,) = torch.autograd.grad(x.sum(), x)
+            return x_grad
+
+        a = torch.randn(10, 10, requires_grad=True, device="cpu")
+        result = fn(a)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        # Backward of `sum` will run during execution of graph break
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        traced_frame_infos = copy.deepcopy(
+            torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos
+        )
+
+        torch._dynamo.reset()
+        torch._dynamo.eval_frame.clear_dynamo_tls()
+        result2 = fn(a)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        new_traced_frame_infos = torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos
+        self.assertEqual(result, result2)
+        # Dynamo should trace exactly the same frames on cache hit
+        self.assertEqual(traced_frame_infos, new_traced_frame_infos)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)

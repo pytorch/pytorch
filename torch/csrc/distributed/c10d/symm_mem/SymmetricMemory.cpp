@@ -38,6 +38,7 @@ class AllocatorMap {
   }
 
   ~AllocatorMap() {
+    LOG(INFO) << "Destroying Symmetric Memory Allocators";
     is_finalizing_ = true;
   }
 
@@ -280,6 +281,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(
       "nvshmem_all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor(a!) in_out_splits, str group_name) -> Tensor(a!)");
+  m.def(
+      "nvshmem_all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor(a!) in_out_splits, str group_name, int? major_align=None) -> Tensor(a!)");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {
