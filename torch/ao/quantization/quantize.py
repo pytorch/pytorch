@@ -2,6 +2,7 @@
 import copy
 import inspect
 import itertools
+import typing_extensions
 import warnings
 
 import torch
@@ -30,7 +31,11 @@ from torch.ao.quantization.quantization_mappings import (
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.nn.utils.parametrize import type_before_parametrizations
 
-from .utils import get_qparam_dict, has_no_children_ignoring_parametrizations
+from .utils import (
+    DEPRECATION_WARNING,
+    get_qparam_dict,
+    has_no_children_ignoring_parametrizations,
+)
 
 
 __all__ = [
@@ -332,6 +337,7 @@ def add_quant_dequant(module):
     return module
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def prepare(
     model,
     inplace=False,
@@ -442,6 +448,7 @@ def _remove_qconfig(module):
     _remove_activation_post_process(module)
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     r"""Quantize the input float model with post training static quantization.
 
@@ -471,6 +478,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     return model
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def quantize_dynamic(
     model, qconfig_spec=None, dtype=torch.qint8, mapping=None, inplace=False
 ):
@@ -561,6 +569,7 @@ def quantize_dynamic(
     return model
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def prepare_qat(model, mapping=None, inplace=False):
     r"""
     Prepares a copy of the model for quantization calibration or
@@ -590,6 +599,7 @@ def prepare_qat(model, mapping=None, inplace=False):
     return model
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def quantize_qat(model, run_fn, run_args, inplace=False):
     r"""Do quantization aware training and output a quantized model
 
@@ -613,6 +623,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     return model
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def convert(
     module,
     mapping=None,

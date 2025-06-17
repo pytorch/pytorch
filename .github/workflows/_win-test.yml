@@ -91,7 +91,7 @@ jobs:
             To start tests locally, change working folder to \actions-runner\_work\pytorch\pytorch\test,
             Activate miniconda and Visual Studio environment and set PYTHON_PATH, by running:
               call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
-              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
               set PYTHONPATH=C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build
 
       # [see note: pytorch repo ref]
@@ -191,8 +191,8 @@ jobs:
           NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
-          VS_VERSION: "16.8.6"
-          VC_YEAR: "2019"
+          VS_VERSION: "17.4.1"
+          VC_YEAR: "2022"
           AWS_DEFAULT_REGION: us-east-1
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_REPOSITORY: ${{ github.repository }}

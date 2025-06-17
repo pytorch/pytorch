@@ -611,6 +611,7 @@ Args:
     {input}
 
 Example::
+
     >>> x = torch.arange(4, dtype=torch.float)
     >>> A = torch.complex(x, x).reshape(2, 2)
     >>> A
@@ -792,13 +793,19 @@ Example::
 add_docstr(
     torch.all,
     r"""
-all(input: Tensor) -> Tensor
+all(input: Tensor, *, out=None) -> Tensor
 
 Tests if all elements in :attr:`input` evaluate to `True`.
 
 .. note:: This function matches the behaviour of NumPy in returning
           output of dtype `bool` for all supported dtypes except `uint8`.
           For `uint8` the dtype of output is `uint8` itself.
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -854,6 +861,12 @@ Tests if any element in :attr:`input` evaluates to `True`.
 .. note:: This function matches the behaviour of NumPy in returning
           output of dtype `bool` for all supported dtypes except `uint8`.
           For `uint8` the dtype of output is `uint8` itself.
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -2038,6 +2051,7 @@ Args:
     indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
+
     >>> t = torch.arange(16.0).reshape(4,4)
     >>> t
     tensor([[ 0.,  1.,  2.,  3.],
@@ -2087,6 +2101,7 @@ Args:
     indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
+
     >>> t = torch.arange(16.0).reshape(4,4)
     >>> t
     tensor([[ 0.,  1.,  2.,  3.],
@@ -2128,6 +2143,7 @@ Args:
     indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
+
     >>> t = torch.arange(16.0).reshape(2, 2, 4)
     >>> t
     tensor([[[ 0.,  1.,  2.,  3.],
@@ -2283,6 +2299,7 @@ Returns:
         :func:`torch.corrcoef` normalized covariance matrix.
 
 Example::
+
     >>> x = torch.tensor([[0, 2], [1, 1], [2, 0]]).T
     >>> x
     tensor([[0, 1, 2],
@@ -4465,6 +4482,7 @@ Keyword args:
     {pin_memory}
 
 Example::
+
     >>> t = torch.randn(2, 5, dtype=torch.float64)
     >>> t.numpy().tofile('storage.pt')
     >>> t_mapped = torch.from_file('storage.pt', shared=False, size=10, dtype=torch.float64)
@@ -5136,6 +5154,7 @@ Returns:
     bin_edges(Tensor[]): sequence of N 1D Tensors containing the bin edges.
 
 Example::
+
     >>> torch.histogramdd(torch.tensor([[0., 1.], [1., 0.], [2., 0.], [2., 2.]]), bins=[3, 3],
     ...                   weight=torch.tensor([1., 2., 4., 8.]))
         torch.return_types.histogramdd(
@@ -6488,12 +6507,15 @@ Alias for :func:`torch.linalg.matrix_exp`.
 add_docstr(
     torch.max,
     r"""
-max(input) -> Tensor
+max(input, *, out=None) -> Tensor
 
 Returns the maximum value of all elements in the ``input`` tensor.
 
 Args:
     {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -7103,12 +7125,15 @@ Example::
 add_docstr(
     torch.min,
     r"""
-min(input) -> Tensor
+min(input, *, out=None) -> Tensor
 
 Returns the minimum value of all elements in the :attr:`input` tensor.
 
 Args:
     {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -10024,6 +10049,7 @@ Keyword args:
     {check_invariants}
 
 Example::
+
     >>> compressed_indices = [0, 2, 4]
     >>> plain_indices = [0, 1, 0, 1]
     >>> values = [1, 2, 3, 4]
@@ -10084,6 +10110,7 @@ Keyword args:
     {check_invariants}
 
 Example::
+
     >>> crow_indices = [0, 2, 4]
     >>> col_indices = [0, 1, 0, 1]
     >>> values = [1, 2, 3, 4]
@@ -10146,6 +10173,7 @@ Keyword args:
     {check_invariants}
 
 Example::
+
     >>> ccol_indices = [0, 2, 4]
     >>> row_indices = [0, 1, 0, 1]
     >>> values = [1, 2, 3, 4]
@@ -10210,6 +10238,7 @@ Keyword args:
     {check_invariants}
 
 Example::
+
     >>> crow_indices = [0, 1, 2]
     >>> col_indices = [0, 1]
     >>> values = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
@@ -10276,6 +10305,7 @@ Keyword args:
     {check_invariants}
 
 Example::
+
     >>> ccol_indices = [0, 1, 2]
     >>> row_indices = [0, 1]
     >>> values = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
@@ -10532,7 +10562,8 @@ Example:
     ...     [[ 0.2035,  1.2959,  1.8101, -0.4644],
     ...      [ 1.5027, -0.3270,  0.5905,  0.6538],
     ...      [-1.5745,  1.3330, -0.5596, -0.6548],
-    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]])
+    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]]
+    ... )  # fmt: skip
     >>> torch.std(a, dim=1, keepdim=True)
     tensor([[1.0311],
             [0.7477],
@@ -10590,7 +10621,8 @@ Example:
     ...     [[ 0.2035,  1.2959,  1.8101, -0.4644],
     ...      [ 1.5027, -0.3270,  0.5905,  0.6538],
     ...      [-1.5745,  1.3330, -0.5596, -0.6548],
-    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]])
+    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]]
+    ... )  # fmt: skip
     >>> torch.std_mean(a, dim=0, keepdim=True)
     (tensor([[1.2620, 1.0028, 1.0957, 0.6038]]),
      tensor([[ 0.0645,  0.4485,  0.8707, -0.0665]]))
@@ -11878,7 +11910,8 @@ Example:
     ...     [[ 0.2035,  1.2959,  1.8101, -0.4644],
     ...      [ 1.5027, -0.3270,  0.5905,  0.6538],
     ...      [-1.5745,  1.3330, -0.5596, -0.6548],
-    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]])
+    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]]
+    ... )  # fmt: skip
     >>> torch.var(a, dim=1, keepdim=True)
     tensor([[1.0631],
             [0.5590],
@@ -11935,7 +11968,8 @@ Example:
     ...     [[ 0.2035,  1.2959,  1.8101, -0.4644],
     ...      [ 1.5027, -0.3270,  0.5905,  0.6538],
     ...      [-1.5745,  1.3330, -0.5596, -0.6548],
-    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]])
+    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]]
+    ... )  # fmt: skip
     >>> torch.var_mean(a, dim=0, keepdim=True)
     (tensor([[1.5926, 1.0056, 1.2005, 0.3646]]),
      tensor([[ 0.0645,  0.4485,  0.8707, -0.0665]]))

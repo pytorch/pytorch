@@ -91,7 +91,7 @@ struct CUDACachingHostAllocatorImpl
           at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
     }
 
-    auto start = std::chrono::system_clock::now();
+    auto start = std::chrono::steady_clock::now();
     bool use_register = c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_use_cuda_host_register();
     if (use_register) {
       allocWithCudaHostRegister(ptr, size);
@@ -99,40 +99,45 @@ struct CUDACachingHostAllocatorImpl
       // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
       C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
     }
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(*ptr) == 0);
-    use_host_register[*ptr] = use_register;
 
-    auto end = std::chrono::system_clock::now();
+    auto end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
     // Update the statistics on the time spent on cudaHostAlloc/hostRegister
     {
       std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(*ptr) == 0);
+      use_host_register[*ptr] = use_register;
       stats_.host_alloc_time.increase(duration.count());
     }
   }
 
   void free_block(Block* block) override {
-    auto start = std::chrono::system_clock::now();
+    auto start = std::chrono::steady_clock::now();
     // Users may change the allocator config at will. torch unit tests do this.
     // However, allocations using cudaHostRegister should use corresonding
     // cudaHostUnregister and similarly for cudaHostAlloc / cudaFreeHost.
     void* ptr = block->ptr_;
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(ptr) == 1);
-    if (use_host_register[ptr]) {
+    bool use_register = false;
+    {
+      std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(ptr) == 1);
+      use_register = use_host_register[ptr];
+    }
+    if (use_register) {
       AT_CUDA_CHECK(cudaHostUnregister(ptr));
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       std::free(ptr);
     } else {
       AT_CUDA_CHECK(cudaFreeHost(ptr));
     }
-    use_host_register.erase(ptr);
-    auto end = std::chrono::system_clock::now();
+    auto end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
     // Update the statistics on the time spent on cudaFreeHost/hostUnregister
     {
       std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      use_host_register.erase(ptr);
       stats_.host_free_time.increase(duration.count());
     }
   }

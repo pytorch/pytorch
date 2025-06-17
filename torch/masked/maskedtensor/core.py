@@ -174,7 +174,7 @@ class MaskedTensor(torch.Tensor):
                 UserWarning,
                 stacklevel=2,
             )
-        return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
+        return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)
 
     def _preprocess_data(self, data, mask):
         from .._ops import _sparse_coo_where, _sparse_csr_where

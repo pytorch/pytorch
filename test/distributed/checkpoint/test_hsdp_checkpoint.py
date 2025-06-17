@@ -5,16 +5,17 @@ import torch
 import torch.distributed.checkpoint as dist_cp
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed._tensor import init_device_mesh, Replicate
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
     DefaultSavePlanner,
 )
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     ShardingStrategy,
     StateDictType,
 )
+from torch.distributed.tensor import Replicate
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,

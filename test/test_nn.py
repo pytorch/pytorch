@@ -10498,6 +10498,17 @@ class TestNNDeviceType(NNTestCase):
         expected_ones = F.log_softmax(logits, dim=1).exp().sum(dim=1)
         self.assertEqual(expected_ones, torch.ones_like(expected_ones))
 
+        # backward
+        logits = torch.randn(5, 513, dtype=dtype, device=device, requires_grad=True)
+        out = F.log_softmax(logits, dim=1)
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        logits_cpu = logits.detach().cpu()
+        logits_cpu.requires_grad = True
+        out_cpu = F.log_softmax(logits_cpu, dim=1)
+        out_cpu.backward(grad.detach().cpu())
+        self.assertEqual(logits.grad, logits_cpu.grad)
+
     @onlyCUDA
     @dtypes(torch.half)
     @largeTensorTest("20GB")
@@ -11523,7 +11534,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
-    def test_ctc_loss_cudnn_tensor(self, device):
+    def test_ctc_loss_cudnn_tensor_cuda(self):
         batch_size = 16
         input_length = 30
         num_labels = 101
@@ -11548,6 +11559,36 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
+
+    @onlyCUDA
+    @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
+    def test_ctc_loss_cudnn_tensor_cpu_length_cuda(self):
+        # batch size
+        N = 50
+        # audio length
+        T = 100
+        # text dimension
+        C = 80
+        # max text length
+        S = 10
+
+        prob_device = torch.device("cuda")
+        other_device = torch.device("cpu")
+        other_dtype = torch.int32
+
+        log_probs = torch.randn(T, N, C).log_softmax(2).to(prob_device)
+
+        input_lengths = torch.full((N,), T, dtype=other_dtype).to(other_device)
+        target_lengths = torch.randint(low=1, high=S, size=(N,), dtype=other_dtype).to(other_device)
+        targets = torch.randint(low=0, high=C, size=(sum(target_lengths),), dtype=other_dtype).to(other_device)
+
+        ctc_loss = torch.nn.functional.ctc_loss(
+            log_probs=log_probs,
+            targets=targets,
+            input_lengths=input_lengths,
+            target_lengths=target_lengths,
+            reduction="sum",
+        )
 
     @expectedFailureMPS
     def test_ctc_loss_error(self, device):
@@ -11632,6 +11673,8 @@ class TestNNDeviceType(NNTestCase):
                 prec = dtype2prec_DONTUSE[dtype]
                 if dtype == torch.float16:
                     prec = 4e-2
+                elif dtype == torch.float32:
+                    prec = 2e-4
                 self.assertEqual(p1.grad, p2.grad, atol=prec, rtol=0)
 
         tests = [
@@ -13086,6 +13129,16 @@ if __name__ == '__main__':
         clip_grad_norm_(p1, max_norm, norm_type=norm_type, foreach=foreach)
         clip_grad_norm_([p2], max_norm, norm_type=norm_type, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
+
+        # Should warning when parameters generator exhausted
+        params = l.parameters()
+        for p in params:
+            pass
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            clip_grad_norm_(params, max_norm, norm_type=norm_type, foreach=foreach)
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "`parameters` is an empty generator, no gradient clipping will occur.")
 
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA

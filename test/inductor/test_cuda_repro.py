@@ -1569,6 +1569,19 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(o1, o2)
 
+    def test_sorted_masks(self):
+        @torch.compile()
+        def foo(x, y):
+            return (x + y).sum(dim=1)
+
+        x = torch.rand([255, 255], device="cuda")
+        y = torch.rand([255, 255], device="cuda")
+
+        _, code = run_and_get_code(foo, x, y)
+        FileCheck().check("tl.load").check_same("r0_mask").check_same("xmask").run(
+            code[0]
+        )
+
     def test_cat_int8_one_kernel(self):
         @torch.compile()
         def cat(inps):
@@ -1626,6 +1639,24 @@ class CudaReproTests(TestCase):
         ]
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
+
+    def test_mutated_aligned_tensor(self):
+        t = torch.rand(4096, device="cuda", dtype=torch.float16)
+
+        def foo(x):
+            return x.add_(1)
+
+        foo_c = torch.compile(dynamic=False)(foo)
+
+        t_orig = t.clone()
+
+        # First invocation, assume alignment, second invocation,
+        # copy to alignment and then mutate after fn invocation
+        self.assertEqual(foo_c(t[:-1]), foo(t_orig[:-1]))
+        self.assertEqual(t, t_orig)
+
+        self.assertEqual(foo_c(t[1:]), foo(t_orig[1:]))
+        self.assertEqual(t, t_orig)
 
     def test_non_commutative_scan_op(self):
         from torch._higher_order_ops.associative_scan import associative_scan
@@ -1931,16 +1962,19 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         def foo(x0):
             x1 = x0 + 1
-            x2 = x1.view(dtype)
+            x2 = x1.view(dtype).view([16 * 16])
             return x2
 
         x0 = torch.randint(0, 255, (16, 16), device=device, dtype=torch.uint8)
         foo_c = torch.compile(foo, backend="inductor", fullgraph=True)
 
         with torch.no_grad():
-            y_c = foo_c(x0)
+            result, code = run_and_get_code(foo_c, x0)
 
-        self.assertEqual(foo(x0), y_c)
+        FileCheck().check("call").check_not("torch.ops.aten.reshape.default(").run(
+            code[0]
+        )
+        self.assertEqual(foo(x0), result)
 
     @unittest.skipIf(
         not config.is_fbcode(),

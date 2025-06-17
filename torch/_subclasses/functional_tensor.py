@@ -118,7 +118,7 @@ class FunctionalTensor(torch.Tensor):
             FunctionalTensor._extra_dispatch_keys & torch._C._dispatch_keys(elem)
         )
 
-        out = torch.Tensor._make_wrapper_subclass(  # type: ignore[arg-type, attr-defined]
+        out = torch.Tensor._make_wrapper_subclass(
             # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
             # Calling the overload that has kwargs causes us to go down the first overload path,
             # which will **always** specialize sizes.

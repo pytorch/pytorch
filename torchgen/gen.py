@@ -9,6 +9,7 @@ from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, TYPE_CHECKING, TypeVar
+from typing_extensions import assert_never
 
 import yaml
 
@@ -84,7 +85,6 @@ from torchgen.native_function_generation import (
 )
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import (
-    assert_never,
     concatMap,
     context,
     FileManager,
@@ -2416,6 +2416,7 @@ def gen_source_files(
             header_file_name = f"c_shim_{dispatch_key.lower()}.h"
             new_header = gen_aoti_c_shim(
                 fallback_native_functions,
+                inductor_fallback_ops,
                 structured_func_group_dict,
                 dispatch_key,
                 backend_indices,
@@ -2441,14 +2442,14 @@ indicates an AOTInductor fallback operator ABI backward compatibility breakage!!
 Only in a limited number of situations, this is allowed:
 
 1. You added a fallback op to the inductor_fallback_ops list in torchgen/aoti/fallback_ops.py.
-If that's the case, run `python torchgen/gen.py --update-aoti-c-shim` to update the existing
-C shim header files.
+If that's the case, run `python torchgen/gen.py --update-aoti-c-shim` to add a new entry to
+existing C shim header files.
 
 2. You added a new default argument to an existing fallback op. This is clearly a BC breaking
-change in the AOTInductor land. In this case, you need to keep a manual copy of that existing
-fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/c/shim.h, bump up the version
-number of that fallback op in the newly generated C shim files, and update the cpp wrapper
-codegen to generate the correct cpp call for this op. Contact AOTInductor team for assistance.
+change in the AOTInductor land. You need to annotate the new default argument in
+torchgen/aoti/fallback_ops.py, and then run `python torchgen/gen.py --update-aoti-c-shim` to
+update the C shim header files by creating different versions of the fallback op. See
+https://github.com/pytorch/pytorch/pull/154848 as an example.
 
                         """
                 except FileNotFoundError:
@@ -2479,6 +2480,7 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
                 f"c_shim_{dispatch_key.lower()}.cpp",
                 lambda: gen_aoti_c_shim(
                     fallback_native_functions,
+                    inductor_fallback_ops,
                     structured_func_group_dict,
                     dispatch_key,
                     backend_indices,
@@ -2820,6 +2822,11 @@ def main() -> None:
         action="store_true",
         help="Generate XPU registration code when set",
     )
+    parser.add_argument(
+        "--mtia",
+        action="store_true",
+        help="Generate MTIA registration code when set",
+    )
 
     # TODO: --op-registration-whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
@@ -2918,6 +2925,12 @@ def main() -> None:
         if DispatchKey.XPU in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.XPU)]
 
+    if not options.mtia:
+        ignore_keys.add(DispatchKey.MTIA)
+
+        if DispatchKey.MTIA in dispatch_keys:
+            del dispatch_keys[dispatch_keys.index(DispatchKey.MTIA)]
+
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
     native_functions, backend_indices = (
@@ -2977,6 +2990,7 @@ def main() -> None:
         DispatchKey.CompositeExplicitAutograd,
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.Meta,
+        DispatchKey.MTIA,
     }
 
     aoti_backends = {
@@ -2986,6 +3000,7 @@ def main() -> None:
 
     if options.mps:
         functions_keys.add(DispatchKey.MPS)
+        aoti_backends.add(DispatchKey.MPS)
 
     if options.xpu:
         functions_keys.add(DispatchKey.XPU)

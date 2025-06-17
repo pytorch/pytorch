@@ -770,6 +770,11 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
 
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
+  const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
+  const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
+  TORCH_CHECK_VALUE(has_running_mean == has_running_var,
+    "running_mean and running_var must either both be None or neither be None");
+
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;

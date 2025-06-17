@@ -3,6 +3,7 @@
 import contextlib
 import importlib.util
 import os
+import re
 import tempfile
 
 import torch._dynamo.config
@@ -52,6 +53,104 @@ class PgoTest(torch._dynamo.test_case.TestCase):
 
         f(torch.randn(2, 5))
         f(torch.randn(2, 6))
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_whitelist_suggestion(self):
+        cnts = CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+                self.attr = torch.randn(4)
+
+            def forward(self, x, y):
+                return self.lin(x) + self.attr + y
+
+        sources = [
+            "L['x']",
+            "L['self']._modules['lin']._parameters['weight']",
+            "L['self']._modules['lin']._parameters['bias']",
+            "L['self'].attr",
+            "L['y']",
+        ]
+
+        def check_whitelist(sources_):
+            state = torch._dynamo.pgo.render_code_state(
+                torch._dynamo.pgo.get_code_state()
+            )
+            whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(
+                1
+            )
+            for src in sources_:
+                self.assertTrue(src in whitelist)
+
+        # check growing whitelist
+        f = Foo()
+        f(torch.randn(2, 4), torch.randn(4))
+        # only x
+        f(torch.randn(4, 4), torch.randn(4))
+        check_whitelist(sources[:1])
+        # x, lin.weight
+        f.lin = torch.nn.Linear(8, 4)
+        f(torch.randn(8, 8), torch.randn(4))
+        check_whitelist(sources[:2])
+        # x, y, lin.weight, lin.bias, attr
+        f.lin = torch.nn.Linear(8, 8)
+        f.attr = torch.randn(8)
+        f(torch.randn(8, 8), torch.randn(8))
+        check_whitelist(sources)
+
+        # now use suggested whitelist
+        self.reset()
+        cnts.clear()
+        state = torch._dynamo.pgo.render_code_state(torch._dynamo.pgo.get_code_state())
+        whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(1)
+        with torch.compiler.config.patch(dynamic_sources=whitelist):
+            f = Foo()
+            f(torch.randn(2, 4), torch.randn(4))
+            f(torch.randn(4, 4), torch.randn(4))
+            f.lin = torch.nn.Linear(8, 8)
+            f.attr = torch.randn(8)
+            f(torch.randn(8, 8), torch.randn(8))
+            self.assertEqual(cnts.frame_count, 1)
+
+    def test_pgo_dynamic_params(self):
+        cnts = CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = None
+
+            def forward(self, x):
+                return self.lin(x)
+
+        f = Foo()
+
+        def run():
+            self.reset()
+            cnts.clear()
+            f.lin = torch.nn.Linear(4, 4)
+            f(torch.randn(2, 4))
+            f(torch.randn(4, 4))
+            f.lin = torch.nn.Linear(8, 8)
+            f(torch.randn(8, 8))
+
+        # recompile each run
+        run()
+        self.assertEqual(cnts.frame_count, 3)
+
+        # parameter static shapes are forced static, so we recompile once
+        run()
+        self.assertEqual(cnts.frame_count, 2)
+
+        # flags are flipped, PGO records dynamism, so params are dynamically compiled to start
+        torch._dynamo.config.force_parameter_static_shapes = False
+        torch._dynamo.config.force_nn_module_property_static_shapes = False
+        run()
         self.assertEqual(cnts.frame_count, 1)
 
     def test_njt(self):

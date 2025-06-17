@@ -19,9 +19,8 @@ from torch.distributed._functional_collectives import (
     reduce_scatter_tensor,
 )
 from torch.distributed._symmetric_memory import _test_mode
-from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.placement_types import Shard
 from torch.distributed.distributed_c10d import _get_group_size_by_name
+from torch.distributed.tensor import DeviceMesh, Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,

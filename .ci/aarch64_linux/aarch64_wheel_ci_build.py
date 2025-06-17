@@ -31,33 +31,47 @@ def build_ArmComputeLibrary() -> None:
         "build=native",
     ]
     acl_install_dir = "/acl"
-    acl_checkout_dir = "ComputeLibrary"
-    os.makedirs(acl_install_dir)
-    check_call(
-        [
-            "git",
-            "clone",
-            "https://github.com/ARM-software/ComputeLibrary.git",
-            "-b",
-            "v25.02",
-            "--depth",
-            "1",
-            "--shallow-submodules",
-        ]
-    )
+    acl_checkout_dir = os.getenv("ACL_SOURCE_DIR", "ComputeLibrary")
+    if os.path.isdir(acl_install_dir):
+        shutil.rmtree(acl_install_dir)
+    if not os.path.isdir(acl_checkout_dir) or not len(os.listdir(acl_checkout_dir)):
+        check_call(
+            [
+                "git",
+                "clone",
+                "https://github.com/ARM-software/ComputeLibrary.git",
+                "-b",
+                "v25.02",
+                "--depth",
+                "1",
+                "--shallow-submodules",
+            ]
+        )
 
     check_call(
-        ["scons", "Werror=1", "-j8", f"build_dir=/{acl_install_dir}/build"]
-        + acl_build_flags,
+        ["scons", "Werror=1", f"-j{os.cpu_count()}"] + acl_build_flags,
         cwd=acl_checkout_dir,
     )
-    for d in ["arm_compute", "include", "utils", "support", "src"]:
+    for d in ["arm_compute", "include", "utils", "support", "src", "build"]:
         shutil.copytree(f"{acl_checkout_dir}/{d}", f"{acl_install_dir}/{d}")
 
 
-def update_wheel(wheel_path, desired_cuda) -> None:
+def replace_tag(filename) -> None:
+    with open(filename) as f:
+        lines = f.readlines()
+    for i, line in enumerate(lines):
+        if line.startswith("Tag:"):
+            lines[i] = line.replace("-linux_", "-manylinux_2_28_")
+            print(f"Updated tag from {line} to {lines[i]}")
+            break
+
+    with open(filename, "w") as f:
+        f.writelines(lines)
+
+
+def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     """
-    Update the cuda wheel libraries
+    Package the cuda wheel libraries
     """
     folder = os.path.dirname(wheel_path)
     wheelname = os.path.basename(wheel_path)
@@ -88,30 +102,19 @@ def update_wheel(wheel_path, desired_cuda) -> None:
         "/usr/lib64/libgfortran.so.5",
         "/acl/build/libarm_compute.so",
         "/acl/build/libarm_compute_graph.so",
+        "/usr/local/lib/libnvpl_lapack_lp64_gomp.so.0",
+        "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0",
+        "/usr/local/lib/libnvpl_lapack_core.so.0",
+        "/usr/local/lib/libnvpl_blas_core.so.0",
     ]
-    if enable_cuda:
+
+    if "128" in desired_cuda:
         libs_to_copy += [
-            "/usr/local/lib/libnvpl_lapack_lp64_gomp.so.0",
-            "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0",
-            "/usr/local/lib/libnvpl_lapack_core.so.0",
-            "/usr/local/lib/libnvpl_blas_core.so.0",
+            "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.8",
+            "/usr/local/cuda/lib64/libcufile.so.0",
+            "/usr/local/cuda/lib64/libcufile_rdma.so.1",
         ]
-        if "126" in desired_cuda:
-            libs_to_copy += [
-                "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.6",
-                "/usr/local/cuda/lib64/libcufile.so.0",
-                "/usr/local/cuda/lib64/libcufile_rdma.so.1",
-            ]
-        elif "128" in desired_cuda:
-            libs_to_copy += [
-                "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.8",
-                "/usr/local/cuda/lib64/libcufile.so.0",
-                "/usr/local/cuda/lib64/libcufile_rdma.so.1",
-            ]
-    else:
-        libs_to_copy += [
-            "/opt/OpenBLAS/lib/libopenblas.so.0",
-        ]
+
     # Copy libraries to unzipped_folder/a/lib
     for lib_path in libs_to_copy:
         lib_name = os.path.basename(lib_path)
@@ -120,6 +123,13 @@ def update_wheel(wheel_path, desired_cuda) -> None:
             f"cd {folder}/tmp/torch/lib/; "
             f"patchelf --set-rpath '$ORIGIN' --force-rpath {folder}/tmp/torch/lib/{lib_name}"
         )
+
+    # Make sure the wheel is tagged with manylinux_2_28
+    for f in os.scandir(f"{folder}/tmp/"):
+        if f.is_dir() and f.name.endswith(".dist-info"):
+            replace_tag(f"{f.path}/WHEEL")
+            break
+
     os.mkdir(f"{folder}/cuda_wheel")
     os.system(f"cd {folder}/tmp/; zip -r {folder}/cuda_wheel/{wheelname} *")
     shutil.move(
@@ -194,8 +204,10 @@ if __name__ == "__main__":
     ).decode()
 
     print("Building PyTorch wheel")
-    build_vars = "MAX_JOBS=5 CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
-    os.system("cd /pytorch; python setup.py clean")
+    build_vars = "CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
+    # MAX_JOB=5 is not required for CPU backend (see commit 465d98b)
+    if enable_cuda:
+        build_vars = "MAX_JOBS=5 " + build_vars
 
     override_package_version = os.getenv("OVERRIDE_PACKAGE_VERSION")
     desired_cuda = os.getenv("DESIRED_CUDA")
@@ -242,6 +254,6 @@ if __name__ == "__main__":
         print("Updating Cuda Dependency")
         filename = os.listdir("/pytorch/dist/")
         wheel_path = f"/pytorch/dist/{filename[0]}"
-        update_wheel(wheel_path, desired_cuda)
+        package_cuda_wheel(wheel_path, desired_cuda)
     pytorch_wheel_name = complete_wheel("/pytorch/")
     print(f"Build Complete. Created {pytorch_wheel_name}..")

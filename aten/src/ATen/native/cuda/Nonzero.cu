@@ -300,7 +300,7 @@ void nonzero_static_cuda_out_impl(
     int64_t size,
     int64_t fill_value,
     Tensor& out) {
-# if (defined(CUDA_VERSION) && CUDA_VERSION > 11040) || defined(USE_ROCM)
+#if defined(CUDA_VERSION) || defined(USE_ROCM)
 
   Tensor self_contiguous_ = self.contiguous();
   // see comment in nonzero_cuda_out_impl on reqs for out

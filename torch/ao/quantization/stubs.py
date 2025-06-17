@@ -1,6 +1,11 @@
-# mypy: allow-untyped-defs
+from typing import Any, Optional
 
+import torch
 from torch import nn
+from torch.ao.quantization import QConfig
+
+
+__all__ = ["QuantStub", "DeQuantStub", "QuantWrapper"]
 
 
 class QuantStub(nn.Module):
@@ -12,12 +17,12 @@ class QuantStub(nn.Module):
             if qconfig is not provided, we will get qconfig from parent modules
     """
 
-    def __init__(self, qconfig=None):
+    def __init__(self, qconfig: Optional[QConfig] = None):
         super().__init__()
         if qconfig:
             self.qconfig = qconfig
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x
 
 
@@ -30,12 +35,12 @@ class DeQuantStub(nn.Module):
             if qconfig is not provided, we will get qconfig from parent modules
     """
 
-    def __init__(self, qconfig=None):
+    def __init__(self, qconfig: Optional[Any] = None):
         super().__init__()
         if qconfig:
             self.qconfig = qconfig
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x
 
 
@@ -54,7 +59,7 @@ class QuantWrapper(nn.Module):
     dequant: DeQuantStub
     module: nn.Module
 
-    def __init__(self, module):
+    def __init__(self, module: nn.Module):
         super().__init__()
         qconfig = getattr(module, "qconfig", None)
         self.add_module("quant", QuantStub(qconfig))
@@ -62,7 +67,7 @@ class QuantWrapper(nn.Module):
         self.add_module("module", module)
         self.train(module.training)
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
         X = self.quant(X)
         X = self.module(X)
         return self.dequant(X)
