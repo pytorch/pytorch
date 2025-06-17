@@ -8800,6 +8800,7 @@ class TestAutoFunctionalizeControlFlow(TestCase):
         return backend.fw_graphs[0]
 
     @requires_cuda
+    @unittest.skipIf(not SM70OrLater, "triton")
     @parametrize("device", ["cuda", "cpu"])
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_input_mutation(self, device, dynamic):
@@ -8854,6 +8855,7 @@ class <lambda>(torch.nn.Module):
             )
 
     @requires_cuda
+    @unittest.skipIf(not SM70OrLater, "triton")
     @parametrize("device", ["cuda", "cpu"])
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_buffer_mutation(self, device, dynamic):
@@ -8917,6 +8919,7 @@ class <lambda>(torch.nn.Module):
             )
 
     @requires_cuda
+    @unittest.skipIf(not SM70OrLater, "triton")
     @parametrize("device", ["cuda", "cpu"])
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_union_input_mutation(self, device, dynamic):
