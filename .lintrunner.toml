@@ -154,7 +154,7 @@ init_command = [
     'numpy==1.26.4 ; python_version >= "3.9" and python_version <= "3.11"',
     'numpy==2.1.0 ; python_version >= "3.12"',
     'expecttest==0.3.0',
-    'mypy==1.15.0',
+    'mypy==1.16.0',
     'sympy==1.13.3',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
@@ -1134,6 +1134,46 @@ init_command = [
     'PyYAML==6.0.1',
 ]
 
+[[linter]]
+code = 'CODESPELL'
+command = [
+    'python3',
+    'tools/linter/adapters/codespell_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    '**',
+]
+exclude_patterns = [
+    # We don't care too much about files in this directory, don't enforce
+    # spelling on them
+    'caffe2/**',
+    'fb/**',
+    '**/fb/**',
+    'third_party/**',
+    'test/dynamo/cpython/**',
+    'torch/_vendor/**',
+    'torch/_inductor/fx_passes/serialized_patterns/**',
+    'torch/_inductor/autoheuristic/artifacts/**',
+    # These files are all grandfathered in, feel free to remove from this list
+    # as necessary
+    'aten/**',
+    'c10/**',
+    'docs/**',
+    'functorch/**',
+    'scripts/**',
+    'test/**',
+    'torch/**',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'codespell[toml]==2.4.1',
+]
+is_formatter = true
+
 # usort + ruff-format
 [[linter]]
 code = 'PYFMT'
@@ -1267,10 +1307,6 @@ exclude_patterns = [
     'test/test_unary_ufuncs.py',
     'test/test_vulkan.py',
     'torch/_awaits/__init__.py',
-    'torch/_custom_op/__init__.py',
-    'torch/_custom_op/autograd.py',
-    'torch/_custom_op/functional.py',
-    'torch/_custom_op/impl.py',
     'torch/_export/__init__.py',
     'torch/_export/constraints.py',
     'torch/_export/db/__init__.py',
@@ -1308,17 +1344,6 @@ exclude_patterns = [
     'torch/_export/db/examples/type_reflection_method.py',
     'torch/_export/db/gen_example.py',
     'torch/_export/db/logging.py',
-    'torch/_export/error.py',
-    'torch/_export/exported_program.py',
-    'torch/_export/pass_base.py',
-    'torch/_export/pass_infra/__init__.py',
-    'torch/_export/pass_infra/node_metadata.py',
-    'torch/_export/pass_infra/proxy_value.py',
-    'torch/_export/passes/__init__.py',
-    'torch/_export/passes/add_runtime_assertions_for_constraints_pass.py',
-    'torch/_export/passes/const_prop_pass.py',
-    'torch/_export/passes/functionalize_side_effectful_ops_pass.py',
-    'torch/_export/passes/replace_sym_size_ops_pass.py',
     'torch/testing/_internal/__init__.py',
     'torch/testing/_internal/autocast_test_lists.py',
     'torch/testing/_internal/autograd_function_db.py',
@@ -1358,19 +1383,6 @@ exclude_patterns = [
     'torch/testing/_internal/test_module/__init__.py',
     'torch/testing/_internal/test_module/future_div.py',
     'torch/testing/_internal/test_module/no_future_div.py',
-    'torch/utils/_contextlib.py',
-    'torch/utils/_cpp_extension_versioner.py',
-    'torch/utils/_crash_handler.py',
-    'torch/utils/_device.py',
-    'torch/utils/_foreach_utils.py',
-    'torch/utils/_freeze.py',
-    'torch/utils/_mode_utils.py',
-    'torch/utils/_python_dispatch.py',
-    'torch/utils/_stats.py',
-    'torch/utils/_traceback.py',
-    'torch/utils/_zip.py',
-    'torch/utils/backcompat/__init__.py',
-    'torch/utils/backend_registration.py',
     'torch/utils/benchmark/__init__.py',
     'torch/utils/benchmark/examples/__init__.py',
     'torch/utils/benchmark/examples/compare.py',
@@ -1443,8 +1455,8 @@ init_command = [
     '--no-black-binary',
     'black==23.12.1',
     'usort==1.0.8.post1',
-    'isort==5.13.2',
-    'ruff==0.11.10',  # sync with RUFF
+    'isort==6.0.1',
+    'ruff==0.11.13',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1535,7 +1547,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.11.10',  # sync with PYFMT
+    'ruff==0.11.13',  # sync with PYFMT
 ]
 is_formatter = true
 
