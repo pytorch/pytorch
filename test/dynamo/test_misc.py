@@ -54,7 +54,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import call_size, counters, ifdynstaticdefault
 from torch._dynamo.variables import builder
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
+from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
@@ -8087,7 +8087,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         m1 = Model(50)
         m2 = Model(60)
-        with fresh_inductor_cache():
+        with fresh_cache():
             m1(torch.rand(1, 2, 3))
             m2(torch.rand(1, 2, 3))
 
