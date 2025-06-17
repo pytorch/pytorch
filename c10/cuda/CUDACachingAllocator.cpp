@@ -2812,7 +2812,7 @@ class DeviceCachingAllocator {
       }
       return bool(p.block);
     } else {
-      if (AllocatorConfig::release_lock_on_device_malloc()) {
+      if (AllocatorConfig::use_release_lock_on_device_malloc()) {
         // At scope exit, acquire the lock again. This provides safety against
         // any potential exceptions in the cudaMallocMaybeCapturing function.
         auto sg = c10::make_scope_exit([&]() { lock.lock(); });
@@ -2821,7 +2821,7 @@ class DeviceCachingAllocator {
       } else {
         p.err = cudaMallocMaybeCapturing(&ptr, size, p);
       }
-      if (AllocatorConfig::release_lock_on_device_malloc()) {
+      if (AllocatorConfig::use_release_lock_on_device_malloc()) {
         TORCH_CHECK(
             lock.owns_lock(), "Failed to acquire lock after cudaMalloc");
       }
@@ -3664,7 +3664,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         AllocatorConfig::pinned_num_register_threads();
     md.expandable_segments = AllocatorConfig::use_expandable_segments();
     md.release_lock_on_malloc =
-        AllocatorConfig::release_lock_on_device_malloc();
+        AllocatorConfig::use_release_lock_on_device_malloc();
     md.pinned_use_host_register =
         AllocatorConfig::pinned_use_device_host_register();
     md.last_allocator_settings = AllocatorConfig::last_allocator_settings();
