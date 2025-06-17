@@ -12,13 +12,14 @@ from torch._higher_order_ops.utils import (
     autograd_not_implemented,
     redirect_to_mode,
     reenter_make_fx,
+    register_fake,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
     UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.proxy_tensor import (
     make_fx,
@@ -470,27 +471,8 @@ def flex_attention_functionalize(
     return ctx.wrap_tensors(out)  # type: ignore[return-value, arg-type]
 
 
+@register_fake(flex_attention)
 def flex_attention_fake_impl(
-    query: torch.Tensor, value: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor]:
-    # TODO: Figure out a better way to handle this for NJT than using sum()
-    if query.is_nested:
-        out = torch.empty_like(query, memory_format=torch.contiguous_format)
-        logsumexp = query.sum(dim=-1)
-        return out, logsumexp
-
-    v_head_dim = value.size(-1)
-    batch_size, num_heads, seq_len_q, _q_head_dim = query.shape
-    logsumexp = query.new_empty(batch_size, num_heads, seq_len_q, dtype=torch.float32)
-    out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
-    out = query.new_empty(out_shape)
-    out = _permute_strides(out, query.stride())
-    return out, logsumexp
-
-
-@flex_attention.py_impl(FakeTensorMode)
-def flex_attention_fake_tensor_mode(
-    mode: FakeTensorMode,
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -522,9 +504,20 @@ def flex_attention_fake_tensor_mode(
         for a in flat_args
     ):
         return NotImplemented
-    with mode:
-        out, logsumexp = flex_attention_fake_impl(query, value)
+
+    # TODO: Figure out a better way to handle this for NJT than using sum()
+    if query.is_nested:
+        out = torch.empty_like(query, memory_format=torch.contiguous_format)
+        logsumexp = query.sum(dim=-1)
         return out, logsumexp
+
+    v_head_dim = value.size(-1)
+    batch_size, num_heads, seq_len_q, _q_head_dim = query.shape
+    logsumexp = query.new_empty(batch_size, num_heads, seq_len_q, dtype=torch.float32)
+    out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
+    out = query.new_empty(out_shape)
+    out = _permute_strides(out, query.stride())
+    return out, logsumexp
 
 
 # Registers dispatches for SAC
@@ -1217,9 +1210,8 @@ def flex_attention_backward_functionalize(
     return ctx.wrap_tensors((grad_query, grad_key, grad_value, grad_score_mod_captured))  # type: ignore[return-value,arg-type]
 
 
-@flex_attention_backward.py_impl(FakeTensorMode)
+@register_fake(flex_attention_backward)
 def flex_attention_backward_fake_tensor_mode(
-    mode: FakeTensorMode,
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -1261,39 +1253,36 @@ def flex_attention_backward_fake_tensor_mode(
         for a in flat_args
     ):
         return NotImplemented
-    with mode:
-        Bq, _, _, qk_head_dim = query.shape
-        Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
+    Bq, _, _, qk_head_dim = query.shape
+    Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
 
-        grad_query = torch.empty_like(query)
-        # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
-        grad_score_mod_captured = tuple(
-            [
-                (
-                    torch.empty_like(buffer, memory_format=torch.contiguous_format)
-                    if isinstance(buffer, torch.Tensor) and buffer.requires_grad
-                    else None
-                )
-                for buffer in score_mod_other_buffers
-            ]
-        )
+    grad_query = torch.empty_like(query)
+    # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
+    grad_score_mod_captured = tuple(
+        [
+            (
+                torch.empty_like(buffer, memory_format=torch.contiguous_format)
+                if isinstance(buffer, torch.Tensor) and buffer.requires_grad
+                else None
+            )
+            for buffer in score_mod_other_buffers
+        ]
+    )
 
-        broadcasted_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))
-        broadcasted_grad_key = _permute_strides(broadcasted_grad_key, key.stride())
+    broadcasted_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))
+    broadcasted_grad_key = _permute_strides(broadcasted_grad_key, key.stride())
 
-        broadcasted_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
-        broadcasted_grad_value = _permute_strides(
-            broadcasted_grad_value, value.stride()
-        )
+    broadcasted_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
+    broadcasted_grad_value = _permute_strides(broadcasted_grad_value, value.stride())
 
-        if Bq > 1 and Bkv == 1:
-            grad_key = torch.sum(broadcasted_grad_key, dim=0, keepdim=True)
-            grad_value = torch.sum(broadcasted_grad_value, dim=0, keepdim=True)
-        else:
-            grad_key = broadcasted_grad_key
-            grad_value = broadcasted_grad_value
+    if Bq > 1 and Bkv == 1:
+        grad_key = torch.sum(broadcasted_grad_key, dim=0, keepdim=True)
+        grad_value = torch.sum(broadcasted_grad_value, dim=0, keepdim=True)
+    else:
+        grad_key = broadcasted_grad_key
+        grad_value = broadcasted_grad_value
 
-        return grad_query, grad_key, grad_value, grad_score_mod_captured
+    return grad_query, grad_key, grad_value, grad_score_mod_captured
 
 
 flex_attention_backward.py_autograd_impl(

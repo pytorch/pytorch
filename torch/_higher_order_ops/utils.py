@@ -3,7 +3,7 @@ import contextlib
 import functools
 from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, overload, TypeVar, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -924,6 +924,19 @@ def check_input_alias_and_mutation_return_outputs(
 registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}
 
 
+F = TypeVar("F", bound=Callable)
+
+
+@overload
+def register_fake(hop, fn: None = None) -> Callable[[F], F]:
+    ...
+
+
+@overload
+def register_fake(hop, fn: F) -> F:
+    ...
+
+
 def register_fake(hop, fn=None):
     """
     Register a fake function for a HOP. This is conceptually equivalent of the
@@ -932,7 +945,7 @@ def register_fake(hop, fn=None):
     """
     assert hop not in registered_hop_fake_fns
 
-    def register(func):
+    def register(func: F) -> F:
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         redirect_to_mode(hop, FakeTensorMode)

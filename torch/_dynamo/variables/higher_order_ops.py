@@ -2872,7 +2872,11 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ]
         all_fake_args = pytree.tree_map(unwrap_proxy_to_faketensor, vt_full_args)
 
-        with torch._guards.TracingContext.try_get().fake_mode:
+        tracing_ctx = torch._guards.TracingContext.try_get()
+        assert tracing_ctx is not None, (
+            "Expected tracing context to be set during dynamo execution"
+        )
+        with tracing_ctx.fake_mode:
             example_value = flex_attention(*all_fake_args)
 
         proxied_args = [
