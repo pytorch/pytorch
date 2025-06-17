@@ -38,6 +38,7 @@ class AllocatorMap {
   }
 
   ~AllocatorMap() {
+    LOG(INFO) << "Destroying Symmetric Memory Allocators";
     is_finalizing_ = true;
   }
 
