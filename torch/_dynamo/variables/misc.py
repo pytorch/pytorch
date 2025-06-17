@@ -53,7 +53,6 @@ from ..utils import (
     istype,
     list_methods,
     proxy_args_kwargs,
-    set_example_value,
     tuple_methods,
 )
 from .base import VariableTracker
@@ -234,8 +233,27 @@ class SuperVariable(VariableTracker):
         elif isinstance(inner_fn, classmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
+            if isinstance(self.objvar, variables.UserDefinedClassVariable):
+                # super().classmethod is called from a classmethod itself. So,
+                # super was converted to super(__class__, cls) in bytecode and
+                # therefore we have to propagate the cls.
+                cls_variable = self.objvar
+            else:
+                # current function is an instance method, therefore super was
+                # converted to super(__class__, self). We have to find
+                # type(self) to bind the cls to the parent classmethod.
+                # Note that it can't be the self.typevar because __class__ is
+                # the class where the method is defined, which could be
+                # different from type(self) with polymorphism.
+                cls_source = None
+                if self.objvar.source:
+                    cls_source = AttrSource(self.objvar.source, "__class__")
+                cls_variable = VariableTracker.build(
+                    tx, self.objvar.value_type, cls_source
+                )
+
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.typevar, source=source
+                inner_fn.__func__, cls_variable, source=source
             ).call_function(tx, args, kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
@@ -858,7 +876,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         value,
         value_type=None,
         inference=False,
-        proxy=None,
         saved_tensors=None,
         needs_input_grad=None,
         non_differentiable=None,
@@ -866,7 +883,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
         self.inference = inference
-        self.proxy = proxy
         self.saved_tensors = saved_tensors
         self.needs_input_grad = needs_input_grad
         self.non_differentiable = non_differentiable
@@ -879,23 +895,17 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 isinstance(x, variables.TensorVariable) and x.requires_grad
                 for x in args
             )
-        proxy = tx.output.create_proxy(
-            "call_function", torch.autograd.function.FunctionCtx, (), {}
-        )
         out = tx.output.side_effects.track_object_new(
             None,
             torch.autograd.function.FunctionCtx,
             functools.partial(
                 AutogradFunctionContextVariable,
                 inference=True,
-                proxy=proxy,
                 saved_tensors=SavedTensorBox(),
                 needs_input_grad=needs_input_grad,
             ),
             {},
         )
-        set_example_value(proxy.node, out.value)
-
         return out
 
     def as_proxy(self):
@@ -1159,7 +1169,9 @@ class GetAttrVariable(VariableTracker):
         elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
             if isinstance(self.obj, variables.UserDefinedObjectVariable):
                 # Bypass any custom setattr as we are updating the `__dict__` itself
-                return self.obj.method_setattr_standard(tx, args[0], args[1])
+                return self.obj.method_setattr_standard(
+                    tx, args[0], args[1], directly_update_dict=True
+                )
             if isinstance(self.obj, variables.NNModuleVariable):
                 # This matches how `setattr` is handled for NNModuleVariable
                 self.obj.convert_to_unspecialized(tx)
@@ -1260,7 +1272,10 @@ class PythonModuleVariable(VariableTracker):
             return tx.output.side_effects.load_attr(self, name)
 
         if self.is_torch or name not in self.value.__dict__:
-            attr_value = getattr(self.value, name)
+            try:
+                attr_value = getattr(self.value, name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
         else:
             attr_value = self.value.__dict__[name]
 

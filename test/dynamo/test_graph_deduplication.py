@@ -1,11 +1,17 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa: B950
+import contextlib
+
 import torch
 import torch.fx
-from torch._dynamo.graph_deduplication import _flatten_args_kwargs
 from torch._dynamo.graph_utils import _detect_cycles
 from torch._dynamo.test_case import TestCase
-from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    extract_graph_and_tracker,
+    normalize_gm,
+)
+from torch.utils._ordered_set import OrderedSet
 
 
 def extract_graph(fn, *args, **kwargs):
@@ -19,9 +25,32 @@ def graph_str(gm):
 
 
 class GraphDededuplicationTests(TestCase):
+    def setUp(self):
+        self.exit_stack = contextlib.ExitStack()
+        self.exit_stack.enter_context(
+            torch._dynamo.config.patch("use_graph_deduplication", True)
+        )
+        super().setUp()
+
+    def tearDown(self):
+        self.exit_stack.close()
+        super().tearDown()
+
     def run_and_return_graphs(self, fn, *args, **kwargs):
-        with torch._dynamo.config.patch("use_graph_deduplication", True):
-            return extract_graph(fn, *args, **kwargs)
+        return extract_graph(fn, *args, **kwargs)
+
+    def run_and_get_simple_graph(self):
+        def fn(x, y):
+            x0 = x + 1
+            y0 = y + 2
+            z = x0.sum() + y0.sum()
+            return z
+
+        x = torch.rand(10, 10, requires_grad=False)
+        y = torch.rand(10, 20, requires_grad=False)
+
+        _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
+        return fw_graphs[0]
 
     def test_single_subgraph(self):
         def inner_fn(x, y):
@@ -432,12 +461,6 @@ class GraphModule(torch.nn.Module):
         )
 
     def test_input_mutation(self):
-        def inner_fn(x, y):
-            x0 = x + 1
-            y0 = y + 2
-            z = x0.sum() + y0.sum()
-            return z
-
         def inner_fn2(x, y):
             x0 = x + 1
             y0 = y + 1
@@ -447,9 +470,6 @@ class GraphModule(torch.nn.Module):
 
         def fn(x, y):
             x0 = torch.sin(x)
-            _y0 = torch.cos(y)
-            # o0 = inner_fn(x0, y0)
-            # o1 = inner_fn(x0, o0)
             o2 = inner_fn2(x0, y)
             o3 = inner_fn2(x0.clone(), y.clone())
             return o2 + o3
@@ -583,28 +603,13 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    def test_flatten_with_slices(self):
-        tree = [{"x": 3}, ["x", slice(1, 2, 3), 1], [4, 5, 6, [slice(3, 4, 5)]]]
-        out = _flatten_args_kwargs(tree)
+    def test_cycle_detection_no_cycle(self):
+        mod = self.run_and_get_simple_graph()
         self.assertExpectedInline(
-            str(out), """[3, 'x', 1, 2, 3, 1, 4, 5, 6, 3, 4, 5]"""
+            _detect_cycles(mod.graph, {}), """no cycle detected"""
         )
 
-    def test_cycle_detection_no_cycle(self):
-        def fn(x, y):
-            x0 = x + 1
-            y0 = y + 2
-            z = x0.sum() + y0.sum()
-            return z
-
-        x = torch.rand(10, 10, requires_grad=False)
-        y = torch.rand(10, 20, requires_grad=False)
-
-        _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
-        mod = fw_graphs[0]
-        self.assertExpectedInline(_detect_cycles(mod.graph), """no cycle detected""")
-
-    def test_cycle_detection_simple(self):
+    def test_cycle_detection_single_node(self):
         def fn(x, y):
             x0 = x + 1
             y0 = y + 2
@@ -621,8 +626,64 @@ class <lambda>(torch.nn.Module):
         args = add_node.args
         add_node.args = (args[0], add_2)
         self.assertExpectedInline(
-            _detect_cycles(mod.graph),
-            """cycle detected in path: deque([arg0_1, add, sum_1, add_2, add])""",
+            _detect_cycles(mod.graph, {add_2: OrderedSet([add_2])}),
+            """cycle detected in path: deque([output, add_2, add_2])""",
+        )
+
+    def test_cycle_detection_two_node(self):
+        def fn(x, y):
+            x0 = x + 1
+            y0 = y + 2
+            z = x0.sum() + y0.sum()
+            return z
+
+        x = torch.rand(10, 10, requires_grad=False)
+        y = torch.rand(10, 20, requires_grad=False)
+
+        _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
+        mod = fw_graphs[0]
+        add_node = next(n for n in mod.graph.nodes if n.name == "add")
+        add_2 = next(n for n in mod.graph.nodes if n.name == "add_2")
+        args = add_node.args
+        add_node.args = (args[0], add_2)
+        self.assertExpectedInline(
+            _detect_cycles(
+                mod.graph,
+                {add_2: OrderedSet([add_node]), add_node: OrderedSet([add_2])},
+            ),
+            """cycle detected in path: deque([output, add_2, add, add_2])""",
+        )
+
+    def test_cycle_detection_arg_and_additional_deps(self):
+        def fn(x, y):
+            x0 = x + 1
+            y0 = y + 2
+            z = x0.sum() + y0.sum()
+            return z
+
+        x = torch.rand(10, 10, requires_grad=False)
+        y = torch.rand(10, 20, requires_grad=False)
+
+        _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
+        mod = fw_graphs[0]
+        add_node = next(n for n in mod.graph.nodes if n.name == "add")
+        add_2 = next(n for n in mod.graph.nodes if n.name == "add_2")
+        args = add_node.args
+        add_node.args = (args[0], add_2)
+        self.assertExpectedInline(
+            _detect_cycles(mod.graph, {add_2: OrderedSet([add_node])}),
+            """cycle detected in path: deque([output, add_2, add, add_2])""",
+        )
+
+    def test_cycle_detection_simple(self):
+        mod = self.run_and_get_simple_graph()
+        add_node = next(n for n in mod.graph.nodes if n.name == "add")
+        add_2 = next(n for n in mod.graph.nodes if n.name == "add_2")
+        args = add_node.args
+        add_node.args = (args[0], add_2)
+        self.assertExpectedInline(
+            _detect_cycles(mod.graph, {}),
+            """cycle detected in path: deque([output, add_2, sum_1, add, add_2])""",
         )
 
     def test_cycle_detection_complex(self):
@@ -656,8 +717,8 @@ class <lambda>(torch.nn.Module):
         args = invoke_subgraph_node.args
         invoke_subgraph_node.args = (add_2, args[1])
         self.assertExpectedInline(
-            _detect_cycles(mod.graph),
-            """cycle detected in path: deque([arg0_1, invoke_subgraph_1, getitem_1, sum_2, add_2, invoke_subgraph, getitem, sum_1, add_1, add_2])""",
+            _detect_cycles(mod.graph, {}),
+            """cycle detected in path: deque([output, add_2, add_1, sum_1, getitem, invoke_subgraph, add_2])""",
         )
 
     def test_autocast_ordering(self):
@@ -699,7 +760,7 @@ class <lambda>(torch.nn.Module):
         sum_2 = get_node("sum_2")
         exit_autocast = mod.graph.call_function(torch.amp._exit_autocast)
         sum_2.append(exit_autocast)
-        additional_deps = _populate_additional_deps(mod.graph)
+        additional_deps = _populate_additional_deps(mod.graph, {})
         invoke_subgraph = get_node("invoke_subgraph")
         invoke_subgraph.append(enter_autocast)
         getitem_1 = get_node("getitem_1")
@@ -912,6 +973,137 @@ class <lambda>(torch.nn.Module):
             add: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
             return (add,)
 """,
+        )
+
+    def test_mutation_ordering(self):
+        from torch._dynamo.graph_deduplication import _stable_topological_sort
+
+        def inner_fn(x, y):
+            x0 = x.view(x.size())
+            return x0.view(x.size())
+
+        def inner_fn2(x, y):
+            x = x * 2
+            y = y * 2
+            return x.sum() + y.sum()
+
+        def fn(x, y):
+            o0 = inner_fn(x, y)
+            o1 = inner_fn(x, y)
+            x.add_(x)
+            o2 = inner_fn2(x, y)
+            y.mul_(y)
+            o3 = inner_fn2(x, y)
+            return o0 + o1 + o2.sum() + o3.sum()
+
+        x = torch.rand(10, 10)
+        y = torch.rand(10, 20)
+        x_clone = x.clone()
+        y_clone = y.clone()
+
+        graph, _ = extract_graph_and_tracker(fn, x_clone, y_clone)
+
+        def graph_code(graph):
+            return graph.python_code("self").src
+
+        def get_node(name):
+            return next(n for n in graph.nodes if n.name == name)
+
+        self.assertExpectedInline(
+            graph_code(graph),
+            """\
+
+
+
+def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+    subgraph_0 = self.subgraph_0
+    l_x_ = L_x_
+    l_y_ = L_y_
+    x0 = l_x_.view((10, 10))
+    o0 = x0.view((10, 10));  x0 = None
+    x0_1 = l_x_.view((10, 10))
+    o1 = x0_1.view((10, 10));  x0_1 = None
+    add_ = l_x_.add_(l_x_);  add_ = None
+    add_2 = o0 + o1;  o0 = o1 = None
+    invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
+    mul_ = l_y_.mul_(l_y_);  mul_ = None
+    getitem = invoke_subgraph[0];  invoke_subgraph = None
+    sum_5 = getitem.sum();  getitem = None
+    add_3 = add_2 + sum_5;  add_2 = sum_5 = None
+    invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = l_y_ = None
+    getitem_1 = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+    sum_6 = getitem_1.sum();  getitem_1 = None
+    add_4 = add_3 + sum_6;  add_3 = sum_6 = None
+    return (add_4,)
+    """,
+        )
+
+        # Shuffle nodes in the graph
+        add_ = get_node("add_")
+        mul_ = get_node("mul_")
+        o1 = get_node("o1")
+        o1.append(mul_)
+        add_2 = get_node("add_2")
+        add_2.append(add_)
+
+        self.assertExpectedInline(
+            graph_code(graph),
+            """\
+
+
+
+def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+    subgraph_0 = self.subgraph_0
+    l_x_ = L_x_
+    l_y_ = L_y_
+    x0 = l_x_.view((10, 10))
+    o0 = x0.view((10, 10));  x0 = None
+    x0_1 = l_x_.view((10, 10))
+    o1 = x0_1.view((10, 10));  x0_1 = None
+    mul_ = l_y_.mul_(l_y_);  mul_ = None
+    add_2 = o0 + o1;  o0 = o1 = None
+    add_ = l_x_.add_(l_x_);  add_ = None
+    invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
+    getitem = invoke_subgraph[0];  invoke_subgraph = None
+    sum_5 = getitem.sum();  getitem = None
+    add_3 = add_2 + sum_5;  add_2 = sum_5 = None
+    invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = l_y_ = None
+    getitem_1 = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+    sum_6 = getitem_1.sum();  getitem_1 = None
+    add_4 = add_3 + sum_6;  add_3 = sum_6 = None
+    return (add_4,)
+    """,
+        )
+        _stable_topological_sort(
+            graph, torch._dynamo.graph_deduplication.last_node_to_additional_deps
+        )
+        self.assertExpectedInline(
+            graph_code(graph),
+            """\
+
+
+
+def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+    subgraph_0 = self.subgraph_0
+    l_x_ = L_x_
+    l_y_ = L_y_
+    x0 = l_x_.view((10, 10))
+    o0 = x0.view((10, 10));  x0 = None
+    x0_1 = l_x_.view((10, 10))
+    o1 = x0_1.view((10, 10));  x0_1 = None
+    add_2 = o0 + o1;  o0 = o1 = None
+    add_ = l_x_.add_(l_x_);  add_ = None
+    invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
+    mul_ = l_y_.mul_(l_y_);  mul_ = None
+    getitem = invoke_subgraph[0];  invoke_subgraph = None
+    sum_5 = getitem.sum();  getitem = None
+    add_3 = add_2 + sum_5;  add_2 = sum_5 = None
+    invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = l_y_ = None
+    getitem_1 = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+    sum_6 = getitem_1.sum();  getitem_1 = None
+    add_4 = add_3 + sum_6;  add_3 = sum_6 = None
+    return (add_4,)
+    """,
         )
 
 

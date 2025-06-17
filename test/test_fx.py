@@ -181,7 +181,7 @@ class Pair(NamedTuple):
 
 
 # for testing pytrees
-class Foo:  # noqa: B209
+class Foo:
     def __init__(self, a, b):
         self.a = a
         self.b = b

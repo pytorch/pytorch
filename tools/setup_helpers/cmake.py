@@ -288,6 +288,12 @@ class CMake:
             }
         )
 
+        # Detect build dependencies from python lib path (in order to set *_HOME variables)
+        # NVSHMEM
+        nvshmem_home = py_lib_path + "/nvidia/nvshmem"
+        if os.path.exists(nvshmem_home):
+            build_options["NVSHMEM_HOME"] = nvshmem_home
+
         # Options starting with CMAKE_
         cmake__options = {
             "CMAKE_INSTALL_PREFIX": install_dir,

@@ -138,7 +138,7 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
 
   // storageOffset
   TORCH_CHECK(
-      storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+    TORCH_GUARD_OR_TRUE(sym_ge(storage_offset, 0)), "Tensor: invalid storage offset ", storage_offset);
 
   // set_storage_{device} (except set_storage_meta__symint)
   // will (unsafely) set the storage offset and then call resize_impl that

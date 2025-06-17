@@ -451,7 +451,7 @@ std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
 // We don't implement __new__ or __init__ because we're using it only as a
 // container for static methods.
 PyTypeObject StaticCudaLauncherType = {
-      PyVarObject_HEAD_INIT(nullptr, 0)
+    PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._StaticCudaLauncher", // tp_name
     sizeof(PyObject), // tp_basicsize
     0, // tp_itemsize

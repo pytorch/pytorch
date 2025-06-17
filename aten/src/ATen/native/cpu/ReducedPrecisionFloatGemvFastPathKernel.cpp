@@ -74,13 +74,9 @@ float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x) {
     }
   });
   const auto [t0, t1] = vec::convert_half_float(x[0]);
-#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE)
-  return vaddvq_f32(t0 + t1);
-#else
   return vec::vec_reduce_all<float>(
       std::plus<vec::Vectorized<float>>(),
       t0 + t1);
-#endif
 }
 
 float fp16_dot_with_fp16_arith(const Half* x, const Half* a, int len) {
@@ -130,13 +126,9 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
 #endif // !defined(__aarch64__) || defined( __ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
 
 float reduce(vec::Vectorized<float> x) {
-#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE)
-  return vaddvq_f32(x);
-#else
   return vec::vec_reduce_all<float>(
       std::plus<vec::Vectorized<float>>(),
       x);
-#endif
 }
 
 // The below reduce overload and fp16_dot_with_fp32_arith are adapted

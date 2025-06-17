@@ -131,7 +131,12 @@ cdll.LoadLibrary("__lib_path__")
                     ],
                     cwd=output_dir,
                     stderr=subprocess.DEVNULL,
-                    env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
+                    env={
+                        **os.environ,
+                        "PYTHONPATH": os.environ.get(
+                            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+                        ),
+                    },
                 )
             except Exception:
                 return False
@@ -141,7 +146,7 @@ cdll.LoadLibrary("__lib_path__")
     def __bool__(self) -> bool:
         return self.__bool__impl(config.cpp.vec_isa_ok)
 
-    @functools.lru_cache(None)  # noqa: B019
+    @functools.cache  # noqa: B019
     def __bool__impl(self, vec_isa_ok) -> bool:
         if vec_isa_ok is not None:
             return vec_isa_ok
@@ -236,7 +241,7 @@ extern "C" void __amx_chk_kernel() {
 }
 """
 
-    @functools.lru_cache(None)  # noqa: B019
+    @functools.cache  # noqa: B019
     def __bool__(self) -> bool:
         if super().__bool__():
             if config.is_fbcode():
@@ -375,7 +380,7 @@ def get_isa_from_cpu_capability(
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
 # might have too much redundant content that is useless for ISA check. Hence,
 # we only cache some key isa information.
-@functools.lru_cache(None)
+@functools.cache
 def valid_vec_isa_list() -> list[VecISA]:
     isa_list: list[VecISA] = []
     if sys.platform == "darwin" and platform.processor() == "arm":

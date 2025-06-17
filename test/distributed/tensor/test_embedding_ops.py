@@ -3,7 +3,7 @@
 import sys
 
 import torch
-from torch.distributed._tensor import (
+from torch.distributed.tensor import (
     distribute_module,
     distribute_tensor,
     DTensor,

@@ -3,6 +3,9 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/ops/as_strided_cpu_dispatch.h>
 #include <ATen/ops/set_cpu_dispatch.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/transformers/attention.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
 
 #include <c10/core/Allocator.h>
 
@@ -108,12 +111,86 @@ at::Tensor& set_openreg(
   return at::cpu::set_(result, storage, storage_offset, size, stride);
 }
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, c10::SymInt, c10::SymInt, at::Tensor, at::Tensor, at::Tensor>
+custom_scaled_dot_product_fused_attention_overrideable(
+    const at::Tensor & query,
+    const at::Tensor & key,
+    const at::Tensor & value,
+    const std::optional<at::Tensor> & attn_bias,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    std::optional<double> scale) {
+  const int64_t batch_size = query.size(0);
+  const int64_t num_heads = query.size(1);
+  const int64_t head_dim_v = value.size(3);
+  const int64_t max_seqlen_q = query.size(2);
+  const int64_t max_seqlen_kv = key.size(2);
+
+  auto opts = query.options();
+  auto output = at::empty({batch_size, num_heads, max_seqlen_q, head_dim_v}, opts);
+  auto logsumexp = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
+  auto debug_attn_mask = at::empty({batch_size, num_heads, max_seqlen_q, max_seqlen_kv},
+                                   opts.dtype(at::kFloat));
+  auto philox_seed = at::empty({}, at::dtype(at::kLong));
+  auto philox_offset = at::empty({}, at::dtype(at::kLong));
+
+  return std::make_tuple(output, logsumexp, at::Tensor(), at::Tensor(), max_seqlen_q, max_seqlen_kv, philox_seed, philox_offset, debug_attn_mask);
+}
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
+custom_scaled_dot_product_fused_attention_overrideable_backward(
+    const at::Tensor & grad_out,
+    const at::Tensor & query,
+    const at::Tensor & key,
+    const at::Tensor & value,
+    const at::Tensor & attn_bias,
+    std::array<bool,4> grad_input_mask,
+    const at::Tensor & out,
+    const at::Tensor & logsumexp,
+    const at::Tensor & cum_seq_q,
+    const at::Tensor & cum_seq_k,
+    int64_t max_q,
+    int64_t max_k,
+    double dropout_p,
+    bool is_causal,
+    const at::Tensor & philox_seed,
+    const at::Tensor & philox_offset,
+    std::optional<double> scale) {
+  return std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>(
+          at::empty_like(query),
+          at::empty_like(key),
+          at::empty_like(value),
+          at::empty_like(attn_bias));
+}
+}
+
+int64_t _fused_sdp_choice_privateuse1(
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const std::optional<at::Tensor>& attn_mask,
+    double dropout_p,
+    bool is_causal,
+    std::optional<double> scale,
+    bool enable_gqa) {
+  auto backend = sdp::SDPBackend::overrideable;
+  return static_cast<int64_t>(backend);
+}
+
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("empty.memory_format", empty_openreg);
   m.impl("empty_strided", empty_strided_openreg);
   m.impl("as_strided", as_strided_openreg);
   m.impl("set_.source_Storage_storage_offset", set_openreg);
+  m.impl("_fused_sdp_choice", &_fused_sdp_choice_privateuse1);
+  m.impl("_scaled_dot_product_fused_attention_overrideable", &custom_scaled_dot_product_fused_attention_overrideable);
+  m.impl("_scaled_dot_product_fused_attention_overrideable_backward", &custom_scaled_dot_product_fused_attention_overrideable_backward);
 }
-
-} // namespace
 } // namespace openreg
+
+namespace at::native {
+REGISTER_PRIVATEUSE1_DISPATCH(
+    _fused_sdp_choice_stub,
+    &openreg::_fused_sdp_choice_privateuse1);
+} // namespace at::native

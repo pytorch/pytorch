@@ -40,6 +40,7 @@ torch.cuda
     temperature
     power_draw
     clock_rate
+    AcceleratorError
     OutOfMemoryError
 
 Random Number Generator
@@ -96,6 +97,8 @@ Graphs (beta)
     make_graphed_callables
 
 .. _cuda-memory-management-api:
+.. automodule:: torch.cuda.memory
+.. currentmodule:: torch.cuda.memory
 
 Memory management
 -----------------
@@ -108,7 +111,11 @@ Memory management
      list_gpu_processes
      mem_get_info
      memory_stats
+     memory_stats_as_nested_dict
+     reset_accumulated_memory_stats
      host_memory_stats
+     host_memory_stats_as_nested_dict
+     reset_accumulated_host_memory_stats
      memory_summary
      memory_snapshot
      memory_allocated
@@ -128,9 +135,6 @@ Memory management
      CUDAPluggableAllocator
      change_current_allocator
      MemPool
-     MemPoolContext
-
-.. currentmodule:: torch.cuda.memory
 
 .. autosummary::
     :toctree: generated
@@ -229,7 +233,6 @@ See the docs for :class:`~torch.cuda.gds.GdsFile` for an example of how to use t
 .. py:module:: torch.cuda.gds
 .. py:module:: torch.cuda.graphs
 .. py:module:: torch.cuda.jiterator
-.. py:module:: torch.cuda.memory
 .. py:module:: torch.cuda.nccl
 .. py:module:: torch.cuda.nvtx
 .. py:module:: torch.cuda.profiler

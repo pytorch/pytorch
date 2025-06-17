@@ -24,9 +24,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
-from ..codegen.common import get_scheduling_for_device
-from ..codegen.cuda_combined_scheduling import CUDACombinedScheduling
-from ..codegen.triton import TritonScheduling
+from ...utils._triton import has_triton
 from ..pattern_matcher import (
     fwd_only,
     gen_register_replacement,
@@ -249,7 +247,7 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
     return arithmetic_intensity > machine_balance
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_pad_cache() -> torch._inductor.codecache.LocalCache:
     return torch._inductor.codecache.LocalCache()
 
@@ -460,11 +458,7 @@ def _should_pad_bench(
         ):
             return True
 
-        scheduling_factory = get_scheduling_for_device(mat1.device.type)
-        if scheduling_factory is None or not isinstance(
-            scheduling_factory(None),
-            (TritonScheduling, CUDACombinedScheduling),
-        ):
+        if not has_triton():
             return False
 
         if not is_mm_compute_bound(m, k, n, mat1.dtype):
@@ -857,7 +851,7 @@ def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _pad_mm_init() -> None:
     from .joint_graph import patterns
 

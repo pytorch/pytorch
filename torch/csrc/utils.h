@@ -101,11 +101,10 @@
 #define THPBoolUtils_newReal(value) THPUtils_newReal_BOOL(value)
 #define THPBoolUtils_checkAccreal(object) THPUtils_checkReal_BOOL(object)
 #define THPBoolUtils_unpackAccreal(object) \
-  (int64_t) THPUtils_unpackReal_BOOL(object)
+  (int64_t)THPUtils_unpackReal_BOOL(object)
 #define THPBoolUtils_newAccreal(value) THPUtils_newReal_BOOL(value)
 #define THPLongUtils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPLongUtils_unpackReal(object) \
-  (int64_t) THPUtils_unpackReal_INT(object)
+#define THPLongUtils_unpackReal(object) (int64_t)THPUtils_unpackReal_INT(object)
 #define THPLongUtils_newReal(value) THPUtils_newReal_INT(value)
 #define THPIntUtils_checkReal(object) THPUtils_checkReal_INT(object)
 #define THPIntUtils_unpackReal(object) (int)THPUtils_unpackReal_INT(object)

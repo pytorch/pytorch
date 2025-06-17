@@ -17,9 +17,10 @@ from torch._export.passes.insert_custom_op_guards import (
     insert_custom_op_guards,
     OpProfile,
 )
-from torch.export import ExportedProgram
-from torch.export._trace import _export
-from torch.export.dynamic_shapes import _DimHint, _DimHintType, Dim
+
+from ._trace import _export
+from .dynamic_shapes import _DimHint, _DimHintType, Dim
+from .exported_program import ExportedProgram
 
 
 log = logging.getLogger(__name__)

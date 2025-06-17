@@ -248,6 +248,15 @@ class TestTorchDeviceType(TestCase):
         s[2:7] = 1
         self.assertEqual(s, storage_type(l))
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    @onlyNativeDeviceTypes
+    def test_storage_use_count(self, device):
+        a = torch.randn(10, device=device)
+        prev_cf = torch._C._storage_Use_Count(a.untyped_storage()._cdata)
+        self.assertEqual(prev_cf, 1)
+        b = a.view(2, 5)
+        self.assertEqual(torch._C._storage_Use_Count(b.untyped_storage()._cdata), prev_cf + 1)
+
     @xfailIfTorchDynamo
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -6011,12 +6020,7 @@ else:
     # Make sure that the parameters become nonsense when scaled gradients are finite
     # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
 
-    @onlyNativeDeviceTypes
-    @optims(
-        [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
-        dtypes=[torch.float32]
-    )
-    def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device, dtype, optim_info):
+    def _test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device, dtype, optim_info):
         optimizer_ctor = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable",))
@@ -6043,6 +6047,23 @@ else:
                 scaler.update()
 
             self.assertTrue(all((p.isnan().any() or p.isinf().any()) for p in model.parameters()))
+
+    @onlyNativeDeviceTypes
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
+        dtypes=[torch.float32]
+    )
+    def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device, dtype, optim_info):
+        self._test_params_invalidated_with_grads_invalidated_between_unscale_and_step(device, dtype, optim_info)
+
+    @onlyNativeDeviceTypes
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
+        dtypes=[torch.float32]
+    )
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_params_invalidated_with_grads_invalidated_and_graph_partition(self, device, dtype, optim_info):
+        self._test_params_invalidated_with_grads_invalidated_between_unscale_and_step(device, dtype, optim_info)
 
     @onlyNativeDeviceTypes
     def test_grad_scale_will_not_overflow(self, device):
@@ -7060,7 +7081,7 @@ class TestTorch(TestCase):
             torch.tensor([1]).unflatten(0, [])
         with self.assertRaisesRegex(RuntimeError, r"Provided sizes \[2, 2\] don't multiply up to the size of dim 0 \(1\)"):
             torch.tensor([1]).unflatten(0, [2, 2])
-        with self.assertRaisesRegex(IndexError, r"Dimension specified as 0 but tensor has no dimensions"):
+        with self.assertRaisesRegex(RuntimeError, r".*Dimension specified as 0 but tensor has no dimensions.*"):
             torch.tensor(1).unflatten(0, [0])
         with self.assertRaisesRegex(RuntimeError, r"only one dimension can be inferred"):
             torch.randn(5, 10).unflatten(1, (-1, -1))

@@ -213,6 +213,7 @@ S390X_BLOCKLIST = [
     "test_unary_ufuncs",
     # these tests fail when cuda is not available
     "inductor/test_aot_inductor",
+    "inductor/test_best_config",
     "inductor/test_cudacodecache",
     "inductor/test_inductor_utils",
     "inductor/test_inplacing_pass",
@@ -396,7 +397,15 @@ AOT_DISPATCH_TESTS = [
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
-CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
+
+
+def _is_cpp_test(test):
+    # Note: tests underneath cpp_extensions are different from other cpp tests
+    # in that they utilize the usual python test infrastructure.
+    return test.startswith(CPP_TEST_PREFIX) and not test.startswith("cpp_extensions")
+
+
+CPP_TESTS = [test for test in TESTS if _is_cpp_test(test)]
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
@@ -414,11 +423,13 @@ TESTS_NOT_USING_GRADCHECK = [
     "test_decomp",
     "test_cpp_extensions_jit",
     "test_jit",
+    "test_matmul_cuda",
     "test_ops",
     "test_ops_jit",
     "dynamo/test_recompile_ux",
     "inductor/test_compiled_optimizers",
     "inductor/test_cutlass_backend",
+    "inductor/test_max_autotune",
     "inductor/test_select_algorithm",
     "inductor/test_smoke",
     "test_quantization",
@@ -467,7 +478,7 @@ def run_test(
     stepcurrent_key = test_file
 
     is_distributed_test = test_file.startswith(DISTRIBUTED_TEST_PREFIX)
-    is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
+    is_cpp_test = _is_cpp_test(test_file)
     # NB: Rerun disabled tests depends on pytest-flakefinder and it doesn't work with
     # pytest-cpp atm. We also don't have support to disable C++ test yet, so it's ok
     # to just return successfully here
@@ -510,7 +521,7 @@ def run_test(
             )
         )
         unittest_args.extend(test_module.get_pytest_args())
-        replacement = {"-f": "-x"}
+        replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
     if options.showlocals:
@@ -543,7 +554,7 @@ def run_test(
         # case such as coverage for C++ test. So just returning ok makes sense
         return 0
 
-    if test_file.startswith(CPP_TEST_PREFIX):
+    if is_cpp_test:
         # C++ tests are not the regular test directory
         if CPP_TESTS_DIR:
             cpp_test = os.path.join(
@@ -1783,11 +1794,6 @@ def run_tests(
         x for x in selected_tests if x not in selected_tests_parallel
     ]
 
-    # See Note [ROCm parallel CI testing]
-    pool = get_context("spawn").Pool(
-        NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
-    )
-
     # NB: This is a hack to make conftest.py and files it depends on available
     # on CPP_TESTS_DIR. We should see if the file could be turned into a
     # full-fledge ptest plugin instead
@@ -1811,17 +1817,6 @@ def run_tests(
         failures.append(failure)
         print_to_stderr(failure.message)
         return True
-
-    def parallel_test_completion_callback(failure):
-        test_failed = handle_error_messages(failure)
-        if IS_CI and options.upload_artifacts_while_running:
-            zip_and_upload_artifacts(test_failed)
-        if (
-            test_failed
-            and not options.continue_through_error
-            and not RERUN_DISABLED_TESTS
-        ):
-            pool.terminate()
 
     keep_going_message = (
         "\n\nTip: You can keep running tests even on failure by passing --keep-going to run_test.py.\n"
@@ -1858,6 +1853,23 @@ def run_tests(
                 raise RuntimeError(failure.message + keep_going_message)
 
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
+
+        # See Note [ROCm parallel CI testing]
+        pool = get_context("spawn").Pool(
+            NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
+        )
+
+        def parallel_test_completion_callback(failure):
+            test_failed = handle_error_messages(failure)
+            if IS_CI and options.upload_artifacts_while_running:
+                zip_and_upload_artifacts(test_failed)
+            if (
+                test_failed
+                and not options.continue_through_error
+                and not RERUN_DISABLED_TESTS
+            ):
+                pool.terminate()
+
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):

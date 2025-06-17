@@ -1,5 +1,6 @@
 import functools
 import logging
+import shutil
 from typing import Optional
 
 import torch
@@ -39,13 +40,6 @@ def get_cuda_version() -> Optional[str]:
         return None
 
 
-@functools.lru_cache(None)
-def nvcc_exist(nvcc_path: str = "nvcc") -> bool:
-    if nvcc_path is None:
-        return False
-    import subprocess
-
-    res = subprocess.call(
-        ["which", nvcc_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
-    return res == 0
+@functools.cache
+def nvcc_exist(nvcc_path: Optional[str] = "nvcc") -> bool:
+    return nvcc_path is not None and shutil.which(nvcc_path) is not None

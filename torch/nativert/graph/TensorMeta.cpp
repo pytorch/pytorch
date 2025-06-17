@@ -92,17 +92,16 @@ c10::Layout convertJsonLayout(const torch::_export::Layout& layout) {
 c10::Device convertJsonDevice(const torch::_export::Device& device) {
   c10::Device d(device.get_type());
   if (auto index = device.get_index()) {
-    d.set_index(*index);
+    d.set_index(static_cast<at::DeviceIndex>(*index));
   }
   return d;
 }
 
 TensorMeta::TensorMeta(const torch::_export::TensorMeta& tensorMeta)
-    : device_(convertJsonDevice(tensorMeta.get_device())) {
-  dtype_ = convertJsonScalarType(tensorMeta.get_dtype());
-  layout_ = convertJsonLayout(tensorMeta.get_layout());
-  requiresGrad_ = tensorMeta.get_requires_grad();
-
+    : dtype_(convertJsonScalarType(tensorMeta.get_dtype())),
+      layout_(convertJsonLayout(tensorMeta.get_layout())),
+      requiresGrad_(tensorMeta.get_requires_grad()),
+      device_(convertJsonDevice(tensorMeta.get_device())) {
   if (tensorMeta.get_storage_offset().tag() ==
       torch::_export::SymInt::Tag::AS_INT) {
     storage_offset_ = tensorMeta.get_storage_offset().get_as_int();

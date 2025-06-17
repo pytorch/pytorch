@@ -594,9 +594,9 @@ def register_parametrization(
 
         # add the new parametrization to the parametrization list
         assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
-        module.parametrizations[tensor_name].append(parametrization)
+        module.parametrizations[tensor_name].append(parametrization)  # type: ignore[operator]
         # If unsafe was True in previous parametrization, keep it enabled
-        module.parametrizations[tensor_name].unsafe |= unsafe  # type: ignore[index, union-attr]
+        module.parametrizations[tensor_name].unsafe |= unsafe  # type: ignore[index, union-attr, operator]
     elif tensor_name in module._buffers or tensor_name in module._parameters:
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
@@ -686,6 +686,7 @@ def remove_parametrizations(
     parametrizations = module.parametrizations[tensor_name]
     if parametrizations.is_tensor:
         original = parametrizations.original
+        assert isinstance(original, torch.Tensor), "is_tensor promised us a Tensor"
         if leave_parametrized:
             with torch.no_grad():
                 t = getattr(module, tensor_name)
@@ -792,7 +793,9 @@ def transfer_parametrizations_and_params(
                 )
 
             # apply the params's parametrizations to to_module
-            for param_func in from_module.parametrizations[parameter_name]:
+            for param_func in from_module.parametrizations[  # type: ignore[attr-defined]
+                parameter_name
+            ]:
                 register_parametrization(to_module, parameter_name, param_func)
             assert isinstance(to_module.parametrizations, ModuleDict)  # for mypy
 

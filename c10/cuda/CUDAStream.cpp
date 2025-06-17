@@ -200,6 +200,7 @@ static void initGlobalStreamState() {
 // Init a single CUDA or HIP stream
 // See Note [HIP Lazy Streams]
 static void initSingleStream(int p, DeviceIndex device_index, int i) {
+  CUDAGuard device_guard(device_index);
   auto& stream = streams[p][device_index][i];
   auto pri = -p; // lower number is higher priority
 

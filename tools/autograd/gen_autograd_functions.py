@@ -555,8 +555,7 @@ def gen_autograd_functions_lib(
             fname,
             lambda: {
                 "generated_comment": "@"
-                + f"generated from {fm.template_dir_for_comments()}/"
-                + fname,
+                + f"generated from {fm.template_dir_for_comments()}/{fname}",
                 "autograd_function_declarations": declarations,
                 "autograd_function_definitions": definitions,
             },
