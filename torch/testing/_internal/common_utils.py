@@ -902,6 +902,11 @@ def prof_callable(callable, *args, **kwargs):
 
     return callable(*args, **kwargs)
 
+def raise_on_run_directly(file_to_call):
+    raise RuntimeError("This test file is not meant to be run directly, "
+                       f"use:\n\n\tpython {file_to_call} TESTNAME\n\n"
+                       "instead.")
+
 def prof_func_call(*args, **kwargs):
     return prof_callable(func_call, *args, **kwargs)
 
@@ -1567,6 +1572,9 @@ if TEST_WITH_TORCHDYNAMO:
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
+    else:
+        # only dynamo for now
+        torch._dynamo.config.compiled_autograd = True
 
 
 # seems like this is only used in test/torch_np
@@ -1639,6 +1647,24 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
             fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
 
         return fn
+
+    return decorator
+
+def runWithoutCompiledAutograd(msg="test doesn't currently work with compiled autograd"):
+    """
+    Usage:
+    @runWithoutCompiledAutograd(msg)
+    def test_blah(self):
+        ...
+    """
+    assert isinstance(msg, str)
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            with torch._dynamo.compiled_autograd._disable():
+                func(*args, **kwargs)
+        return wrapper
 
     return decorator
 
@@ -3285,6 +3311,11 @@ class TestCase(expecttest.TestCase):
                     file_name = os.path.join(subdir, key)
                     setattr(self, self._testMethodName, ignore_failure(method, file_name))
 
+                from .dynamo_test_failures import compiled_autograd_skips
+                if torch._dynamo.config.compiled_autograd and key in compiled_autograd_skips:
+                    # Still run the test, but with compiled autograd disabled
+                    super_run = runWithoutCompiledAutograd()(super_run)
+
             super_run(result=result)
 
         if strict_mode or should_reset_dynamo:
@@ -3895,7 +3926,7 @@ class TestCase(expecttest.TestCase):
                     ((0, 0), [(1, 2)], [()]),
             ]:
                 for blocksize in blocksizes:
-                    for densesize in densesizes:
+                    for densesize in densesizes:  # type: ignore[attr-defined]
                         if layout == torch.strided:
                             indices = ()  # type: ignore[assignment]
                             values = torch.empty((basesize + densesize), device=device, dtype=dtype)

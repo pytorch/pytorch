@@ -43,13 +43,14 @@ logger = logging.getLogger(__name__)
 
 d_hid = 512
 batch_size = 256
-
 torch.manual_seed(0)
 
 device_type = torch.accelerator.current_accelerator().type
 
 
 class ScheduleTest(MultiProcContinousTest):
+    world_size = 2
+
     @classmethod
     def backend_str(cls) -> str:
         return dist.get_default_backend_for_device(device_type)
