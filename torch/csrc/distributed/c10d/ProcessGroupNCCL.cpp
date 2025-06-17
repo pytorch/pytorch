@@ -265,7 +265,8 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
   static const bool flag = [] {
     const bool flag =
         getCvarBool(TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
-    if (flag && c10::CachingAllocator::AllocatorConfig::expandable_segments()) {
+    if (flag &&
+        c10::CachingAllocator::AllocatorConfig::use_expandable_segments()) {
 #ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
       LOG(INFO)
           << "disables TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
