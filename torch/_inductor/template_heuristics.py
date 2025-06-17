@@ -981,5 +981,44 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         )
 
 
+class PersistentTMAConfigHeuristics(BaseConfigHeuristic):
+    """
+    Config heuristic for Persistent TMA templates that uses persistent_mm_configs
+    instead of regular mm_configs.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use persistent_mm_configs
+        self.mm_configs = self.persistent_mm_configs
+
+    def _to_params(
+        self,
+        kernel_inputs: MMKernelInputs,
+        config_gen_fn: Callable[[int, int, int], Generator[TritonConfig, None, None]],
+    ) -> Generator[TritonTemplateMMParams, None, None]:
+        """
+        Generate PersistentTMATritonTemplateMMParams for persistent matrix multiplication.
+        First calls the super's _to_params, then adds persistent-specific parameters.
+
+        Args:
+            kernel_inputs: MMKernelInputs object containing input nodes for the problem
+            config_gen_fn: Function that generates TritonConfig objects
+        """
+        # Call the super's _to_params to get base parameters
+        for base_params in super()._to_params(kernel_inputs, config_gen_fn):
+            input_nodes = kernel_inputs.nodes()
+            # Get persistent MM options
+            persistent_options = self._persistent_mm_options(
+                input_nodes[0], input_nodes[1]
+            )
+
+            # Convert to PersistentTMATritonTemplateMMParams by adding persistent-specific parameters
+            yield PersistentTMATritonTemplateMMParams(
+                **base_params.kwargs(),
+                **persistent_options,
+            )
+
+
 class XPUConfigHeuristic(BaseConfigHeuristic):
     pass

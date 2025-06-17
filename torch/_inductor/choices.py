@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import typing
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -9,6 +10,9 @@ import torch
 
 from . import config
 from .codecache import write_text
+from .codegen.triton_templates.persistent_tma_mm_template import (
+    persistent_tma_mm_template,
+)
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
@@ -16,10 +20,14 @@ from .template_heuristics import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    PersistentTMAConfigHeuristics,
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
 from .virtualized import V
+
+
+log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -32,6 +40,7 @@ if TYPE_CHECKING:
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
+    from .common import KernelTemplate
     from .kernel_inputs import MMKernelInputs
     from .kernel_params.params import KernelTemplateParams
 
@@ -55,6 +64,38 @@ class InductorChoices:
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
     """
 
+    def __init__(self) -> None:
+        # Template-specific heuristics: template_id -> device_type -> config_heuristic_class
+        self._template_config_heuristics: dict[
+            str, dict[str, type[BaseConfigHeuristic]]
+        ] = {}
+
+        # Default heuristics: device_type -> config_heuristic_class
+        self._default_config_heuristics: dict[str, type[BaseConfigHeuristic]] = {}
+
+        self._register_mm_heuristics()
+
+    def _register_mm_heuristics(self) -> None:
+        """Register matrix multiplication heuristics for different templates and devices."""
+        # Set up default heuristics for each device type
+        if torch.version.hip is None:
+            # NVIDIA CUDA
+            self._default_config_heuristics["cuda"] = CUDAConfigHeuristic
+        else:
+            # AMD ROCm
+            self._default_config_heuristics["cuda"] = ROCmConfigHeuristic
+
+        self._default_config_heuristics["xpu"] = XPUConfigHeuristic
+        self._default_config_heuristics["cpu"] = CPUConfigHeuristic
+
+        # Register template-specific heuristics
+        # Only register PersistentTMAConfigHeuristics for NVIDIA (when torch.version.hip is None)
+        if torch.version.hip is None:
+            persistent_template_id = persistent_tma_mm_template.id
+            self._template_config_heuristics[persistent_template_id] = {
+                "cuda": PersistentTMAConfigHeuristics
+            }
+
     def get_config_heuristics(
         self, device_type: Optional[str] = "cuda"
     ) -> BaseConfigHeuristic:
@@ -68,6 +109,46 @@ class InductorChoices:
         elif device_type == "cpu":
             return CPUConfigHeuristic()
         else:
+            return BaseConfigHeuristic()
+
+    def get_mm_config_params_heuristics(
+        self, template: KernelTemplate, kernel_inputs: MMKernelInputs
+    ) -> BaseConfigHeuristic:
+        """
+        Get the appropriate config heuristic for matrix multiplication based on template type.
+
+        Args:
+            template: KernelTemplate instance
+            kernel_inputs: MMKernelInputs instance
+
+        Returns:
+            BaseConfigHeuristic: The appropriate config heuristic for the template
+        """
+        # Get template ID and device type
+        template_id = template.id
+        device_type = kernel_inputs.device_type
+        if device_type is None:
+            device_type = "cuda"
+
+        # Determine which heuristics dictionary to use
+        if template_id in self._template_config_heuristics:
+            heuristics_dict = self._template_config_heuristics[template_id]
+        else:
+            log.debug(
+                "Template ID %s not found in template-specific heuristics, using default heuristics",
+                template_id,
+            )
+            heuristics_dict = self._default_config_heuristics
+
+        # Get the heuristic class for the device type
+        if device_type in heuristics_dict:
+            heuristic_class = heuristics_dict[device_type]
+            return heuristic_class()
+        else:
+            log.warning(
+                "Device type %s not found in heuristics, falling back to BaseConfigHeuristic",
+                device_type,
+            )
             return BaseConfigHeuristic()
 
     # GEMM configs
@@ -123,35 +204,14 @@ class InductorChoices:
         return mm_heuristics.get_mm_plus_mm_configs()
 
     # MM params configs
-    def get_base_mm_params(
-        self, kernel_inputs: MMKernelInputs
+    def get_mm_params(
+        self, template: KernelTemplate, kernel_inputs: MMKernelInputs
     ) -> partial[Generator[KernelTemplateParams, None, None]]:
-        device_type = (
-            "cuda" if kernel_inputs.device_type is None else kernel_inputs.device_type
-        )
-        mm_heuristics = self.get_config_heuristics(device_type)
+        mm_heuristics = self.get_mm_config_params_heuristics(template, kernel_inputs)
         if config.max_autotune_gemm_search_space != "EXHAUSTIVE":
             return mm_heuristics.get_mm_params(kernel_inputs)  # type: ignore[return-value] # Generator invariance
         else:
             return mm_heuristics.get_exhaustive_mm_params(kernel_inputs)  # type: ignore[return-value] # Generator invariance
-
-    def get_exhaustive_mm_params(
-        self, kernel_inputs: MMKernelInputs
-    ) -> partial[Generator[KernelTemplateParams, None, None]]:
-        device_type = (
-            "cuda" if kernel_inputs.device_type is None else kernel_inputs.device_type
-        )
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_exhaustive_mm_params(kernel_inputs)  # type: ignore[return-value] # Generator invariance
-
-    def get_persistent_mm_params(
-        self, kernel_inputs: MMKernelInputs
-    ) -> partial[Generator[KernelTemplateParams, None, None]]:
-        device_type = (
-            "cuda" if kernel_inputs.device_type is None else kernel_inputs.device_type
-        )
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_persistent_mm_params(kernel_inputs)  # type: ignore[return-value] # Generator invariance
 
     # Conv configs
     def get_conv_configs(
