@@ -5,6 +5,10 @@ set -ex
 SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P ))"
 
 export TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
+## WAR to resolve the ld error in libtorch build with CUDA 12.9
+if [[ "$DESIRED_CUDA" == "cu129" && "$PACKAGE_TYPE" == "libtorch" ]]; then
+    export TORCH_NVCC_FLAGS="$TORCH_NVCC_FLAGS --host-linker-script=use-lcs"
+fi
 export NCCL_ROOT_DIR=/usr/local/cuda
 export TH_BINARY_BUILD=1
 export USE_STATIC_CUDNN=1
