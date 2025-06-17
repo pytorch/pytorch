@@ -520,7 +520,7 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
         if v and v[0].get("Gb_type") == gb_type:
             return f"{GRAPH_BREAK_SITE_URL}{k}"
 
-    return "Was not able to find link for this graph break type"
+    return "None"
 
 
 # TODO replace old unimplemented later
