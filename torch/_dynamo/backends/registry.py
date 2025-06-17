@@ -65,7 +65,8 @@ import logging
 import sys
 from collections.abc import Sequence
 from importlib.metadata import EntryPoint
-from typing import Callable, Optional, Protocol
+from typing import Callable, Optional
+from typing_extensions import Protocol
 
 import torch
 from torch import fx
