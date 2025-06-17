@@ -438,14 +438,6 @@ class FSDPParamGroup:
                 all_reduce_stream = self._all_reduce_hook_stream
             else:
                 all_reduce_stream = self.comm_ctx.all_reduce_stream
-            if self.reduce_scatter_reduce_op and isinstance(
-                self.reduce_scatter_reduce_op, dist.ReduceOp
-            ):
-                # self.reduce_scatter_reduce_op set by set_reduce_scatter_divide_factor
-                # uses NCCL's PreMulSum, which only allows data type half, float,
-                # or double. Set reduce_dtype as orig_dtype so that if won't be cast by
-                # mp_policy.
-                self._reduce_dtype = self._orig_dtype
             self._wait_for_post_backward()
             (
                 reduce_scatter_input,
