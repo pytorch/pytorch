@@ -303,29 +303,26 @@ class ScannedModule(nn.Module):
         single_params = dict(self.single_mod.named_parameters())
         single_buffers = dict(self.single_mod.named_buffers())
 
-        # Create the individual parameters and buffers for the module and stack them
-        all_parameters = [
-            {
-                n: p.detach().clone().requires_grad_(p.requires_grad)
-                for n, p in single_params.items()
-            }
-            for ind in range(self.stacked_len)
-        ]
         self._parameters = {
-            k: construct_stacked_leaf(tuple(params[k] for params in all_parameters), k)
-            for k in all_parameters[0]
+            n: torch.nn.parameter.Parameter(
+                p.repeat([stacked_len] + [1] * p.ndim), requires_grad=p.requires_grad
+            )
+            for n, p in single_params.items()
+        }
+        self._idxs_parameters = {
+            n: torch.ones_like(p, dtype=torch.int64).unsqueeze(0)
+            for n, p in single_params.items()
         }
 
-        all_buffers = [
-            {
-                n: p.detach().clone().requires_grad_(p.requires_grad)
-                for n, p in single_buffers.items()
-            }
-            for ind in range(self.stacked_len)
-        ]
         self._buffers = {
-            k: construct_stacked_leaf(tuple(buffers[k] for buffers in all_buffers), k)
-            for k in all_buffers[0]
+            n: torch.nn.parameter.Parameter(
+                p.repeat([stacked_len] + [1] * p.ndim), requires_grad=p.requires_grad
+            )
+            for n, p in single_buffers.items()
+        }
+        self._idxs_buffers = {
+            n: torch.ones_like(p, dtype=torch.int64).unsqueeze(0)
+            for n, p in single_buffers.items()
         }
 
     def _mask_parameters_or_buffers(self, parameters_or_buffers, prefix):
@@ -344,14 +341,9 @@ class ScannedModule(nn.Module):
     def select_sliced_parameters_and_buffers(self, idx):
         import torch.utils._pytree as pytree
 
-        int_idx = idx.item()
-        torch._check(int_idx >= 0)
-        torch._check(int_idx < self.stacked_len)
-        parameters_and_buffers = pytree.tree_map(
-            lambda x: x.select(0, int_idx), self._parameters
-        )
+        parameters_and_buffers = pytree.tree_map(lambda x: x[idx][0], self._parameters)
         parameters_and_buffers.update(
-            pytree.tree_map(lambda x: x.select(0, int_idx), self._buffers)
+            pytree.tree_map(lambda x: x[idx][0], self._buffers)
         )
         return parameters_and_buffers
 
@@ -364,5 +356,7 @@ class ScannedModule(nn.Module):
             )
             return new_carry, torch.empty_like(new_carry)
 
-        last_carry, _ = scan(combine_fn, xs, torch.arange(self.stacked_len))
+        last_carry, _ = scan(
+            combine_fn, xs, torch.arange(self.stacked_len).unsqueeze(-1)
+        )
         return last_carry
