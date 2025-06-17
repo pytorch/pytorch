@@ -116,6 +116,27 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             f(torch.randn(8, 8), torch.randn(8))
             self.assertEqual(cnts.frame_count, 1)
 
+    def test_pgo_dynamic_false(self):
+        @torch.compile(backend="eager", dynamic=False)
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x += 2
+                y += 2
+                torch._dynamo.graph_break()
+                x -= 2
+                y *= 2
+                return x, y
+
+        self.reset()
+        f = Foo()
+        f(torch.randn(2, 4), torch.randn(2, 4))
+        f(torch.randn(4, 4), torch.randn(6, 8))
+
+        # check PGO code state is overwritten with static value, both before/after graph break
+        for code_state in torch._dynamo.pgo.get_code_state().values():
+            self.assertEqual(code_state.automatic_dynamic["L['x']"].size, (4, 4))
+            self.assertEqual(code_state.automatic_dynamic["L['y']"].size, (6, 8))
+
     def test_pgo_dynamic_params(self):
         cnts = CompileCounter()
 
