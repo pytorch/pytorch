@@ -1114,12 +1114,14 @@ def has_user_subclass(args, allowed_subclasses):
         True if user tensor subclasses are found, False otherwise
     """
     flat_args, _ = pytree.tree_flatten(args)
-    return any(
+
+    val = any(
         isinstance(a, torch.Tensor)
         and type(a) is not torch.Tensor
         and not isinstance(a, allowed_subclasses)
         for a in flat_args
     )
+    return val
 
 
 def _has_gen_schema(op: HigherOrderOperator):

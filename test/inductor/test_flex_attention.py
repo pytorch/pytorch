@@ -3887,10 +3887,19 @@ class GraphModule(torch.nn.Module):
             score_mod_other_buffers=(),
             mask_mod_other_buffers=(),
         ):
-            b, h, s, _ = query.shape
-            return AsStridedErrorTensor(torch.rand_like(query)), AsStridedErrorTensor(
-                query.new_empty(b, h, s)
+            inner_q, inner_k, inner_v = query.elem, key.elem, value.elem
+            out, lse = flex_attention_hop(
+                inner_q,
+                inner_k,
+                inner_v,
+                score_mod,
+                block_mask,
+                scale,
+                kernel_options,
+                score_mod_other_buffers,
+                mask_mod_other_buffers,
             )
+            return AsStridedErrorTensor(out), AsStridedErrorTensor(lse)
 
         # Test setup
         B, H, S, D = 2, 1, 128, 16
