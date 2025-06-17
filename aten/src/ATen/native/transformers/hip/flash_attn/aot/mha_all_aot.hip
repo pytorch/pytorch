@@ -64,8 +64,8 @@
 #include <aotriton/flash.h>
 #include <aotriton/runtime.h>
 
-#if AOTRITON_VERSION_MINOR != 9
-#error "This adaptor code is only tested with AOTriton 0.9.x"
+#if AOTRITON_VERSION_MINOR < 9
+#error "This adaptor code is only tested with AOTriton >= 0.9"
 #endif
 
 namespace pytorch_flash {
