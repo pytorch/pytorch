@@ -25,8 +25,8 @@ def conditional_product(*args: int) -> int:
     return functools.reduce(operator.mul, [x for x in args if x])
 
 
-def ceildiv(numer: int, denom: int) -> int:
-    return -(numer // -denom)
+def ceildiv(number: int, denom: int) -> int:
+    return -(number // -denom)
 
 
 def is_power_of_2(n: int) -> bool:
@@ -155,7 +155,7 @@ dynamo_timed = torch._dynamo.utils.dynamo_timed  # type: ignore[has-type]
 def triton_hash_to_path_key(key: str) -> str:
     # In early versions of Triton, the hash is directly used in the path name.
     # Later, the hash is converted to base64 before being used in the path name.
-    # Later, the base64 convertion was replaced to the base32
+    # Later, the base64 conversion was replaced to the base32
     #
     # This code tries to import _base64 and falls back to _base32 if _base64 is unavailable.
     #

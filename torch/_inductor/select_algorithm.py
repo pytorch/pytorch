@@ -375,7 +375,7 @@ class TritonTemplateKernel(TritonKernel):
         self.template_out: Optional[str] = None
         self.ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
 
-        # Whe caching is enabled, the generated code is not dependent on the input nodes names, or
+        # When caching is enabled, the generated code is not dependent on the input nodes names, or
         # symbolic sizes names.
         # However, some of the variables returned by generate_and_load that are computed during the
         # triton template expansions (code generation) are dependent on those.

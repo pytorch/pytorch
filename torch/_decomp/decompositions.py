@@ -52,7 +52,7 @@ class Reduction(Enum):
 
 
 # This wraps a decomposition and performs various type promotion logic within it, depending on the strategy provided
-# We're currently re-using ELEMENTWISE_TYPE_PROMOTION_KIND, although some of the usages are on non-elementwise ops
+# We're currently reusing ELEMENTWISE_TYPE_PROMOTION_KIND, although some of the usages are on non-elementwise ops
 # Will need to validate the non-elementwise uses
 def type_casts(
     f: Callable,
@@ -947,7 +947,7 @@ def im2col(
     )
     torch._check(
         all(c > 0 for c in output_size),
-        lambda: f"Given an input with spacial size {tuple(shape[-2:])}, "
+        lambda: f"Given an input with spatial size {tuple(shape[-2:])}, "
         f"kernel_size={kernel_size}, dilation={dilation}, "
         f"padding={padding}, stride={stride}, "
         "the calculated shape of the array of sliding blocks "
@@ -4045,7 +4045,7 @@ def nll_loss2d_forward(
     return _nll_loss_forward(self, target, weight, reduction, ignore_index)
 
 
-# These are adapted from aten/src/ATen/native/UpSample.h, wich is based on
+# These are adapted from aten/src/ATen/native/UpSample.h, which is based on
 # https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
 def _upsample_cubic_convolution1(x: Tensor, A: float) -> Tensor:
     return ((A + 2) * x - (A + 3)) * x * x + 1

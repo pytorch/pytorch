@@ -74,7 +74,7 @@ class CompiledArtifact:
             key = cache_info.aot_autograd_artifacts[0]
 
             if format == "binary":
-                # cant assert that it is a file since it might not exist yet
+                # can't assert that it is a file since it might not exist yet
                 assert not os.path.isdir(path)
 
                 from torch.utils._appending_byte_serializer import BytesWriter
@@ -118,7 +118,7 @@ class CompiledArtifact:
     ) -> CompiledArtifact:
         with dynamo_timed("CompiledArtifact.load"):
             if format == "binary":
-                # cant assert that it is a file since it might not exist yet
+                # can't assert that it is a file since it might not exist yet
                 assert not os.path.isdir(path)
                 with open(path, "rb") as file:
                     artifacts = file.read()
