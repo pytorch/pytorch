@@ -78,7 +78,7 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
-    TEST_CUDA_PYTHON,
+    TEST_CUDA_PYTHON_BINDINGS,
     TEST_NUMPY,
     TEST_WITH_ROCM,
     TestCase,
@@ -3530,8 +3530,8 @@ exit(2)
             raw_pointer = graph.raw_cuda_graph()
 
     @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-python must be installed",
+        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
     )
     def test_cuda_graph_raw_graph(self):
         import cuda.bindings.runtime as cudart
