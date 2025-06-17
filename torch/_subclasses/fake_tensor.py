@@ -122,6 +122,11 @@ class UnsupportedOperatorException(RuntimeError):
 
 
 @dataclass
+class UnsupportedMutationAliasingException(RuntimeError):
+    reason: str
+
+
+@dataclass
 class MetadataMismatchError(RuntimeError):
     reason: str
 
@@ -228,7 +233,7 @@ def maybe_get_fake_mode(t: object) -> Optional[FakeTensorMode]:
     return None
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
     return torch._C._SchemaInfo(func._schema)
 
@@ -238,7 +243,7 @@ def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
 # torch/_decomp/decompositions.py.
 # decomps are used for aot autograd tracing so we would like to unify on their
 # implementation and add additional testing to them
-@functools.lru_cache(None)
+@functools.cache
 def torch_decomp_decompositions(func: OpOverload) -> bool:
     from torch._decomp import decomposition_table
 
@@ -506,7 +511,7 @@ class FakeTensorConverter:
         return out
 
 
-@functools.lru_cache(None)
+@functools.cache
 def init_gpu_context(device: torch.device) -> None:
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available() or torch.xpu.is_available():
