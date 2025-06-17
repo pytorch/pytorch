@@ -134,16 +134,6 @@ class C10_API SymbolicShapeMeta {
     return is_non_overlapping_and_dense_;
   }
 
-  // Note [is_contiguous_or_false]
-  // Like is_contiguous, but more dynamic shape-friendly. Returns uncertain
-  // false instead of throwing data-dependent errors for tensors with unbacked
-  // sizes or strides that can be either contiguous or not. The property is
-  // cached, meaning that if some runtime assertions are added that can be used
-  // to infer that the tensor is always contiguous after caching, this can still
-  // return false. This should be used in places where the contiguity check is
-  // not material or when there is a general path even if less performant that
-  // can be taken (for example, clone path in reshape or contiguous call).
-
   // Assumptions so we can short-circuit computation
   // NOTE: Don't need to lock mutables_ since these aren't const
   void assume_contiguous(SymBool val = true) {
