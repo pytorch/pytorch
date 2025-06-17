@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
+# mypy: ignore-errors
 import sys
 from pathlib import Path
 
-from tools.dynamo.gb_id_mapping import find_unimplemented_v2_calls, load_registry
+from .gb_id_mapping import find_unimplemented_v2_calls, load_registry
 
 
 def test_verify_gb_id_mapping():
@@ -11,7 +12,9 @@ def test_verify_gb_id_mapping():
     """
     script_dir = Path(__file__).resolve().parent
     dynamo_dir = script_dir.parent.parent / "torch" / "_dynamo"
-    registry_path = script_dir.parent.parent / "torch" / "_dynamo" / "graph_break_registry.json"
+    registry_path = (
+        script_dir.parent.parent / "torch" / "_dynamo" / "graph_break_registry.json"
+    )
 
     python_files = list(dynamo_dir.glob("**/*.py"))
 
@@ -43,7 +46,6 @@ def test_verify_gb_id_mapping():
 
     print("All unimplemented_v2 calls match the registry.")
     return True
-
 
 
 if __name__ == "__main__":

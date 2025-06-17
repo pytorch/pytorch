@@ -816,7 +816,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     gb_type="Data-dependent branching",
                     context=f"attempted to jump with {value}",
                     explanation=_explanation,
-                    hints=_hints,
+                    hints=[
+                        *graph_break_hints.FUNDAMENTAL,
+                        "Use `torch.cond` to express dynamic control flow.",
+                    ],
                 )
 
     return inner
