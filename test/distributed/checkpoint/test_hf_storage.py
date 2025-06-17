@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import torch
 from torch.distributed.checkpoint import DefaultLoadPlanner
+from torch.distributed.checkpoint._hf_utils import _HFStorageInfo
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.filesystem import _StorageInfo, FileSystem
 from torch.distributed.checkpoint.hf_storage import (
@@ -33,7 +34,6 @@ from torch.distributed.checkpoint.planner import (
 from torch.distributed.checkpoint.planner_helpers import _create_write_item_for_tensor
 from torch.distributed.checkpoint.storage import WriteResult
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.distributed.checkpoint.hf_utils import _HFStorageInfo
 
 
 class TestHfStorage(TestCase):

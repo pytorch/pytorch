@@ -30,9 +30,11 @@ from torch.distributed.checkpoint._extension import (
     ExtensionRegistry,
     StreamTransformExtension,
 )
-from torch.distributed.checkpoint.hf_utils import (
+from torch.distributed.checkpoint._hf_utils import (
     CUSTOM_METADATA_KEY,
     DCP_VERSION_KEY,
+    FORMAT_KEY,
+    FORMAT_VALUE,
     HF_DCP_VERSION,
 )
 from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE, StorageMeta
@@ -449,6 +451,7 @@ def _write_files_from_queue(
                             metadata={
                                 CUSTOM_METADATA_KEY: json.dumps(metadata_dict),
                                 DCP_VERSION_KEY: str(HF_DCP_VERSION),
+                                FORMAT_KEY: FORMAT_VALUE,
                             },
                         )
                     )
