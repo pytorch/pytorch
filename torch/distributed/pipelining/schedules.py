@@ -616,20 +616,22 @@ class ScheduleGPipe(_PipelineScheduleRuntime):
         """Generate the pipeline order for GPipe schedule (fill-drain pattern)."""
         pipeline_order: dict[int, list[Optional[_Action]]] = {}
         
-        for rank in range(self.pp_group_size):
-            rank_ops: list[Optional[_Action]] = []
-            stage_idx = rank  # Single stage per rank
-            
-            # Fill phase: forward passes
+        # For single-stage schedules, we only generate schedule for the current rank
+        current_rank = self._stages[0].group_rank
+        stage_idx = self._stages[0].stage_index
+        
+        rank_ops: list[Optional[_Action]] = []
+        
+        # Fill phase: forward passes
+        for mb_idx in range(self._n_microbatches):
+            rank_ops.append(_Action(stage_idx, FORWARD, mb_idx))
+        
+        # Drain phase: backward passes (if has_backward)
+        if self._has_backward:
             for mb_idx in range(self._n_microbatches):
-                rank_ops.append(_Action(stage_idx, FORWARD, mb_idx))
-            
-            # Drain phase: backward passes (if has_backward)
-            if self._has_backward:
-                for mb_idx in range(self._n_microbatches):
-                    rank_ops.append(_Action(stage_idx, FULL_BACKWARD, mb_idx))
-            
-            pipeline_order[rank] = rank_ops
+                rank_ops.append(_Action(stage_idx, FULL_BACKWARD, mb_idx))
+        
+        pipeline_order[current_rank] = rank_ops
         
         return pipeline_order
 
@@ -728,36 +730,38 @@ class Schedule1F1B(_PipelineScheduleRuntime):
         """Generate the pipeline order for 1F1B schedule."""
         pipeline_order: dict[int, list[Optional[_Action]]] = {}
         
-        for rank in range(self.pp_group_size):
-            rank_ops: list[Optional[_Action]] = []
-            stage_idx = rank  # Single stage per rank
-            
-            # Warmup: forward passes
-            warmup_chunks = min(self._n_microbatches, self.pp_group_size - rank)
-            for mb_idx in range(warmup_chunks):
-                rank_ops.append(_Action(stage_idx, FORWARD, mb_idx))
-            
-            # 1B1F phase: interleaved backward and forward
-            fwd_mb_index = warmup_chunks
-            bwd_mb_index = 0
-            
-            while fwd_mb_index < self._n_microbatches and bwd_mb_index < warmup_chunks:
-                # Backward first
-                if self._has_backward:
-                    rank_ops.append(_Action(stage_idx, FULL_BACKWARD, bwd_mb_index))
-                bwd_mb_index += 1
-                
-                # Then forward
-                rank_ops.append(_Action(stage_idx, FORWARD, fwd_mb_index))
-                fwd_mb_index += 1
-            
-            # Cooldown: remaining backward passes
+        # For single-stage schedules, we only generate schedule for the current rank
+        current_rank = self._stages[0].group_rank
+        stage_idx = self._stages[0].stage_index
+        
+        rank_ops: list[Optional[_Action]] = []
+        
+        # Warmup: forward passes
+        warmup_chunks = min(self._n_microbatches, self.pp_group_size - current_rank)
+        for mb_idx in range(warmup_chunks):
+            rank_ops.append(_Action(stage_idx, FORWARD, mb_idx))
+        
+        # 1B1F phase: interleaved backward and forward
+        fwd_mb_index = warmup_chunks
+        bwd_mb_index = 0
+        
+        while fwd_mb_index < self._n_microbatches and bwd_mb_index < warmup_chunks:
+            # Backward first
             if self._has_backward:
-                while bwd_mb_index < self._n_microbatches:
-                    rank_ops.append(_Action(stage_idx, FULL_BACKWARD, bwd_mb_index))
-                    bwd_mb_index += 1
+                rank_ops.append(_Action(stage_idx, FULL_BACKWARD, bwd_mb_index))
+            bwd_mb_index += 1
             
-            pipeline_order[rank] = rank_ops
+            # Then forward
+            rank_ops.append(_Action(stage_idx, FORWARD, fwd_mb_index))
+            fwd_mb_index += 1
+        
+        # Cooldown: remaining backward passes
+        if self._has_backward:
+            while bwd_mb_index < self._n_microbatches:
+                rank_ops.append(_Action(stage_idx, FULL_BACKWARD, bwd_mb_index))
+                bwd_mb_index += 1
+        
+        pipeline_order[current_rank] = rank_ops
         
         return pipeline_order
 
