@@ -1163,9 +1163,7 @@ exclude_patterns = [
     'functorch/**',
     'scripts/**',
     'test/**',
-    'tools/**',
     'torch/**',
-    'torchgen/**',
 ]
 init_command = [
     'python3',
