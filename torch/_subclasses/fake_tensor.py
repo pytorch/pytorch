@@ -2527,7 +2527,7 @@ class FakeTensorMode(TorchDispatchMode):
                         and s.rhs == 1
                     ):
                         assert self.shape_env is not None
-                        self.shape_env.set_unbacked_var_to_val(s, bool(real_t))
+                        self.shape_env.set_unbacked_var_to_val(s, int(real_t))
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches

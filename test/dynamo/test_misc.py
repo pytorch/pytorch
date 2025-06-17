@@ -12462,6 +12462,42 @@ fn
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(fn(*inputs), inputs[0])
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_builtin_bool_on_symint(self):
+        def f(x):
+            return bool(x.item())
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randint(10, (1,))
+
+        ref = f(x)
+        res = opt_f(x)
+        self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_builtin_bool_on_symfloat(self):
+        def f(x):
+            return bool(x.item())
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(1)
+
+        ref = f(x)
+        res = opt_f(x)
+        self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_builtin_bool_on_symbool(self):
+        def f(x):
+            return bool(x.item())
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(1) == 1
+
+        ref = f(x)
+        res = opt_f(x)
+        self.assertEqual(ref, res)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
