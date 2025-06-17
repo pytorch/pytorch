@@ -8,21 +8,21 @@ higher-level API to automatically differentiate models split across several
 machines.
 
 ```{warning}
-     APIs in the RPC package are stable. There are multiple ongoing work items
-     to improve performance and error handling, which will ship in future releases.
+APIs in the RPC package are stable. There are multiple ongoing work items
+to improve performance and error handling, which will ship in future releases.
 ```
 
 ```{warning}
-    CUDA support was introduced in PyTorch 1.9 and is still a **beta** feature.
-    Not all features of the RPC package are yet compatible with CUDA support and
-    thus their use is discouraged. These unsupported features include: RRefs,
-    JIT compatibility, dist autograd and dist optimizer, and profiling. These
-    shortcomings will be addressed in future releases.
+CUDA support was introduced in PyTorch 1.9 and is still a **beta** feature.
+Not all features of the RPC package are yet compatible with CUDA support and
+thus their use is discouraged. These unsupported features include: RRefs,
+JIT compatibility, dist autograd and dist optimizer, and profiling. These
+shortcomings will be addressed in future releases.
 ```
 
 ```{note}
-    Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
-    for a brief introduction to all features related to distributed training.
+Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
+for a brief introduction to all features related to distributed training.
 ```
 
 ## Basics
