@@ -381,7 +381,7 @@ def foreach_reduce(
     orig_dtype: Optional[torch.dtype],
     reduce_dtype: Optional[torch.dtype],
     device: torch.device,
-    gradient_divide_factor: float,
+    gradient_divide_factor: Optional[float],
     all_reduce_group: Optional[dist.ProcessGroup],  # not `None` iff HSDP
     all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
@@ -412,11 +412,11 @@ def foreach_reduce(
     reduce_dtype = reduce_dtype or grad_dtype
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
         _get_gradient_divide_factors(
-            gradient_divide_factor,
             reduce_scatter_group,
             all_reduce_group,
             reduce_dtype,
             device.type,
+            gradient_divide_factor,
             force_sum_reduction_for_comms,
         )
     )
@@ -603,11 +603,11 @@ def _get_all_gather_input_metadatas(
 
 
 def _get_gradient_divide_factors(
-    factor: Optional[float],
     reduce_scatter_group: dist.ProcessGroup,
     all_reduce_group: Optional[dist.ProcessGroup],
     reduce_dtype: torch.dtype,
     device_type: str = "",
+    factor: Optional[float] = None,
     force_sum_reduction_for_comms: bool = False,
 ) -> tuple[
     Optional[float],
@@ -615,6 +615,7 @@ def _get_gradient_divide_factors(
     Union[dist.ReduceOp, dist.ReduceOp.RedOpType],
     Union[dist.ReduceOp, dist.ReduceOp.RedOpType],
 ]:
+    # MTIA appears to only support SUM reduction, hence we force it implicitly
     if device_type == "mtia":
         force_sum_reduction_for_comms = True
 
@@ -626,19 +627,25 @@ def _get_gradient_divide_factors(
     if all_reduce_group is not None:
         data_parallel_size *= all_reduce_group.size()
 
+    if factor is None:
+        factor = float(data_parallel_size)
+
     if not overflow_risk and not force_sum_reduction_for_comms:
         if factor == data_parallel_size:
+            # Warning: NCCL ReduceOp.AVG may produce incorrect results with
+            # world size 1.
             return None, None, ReduceOp.AVG, ReduceOp.AVG
         else:
             reduce_scatter_op = torch.distributed._make_nccl_premul_sum(1 / factor)
             return None, None, reduce_scatter_op, ReduceOp.SUM
 
+    pre_factor: Optional[float]
     if overflow_risk:
         # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid
         # overflow/underflow. For N data parallel workers, each worker computes
         # g_i, and they collectively reduce (g_1 + ... + g_N) / N. To avoid
         # overflow/underflow, we divide by ~sqrt(N) before/after the reduction.
-        pre_factor: int = 1
+        pre_factor = 1
         while factor % pre_factor == 0 and factor / pre_factor > pre_factor:
             pre_factor *= 2
         post_factor = factor / pre_factor

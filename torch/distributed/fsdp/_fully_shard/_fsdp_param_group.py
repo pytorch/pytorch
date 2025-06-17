@@ -179,10 +179,7 @@ class FSDPParamGroup:
         self.reshard_after_backward: bool = True
         # Optional custom factor for the gradient reduction op (e.g. to divide
         # by a factor other than the world size)
-        self.gradient_divide_factor: float = (
-            self._reduce_scatter_process_group.size()
-            * (self._all_reduce_process_group.size() if self._is_hsdp else 1)
-        )
+        self.gradient_divide_factor: Optional[float] = None
         # Whether reduce-scatter and all-reduce should be issued using only
         # summations, potentially with separate pre-/post-scaling.
         self.force_sum_reduction_for_comms: bool = False

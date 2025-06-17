@@ -185,6 +185,7 @@ def fully_shard(
     Returns:
         FSDPModule: The module with FSDP applied (in-place).
     """
+    torch._C._log_api_usage_once("torch.distributed.fsdp.fully_shard")
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
             f"fully_shard does not support containers that do not implement forward: {module}"
@@ -500,7 +501,7 @@ class FSDPModule:
 
     @deprecated("Use `set_gradient_divide_factor` instead")
     def set_reduce_scatter_divide_factor(self, factor: float) -> None:
-        """Use :method:`set_gradient_divide_factor` instead"""
+        """Use :py:meth:`set_gradient_divide_factor` instead"""
         self.set_gradient_divide_factor(factor)
 
     def set_gradient_divide_factor(self, factor: float) -> None:
@@ -523,6 +524,15 @@ class FSDPModule:
         at the cost of separate additional pre- or post-scaling operations.
         This is needed for example because NCCL currently supports zero-copy
         transfers only for this kind of collectives.
+
+        NB: for MTIA devices, this is always implicitly enabled.
+
+        NB: if `set_all_reduce_hook` is used under FSDP setup, the caller needs
+        to ensure the custom all-reduce across FSDP units follow this strategy
+        as well, as FSDP can no longer automatically handle that.
+
+        Args:
+            enable (bool): Whether to only ever use ReduceOp.SUM for comms.
         """
         state = self._get_fsdp_state()
         if (fsdp_param_group := state._fsdp_param_group) is not None:

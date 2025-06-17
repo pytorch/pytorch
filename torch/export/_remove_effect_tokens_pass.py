@@ -53,13 +53,13 @@ def _remove_effect_tokens_from_graph_helper(
         assert isinstance(func, (torch._ops.OpOverload, torch._ops.HigherOrderOperator))
 
         if func == torch.ops.higher_order.call_torchbind:
-            custom_obj_meta = node.args[2].meta["val"]
+            custom_obj_meta = node.args[2].meta["val"]  # type: ignore[union-attr]
             assert isinstance(custom_obj_meta, CustomObjArgument)
             if custom_obj_meta.fake_val:
                 custom_obj = custom_obj_meta.fake_val
-            elif node.args[2].name in inputs_to_lifted_custom_objs:
+            elif node.args[2].name in inputs_to_lifted_custom_objs:  # type: ignore[union-attr]
                 custom_obj = ep.constants[
-                    inputs_to_lifted_custom_objs[node.args[2].name]
+                    inputs_to_lifted_custom_objs[node.args[2].name]  # type: ignore[union-attr]
                 ]
             else:
                 raise RuntimeError(f"Unable to find custom obj for node {node}")
