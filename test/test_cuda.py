@@ -3525,7 +3525,7 @@ exit(2)
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"You cannot access the raw cudaGraph_t instance unless CUDAGraph was initialized with keep_graph=true",
+            r"You cannot access the raw (cuda|hip)Graph_t instance unless CUDAGraph was initialized with keep_graph=true",
         ):
             raw_pointer = graph.raw_cuda_graph()
 
