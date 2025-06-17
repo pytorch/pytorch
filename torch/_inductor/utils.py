@@ -996,6 +996,25 @@ def output_node(gm: torch.fx.GraphModule) -> Node:
     return last_node
 
 
+def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
+    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
+    input_devices: OrderedSet[torch.device] = OrderedSet(
+        node.meta["val"].device
+        for node in placeholder_nodes
+        if isinstance(node.meta.get("val"), torch.Tensor)
+    )
+
+    out_arg = output_node(gm).args[0]  # type: ignore[union-attr]
+    out_args = out_arg if isinstance(out_arg, tuple) else (out_arg,)
+    out_devices: OrderedSet[torch.device] = OrderedSet(
+        arg.meta["val"].device
+        for arg in out_args
+        if isinstance(arg, torch.fx.Node)
+        and isinstance(arg.meta.get("val"), torch.Tensor)
+    )
+    return input_devices | out_devices
+
+
 _registered_caches: list[Any] = []
 
 
@@ -1506,7 +1525,7 @@ def use_triton_template(
 
 
 def use_triton_tma_template(*matrices: IRNode) -> bool:
-    from torch.utils._triton import has_triton_tma_device
+    from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
     from .virtualized import V
 
@@ -1534,6 +1553,10 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
 
         inner_bytes = inner_dim * dtype.itemsize
         return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
+
+    if has_triton_stable_tma_api() and config.cpp_wrapper:
+        # TODO(dberard) remove this when we get AOTI support for new TMA APIs (#155047)
+        return False
 
     return (
         config.triton.enable_persistent_tma_matmul
@@ -1574,6 +1597,14 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
+def _use_cutlass_for_op(op_name: str) -> bool:
+    """Check if CUTLASS should be used for the given operation."""
+    enabled_ops = config.cuda.cutlass_enabled_ops.upper()
+    if enabled_ops == "ALL":
+        return True
+    return op_name.upper() in [x.strip() for x in enabled_ops.split(",")]
+
+
 decompose_k_threshold = 32
 
 # To limit compile time
@@ -1589,7 +1620,7 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     from torch._inductor.virtualized import V
 
     return (
-        V.graph.sizevars.is_expr_static_and_true(
+        V.graph.sizevars.statically_known_true(
             sympy.And(
                 sympy.Ge(k, decompose_k_threshold * m),
                 sympy.Ge(k, decompose_k_threshold * n),
@@ -2753,7 +2784,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
 
     # Allow for unhinted e as long as we can still statically prove
     # (e.g., via ValueRanges) that it is still in bounds
-    if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
+    if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
     # Otherwise, the hint MUST exist and be in range
     return has_hint(e) and size_hint(e) <= int_max

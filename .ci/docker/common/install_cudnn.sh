@@ -7,7 +7,7 @@ if [[ -n "${CUDNN_VERSION}" ]]; then
     if [[ ${CUDA_VERSION:0:4} == "12.9" || ${CUDA_VERSION:0:4} == "12.8" ]]; then
         CUDNN_NAME="cudnn-linux-x86_64-9.10.2.21_cuda12-archive"
     elif [[ ${CUDA_VERSION:0:4} == "12.6" ]]; then
-        CUDNN_NAME="cudnn-linux-x86_64-9.5.1.17_cuda12-archive"
+        CUDNN_NAME="cudnn-linux-x86_64-9.10.2.21_cuda12-archive"
     elif [[ ${CUDA_VERSION:0:2} == "11" ]]; then
         CUDNN_NAME="cudnn-linux-x86_64-9.1.0.70_cuda11-archive"
     else
