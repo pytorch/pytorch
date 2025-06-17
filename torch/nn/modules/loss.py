@@ -1319,14 +1319,14 @@ class CrossEntropyLoss(_WeightedLoss):
 
     .. note::
         When ``target`` contains class probabilities, it should consist of soft labels—that is,
-        each `target` entry should represent a probability distribution over the possible classes for a given data sample,
-        with individual probabilities between `[0,1]` and the total distribution summing to 1.
+        each ``target`` entry should represent a probability distribution over the possible classes for a given data sample,
+        with individual probabilities between ``[0,1]`` and the total distribution summing to 1.
         This is why the :func:`softmax()` function is applied to the ``target`` in the class probabilities example above.
 
-        PyTorch does not validate whether the values provided in `target` lie in the range `[0,1]`
-        or whether the distribution of each data sample sums to `1`.
+        PyTorch does not validate whether the values provided in ``target`` lie in the range ``[0,1]``
+        or whether the distribution of each data sample sums to ``1``.
         No warning will be raised and it is the user's responsibility
-        to ensure that `target` contains valid probability distributions.
+        to ensure that ``target`` contains valid probability distributions.
         Providing arbitrary values may yield misleading loss values and unstable gradients during training.
 
     Examples:
