@@ -18,7 +18,7 @@ constexpr size_t kPinnedMaxRegisterThreads = 128;
 
 AllocatorConfig& AllocatorConfig::instance() {
   static AllocatorConfig instance;
-  c10::once_flag init_once;
+  static c10::once_flag init_once;
 #define C10_ALLOCATOR_CONFIG_PARSE_ENV(env, deprecated)                       \
   auto env##_name = c10::utils::get_env(#env);                                \
   if (env##_name.has_value()) {                                               \
