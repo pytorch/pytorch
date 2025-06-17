@@ -1225,9 +1225,11 @@ def _map_param_key_to_optim_keys(
         key_obj_list: list[Optional[list[_OptimStateKey]]] = (
             [all_optim_state_keys] if rank == 0 else [None]
         )
-        dist.broadcast_object_list(
-            key_obj_list, src=dist.get_global_rank(group, 0), group=group
-        )
+        if group is not None:
+            src_rank = dist.get_global_rank(group, 0)
+        else:
+            src_rank = 0
+        dist.broadcast_object_list(key_obj_list, src=src_rank, group=group)
         assert key_obj_list[0] is not None
         all_optim_state_keys = key_obj_list[0]
         _check_missing_keys_on_rank(
