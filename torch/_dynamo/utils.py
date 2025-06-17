@@ -107,7 +107,6 @@ if typing.TYPE_CHECKING:
 
     import torch.utils.checkpoint
 
-
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -4203,7 +4202,7 @@ def is_rng_state_getter_or_setter(value) -> bool:
     return value in (*setters, *getters)
 
 
-def is_tensor_base_attr_getter(value) -> bool:
+def is_tensor_base_attr_getter(value) -> TypeGuard[types.MethodWrapperType]:
     return (
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"

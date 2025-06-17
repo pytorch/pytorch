@@ -276,7 +276,7 @@ def smoke_test_cuda(
             torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
             print(f"Torch nccl; version: {torch_nccl_version}")
 
-        # Pypi dependencies are installed on linux ony and nccl is availbale only on Linux.
+        # Pypi dependencies are installed on linux only and nccl is available only on Linux.
         if pypi_pkg_check == "enabled" and sys.platform in ["linux", "linux2"]:
             compare_pypi_to_torch_versions(
                 "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
