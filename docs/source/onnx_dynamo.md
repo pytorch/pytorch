@@ -165,7 +165,7 @@ The following metadata fields are added to each ONNX node:
 
 - **pkg.torch.onnx.fx_node**
 
-  The string representation of the original FX node, including its name, number of consumers, torch op, arguments, and keyword arguments.
+  The string representation of the original FX node, including its name, number of consumers, the targeted torch op, arguments, and keyword arguments.
   
   *Example:*
   `%sym_size_int_720 : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%img, 2), kwargs = {})`
@@ -192,6 +192,19 @@ The following metadata fields are added to each ONNX node:
   `[2]`
 
 These metadata fields are stored in the metadata_props attribute of each ONNX node and can be inspected using Netron or programmatically.
+
+The overall ONNX IR graph has the following metadata props:
+
+- **pkg.torch.export.ExportedProgram.graph_signature**
+
+  This property contains a string representation of the graph_signature from the original PyTorch ExportedProgram. The graph signature describes the structure of the model's inputs and outputs and how they map to the ONNX graph. The inputs are defined as `InputSpec` objects, which include the kind of input (e.g., `InputKind.PARAMETER` for parameters, `InputKind.USER_INPUT` for user-defined inputs), the argument name, the target (which can be a specific node in the model), and whether the input is persistent. The outputs are defined as `OutputSpec` objects, which specify the kind of output (e.g., `OutputKind.USER_OUTPUT`) and the argument name.
+
+- **pkg.torch.export.ExportedProgram.range_constraints**
+
+  This property contains a string representation of any range constraints that were present in the original PyTorch ExportedProgram. Range constraints specify valid ranges for symbolic shapes or values in the model, which can be important for models that use dynamic shapes or symbolic dimensions.
+
+  *Example:*
+  `s0: VR[2, int_oo]`, which indicates that the size of the input tensor must be at least 2.
 
 Each input value in the ONNX graph may have the following metadata property:
 
