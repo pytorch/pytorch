@@ -821,11 +821,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sym_is_contiguous_default(memory_format);
   }
 
-  bool is_contiguous_custom(at::MemoryFormat memory_format) const {
-    return sym_is_contiguous_custom(memory_format)
-        .guard_bool(__FILE__, __LINE__);
-  }
-
   template <typename T>
   T is_contiguous_default_impl(at::MemoryFormat memory_format) const {
     if (!has_symbolic_sizes_strides_) {
@@ -892,14 +887,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
-  bool is_non_overlapping_and_dense_default(bool guard_or_false = false) const {
+  SymBool sym_is_non_overlapping_and_dense_default() const {
     if (has_symbolic_sizes_strides_) {
-      const auto& cond = symbolic_shape_meta().is_non_overlapping_and_dense();
+      return symbolic_shape_meta().is_non_overlapping_and_dense();
+    } else {
+      return is_non_overlapping_and_dense_;
+    }
+  }
 
-      if (guard_or_false) {
-        return cond.guard_or_false(__FILE__, __LINE__);
-      }
-      return cond.guard_bool(__FILE__, __LINE__);
+  bool is_non_overlapping_and_dense_default() const {
+    if (has_symbolic_sizes_strides_) {
+      return sym_is_non_overlapping_and_dense_default().guard_bool(
+          __FILE__, __LINE__);
     } else {
       return is_non_overlapping_and_dense_;
     }
@@ -992,17 +991,23 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
 
   // sizes_strides_policy_ >= CustomStrides
-  // when guard_or_false is true, it's ok if the function returns false to avoid
-  // a data dependent error even if the actual result at runtime is true.
-  virtual c10::SymBool sym_is_contiguous_custom(
-      at::MemoryFormat memory_format) const;
 
   virtual bool is_strides_like_custom(at::MemoryFormat memory_format) const;
 
-  // when guard_or_false is true, it's ok if the function returns false to avoid
-  // a data dependent error even if the actual result at runtime is true.
-  virtual bool is_non_overlapping_and_dense_custom(
-      bool guard_or_false = false) const;
+  virtual c10::SymBool sym_is_non_overlapping_and_dense_custom() const;
+
+  bool is_non_overlapping_and_dense_custom() const {
+    return sym_is_non_overlapping_and_dense_custom().guard_bool(
+        __FILE__, __LINE__);
+  }
+
+  virtual c10::SymBool sym_is_contiguous_custom(
+      at::MemoryFormat memory_format) const;
+
+  bool is_contiguous_custom(at::MemoryFormat memory_format) const {
+    return sym_is_contiguous_custom(memory_format)
+        .guard_bool(__FILE__, __LINE__);
+  }
 
   // sizes_strides_policy_ >= CustomSizes
   // Currently this method only exists to be overwritten by subclasses such as
@@ -2481,10 +2486,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_non_overlapping_and_dense_or_false() const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
-      return is_non_overlapping_and_dense_custom(true /*guard_or_false*/);
-    }
-    return is_non_overlapping_and_dense_default(true /*guard_or_false*/);
+    return sym_is_non_overlapping_and_dense().guard_or_false(
+        __FILE__, __LINE__);
   }
 
   bool is_non_overlapping_and_dense() const {
@@ -2492,6 +2495,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return is_non_overlapping_and_dense_custom();
     }
     return is_non_overlapping_and_dense_default();
+  }
+
+  SymBool sym_is_non_overlapping_and_dense() const {
+    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+      return sym_is_non_overlapping_and_dense_custom();
+    }
+    return sym_is_non_overlapping_and_dense_default();
   }
 
   // if this returns true, then it is guaranteed that this tensor has symbolic

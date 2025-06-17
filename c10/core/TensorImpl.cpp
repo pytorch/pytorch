@@ -328,13 +328,12 @@ bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
   return is_strides_like_default(memory_format);
 }
 
-bool TensorImpl::is_non_overlapping_and_dense_custom(
-    bool guard_or_false) const {
+c10::SymBool TensorImpl::sym_is_non_overlapping_and_dense_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->is_non_overlapping_and_dense(
         this);
   }
-  return is_non_overlapping_and_dense_default(guard_or_false);
+  return sym_is_non_overlapping_and_dense_default();
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
