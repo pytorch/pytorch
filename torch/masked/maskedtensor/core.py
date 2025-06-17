@@ -304,7 +304,7 @@ class MaskedTensor(torch.Tensor):
         return MaskedTensor(fn(data), mask)
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs):
+    def __torch_dispatch__(cls, func, types, args, kwargs):  # type: ignore[override]
         func = func.overloadpacket
 
         from ._ops_refs import _MASKEDTENSOR_DISPATCH_TABLE
@@ -355,5 +355,5 @@ class MaskedTensor(torch.Tensor):
 
     # Update later to support more sparse layouts
     @property
-    def is_sparse(self):
+    def is_sparse(self):  # type: ignore[override]
         return self.is_sparse_coo() or self.is_sparse_csr()
