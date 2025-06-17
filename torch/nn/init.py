@@ -171,7 +171,6 @@ def calculate_gain(
     Examples:
         >>> gain = nn.init.calculate_gain('leaky_relu', 0.2)  # leaky_relu with negative_slope=0.2
 
-    .. _Self-Normalizing Neural Networks: https://papers.nips.cc/paper/2017/hash/5d44ee6f2c3f71b73125876103c8f6c4-Abstract.html
     """
     linear_fns = [
         "linear",
