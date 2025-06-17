@@ -13,6 +13,7 @@
 #if AT_CUDNN_ENABLED()
 
 #endif
+#include <ATen/core/AllocaorConfig.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CachingHostAllocator.h>
@@ -21,7 +22,6 @@
 #include <ATen/cuda/jiterator.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/core/StorageImpl.h>
-#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -426,8 +426,7 @@ PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
     PyObject* _unused,
     PyObject* env) {
   HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::setAllocatorSettings(
-      THPUtils_unpackString(env));
+  c10::CachingAllocator::setAllocatorSettings(THPUtils_unpackString(env));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

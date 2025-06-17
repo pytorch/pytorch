@@ -11,7 +11,6 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceType.h>
-#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
