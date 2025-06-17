@@ -1164,6 +1164,17 @@ class DeviceCachingAllocator {
     }
   }
 
+  bool isExpandableSegmentEnabled() {
+#ifndef PYTORCH_C10_DRIVER_API_SUPPORTED
+    if (AllocatorConfig::use_expandable_segments()) {
+      TORCH_WARN_ONCE("expandable_segments not supported on this platform")
+    }
+    return false;
+#else
+    return true;
+#endif
+  }
+
   bool isHistoryEnabled() {
     return record_history;
   }
@@ -2608,7 +2619,7 @@ class DeviceCachingAllocator {
 
   bool should_split(const Block* block, size_t size) {
     size_t remaining = block->size - size;
-    if (block->pool->is_small || CUDAAllocatorConfig::expandable_segments()) {
+    if (block->pool->is_small || isExpandableSegmentEnabled()) {
       return remaining >= kMinBlockSize;
     } else {
       return (size < CUDAAllocatorConfig::max_split_size()) &&
@@ -2640,7 +2651,7 @@ class DeviceCachingAllocator {
       return false;
 
     if ((*it)->expandable_segment_) {
-      if (CUDAAllocatorConfig::expandable_segments()) {
+      if (isExpandableSegmentEnabled()) {
         // if we are allocated to the part of the block that is expandable
         // for the purposes of "best fit" we consider its size to be the size it
         // can expand to, not the size it currently is. This means that we
@@ -2787,7 +2798,7 @@ class DeviceCachingAllocator {
       return false;
       // Temporarily disable checkpointing & cudagraphs internally
     } else if (
-        CUDAAllocatorConfig::expandable_segments() &&
+        isExpandableSegmentEnabled() &&
         !(in_fbcode && p.pool->owner_PrivatePool)) {
       TORCH_CHECK(
           !active_pool,
@@ -3552,6 +3563,12 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->popCompileContext();
   }
 
+  bool isExpandableSegmentEnabled() override {
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    return device_allocator[device]->isExpandableSegmentEnabled();
+  }
+
   bool isHistoryEnabled() override {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
@@ -3656,7 +3673,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     md.max_split_size = CUDAAllocatorConfig::max_split_size();
     md.pinned_num_register_threads =
         CUDAAllocatorConfig::pinned_num_register_threads();
-    md.expandable_segments = CUDAAllocatorConfig::expandable_segments();
+    md.expandable_segments = isExpandableSegmentEnabled();
     md.release_lock_on_malloc =
         CUDAAllocatorConfig::release_lock_on_cudamalloc();
     md.pinned_use_host_register =
@@ -4041,49 +4058,9 @@ CUDAAllocator* allocator();
 } // namespace CudaMallocAsync
 
 struct BackendStaticInitializer {
-  // Parses env for backend at load time, duplicating some logic from
-  // CUDAAllocatorConfig. CUDAAllocatorConfig double-checks it later (at
-  // runtime). Defers verbose exceptions and error checks, including Cuda
-  // version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
-  // works, maybe we should move all of CUDAAllocatorConfig here?
   CUDAAllocator* parseEnvForBackend() {
-    auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
-#ifdef USE_ROCM
-    // convenience for ROCm users to allow either CUDA or HIP env var
-    if (!val.has_value()) {
-      val = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
-    }
-#endif
-    if (val.has_value()) {
-      const std::string& config = val.value();
-
-      std::regex exp("[\\s,]+");
-      std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
-      std::sregex_token_iterator end;
-      std::vector<std::string> options(it, end);
-
-      for (auto option : options) {
-        std::regex exp2("[:]+");
-        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
-        std::sregex_token_iterator end2;
-        std::vector<std::string> kv(it2, end2);
-        if (kv.size() >= 2) {
-          if (kv[0] == "backend") {
-#ifdef USE_ROCM
-            // convenience for ROCm users to allow either CUDA or HIP env var
-            if (kv[1] ==
-                    "cud"
-                    "aMallocAsync" ||
-                kv[1] == "hipMallocAsync")
-#else
-            if (kv[1] == "cudaMallocAsync")
-#endif
-              return CudaMallocAsync::allocator();
-            if (kv[1] == "native")
-              return &Native::allocator;
-          }
-        }
-      }
+    if (c10::CachingAllocator::AllocatorConfig::use_async_allocator()) {
+      return CudaMallocAsync::allocator();
     }
     return &Native::allocator;
   }
@@ -4091,6 +4068,7 @@ struct BackendStaticInitializer {
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
     allocator.store(r);
+    c10::CachingAllocator::AllocatorConfig::set_allocator_loaded();
   }
 };
 

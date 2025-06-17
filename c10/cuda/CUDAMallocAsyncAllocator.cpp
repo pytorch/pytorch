@@ -914,6 +914,12 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     C10_CUDA_CHECK(
         cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
   }
+  bool isExpandableSegmentEnabled() override {
+    TORCH_WARN_ONCE(
+        "CudaMallocAsyncAllocator does not support expandable segments. "
+        "Please use CUDACachingAllocator instead if you need this feature.");
+    return false;
+  }
 };
 
 static CudaMallocAsyncAllocator device_allocator;
