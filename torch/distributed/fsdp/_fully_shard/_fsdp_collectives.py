@@ -504,6 +504,7 @@ def foreach_reduce(
         ):
             # Assume even sharding for Shard(i), i > 0; otherwise would require
             # copy-out for contiguous strides
+            """
             if all_reduce_group is not None:
                 size_dim = len(fsdp_param.sharded_size)
                 size = [fsdp_param.sharded_size[0] // all_reduce_group.size()]
@@ -512,10 +513,10 @@ def foreach_reduce(
                 size = torch.Size(size)
             else:
                 size = fsdp_param.sharded_size
-            torch.distributed.breakpoint()
+            """
             new_sharded_grad = torch.as_strided(
                 reduce_output,
-                size=size,
+                size=fsdp_param.fully_sharded_size,
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
             )
@@ -549,7 +550,6 @@ def foreach_reduce(
                     and fsdp_param.sharded_param_fully_shard.dtype
                     != new_sharded_dtensor_grad.dtype
                 ):
-                    torch.distributed.breakpoint()
                     fsdp_param.sharded_param_fully_shard.grad = (
                         new_sharded_dtensor_grad.to(
                             fsdp_param.sharded_param_fully_shard.dtype

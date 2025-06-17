@@ -378,14 +378,17 @@ class FSDPParam:
             sharded_param, param_data.size(), dim=shard_dim
         )
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
+        self.padded_sharded_param_size = chunks[0].size()
 
         chunks = _chunk_with_empty(
             param_data, shard_world_size * replicate_world_size, dim=shard_dim
         )
-        fully_sharded_param = chunks[shard_rank + replicate_rank * shard_world_size]
-
+        fully_sharded_param = chunks[replicate_rank + shard_rank * replicate_world_size]
+        self.fully_sharded_size = _get_dim_chunked_size(
+            fully_sharded_param, param_data.size(), dim=shard_dim
+        )
         padded_sharded_size = chunks[0].size()  # 0th always padded
-        self.padded_sharded_param_size = padded_sharded_size
+        # self.padded_sharded_param_size = padded_sharded_size
         # Pre-pad the sharded parameter to avoid padding before all-gather
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
         if fully_sharded_param.numel() > 0:
@@ -414,15 +417,15 @@ class FSDPParam:
             )
         )
         self.sharded_param_fully_shard.requires_grad_(param.requires_grad)
-        torch.distributed.breakpoint()
         sharded_param = torch.cat(
-            chunks[replicate_rank : replicate_rank + replicate_world_size],
+            chunks[shard_rank : shard_rank + shard_world_size],
             dim=0,
         )
         padded_sharded_param_size = torch.cat(
-            chunks[::replicate_world_size],
+            chunks[0:shard_world_size],
             dim=0,
-        ).size()  # issue here, should be 4 rather than 2
+        ).size()
+        # torch.distributed.breakpoint()
         padded_sharded_param = param_data.new_zeros(padded_sharded_param_size).to(
             self.mp_policy.param_dtype
         )
@@ -440,13 +443,6 @@ class FSDPParam:
                 sharded_param,
                 self._sharding_spec,
             )
-        )
-        torch.distributed.breakpoint()
-        print(
-            "each rank sharded param",
-            torch.distributed.get_rank(),
-            self.sharded_param,
-            sharded_param,
         )
         self.sharded_param.requires_grad_(param.requires_grad)
         # Let `param_data` be freed normally when its ref count reaches 0 when
@@ -805,6 +801,7 @@ class FSDPParam:
                 sharded_param_data = sharded_param_data.to(
                     self.device, non_blocking=True
                 )
+            torch.distributed.breakpoint()
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             if not compiled_autograd_enabled() and hasattr(
@@ -815,7 +812,9 @@ class FSDPParam:
                 cast(torch.Tensor, self._sharded_post_forward_param_data),
                 self.param_dtype,
             )
+            torch.distributed.breakpoint()
             return [all_gather_input]
+        torch.distributed.breakpoint()
         return [torch.empty(0)]  # mypy
 
     @property
