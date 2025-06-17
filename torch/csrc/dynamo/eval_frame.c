@@ -223,12 +223,19 @@ const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
 }
 
-void clear_old_frame_if_python_312_plus(
+void clear_old_frame_if_python_312_plus(THP_EVAL_API_FRAME_OBJECT* frame) {
+#if IS_PYTHON_3_12_PLUS
+
+  THP_PyFrame_Clear(frame);
+
+#endif
+}
+
+void pop_old_frame_if_python_312_plus(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame) {
 #if IS_PYTHON_3_12_PLUS
 
-  THP_PyFrame_Clear(frame);
   THP_PyThreadState_PopFrame(tstate, frame);
 
 #endif
@@ -417,9 +424,13 @@ static PyObject* dynamo_eval_custom_code_impl(
   }
 
   // NOTE: if you want to evaluate frame instead of shadow in 3.12+,
-  // you need to clear_old_frame_if_python_312_plus the shadow frame BEFORE
+  // you need to clear/pop_old_frame_if_python_312_plus the shadow frame BEFORE
   // calling eval_frame_default (i.e. here) and comment out the
-  // clear_old_frame_if_python_312_plus call on the original frame.
+  // clear/pop_old_frame_if_python_312_plus call on the original frame.
+
+  // clear the old frame now, to clear extra references to locals
+  clear_old_frame_if_python_312_plus(frame);
+  // popping frame in 3.12+ is done by whoever called this function
 
   PyObject* result = dynamo_eval_frame_default(tstate, shadow, throw_flag);
 
@@ -657,6 +668,8 @@ static int clear_state(PyObject* module) {
 }
 
 bool is_skip_guard_eval_unsafe = false;
+
+// static PyObject* (PyObject* dummy, PyObject* obj) {
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},

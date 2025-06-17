@@ -97,6 +97,8 @@ class PyCodegen:
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
         self.overridden_sources: dict[Source, Source] = overridden_sources or {}
+        # locals that this PyCodegen has stored to so far
+        self.stored_locals: set[str] = set()
 
     def restore_stack(self, stack_values, *, value_from_source=True):
         prev = self.value_from_source
@@ -430,6 +432,7 @@ class PyCodegen:
 
     def create_store(self, name) -> Instruction:
         assert name in self.code_options["co_varnames"], f"{name} missing"
+        self.stored_locals.add(name)
         return create_instruction("STORE_FAST", argval=name)
 
     def create_store_deref(self, name) -> Instruction:
@@ -688,5 +691,6 @@ class PyCodegen:
             create_instruction("CALL_FUNCTION_KW", arg=nargs),
         ]
 
-    def create_delete(self, value) -> Instruction:
-        return create_instruction("DELETE_FAST", argval=value)
+    def create_delete(self, name) -> Instruction:
+        assert name in self.code_options["co_varnames"], f"{name} missing"
+        return create_instruction("DELETE_FAST", argval=name)

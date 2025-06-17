@@ -1245,6 +1245,7 @@ class OutputGraph(OutputGraphGuardsState):
         any dropped NULLs.
 
         Returns stack indices and locals keys where we dropped NULLs, and where we found inactive context manager objects.
+        Also returns a list of local names that can be DELETE_FAST'd by the caller.
         """
 
         assert self.root_tx is not None
@@ -1280,9 +1281,9 @@ class OutputGraph(OutputGraphGuardsState):
                     prefix_insts.append(copy.copy(inst))
         self.add_output_instructions(prefix_insts)
 
-        assert not (self.pregraph_bytecode and self.export), (
-            "export does not support pregraph_bytecode"
-        )
+        assert not (
+            self.pregraph_bytecode and self.export
+        ), "export does not support pregraph_bytecode"
         self.add_output_instructions(self.pregraph_bytecode)
 
         alias_insts, overridden_sources = self.handle_aliases_for_stolen_lists(
@@ -1327,6 +1328,8 @@ class OutputGraph(OutputGraphGuardsState):
         }
         root = FakeRootModule(nn_modules_proxies)
 
+        locals_to_delete = list(self.root_tx.initial_filled_locals)
+
         from .decorators import disable
 
         # to handle random calls
@@ -1348,12 +1351,15 @@ class OutputGraph(OutputGraphGuardsState):
             random_calls_instructions.append(
                 codegen.create_store(self.random_values_var),
             )
+            locals_to_delete.extend(self.random_values_var)
             self.add_output_instructions(random_calls_instructions)
 
         # call compiled fx graph
         graph_output_var = None
         stored_graph_output_var = False
         root_stack_values = all_stack_values[-1]
+        output_insts = []
+        temp_vars = []
         if (
             self.root_tx is tx
             and root_stack_values
@@ -1378,12 +1384,9 @@ class OutputGraph(OutputGraphGuardsState):
             and not all_stack_locals_metas[-1].locals_null_keys
         ):
             # optimization to generate better code in a common case
-            self.add_output_instructions(
-                self.compile_and_call_fx_graph(
-                    tx, list(reversed(root_stack_values)), root
-                )
-                + [create_instruction("UNPACK_SEQUENCE", arg=len(root_stack_values))]
-            )
+            output_insts = self.compile_and_call_fx_graph(
+                tx, list(reversed(root_stack_values)), root
+            ) + [create_instruction("UNPACK_SEQUENCE", arg=len(root_stack_values))]
         else:
             graph_output_var = self.new_var("graph_out")
             # load stack values in a flat manner for now - will likely change later.
@@ -1431,26 +1434,44 @@ class OutputGraph(OutputGraphGuardsState):
                 # NB: Important to run compiler collective even when there is
                 # a graph break
                 self.run_compiler_collective()
-            self.add_output_instructions(output + pass2.get_instructions())
+            output_insts = output + pass2.get_instructions()
+            locals_to_delete_set = set(locals_to_delete)
+            temp_vars = [
+                local
+                for local in pass2.stored_locals
+                if local not in locals_to_delete_set and local != graph_output_var
+            ]
 
         # restore all the live local vars of the root
         local_restore_cg = PyCodegen(
             self.root_tx, overridden_sources=overridden_sources
         )
         # TODO this local restoration should be removed when fully implementing nested graph breaks
-        self.add_output_instructions(
-            [
-                local_restore_cg.create_store(var)
-                for var in reversed(all_restore_vars[-1])
-            ]
-        )
+        output_insts += [
+            local_restore_cg.create_store(var) for var in reversed(all_restore_vars[-1])
+        ]
 
         if graph_output_var and stored_graph_output_var:
-            self.add_output_instructions(
-                [local_restore_cg.create_delete(graph_output_var)]
-            )
+            output_insts.append(local_restore_cg.create_delete(graph_output_var))
 
-        return all_stack_locals_metas
+        # Find all locals that are not used in output_insts or are live locals that
+        # need to be restored for the resume call, and DELETE_FAST them
+        # before output_insts, that is, the call to the compiled graph.
+        # NOTE: we assume that we do not codegen compound bytecode like LOAD_FAST_LOAD_FAST.
+        live_locals = {
+            inst.argval for inst in output_insts if inst.opname == "LOAD_FAST"
+        } | set(self.root_tx.symbolic_locals.keys())
+        del_insts = [
+            create_instruction("DELETE_FAST", argval=local)
+            for local in locals_to_delete
+            if local not in live_locals
+        ]
+        locals_to_delete = [
+            local for local in locals_to_delete if local in live_locals
+        ] + temp_vars
+        self.add_output_instructions(del_insts + output_insts)
+
+        return all_stack_locals_metas, locals_to_delete
 
     def codegen_suffix(self, tx, stack_values, cg):
         # NOTE: `codegen_save_tempvars` must run first to update `source` fields
@@ -1573,9 +1594,9 @@ class OutputGraph(OutputGraphGuardsState):
                 payload_fn=lambda: ds.local_state.render(),
             )
             device_types = compile_pg._device_types
-            assert len(device_types) == 1, (
-                "Expect only one device type but got {}".format("+".join(device_types))
-            )
+            assert (
+                len(device_types) == 1
+            ), "Expect only one device type but got {}".format("+".join(device_types))
             with (
                 get_interface_for_device(device_types.pop()).device(  # type: ignore[attr-defined]
                     compile_pg.rank() % torch.accelerator.device_count()
@@ -2567,9 +2588,9 @@ class SubgraphTracer(fx.Tracer):
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Node):
                     continue
-                assert arg.graph == self.graph, (
-                    "create_node using arg not from this SubgraphTracer"
-                )
+                assert (
+                    arg.graph == self.graph
+                ), "create_node using arg not from this SubgraphTracer"
 
         node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
@@ -2614,9 +2635,9 @@ class SubgraphTracer(fx.Tracer):
             before,
         )
         if source is None:
-            assert self.parent is not None, (
-                f"you are required to provide a source for inputs {name} example_val {example_value} on the root tracer"
-            )
+            assert (
+                self.parent is not None
+            ), f"you are required to provide a source for inputs {name} example_val {example_value} on the root tracer"
 
         # Note [Export inputs must be explicitly passed in]
         # In eager, we are generally OK with adding graph inputs whenever we
@@ -2713,9 +2734,9 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        assert self.parent is not None, (
-            "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
-        )
+        assert (
+            self.parent is not None
+        ), "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
 
         example_value = proxy.node.meta["example_value"]
 
@@ -3025,9 +3046,9 @@ class SubgraphTracer(fx.Tracer):
             if isinstance(proxy, LazyProxy):
                 proxy = proxy()
                 self.bound_symbols[s0] = proxy
-            assert isinstance(proxy, torch.fx.Proxy) and proxy.tracer is self, (
-                f"The proxy of symbol {s0} doesn't belong to current tracer."
-            )
+            assert (
+                isinstance(proxy, torch.fx.Proxy) and proxy.tracer is self
+            ), f"The proxy of symbol {s0} doesn't belong to current tracer."
         # Sort the symbols so that we can have a deterministic lifting order
         return sorted(to_be_bound, key=lambda s: s.name)
 

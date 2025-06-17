@@ -104,8 +104,12 @@ PyObject* dynamo__custom_eval_frame(
   const char* trace_annotation = "";
   PyObject* eval_result = nullptr; // strong reference
 
+  std::unique_ptr<FrameLocalsMapping> locals;
+
   // exit functions
   auto eval_default = [&]() {
+    // clear extra reference to locals
+    locals.reset(nullptr);
     eval_frame_callback_set(recursive_callback.ptr());
     eval_result = dynamo_eval_frame_default(tstate, frame, throw_flag);
     if (!callback.is(recursive_callback)) {
@@ -121,8 +125,10 @@ PyObject* dynamo__custom_eval_frame(
   // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for
   // clearing/popping the frame, meaning that unless we default evaluate the
   // original frame, we are responsible for clearing it - via
-  // clear_old_frame_if_python_312_plus.
+  // clear/pop_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
+    // clear extra reference to locals
+    locals.reset(nullptr);
     eval_frame_callback_set(recursive_callback.ptr());
     DEBUG_NULL_CHECK(cached_code);
     eval_result = dynamo_eval_custom_code(
@@ -130,10 +136,13 @@ PyObject* dynamo__custom_eval_frame(
     if (!callback.is(recursive_callback)) {
       eval_frame_callback_set(callback.ptr());
     }
-    clear_old_frame_if_python_312_plus(tstate, frame);
+    pop_old_frame_if_python_312_plus(tstate, frame);
   };
 
-  auto fail = [&]() { clear_old_frame_if_python_312_plus(tstate, frame); };
+  auto fail = [&]() {
+    clear_old_frame_if_python_312_plus(frame);
+    pop_old_frame_if_python_312_plus(tstate, frame);
+  };
 
   ExtraState* extra = get_extra_state(F_CODE(frame));
 
@@ -161,8 +170,7 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // default and run-only mode require guard eval
-  std::unique_ptr<FrameLocalsMapping> locals =
-      std::make_unique<FrameLocalsMapping>(frame);
+  locals = std::make_unique<FrameLocalsMapping>(frame);
   PyObject* backend = get_backend(callback.ptr()); // borrowed
 
   // We don't run the current custom_eval_frame behavior for guards.

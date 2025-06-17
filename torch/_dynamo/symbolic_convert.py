@@ -606,7 +606,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
 
         self.push(value)
         log.debug("generic_jump triggered compile")
-        all_stack_locals_metadata = self.output.compile_subgraph(
+        all_stack_locals_metadata, locals_to_delete = self.output.compile_subgraph(
             self,
             reason=GraphCompileReason(
                 f"generic_jump {typestr(value)}{extra_msg}", [self.frame_summary()]
@@ -616,11 +616,13 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         self.pop()
 
         if_next = self.create_call_resume_at(
-            self.next_instruction, all_stack_locals_metadata
+            self.next_instruction, all_stack_locals_metadata, locals_to_delete
         )
         if push:
             self.push(value)
-        if_jump = self.create_call_resume_at(inst.target, all_stack_locals_metadata)
+        if_jump = self.create_call_resume_at(
+            inst.target, all_stack_locals_metadata, locals_to_delete
+        )
 
         if sys.version_info >= (3, 13):
             # 3.13 requires stack[-1] to be bool type
@@ -891,7 +893,7 @@ def break_graph_if_unsupported(*, push):
             else:
                 stack_effect = dis.stack_effect(inst.opcode, inst.arg)
 
-            all_stack_locals_metadata = self.output.compile_subgraph(
+            all_stack_locals_metadata, locals_to_delete = self.output.compile_subgraph(
                 self, reason=reason, stack_pops=push - stack_effect
             )
             cg = PyCodegen(self)
@@ -943,7 +945,7 @@ def break_graph_if_unsupported(*, push):
                 self.push(UnknownVariable())
             self.output.add_output_instructions(
                 self.create_call_resume_at(
-                    self.next_instruction, all_stack_locals_metadata
+                    self.next_instruction, all_stack_locals_metadata, locals_to_delete
                 )
             )
 
@@ -2331,7 +2333,7 @@ class InstructionTranslatorBase(
                 "STORE_ATTR instruction (i.e. `obj.attr = val`) that it should not compile the partial graph.",
                 hints=[],
             )
-        all_stack_locals_metadata = self.output.compile_subgraph(
+        all_stack_locals_metadata, locals_to_delete = self.output.compile_subgraph(
             self,
             reason=GraphCompileReason("store_attr", [self.frame_summary()]),
             stack_pops=2,
@@ -2339,7 +2341,9 @@ class InstructionTranslatorBase(
         self.output.add_output_instructions([copy.copy(inst)])
         self.popn(2)
         self.output.add_output_instructions(
-            self.create_call_resume_at(self.next_instruction, all_stack_locals_metadata)
+            self.create_call_resume_at(
+                self.next_instruction, all_stack_locals_metadata, locals_to_delete
+            )
         )
 
     def DELETE_ATTR(self, inst):
@@ -2350,7 +2354,9 @@ class InstructionTranslatorBase(
             {},
         )
 
-    def create_call_resume_at(self, offset, all_stack_locals_metadata):
+    def create_call_resume_at(
+        self, offset, all_stack_locals_metadata, locals_to_delete
+    ):
         raise AssertionError(
             f"create_call_resume_at not overridden by subclass {type(self)}"
         )
@@ -3224,6 +3230,10 @@ class InstructionTranslatorBase(
         self.f_locals: dict[str, Any] = (
             f_locals  # needed for recording accessed locals for replay
         )
+        # used for local deletion in codegen
+        self.initial_filled_locals = tuple(
+            set(f_locals.keys()) - set(f_code.co_freevars + f_code.co_cellvars)
+        )
         self.f_globals: dict[str, Any] = f_globals
         self.f_builtins: dict[str, Any] = f_builtins
         self.code_options: dict[str, Any] = code_options
@@ -3510,7 +3520,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.active_generic_context_managers
         )
 
-    def create_call_resume_at(self, inst, all_stack_locals_metadata):
+    def create_call_resume_at(self, inst, all_stack_locals_metadata, locals_to_delete):
         self.instruction_pointer = None
 
         if inst.opname == "RETURN_VALUE":
@@ -3603,6 +3613,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             )
 
         cg.extend_output([cg.create_load(k) for k in argnames])
+        # release all remaining references to locals because this frame
+        # won't reference them after calling the resume
+        cg.extend_output([cg.create_delete(k) for k in locals_to_delete])
         cg.extend_output(create_call_function(nargs, False))
         cg.append_output(create_instruction("RETURN_VALUE"))
         return cg.get_instructions()
@@ -3650,7 +3663,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             f"torchdynamo done tracing {self.f_code.co_name} ({inst.opname})",
         )
         log.debug("%s triggered compile", inst.opname)
-        all_stack_locals_metadata = self.output.compile_subgraph(
+        all_stack_locals_metadata, locals_to_delete = self.output.compile_subgraph(
             self,
             reason=GraphCompileReason(
                 "return_value", [self.frame_summary()], graph_break=False
@@ -3658,8 +3671,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         # check that our stack/locals meta are correct:
         # we should only be tracing 1 frame, and there should not be any NULLs on the stack
+        # there should be no more live locals to delete
         assert len(all_stack_locals_metadata) == 1
         assert not all_stack_locals_metadata[0].stack_null_idxes
+        assert not locals_to_delete
         return_inst = (
             create_instruction("RETURN_VALUE")
             if inst.opname == "RETURN_VALUE"
@@ -4014,7 +4029,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing
 
-    def create_call_resume_at(self, inst, all_stack_locals_metadata):
+    def create_call_resume_at(self, inst, all_stack_locals_metadata, locals_to_delete):
         unimplemented_v2(
             gb_type="Graph break in inlined function",
             context="",

@@ -6917,6 +6917,51 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             fn(torch.ones(3))
 
 
+    # TODO add a unittest that checks that modified bytecode DELETE_FASTs the right
+    # locals at the right location
+
+    # Test that we don't refleak deleted variables across graph breaks
+    @unittest.skip("WIP")
+    def test_del_around_graph_breaks(self):
+        # this function forces a graph break and retrieves the
+        # real liveness of the weakref
+        @torch._dynamo.disable
+        def alive(ref):
+            breakpoint()
+            return ref() is not None
+
+        # ref1 tests a local that is deleted in the same frame
+        # ref2 tests a local that is deleted in a resume frame,
+        # and we check for existence during the unsupported instruction call
+        # ref3 tests a local that is deleted in a resume frame,
+        # and we check for existence in the next resume frame
+        @torch.compile(backend="eager")
+        def f(x):
+            tmp1 = x + 1
+            tmp2 = x + 2
+            tmp3 = x + 3
+            ref1 = weakref.ref(tmp1)
+            ref2 = weakref.ref(tmp2)
+            ref3 = weakref.ref(tmp3)
+            del tmp1
+            res1 = alive(ref1)  # graph break
+            del tmp2
+            del tmp3
+            res2 = alive(ref2)  # graph break
+            y = x + 1
+            res3 = alive(ref3)  # graph break
+            # variable re-use should not keep old references alive
+            tmp1 = 1
+            tmp2 = 2
+            tmp3 = 3
+            return res1, res2, res3
+
+        res1, res2, res3 = f(torch.ones(3))
+        self.assertFalse(res1)
+        # self.assertFalse(res2)
+        self.assertFalse(res3)
+
+
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
         @torch.compile(backend="aot_eager")
