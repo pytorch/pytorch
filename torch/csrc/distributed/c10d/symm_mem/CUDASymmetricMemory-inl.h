@@ -265,6 +265,10 @@ __device__ __inline__ T add_bf16x2(T a, T b) {
     float f;
     __hip_bfloat16 bf[2];
   } _bf2f_a = {.f = 0}, _bf2f_b = {.f = 0};
+
+  //__hip_bfloat162 is a struct wtih two __hip_bfloat16 elements called x and y
+  // This typecasts input a and b as bfloat16 and maps to low bits of a float
+  // and does the addition in float
   _bf2f_a.bf[1] = reinterpret_cast<__hip_bfloat162*>(&a)->x;
   _bf2f_b.bf[1] = reinterpret_cast<__hip_bfloat162*>(&b)->x;
   union f2bf {
@@ -272,9 +276,13 @@ __device__ __inline__ T add_bf16x2(T a, T b) {
     __hip_bfloat16 bf[2];
   } _f2bf_res0, _f2bf_res1;
   _f2bf_res0.f = _bf2f_a.f + _bf2f_b.f;
+
+  // Same thing for y elements of __hip_bfloat162
   _bf2f_a.bf[1] = reinterpret_cast<__hip_bfloat162*>(&a)->y;
   _bf2f_b.bf[1] = reinterpret_cast<__hip_bfloat162*>(&b)->y;
   _f2bf_res1.f = _bf2f_a.f + _bf2f_b.f;
+
+  // Put the two results together
   __hip_bfloat162 rtn(_f2bf_res0.bf[1], _f2bf_res1.bf[1]);
   return *reinterpret_cast<T*>(&rtn);
 #else
