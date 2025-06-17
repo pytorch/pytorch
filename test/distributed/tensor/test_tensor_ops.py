@@ -440,7 +440,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
         # case 1 all replicate: input replicated, index replicated, output replicated
         global_input = torch.randn(12, 8, 16)
-        global_index = torch.randint(8, (4, 4, 8))
+        global_index = torch.randint(self.world_size, (4, 4, 8))
         input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
         index_dt = distribute_tensor(global_index, device_mesh, [Replicate()])
         for gather_dim in [0, 1, 2]:
@@ -458,7 +458,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
         gather_dim = 1
         global_input = torch.randn(12, 8, 16)
-        global_index = torch.randint(8, (4, 1, 8))
+        global_index = torch.randint(self.world_size, (4, 1, 8))
         global_output = torch.gather(global_input, gather_dim, global_index)
         input_dt = distribute_tensor(global_input, device_mesh, [Shard(gather_dim)])
         index_dt = distribute_tensor(global_index, device_mesh, [Replicate()])
@@ -471,7 +471,7 @@ class DistTensorOpsTest(DTensorTestBase):
         # case 3 index sharding: input replicated, index sharded, output sharded
         # only works when the sharding dimension is the gather dimension
         global_input = torch.randn(12, 8, 16)
-        global_index = torch.randint(8, (4, 4, 8))
+        global_index = torch.randint(self.world_size, (4, 4, 8))
         for gather_dim in range(len(global_index.shape)):
             input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
             index_dt = distribute_tensor(global_index, device_mesh, [Shard(gather_dim)])
@@ -591,6 +591,19 @@ class DistTensorOpsTest(DTensorTestBase):
                 torch.randint(2, (8, 1)),
                 torch.randint(5, (12, 8, 12)),
             )
+
+    @with_comms
+    def test_index_put(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        global_input = torch.randn(2, 2)
+        global_index = [
+            i.detach().clone()
+            for i in torch.randperm(global_input.ndim)[: min(global_input.ndim, 2)]
+        ]
+        input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
+        output_dt = torch.index_put(input_dt, global_index, torch.tensor(1.0))
+        ref = torch.index_put(global_input, global_index, torch.tensor(1.0))
+        self.assertEqual(output_dt.full_tensor(), ref)
 
     @with_comms
     def test_where_type_promotion(self):
