@@ -270,7 +270,10 @@ class TORCH_API TensorBase {
   // false instead of throwing data-dependent errors for tensors with unbacked
   // sizes or strides.
   bool is_contiguous_or_false(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
-    return impl_->is_contiguous_or_false(memory_format);
+    if (impl_->has_symbolic_sizes_strides()) {
+      return impl_->sym_is_contiguous(memory_format).guard_or_false(__FILE__, __LINE__);
+    }
+    return impl_->is_contiguous(memory_format);
   }
 
   bool is_non_overlapping_and_dense() const {

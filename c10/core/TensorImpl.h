@@ -812,6 +812,49 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
+  // Returns contiguity a
+  c10::SymBool sym_is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
+    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+      return sym_is_contiguous_custom(memory_format);
+    }
+    return sym_is_contiguous_default(memory_format);
+  }
+
+  bool is_contiguous_custom(at::MemoryFormat memory_format) const {
+    return sym_is_contiguous_custom(memory_format)
+        .guard_bool(__FILE__, __LINE__);
+  }
+
+  template <typename T>
+  T is_contiguous_default_impl(at::MemoryFormat memory_format) const {
+    if (!has_symbolic_sizes_strides_) {
+      if (memory_format == at::MemoryFormat::ChannelsLast) {
+        return is_channels_last_contiguous_;
+      } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+        return is_channels_last_3d_contiguous_;
+      }
+      return is_contiguous_;
+    }
+
+    // Handle dynamic shapes.
+    const auto& symbolic = symbolic_shape_meta().is_contiguous(memory_format);
+
+    if constexpr (std::is_same_v<T, bool>) {
+      return symbolic.guard_bool(__FILE__, __LINE__);
+    } else {
+      return symbolic;
+    }
+  }
+
+  bool is_contiguous_default(at::MemoryFormat memory_format) const {
+    return is_contiguous_default_impl<bool>(memory_format);
+  }
+
+  c10::SymBool sym_is_contiguous_default(at::MemoryFormat memory_format) const {
+    return is_contiguous_default_impl<c10::SymBool>(memory_format);
+  }
+
   /**
    * Whether or not a tensor is laid out in contiguous memory.
    *
@@ -825,36 +868,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return is_contiguous_custom(memory_format);
     }
     return is_contiguous_default(memory_format);
-  }
-
-  bool is_contiguous_or_false(
-      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
-      return is_contiguous_custom(memory_format, true /*guard_or_false*/);
-    }
-    return is_contiguous_default(memory_format, true /*guard_or_false*/);
-  }
-
-  // These are factored into separate functions in case subclasses
-  // want to use them
-  bool is_contiguous_default(
-      at::MemoryFormat memory_format,
-      bool guard_or_false = false) const {
-    if (has_symbolic_sizes_strides_) {
-      const auto& symbolic = symbolic_shape_meta().is_contiguous(memory_format);
-
-      if (guard_or_false) {
-        return symbolic.guard_or_false(__FILE__, __LINE__);
-      }
-      return symbolic.guard_bool(__FILE__, __LINE__);
-    }
-
-    if (memory_format == at::MemoryFormat::ChannelsLast) {
-      return is_channels_last_contiguous_;
-    } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-      return is_channels_last_3d_contiguous_;
-    }
-    return is_contiguous_;
   }
 
   bool is_strides_like_default(at::MemoryFormat memory_format) const {
@@ -981,9 +994,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // sizes_strides_policy_ >= CustomStrides
   // when guard_or_false is true, it's ok if the function returns false to avoid
   // a data dependent error even if the actual result at runtime is true.
-  virtual bool is_contiguous_custom(
-      at::MemoryFormat memory_format,
-      bool guard_or_false = false) const;
+  virtual c10::SymBool sym_is_contiguous_custom(
+      at::MemoryFormat memory_format) const;
 
   virtual bool is_strides_like_custom(at::MemoryFormat memory_format) const;
 

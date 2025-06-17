@@ -499,7 +499,7 @@ int64_t FunctionalTensorWrapper::dim_custom() const {
 int64_t FunctionalTensorWrapper::numel_custom() const {
   return value_.unsafeGetTensorImpl()->numel();
 }
-bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format, bool) const {
+c10::SymBool FunctionalTensorWrapper::sym_is_contiguous_custom(at::MemoryFormat memory_format) const {
   return value_.unsafeGetTensorImpl()->is_contiguous(memory_format);
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {

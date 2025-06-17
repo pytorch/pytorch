@@ -310,14 +310,14 @@ void TensorImpl::throw_data_ptr_access_error() const {
       false, "Cannot access data pointer of Tensor that doesn't have storage");
 }
 
-bool TensorImpl::is_contiguous_custom(
-    at::MemoryFormat memory_format,
-    bool guard_or_false) const {
+c10::SymBool TensorImpl::sym_is_contiguous_custom(
+    at::MemoryFormat memory_format) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
         this, memory_format);
   }
-  return is_contiguous_default(memory_format, guard_or_false);
+
+  return sym_is_contiguous_default(memory_format);
 }
 
 bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {

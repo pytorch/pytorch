@@ -201,8 +201,8 @@ bool LTCTensorImpl::is_non_overlapping_and_dense_custom(bool) const {
   return false;
 }
 
-bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat _unused, bool)
-    const {
+c10::SymBool LTCTensorImpl::sym_is_contiguous_custom(
+    c10::MemoryFormat _unused) const {
   // TODO(ezyang): I don't think this branch is actually necessary
   // TODO(ezyang): I don't think this logic is right, shouldn't we pass on
   // the memory format?
