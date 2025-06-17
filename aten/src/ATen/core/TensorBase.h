@@ -266,9 +266,9 @@ class TORCH_API TensorBase {
   }
 
   // Note [is_contiguous_or_false]
-  // Like is_contiguous, but more dynamic shape-friendly. Returns uncertain
+  // Like is_contiguous, but more dynamic shape-friendly. Can returns
   // false instead of throwing data-dependent errors for tensors with unbacked
-  // sizes or strides that can be either contiguous or not.
+  // sizes or strides.
   bool is_contiguous_or_false(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     return impl_->is_contiguous_or_false(memory_format);
   }

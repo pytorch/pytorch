@@ -841,12 +841,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       at::MemoryFormat memory_format,
       bool guard_or_false = false) const {
     if (has_symbolic_sizes_strides_) {
-      auto& symblic_contig = symbolic_shape_meta().is_contiguous(memory_format);
+      const auto& symbolic = symbolic_shape_meta().is_contiguous(memory_format);
+
       if (guard_or_false) {
-        return symblic_contig.guard_or_false(__FILE__, __LINE__);
-      } else {
-        return symblic_contig.guard_bool(__FILE__, __LINE__);
+        return symbolic.guard_or_false(__FILE__, __LINE__);
       }
+      return symbolic.guard_bool(__FILE__, __LINE__);
     }
 
     if (memory_format == at::MemoryFormat::ChannelsLast) {
@@ -881,7 +881,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_non_overlapping_and_dense_default(bool guard_or_false = false) const {
     if (has_symbolic_sizes_strides_) {
-      auto cond = symbolic_shape_meta().is_non_overlapping_and_dense();
+      const auto& cond = symbolic_shape_meta().is_non_overlapping_and_dense();
+
       if (guard_or_false) {
         return cond.guard_or_false(__FILE__, __LINE__);
       }
@@ -975,17 +976,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *
    * NB: dim is overrideable separately from sizes because it is possible
    * for a tensor to have rank, but not well defined sizes.
-   * when guard_or_false is true, it's ok if the function returns false to avoid
-   * a data dependent error even if the actual results at runtime are true.
    */
+
   // sizes_strides_policy_ >= CustomStrides
+  // when guard_or_false is true, it's ok if the function returns false to avoid
+  // a data dependent error even if the actual result at runtime is true.
   virtual bool is_contiguous_custom(
       at::MemoryFormat memory_format,
       bool guard_or_false = false) const;
 
   virtual bool is_strides_like_custom(at::MemoryFormat memory_format) const;
+
+  // when guard_or_false is true, it's ok if the function returns false to avoid
+  // a data dependent error even if the actual result at runtime is true.
   virtual bool is_non_overlapping_and_dense_custom(
       bool guard_or_false = false) const;
+
   // sizes_strides_policy_ >= CustomSizes
   // Currently this method only exists to be overwritten by subclasses such as
   // NestedTensorImpl.

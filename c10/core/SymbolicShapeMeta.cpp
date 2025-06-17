@@ -22,7 +22,6 @@ SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other)
   is_channels_last_ = other.is_channels_last_;
   is_channels_last_3d_ = other.is_channels_last_3d_;
   is_non_overlapping_and_dense_ = other.is_non_overlapping_and_dense_;
-
   available_.store(other.available_.load());
   // NOLINTEND(cppcoreguidelines-prefer-member-initializer)
 }
@@ -80,9 +79,9 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   }
   c10::SymIntArrayRef sizes(sizes_);
   c10::SymIntArrayRef strides(strides_);
-  // In the case that sizes and strides are hinted, we could store the result,
-  // but we do not want to do that, in order not to specialize when
-  // backed_size_oblivious is on.
+  // In the case that sizes and strides are hinted, we could call
+  // _compute_contiguous and store the resuls, but we do not want to do that, in
+  // order not to specialize when backed_size_oblivious is on.
   auto def_contig = _compute_contiguous_or_false(sizes, strides, numel());
   if (def_contig) {
     return true;
