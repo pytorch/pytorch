@@ -2509,11 +2509,11 @@ TEST(StaticRuntime, LinalgNorm_StringOrd) {
   auto dim = std::vector<int64_t>({0, 1});
   auto dtype = at::ScalarType::Float;
 
-  std::vector<IValue> args0{a, "fro", dim, true, dtype};  // codespell:ignore fro
+  std::vector<IValue> args0{a, "fro", dim, true, dtype};
   testStaticRuntime(linalg_norm_ord_str, args0);
 
   auto b = at::randn({3, 2, 17});
-  std::vector<IValue> args1{b, "fro", dim, true, dtype};  // codespell:ignore fro
+  std::vector<IValue> args1{b, "fro", dim, true, dtype}; 
   testStaticRuntime(linalg_norm_ord_str, args0, args1);
 }
 
