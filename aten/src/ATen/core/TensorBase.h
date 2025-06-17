@@ -265,7 +265,7 @@ class TORCH_API TensorBase {
     return impl_->is_contiguous(memory_format);
   }
 
-  // check Note[contiguous_or_false]
+  // check Note [contiguous_or_false]
   bool contiguous_or_false(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     return impl_->contiguous_or_false(memory_format);
   }
