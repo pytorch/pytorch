@@ -2059,8 +2059,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     @staticmethod
     def _compatible_with_stableivalue(op: torch._ops.OpOverload) -> bool:
-        """Returns true if op_overload._schema is compatible with StableIValue, as
-        defined in the common C-shim."""
+        """Returns true if op_overload._schema only utilizes types supported by the AOT
+        C-shim *internal* function to_ivalue.  to_ivalue is an implementation detail, so
+        these types are not guaranteed to be supported long-term.  When generating code
+        for cpp_wrapper mode, we don't have to be forward-compatible, so changing this
+        function's implementation in future is fine."""
         supported_types = (
             torch.BoolType,
             torch.DeviceObjType,
@@ -2328,7 +2331,10 @@ if (!custom_op_wrapper) {
     ) -> None:
         """Generate fallback kernel calls with runtime (non-AOT) dispatch.  This can
         only be called in cpp_wrapper mode, and assumes that the input is a non-None
-        OpOverload."""
+        OpOverload.
+
+        In the future, we may switch over to directly calling c10::Dispatcher if we need
+        to support more datatypes."""
         if raw_outputs:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"

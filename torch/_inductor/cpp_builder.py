@@ -575,8 +575,10 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
     return cflags
 
 
-def _get_optimization_cflags() -> list[str]:
-    wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level
+def _get_optimization_cflags(min_optimize: bool = False) -> list[str]:
+    wrapper_opt_level = (
+        config.aot_inductor.compile_wrapper_opt_level if min_optimize else "O3"
+    )
     if _IS_WINDOWS:
         return [wrapper_opt_level]
     else:
@@ -616,6 +618,7 @@ def get_cpp_options(
     do_link: bool,
     warning_all: bool = True,
     extra_flags: Sequence[str] = (),
+    min_optimize: bool = False,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     definitions: list[str] = []
     include_dirs: list[str] = []
@@ -627,7 +630,7 @@ def get_cpp_options(
 
     cflags = (
         _get_shared_cflag(do_link)
-        + _get_optimization_cflags()
+        + _get_optimization_cflags(min_optimize)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
@@ -664,6 +667,7 @@ class CppOptions(BuildOptionsBase):
         extra_flags: Sequence[str] = (),
         use_relative_path: bool = False,
         compiler: str = "",
+        min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
     ) -> None:
@@ -688,6 +692,7 @@ class CppOptions(BuildOptionsBase):
             do_link=not (compile_only or precompiling or preprocessing),
             extra_flags=extra_flags,
             warning_all=warning_all,
+            min_optimize=min_optimize,
         )
 
         _append_list(self._definitions, definitions)
@@ -1147,6 +1152,7 @@ class CppTorchOptions(CppOptions):
         shared: bool = True,
         extra_flags: Sequence[str] = (),
         compiler: str = "",
+        min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
     ) -> None:
@@ -1156,6 +1162,7 @@ class CppTorchOptions(CppOptions):
             extra_flags=extra_flags,
             use_relative_path=use_relative_path,
             compiler=compiler,
+            min_optimize=min_optimize,
             precompiling=precompiling,
             preprocessing=preprocessing,
         )
@@ -1319,6 +1326,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         use_mmap_weights: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
+        min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
     ) -> None:
@@ -1330,6 +1338,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
+            min_optimize=min_optimize,
             precompiling=precompiling,
             preprocessing=preprocessing,
         )
