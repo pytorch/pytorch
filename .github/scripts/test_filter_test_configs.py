@@ -754,7 +754,7 @@ class TestConfigFilter(TestCase):
                 "job_name": "A job name",
                 "pr_body": "resolves #123 fixes #234",
                 "expected": _gen_expected_string(reenabled_issues="123,234"),
-                "description": "Re-enable some issues",
+                "description": "Reenable some issues",
             },
         ]
 
