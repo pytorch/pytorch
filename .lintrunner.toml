@@ -1160,9 +1160,7 @@ exclude_patterns = [
     # as necessary
     'aten/**',
     'test/**',
-    'tools/**',
     'torch/**',
-    'torchgen/**',
 ]
 init_command = [
     'python3',
