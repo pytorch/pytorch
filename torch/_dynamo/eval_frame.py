@@ -543,7 +543,6 @@ class _TorchDynamoContext:
         self._dynamic = dynamic
         self.compiler_config = compiler_config
         self.cleanup_fns: list[Callable[[], Any]] = []
-        self.enter_exit_hooks = []
         self._package = package
         patch_fn()
 
@@ -551,25 +550,18 @@ class _TorchDynamoContext:
         backend = innermost_fn(callback)
         cached_backends.setdefault(id(backend), backend)
 
-        if dynamic is not None:
-            self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
+        # Hard-coded hook flags for performance optimization
+        self._has_dynamic_hook = dynamic is not None
+        self._dynamic_cleanup = None
+        if self._has_dynamic_hook:
+            self._dynamic_hook = make_set_enable_dynamic(dynamic)
 
-        if on_enter is not nothing:
-            # this case is not common
-            def call_on_enter():
-                on_enter()
-                return nothing
+        self._has_on_enter_hook = on_enter is not nothing
+        self._on_enter_fn = on_enter if self._has_on_enter_hook else None
 
-            self.enter_exit_hooks.append(call_on_enter)
-
-        if backend_ctx_ctor is not contextlib.nullcontext:
-            # this case is not common
-            def call_backend_ctx():
-                ctx = backend_ctx_ctor()
-                ctx.__enter__()
-                return functools.partial(ctx.__exit__, None, None, None)
-
-            self.enter_exit_hooks.append(call_backend_ctx)
+        self._has_backend_ctx_hook = backend_ctx_ctor is not contextlib.nullcontext
+        self._backend_ctx_ctor = backend_ctx_ctor if self._has_backend_ctx_hook else None
+        self._backend_ctx = None
 
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:
@@ -579,7 +571,18 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.prior = set_eval_frame(None)
-        self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
+
+        # Hard-coded hook execution for performance
+        if self._has_dynamic_hook:
+            self._dynamic_cleanup = self._dynamic_hook()
+
+        if self._has_on_enter_hook:
+            self._on_enter_fn()
+
+        if self._has_backend_ctx_hook:
+            self._backend_ctx = self._backend_ctx_ctor()
+            self._backend_ctx.__enter__()
+
         self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
             _is_skip_guard_eval_unsafe_stance()
         )
@@ -589,9 +592,16 @@ class _TorchDynamoContext:
         assert self.prior is not unset
         set_eval_frame(None)
         set_skip_guard_eval_unsafe(self.prior_skip_guard_eval_unsafe)
-        for cleanup in self.cleanup_fns:
-            cleanup()
-        self.cleanup_fns.clear()
+
+        # Hard-coded cleanup execution for performance
+        if self._has_backend_ctx_hook and self._backend_ctx is not None:
+            self._backend_ctx.__exit__(None, None, None)
+            self._backend_ctx = None
+
+        if self._has_dynamic_hook and self._dynamic_cleanup is not None:
+            self._dynamic_cleanup()
+            self._dynamic_cleanup = None
+
         _maybe_set_eval_frame(_callback_from_stance(self.prior))
         self.prior = unset
 
