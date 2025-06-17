@@ -57,18 +57,13 @@ struct Schedule {
   using PongEpilogueSchedule =
       cutlass::epilogue::PtrArrayTmaWarpSpecializedPingpong;
   // SM100
-  using MMA1SM_Schedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecialized1SmSm100;
-  using MMA1SM_EpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized1Sm;
+  using AutoKernelSchedule = cutlass::gemm::collective::KernelScheduleAuto;
+  using AutoEpilogueSchedule = cutlass::epilogue::collective::EpilogueScheduleAuto;
 
-  using KernelSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, MMA1SM_Schedule,
+  using KernelSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, AutoKernelSchedule,
     cute::conditional_t<PONG, PongSchedule, CooperativeSchedule>>;
-  using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, MMA1SM_EpilogueSchedule, 
+  using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, AutoEpilogueSchedule, 
     cute::conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>>;
-
-  // using KernelSchedule =
-  //     cute::conditional_t<PONG, PongSchedule, CooperativeSchedule>;
-  // using EpilogueSchedule = cute::
-  //     conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>;
 
 };
 
@@ -335,11 +330,12 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
   const bool sm10x = properties != nullptr && properties->major == 10;
 
   if constexpr (sm10x) {
+    
     bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm100,
         a_row_major,
         b_row_major,
-        /*Pong but doesnt matter rn*/ true,
+        true,
         cute::_64,
         cute::_128,
         cute::_128>(mat_a, mat_b, offs, bias, out);
