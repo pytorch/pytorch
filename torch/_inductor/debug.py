@@ -611,8 +611,12 @@ class DebugFormatter:
                     static_layout = FixedLayout(
                         layout.device,
                         dtype=layout.dtype,
-                        size=[*V.graph.sizevars.size_hints(layout.size)],
-                        stride=[*V.graph.sizevars.size_hints(layout.stride)],
+                        size=list(
+                            V.graph.sizevars.size_hints_or_throw(layout.size)
+                        ),
+                        stride=list(
+                            V.graph.sizevars.size_hints_or_throw(layout.stride)
+                        ),
                         offset=offset,
                     )
                     node_info["layout"] = str(static_layout)
@@ -630,16 +634,20 @@ class DebugFormatter:
                 pass
             try:
                 node_info["stride"] = str(
-                    V.graph.sizevars.size_hints(node.get_stride())
+                    V.graph.sizevars.size_hints_or_throw(node.get_stride())
                 )
             except Exception:
                 pass
             try:
-                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))  # type: ignore[arg-type]
+                node_info["size"] = str(
+                    V.graph.sizevars.size_hints_or_throw(node.get_size())
+                )  # type: ignore[arg-type]
             except Exception:
                 pass
             try:
-                node_info["numel"] = str(V.graph.sizevars.size_hint(node.get_numel()))
+                node_info["numel"] = str(
+                    V.graph.sizevars.size_hint_or_throw(node.get_numel())
+                )
             except Exception:
                 pass
             if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
