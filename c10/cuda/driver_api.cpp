@@ -54,18 +54,15 @@ typedef cudaError_t (*GetEntryPoint)(
     cudaDriverEntryPointQueryResult*);
 
 void* get_symbol(const char* symbol, int cuda_version) {
-  constexpr char driver_entrypoint[] = "cudaGetDriverEntryPoint";
-  constexpr char driver_entrypoint_versioned[] =
-      "cudaGetDriverEntryPointByVersion";
   // We link to the libcudart.so already, so can search for it in the current
   // context
-  static GetEntryPoint driver_entrypoint_fun =
-      reinterpret_cast<GetEntryPoint>(dlsym(RTLD_DEFAULT, driver_entrypoint));
+  static GetEntryPoint driver_entrypoint_fun = reinterpret_cast<GetEntryPoint>(
+      dlsym(RTLD_DEFAULT, "cudaGetDriverEntryPoint"));
   static VersionedGetEntryPoint driver_entrypoint_versioned_fun =
       reinterpret_cast<VersionedGetEntryPoint>(
-          dlsym(RTLD_DEFAULT, driver_entrypoint_versioned));
+          dlsym(RTLD_DEFAULT, "cudaGetDriverEntryPointByVersion"));
 
-  cudaDriverEntryPointQueryResult driver_result;
+  cudaDriverEntryPointQueryResult driver_result{};
   void* entry_point = nullptr;
   if (driver_entrypoint_versioned_fun != nullptr) {
     // Found versioned entrypoint function
