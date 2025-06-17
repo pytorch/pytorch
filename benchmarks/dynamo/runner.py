@@ -550,7 +550,7 @@ def build_summary(args):
         gh_fh.write(comment)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def archive_data(archive_name):
     if archive_name is not None:
         prefix_match = re.search(r"\w+(?=_performance)", archive_name)
@@ -570,7 +570,7 @@ def archive_data(archive_name):
     return day, prefix
 
 
-@functools.lru_cache(None)
+@functools.cache
 def default_archive_name(dtype):
     _, prefix = archive_data(None)
     return f"{prefix}_performance_{dtype}_{randint(100, 999)}"

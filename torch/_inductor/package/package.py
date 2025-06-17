@@ -3,20 +3,12 @@ import json
 import logging
 import os
 import tempfile
-from typing import Any, IO, Optional, Union
+from typing import IO, Union
 
 import torch
-import torch._inductor
-import torch.utils._pytree as pytree
 from torch._inductor import config
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
-from torch.export._tree_utils import reorder_kwargs
-from torch.export.pt2_archive._package import PT2ArchiveWriter
-from torch.export.pt2_archive.constants import (
-    AOTINDUCTOR_DIR,
-    CONSTANTS_DIR,
-    CUSTOM_OBJ_FILENAME_PREFIX,
-)
+from torch.export.pt2_archive._package import AOTICompiledModel, load_pt2, package_pt2
 from torch.types import FileLike
 
 
@@ -95,122 +87,8 @@ def package_aoti(
         the AOTInductor files, or a dictionary mapping the model name to the
         path to its AOTInductor generated files.
     """
-    if isinstance(aoti_files, list):
-        aoti_files = {"model": aoti_files}
 
-    assert isinstance(aoti_files, dict), (
-        "Please pass a list of AOTI generated files to be packaged or "
-        "a dictionary mapping model names to their list of AOTI generated "
-        "files. You can get this list of files through calling "
-        "`torch._inductor.aot_compile(..., options={aot_inductor.package=True})`"
-    )
-    assert (
-        isinstance(archive_file, (io.IOBase, IO))
-        and archive_file.writable()
-        and archive_file.seekable()
-    ) or (
-        isinstance(archive_file, (str, os.PathLike))
-        and os.fspath(archive_file).endswith(".pt2")
-    ), (
-        f"Expect archive file to be a file ending in .pt2, or is a buffer. Instead got {archive_file}"
-    )
-
-    # Save using the PT2 packaging format
-    # (https://docs.google.com/document/d/1jLPp8MN8Whs0-VW9PmJ93Yg02W85tpujvHrTa1pc5x8/edit#heading=h.v2y2jgnwc56a)
-
-    with PT2ArchiveWriter(archive_file) as archive_writer:
-        for model_name, files in aoti_files.items():
-            num_so_files = 0
-            num_cpp_files = 0
-
-            for file in files:
-                if file == "":
-                    continue
-
-                if file.endswith(".so"):
-                    num_so_files += 1
-                    if num_so_files > 1:
-                        raise RuntimeError(
-                            f"Multiple .so files found in {files}. "
-                            "You might need to clear your cache "
-                            "directory before calling aoti_compile again."
-                        )
-                if file.endswith(".cpp"):
-                    num_cpp_files += 1
-                    if num_so_files > 1:
-                        raise RuntimeError(
-                            f"Multiple .cpp files found in {files}. "
-                            "You might need to clear your cache "
-                            "directory before calling aoti_compile again."
-                        )
-
-                filename = os.path.basename(file)
-                if filename.startswith(CUSTOM_OBJ_FILENAME_PREFIX):
-                    new_filepath = os.path.join(CONSTANTS_DIR, filename)
-                else:
-                    new_filepath = os.path.join(AOTINDUCTOR_DIR, model_name, filename)
-                log.debug(
-                    "Saving AOTI generated file %s to archive in %s", file, new_filepath
-                )
-                archive_writer.write_file(
-                    str(new_filepath),
-                    file,
-                )
-
-    if isinstance(archive_file, (io.IOBase, IO)):
-        archive_file.seek(0)
-    return archive_file
-
-
-class AOTICompiledModel:
-    """
-    Callable AOT Inductor loaded model from a .pt2
-    """
-
-    def __init__(self, loader: torch._C._aoti.AOTIModelPackageLoader) -> None:
-        self.loader = loader
-
-    def __call__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-        call_spec = self.loader.get_call_spec()  # type: ignore[attr-defined]
-        in_spec = pytree.treespec_loads(call_spec[0])
-        out_spec = pytree.treespec_loads(call_spec[1])
-        flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
-        flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
-        flat_outputs = self.loader.boxed_run(flat_inputs)  # type: ignore[attr-defined]
-        return pytree.tree_unflatten(flat_outputs, out_spec)
-
-    def get_metadata(self) -> dict[str, str]:
-        return self.loader.get_metadata()  # type: ignore[attr-defined]
-
-    def load_constants(
-        self,
-        constants_map: dict[str, torch.Tensor],
-        *,
-        check_full_update: bool,
-        user_managed: bool = False,
-    ) -> None:
-        """
-        Given a mapping of constant fqns to tensors, load the constants into the model.
-        You can use ``get_constant_fqns`` to get the list of constant fqns that
-        are needed in the compiled model.
-
-        Args:
-            constants_map: A mapping of constant fqns to tensors.
-            check_full_update: Whether to add check to see if all the constants
-            are updated and have values.
-        """
-        self.loader.load_constants(  # type: ignore[attr-defined]
-            constants_map, False, check_full_update, user_managed
-        )
-
-    def get_constant_fqns(self) -> list[str]:
-        return self.loader.get_constant_fqns()  # type: ignore[attr-defined]
-
-    def __deepcopy__(self, memo: Optional[dict[Any, Any]]) -> "AOTICompiledModel":
-        log.warning(
-            "AOTICompiledModel deepcopy warning: AOTICompiledModel.loader is not deepcopied."
-        )
-        return AOTICompiledModel(self.loader)  # type: ignore[attr-defined]
+    return package_pt2(archive_file, aoti_files=aoti_files)
 
 
 def load_package(
@@ -220,18 +98,25 @@ def load_package(
     num_runners: int = 1,
     device_index: int = -1,
 ) -> AOTICompiledModel:  # type: ignore[type-arg]
-    assert (
-        isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable()
-    ) or (isinstance(path, (str, os.PathLike)) and os.fspath(path).endswith(".pt2")), (
-        f"Unable to load package. Path must be a buffer or a file ending in .pt2. Instead got {path}"
-    )
+    try:
+        pt2_contents = load_pt2(
+            path,
+            run_single_threaded=run_single_threaded,
+            num_runners=num_runners,
+            device_index=device_index,
+        )
+        if model_name not in pt2_contents.aoti_runners:
+            raise RuntimeError(f"Model {model_name} not found in package")
+        return pt2_contents.aoti_runners[model_name]
+    except RuntimeError:
+        log.warning("Loading outdated pt2 file. Please regenerate your package.")
 
     if isinstance(path, (io.IOBase, IO)):
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
             # TODO(angelayi): We shouldn't need to do this -- miniz should
             # handle reading the buffer. This is just a temporary workaround
-            f.write(path.read())
             path.seek(0)
+            f.write(path.read())
             log.debug("Writing buffer to tmp file located at %s.", f.name)
             loader = torch._C._aoti.AOTIModelPackageLoader(
                 f.name, model_name, run_single_threaded, num_runners, device_index

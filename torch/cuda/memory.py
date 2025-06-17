@@ -847,6 +847,7 @@ def _record_memory_history_legacy(
     record_context_cpp=False,
     clear_history=False,
     compile_context=False,
+    global_record_annotations=False,
 ):
     _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
@@ -856,6 +857,7 @@ def _record_memory_history_legacy(
         record_context_cpp,
         clear_history,
         compile_context,
+        global_record_annotations,
     )
 
 
@@ -912,9 +914,16 @@ def _record_memory_history_impl(
     device: "Device" = None,
     clear_history: bool = False,
     compile_context: bool = False,
+    global_record_annotations: bool = False,
 ):
     _C._cuda_record_memory_history(  # type: ignore[call-arg]
-        enabled, context, stacks, max_entries, clear_history, compile_context
+        enabled,
+        context,
+        stacks,
+        max_entries,
+        clear_history,
+        compile_context,
+        global_record_annotations,
     )
 
 
