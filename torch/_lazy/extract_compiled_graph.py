@@ -170,7 +170,7 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
 
     if len(fallback_ops) > 0:
         raise RuntimeError(
-            f"Fail to extact the compiled graph because of fallback: {','.join(fallback_ops)}"
+            f"Fail to extract the compiled graph because of fallback: {','.join(fallback_ops)}"
         )
 
     if not isinstance(lazy_out, (tuple, list)):
