@@ -174,6 +174,9 @@ class BaseListVariable(VariableTracker):
                 raise_args_mismatch(tx, name)
             return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
+
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
@@ -189,6 +192,9 @@ class BaseListVariable(VariableTracker):
                 kwargs,
             )
         elif name in cmp_name_to_op_mapping:
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
+
             left = self
             right = args[0]
             # TODO this type check logic mirrors the following
@@ -410,13 +416,14 @@ class CommonListMethodsVariable(BaseListVariable):
             tx.output.side_effects.mutation(self)
             self.items.append(arg)
             return ConstantVariable.create(None)
-        elif (
-            name == "extend"
-            and self.is_mutable()
-            and args
-            and args[0].has_force_unpack_var_sequence(tx)
-        ):
-            assert not kwargs
+        elif name == "extend" and self.is_mutable():
+            if len(args) != 1 or kwargs:
+                raise_args_mismatch(tx, name)
+
+            if not args[0].has_force_unpack_var_sequence(tx):
+                msg = ConstantVariable.create(f"{type(args[0])} object is not iterable")
+                raise_observed_exception(TypeError, tx, args=[msg])
+
             (arg,) = args
             arg.force_apply_to_var_sequence(
                 tx, lambda item: self.call_method(tx, "append", [item], {})
