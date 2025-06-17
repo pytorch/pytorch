@@ -13,7 +13,7 @@ from torch._inductor.fx_passes.pad_mm import (
     should_pad_mm_bf16,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
+from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -362,7 +362,7 @@ class PadMMTest(TestCase):
         self.assertEqual(out, inps[0] @ inps[1])
 
     @inductor_config.patch(force_shape_pad=True)
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_pad_addmm_2d_bias(self):
         @torch.compile()
         def foo(input, x, y):
@@ -419,7 +419,7 @@ class PadMMTest(TestCase):
             res2, bmm_expected_result
         ), "BMM results are not identical"
 
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_exclude_padding(self):
         @torch.compile()
         def mm(a, b):
@@ -448,7 +448,7 @@ class PadMMTest(TestCase):
             repr(local_cache)
         )
 
-    @fresh_inductor_cache()
+    @fresh_cache()
     @inductor_config.patch(max_pointwise_cat_inputs=2)
     def test_exclude_cat_padding(self):
         @torch.compile()
@@ -475,7 +475,7 @@ class PadMMTest(TestCase):
         "No perf regression on H100+ with BF16",
     )
     @skipIfRocm
-    @fresh_inductor_cache()
+    @fresh_cache()
     @inductor_config.patch(
         post_grad_fusion_options={"pad_aten_mm_pass": {"k_threshold_to_pad": 8388608}}
     )
@@ -508,7 +508,7 @@ class PadMMTest(TestCase):
 
         assert torch.allclose(res2, mm_expected_result), "MM results are not identical"
 
-    @fresh_inductor_cache()
+    @fresh_cache()
     @inductor_config.patch(
         {
             "triton.unique_kernel_names": "original_aten",
