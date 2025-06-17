@@ -850,8 +850,6 @@ endif()
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
-set_property(SOURCE ${ATen_ATTENTION_KERNEL_SRCS} APPEND
-    PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_NO_OPERATORS")
 
 if(USE_MPS OR USE_PYTORCH_METAL)
   enable_language(OBJC OBJCXX)
@@ -1043,9 +1041,8 @@ elseif(USE_CUDA)
         FLASH_NAMESPACE=pytorch_flash
         UNFUSE_FMA                      # Addressing issue #121558
       )
-    target_include_directories(torch_cuda PRIVATE
-        ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/
-    )
+    target_link_libraries(torch_cuda PRIVATE flash_attention)
+    install(TARGETS flash_attention EXPORT Caffe2Targets DESTINATION lib)
   endif()
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_cuda PRIVATE USE_MEM_EFF_ATTENTION)
@@ -1969,19 +1966,5 @@ if(BUILD_TEST)
       endif()
     endforeach()
   endif()
-endif()
-
-if(MSVC)
-  # This is used to enable the conforming lambda processor in MSVC
-  # Which allows us to capture constexpr in lambdas
-  # Note that this will be turned on by default for std=c++20 and above
-  # This should be applied globally when https://github.com/pytorch/pytorch/issues/92600 is fixed
-  foreach(tmp ${MEM_EFF_ATTENTION_CUDA_SOURCES})
-    # MEM_EFF_ATTENTION_CUDA is populated in pytorch/aten/src/ATen/CMakeLists.txt
-    # We iterate over these files, updating paths and adding the compile flag
-    FILE(RELATIVE_PATH tmp_path "${PROJECT_SOURCE_DIR}" "${tmp}")
-    SET(tmp_path "../${tmp_path}")
-    set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
-  endforeach()
 endif()
 endif()
