@@ -3684,7 +3684,7 @@ class CUDACodeCache:
                 "CUTLASSKernelBinaryRemoteCache not available, remote caching disabled"
             )
             return None
-          
+
     @staticmethod
     def cache_clear() -> None:
         CUDACodeCache.cache.clear()
