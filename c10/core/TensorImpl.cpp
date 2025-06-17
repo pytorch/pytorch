@@ -312,17 +312,12 @@ void TensorImpl::throw_data_ptr_access_error() const {
 
 bool TensorImpl::is_contiguous_custom(
     at::MemoryFormat memory_format,
-    bool contiguous_or_false) const {
+    bool guard_or_false) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
         this, memory_format);
   }
-  if (contiguous_or_false) {
-    return is_contiguous_or_false_default(memory_format);
-
-  } else {
-    return is_contiguous_default(memory_format);
-  }
+  return is_contiguous_default(memory_format, guard_or_false);
 }
 
 bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {

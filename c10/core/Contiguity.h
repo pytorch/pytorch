@@ -12,7 +12,7 @@ namespace c10 {
 
 template <typename T>
 bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
-  if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(numel, 0))) {
+  if (sym_eq(numel, 0)) {
     return true;
   }
 
@@ -20,11 +20,11 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   // NB: make sure we do signed arithmetic
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
     const auto& size_d = sizes[d];
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(size_d, 1))) {
+    if (sym_eq(size_d, 1)) {
       continue;
     }
 
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(strides[d], expected_stride))) {
+    if (sym_ne(strides[d], expected_stride)) {
       return false;
     }
     expected_stride *= size_d;
@@ -36,7 +36,10 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
 // its not or if we can't determine if it is contiguous due to unbacked symbols
 // (it could be either in that case based on the actual runtime data).
 template <typename T>
-bool _compute_def_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
+bool _compute_contiguous_or_false(
+    ArrayRef<T> sizes,
+    ArrayRef<T> strides,
+    T numel) {
   if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
     return true;
   }
@@ -55,6 +58,25 @@ bool _compute_def_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
     expected_stride *= size_d;
   }
   return true;
+}
+
+// Return a SymBool with underlying symbolic expression that represents
+// contiguity.
+inline static c10::SymBool _compute_contiguous_sym(
+    ArrayRef<c10::SymInt> sizes,
+    ArrayRef<c10::SymInt> strides,
+    const c10::SymInt& numel) {
+  c10::SymBool is_empty = sym_eq(numel, 0);
+  c10::SymBool is_contiguous_cond = true;
+
+  c10::SymInt expected_stride = 1;
+  for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
+    const auto& size_d = sizes[d];
+    is_contiguous_cond = is_contiguous_cond.sym_and(
+        size_d.sym_eq(1).sym_or(sym_eq(strides[d], expected_stride)));
+    expected_stride = size_d;
+  }
+  return is_contiguous_cond.sym_or(is_empty);
 }
 
 template <typename T>
@@ -87,35 +109,6 @@ bool _compute_channels_last_contiguous_2d(
 }
 
 template <typename T>
-bool _compute_def_channels_last_contiguous_2d(
-    ArrayRef<T> sizes,
-    ArrayRef<T> strides) {
-  // Please don't combine these code, constant array is used here to let
-  // compiler fully unroll the loop to get better performance
-  switch (sizes.size()) {
-    case 4: {
-      T expected = 1;
-      for (auto& d : {1, 3, 2, 0}) {
-        const auto& size_d = sizes[d];
-        if (TORCH_GUARD_OR_TRUE(sym_ne(size_d, 1))) {
-          if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected))) {
-            return false;
-          }
-          expected *= size_d;
-        }
-      }
-      return true;
-    }
-      // NOLINTNEXTLINE(bugprone-branch-clone)
-    case 3:
-      // TODO dim == 3 case will be enabled once it is fully tested
-      return false;
-    default:
-      return false;
-  }
-}
-
-template <typename T>
 bool _compute_channels_last_contiguous_3d(
     ArrayRef<T> sizes,
     ArrayRef<T> strides) {
@@ -128,35 +121,6 @@ bool _compute_channels_last_contiguous_3d(
         const auto& size_d = sizes[d];
         if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(size_d, 1))) {
           if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(strides[d], expected))) {
-            return false;
-          }
-          expected *= size_d;
-        }
-      }
-      return true;
-    }
-      // NOLINTNEXTLINE(bugprone-branch-clone)
-    case 4:
-      // TODO dim == 4 case will be enabled once it is fully tested
-      return false;
-    default:
-      return false;
-  }
-}
-
-template <typename T>
-bool _compute_def_channels_last_contiguous_3d(
-    ArrayRef<T> sizes,
-    ArrayRef<T> strides) {
-  // Please don't combine these code, constant array is used here to let
-  // compiler fully unroll the loop to get better performance
-  switch (sizes.size()) {
-    case 5: {
-      T expected = 1;
-      for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto& size_d = sizes[d];
-        if (TORCH_GUARD_OR_TRUE(sym_ne(size_d, 1))) {
-          if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected))) {
             return false;
           }
           expected *= size_d;

@@ -827,51 +827,26 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_default(memory_format);
   }
 
-  bool contiguous_or_false(
+  bool is_contiguous_or_false(
       at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
-      return is_contiguous_custom(memory_format, true);
+      return is_contiguous_custom(memory_format, true /*guard_or_false*/);
     }
-    return is_contiguous_or_false_default(memory_format);
+    return is_contiguous_default(memory_format, true /*guard_or_false*/);
   }
 
   // These are factored into separate functions in case subclasses
   // want to use them
-  bool is_contiguous_default(at::MemoryFormat memory_format) const {
+  bool is_contiguous_default(
+      at::MemoryFormat memory_format,
+      bool guard_or_false = false) const {
     if (has_symbolic_sizes_strides_) {
-      if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return symbolic_shape_meta().is_channels_last_contiguous().guard_bool(
-            __FILE__, __LINE__);
-      } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return symbolic_shape_meta()
-            .is_channels_last_3d_contiguous()
-            .guard_bool(__FILE__, __LINE__);
+      auto& symblic_contig = symbolic_shape_meta().is_contiguous(memory_format);
+      if (guard_or_false) {
+        return symblic_contig.guard_or_false(__FILE__, __LINE__);
+      } else {
+        return symblic_contig.guard_bool(__FILE__, __LINE__);
       }
-      return symbolic_shape_meta().is_contiguous().guard_bool(
-          __FILE__, __LINE__);
-    }
-
-    if (memory_format == at::MemoryFormat::ChannelsLast) {
-      return is_channels_last_contiguous_;
-    } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-      return is_channels_last_3d_contiguous_;
-    }
-    return is_contiguous_;
-  }
-
-  bool is_contiguous_or_false_default(at::MemoryFormat memory_format) const {
-    if (has_symbolic_sizes_strides_) {
-      if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return symbolic_shape_meta()
-            .definitely_channels_last_contiguous_fast()
-            .guard_bool(__FILE__, __LINE__);
-      } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return symbolic_shape_meta()
-            .definitely_channels_last_3d_contiguous_fast()
-            .guard_bool(__FILE__, __LINE__);
-      }
-      return symbolic_shape_meta().contiguous_or_false().guard_bool(
-          __FILE__, __LINE__);
     }
 
     if (memory_format == at::MemoryFormat::ChannelsLast) {
@@ -904,10 +879,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
-  bool is_non_overlapping_and_dense_default() const {
+  bool is_non_overlapping_and_dense_default(bool guard_or_false = false) const {
     if (has_symbolic_sizes_strides_) {
-      return symbolic_shape_meta().is_non_overlapping_and_dense().guard_bool(
-          __FILE__, __LINE__);
+      auto cond = symbolic_shape_meta().is_non_overlapping_and_dense();
+      if (guard_or_false) {
+        return cond.guard_or_false(__FILE__, __LINE__);
+      }
+      return cond.guard_bool(__FILE__, __LINE__);
     } else {
       return is_non_overlapping_and_dense_;
     }
@@ -2479,6 +2457,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_strides_like_channels_last_3d() const {
     return is_strides_like(at::MemoryFormat::ChannelsLast3d);
+  }
+
+  bool is_non_overlapping_and_dense_or_false() const {
+    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+      return is_non_overlapping_and_dense_custom();
+    }
+    return is_non_overlapping_and_dense_default(true /*guard_or_false*/);
   }
 
   bool is_non_overlapping_and_dense() const {
