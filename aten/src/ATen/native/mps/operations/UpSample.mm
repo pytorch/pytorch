@@ -325,10 +325,7 @@ static void upsample_kernel_out_template(const Tensor& input,
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:upsamplePSO];
-      mtl_setArgs(computeEncoder,
-                  input,
-                  output,
-                  params);
+      mtl_setArgs(computeEncoder, input, output, params);
       mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1] * output_size[2]);
     }
   });
@@ -564,7 +561,8 @@ TORCH_IMPL_FUNC(upsample_trilinear3d_out_mps)(const Tensor& input,
                                               std::optional<double> scales_h,
                                               std::optional<double> scales_w,
                                               const Tensor& output) {
-  mps::upsample_kernel_out_template(input, output_size, align_corners, scales_d, scales_h, scales_w, output, "trilinear");
+  mps::upsample_kernel_out_template(
+      input, output_size, align_corners, scales_d, scales_h, scales_w, output, "trilinear");
 }
 
 TORCH_IMPL_FUNC(upsample_trilinear3d_backward_out_mps)(const Tensor& grad_output,
