@@ -384,14 +384,14 @@ with such a step.
 On Linux
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-python setup.py build --cmake-only
+CMAKE_ONLY=1 python setup.py build
 ccmake build  # or cmake-gui build
 ```
 
 On macOS
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ CMAKE_ONLY=1 python setup.py build
 ccmake build  # or cmake-gui build
 ```
 
