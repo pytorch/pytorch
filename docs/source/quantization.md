@@ -1127,7 +1127,7 @@ is not supported. To save/load quantized models, the following ways can be used:
 
 ### Symbolic Trace Error when using FX Graph Mode Quantization
 
-Symbolic traceability is a requirement for {ref}`prototype---maintenance-mode-fx-graph-mode-quantization`, so if you pass a PyTorch Model that is not symbolically traceable to `torch.ao.quantization.prepare_fx` or `torch.ao.quantization.prepare_qat_fx`, we might see an error like the following:
+Symbolic traceability is a requirement for {ref}`prototype-maintenance-mode-fx-graph-mode-quantization`, so if you pass a PyTorch Model that is not symbolically traceable to `torch.ao.quantization.prepare_fx` or `torch.ao.quantization.prepare_qat_fx`, we might see an error like the following:
 
 ```console
 torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
