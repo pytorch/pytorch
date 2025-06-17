@@ -143,16 +143,48 @@ to resolve the issue.
 :hidden:
 onnx_dynamo_memory_usage
 ```
-
 ## Metadata
 
-The `ExportedProgram` class is a representation of a PyTorch model that has been exported to ONNX format. It contains the model's computation graph, which includes the operations performed on the input tensors, their types, and shapes. The `ExportedProgram` class consists of:
-- The `GraphModule` class, a PyTorch module that represents the exported program. It includes a `forward` method that defines the computation graph.
-  - The `forward` method inputs are defined as parameters with specific tensor types and shapes, such as "f32[8, 8]" for a float32 tensor with shape [8, 8].
-  - The operations within the `forward` method are represented as `torch.ops.aten` calls. Each operation is named (e.g., `torch.ops.aten.conv2d.default`) and includes the inputs and outputs with their respective types and shapes. 
-  - Each operation in the graph is annotated with its source file and line number, providing context for where the operation was defined in the original code (e.g., `# File: ~/python/site-packages/torch/nn/modules/conv.py:554 in forward, code: return self._conv_forward(input, self.weight, self.bias)`).
-- The `Graph signature`, which defines the input and output specifications of the model. The inputs are defined as `InputSpec` objects, which include the kind of input (e.g., `InputKind.PARAMETER` for parameters, `InputKind.USER_INPUT` for user-defined inputs), the argument name, the target (which can be a specific layer in the model), and whether the input is persistent. The outputs are defined as `OutputSpec` objects, which specify the kind of output (e.g., `OutputKind.USER_OUTPUT`) and the argument name.
-- A `Range constraints` dictionary, which specifies any constraints on the input sizes or shapes, such as `s0: VR[2, int_oo]`, indicating that the size of the input tensor can vary between 2 and infinity.
+During ONNX export, each ONNX node is annotated with metadata that helps trace its origin and context from the original PyTorch model. This metadata is useful for debugging, model inspection, and understanding the mapping between PyTorch and ONNX graphs.
+
+The following metadata fields are added to each ONNX node:
+
+- **namespace**
+
+  A string representing the hierarchical namespace of the node, consisting of a stack trace of modules/methods.
+
+  *Example:*
+  `_empty_nn_module_stack_from_metadata_hook: _empty_nn_module_stack_from_metadata_hook/sym_size_int_720: aten.sym_size.int`
+
+- **pkg.torch.onnx.class_hierarchy**
+
+  A list of class names representing the hierarchy of modules leading to this node.
+  
+  *Example:*
+  `['_empty_nn_module_stack_from_metadata_hook', 'aten.sym_size.int']`
+
+- **pkg.torch.onnx.fx_node**
+
+  The string representation of the original FX node, including its name, number of consumers, torch op, arguments, and keyword arguments.
+  
+  *Example:*
+  `%sym_size_int_720 : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%img, 2), kwargs = {})`
+
+- **pkg.torch.onnx.name_scopes**
+
+  A list of name scopes (methods) representing the path to this node in the PyTorch model.
+
+  *Example:*
+  `['_empty_nn_module_stack_from_metadata_hook', 'sym_size_int_720']`
+
+- **pkg.torch.onnx.stack_trace**
+
+  The stack trace from the original code where this node was created, if available.
+
+  *Example:*
+  `File "torch/fx/passes/runtime_assert.py", line 24, in insert_deferred_runtime_asserts`
+
+These metadata fields are stored in the metadata_props attribute of each ONNX node and can be inspected using Netron or programmatically.
 
 ## API Reference
 
