@@ -1543,9 +1543,9 @@ auto Engine::ready_queue(
       !c10::AutogradState::get_tls_state().get_multithreading_enabled();
   // Note [ Engine threading optimization when single device ]
   //
-  // If during graph discovery, we find that there is only a single distinct
-  // device, we will reuse the calling thread. This can improve cache locality,
-  // etc.
+  // If during graph traversal, we find that there is only a single distinct
+  // device, we will reuse the calling thread. This can result in a perf win
+  // due to fewer cache misses, TLB misses, context switches, etc.
   //
   // The only situation current_graph_task is not yet set is when
   // execute_with_graph_task enqueues the very first task. We manually check
