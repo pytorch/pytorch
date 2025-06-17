@@ -266,7 +266,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(rand2_1.getstate(), rand2_2.getstate())
         self.assertEqual(rand3_1.getstate(), rand3_2.getstate())
 
-    def test_random_object_overriden_methods(self):
+    def test_random_object_overridden_methods(self):
         # these will result in graph breaks, but we shouldn't crash
         def get_rng():
             rand1 = random.Random(1)
