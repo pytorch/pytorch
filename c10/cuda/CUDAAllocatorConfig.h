@@ -9,7 +9,7 @@ namespace c10::cuda::CUDACachingAllocator {
 
 // Keep this for backwards compatibility
 C10_DEPRECATED_MESSAGE(
-  "CUDAAllocatorConfig is deprecated. Please use c10::CachingAllocator::AllocatorConfig instead.")
+    "CUDAAllocatorConfig is deprecated. Please use c10::CachingAllocator::AllocatorConfig instead.")
 class C10_CUDA_API CUDAAllocatorConfig
     : public CachingAllocator::AllocatorConfig {
  public:
