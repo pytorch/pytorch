@@ -1,4 +1,6 @@
 import dataclasses
+import functools
+import logging
 import operator
 import textwrap
 from collections import Counter
@@ -19,9 +21,10 @@ from torch._inductor.utils import sympy_product
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
+from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv
 
-from .. import ir
+from .. import config, ir
 from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
 from .common import (
     CodegenSymbol,
@@ -58,6 +61,7 @@ from .wrapper import (
 
 
 aten = torch.ops.aten
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -194,6 +198,23 @@ class FxConverter:
         node.name = name
         node.meta["val"] = buffer.get_example()
 
+    def _create_as_strided(
+        self,
+        input_node: torch.fx.Node,
+        size: tuple[Any, ...],
+        stride: tuple[Any, ...],
+        offset: Union[int, sympy.Expr],
+    ) -> torch.fx.Node:
+        return self.gm.graph.call_function(
+            torch.as_strided,
+            args=(
+                input_node,
+                convert_shape_to_symint(size),
+                convert_shape_to_symint(stride),
+                convert_to_symint(offset),
+            ),
+        )
+
     def _record_allocation(self, buffer: CodegenBuffer, node: torch.fx.Node) -> None:
         """
         Updates the symbol table to record that an Inductor buffer maps to the result of
@@ -239,8 +260,13 @@ class FxConverter:
         """
         Converts graph inputs to FX placeholders.
         """
-        for ir_node in V.graph.graph_inputs.values():
-            buffer = self._get_buffer(ir_node)
+        for name, ir_node in V.graph.graph_inputs.items():
+            # Introduce a new symbol for constant inputs.
+            buffer = (
+                SymbolBuffer(sympy.Symbol(name, is_integer=True))
+                if isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
+                else self._get_buffer(ir_node)
+            )
             node = self.gm.graph.placeholder(buffer.get_name())
             self._create_meta_from_buffer(node, buffer)
             self._record_allocation(buffer, node)
@@ -406,12 +432,17 @@ class FxConverter:
         assert name
         size = tuple(layout.size)
         stride = tuple(layout.stride)
+        if isinstance(layout, ir.NonOwningLayout):
+            # Look up the view's layout.
+            view = layout.view
+            assert isinstance(view, ir.ReinterpretView), (
+                f"unexpected type: {type(view)}"
+            )
+            layout = view.layout
         offset = input_buffer.get_offset() + layout.offset
 
         # Map ReinterpretView to as_strided.
-        result_node = self.gm.graph.call_function(
-            torch.as_strided, args=(input_node, size, stride, offset)
-        )
+        result_node = self._create_as_strided(input_node, size, stride, offset)
         result_node.name = name
         result_node.meta["val"] = layout.get_example()
         self._record_allocation(result_buffer, result_node)
@@ -427,17 +458,15 @@ class FxConverter:
         result_node = old_node
 
         # Change shape and stride.
-        size = new.get_size()
-        stride = new.get_stride()
+        size = tuple(new.get_size())
+        stride = tuple(new.get_stride())
         offset = new.get_offset()
         if (
-            old.get_size() != size
-            or old.get_stride() != stride
+            tuple(old.get_size()) != size
+            or tuple(old.get_stride()) != stride
             or old.get_offset() != offset
         ):
-            result_node = self.gm.graph.call_function(
-                torch.as_strided, args=(old_node, size, stride, offset)
-            )
+            result_node = self._create_as_strided(old_node, size, stride, offset)
             self._create_meta_from_buffer(result_node, new)
 
         self._record_allocation(new, result_node)
@@ -483,10 +512,47 @@ class FxConverter:
         call_args = self._lookup_args(line.call_args)
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
-        config = tuner.compile_results[0].config
-        call_args, grid = tuner._interpret_args_grid(call_args, config)
+
+        # Optionally autotune the kernels.
+        # The FX backend currently only supports compile-time tuning.
+        kernel_name = tuner.fn.__name__
+        if config.triton.autotune_at_compile_time:
+            from triton.runtime import driver
+
+            log.info("Autotuning Triton kernel %s at compile time.", kernel_name)
+            device = driver.active.get_current_device()
+            stream = driver.active.get_current_stream(device)
+
+            def node_to_tuning_arg(arg: Any) -> Any:
+                """
+                Create real tensors for autotuning arguments, substituting size hints
+                for dynamic shapes.
+                """
+                to_size_hint = functools.partial(
+                    pytree.tree_map, V.graph.sizevars.size_hint
+                )
+                if not isinstance(arg, torch.fx.Node):
+                    return to_size_hint(arg)
+
+                fake = arg.meta["val"]
+                return torch.empty_strided(
+                    to_size_hint(fake.shape),
+                    to_size_hint(fake.stride()),
+                    device=device,
+                ).zero_()
+
+            arg_values = [node_to_tuning_arg(arg) for arg in call_args]
+            tuner.run(*arg_values, stream=stream)
+        else:
+            log.info(
+                "Skipping autotuning for kernel %s. Set config.triton.autotune_at_compile_time = True to enable.",
+                kernel_name,
+            )
+
+        kernel_config = tuner.compile_results[0].config
+        call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)
         call_kwargs = dict(zip(tuner.triton_meta["signature"], call_args))
-        call_kwargs.update(config.kwargs)
+        call_kwargs.update(kernel_config.kwargs)
 
         def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
             """

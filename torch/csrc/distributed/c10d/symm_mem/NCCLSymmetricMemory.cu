@@ -6,6 +6,8 @@
 
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
 
+#include <nccl.h>
+
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
@@ -40,7 +42,7 @@ class NCCLSymmetricMemory : public SymmetricMemory {
       const std::string& group_name,
       ncclWindow_t handle,
       ncclWindow_t signal_handle)
-      : allocation_(allocation),
+      : allocation_(std::move(allocation)),
         buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name),
@@ -53,9 +55,7 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     // WIP
   }
 
-  ~NCCLSymmetricMemory() override{
-      // TODO
-  };
+  ~NCCLSymmetricMemory() override = default;
 
   std::vector<void*> get_buffer_ptrs() override {
     return buffers_;
@@ -232,7 +232,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     c10::cuda::CUDAGuard guard(device_idx);
     // TODO: we might need to use a roundup or mempool for mem allocation.
     void* ptr;
-    TORCH_CHECK(ncclMemAlloc(&ptr, size) == ncclSuccess, "ncclMemAlloc failed");
+    NCCLCHECK(ncclMemAlloc(&ptr, size));
     auto allocation =
         std::make_shared<NCCLAllocation>(ptr, size, device_idx);
     // TODO: thread safety
@@ -270,7 +270,8 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
 
     auto group = resolve_process_group(group_name.value());
-    c10::cuda::CUDAGuard guard(it->second->device_idx);
+    auto alloc = it->second;
+    c10::cuda::CUDAGuard guard(alloc->device_idx);
     ncclWindow_t handle;
     ncclWindow_t signal_handle;
 
@@ -284,14 +285,14 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // NCCL window registration api requires all ranks to have the same buffer size
     // we have this check to make sure all ranks have the same buffer size.
     for (auto r = 0; r < group_info.world_size; ++r) {
-      TORCH_CHECK(it->second->buffer_size == buffer_size_map[r], "buffer size mismatch");
+      TORCH_CHECK(alloc->buffer_size == buffer_size_map[r], "buffer size mismatch");
     }
     auto* ncclPg = dynamic_cast<c10d::ProcessGroupNCCL*>(
         group->getBackend(c10::DeviceType::CUDA).get());
     TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
     ncclComm_t comm = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
     C10D_NCCL_CHECK(
-      ncclCommWindowRegister(comm, ptr, it->second->buffer_size, (ncclWindow_t*)&handle, NCCL_WIN_COLL_SYMMETRIC),
+      ncclCommWindowRegister(comm, ptr, alloc->buffer_size, (ncclWindow_t*)&handle, NCCL_WIN_COLL_SYMMETRIC),
       c10::str(
           "Failed to window register segment with ptr ",
           ptr,
@@ -313,7 +314,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         comm));
 
     auto symm_mem =
-        c10::make_intrusive<NCCLSymmetricMemory>(it->second, *group_name, std::move(handle), std::move(signal_handle));
+        c10::make_intrusive<NCCLSymmetricMemory>(alloc, *group_name, std::move(handle), std::move(signal_handle));
 
     symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
     return symm_mem;
