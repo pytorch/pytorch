@@ -10,6 +10,7 @@
 #include <utility>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -264,11 +265,14 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
   static const bool flag = [] {
     const bool flag =
         getCvarBool(TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
-    if (flag &&
-        c10::cuda::CUDACachingAllocator::get()->isExpandableSegmentEnabled()) {
+    if (flag && c10::CachingAllocator::AllocatorConfig::expandable_segments()) {
+#ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
       LOG(INFO)
           << "disables TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
       return false;
+#else
+      TORCH_WARN_ONCE("expandable_segments not supported on this platform")
+#endif
     }
     return flag;
   }();
