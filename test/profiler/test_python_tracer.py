@@ -1,5 +1,5 @@
 from torch.profiler import profile, ProfilerActivity
-from torch.testing._internal.common_utils import run_tests, skipIfPythonVersionNotIn, TestCase, TemporaryFileName
+from torch.testing._internal.common_utils import run_tests, skipIfPythonVersionMismatch, TestCase, TemporaryFileName
 
 import json
 import sys
@@ -8,7 +8,7 @@ import time
 
 class TestPythonTracer(TestCase):
 
-    @skipIfPythonVersionNotIn("3.12", "3.13")
+    @skipIfPythonVersionMismatch(lambda major, minor, micro: major == 3 and minor == 12)
     def test_method_with_c_function(self):
         micro = sys.version_info.micro
 
