@@ -163,8 +163,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def _in_graph_classes():
         _in_graph_class_list = {
             torch.Tensor,
+            torch.Stream,
+            torch.Event,
             torch.cuda.Stream,
             torch.cuda.Event,
+            torch.xpu.Stream,
+            torch.xpu.Event,
         }
         if hasattr(torch, "hpu"):
             _in_graph_class_list.update(
@@ -477,7 +481,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
         elif self.value is weakref.ref:
-            return variables.WeakRefVariable(args[0])
+            if len(args) > 1:
+                callback = args[1]
+            else:
+                callback = variables.ConstantVariable.create(None)
+            return variables.WeakRefVariable(args[0], callback)
         elif self.value is functools.partial:
             if not args:
                 unimplemented("functools.partial malformed")
