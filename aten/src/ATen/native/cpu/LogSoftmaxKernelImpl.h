@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/OpMathType.h>
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 
 #include <cstdint>
