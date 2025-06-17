@@ -86,7 +86,7 @@ from .cpp_utils import (
 _IS_WINDOWS = sys.platform == "win32"
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_export_declaration():
     return "__declspec(dllexport)" if _IS_WINDOWS else ""
 
@@ -3735,7 +3735,7 @@ class TilingSelect:
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
-                            V.graph.sizevars.guard_lt(call_range, factor_lowp)  # type: ignore[arg-type]
+                            V.graph.sizevars.check_lt(call_range, factor_lowp)  # type: ignore[arg-type]
                             tiling_factor = factor_lowp // 2
                             break
                     elif call_ranges[tiling_indice] < factor_lowp:
@@ -4986,7 +4986,7 @@ class CppScheduling(BaseScheduling):
                                 layout=local_buffer_layout,
                             )
                             local_buffers.append(local_buffer_used)
-                            local_to_global_buffers[local_buffer_used.name] = []
+                            local_to_global_buffers[local_buffer_used.name] = []  # type: ignore[index]
                         local_to_global_buffers[local_buffer_used.name].append(
                             global_buffer,
                         )

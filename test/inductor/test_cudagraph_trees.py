@@ -2801,6 +2801,8 @@ if HAS_CUDA:
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @torch._inductor.config.patch("graph_partition", True)
+        # turn on input mutation support to avoid skipping cudagraph at dynamo level
+        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         def test_graph_partition_cpu_scalar_mutation(self):
             # tests that input mutation on a cpu scalar tensor x is correctly
             # handled when moving x to gpu at the beginning of the graph.
