@@ -461,10 +461,7 @@ struct ExpandableSegment {
           // in practice, we can get CUDA_ERROR_NOT_SUPPORTED or
           // CUDA_ERROR_NOT_PERMITTED to be safe, any non out-of-memory error is
           // considered as the handle type is not supported. if the handle type
-          // is not supported, return a null range to indicate it. and clear the
-          // error by calling cuGetErrorString_.
-          const char* error_string = nullptr;
-          DriverAPI::get()->cuGetErrorString_(status, &error_string);
+          // is not supported, return a null range to indicate it.
           return SegmentRange(nullptr, 0);
         } else {
           C10_CUDA_DRIVER_CHECK(status);
