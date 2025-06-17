@@ -3600,8 +3600,9 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("sdpa_backend", ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["default"])
     @tf32_enabled()
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
-                                               head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
-                                               scale: str, enable_gqa: bool, n_heads: list[int]):
+                                               head_dim: int, is_causal: bool, dropout_p: float,
+                                               dtype: torch.dtype, scale: str, enable_gqa: bool,
+                                               n_heads: list[int], sdpa_backend: str):
 
 
         #torch.backends.cuda.preferred_rocm_fa_library("ck")
@@ -3618,11 +3619,13 @@ class TestSDPACudaOnly(NNTestCase):
         if TEST_WITH_ROCM:
             torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
             # When no args are given to preferred_rocm_fa_library, it acts as a getter
-            TEST_WITH_CK = torch.backends.cuda.preferred_rocm_fa_library()
+            TEST_WITH_CK = (torch.backends.cuda.preferred_rocm_fa_library() == torch._C._ROCmFABackend.Ck)
 
         if TEST_WITH_CK and head_dim > 128:
             self.skipTest("CK does not support head dims over 128")
         #print("TEST_WITH_CK: ", TEST_WITH_CK)
+        #print("TWCK type: ", type(TEST_WITH_CK))
+        #print("BACKEND!: ", sdpa_backend)
         scale = scale if scale is None else (1 / head_dim)
         num_heads_q = num_heads_kv = 4
         if enable_gqa:
@@ -3702,23 +3705,41 @@ class TestSDPACudaOnly(NNTestCase):
         grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
 
         fudge_factors = {
-            'out': 5, # NEW CK MIN
+            'out': 4, # NEW CK MIN
             'grad_query': 180.0,
             'grad_key': 16,
-            'grad_value': 6, # NEW CK MIN
+            'grad_value': 4, # NEW CK MIN
         }
         if TEST_WITH_ROCM:
-            fudge_factors['grad_key'] = 145.0 # NEW CK MIN
-            fudge_factors['grad_query'] = 855.0 # ck min = 855.0
-            if seq_len_k >= 1024:
-                fudge_factors['grad_key'] = 70.0
-            if seq_len_k >= 2048:
-                fudge_factors['grad_key'] = 190.0
-                fudge_factors['grad_query'] = 1550.0 # NEW CK MIN
-                if seq_len_q >= 2048:
-                    fudge_factors['grad_query'] = 1100.0
-            if dtype == torch.float32:
-                fudge_factors['grad_key'] = 90.0
+            if TEST_WITH_CK:
+                fudge_factors['out'] = 5
+                fudge_factors['grad_key'] = 145.0 # NEW CK MIN
+                fudge_factors['grad_query'] = 855.0 # ck min = 855.0
+                fudge_factors['grad_value'] = 6
+                if seq_len_k >= 1024:
+                    fudge_factors['grad_key'] = 70.0
+                if seq_len_k >= 2048:
+                    fudge_factors['grad_key'] = 190.0
+                    fudge_factors['grad_query'] = 1550.0 # NEW CK MIN
+                    if seq_len_q >= 2048:
+                        fudge_factors['grad_query'] = 1100.0
+                if dtype == torch.float32:
+                    fudge_factors['grad_key'] = 90.0
+            else:
+                fudge_factors['grad_key'] = 45.0
+                fudge_factors['grad_query'] = 360.0
+                if seq_len_k >= 1024:
+                    fudge_factors['grad_key'] = 70.0
+                if seq_len_k >= 2048:
+                    fudge_factors['grad_key'] = 190.0
+                    fudge_factors['grad_query'] = 650.0
+                    if seq_len_q >= 2048:
+                        fudge_factors['grad_query'] = 1100.0
+                if dtype == torch.float32:
+                    fudge_factor['grad_key'] = 90.0
+
+
+
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
