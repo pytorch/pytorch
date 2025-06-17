@@ -4,11 +4,12 @@ import dataclasses
 import itertools
 from functools import partial
 from threading import Lock
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, List, TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
+from .kernel.kernel_filters import gemm_config_registry
 from .utils import get_backend_num_stages
 from .virtualized import V
 
@@ -417,111 +418,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             ConvConfig(256, 64, 32, 2, 8),
         ]
 
-    def _finalize_mm_configs(
-        self,
-        configs: list[BaseConfig],
-    ) -> Generator[TritonConfig, None, None]:
-        """
-        Finalizes configs after scaling, applying additional constraints.
-        """
-        used: OrderedSet[tuple[int, ...]] = OrderedSet()
-
-        max_mm_configs = config.test_configs.max_mm_configs
-
-        for conf in configs:
-            # Each warp computes a 16x16 tile = 256 elements
-            num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
-
-            # Construct key for finding duplicate configs
-            key: tuple[int, ...] = (
-                conf.block_m,
-                conf.block_n,
-                conf.block_k,
-                conf.num_stages,
-                num_warps,
-            )
-
-            # Check if gemm specific arg exists - add to key if does
-            group_m = getattr(conf, "group_m", None)
-            if group_m is not None:
-                key += (group_m,)
-
-            if key not in used and (
-                max_mm_configs is None or len(used) < max_mm_configs
-            ):
-                used.add(key)
-                kwargs = {
-                    "BLOCK_M": conf.block_m,
-                    "BLOCK_N": conf.block_n,
-                    "BLOCK_K": conf.block_k,
-                    "num_stages": conf.num_stages,
-                    "num_warps": num_warps,
-                }
-                if group_m is not None:
-                    kwargs["GROUP_M"] = group_m
-                yield self.triton_config(**kwargs)
-
-    def _scale_mm_configs(
-        self,
-        m: int,
-        n: int,
-        k: int,
-        configs: list[BaseConfig],
-        scale: float,
-        has_int8_tensor: bool,
-        exclude: Callable[[int, int, int], bool],
-    ) -> list[BaseConfig]:
-        """
-        Scales and filters matrix multiplication configs based on input size.
-        """
-        from .runtime.runtime_utils import next_power_of_2
-
-        min_block_size = 16
-        min_block_size_k = 32 if has_int8_tensor else 16
-
-        m = max(
-            next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    m,
-                    fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                )
-            ),
-            min_block_size,
-        )
-        n = max(
-            next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    n,
-                    fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                )
-            ),
-            min_block_size,
-        )
-        k = max(
-            next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    k,
-                    fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                )
-            ),
-            min_block_size_k,
-        )
-
-        scaled_configs = []
-        for c in configs:
-            scaled_config = dataclasses.replace(
-                c,
-                block_m=max(min(int(c.block_m * scale), m), min_block_size),
-                block_n=max(min(int(c.block_n * scale), n), min_block_size),
-                block_k=max(min(int(c.block_k * scale), k), min_block_size_k),
-            )
-
-            if not exclude(
-                scaled_config.block_m, scaled_config.block_n, scaled_config.block_k
-            ):
-                scaled_configs.append(scaled_config)
-
-        return scaled_configs
+    # The _finalize_mm_configs and _scale_mm_configs methods have been moved to the
+    # middleware system in kernel_filters.py. They are registered as filters in the
+    # gemm_config_registry.
 
     def preprocess_mm_configs(
         self,
@@ -533,10 +432,38 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scale: int = 1,
         exclude: Callable[[int, int, int], bool] = lambda m, n, k: False,
     ) -> Generator[TritonConfig, None, None]:
-        scaled_configs = self._scale_mm_configs(
-            m, n, k, configs, scale, has_int8_tensor, exclude
-        )
-        return self._finalize_mm_configs(scaled_configs)
+        """
+        Process configs through the middleware system.
+        
+        This method sets the scale parameters and then applies all registered filters
+        from the gemm_config_registry.
+        """
+        # Set the scale parameters for the middleware system
+        from .kernel.kernel_filters import set_scale_params
+        set_scale_params(m, n, k, scale, has_int8_tensor, exclude)
+        
+        # Apply all registered filters from the middleware system
+        filtered_configs = gemm_config_registry.apply_filters(configs)
+        
+        # Convert to triton configs
+        for conf in filtered_configs:
+            # Each warp computes a 16x16 tile = 256 elements
+            num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
+            
+            kwargs = {
+                "BLOCK_M": conf.block_m,
+                "BLOCK_N": conf.block_n,
+                "BLOCK_K": conf.block_k,
+                "num_stages": conf.num_stages,
+                "num_warps": num_warps,
+            }
+            
+            # Check if gemm specific arg exists - add to kwargs if it does
+            group_m = getattr(conf, "group_m", None)
+            if group_m is not None:
+                kwargs["GROUP_M"] = group_m
+                
+            yield self.triton_config(**kwargs)
 
     def triton_config(
         self, num_stages: int, num_warps: int, **kwargs: Any
@@ -688,71 +615,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         for c in configs:
             c.num_stages = self.default_num_stages
         return configs
-
-    def _finalize_mm_configs(
-        self,
-        configs: list[BaseConfig],
-    ) -> Generator[TritonConfig, None, None]:
-        """
-        Finalizes configs after scaling, applying additional constraints.
-        """
-        used: OrderedSet[tuple[int, ...]] = OrderedSet()
-
-        max_mm_configs = config.test_configs.max_mm_configs
-
-        for conf in configs:
-            # Each warp computes a 16x16 tile = 256 elements
-            conf.num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
-
-            # Defaults for AMD triton backend kern args if not set
-            matrix_instr_nonkdim = getattr(conf, "matrix_instr_nonkdim", 16)
-            waves_per_eu = getattr(conf, "waves_per_eu", 0)
-            kpack = getattr(conf, "kpack", 2)
-
-            if matrix_instr_nonkdim != 0 and (
-                conf.block_m % matrix_instr_nonkdim != 0
-                or conf.block_n % matrix_instr_nonkdim != 0
-            ):
-                #  block_m and block_n must be a multiple of matrix_instr_nonkdim
-                continue
-
-            # Construct key for finding duplicate configs
-            key: tuple[int, ...] = (
-                conf.block_m,
-                conf.block_n,
-                conf.block_k,
-                conf.num_stages,
-                conf.num_warps,
-                waves_per_eu,
-                matrix_instr_nonkdim,
-                kpack,
-            )
-
-            # Check if gemm specific arg exists - add to key if does
-            group_m = getattr(conf, "group_m", None)
-            if group_m is not None:
-                key += (group_m,)
-
-            if waves_per_eu != 0:
-                waves_per_eu = int(8 // conf.num_warps)
-
-            if key not in used and (
-                max_mm_configs is None or len(used) < max_mm_configs
-            ):
-                used.add(key)
-                kwargs = {
-                    "BLOCK_M": conf.block_m,
-                    "BLOCK_N": conf.block_n,
-                    "BLOCK_K": conf.block_k,
-                    "num_stages": conf.num_stages,
-                    "num_warps": conf.num_warps,
-                    "matrix_instr_nonkdim": matrix_instr_nonkdim,
-                    "waves_per_eu": waves_per_eu,
-                    "kpack": kpack,
-                }
-                if group_m is not None:
-                    kwargs["GROUP_M"] = group_m
-                yield self.triton_config(**kwargs)
 
     def get_extra_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         filtered_configs = self._filter_configs(

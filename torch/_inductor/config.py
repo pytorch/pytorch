@@ -450,6 +450,28 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
 
+# Specify the size of the benchmarking space for GEMM autotuning with the neural network model.
+# DEFAULT     - use the default configs (same as max_autotune_gemm_search_space)
+# EXHAUSTIVE  - use the exhaustive configs (same as max_autotune_gemm_search_space)
+# <number>    - use the top <number> configs as predicted by the model
+def parse_matmul_gemm_autotune_benchmarking_space() -> Union[str, int]:
+    value = os.environ.get(
+        "TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARKING_SPACE",
+        max_autotune_gemm_search_space
+    )
+    # Try to parse as an integer first
+    try:
+        return int(value)
+    except ValueError:
+        # If not an integer, return the uppercase string
+        return value.upper()
+
+matmul_gemm_autotune_benchmarking_space = parse_matmul_gemm_autotune_benchmarking_space()
+
+# Path to a kernel lookup table file for filtering configs
+# This file contains pre-determined optimal configs for specific problem sizes
+kernel_lut_path: Optional[str] = os.environ.get("TORCHINDUCTOR_KERNEL_LUT_PATH")
+
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
 
