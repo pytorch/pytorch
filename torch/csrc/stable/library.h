@@ -181,6 +181,15 @@ StableIValue from(T val) {
 }
 
 template <typename T>
+StableIValue from(const std::optional<T>& val) {
+  return detail::FromImpl<std::optional<T>>::call(val);
+}
+
+StableIValue from(const torch::stable::Tensor& val) {
+  return detail::FromImpl<torch::stable::Tensor>::call(val);
+}
+
+template <typename T>
 T to(StableIValue val) {
   return detail::ToImpl<T>::call(val);
 }
