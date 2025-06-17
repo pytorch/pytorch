@@ -1,5 +1,5 @@
+#include <c10/metal/atomic.h>
 #include <c10/metal/indexing.h>
-#include <metal_atomic>
 #include <metal_stdlib>
 
 using namespace metal;
@@ -201,53 +201,8 @@ kernel_index_offsets<packed_uint3, ulong3>(
     constant uint& num_dimensions [[buffer(3)]],
     uint thread_index [[thread_position_in_grid]]);
 
-template <typename T, typename E, typename OffsetsT>
-kernel void index_put_accumulate_native_dtypes(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant OffsetsT* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  constant int64_t* index_sizes = (constant int64_t*)indexSizes;
-  constant int64_t* index_strides = (constant int64_t*)indexStrides;
-  int64_t offset = 0;
-  for (uint32_t i = 0; i < num_indices; i++) {
-    constant int64_t* indexArray = indexAB[i].indexArray;
-    int64_t index = indexArray[offsets[thread_index].z / sizeof(int64_t)];
-    if (index < 0) {
-      index += index_sizes[i];
-    }
-    offset += index * index_strides[i];
-  }
-  device T* out =
-      (device T*)((device char*)outputData + offsets[thread_index].x + offset);
-  constant E* in =
-      (constant E*)((constant char*)inputData + offsets[thread_index].y);
-  atomic_fetch_add_explicit(out, *in, memory_order_relaxed);
-}
-
-template <typename T>
-__attribute__((__always_inline__)) void atomic_fetch_add_relaxed(
-    device void* addr,
-    T value) {
-  device atomic_uint* uintAddr = (device atomic_uint*)addr;
-  uint expected = atomic_load_explicit(uintAddr, memory_order_relaxed);
-  T updated = as_type<T>(expected) + value;
-  while (!atomic_compare_exchange_weak_explicit(
-      uintAddr,
-      &expected,
-      as_type<uint>(updated),
-      memory_order_relaxed,
-      memory_order_relaxed)) {
-    updated = as_type<T>(expected) + value;
-  }
-}
-
 template <typename T, typename OffsetsT>
-kernel void atomic_index_put_accumulate(
+kernel void index_put_accumulate(
     constant IndexAB* indexAB [[buffer(0)]],
     constant void* indexSizes [[buffer(1)]],
     constant void* indexStrides [[buffer(2)]],
@@ -258,7 +213,7 @@ kernel void atomic_index_put_accumulate(
     uint thread_index [[thread_position_in_grid]]) {
   constant int64_t* index_sizes = (constant int64_t*)indexSizes;
   constant int64_t* index_strides = (constant int64_t*)indexStrides;
-  int64_t offset = 0;
+  int64_t offset = offsets[thread_index].x;
   for (uint32_t i = 0; i < num_indices; i++) {
     constant int64_t* indexArray = indexAB[i].indexArray;
     int64_t index = indexArray[offsets[thread_index].z / sizeof(int64_t)];
@@ -267,56 +222,38 @@ kernel void atomic_index_put_accumulate(
     }
     offset += index * index_strides[i];
   }
-  device void* out = (device void*)((device char*)outputData +
-                                    offsets[thread_index].x + offset);
-  constant T* in =
-      (constant T*)((constant char*)inputData + offsets[thread_index].y);
-  atomic_fetch_add_relaxed<T>(out, *in);
+  const auto in =
+      *(constant T*)((constant char*)inputData + offsets[thread_index].y);
+  AtomicType<T>::atomic_add(
+      reinterpret_cast<device AtomicType_t<T>*>(outputData),
+      offset / sizeof(T),
+      in);
 }
 
-template [[host_name("index_put_accumulate_32bit_float_idx32")]] kernel void
-atomic_index_put_accumulate<float, uint3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
+#define REGISTER_INDEX_PUT_ACCUMULATE(DTS, DTYPE, IDXS, IDX_DTYPE) \
+  template [[host_name("index_put_accumulate_" #DTS "_" #DTYPE     \
+                       "_" #IDXS)]] kernel void                    \
+  index_put_accumulate<DTYPE, IDX_DTYPE>(                          \
+      constant IndexAB * indexAB [[buffer(0)]],                    \
+      constant void* indexSizes [[buffer(1)]],                     \
+      constant void* indexStrides [[buffer(2)]],                   \
+      constant IDX_DTYPE* offsets [[buffer(3)]],                   \
+      constant void* inputData [[buffer(4)]],                      \
+      device void* outputData [[buffer(5)]],                       \
+      constant uint32_t& num_indices [[buffer(6)]],                \
+      uint thread_index [[thread_position_in_grid]])
 
-template [[host_name("index_put_accumulate_32bit_float_idx64")]] kernel void
-atomic_index_put_accumulate<float, ulong3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant ulong3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
+REGISTER_INDEX_PUT_ACCUMULATE(32bit, float, idx32, uint3);
+REGISTER_INDEX_PUT_ACCUMULATE(32bit, float, idx64, ulong3);
+REGISTER_INDEX_PUT_ACCUMULATE(32bit, int, idx32, uint3);
+REGISTER_INDEX_PUT_ACCUMULATE(32bit, int, idx64, ulong3);
+REGISTER_INDEX_PUT_ACCUMULATE(16bit, half, idx32, uint3);
+REGISTER_INDEX_PUT_ACCUMULATE(16bit, half, idx64, ulong3);
 
-template [[host_name("index_put_accumulate_32bit_int_idx32")]] kernel void
-index_put_accumulate_native_dtypes<atomic_int, int, uint3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
-
-template [[host_name("index_put_accumulate_32bit_int_idx64")]] kernel void
-index_put_accumulate_native_dtypes<atomic_int, int, ulong3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant ulong3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
+#if __METAL_VERSION__ >= 310
+REGISTER_INDEX_PUT_ACCUMULATE(16bit, bfloat, idx32, uint3);
+REGISTER_INDEX_PUT_ACCUMULATE(16bit, bfloat, idx64, ulong3);
+#endif
 
 template <typename T>
 kernel void masked_fill_scalar_dense(
@@ -358,6 +295,127 @@ kernel void masked_fill_scalar_strided(
   }
 }
 
+template <typename T, typename index_t>
+kernel void index_copy_dense(
+    device T* output,
+    constant T* input,
+    constant T* source,
+    constant index_t* indices,
+    constant uint& dim,
+    constant long* sizes,
+    constant uint& ndim,
+    constant uint& indices_numel,
+    uint thread_index [[thread_position_in_grid]]) {
+  // first copy input to output
+  output[thread_index] = input[thread_index];
+
+  // calculate pos in the tensor using a signed counter
+  long pos[max_ndim];
+  long linear_idx = thread_index;
+  for (int i = static_cast<int>(ndim) - 1; i >= 0; --i) {
+    pos[i] = linear_idx % sizes[i];
+    linear_idx /= sizes[i];
+  }
+
+  // check if this position's dim coordinate is in the indices
+  long dim_pos = pos[dim];
+
+  // search through indices to see if current dim pos should be updated
+  for (uint i = 0; i < indices_numel; i++) {
+    if (indices[i] == dim_pos) {
+      // this position should be updated from source
+      // calculate source offset where the source tensor has the same shape
+      // except along dim where it has size = indices_numel
+      long source_offset = 0;
+      long stride = 1;
+      for (int j = static_cast<int>(ndim) - 1; j >= 0; --j) {
+        if (j == static_cast<int>(dim)) {
+          // for the indexed dimension, use position i
+          source_offset += i * stride;
+          stride *= indices_numel;
+        } else {
+          // for other dimensions use the same position
+          source_offset += pos[j] * stride;
+          stride *= sizes[j];
+        }
+      }
+
+      output[thread_index] = source[source_offset];
+      break;
+    }
+  }
+}
+
+template <typename T, typename index_t>
+kernel void index_copy_strided(
+    device T* output,
+    constant T* input,
+    constant T* source,
+    constant index_t* indices,
+    constant uint& dim,
+    constant long* sizes,
+    constant uint& ndim,
+    constant uint& indices_numel,
+    constant long* input_strides,
+    constant long* output_strides,
+    constant long* source_strides,
+    uint thread_index [[thread_position_in_grid]]) {
+  int pos[max_ndim];
+  pos_from_thread_index(int(thread_index), pos, sizes, ndim);
+
+  // compute offsets for the output and input tensors
+  long output_offset = offset_from_coord(pos, output_strides, ndim);
+  long input_offset = offset_from_coord(pos, input_strides, ndim);
+
+  output[output_offset] = input[input_offset];
+
+  // save the original coordinate along the dim we're updating
+  int orig_dim = pos[dim];
+
+  // find the last index in the indices array that equals this coordinate
+  int last_matching_index = -1;
+  for (uint i = 0; i < indices_numel; i++) {
+    if (indices[i] == orig_dim) {
+      last_matching_index = int(i);
+    }
+  }
+
+  // if a matching index was found, use it to update the output
+  if (last_matching_index != -1) {
+    pos[dim] = last_matching_index;
+    long source_offset = offset_from_coord(pos, source_strides, ndim);
+    output[output_offset] = source[source_offset];
+  }
+}
+
+#define INSTANTIATE_INDEX_COPY(T, index_t)                      \
+  template [[host_name("index_copy_dense_" #T "_" #index_t)]]   \
+  kernel void index_copy_dense<T, index_t>(                     \
+      device T*,                                                \
+      constant T*,                                              \
+      constant T*,                                              \
+      constant index_t*,                                        \
+      constant uint&,                                           \
+      constant long*,                                           \
+      constant uint&,                                           \
+      constant uint&,                                           \
+      uint);                                                    \
+                                                                \
+  template [[host_name("index_copy_strided_" #T "_" #index_t)]] \
+  kernel void index_copy_strided<T, index_t>(                   \
+      device T*,                                                \
+      constant T*,                                              \
+      constant T*,                                              \
+      constant index_t*,                                        \
+      constant uint&,                                           \
+      constant long*,                                           \
+      constant uint&,                                           \
+      constant uint&,                                           \
+      constant long*,                                           \
+      constant long*,                                           \
+      constant long*,                                           \
+      uint);
+
 #define REGISTER_MASKED_FILL_SCALAR(SIZE, DTYPE)                            \
   template [[host_name("masked_fill_scalar_strided_" #SIZE)]] kernel void   \
   masked_fill_scalar_strided<DTYPE>(                                        \
@@ -380,3 +438,28 @@ REGISTER_MASKED_FILL_SCALAR(64bit, long);
 REGISTER_MASKED_FILL_SCALAR(32bit, int);
 REGISTER_MASKED_FILL_SCALAR(16bit, short);
 REGISTER_MASKED_FILL_SCALAR(8bit, char);
+INSTANTIATE_INDEX_COPY(float, int);
+INSTANTIATE_INDEX_COPY(float, long);
+INSTANTIATE_INDEX_COPY(bool, int);
+INSTANTIATE_INDEX_COPY(bool, long);
+INSTANTIATE_INDEX_COPY(half, int);
+INSTANTIATE_INDEX_COPY(half, long);
+INSTANTIATE_INDEX_COPY(int, int);
+INSTANTIATE_INDEX_COPY(int, long);
+INSTANTIATE_INDEX_COPY(long, int);
+INSTANTIATE_INDEX_COPY(long, long);
+INSTANTIATE_INDEX_COPY(short, int);
+INSTANTIATE_INDEX_COPY(short, long);
+INSTANTIATE_INDEX_COPY(char, int);
+INSTANTIATE_INDEX_COPY(char, long);
+INSTANTIATE_INDEX_COPY(uchar, int);
+INSTANTIATE_INDEX_COPY(uchar, long);
+
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_INDEX_COPY(bfloat, int);
+INSTANTIATE_INDEX_COPY(bfloat, long);
+#endif
+INSTANTIATE_INDEX_COPY(float2, int);
+INSTANTIATE_INDEX_COPY(float2, long);
+INSTANTIATE_INDEX_COPY(half2, int);
+INSTANTIATE_INDEX_COPY(half2, long);

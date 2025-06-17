@@ -351,7 +351,7 @@ def foreach_reduce(
     unsharded_grads: list[torch.Tensor],
     reduce_scatter_group: dist.ProcessGroup,
     reduce_scatter_stream: torch.Stream,
-    orig_dtype: torch.dtype,
+    orig_dtype: Optional[torch.dtype],
     reduce_dtype: Optional[torch.dtype],
     device: torch.device,
     reduce_scatter_reduce_op: Optional[Union[dist.ReduceOp, dist.ReduceOp.RedOpType]],
@@ -569,6 +569,7 @@ def _get_gradient_divide_factors(
 ) -> Union[tuple[None, None], tuple[float, float]]:
     # For fp32/bf16, we do not need to worry about overflow/underflow, so we
     # use NCCL's built-in division to avoid separate div kernels
+    # Warning: NCCL ReduceOp.AVG may produce incorrect results with world size 1.
     if reduce_dtype in (torch.float32, torch.bfloat16) and device_type != "mtia":
         return None, None
     data_parallel_size = reduce_scatter_group.size()

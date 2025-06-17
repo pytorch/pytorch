@@ -17,6 +17,7 @@ from torch.utils._pytree import (
     SequenceKey,
     SUPPORTED_NODES,
     tree_flatten,
+    tree_map,
     tree_map_with_path,
 )
 
@@ -198,11 +199,11 @@ class _StaticDim(Dim):
         self.value = value
 
     @property
-    def min(self):
+    def min(self):  # type: ignore[override]
         return self.value  # type: ignore[attr-defined]
 
     @property
-    def max(self):
+    def max(self):  # type: ignore[override]
         return self.value  # type: ignore[attr-defined]
 
 
@@ -228,7 +229,7 @@ class _DerivedDim(Dim):
         self.fn = fn
 
     @property
-    def min(self):
+    def min(self):  # type: ignore[override]
         # assume that self.fn is an increasing function
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
@@ -248,7 +249,7 @@ class _DerivedDim(Dim):
         return int(_min_symint)
 
     @property
-    def max(self):
+    def max(self):  # type: ignore[override]
         # assume that self.fn is an increasing function
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
@@ -449,7 +450,10 @@ class _IntWrapper:
     """
 
     val: int
-    dim: Optional[Union[_DimHint, int]] = None
+    # Disallow specifying dynamism
+    dynamism: Optional[Union[_DimHint, int]] = dataclasses.field(
+        init=False, default=None
+    )
 
 
 def _process_equalities(
@@ -662,7 +666,7 @@ class ShapesCollection:
 
     Example::
 
-        args = ({"x": tensor_x, "others": [tensor_y, tensor_z]})
+        args = {"x": tensor_x, "others": [tensor_y, tensor_z]}
 
         dim = torch.export.Dim(...)
         dynamic_shapes = torch.export.ShapesCollection()
@@ -672,22 +676,42 @@ class ShapesCollection:
         # dynamic_shapes = {"x": (dim, dim + 1, 8), "others": [{0: dim * 2}, None]}
 
         torch.export(..., args, dynamic_shapes=dynamic_shapes)
+
+    To specify dynamism for integers, we need to first wrap the integers using
+    _IntWrapper so that we have a "unique identification tag" for each integer.
+
+    Example::
+
+        args = {"x": tensor_x, "others": [int_x, int_y]}
+        # Wrap all ints with _IntWrapper
+        mapped_args = pytree.tree_map_only(int, lambda a: _IntWrapper(a), args)
+
+        dynamic_shapes = torch.export.ShapesCollection()
+        dynamic_shapes[tensor_x] = (dim, dim + 1, 8)
+        dynamic_shapes[mapped_args["others"][0]] = Dim.DYNAMIC
+
+        # This is equivalent to the following (now auto-generated):
+        # dynamic_shapes = {"x": (dim, dim + 1, 8), "others": [Dim.DYNAMIC, None]}
+
+        torch.export(..., args, dynamic_shapes=dynamic_shapes)
     """
 
     def __init__(self):
         self._shapes = {}
 
     def __setitem__(self, t, shape):
-        assert isinstance(
-            t, torch.Tensor
-        ), f"Cannot assign shape to non-tensor type {type(t)}"
+        assert isinstance(t, (torch.Tensor, _IntWrapper)), (
+            f"Cannot assign shape to non-tensor or non-_IntWrapper type {type(t)}"
+        )
+
         # TODO(avik): check that shape is indeed a Shape
+
         t_id = id(t)
         if t_id in self._shapes:
             _shape = self._shapes[t_id]
-            assert (
-                shape == _shape
-            ), f"Shapes assigned to tensor do not match: expected {_shape}, got {shape}"
+            assert shape == _shape, (
+                f"Shapes assigned to input do not match: expected {_shape}, got {shape}"
+            )
         else:
             self._shapes[id(t)] = shape
 
@@ -742,7 +766,7 @@ class AdditionalInputs:
 
     Example::
 
-        args0, kwargs0 = ... # example inputs for export
+        args0, kwargs0 = ...  # example inputs for export
 
         # other representative inputs that the exported program will run on
         dynamic_shapes = torch.export.AdditionalInputs()
@@ -762,9 +786,9 @@ class AdditionalInputs:
         """
 
         assert type(args) is tuple, f"Representative args {args} must be a tuple"
-        assert (
-            kwargs is None or type(kwargs) is dict
-        ), f"Representative kwargs {kwargs} must be None or a dict"
+        assert kwargs is None or type(kwargs) is dict, (
+            f"Representative kwargs {kwargs} must be None or a dict"
+        )
         self._examples.append((args, kwargs))
 
     def dynamic_shapes(self, m, args, kwargs=None):
@@ -776,17 +800,34 @@ class AdditionalInputs:
 
         dynamic_shapes, *other_dynamic_shapes = [
             _tree_map_with_path(
-                lambda path, t: tuple(t.shape), _combine_args(m, args, kwargs)
+                lambda path, t: tuple(t.shape) if isinstance(t, torch.Tensor) else t,
+                _combine_args(m, args, kwargs),
             )
             for args, kwargs in [(args, kwargs), *self._examples]
         ]
 
-        return tree_map_with_path(
-            lambda path, dim, *other_dims: (
-                dim
-                if all(other_dim == dim for other_dim in other_dims)
-                else Dim.DYNAMIC
-            ),
+        def _mark_dynamism(v, *other_vs):
+            if not all(type(v) == type(other) for other in other_vs):
+                raise ValueError(
+                    "The following inputs were found to have differing types, "
+                    f"so they cannot be marked as dynamic: {(v,) + other_vs}."
+                )
+
+            if isinstance(v, int) and not isinstance(v, bool):
+                if all(other_v == v for other_v in other_vs):
+                    return None
+                else:
+                    return Dim.DYNAMIC
+            else:
+                if not all(other_v == v for other_v in other_vs):
+                    raise ValueError(
+                        "The following inputs were found to have differing values, "
+                        f"but they cannot be marked as dynamic: {(v,) + other_vs}."
+                    )
+                return None
+
+        return tree_map(
+            _mark_dynamism,
             dynamic_shapes,
             *other_dynamic_shapes,
             is_leaf=lambda i: type(i) is int,
@@ -1034,7 +1075,8 @@ def _process_dynamic_shapes(
                 i,
                 dim.__name__,
                 StrictMinMaxConstraint(
-                    vr=ValueRanges(lower=dim.value, upper=dim.value), warn_only=False  # type: ignore[attr-defined]
+                    vr=ValueRanges(lower=dim.value, upper=dim.value),  # type: ignore[attr-defined]
+                    warn_only=False,
                 ),
             )
         else:
@@ -1044,7 +1086,8 @@ def _process_dynamic_shapes(
                 i,
                 dim.__name__,
                 StrictMinMaxConstraint(
-                    vr=ValueRanges(lower=dim.min, upper=dim.max), warn_only=False  # type: ignore[attr-defined]
+                    vr=ValueRanges(lower=dim.min, upper=dim.max),  # type: ignore[attr-defined]
+                    warn_only=False,
                 ),
             )
         return constraint
@@ -1097,7 +1140,7 @@ def _process_dynamic_shapes(
             # integers as dynamic, we first wrap integers in this class, and
             # then set the `dim` field of the class with the dynamic shapes dim
             # to mark the integer as dynamic.
-            t.dim = dynamic_shape
+            t.dynamism = dynamic_shape
 
     _tree_map_with_path(assoc_shape, combined_args, dynamic_shapes, tree_name="inputs")
 
@@ -1120,7 +1163,7 @@ def _process_dynamic_shapes(
 
 
 def _get_dim_name_mapping(
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None]
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
 ):
     name_to_dim = {}
     for dim in tree_flatten(

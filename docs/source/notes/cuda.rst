@@ -511,6 +511,8 @@ Available options:
   80% of the total memory allocated to the GPU application). The algorithm prefers
   to free old & unused blocks first to avoid freeing blocks that are actively being
   reused. The threshold value should be between greater than 0.0 and less than 1.0.
+  The default value is set at 1.0.
+
   ``garbage_collection_threshold`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``garbage_collection_threshold`` is ignored.
 * ``expandable_segments`` (experimental, default: `False`) If set to `True`, this setting instructs
@@ -546,20 +548,20 @@ Available options:
   appended to the end of the segment. This process does not create as many slivers
   of unusable memory, so it is more likely to succeed at finding this memory.
 
-  `pinned_use_cuda_host_register` option is a boolean flag that determines whether to
+* `pinned_use_cuda_host_register` option is a boolean flag that determines whether to
   use the CUDA API's cudaHostRegister function for allocating pinned memory instead
   of the default cudaHostAlloc. When set to True, the memory is allocated using regular
   malloc and then pages are mapped to the memory before calling cudaHostRegister.
   This pre-mapping of pages helps reduce the lock time during the execution
   of cudaHostRegister.
 
-  `pinned_num_register_threads` option is only valid when pinned_use_cuda_host_register
+* `pinned_num_register_threads` option is only valid when pinned_use_cuda_host_register
   is set to True. By default, one thread is used to map the pages. This option allows
   using more threads to parallelize the page mapping operations to reduce the overall
   allocation time of pinned memory. A good value for this option is 8 based on
   benchmarking results.
 
-  `pinned_use_background_threads` option is a boolean flag to enable background thread
+* `pinned_use_background_threads` option is a boolean flag to enable background thread
   for processing events. This avoids any slow path associated with querying/processing of
   events in the fast allocation path. This feature is disabled by default.
 
@@ -768,6 +770,21 @@ be called internally on deletion of the pool, hence returning all the memory to 
 .. code:: python
 
    del tensor, del pool
+
+
+Users can optionally specify a ``use_on_oom`` bool (which is False by default) during MemPool
+creation. If true, then the CUDACachingAllocator will be able to use memory in this pool as
+a last resort instead of OOMing.
+
+.. code:: python
+
+    pool = torch.cuda.MemPool(allocator, use_on_oom=True)
+    with torch.cuda.use_mem_pool(pool):
+        a = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+    del a
+
+    # at the memory limit, this will succeed by using pool's memory in order to avoid the oom
+    b = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
 
 
 The following :meth:`torch.cuda.MemPool.use_count` and :meth:`torch.cuda.MemPool.snapshot`

@@ -19,7 +19,6 @@
 #include <c10/util/TypeIndex.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_view.h>
 
 #include <c10/core/ScalarType.h>
 
