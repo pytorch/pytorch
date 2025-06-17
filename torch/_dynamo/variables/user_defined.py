@@ -106,6 +106,10 @@ def is_standard_setattr(val):
     return val in (object.__setattr__, BaseException.__setattr__)
 
 
+def is_standard_delattr(val):
+    return val in (object.__delattr__, BaseException.__delattr__)
+
+
 def is_forbidden_context_manager(ctx):
     f_ctxs = []
 
@@ -145,7 +149,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return f"{self.__class__.__name__}({self.value})"
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _constant_fold_classes():
         return {
             torch.device,
@@ -155,12 +159,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
         }
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _in_graph_classes():
         _in_graph_class_list = {
             torch.Tensor,
+            torch.Stream,
+            torch.Event,
             torch.cuda.Stream,
             torch.cuda.Event,
+            torch.xpu.Stream,
+            torch.xpu.Event,
         }
         if hasattr(torch, "hpu"):
             _in_graph_class_list.update(
@@ -173,7 +181,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return set(tensortype_to_dtype.keys()) | _in_graph_class_list
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def supported_c_new_functions():
         exceptions = [
             getattr(builtins, name).__new__
@@ -473,7 +481,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
         elif self.value is weakref.ref:
-            return variables.WeakRefVariable(args[0])
+            if len(args) > 1:
+                callback = args[1]
+            else:
+                callback = variables.ConstantVariable.create(None)
+            return variables.WeakRefVariable(args[0], callback)
         elif self.value is functools.partial:
             if not args:
                 unimplemented("functools.partial malformed")
@@ -839,7 +851,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _supported_random_functions():
         fns = {
             random.random,
@@ -873,6 +885,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
+
+            if is_standard_delattr(method):
+                return self.method_setattr_standard(
+                    tx, args[0], variables.DeletedVariable()
+                )
 
             if method is object.__eq__ and len(args) == 1 and not kwargs:
                 other = args[0]

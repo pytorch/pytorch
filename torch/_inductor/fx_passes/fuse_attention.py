@@ -849,13 +849,6 @@ def _get_sfdp_patterns():
                 _sfdp_extra_check(aten.div.Tensor),
             ),
             (
-                _sfdp_pattern_20,
-                _sfdp_replacement_20,
-                [g(), g(), g(), m()],
-                d,
-                _sfdp_extra_check(aten.div.Tensor),
-            ),
-            (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g(), g(), g(), m_bool()],
@@ -875,6 +868,13 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), b_bool(), b_float()],
                 d,
                 _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_20,
+                _sfdp_replacement_20,
+                [g(), g(), g(), m_2d()],
+                d,
+                _sfdp_extra_check(aten.div.Tensor),
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
@@ -956,7 +956,7 @@ def _get_sfdp_patterns():
             )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _sfdp_init():
     for key, register_replacement_kwargs in _get_sfdp_patterns():
         gen_register_replacement(key, **register_replacement_kwargs)

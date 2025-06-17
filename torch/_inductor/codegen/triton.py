@@ -8,6 +8,7 @@ import functools
 import itertools
 import logging
 import math
+import operator
 import os
 import textwrap
 from collections.abc import Iterable, Sequence
@@ -226,7 +227,12 @@ class IndexingOptions:
 
     @property
     def mask_str(self) -> str:
-        return " & ".join(map(str, self.mask_vars)) if self.mask_vars else "None"
+        # The sorted call is added to make sure the order is still
+        # deterministic if self.mask_vars contains mix of string
+        # and TritonCSEVariable
+        return (
+            " & ".join(sorted(map(str, self.mask_vars))) if self.mask_vars else "None"
+        )
 
 
 @dataclasses.dataclass
@@ -748,7 +754,7 @@ class TritonCSEVariable(CSEVariable):
     def __init__(self, name, bounds: ValueRanges[Any], dtype: torch.dtype) -> None:
         super().__init__(name, bounds, dtype)
         # We'll use this to track which masks the variable needs when used for indirect indexing
-        self.mask_vars = OrderedSet[str]()
+        self.mask_vars: OrderedSet[str] = OrderedSet()
         assert dtype is not None, "TritonCSEVariable must have dtype"
 
     def update_on_args(self, name, args, kwargs):
@@ -1305,7 +1311,7 @@ class TritonKernelOverrides(TritonOverrides):
         self._setup_libdevice_routing()
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _setup_libdevice_routing(cls):
         """Set up routing to libdevice implementations for fp64 inputs."""
 
@@ -1768,8 +1774,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         index_vars = index.free_symbols
         has_rindex = False
 
-        mask_vars = OrderedSet[str]()
-        for var in index_vars:
+        mask_vars: OrderedSet[str] = OrderedSet()
+        for var in sorted(index_vars, key=operator.attrgetter("name")):
             assert isinstance(var, sympy.Symbol)
             has_rindex = has_rindex or symbol_is_type(
                 var, TritonSymbols.reduction_types
@@ -1810,7 +1816,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         have_dense = True
         have_loop_vars = False
-        dense_mask_vars = OrderedSet[str]()
+        dense_mask_vars: OrderedSet[str] = OrderedSet()
 
         for tree in self.active_range_trees():
             if index_vars.intersection(tree.var_list):
@@ -2736,13 +2742,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 assert reduction_type == "welford_reduce"
                 result_mean, result_m2, result_weight = result_var
                 peer_mean = self.codegen_cooperative_reduction_peer_combine(
-                    result_mean, upcast_acc_dtype(src_dtype), default[0]
+                    result_mean,
+                    upcast_acc_dtype(src_dtype),
+                    default[0],  # type: ignore[index]
                 )
                 peer_m2 = self.codegen_cooperative_reduction_peer_combine(
-                    result_m2, upcast_acc_dtype(src_dtype), default[1]
+                    result_m2,
+                    upcast_acc_dtype(src_dtype),
+                    default[1],  # type: ignore[index]
                 )
                 peer_weight = self.codegen_cooperative_reduction_peer_combine(
-                    result_weight, upcast_acc_dtype(src_dtype), default[2]
+                    result_weight,
+                    upcast_acc_dtype(src_dtype),
+                    default[2],  # type: ignore[index]
                 )
                 self.welford_reduce_final_reduction(
                     self.post_loop_store,
@@ -3549,7 +3561,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
                     )
 
-        mutated_args = OrderedSet[str]()
+        mutated_args: OrderedSet[str] = OrderedSet()
         for mutation in self.mutations:
             if mutation in self.args.input_buffers:
                 mutated_args.add(self.args.input_buffers[mutation])
@@ -3641,6 +3653,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }
+        if self.tiling_scores:
+            inductor_meta["tiling_scores"] = self.tiling_scores
+
         if self.cooperative_reduction:
             inductor_meta["persistent_reduction"] = self.persistent_reduction
 

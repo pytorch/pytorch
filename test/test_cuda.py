@@ -1061,7 +1061,7 @@ print(t.is_pinned())
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
         with self.assertRaisesRegex(
-            RuntimeError, "device_index >= 0 && device_index < num_gpus"
+            RuntimeError, "Device index value .* is out of index range"
         ):
             torch.accelerator.current_stream(torch.accelerator.device_count())
 
@@ -1386,6 +1386,8 @@ except RuntimeError as e:
             errors = pool.map(method, [arg])
             for e in errors:
                 if "device-side assert triggered" not in str(e):
+                    self.fail(e)
+                if e.error_code != 710:  # cudaErrorAssert == 710
                     self.fail(e)
 
     @staticmethod
@@ -5111,6 +5113,20 @@ class TestMemPool(TestCase):
             "dummy_free",
         )
         return allocator, dummy_allocator
+
+    def test_mempool_empty_cache(self):
+        torch.cuda.empty_cache()
+        pool = torch.cuda.MemPool()
+        x = torch.empty(1024, 1024, device="cuda")
+
+        with torch.cuda.use_mem_pool(pool):
+            y = torch.empty(1024, 1024, device="cuda")
+
+        del y
+        del x
+        del pool
+        segments = torch.cuda.memory._snapshot()["segments"]
+        self.assertTrue(len(segments) > 0, "expected more than one segment")
 
     def test_mempool_empty_cache_inactive(self):
         torch.cuda.empty_cache()

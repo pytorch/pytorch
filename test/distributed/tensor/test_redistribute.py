@@ -312,7 +312,9 @@ class RedistributeTest(DTensorTestBase):
                         backward_dtype=backward_dtype,
                     )
                 self.assertEqual(reshard_dtensor.size(), torch.Size(input_size))
-                self.assertEqual(expected_tensor, reshard_dtensor.to_local())
+                self.assertEqual(
+                    expected_tensor.to(forward_dtype), reshard_dtensor.to_local()
+                )
                 self.assertEqual(
                     comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
                 )
