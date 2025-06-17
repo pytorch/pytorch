@@ -2,7 +2,6 @@
 
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
-import math
 import unittest
 
 import torch
@@ -10,28 +9,18 @@ import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
-class ListTests(torch._dynamo.test_case.TestCase):
-    # List methods
-    # + append
-    # + copy
+class TupleTests(torch._dynamo.test_case.TestCase):
+    # Tuple methods
     # + count
-    # + clear
-    # + extend
     # + index
-    # + insert
-    # + pop
-    # + remove
-    # + reverse
-    # + sort
     # BinOps:
     # +, <, >, <=, >=, ==, !=
     # Dunder methods:
-    # + __setitem__
     # + __getitem__
     # + __contains__
     # + __delitem__
 
-    thetype = list
+    thetype = tuple
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -45,26 +34,8 @@ class ListTests(torch._dynamo.test_case.TestCase):
     def assertEqual(self, a, b):
         return self.assertTrue(a == b, f"{a} != {b}")
 
-    def assertNotEqual(self, x, y, msg = None, *, atol = None, rtol = None, **kwargs):
+    def assertNotEqual(self, x, y, msg=None, *, atol=None, rtol=None, **kwargs):
         return self.assertTrue(x != y, f"{x} == {y}")
-
-    @make_dynamo_test
-    def test_append(self):
-        p = self.thetype('abc')
-        self.assertIsNone(p.append('d'))
-        self.assertEqual(p, ['a', 'b', 'c', 'd'])
-
-        # Wrong number of arguments
-        self.assertRaises(TypeError, p.append)
-        self.assertRaises(TypeError, p.append, 2, 3)
-
-    @make_dynamo_test
-    def test_copy(self):
-        p = self.thetype('abc')
-        self.assertEqual(p.copy(), p)
-
-        # Wrong number of arguments
-        self.assertRaises(TypeError, p.copy, 1)
 
     @make_dynamo_test
     def test_count(self):
@@ -77,29 +48,6 @@ class ListTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, p.count, 2, 3)
 
     @make_dynamo_test
-    def test_clear(self):
-        p = self.thetype("abc")
-        self.assertIsNone(p.clear())
-        self.assertEqual(p, [])
-        self.assertEqual(len(p), 0)
-
-        # Wrong number of arguments
-        self.assertRaises(TypeError, p.clear, 1)
-
-    @make_dynamo_test
-    def test_extend(self):
-        p, q = map(self.thetype, ["ab", "cd"])
-        self.assertIsNone(p.extend(q))
-        self.assertEqual(p, self.thetype("abcd"))
-
-        # extend needs an iterable
-        self.assertRaises(TypeError, p.extend, 1)
-
-        # Wrong number of arguments
-        self.assertRaises(TypeError, p.extend)
-        self.assertRaises(TypeError, p.extend, 2, 3)
-
-    @make_dynamo_test
     def test_index(self):
         p = self.thetype("abc")
         self.assertEqual(p.index("a"), 0)
@@ -107,54 +55,6 @@ class ListTests(torch._dynamo.test_case.TestCase):
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.index)
-
-    @make_dynamo_test
-    def test_insert(self):
-        p = self.thetype("abc")
-        self.assertIsNone(p.insert(1, "ef"))
-        self.assertEqual(p, ["a", "ef", "b", "c"])
-
-        # Wrong number of arguments
-        self.assertRaises(TypeError, p.insert)
-        self.assertRaises(TypeError, p.insert, 1)
-        self.assertRaises(TypeError, p.insert, 1, 2, 3)
-
-    @make_dynamo_test
-    def test_pop(self):
-        p = self.thetype("abcd")
-        self.assertEqual(p.pop(), "d")
-        self.assertEqual(p.pop(1), "b")
-        self.assertRaises(IndexError, p.pop, 10)
-
-        # Wrong number of arguments
-        self.assertRaises(TypeError, p.pop, 2, 3)
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_remove(self):
-        p = self.thetype("abad")
-        self.assertIsNone(p.remove("a"))
-        self.assertEqual(p, ["b", "a", "d"])
-        self.assertRaises(ValueError, p.remove, "x")
-
-        # Wrong number of arguments
-        self.assertRaises(TypeError, p.remove)
-        self.assertRaises(TypeError, p.remove, 2, 3)
-
-    @make_dynamo_test
-    def test_reverse(self):
-        p = self.thetype("abcd")
-        self.assertIsNone(p.reverse())
-        self.assertEqual(p, self.thetype("dcba"))
-
-        # Wrong number of arguments
-        self.assertRaises(TypeError, p.reverse, 1)
-
-    @make_dynamo_test
-    def test_sort(self):
-        p = self.thetype("dbca")
-        self.assertIsNone(p.sort())
-        self.assertEqual(p, self.thetype("abcd"))
 
     @unittest.expectedFailure
     @make_dynamo_test
@@ -231,17 +131,6 @@ class ListTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, p.__ge__)
 
     @make_dynamo_test
-    def test___setitem__(self):
-        p = self.thetype("abc")
-        self.assertIsNone(p.__setitem__(2, "a"))
-        self.assertEqual(p, self.thetype("aba"))
-
-        # Wrong number of arguments
-        self.assertRaises(TypeError, p.__setitem__)
-        self.assertRaises(TypeError, p.__setitem__, 1)
-        self.assertRaises(TypeError, p.__setitem__, 1, 2, 3)
-
-    @make_dynamo_test
     def test___getitem__(self):
         p = self.thetype("abc")
         self.assertEqual(p.__getitem__(2), "c")
@@ -271,6 +160,128 @@ class ListTests(torch._dynamo.test_case.TestCase):
         # Wrong number of arguments
         self.assertRaises(TypeError, p.__delitem__)
         self.assertRaises(TypeError, p.__delitem__, 1, 2)
+
+
+class ListTests(TupleTests):
+    # List methods
+    # + append
+    # + copy
+    # + clear
+    # + extend
+    # + insert
+    # + pop
+    # + remove
+    # + reverse
+    # + sort
+    # BinOps:
+    # +, <, >, <=, >=, ==, !=
+    # Dunder methods:
+    # + __setitem__
+    # + __getitem__
+    # + __contains__
+    # + __delitem__
+
+    thetype = list
+
+    @make_dynamo_test
+    def test_append(self):
+        p = self.thetype("abc")
+        self.assertIsNone(p.append("d"))
+        self.assertEqual(p, ["a", "b", "c", "d"])
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.append)
+        self.assertRaises(TypeError, p.append, 2, 3)
+
+    @make_dynamo_test
+    def test_copy(self):
+        p = self.thetype("abc")
+        self.assertEqual(p.copy(), p)
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.copy, 1)
+
+    @make_dynamo_test
+    def test_clear(self):
+        p = self.thetype("abc")
+        self.assertIsNone(p.clear())
+        self.assertEqual(p, [])
+        self.assertEqual(len(p), 0)
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.clear, 1)
+
+    @make_dynamo_test
+    def test_extend(self):
+        p, q = map(self.thetype, ["ab", "cd"])
+        self.assertIsNone(p.extend(q))
+        self.assertEqual(p, self.thetype("abcd"))
+
+        # extend needs an iterable
+        self.assertRaises(TypeError, p.extend, 1)
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.extend)
+        self.assertRaises(TypeError, p.extend, 2, 3)
+
+    @make_dynamo_test
+    def test_insert(self):
+        p = self.thetype("abc")
+        self.assertIsNone(p.insert(1, "ef"))
+        self.assertEqual(p, ["a", "ef", "b", "c"])
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.insert)
+        self.assertRaises(TypeError, p.insert, 1)
+        self.assertRaises(TypeError, p.insert, 1, 2, 3)
+
+    @make_dynamo_test
+    def test_pop(self):
+        p = self.thetype("abcd")
+        self.assertEqual(p.pop(), "d")
+        self.assertEqual(p.pop(1), "b")
+        self.assertRaises(IndexError, p.pop, 10)
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.pop, 2, 3)
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_remove(self):
+        p = self.thetype("abad")
+        self.assertIsNone(p.remove("a"))
+        self.assertEqual(p, ["b", "a", "d"])
+        self.assertRaises(ValueError, p.remove, "x")
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.remove)
+        self.assertRaises(TypeError, p.remove, 2, 3)
+
+    @make_dynamo_test
+    def test_reverse(self):
+        p = self.thetype("abcd")
+        self.assertIsNone(p.reverse())
+        self.assertEqual(p, self.thetype("dcba"))
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.reverse, 1)
+
+    @make_dynamo_test
+    def test_sort(self):
+        p = self.thetype("dbca")
+        self.assertIsNone(p.sort())
+        self.assertEqual(p, self.thetype("abcd"))
+
+    @make_dynamo_test
+    def test___setitem__(self):
+        p = self.thetype("abc")
+        self.assertIsNone(p.__setitem__(2, "a"))
+        self.assertEqual(p, self.thetype("aba"))
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.__setitem__)
+        self.assertRaises(TypeError, p.__setitem__, 1)
+        self.assertRaises(TypeError, p.__setitem__, 1, 2, 3)
 
 
 if __name__ == "__main__":
