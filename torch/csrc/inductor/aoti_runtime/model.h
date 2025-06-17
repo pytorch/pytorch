@@ -15,11 +15,14 @@
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
+#ifdef USE_MPS
+#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
+#endif // USE_MPS
 #ifdef USE_XPU
 #include <torch/csrc/inductor/aoti_runtime/utils_xpu.h>
 #else
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
-#endif
+#endif // USE_XPU
 #include <torch/csrc/inductor/aoti_runtime/constant_type.h>
 
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
@@ -74,6 +77,15 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   return RAIIDataPtr(data_ptr, deleter);
 }
 
+#elif defined(USE_MPS)
+
+RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
+  void* data_ptr = nullptr;
+  aoti_torch_mps_malloc(&data_ptr, num_bytes);
+  auto deleter = [](void* ptr) { aoti_torch_mps_free(ptr); };
+  return RAIIDataPtr(data_ptr, deleter);
+}
+
 #else
 
 RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
@@ -113,7 +125,7 @@ inline void parse_device_str(
   } else if (sm[1].str() == "xpu") {
     device_type = aoti_torch_device_type_xpu();
 #endif
-#ifdef __APPLE__
+#ifdef USE_MPS
   } else if (sm[1].str() == "mps") {
     device_type = aoti_torch_device_type_mps();
 #endif
@@ -165,6 +177,11 @@ class AOTInductorModelBase {
       aoti_torch_set_current_xpu_device(device_idx_);
     }
 #endif // USE_XPU
+#ifdef USE_MPS
+    if (device_idx_ == -1) {
+      device_idx_ = 0;
+    }
+#endif // USE_MPS
   }
 
   // NOLINTNEXTLINE(modernize-use-equals-default)
@@ -299,7 +316,7 @@ class AOTInductorModelBase {
     if (!include_weights) {
       return;
     }
-#if defined(USE_CUDA) || defined(USE_XPU)
+#if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
     constant_blob_ = RAII_gpuMalloc(blob_size);
 #else
     constant_blob_ = RAII_cpuMalloc(blob_size);
@@ -327,7 +344,12 @@ class AOTInductorModelBase {
       auto ndim = this->constant_ndim(i);
       auto size = this->constant_shape(i);
       auto stride = this->constant_stride(i);
+#ifdef USE_MPS
+      auto offset = this->constant_offset(i) +
+          (constants_internal_offset[i] / aoti_torch_dtype_element_size(dtype));
+#else
       auto offset = this->constant_offset(i);
+#endif
       auto layout = this->constant_layout(i);
       auto opaque_metadata_ptr = this->opaque_metadata(i);
       auto opaque_metadata_size = this->opaque_metadata_size(i);
@@ -390,6 +412,14 @@ class AOTInductorModelBase {
           _get_constants_start() + bytes_read,
           data_size,
           cudaMemcpyHostToDevice));
+#elif USE_MPS
+      aoti_torch_mps_memcpy(
+          constants_ptr,
+          constant_offset,
+          bytes_read,
+          data_size,
+          _get_constants_start());
+      return constants_ptr;
 #else
       memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
 #endif
