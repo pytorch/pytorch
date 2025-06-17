@@ -56,7 +56,7 @@ def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
     return content
 
 
-@functools.lru_cache(None)
+@functools.cache
 def try_import_cutlass() -> bool:
     """
     We want to support three ways of passing in CUTLASS:
@@ -251,7 +251,7 @@ class CUTLASSArgs:
 
 
 @clear_on_fresh_inductor_cache
-@functools.lru_cache(None)
+@functools.cache
 def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     # Note: Cache needs to be specific for cuda architecture and version
 
