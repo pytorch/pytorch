@@ -613,7 +613,7 @@ split_reductions = True
 # num_split. Too small num_split make the split reduction less efficient.
 # It's a much bigger problem when we compile a dynamic shape kernel with
 # non-representative inputs.
-min_num_split = int(os.environ.get("TORCHINDUCTOR_MIN_NUM_SPLIT", 0))
+min_num_split = int(os.environ.get("TORCHINDUCTOR_MIN_NUM_SPLIT", 256))
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
