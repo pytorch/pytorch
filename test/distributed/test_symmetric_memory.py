@@ -10,7 +10,7 @@ import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
+from torch._inductor.utils import fresh_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
@@ -1020,7 +1020,7 @@ class LoweringTest(MultiProcContinousTest):
     @skip("Fails with 'one_shot_all_reduce' not found in AOT graph, TODO: fix")
     @skipIfRocm  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_lowering_one_shot_all_reduce(self):
         self._init_process()
         arg = torch.rand(4, 4, device=self.device)
@@ -1077,10 +1077,6 @@ class SymmMemSingleProcTest(TestCase):
     @skipIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 0),
         "stream_write_value32 currently only supports cuda version>=12.0",
-    )
-    @skipIf(
-        _get_torch_cuda_version() >= (12, 6),
-        "https://github.com/pytorch/pytorch/issues/154073",
     )
     @runOnRocmArch(MI300_ARCH)
     def test_stream_write_value32(self):
