@@ -326,6 +326,8 @@ skip_torchrec = True
 dont_skip_tracing = False
 
 # If True, enforce fullgraph=True - raise errors on graph break
+# NOTE: do not set manually - this is modified internally by Dynamo.
+# Use the fullgraph option of torch.compile instead.
 error_on_graph_break = False
 
 # No longer used
