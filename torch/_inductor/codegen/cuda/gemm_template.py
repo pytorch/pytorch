@@ -13,7 +13,7 @@ import torch.utils._pytree as pytree
 from torch._inductor.codegen.cuda.cutlass_cache import maybe_fetch_ops
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.select_algorithm import create_inputs_key
-from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.utils import clear_on_fresh_cache
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
@@ -405,7 +405,7 @@ int main(int argc, char** argv) {
 """  # noqa: B950
 
 
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
 class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     """
     CUTLASS GEMM Template, which is used to generate CUTLASS GEMM kernels
@@ -422,6 +422,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         alpha: float,
         beta: float,
         input_reorder: Optional[list[int]] = None,
+        use_fast_accum: Optional[bool] = None,
     ) -> None:
         """
         Args:
@@ -437,6 +438,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
         self.alpha = alpha
         self.beta = beta
+        self.use_fast_accum = use_fast_accum
         assert 2 <= len(input_nodes) <= 5
         assert self._are_inputs_layout_compatible(
             [node.get_layout() for node in input_nodes]
@@ -453,6 +455,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
         input_reorder: Optional[list[int]] = None,
+        use_fast_accum: Optional[bool] = None,
         **extra_kwargs,
     ) -> None:
         raise NotImplementedError
@@ -559,6 +562,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 self.maybe_append_choice(
                     choices, description=description, op=op, swizzle=swizzle
                 )
+
         if len(ops) == 0:
             input_layouts = [node.get_layout() for node in input_nodes]
             input_strides = [node.get_stride() for node in input_nodes]
@@ -872,6 +876,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         # Set epilogue.
         # TODO: update epilogue functor according to epilogues.
         op.element_epilogue = op.accumulator_type()
+
+        if self.use_fast_accum is not None:
+            is_op_fast_accum = "fastaccum" in op.configuration_name()
+            if self.use_fast_accum ^ is_op_fast_accum:
+                return None
 
         # Set bias layout and alignment.
         status = self._set_bias_layout_and_alignment(op)
@@ -1243,8 +1252,11 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         alpha: float,
         beta: float,
         input_reorder: Optional[list[int]] = None,
+        use_fast_accum: Optional[bool] = None,
     ):
-        super().__init__(input_nodes, layout, alpha, beta, input_reorder)
+        super().__init__(
+            input_nodes, layout, alpha, beta, input_reorder, use_fast_accum
+        )
 
     @staticmethod
     def add_cutlass_gemm_choices(
@@ -1254,10 +1266,16 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
         input_reorder: Optional[list[int]] = None,
+        use_fast_accum: Optional[bool] = None,
         **extra_kwargs,
     ) -> None:
         template = CUTLASS3xGemmTemplate(
-            input_nodes, layout, alpha, beta, input_reorder
+            input_nodes,
+            layout,
+            alpha,
+            beta,
+            input_reorder,
+            use_fast_accum,
         )
         template._add_cutlass_gemm_choices(
             choices, layout, input_nodes, alpha, beta, input_reorder, **extra_kwargs
@@ -1390,6 +1408,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         examples = create_example_tensors(
             var_name_to_buffer_name,
             name_to_buffer,  # type: ignore[arg-type]
+            V.graph.sizevars.size_hint,
         )
         evt_name, evt_args, evt_code = trace(
             evt_py_code,
@@ -1399,6 +1418,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             op.tile_description,  # type: ignore[attr-defined]
             op.epilogue_schedule,  # type: ignore[attr-defined]
             {k: name_to_buffer[v] for k, v in var_name_to_buffer_name.items()},  # type: ignore[arg-type,misc]
+            V.graph.sizevars.size_hint,
         )
 
         return (
@@ -1624,6 +1644,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
         input_reorder: Optional[list[int]] = None,
+        use_fast_accum: Optional[bool] = False,
         **extra_kwargs,
     ) -> None:
         template = CUTLASS2xGemmTemplate(
