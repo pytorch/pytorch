@@ -67,6 +67,7 @@ if TYPE_CHECKING:
 
     from ..custom_graph_pass import CustomGraphModulePass
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
+    from ..kernel_params.params import KernelTemplateParams
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
     from .wrapper import PythonWrapperCodegen
@@ -2329,8 +2330,26 @@ class KernelTemplate:
 
         return get_dtype
 
-    def __init__(self, name: str) -> None:
+    def __init__(
+        self, name: str, param_cls: Optional[type[KernelTemplateParams]] = None
+    ) -> None:
+        """
+        Initialize a kernel template.
+
+        Args:
+            name: An ideally unique name for the template.
+            param_cls: The class used to gather parameters for the kernel template to render.
+        """
         self.name = name
+        self._param_cls = param_cls
+
+    @property
+    def get_param_cls(self) -> Optional[type[KernelTemplateParams]]:
+        """
+        Returns the parameter class for this kernel template.
+        Subclasses can override this to provide their own parameter class.
+        """
+        return self._param_cls
 
     @property
     def id(self) -> str:

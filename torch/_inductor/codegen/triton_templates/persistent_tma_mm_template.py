@@ -6,6 +6,7 @@
 
 from typing import Any, Optional
 
+from ...kernel_params.params import PersistentTMATritonTemplateMMParams
 from ...utils import get_tma_workspace_arg
 from .mm_common import persistent_mm_grid
 from .template import TritonTemplate
@@ -41,6 +42,7 @@ class PersistentTMATritonTemplate(TritonTemplate):
 persistent_tma_mm_template = PersistentTMATritonTemplate(
     name="mm_persistent_tma",
     grid=persistent_mm_grid,
+    param_cls=PersistentTMATritonTemplateMMParams,
     source=r"""
 {{def_kernel("A", "B")}}
     M = {{size("A", 0)}}

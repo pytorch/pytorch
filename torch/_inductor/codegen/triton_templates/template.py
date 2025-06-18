@@ -24,6 +24,7 @@ from ...autotune_process import (
 from ...codecache import PyCodeCache
 from ...codegen.common import KernelTemplate, WorkspaceArg, WorkspaceZeroMode
 from ...codegen.triton import TritonScheduling
+from ...kernel_params.params import KernelTemplateParams
 from ...runtime.triton_compat import HAS_WARP_SPEC
 from ...utils import Placeholder
 from ...virtualized import V
@@ -180,8 +181,10 @@ class TritonTemplate(KernelTemplate):
         debug=False,
         cache_codegen_enabled_for_template=False,
         prologue_loads_all_inputs=False,
+        # TODO(coconutruben): remove None once all templates are migrated
+        param_cls: Optional[type[KernelTemplateParams]] = None,
     ) -> None:
-        super().__init__(name)
+        super().__init__(name, param_cls=param_cls)
         self.grid = grid
         self.template = self._template_from_string(source)
         assert name not in self.all_templates, "duplicate template name"

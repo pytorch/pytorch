@@ -19,11 +19,21 @@ except ImportError:
 
 from torch._inductor.codegen.triton_templates.template import TritonTemplate
 from torch._inductor.kernel.mm_common import mm_grid
+from torch._inductor.kernel_params.params import (
+    ROCmTritonTemplateMMParams,
+    TritonTemplateMMParams,
+)
+
+
+param_cls = (
+    TritonTemplateMMParams if torch.version.hip is None else ROCmTritonTemplateMMParams
+)
 
 
 mm_template = TritonTemplate(
     name="mm",
     grid=mm_grid,
+    param_cls=param_cls,
     source=(
         r"""
 {{def_kernel("A", "B")}}
