@@ -58,7 +58,6 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
-    set_guard_complete_hook,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
     unsupported,
@@ -91,7 +90,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
-from . import config, convert_frame, distributed, external_utils, trace_rules, utils
+from . import config, convert_frame, external_utils, trace_rules, utils
 from .backends.registry import CompilerFn, lookup_backend
 from .code_context import code_context
 from .exc import (
@@ -520,35 +519,6 @@ def _log_traced_frames():
     log.info(msg)
 
 
-def guard_collectives_hook(guard_eval_result):
-    import torch.distributed as dist
-    from torch._dynamo.utils import dynamo_timed
-
-    # guard_eval_result == True  ==>  cache hit
-    if pg := distributed.get_guard_pg():
-        with dynamo_timed(
-            "guard_collective", log_pt2_compile_event=True, log_waitcounter=True
-        ):
-            log.info("guard_collective %s", guard_eval_result)
-            torch._logging.trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "guard_collective",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: str(guard_eval_result),
-            )
-            # TODO: a bit awkward to time, this isn't inside of the dynamo compile region
-            all_results = [None] * pg.size()
-            dist.all_gather_object(all_results, guard_eval_result, group=pg)
-            # True = everyone hit, OK to run
-            # False = someone missed, force recompile everywhere
-            res = all(all_results)
-            log.info("guard_collective %s -> %s", guard_eval_result, res)
-            return res
-    return guard_eval_result
-
-
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -613,15 +583,11 @@ class _TorchDynamoContext:
         self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
             _is_skip_guard_eval_unsafe_stance()
         )
-        self.prior_guard_complete_hook = set_guard_complete_hook(
-            guard_collectives_hook if config.enable_guard_collectives else None
-        )
         _maybe_set_eval_frame(_callback_from_stance(self.callback))
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
         set_eval_frame(None)
-        set_guard_complete_hook(self.prior_guard_complete_hook)
         set_skip_guard_eval_unsafe(self.prior_skip_guard_eval_unsafe)
         for cleanup in self.cleanup_fns:
             cleanup()
@@ -721,9 +687,6 @@ class _TorchDynamoContext:
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
-                prior_guard_complete_hook = set_guard_complete_hook(
-                    guard_collectives_hook if config.enable_guard_collectives else None
-                )
 
                 # Ensure that if an assertion occurs after graph pushes
                 # something onto the DynamicLayerStack then we pop it off (the
@@ -759,7 +722,6 @@ class _TorchDynamoContext:
                     )
 
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
-                    set_guard_complete_hook(prior_guard_complete_hook)
                     for cleanup in cleanups:
                         cleanup()
             finally:
@@ -932,16 +894,12 @@ class DisableContext(_TorchDynamoContext):
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
-                prior_guard_complete_hook = set_guard_complete_hook(
-                    guard_collectives_hook if config.enable_guard_collectives else None
-                )
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
                 try:
                     return fn(*args, **kwargs)
                 finally:
                     set_eval_frame(None)
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
-                    set_guard_complete_hook(prior_guard_complete_hook)
             finally:
                 _maybe_set_eval_frame(prior)
 
