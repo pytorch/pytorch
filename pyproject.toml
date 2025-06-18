@@ -281,6 +281,3 @@ select = [
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
-
-[tool.codespell]
-ignore-words = "tools/linter/dictionary.txt"
