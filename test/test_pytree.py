@@ -781,13 +781,7 @@ class TestGenericPytree(TestCase):
                 self.assertFalse(pytree.is_namedtuple(cls))
                 self.assertFalse(pytree.is_namedtuple_class(cls))
 
-    @parametrize(
-        "pytree",
-        [
-            subtest(py_pytree, name="py"),
-            subtest(cxx_pytree, name="cxx"),
-        ],
-    )
+    @parametrize_pytree_module
     def test_enum_treespec_roundtrip(self, pytree):
         data = {TestEnum.A: 5}
         spec = pytree.tree_structure(data)
