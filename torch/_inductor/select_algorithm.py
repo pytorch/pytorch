@@ -12,7 +12,7 @@ import time
 from collections.abc import Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
-
+from typing_extensions import Self
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -22,7 +22,6 @@ from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
 from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
-from typing_extensions import Self
 
 from . import config, ir
 from .autotune_process import TritonGPUBenchmarkRequest
@@ -128,9 +127,9 @@ class PartialRender:
                 )
             else:
                 return
-        assert (
-            self.replacement_hooks[hook_key] is not None
-        ), "hook_key can only be called once"
+        assert self.replacement_hooks[hook_key] is not None, (
+            "hook_key can only be called once"
+        )
         self.code = self.code.replace(hook_key, self.replacement_hooks[hook_key]())
         self.replacement_hooks[hook_key] = None
 
@@ -264,9 +263,9 @@ class ExternKernelCaller(ChoiceCaller):
 
     def output_node(self):
         if self.choice.use_fallback_kernel:
-            assert (
-                self.choice.op_overload is not None
-            ), "Please provide an op_overload to use ir.FallbackKernel"
+            assert self.choice.op_overload is not None, (
+                "Please provide an op_overload to use ir.FallbackKernel"
+            )
             inner = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
