@@ -114,20 +114,35 @@ bool FallbackAwareDeviceChecker::is_mps_cpu_compatible_operation(
   if (!operation_name)
     return false;
 
+  std::string op_name(operation_name);
+  
   // Operations that commonly use fallback and should allow CPU/MPS mixing
   static const std::unordered_set<std::string> compatible_ops = {
       "lcm",
-      "gcd",
+      "gcd", 
       "bitwise_and",
       "bitwise_or",
       "bitwise_xor",
       "_copy_from_and_resize",
       "copy_",
       "embedding_dense_backward",
+      "linalg_solve_triangular",
       // Add more operations that legitimately use fallback
   };
 
-  return compatible_ops.find(operation_name) != compatible_ops.end();
+  // Check direct operation name
+  if (compatible_ops.find(op_name) != compatible_ops.end()) {
+    return true;
+  }
+  
+  // Check for wrapper names (e.g., "wrapper_MPS__linalg_solve_triangular")
+  for (const auto& compat_op : compatible_ops) {
+    if (op_name.find(compat_op) != std::string::npos) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 } // namespace c10
