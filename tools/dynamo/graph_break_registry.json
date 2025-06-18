@@ -270,7 +270,7 @@
     {
       "Gb_type": "Caught non-Exception value",
       "Context": "str(exc_instance)",
-      "Explanation": "Except expects to recieve an object of Exception type but received {exc_instance}.",
+      "Explanation": "Except expects to receive an object of Exception type but received {exc_instance}.",
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
@@ -330,7 +330,7 @@
       "Hints": [
         "Use `torch._assert()` to raise a hard AssertionError when the check fails. ",
         "This error will propagate back the user code ",
-        "that called the compiled function (i.e. Dynamo wil not trace any exception handling).",
+        "that called the compiled function (i.e. Dynamo will not trace any exception handling).",
         "Remove the assert statement.",
         "Move the assert statement outside of any context managers in order to graph break with ",
         "partial graph compilation (if fullgraph=False).",
@@ -2050,7 +2050,7 @@
     {
       "Gb_type": "torch.distributed package is not available!",
       "Context": "",
-      "Explanation": "The PyTorch package doesn't include torch.distributed when builing from source.",
+      "Explanation": "The PyTorch package doesn't include torch.distributed when building from source.",
       "Hints": [
         "Set USE_DISTRIBUTED=1 to enable it when building PyTorch from source."
       ]
