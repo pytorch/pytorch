@@ -374,7 +374,7 @@ Take the instruction `%rv.1 : Tensor = aten::zeros(%4, %6, %6, %10, %12) # test.
 example.
 
 - `%rv.1 : Tensor` means we assign the output to a (unique) value named `rv.1`, that value is of `Tensor` type and that we do not know its concrete shape.
-- `aten::zeros` is the operator (equivalent to `torch.zeros`) and the input list `(%4, %6, %6, %10, %12)` specifies which values in scope should be passed as inputs. The schema for built-in functions like `aten::zeros` can be found at {ref}`<builtin functions>`.
+- `aten::zeros` is the operator (equivalent to `torch.zeros`) and the input list `(%4, %6, %6, %10, %12)` specifies which values in scope should be passed as inputs. The schema for built-in functions like `aten::zeros` can be found at {ref}`builtin functions`.
 - `# test.py:9:10` is the location in the original source file that generated this instruction. In this case, it is a file named `test.py`, on line 9, and at character 10.
 
 Notice that operators can also have associated `blocks`, namely the
