@@ -740,8 +740,8 @@ def some_fn2():
 # If it is called in script it is replaced with an exception.
 @torch.jit.unused
 def some_fn3():
-import pdb; pdb.set_trace()
-return 4
+    import pdb; pdb.set_trace()
+    return 4
 
 # Doesn't do anything, this function is already
 # the main entry point
