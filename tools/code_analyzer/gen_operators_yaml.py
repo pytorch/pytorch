@@ -68,13 +68,13 @@ from torchgen.selective_build.selector import merge_kernel_metadata
 #    used by training, and not just the root operators. All Training ops are
 #    also considered for inference, so these are merged into inference ops.
 #
-# 3. Operator Depencency Graph (--dep-graph-yaml-path): A path to the
+# 3. Operator Dependency Graph (--dep-graph-yaml-path): A path to the
 #    operator dependency graph used to determine which operators depend on
 #    which other operators for correct functioning. This is used for
 #    generating the transitive closure of all the operators used by the
 #    model based on the root operators when static selective build is used.
 #    For tracing based selective build, we don't need to perform this
-#    transitive cloure.
+#    transitive closure.
 #
 # 4. Model Metadata (--model-name, --model-versions, --model-assets,
 #    --model-backends): Self-descriptive. These are used to tell this
