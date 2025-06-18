@@ -12,7 +12,7 @@ It does so by:
 """
 
 import warnings
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, ExitStack, nullcontext
 from functools import wraps
 from typing import Any, Callable, Union
 from unittest.mock import patch
@@ -182,6 +182,16 @@ def fn_prepped_for_autograd(
     return inner_fn
 
 
+@contextmanager
+def disable_autocast():
+    with ExitStack() as stack:
+        autocast_enabled_devices = torch._C._autocast_supported_devices()
+        for device_type in autocast_enabled_devices:
+            if hasattr(torch, device_type):
+                stack.enter_context(torch.amp.autocast(device_type, enabled=False))
+        yield
+
+
 # Given a fn, computes the joint.
 # NOTE: fn is expects the following behavior:
 # (1) fn() needs to return a tuple of (outs, mask),
@@ -255,7 +265,18 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                 )
                 functional_tensor_mode._tokens = {}
 
-            with set_partitioner_tag_is_backward(), fx_traceback.preserve_node_meta():
+            with set_partitioner_tag_is_backward(), fx_traceback.preserve_node_meta(), ExitStack() as stack:
+                backward_pass_autocast = torch._functorch.config.backward_pass_autocast
+                if backward_pass_autocast == "same_as_forward":
+                    # Use the ambient autocast mode(s)
+                    pass
+                elif backward_pass_autocast == "off":
+                    stack.enter_context(disable_autocast())
+                else:
+                    assert isinstance(backward_pass_autocast, list)
+                    for ctx in backward_pass_autocast:
+                        stack.enter_context(ctx)
+
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
                 if aot_config.no_tangents:
                     assert len(needed_tangents) == 1 and needed_tangents[0].numel() == 1
