@@ -475,11 +475,9 @@ def init_backend_registration() -> None:
             "cpu",
             lambda scheduling: cpu_backends[config.cpu_backend](scheduling),
             PythonWrapperCodegen,
-            (
-                CppWrapperCpuArrayRef
-                if config.aot_inductor.allow_stack_allocation
-                else CppWrapperCpu
-            ),
+            CppWrapperCpuArrayRef
+            if config.aot_inductor.allow_stack_allocation
+            else CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -2331,13 +2329,6 @@ class KernelTemplate:
 
     def __init__(self, name: str) -> None:
         self.name = name
-
-    @property
-    def id(self) -> str:
-        """
-        Returns a unique identifier for the kernel template.
-        """
-        return f"{self.__class__.__name__}::{self.name}"
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any

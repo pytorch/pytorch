@@ -54,6 +54,7 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
+    cuda_python_error_check,
     EXPANDABLE_SEGMENTS,
     freeze_rng_state,
     gcIfJetson,
@@ -80,6 +81,7 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
+    TEST_CUDA_PYTHON_BINDINGS,
     TEST_NUMPY,
     TEST_WITH_ROCM,
     TestCase,
@@ -3526,6 +3528,95 @@ exit(2)
 
         # Exception would Corrupt Process and make other tests fail
         # self.assertTrue(throws_on_cuda_event("global"))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-python must be installed",
+    )
+    def test_cuda_graph_raw_graph_keep_graph_false(self):
+        graph = torch.cuda.CUDAGraph(keep_graph=False)
+        x = torch.zeros([2000], device="cuda")
+        y = torch.ones([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            z = x + y
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"instantiate\(\) is intended to be called by the user only when keep_graph=true",
+        ):
+            raw_pointer = graph.instantiate()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"You cannot access the raw (cuda|hip)Graph_t instance unless CUDAGraph was initialized with keep_graph=true",
+        ):
+            raw_pointer = graph.raw_cuda_graph()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
+    )
+    def test_cuda_graph_raw_graph(self):
+        import cuda.bindings.runtime as cudart
+
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.zeros([2000], device="cuda")
+        y = torch.ones([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            z = x + y
+
+        raw_pointer = graph.raw_cuda_graph()
+
+        cudart_cuda_graph = cudart.cudaGraph_t(init_value=raw_pointer)
+        _, num_nodes = cuda_python_error_check(
+            cudart.cudaGraphGetNodes(cudart_cuda_graph)
+        )
+        nodes, _ = cuda_python_error_check(
+            cudart.cudaGraphGetNodes(cudart_cuda_graph, num_nodes)
+        )
+        for node in nodes:
+            cuda_python_error_check(cudart.cudaGraphNodeGetType(node))
+
+        graph.replay()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_cuda_graph_raw_graph_reset_and_recapture(self):
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.zeros([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            x += 1.0
+
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(x == 1.0))
+        # Exercise the code path where you reinstantiate the cuda graph twice.
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(x == 2.0))
+        graph.replay()
+        self.assertTrue(torch.all(x == 3.0))
+
+        # Check that graph capture can succeed after reseting.
+        graph.reset()
+
+        # Don't do x[:] = 0.0 because we want to capture a new address
+        # in the next cuda graph, to make sure we are running a new
+        # cuda graph.
+        x = torch.zeros([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            x += 2.0
+
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(x == 2.0))
+        # Exercise the code path where you reinstantiate the cuda graph twice.
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(x == 4.0))
+        graph.replay()
+        self.assertTrue(torch.all(x == 6.0))
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
