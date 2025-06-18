@@ -1344,7 +1344,7 @@
 - func: logical_or.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: logical_or_out
+    CPU, CUDA, MTIA: logical_or_out
     MPS: logical_or_out_mps
   tags: pointwise
 
@@ -3505,7 +3505,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: log_out
+    CPU, CUDA, MPS, MTIA: log_out
   tags: pointwise
 
 - func: log10(Tensor self) -> Tensor
@@ -3573,7 +3573,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: log2_out
+    CPU, CUDA, MPS, MTIA: log2_out
   tags: pointwise
 
 - func: logaddexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
