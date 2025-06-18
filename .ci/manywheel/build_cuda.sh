@@ -59,9 +59,7 @@ case ${CUDA_VERSION} in
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         # WAR to resolve the ld error in libtorch build with CUDA 12.9
         if [[ "$DESIRED_CUDA" == "cu129" && "$PACKAGE_TYPE" == "libtorch" ]]; then
-            EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--no-relax")
-            EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_EXE_LINKER_FLAGS=-Wl,--no-relax")
-            EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_MODULE_LINKER_FLAGS=-Wl,--no-relax")
+            TORCH_CUDA_ARCH_LIST="7.5;8.0;9.0;10.0;12.0+PTX"
         fi
         ;;
     12.6)
