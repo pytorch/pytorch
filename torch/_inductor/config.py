@@ -1495,6 +1495,16 @@ class cuda:
         "TORCHINDUCTOR_CUTLASS_ENABLED_OPS", "all"
     )
 
+    # Whether to consult the binary remote cache
+    use_binary_remote_cache: bool = True
+
+    # Whether to upload compiled kernels to remote cache
+    upload_to_binary_remote_cache: bool = False
+
+    # Whether to force upload if the key already exists
+    # Use this to overwrite and handle cache pollution
+    binary_remote_cache_force_write: bool = False
+
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
