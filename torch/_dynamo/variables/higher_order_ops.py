@@ -2826,8 +2826,6 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from torch._higher_order_ops.flex_attention import flex_attention_fake_impl
-
         from .builder import wrap_fx_proxy
 
         (
@@ -2864,12 +2862,6 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Proxying user defined functions is not supported.
         inp_args, _ = proxy_args_kwargs(proxied_args, {})
 
-        query_meta = query.as_proxy().node.meta["example_value"]
-        value_meta = value.as_proxy().node.meta["example_value"]
-        with torch._guards.TracingContext.try_get().fake_mode:
-            out_meta, lse_meta = flex_attention_fake_impl(query_meta, value_meta)
-        example_value = (out_meta, lse_meta)
-
         # Compose the ordered HOO args:
         # - inp_args: [query, key, value, block_mask, scale, kernel_options]
         # - subgraph node: [score_mod, mask_fn_node]
@@ -2892,7 +2884,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 ),
                 kwargs={},
             ),
-            example_value=example_value,
+            example_value=None,
         )
 
 

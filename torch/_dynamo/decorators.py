@@ -10,7 +10,7 @@ import inspect
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -808,6 +808,7 @@ _allowed_config_patches = (
     "allow_unspec_int_on_nn_module",
     "skip_torchrec",
     "dont_skip_tracing",
+    "error_on_graph_break",
 )
 
 from . import config
@@ -862,6 +863,14 @@ def patch_dynamo_config(
     return DynamoConfigPatchProxy(config_patch)
 
 
+@overload
+def dont_skip_tracing(fn: None = None) -> DynamoConfigPatchProxy: ...
+
+
+@overload
+def dont_skip_tracing(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
 def dont_skip_tracing(fn=None):
     """
     Context manager/decorator to trace into functions intentionally marked by developers to be skipped
@@ -873,3 +882,13 @@ def dont_skip_tracing(fn=None):
     if fn:
         return ctx(fn)
     return ctx
+
+
+def set_fullgraph(fullgraph: bool) -> DynamoConfigPatchProxy:
+    """
+    Context manager/decorator to toggle fullgraph setting.
+
+    More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
+    or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
+    """
+    return patch_dynamo_config(error_on_graph_break=fullgraph)
