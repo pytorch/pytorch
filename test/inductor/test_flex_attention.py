@@ -3910,7 +3910,22 @@ class GraphModule(torch.nn.Module):
         key_elem = torch.randn(B, H, S, D, device=device, dtype=dtype)
         value_elem = torch.randn(B, H, S, D, device=device, dtype=dtype)
 
-        # Wrap in our subclass
+        # Test 1: Verify as_strided raises error when called directly on AsStridedErrorTensor
+        test_tensor = AsStridedErrorTensor(query_elem)
+        with self.assertRaisesRegex(
+            RuntimeError, "as_strided was called on AsStridedErrorTensor!"
+        ):
+            torch.as_strided(
+                test_tensor, size=(B, H, S, D), stride=test_tensor.stride()
+            )
+
+        # Test 2: Run flex_attention with normal tensors first
+        compiled_fn = torch.compile(flex_attention, backend="aot_eager", fullgraph=True)
+        normal_out, normal_lse = compiled_fn(
+            query_elem, key_elem, value_elem, return_lse=True
+        )
+
+        # Test 3: Wrap in our subclass
         query = AsStridedErrorTensor(query_elem)
         key = AsStridedErrorTensor(key_elem)
         value = AsStridedErrorTensor(value_elem)
@@ -3918,25 +3933,16 @@ class GraphModule(torch.nn.Module):
         # This should NOT error with as_strided after the fix
         # Before the fix, it would error because FakeTensorMode would directly
         # call flex_attention_fake_impl which uses as_strided
-        compiled_fn = torch.compile(flex_attention, backend="aot_eager", fullgraph=True)
+        out, lse = compiled_fn(query, key, value, return_lse=True)
+        # Verify we got valid output
+        self.assertIsInstance(out, AsStridedErrorTensor)
+        self.assertIsInstance(lse, AsStridedErrorTensor)
+        self.assertEqual(out.shape, (B, H, S, D))
+        self.assertEqual(lse.shape, (B, H, S))
 
-        # Run with subclassed inputs - should not raise
-        try:
-            out, lse = compiled_fn(query, key, value, return_lse=True)
-            # Verify we got valid output
-            self.assertIsInstance(out, AsStridedErrorTensor)
-            self.assertIsInstance(lse, AsStridedErrorTensor)
-            self.assertEqual(out.shape, (B, H, S, D))
-            self.assertEqual(lse.shape, (B, H, S))
-        except RuntimeError as e:
-            if "as_strided was called" in str(e):
-                self.fail(
-                    "as_strided was called on tensor subclass, indicating dispatch order is broken. "
-                    "Tensor subclasses should get to handle flex_attention before it reaches "
-                    "the implementation that calls as_strided."
-                )
-            else:
-                raise
+        # Test 4: Compare outputs between normal tensors and subclassed tensors
+        torch.testing.assert_close(out.elem, normal_out, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(lse.elem, normal_lse, rtol=1e-5, atol=1e-5)
 
     @supported_platform
     @skip_on_cuda
