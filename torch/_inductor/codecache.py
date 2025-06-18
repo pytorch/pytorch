@@ -28,7 +28,7 @@ from bisect import bisect_right
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
-from functools import partial
+from functools import lru_cache, partial
 from pathlib import Path
 from time import time, time_ns
 from types import ModuleType
@@ -86,7 +86,7 @@ from torch._inductor.runtime.compile_tasks import _reload_python_module
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import (
     ALIGN_BYTES,
-    clear_on_fresh_inductor_cache,
+    clear_on_fresh_cache,
     is_linux,
     is_windows,
 )
@@ -236,7 +236,7 @@ class CacheBase:
         return system
 
     @staticmethod
-    @clear_on_fresh_inductor_cache
+    @clear_on_fresh_cache
     @functools.cache
     def get_local_cache_path() -> Path:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
@@ -1595,7 +1595,7 @@ def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
         return path, ""
 
 
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
 class CudaKernelParamCache:
     cache: dict[str, dict[str, Any]] = {}
     cache_clear = staticmethod(cache.clear)
@@ -2100,11 +2100,10 @@ class AotCodeCompiler:
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
             )
-            gpu_kernels_o = [
-                entry.output_path
-                for entry in gpu_codecache.cache.values()
-                if entry.output_path.endswith(".o")
-            ]
+            gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
+            # clear the list of aot kernels after each linking
+            gpu_codecache.aot_kernels_o.clear()
+
             if gpu_kernels_o:
                 assert not config.aot_inductor.emit_multi_arch_kernel, (
                     "TODO: add emit_multi_arch_kernel support for cutlass kernels"
@@ -2292,7 +2291,7 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p, No
 
 # Precompiled headers are persistent past program runtime, but associated with one
 # specific compiler version and set of flags.  We explicitly use default_cache_dir here
-# because these headers need to be global, rather than ignored by fresh_inductor_cache.
+# because these headers need to be global, rather than ignored by fresh_cache.
 _HEADER_DIR = os.path.join(default_cache_dir(), "precompiled_headers")
 _HEADER_LOCK_DIR = os.path.join(_HEADER_DIR, "locks")
 
@@ -2379,7 +2378,7 @@ def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     )
 
 
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
 class CppCodeCache:
     """Compiles and caches C++ libraries.  Users of this class supply the source code to
     be compiled, while compilation flags are set by CppBuilder."""
@@ -2588,7 +2587,7 @@ def _worker_compile_cpp(
 
 
 # Customized Python binding for cpp kernels
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
     cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
@@ -2769,7 +2768,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         return cls.load_pybinding_async(*args, **kwargs)()
 
 
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
@@ -2838,7 +2837,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         return _get_cpp_wrapper_header(device)
 
 
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
 class HalideCodeCache(CppPythonBindingsCodeCache):
     cache: dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
     cache_clear = staticmethod(cache.clear)
@@ -3141,10 +3140,10 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         target = "host-cuda" if device_type == "cuda" else "host"
         if cls._standalone_runtime_path:
             assert not os.path.exists(cls._standalone_runtime_path)
-            # We hit this case in unittests when we run with fresh_inductor_cache()
+            # We hit this case in unittests when we run with fresh_cache()
             # Generating a fresh runtime over and over causes errors because we initialize
             # cuda hundreds of times in the same process and run out of file descriptors.
-            # Workaround by jail breaking the current fresh_inductor_cache().
+            # Workaround by jail breaking the current fresh_cache().
             base = default_cache_dir()
         else:
             base = cache_dir()
@@ -3240,7 +3239,7 @@ def touch(filename: str) -> None:
     open(filename, "a").close()
 
 
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
 class PyCodeCache:
     # Track the loaded modules so we can remove the on-disk artifacts when
     # clearing the cache. Note also that we may load the same path more
@@ -3626,7 +3625,15 @@ class DLLWrapper:
         self.close()
 
 
-@clear_on_fresh_inductor_cache
+@lru_cache
+def binary_error_path(output_path: str) -> str:
+    """
+    standard format for the error path
+    """
+    return output_path + ".error"
+
+
+@clear_on_fresh_cache
 class CUDACodeCache:
     """
     A cache for managing the compilation and loading of CUDA source code specifically for CUTLASS.
@@ -3642,8 +3649,46 @@ class CUDACodeCache:
         error_json: Optional[str] = None
 
     cache: dict[str, CacheEntry] = {}
-    cache_clear = staticmethod(cache.clear)
+    aot_kernels_o: list[str] = []
     _SOURCE_CODE_SUFFIX = "cu"
+
+    @staticmethod
+    def cache_clear() -> None:
+        CUDACodeCache.cache.clear()
+        CUDACodeCache.aot_kernels_o.clear()
+
+    @staticmethod
+    @lru_cache(maxsize=4)
+    def get_kernel_binary_remote_cache(
+        caching_enabled: bool, caching_available: bool
+    ) -> Optional[Any]:
+        """
+        Get or create the class instance of the CUTLASSKernelBinaryRemoteCache.
+
+        Args:
+            caching_enabled: Whether binary remote caching is enabled
+            caching_available: Whether we're in fbcode environment
+
+        Returns:
+            CUTLASSKernelBinaryRemoteCache: The class instance of the kernel binary remote cache
+        """
+        if not caching_enabled:
+            log.debug("CUTLASSKernelBinaryRemoteCache not requested, skipping")
+            return None
+        if not caching_available:
+            return None
+
+        try:
+            from torch._inductor.fb.kernel_binary_remote_cache import (
+                CUTLASSKernelBinaryRemoteCache,
+            )
+
+            return CUTLASSKernelBinaryRemoteCache()
+        except ImportError:
+            log.debug(
+                "CUTLASSKernelBinaryRemoteCache not available, remote caching disabled"
+            )
+            return None
 
     @classmethod
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
@@ -3693,10 +3738,31 @@ class CUDACodeCache:
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
-                if os.path.exists(output_path + ".error"):
-                    with open(output_path + ".error", encoding="utf-8") as fh:
+                error_path = binary_error_path(output_path)
+                binary_remote_cache = cls.get_kernel_binary_remote_cache(
+                    caching_enabled=config.cuda.use_binary_remote_cache
+                    and not config.force_disable_caches,
+                    caching_available=config.is_fbcode(),
+                )
+                if binary_remote_cache is not None:
+                    # The remote cache implementation will only download if the file does
+                    # not already exist locally
+                    binary_remote_cache.get(output_path, error_path)
+
+                if os.path.exists(error_path):
+                    with open(error_path, encoding="utf-8") as fh:
                         error_json = fh.read()
                     cmd_parts, error_output = json.loads(error_json)
+                    if (
+                        binary_remote_cache is not None
+                        and config.cuda.upload_to_binary_remote_cache
+                    ):
+                        # This ensures that a local error is uploaded to the remote cache,
+                        # as we make no assumptions about the remote cache having the same
+                        # information as the local cache
+                        binary_remote_cache.put(
+                            error_path, config.cuda.binary_remote_cache_force_write
+                        )
                     cls.cache[key] = CUDACodeCache.CacheEntry(
                         input_path, output_path, error_json
                     )
@@ -3731,22 +3797,38 @@ class CUDACodeCache:
                             cmd_parts,
                             input_path,
                             output_path,
+                            binary_remote_cache,
                         )
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
                     except Exception as error:
                         if "COMPILE FAILED WITH" in str(error):
                             cls._record_cuda_compile_error(
-                                str(error), key, cmd_parts, input_path, output_path
+                                str(error),
+                                key,
+                                cmd_parts,
+                                input_path,
+                                output_path,
+                                binary_remote_cache,
                             )
                             raise exc.CUDACompileError(cmd_parts, str(error)) from error
                         raise error
                     end_time = time()
                     log_duration_msg = f"CUDA Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
                     log.info(log_duration_msg)
+
                 else:
                     log.debug(
                         "CUDA Compilation skipped: %s since output already exists",
                         input_path,
+                    )
+                # Upload to remote cache if enabled
+                if (
+                    binary_remote_cache is not None
+                    and config.cuda.upload_to_binary_remote_cache
+                ):
+                    # will log on errors, but not fail out
+                    binary_remote_cache.put(
+                        output_path, config.cuda.binary_remote_cache_force_write
                     )
                 cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path, None)
         cache_entry: CUDACodeCache.CacheEntry = cls.cache[key]
@@ -3781,14 +3863,27 @@ class CUDACodeCache:
         cmd_parts: list[str],
         input_path: str,
         output_path: str,
+        # Any here, as the import and type will only work in fbcode
+        # TODO: Make the typing hint strong here
+        binary_remote_cache: Any = None,
     ) -> None:
         error_json = json.dumps([cmd_parts, error_str])
         cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path, error_json)
-        with open(output_path + ".error", "w", encoding="utf-8") as fh:
+        error_path = binary_error_path(output_path)
+        with open(error_path, "w", encoding="utf-8") as fh:
             fh.write(error_json)
 
+        # Upload to remote cache directly from memory if enabled
+        if (
+            binary_remote_cache is not None
+            and config.cuda.upload_to_binary_remote_cache
+        ):
+            binary_remote_cache.put(
+                error_path, config.cuda.binary_remote_cache_force_write
+            )
 
-@clear_on_fresh_inductor_cache
+
+@clear_on_fresh_cache
 class ROCmCodeCache:
     @dataclasses.dataclass
     class CacheEntry:
@@ -3796,9 +3891,14 @@ class ROCmCodeCache:
         output_path: str
 
     cache: dict[str, CacheEntry] = {}
-    cache_clear = staticmethod(cache.clear)
+    aot_kernels_o: list[str] = []
     _SOURCE_CODE_SUFFIX = "cpp"
     _logged_compiler_version = False
+
+    @staticmethod
+    def cache_clear() -> None:
+        ROCmCodeCache.cache.clear()
+        ROCmCodeCache.aot_kernels_o.clear()
 
     @classmethod
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
