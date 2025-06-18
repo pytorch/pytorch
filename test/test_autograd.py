@@ -4541,8 +4541,7 @@ class TestAutograd(TestCase):
         # Basic example: single path
         t = torch.tensor(1.0, requires_grad=True).clone().sin().exp()
         all_hooks.append(t.register_hook(hook))
-        with torch.autograd.set_multithreading_enabled(False):
-            t.backward()
+        t.backward()
         self.assertExpectedInline(
             names(predicted[0]),
             """\
@@ -4558,8 +4557,7 @@ ExpBackward0, SinBackward0, CloneBackward0, torch::autograd::AccumulateGrad
         out = c * d
         register_logging_hooks(a, b, c, d, out)
         all_hooks.append(out.register_hook(hook))
-        with torch.autograd.set_multithreading_enabled(False):
-            out.backward()
+        out.backward()
         self.assertEqual(predicted[0], grad_fns(*actual))
         actual = []
 
@@ -4570,8 +4568,7 @@ ExpBackward0, SinBackward0, CloneBackward0, torch::autograd::AccumulateGrad
         out = b * c
         register_logging_hooks(a, b, c, out)
         all_hooks.append(out.register_hook(hook))
-        with torch.autograd.set_multithreading_enabled(False):
-            out.backward()
+        out.backward()
         self.assertEqual(predicted[0], grad_fns(*actual))
         actual = []
 
@@ -4583,8 +4580,7 @@ ExpBackward0, SinBackward0, CloneBackward0, torch::autograd::AccumulateGrad
         out3 = b.cos()
         register_logging_hooks(a, b, out, out2, out3)
         all_hooks.append(out3.register_hook(hook))
-        with torch.autograd.set_multithreading_enabled(False):
-            torch.autograd.grad((out, out3, out2), inputs=(a,))
+        torch.autograd.grad((out, out3, out2), inputs=(a,))
         self.assertExpectedInline(
             names(predicted[0]),
             """\
@@ -4601,8 +4597,7 @@ CosBackward0, CosBackward0, SinBackward0, MulBackward0, torch::autograd::Accumul
         out = b.sin()
         register_logging_hooks(a, b, out)
         all_hooks.append(out.register_hook(hook))
-        with torch.autograd.set_multithreading_enabled(False):
-            out.backward()
+        out.backward()
         self.assertEqual(predicted[0], grad_fns(*actual))
         actual = []
 
@@ -4612,8 +4607,7 @@ CosBackward0, CosBackward0, SinBackward0, MulBackward0, torch::autograd::Accumul
         out = b.sin()
         register_logging_hooks(a, b, out)
         all_hooks.append(out.register_hook(hook))
-        with torch.autograd.set_multithreading_enabled(False):
-            torch.autograd.grad((out,), inputs=(a, b))
+        torch.autograd.grad((out,), inputs=(a, b))
         self.assertEqual(
             names(predicted[0]),
             """\
@@ -4631,8 +4625,7 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         out = c.sin()
         register_logging_hooks(a, b, c, out)
         all_hooks.append(out.register_hook(hook))
-        with torch.autograd.set_multithreading_enabled(False):
-            torch.autograd.grad((out,), inputs=(a,))
+        torch.autograd.grad((out,), inputs=(a,))
         self.assertEqual(
             names(predicted[0]),
             """\
@@ -4649,14 +4642,15 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         ):
             torch._C._current_graph_task_execution_order()
 
-        # Errors when context manager not enabled
-        t = torch.tensor(1.0, requires_grad=True).clone().sin().exp()
-        all_hooks.append(t.register_hook(hook))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "expects the current backward to be executed with multithreading disabled",
-        ):
-            t.backward()
+        # Errors when context manager not enabled and multithreading happens
+        if TEST_CUDA:
+            t = torch.tensor(1.0, requires_grad=True).clone().sin().to("cuda").exp()
+            all_hooks.append(t.register_hook(hook))
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "expects the current backward to be executed with multithreading disabled",
+            ):
+                t.backward()
 
         # Avoid leaking memory
         for h in all_hooks:
