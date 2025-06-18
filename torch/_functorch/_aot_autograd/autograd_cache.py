@@ -21,9 +21,10 @@ from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Uni
 from typing_extensions import override
 
 import torch
+from torch._dynamo.precompile_context import PrecompileCacheArtifact, PrecompileContext
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import (
-    CHROMIUM_EVENT_LOG,
+    chromium_event_log_active,
     CompileEventLogger,
     counters,
     dynamo_timed,
@@ -202,6 +203,13 @@ def check_node_safe(node: Node):
 
     # I'd love to use a match statement here, but it wasn't introduced until py3.10
     if node.op == "call_function":
+        if node.meta and node.meta.get("is_wrapped", False):
+            # This is fx.wrap function
+            # By default we BypassAOTAutogradCache for unknown functions,
+            # But if user explicitly specified cache hash - allow to cache it.
+            if node.meta.get("user_cache_hash", None):
+                return
+
         if not is_cacheable_function(node.target):
             module = getattr(node.target, "__module__", None)
             name = getattr(node.target, "__name__", None)
@@ -259,6 +267,15 @@ def check_cacheable(gm: torch.fx.GraphModule):
     for node in nodes:
         check_node_safe(node)
 
+    # Saved tensors hooks are globally set subgraphs,
+    # that are not used explicitly in the main graph.
+    # They are inlined in aot_autograd graphs.
+    # Subgraphs are only used for caching logic.
+    if hasattr(gm, "saved_tensors_hooks_pack_0"):
+        check_cacheable(gm.saved_tensors_hooks_pack_0)  # type: ignore[arg-type]
+        # We have guarantee of unpack sugraph existance if pack subgraph exists
+        check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
+
 
 def check_metadata_cacheable(metadata: ViewAndMutationMeta):
     """
@@ -292,6 +309,27 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.disable_amp = torch._C._is_any_autocast_enabled()
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
+        self.saved_tensors_hooks_fx_wrap_cache_hashes: tuple[list[str], list[str]] = (
+            [],
+            [],
+        )
+
+        if hasattr(gm, "saved_tensors_hooks_pack_0"):
+
+            def _add_wrapped_user_cache_hashes(_gm, _l):
+                for node in _gm.graph.nodes:
+                    if node.meta and node.meta.get("is_wrapped", False):
+                        _l.append(node.meta["user_cache_hash"])
+
+            _add_wrapped_user_cache_hashes(
+                gm.saved_tensors_hooks_pack_0,
+                self.saved_tensors_hooks_fx_wrap_cache_hashes[0],
+            )
+            _add_wrapped_user_cache_hashes(
+                gm.saved_tensors_hooks_unpack_0,
+                self.saved_tensors_hooks_fx_wrap_cache_hashes[1],
+            )
+
         try:
             # FXGraphCache has constraints on what can be pickled in its inductor
             # config. Check that the gm is cacheable by inductor first,
@@ -552,6 +590,15 @@ class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoa
     def _is_backward(self) -> bool:
         return True
 
+    def post_compile(
+        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
+    ) -> CompiledFxGraph:
+        compiled_bw = super().post_compile(result, fx_config)
+        # See note [Wrapping bw_compiler in disable]
+        # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
+        # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
+        return torch._dynamo.disable(compiled_bw, reason="do not trace generated backwards pass")  # type: ignore[return-value]
+
 
 # Forward types don't have any extra parameters, so this is just a TypeAlias, in essence
 class BundledCompiledForward(CompiledFxGraphLoadable):
@@ -562,7 +609,14 @@ class BundledCompiledForward(CompiledFxGraphLoadable):
 class BundledCompiledBackward(
     GenericCompiledBackward[CompiledFxGraph], CompiledFxGraphLoadable
 ):
-    pass
+    def post_compile(
+        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
+    ) -> CompiledFxGraph:
+        compiled_bw = super().post_compile(result, fx_config)
+        # See note [Wrapping bw_compiler in disable]
+        # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
+        # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
+        return torch._dynamo.disable(compiled_bw, reason="do not trace generated backwards pass")  # type: ignore[return-value]
 
 
 TForward = TypeVar("TForward", bound=InductorOutput)
@@ -863,6 +917,21 @@ class AOTAutogradCacheArtifact(CacheArtifact):
         return "aot_autograd"
 
 
+@CacheArtifactFactory.register
+class BundledAOTAutogradCacheArtifact(
+    PrecompileCacheArtifact[BundledAOTAutogradCacheEntry]
+):
+    @override
+    @staticmethod
+    def type():
+        return "precompile_aot_autograd"
+
+    @override
+    def after_deserialization(self) -> BundledAOTAutogradCacheEntry:
+        entry = pickle.loads(self.content)
+        return entry
+
+
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
     """
     Caches the results of running AOTAutograd. This class mostly handles the save and load logic, whereas
@@ -1026,7 +1095,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                     "components": debug_lines,
                 }
             )
-            if CHROMIUM_EVENT_LOG:
+            if chromium_event_log_active():
                 CompileEventLogger.instant(
                     f"autograd_cache_{cache_state}",
                     metadata=cache_info,
@@ -1114,6 +1183,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 CacheArtifactManager.record_artifact(
                     AOTAutogradCacheArtifact.type(), key, pickled_content
                 )
+                if config.bundled_autograd_cache:
+                    PrecompileContext.record_artifact(
+                        BundledAOTAutogradCacheArtifact.type(), key, pickled_content
+                    )
         except Exception as e:
             log.info("AOTAutograd cache unable to load compiled graph: %s", e)
             if config.strict_autograd_cache:
@@ -1143,6 +1216,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             CacheArtifactManager.record_artifact(
                 AOTAutogradCacheArtifact.type(), key, content
             )
+            if config.bundled_autograd_cache:
+                # TODO: the key here isn't correct
+                PrecompileContext.record_artifact(
+                    BundledAOTAutogradCacheArtifact.type(), key, content
+                )
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
@@ -1176,7 +1254,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 remote_cache.put(key, cache_data)
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
         """
         Attempts to load the remote cache, returns None on error.

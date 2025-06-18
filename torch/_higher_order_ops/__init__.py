@@ -29,6 +29,7 @@ from torch._higher_order_ops.strict_mode import strict_mode
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._higher_order_ops.while_loop import while_loop
 from torch._higher_order_ops.wrap import (
+    dynamo_bypassing_wrapper,
     tag_activation_checkpoint,
     wrap_activation_checkpoint,
     wrap_with_autocast,
@@ -41,6 +42,7 @@ __all__ = [
     "while_loop",
     "invoke_subgraph",
     "scan",
+    "map",
     "flex_attention",
     "flex_attention_backward",
     "hints_wrapper",
@@ -63,6 +65,7 @@ __all__ = [
     "wrap_with_set_grad_enabled",
     "wrap_with_autocast",
     "wrap_activation_checkpoint",
+    "dynamo_bypassing_wrapper",
     "strict_mode",
     "aoti_call_delegate",
     "map",

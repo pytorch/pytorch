@@ -65,6 +65,7 @@ extensions = [
     "myst_parser",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
+    "sphinx_sitemap",
 ]
 
 myst_enable_extensions = [
@@ -72,6 +73,14 @@ myst_enable_extensions = [
     "deflist",
     "html_image",
 ]
+
+html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
+sitemap_locales = [None]
+sitemap_excludes = [
+    "search.html",
+    "genindex.html",
+]
+sitemap_url_scheme = "{link}"
 
 # build the templated autosummary files
 autosummary_generate = True
@@ -506,34 +515,8 @@ coverage_ignore_functions = [
     "graph_pool_handle",
     "is_current_stream_capturing",
     "make_graphed_callables",
-    # torch.cuda.memory
-    "caching_allocator_alloc",
-    "caching_allocator_delete",
-    "change_current_allocator",
-    "empty_cache",
-    "get_allocator_backend",
-    "get_per_process_memory_fraction",
-    "list_gpu_processes",
-    "max_memory_allocated",
-    "max_memory_cached",
-    "max_memory_reserved",
-    "mem_get_info",
-    "memory_allocated",
-    "memory_cached",
-    "memory_reserved",
-    "memory_snapshot",
-    "memory_stats",
-    "memory_stats_as_nested_dict",
-    "host_memory_stats",
-    "host_memory_stats_as_nested_dict",
-    "memory_summary",
-    "reset_accumulated_memory_stats",
-    "reset_accumulated_host_memory_stats",
-    "reset_max_memory_allocated",
-    "reset_max_memory_cached",
+    # torch.mtia.memory
     "reset_peak_memory_stats",
-    "reset_peak_host_memory_stats",
-    "set_per_process_memory_fraction",
     # torch.cuda.nccl
     "all_gather",
     "all_reduce",
@@ -990,7 +973,6 @@ coverage_ignore_functions = [
     "to_node",
     "wrap_node",
     "sym_sqrt",
-    "sym_ite",
     # torch.fx.experimental.symbolic_shapes
     "bind_symbols",
     "cast_symbool_to_symint_guardless",
@@ -1315,10 +1297,6 @@ coverage_ignore_functions = [
     "scatter_kwargs",
     # torch.nn.parameter
     "is_lazy",
-    # torch.nn.utils.clip_grad
-    "clip_grad_norm",
-    "clip_grad_norm_",
-    "clip_grad_value_",
     # torch.nn.utils.convert_parameters
     "parameters_to_vector",
     "vector_to_parameters",
@@ -2274,7 +2252,6 @@ coverage_ignore_classes = [
     "UnsynchronizedAccessError",
     # torch.cuda.memory
     "MemPool",
-    "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -2608,6 +2585,9 @@ coverage_ignore_classes = [
     # torch.distributed.checkpoint.filesystem
     "FileSystemReader",
     "FileSystemWriter",
+    # torch.distributed.checkpoint.hf_storage
+    "HuggingFaceStorageReader",
+    "HuggingFaceStorageWriter",
     # torch.distributed.checkpoint.metadata
     "BytesStorageMetadata",
     "ChunkStorageMetadata",

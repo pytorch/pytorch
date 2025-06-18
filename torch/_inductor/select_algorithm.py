@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import builtins
 import contextlib
 import dataclasses
 import functools
@@ -29,7 +28,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
-from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
@@ -69,6 +68,7 @@ from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
     ceildiv,
+    do_bench_using_profiling,
     FakeIndentedBuffer,
     get_dtype_size,
     is_gpu,
@@ -311,6 +311,7 @@ class TritonTemplateKernel(TritonKernel):
         epilogue_fn=identity,
         subgraphs: Optional[list[ir.ComputedBuffer]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
+        prologue_loads_all_inputs=False,
     ) -> None:
         numel = sympy_product(output_node.get_size())
         super().__init__(
@@ -387,6 +388,10 @@ class TritonTemplateKernel(TritonKernel):
         # Update each time an input is marked frozen, used to replay the freezing of inputs on a cache hit.
         self.frozen_layouts_cnt = 0
 
+        # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
+        # by adding all inputs.
+        self.prologue_loads_all_inputs = prologue_loads_all_inputs
+
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
         # (never accessed).
@@ -428,6 +433,7 @@ class TritonTemplateKernel(TritonKernel):
             key.name: getattr(self, key.name)
             for key in dataclasses.fields(SubgraphInfo)
         }
+
         assert body_name in self.subgraph_bodies, body_name
 
         subgraph = self.subgraph_bodies[body_name]
@@ -488,7 +494,10 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta: dict[str, Any] = {
             "signature": signature_to_meta(
-                signature, size_dtype=self.index_dtype, argdefs=argdefs
+                signature,
+                size_dtype=self.index_dtype,
+                argdefs=argdefs,
+                is_template=True,
             ),
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
@@ -585,10 +594,13 @@ class TritonTemplateKernel(TritonKernel):
         # The args may be duplicated, so renaming must be after args are de-duplicated.
         for name in argnames:
             input_node = self.named_input_nodes[name]
+            if self.prologue_loads_all_inputs:
+                self.prologue_supported_inputs.add(input_node.get_name())
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
             if input_node.get_name() in self.prologue_fused_inputs:
                 continue
+
             arg_name = self.args.input_buffers[input_node.get_name()]
             if input_node.get_layout().offset == 0:
                 renames.writeline(f"{name} = {arg_name}")
@@ -756,7 +768,9 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         input_node = self.named_input_nodes[input_name]
-        self.prologue_supported_inputs.add(input_node.get_name())
+        if not self.prologue_loads_all_inputs:
+            self.prologue_supported_inputs.add(input_node.get_name())
+
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
             "x": tilings[0],
@@ -1110,7 +1124,7 @@ class TritonTemplateKernel(TritonKernel):
         ]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _jinja2_env():
     try:
         import jinja2
@@ -1166,6 +1180,7 @@ class GeneratedCodeCache:
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
+        epilogue_fn_hash: Optional[str],
         subgraphs: Optional[list[ir.Buffer]],  # has to be none to cache
         workspace_arg: Optional[WorkspaceArg],  # has to be none to cache
         layout: ir.Layout,
@@ -1194,12 +1209,16 @@ class GeneratedCodeCache:
                     return True
             return False
 
+        if epilogue_fn is identity:
+            assert epilogue_fn_hash is None
+            epilogue_fn_hash = "identity"
+
         # we do not cache under those conditions right now.
         if (
             has_flexible_layout()
             or subgraphs is not None
             or workspace_arg is not None
-            or epilogue_fn is not identity
+            or epilogue_fn_hash is None
         ):
             return None
 
@@ -1216,6 +1235,7 @@ class GeneratedCodeCache:
                 "layout": layout_key(layout),
                 "num_consumer_groups": num_consumer_groups,
                 "num_buffers_warp_spec": num_buffers_warp_spec,
+                "epilogue_fn_hash": epilogue_fn_hash,
                 "kwargs": kwargs,
             }
         )
@@ -1261,6 +1281,7 @@ class TritonTemplate(KernelTemplate):
         source: str,
         debug=False,
         cache_codegen_enabled_for_template=False,
+        prologue_loads_all_inputs=False,
     ) -> None:
         super().__init__(name)
         self.grid = grid
@@ -1270,7 +1291,10 @@ class TritonTemplate(KernelTemplate):
         self.debug = debug
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
-        clear_on_fresh_inductor_cache(self._generated_code_cache)
+        clear_on_fresh_cache(self._generated_code_cache)
+        # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
+        # by adding all inputs.
+        self.prologue_loads_all_inputs = prologue_loads_all_inputs
 
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
@@ -1309,6 +1333,7 @@ class TritonTemplate(KernelTemplate):
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
+        epilogue_fn_hash: Optional[str],
         subgraphs: Optional[list[ir.Buffer]],
         workspace_arg: Optional[WorkspaceArg],
         num_consumer_groups: int,
@@ -1333,6 +1358,7 @@ class TritonTemplate(KernelTemplate):
                 prefix_args,
                 suffix_args,
                 epilogue_fn,
+                epilogue_fn_hash,
                 subgraphs,
                 workspace_arg,
                 layout,
@@ -1370,6 +1396,7 @@ class TritonTemplate(KernelTemplate):
             "suffix_args": suffix_args,
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
+            "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
         }
 
         if HAS_WARP_SPEC:
@@ -1499,6 +1526,7 @@ class TritonTemplate(KernelTemplate):
         prefix_args: int = 0,
         suffix_args: int = 0,
         epilogue_fn: Optional[Callable[..., Any]] = identity,
+        epilogue_fn_hash: Optional[str] = None,
         subgraphs: Optional[list[ir.Buffer]] = None,
         mutated_inputs: Optional[list[ir.IRNode]] = None,
         call_sizes: Optional[list[sympy.core.symbol.Symbol]] = None,
@@ -1526,7 +1554,7 @@ class TritonTemplate(KernelTemplate):
         # capability doesn't support them.  This is a bug in Triton, but for now we'll
         # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
         # for one example issue with this problem.
-        if not torch.cuda.is_tf32_supported():
+        if torch.cuda.is_available() and not torch.cuda.is_tf32_supported():
             kwargs["ALLOW_TF32"] = "False"
 
         if call_sizes is None:
@@ -1540,13 +1568,14 @@ class TritonTemplate(KernelTemplate):
             prefix_args,
             suffix_args,
             epilogue_fn,
+            epilogue_fn_hash,
             subgraphs,
             workspace_arg,
             num_consumer_groups,
             num_buffers_warp_spec,
             layout,
             kwargs,
-            generate_with_caching,
+            generate_with_caching and self._cache_codegen_enabled_for_template,
         )
 
         # May happen as result of dev by 0.
@@ -1697,7 +1726,7 @@ class ExternKernelChoice:
     def call_name(self):
         return f"extern_kernels.{self.name}"
 
-    @functools.lru_cache(None)  # noqa: B019
+    @functools.cache  # noqa: B019
     def hash_key(self):
         fn = self.to_callable()
         parts = [
@@ -1761,6 +1790,9 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
         return self.bmreq.benchmark(*args, out=out)
 
     def precompile(self):
@@ -1844,6 +1876,8 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
+            if config.profile_bandwidth_with_do_bench_using_profiling:
+                return do_bench_using_profiling(lambda: algo(*args))
             return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
@@ -1899,7 +1933,7 @@ class ExternKernelCaller(ChoiceCaller):
         return f"extern_{self.choice.name}"
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_mm_log_filename() -> Optional[str]:
     mm_file_name = os.environ.get("TORCHINDUCTOR_MM_LOGGING_FILE", None)
     if not mm_file_name:
@@ -2018,7 +2052,7 @@ class NoValidChoicesError(RuntimeError):
     pass
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_num_workers() -> int:
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
@@ -2045,8 +2079,26 @@ def create_precompile_key(
             inputs_key,
             torch.get_float32_matmul_precision(),
         ]
-        + [choice.hash_key() for choice in choices]
+        + [choice.kernel_hash_key() for choice in choices]
     )
+
+
+# Args to FeedbackFunctions
+# timings: mapping from choices to the benchmark time
+# name: name of the op
+# input_nodes: list of input ir.py Nodes
+# choices: list of choices
+# profiled time: Callable that returns a dict mapping from choices to the profiled time
+FeedbackFunction = Callable[
+    [
+        dict[ChoiceCaller, float],
+        str,
+        list[Any],
+        list[ChoiceCaller],
+        Callable[[], dict[ChoiceCaller, float]],
+    ],
+    None,
+]
 
 
 class AlgorithmSelectorCache(PersistentCache):
@@ -2069,13 +2121,9 @@ class AlgorithmSelectorCache(PersistentCache):
         # of a particular key
         self.precompile_cache: dict[str, Callable[[], None]] = {}
         # list of callbacks that are called after benchmarking
-        self.feedback_saver_fns: list[
-            Callable[
-                [dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None
-            ]
-        ] = []
+        self.feedback_saver_fns: list[FeedbackFunction] = []
 
-        clear_on_fresh_inductor_cache(self)
+        clear_on_fresh_cache(self)
 
     def cache_clear(self) -> None:
         self.precompile_cache.clear()
@@ -2104,9 +2152,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
-
-        # TODO(nmacchioni): remove once CI tests are fixed
-        choices = [choice for choice in choices if choice is not None]
 
         if config.test_configs.autotune_choice_name_regex is not None:
             choices = [
@@ -2149,7 +2194,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
-        @functools.lru_cache(None)
+        @functools.cache
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
@@ -2157,10 +2202,25 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def autotune(choices):
             log.debug("Starting autotuning")
+
             with dynamo_timed(
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
+                metadata={
+                    "autotune_strides": ", ".join(
+                        [str(n.get_stride()) for n in input_nodes]
+                    ),
+                    "autotune_dtypes": ", ".join(
+                        [str(n.get_dtype()) for n in input_nodes]
+                    ),
+                    "autotune_shape": ", ".join(
+                        ["x".join(map(str, n.get_size())) for n in input_nodes]
+                    ),
+                    "autotune_offset": ", ".join(
+                        [str(n.get_layout().offset) for n in input_nodes]
+                    ),
+                },
             ):
                 return make_benchmark_fn()(choices)
 
@@ -2180,6 +2240,7 @@ class AlgorithmSelectorCache(PersistentCache):
             log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
 
             candidates = self.prescreen_choices(choices)
+            prescreening_elapse: Optional[float] = None
             if candidates:
                 prescreening_start_ts = time.time()
                 timings = self.lookup(
@@ -2217,11 +2278,36 @@ class AlgorithmSelectorCache(PersistentCache):
                 or config.trace.log_autotuning_results
             ):
                 self.log_results(
-                    name, input_nodes, timings, autotune_elapse, precompile_elapse
+                    name,
+                    input_nodes,
+                    timings,
+                    autotune_elapse,
+                    precompile_elapse,
+                    prescreening_elapse,
                 )
 
+            def profiler_bench_function():
+                # we're not running through the normal caching autotuner method here because we want to avoid returning
+                # the cached value.
+                # Avoid benchmarking in a separate process because it's not easy to signal to the TuningProcess that we
+                # should use the profiler.
+                with config.patch(
+                    profile_bandwidth_with_do_bench_using_profiling=True,
+                    autotune_in_subproc=False,
+                ):
+                    return self.make_benchmark_fn(
+                        choices, input_nodes, layout, input_gen_fns
+                    )(choices)
+
             for feedback_fn in self.feedback_saver_fns:
-                feedback_fn(timings, name, input_nodes, choices)
+                # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
+                feedback_fn(
+                    timings,
+                    name,
+                    input_nodes,
+                    choices,
+                    profiler_bench_function,
+                )
 
             return timings
 
@@ -2271,13 +2357,34 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
         timings = do_autotuning(choices, precompile_fn)
-        if timings == {} or choices[0] not in timings:
-            return choices[0].output_node()
 
-        selected_key = builtins.min(timings, key=timings.__getitem__)
-        selected_choice = selected_key.output_node()
-        log.debug("selected choice: %s", str(selected_choice))
-        return selected_choice
+        # if timings is empty, we really have no choice but to return a semi-random
+        # choice. returning the first `ExternKernelCaller` is probably the safest bet
+        # in this case, since it will generally be the ATen kernel. if there are no
+        # `ExternKernelCaller`s to return, then returning the 0th kernel is our next
+        # best option (ideally we'd fail whenever there is no ATen kernel to fallback
+        # to, but that's not trivial to figure out)
+        if timings == {}:
+            for choice in choices:
+                if isinstance(choice, ExternKernelCaller):
+                    node = choice.output_node()
+                    log.debug(
+                        "Autotuning returned empty timings, falling back to first `ExternKernelCaller`: %s",
+                        node,
+                    )
+                    return node
+            node = choices[0].output_node()
+            log.debug(
+                "Autotuning returned empty timings, falling back to first choice: %s",
+                node,
+            )
+            return node
+
+        # if we got any timings at all, pick the best of those
+        choice = min(timings, key=timings.__getitem__)
+        node = choice.output_node()
+        log.debug("Autotuning selected choice: %s", node)
+        return node
 
     def make_precompile_fn(
         self,
@@ -2381,11 +2488,11 @@ class AlgorithmSelectorCache(PersistentCache):
         seen_choices: OrderedSet[str] = OrderedSet()
         for c in choices:
             # Skip choices which we have already issued a precompile
-            if c.hash_key() in seen_choices:
+            if c.kernel_hash_key() in seen_choices:
                 log.debug("Skipping already seen choice: %s", c)
                 continue
             else:
-                seen_choices.add(c.hash_key())
+                seen_choices.add(c.kernel_hash_key())
 
             if hasattr(c, "precompile"):
                 triton_cuda_choice = isinstance(c, TritonTemplateCaller) and isinstance(
@@ -2405,7 +2512,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 future.add_done_callback(on_complete)
                 futures[future] = c
 
-        @functools.lru_cache(None)
+        @functools.cache
         @restore_stdout_stderr()
         def wait_on_futures():
             log.debug("Waiting on futures")
@@ -2694,19 +2801,43 @@ class AlgorithmSelectorCache(PersistentCache):
             return []
 
         log.debug("Before pruning using prescreening timings, %d choices", len(choices))
-        sorted_choices = sorted(
+        sorted_candidates = sorted(
             candidate_timings.keys(), key=lambda choice: candidate_timings[choice]
         )
+
+        # Print prescreening timings
+        if (
+            candidate_timings
+            and PRINT_AUTOTUNE
+            and config.autotune_num_choices_displayed != 0
+        ):
+            n = config.autotune_num_choices_displayed
+            top_k = sorted_candidates[:n]
+            best = top_k[0]
+            best_time = candidate_timings[best]
+
+            lines = ["PRESCREENING CANDIDATE TIMINGS"]
+            for choice in top_k:
+                result = candidate_timings[choice]
+                if result:
+                    lines.append(
+                        f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {choice.description}"
+                    )
+                else:
+                    lines.append(
+                        f"  {choice.name} {result:.4f} ms <DIVIDED BY ZERO ERROR>"
+                    )
+
+            log.info("\n".join(lines))
         num_to_keep = max(int(math.sqrt(len(choices)) / 4), 8)
 
         # prune choices based on prescreening timings
         candidates_to_prune = OrderedSet(
-            candidate.bmreq.hash_key  # type: ignore[attr-defined]
-            for candidate in sorted_choices[num_to_keep:]
+            candidate.kernel_hash_key() for candidate in sorted_candidates[num_to_keep:]
         )
-        for candidate in sorted_choices[:num_to_keep]:
+        for candidate in sorted_candidates[:num_to_keep]:
             if candidate_timings[candidate] == float("inf"):
-                candidates_to_prune.add(candidate.bmreq.hash_key)  # type: ignore[attr-defined]
+                candidates_to_prune.add(candidate.kernel_hash_key())
             else:
                 if isinstance(candidate, CUDATemplateCaller):
                     candidate.bmreq.ensure_dll_loaded()
@@ -2714,7 +2845,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices = [
             choice
             for choice in choices
-            if choice.bmreq.hash_key not in candidates_to_prune  # type: ignore[attr-defined]
+            if choice.kernel_hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
         ]
 
         log.debug("After pruning using prescreening timings, %d choices", len(choices))
@@ -2727,6 +2858,7 @@ class AlgorithmSelectorCache(PersistentCache):
         timings: dict[ChoiceCaller, float],
         elapse: float,
         precompile_elapse: float,
+        prescreening_elapse: Optional[float] = None,
     ):
         V.debug.log_autotuning_results(
             name, input_nodes, timings, elapse, precompile_elapse
@@ -2815,9 +2947,16 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
+        prescreening_msg = (
+            f" and {prescreening_elapse:.4f} seconds prescreening"
+            if prescreening_elapse is not None
+            else ""
+        )
         sys.stderr.write(
             f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f}"
-            f" seconds precompiling for {len(timings)} choices\n"
+            f" seconds precompiling for {len(timings)} choices"
+            + prescreening_msg
+            + "\n"
         )
 
     @staticmethod
@@ -2902,12 +3041,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
         )
 
-    def add_feedback_saver(
-        self,
-        fn: Callable[
-            [dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None
-        ],
-    ):
+    def add_feedback_saver(self, fn: FeedbackFunction):
         self.feedback_saver_fns.append(fn)
 
 
@@ -2924,11 +3058,14 @@ def autotune_select_algorithm(*args, **kwargs):
             torch._inductor.config.benchmark_epilogue_fusion
         )
 
+    if "precompilation_timeout_seconds" not in kwargs:
+        kwargs["precompilation_timeout_seconds"] = config.precompilation_timeout_seconds
+
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 
 
 def add_feedback_saver(
-    fn: Callable[[dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None],
+    fn: FeedbackFunction,
 ):
     global _ALGORITHM_SELECTOR_CACHE
     if _ALGORITHM_SELECTOR_CACHE is None:

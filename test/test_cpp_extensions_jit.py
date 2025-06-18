@@ -1194,6 +1194,48 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(abs_t, torch.abs(t))
         self.assertEqual(floor_t, torch.floor(t))
 
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
+    def test_cuda_pluggable_allocator_include(self):
+        """
+        This method creates a minimal example to replicate the apex setup.py to build nccl_allocator extension
+        """
+
+        # the cpp source includes CUDAPluggableAllocator and has an empty exported function
+        cpp_source = """
+                #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+                #include <torch/extension.h>
+                int get_nccl_allocator() {
+                    return 0;
+                }
+                PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+                    m.def("get_nccl_allocator", []() { return get_nccl_allocator(); });
+                }
+                """
+
+        build_dir = tempfile.mkdtemp()
+        src_path = os.path.join(build_dir, "NCCLAllocator.cpp")
+
+        with open(src_path, mode="w") as f:
+            f.write(cpp_source)
+
+        # initially success is false
+        success = False
+        try:
+            # try to build the module
+            torch.utils.cpp_extension.load(
+                name="nccl_allocator",
+                sources=src_path,
+                verbose=True,
+                with_cuda=True,
+            )
+            # set success as true if built successfully
+            success = True
+        except Exception as e:
+            print(f"Failed to load the module: {e}")
+
+        # test if build was successful
+        self.assertEqual(success, True)
+
 
 if __name__ == "__main__":
     common.run_tests()

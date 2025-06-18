@@ -8,11 +8,12 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.cond import create_bw_fn, materialize_as_graph
+from torch._higher_order_ops.cond import create_bw_fn
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     check_meta_consistency,
     first_slice_copy,
+    materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -149,11 +150,21 @@ def scan(
         out (torch.Tensor or pytree with tensor leaves),
             each tensor leaf is a stacked output along first dim, where each slice is the output of a scan iteration.
 
+    Restrictions:
+        - The combine_fn shouldn't have any aliasing between input-input, input-output, and output-output. E.g. return a view
+            or the same tensor as input is not supported. As a workaround, can clone the output to avoid aliasing.
+
+        - The combine_fn shoudn't mutate any inputs. We'll remove the mutation restriction for inference soon. Please file an issue
+            if you input mutation support for training is needed.
+
+        - The combine_fn's init carry should match the next_carry in pytree structure and in tensor metadata.
+
     Example::
 
         def add(x: torch.Tensor, y: torch.Tensor):
             next_carry = y = x + y
-            return next_carry, y
+            # clone the output to avoid output-output aliasing
+            return next_carry, y.clone()
 
         i0 = torch.zeros(1)
         xs = torch.arange(5)
@@ -805,19 +816,6 @@ class ScanAutogradOp(torch.autograd.Function):
 
 @scan_op.py_autograd_impl
 def scan_autograd(combine_fn, init, xs, additional_inputs):
-    if not any(
-        el.requires_grad
-        for el in (tuple(init) + tuple(xs) + additional_inputs)
-        if isinstance(el, torch.Tensor)
-    ):
-        with torch._C._AutoDispatchBelowAutograd():
-            return scan_op(
-                combine_fn,
-                init,
-                xs,
-                additional_inputs,
-            )
-
     num_leaves_init = len(init)
     num_leaves_xs = len(xs)
     num_additional_inputs = len(additional_inputs)

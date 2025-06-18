@@ -10498,6 +10498,17 @@ class TestNNDeviceType(NNTestCase):
         expected_ones = F.log_softmax(logits, dim=1).exp().sum(dim=1)
         self.assertEqual(expected_ones, torch.ones_like(expected_ones))
 
+        # backward
+        logits = torch.randn(5, 513, dtype=dtype, device=device, requires_grad=True)
+        out = F.log_softmax(logits, dim=1)
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        logits_cpu = logits.detach().cpu()
+        logits_cpu.requires_grad = True
+        out_cpu = F.log_softmax(logits_cpu, dim=1)
+        out_cpu.backward(grad.detach().cpu())
+        self.assertEqual(logits.grad, logits_cpu.grad)
+
     @onlyCUDA
     @dtypes(torch.half)
     @largeTensorTest("20GB")
@@ -11662,6 +11673,8 @@ class TestNNDeviceType(NNTestCase):
                 prec = dtype2prec_DONTUSE[dtype]
                 if dtype == torch.float16:
                     prec = 4e-2
+                elif dtype == torch.float32:
+                    prec = 2e-4
                 self.assertEqual(p1.grad, p2.grad, atol=prec, rtol=0)
 
         tests = [
@@ -13116,6 +13129,16 @@ if __name__ == '__main__':
         clip_grad_norm_(p1, max_norm, norm_type=norm_type, foreach=foreach)
         clip_grad_norm_([p2], max_norm, norm_type=norm_type, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
+
+        # Should warning when parameters generator exhausted
+        params = l.parameters()
+        for p in params:
+            pass
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            clip_grad_norm_(params, max_norm, norm_type=norm_type, foreach=foreach)
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "`parameters` is an empty generator, no gradient clipping will occur.")
 
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA

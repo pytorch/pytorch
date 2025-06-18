@@ -231,6 +231,14 @@ class TestPatternMatcherBase(TestCase):
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
                 *clone_inputs,
             )
+            assert_keywords = ["assert_size_stride", "assert_alignment"]
+            filtered_lines = [
+                line
+                for line in source_code.splitlines()
+                if not any(assert_key in line for assert_key in assert_keywords)
+            ]
+            source_code = "\n".join(filtered_lines)
+
             for op in include_ops:
                 self.assertIn(op, source_code)
             if num_include_ops is not None:
@@ -4091,10 +4099,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 nodes_count = 10 if has_bias else 7
             else:
                 nodes_count = 7 if has_bias else 6
-            self.assertEqual(
-                counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
-                nodes_count,
-            )
+            if counters["inductor"]["removed_pointless_view_pair"] == 0:
+                # Removing pointless view pairs affect how the pattern
+                # for this test is matched.
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    nodes_count,
+                )
 
         self._test_common(
             mod,

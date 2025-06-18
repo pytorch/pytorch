@@ -1064,6 +1064,12 @@ if(USE_ROCM)
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt)
+    # hipsparselt is an optional component that will eventually be enabled by default.
+    if(hipsparselt_FOUND)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        roc::hipsparselt
+      )
+    endif()
 
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
@@ -1154,6 +1160,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
+    list(APPEND Caffe2_DEPENDENCY_LIBS moodycamel)
     if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
     elseif(USE_ROCM)
@@ -1663,7 +1670,10 @@ if(USE_KINETO)
   }" EXCEPTIONS_WORK)
         set(CMAKE_REQUIRED_LINK_OPTIONS "")
         if(NOT EXCEPTIONS_WORK)
-          message(FATAL_ERROR "Detected that statically linking against CUPTI causes exceptions to stop working.  See https://github.com/pytorch/pytorch/issues/57744 for more details.  Perhaps try: USE_CUPTI_SO=1 python setup.py develop --cmake")
+          message(FATAL_ERROR
+            "Detected that statically linking against CUPTI causes exceptions to stop working. "
+            "See https://github.com/pytorch/pytorch/issues/57744 for more details. "
+            "Perhaps try: USE_CUPTI_SO=1 CMAKE_FRESH=1 python setup.py develop")
         endif()
       endif()
 
@@ -1713,3 +1723,7 @@ target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_
 # Include nlohmann-json
 add_library(nlohmann INTERFACE IMPORTED)
 include_directories(nlohmann SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)
+
+# Include moodycamel
+add_library(moodycamel INTERFACE IMPORTED)
+include_directories(moodycamel SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/concurrentqueue)

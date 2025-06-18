@@ -543,7 +543,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 )
                 if fwd_fullgraph:
                     self.assertEqual(len(counters["graph_break"]), 1)
-                    self.assertIn("Tensor.backward", counters["graph_break"])
+                    self.assertExpectedInline(
+                        next(iter(counters["graph_break"].keys())),
+                        """\
+Unsupported Tensor.backward() call
+  Explanation: Dynamo currently does not support tracing `Tensor.backward()`.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+
+  Developer debug context: call_method TensorVariable() backward () {}
+""",  # noqa: B950
+                    )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
                 return res
@@ -728,9 +737,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 fwd_fullgraph=fwd_fullgraph,
             )
 
-    @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
+    def _test_nested_fully_shard_backend_inductor_fullgraph_True(self):
         self.skipTestForOldSm()
         for fwd_fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
@@ -765,7 +772,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
-                file_check = FileCheck().check("def call(args):")
+
+                extra_str_from_graph_partition = (
+                    "self, " if torch._inductor.config.graph_partition else ""
+                )
+
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for fwd_ag_block_info in [
                     dict(overlapped_compute_op_str=None),
                     dict(
@@ -801,7 +815,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 file_check.run(fwd_code)
 
                 bwd_code = triton_codes[1]
-                file_check = FileCheck().check("def call(args):")
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for bwd_ag_block_info in [
                     dict(overlapped_compute_op_str=None),
                     dict(
@@ -828,6 +844,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     # )
                     pass
                 file_check.run(bwd_code)
+
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
+        self._test_nested_fully_shard_backend_inductor_fullgraph_True()
+
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_nested_fully_shard_backend_inductor_fullgraph_True_graph_partition(self):
+        self._test_nested_fully_shard_backend_inductor_fullgraph_True()
 
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
     @skipIfRocm
@@ -880,7 +907,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             for _, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
-                model, mesh=mesh, reshard_after_forward=True, **fsdp_config
+                model, mesh=mesh, reshard_after_forward=False, **fsdp_config
             )
             optim = torch.optim.SGD(model.parameters(), lr=1e-4)
             return model, optim
@@ -944,11 +971,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     fwd_fullgraph=fwd_fullgraph,
                 )
 
-    @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    # TODO: native_dropout causes CUDA IMA error, need to figure out why
-    @torch._inductor.config.patch(fallback_random=True)
-    def test_transformer_backend_inductor_fullgraph_True(self):
+    def _test_transformer_backend_inductor_fullgraph_True(self):
         self.skipTestForOldSm()
         for (
             fwd_fullgraph,
@@ -994,7 +1017,13 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
-                file_check = FileCheck().check("def call(args):")
+                extra_str_from_graph_partition = (
+                    "self, " if torch._inductor.config.graph_partition else ""
+                )
+
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for fwd_ag_block_info in [
                     dict(
                         overlapped_compute_op_str=(
@@ -1019,7 +1048,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 file_check.run(fwd_code)
 
                 bwd_code = triton_codes[1]
-                file_check = FileCheck().check("def call(args):")
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for bwd_ag_block_info in [
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
@@ -1055,6 +1086,21 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     #     )
                     pass
                 file_check.run(bwd_code)
+
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    # TODO: native_dropout causes CUDA IMA error, need to figure out why
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_transformer_backend_inductor_fullgraph_True(self):
+        self._test_transformer_backend_inductor_fullgraph_True()
+
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    # TODO: native_dropout causes CUDA IMA error, need to figure out why
+    @torch._inductor.config.patch(fallback_random=True)
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_transformer_backend_inductor_fullgraph_True_graph_partition(self):
+        self._test_transformer_backend_inductor_fullgraph_True()
 
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
     @skipIfRocm
