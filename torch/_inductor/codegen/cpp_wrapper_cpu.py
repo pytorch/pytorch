@@ -1343,7 +1343,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
-        # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
+        # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the corresponding
         # tensor prematurely deallocated, thus the temporary array trick here.
         indices_str = self._generate_temporary_array_pointer(
             "AtenTensorHandle", indices
@@ -1780,7 +1780,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
             # in ABI-compatible mode, we need to use the ABI shim function
-            # to extract a C++ bool from the unrelying scalar bool Tensor
+            # to extract a C++ bool from the underlying scalar bool Tensor
             predicate = f"{conditional.predicate.get_name()}_scalar"
             if predicate not in self.used_cond_predicate:
                 self.codegen_tensor_item(
@@ -1844,7 +1844,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # in ABI-compatible mode, the carried inputs are codegened
             # as buffers outside the while loop and set to the initial
             # values. at the end of each while_loop iteration, they
-            # will be assined the carried values.
+            # will be assigned the carried values.
             out_name = out.get_name()
             self.writeline(f"AtenTensorHandle {out_name}_handle;")
             self.writeline(
@@ -1853,7 +1853,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
             cond_outer_inputs.append(out_name)
 
-        # additional inputs will be assinged within the while_loop
+        # additional inputs will be assigned within the while_loop
         # iteration directly from the corresponding outer graph buffers
         cond_outer_inputs.extend(outer_additional_inputs)
 

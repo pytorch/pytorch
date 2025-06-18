@@ -3798,7 +3798,7 @@ def _compute_stride(old_shape, old_stride, new_shape):
 
 
 # This function is called to trace through view operation during fake tensor tracing.
-# It will be called when the exisiting path throws a data dependent error. It's much
+# It will be called when the existing path throws a data dependent error. It's much
 # simpler that reshape_view_helper, if it fails it will throw the original data_dependent_error
 # that was passed to it.
 # The function does the following:
@@ -6206,7 +6206,7 @@ def bucketize(
     if n_boundaries == 0:
         return torch.zeros_like(a)
     # We are trying to find the bucket (defined by pairs of consecutive elements of `boundaries`)
-    # each element of `a` belongs to. We use binary search to achieve logarithimic complexity,
+    # each element of `a` belongs to. We use binary search to achieve logarithmic complexity,
     # but each step of the search is done "in parallel" over all elements of `a`
     # can't use int32 as indexes, so we have to do all computations with int64 and convert at the end
     start = torch.zeros(a.shape, device=a.device, dtype=torch.int64)
