@@ -228,12 +228,11 @@ class InPlaceCompilationTests(TestCase):
     def test_list_bad_access(self):
         @torch.compile(backend="eager")
         def fn(x, y):
-            a =  [x]
+            a = [x]
             return a[y]
 
         with self.assertRaises(IndexError):
             fn(torch.randn(10), 99)
-
 
 
 # The private variants of the below functions are extensively tested

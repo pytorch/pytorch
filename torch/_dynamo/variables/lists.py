@@ -43,7 +43,6 @@ from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
-from ..exc import unimplemented_v2
 
 
 if TYPE_CHECKING:
@@ -126,7 +125,7 @@ class BaseListVariable(VariableTracker):
                     from_exc=e,
                     explanation="We can't evaluate code that throws in general, please only access valid list indices",
                     hints=[],
-                )
+                ) from e
 
     def unpack_var_sequence(self, tx):
         return list(self.items)
