@@ -454,9 +454,9 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         inp_hdl = symm_mem.rendezvous(inp, group=group_name)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
 
-        # Signal buffer (uint64 flag)
-        flag = symm_mem.empty(1, dtype=torch.int64, device=self.device).fill_(0)
-        flag_hdl = symm_mem.rendezvous(flag, group=group_name)
+        # Use the signal pad attached to the output symmetric memory handle
+        # as the flag buffer for signaling completion.
+        flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
         NVSHMEM_SIGNAL_SET = 0  # value defined by NVSHMEM for atomic set
@@ -466,7 +466,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
             # Rank 0 puts into Rank 1
             dst_ptr = out_hdl.buffer_ptrs[peer]
             src_ptr = inp_hdl.buffer_ptrs[rank]
-            sig_ptr = flag_hdl.buffer_ptrs[peer]
+            sig_ptr = out_hdl.signal_pad_ptrs[peer]
             put_signal_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
@@ -525,9 +525,9 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         inp_hdl = symm_mem.rendezvous(inp, group=group_name)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
 
-        # Signal buffer (uint64 flag)
-        flag = symm_mem.empty(1, dtype=torch.int64, device=self.device).fill_(0)
-        flag_hdl = symm_mem.rendezvous(flag, group=group_name)
+        # Use the signal pad attached to the output symmetric memory handle
+        # as the flag buffer for signaling completion.
+        flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
         NVSHMEM_SIGNAL_ADD = 5  # atomic add operation
@@ -537,7 +537,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
             # Rank 0 puts into Rank 1
             dst_ptr = out_hdl.buffer_ptrs[peer]
             src_ptr = inp_hdl.buffer_ptrs[rank]
-            sig_ptr = flag_hdl.buffer_ptrs[peer]
+            sig_ptr = out_hdl.signal_pad_ptrs[peer]
             put_signal_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
