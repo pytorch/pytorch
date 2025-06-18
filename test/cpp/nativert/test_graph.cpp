@@ -562,4 +562,86 @@ return (%a)
     EXPECT_NE(ids.end(), ids.find(i));
   }
 }
+
+TEST(SerializationTest, RoundTrip) {
+  static constexpr std::string_view source =
+      R"(graph(%foo, %bar, %baz):
+%o1 = aten.foo(self=%foo, target=%bar, alpha=0.1)
+return(%o1, %baz)
+)";
+  const auto graph = stringToGraph(source);
+  const auto serialized = graphToString(*graph);
+  EXPECT_EQ(source, serialized);
+}
+
+TEST(SerializationTest, EscapedStringConstant) {
+  const auto parsed =
+      std::get<std::string>(convertAtomicConstant(R"("string_\"escape")"));
+  std::string expected = "string_\\\"escape";
+  EXPECT_EQ(parsed, expected);
+}
+
+TEST(SerializationTest, DeviceConstant) {
+  const auto device =
+      std::get<c10::Device>(convertAtomicConstant("Device{cuda:1}"));
+  EXPECT_EQ(device.index(), 1);
+  EXPECT_EQ(device.type(), c10::DeviceType::CUDA);
+}
+
+TEST(SerializationTest, TrueConstant) {
+  const auto parsedTrue = std::get<bool>(convertAtomicConstant("true"));
+  EXPECT_EQ(parsedTrue, true);
+  const auto parsedFalse = std::get<bool>(convertAtomicConstant("false"));
+  EXPECT_EQ(parsedFalse, false);
+}
+
+TEST(SerializationTest, MemoryFormatConstant) {
+  const auto parsed = std::get<c10::MemoryFormat>(
+      convertAtomicConstant("MemoryFormat::ContiguousFormat"));
+  EXPECT_EQ(parsed, c10::MemoryFormat::Contiguous);
+}
+
+TEST(SerializationTest, FloatConstant) {
+  const auto parsed = std::get<double>(convertAtomicConstant("5.0"));
+  EXPECT_EQ(parsed, 5.0);
+}
+
+TEST(SerializationTest, IntConstant) {
+  const auto parsed = std::get<int64_t>(convertAtomicConstant("5"));
+  EXPECT_EQ(parsed, 5);
+}
+
+TEST(SerializationTest, FloatExponentConstant) {
+  const auto parsed = std::get<double>(convertAtomicConstant("1e-05"));
+  EXPECT_EQ(parsed, 0.00001);
+}
+
+TEST(SerializationTest, SingleElementListConstant) {
+  const auto parsed =
+      std::get<std::vector<int64_t>>(convertListConstant("[1]"));
+  const auto expected = std::vector<int64_t>{1};
+  EXPECT_EQ(parsed, expected);
+}
+
+TEST(SerializationTest, IntListConstant) {
+  const auto parsed =
+      std::get<std::vector<int64_t>>(convertListConstant("[1, 2, 3, 4]"));
+  const auto expected = std::vector<int64_t>{1, 2, 3, 4};
+  EXPECT_EQ(parsed, expected);
+}
+
+TEST(SerializationTest, FloatListConstant) {
+  const auto parsed = std::get<std::vector<double>>(
+      convertListConstant("[1.0, 2.0, 3.0, 4.0]"));
+  const auto expected = std::vector<double>{1.0, 2.0, 3.0, 4.0};
+  EXPECT_EQ(parsed, expected);
+}
+
+TEST(SerializationTest, BoolListConstant) {
+  const auto parsed =
+      std::get<std::vector<bool>>(convertListConstant("[false, true, false]"));
+  const auto expected = std::vector<bool>{false, true, false};
+  EXPECT_EQ(parsed, expected);
+}
+
 } // namespace torch::nativert
