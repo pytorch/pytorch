@@ -57,6 +57,10 @@ case ${CUDA_VERSION} in
     12.8|12.9)
         TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX" #removing sm_50-sm_70 as these architectures are deprecated in CUDA 12.8/9 and will be removed in future releases
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
+        # WAR to resolve the ld error in libtorch build with CUDA 12.9
+        if [[ "$DESIRED_CUDA" == "cu129" && "$PACKAGE_TYPE" == "libtorch" ]]; then
+            EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--no-relax")
+        fi
         ;;
     12.6)
         TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
@@ -108,10 +112,6 @@ if [[ $CUDA_VERSION == 12* ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
     export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
-    # WAR to resolve the ld error in libtorch build with CUDA 12.9
-    if [[ "$DESIRED_CUDA" == "cu129" && "$PACKAGE_TYPE" == "libtorch" ]]; then
-        export TORCH_NVCC_FLAGS="$TORCH_NVCC_FLAGS --host-linker-script=use-lcs"
-    fi
     if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
         echo "Bundling with cudnn and cublas."
         DEPS_LIST+=(
