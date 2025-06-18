@@ -156,9 +156,10 @@ a submodule using tracing that can be called from the methods of a script module
 Example (using a traced module):
 
 ```{testcode}
+:skipif: torchvision is None
+
 import torch
 import torchvision
-:skipif: torchvision is None
 
 class MyScriptModule(torch.nn.Module):
     def __init__(self):
