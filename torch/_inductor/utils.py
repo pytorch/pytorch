@@ -1791,7 +1791,9 @@ def use_ck_conv_template(layout: Layout) -> bool:
 
 
 def _use_template_for_cpu(layout: Layout) -> bool:
-    return (config.max_autotune or config.max_autotune_gemm) and layout.device.type == "cpu"
+    return (
+        config.max_autotune or config.max_autotune_gemm
+    ) and layout.device.type == "cpu"
 
 
 def use_cpp_bmm_template(
@@ -1871,7 +1873,9 @@ def use_cpp_gemm_template(
 
 
 def use_aten_gemm_kernels() -> bool:
-    return not (config.max_autotune or config.max_autotune_gemm) or _use_autotune_backend("ATEN")
+    return not (
+        config.max_autotune or config.max_autotune_gemm
+    ) or _use_autotune_backend("ATEN")
 
 
 class DebugDirManager:
