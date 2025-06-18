@@ -700,7 +700,7 @@ endif()
 if(USE_KLEIDIAI AND CMAKE_C_COMPILER_VERSION)
     if(CMAKE_C_COMPILER_VERSION VERSION_LESS 11)
       set(USE_KLEIDIAI OFF)
-      message(WARNING "Disabling KleidiAI: Requires atleast GCC 11 or Clang 11")
+      message(WARNING "Disabling KleidiAI: Requires at least GCC 11 or Clang 11")
     endif()
 endif()
 
@@ -1258,7 +1258,7 @@ endif()
 add_subdirectory(c10)
 add_subdirectory(caffe2)
 
-# ---[ CMake related files Uninistall option.
+# ---[ CMake related files Uninstall option.
 if(NOT TARGET caffe2_uninstall)
   configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in
