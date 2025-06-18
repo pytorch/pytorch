@@ -6594,7 +6594,6 @@ class TestCompileKernel(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_as_custom_op(self):
-        
         # Define a simple vector addition kernel
         kernel_source = """
         __global__ void vector_add(const float* a, const float* b, float* c, int n) {
@@ -6604,38 +6603,38 @@ class TestCompileKernel(TestCase):
             }
         }
         """
-        
+
         @torch.library.custom_op("test_compile_kernel::vector_add", mutates_args=())
         def vector_add_op(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
             from torch.cuda import _compile_kernel
-            
+
             compiled_kernel = _compile_kernel(kernel_source, "vector_add")
-            
+
             c = torch.empty_like(a)
             n = a.numel()
-            
+
             threads_per_block = 256
             blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
             compiled_kernel(
                 grid=(blocks_per_grid, 1, 1),
                 block=(threads_per_block, 1, 1),
-                args=[a, b, c, n]
+                args=[a, b, c, n],
             )
-            
+
             return c
-        
+
         @vector_add_op.register_fake
         def _(a, b):
             return torch.empty_like(a)
-        
-        device = torch.device('cuda:0')
+
+        device = torch.device("cuda:0")
         size = (1024,)
-        
+
         a = torch.randn(size, device=device, dtype=torch.float32)
         b = torch.randn(size, device=device, dtype=torch.float32)
-        
+
         result = vector_add_op(a, b)
-        
+
         expected = a + b
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
 
@@ -6643,7 +6642,7 @@ class TestCompileKernel(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_custom_op_with_autograd(self):
         """Test custom op using compiled kernel with autograd support."""
-        
+
         kernel_source = """
         __global__ void element_wise_multiply(const float* a, const float* b, float* c, int n) {
             int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -6652,68 +6651,67 @@ class TestCompileKernel(TestCase):
             }
         }
         """
-        
+
         @torch.library.custom_op("test_compile_kernel::elem_mul", mutates_args=())
         def elem_mul_op(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
             from torch.cuda import _compile_kernel
-            
+
             compiled_kernel = _compile_kernel(kernel_source, "element_wise_multiply")
-            
+
             c = torch.empty_like(a)
             n = a.numel()
-            
+
             threads_per_block = 256
             blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
             compiled_kernel(
                 grid=(blocks_per_grid, 1, 1),
                 block=(threads_per_block, 1, 1),
-                args=[a, b, c, n]
+                args=[a, b, c, n],
             )
-            
+
             return c
-        
+
         @elem_mul_op.register_fake
         def _(a, b):
             return torch.empty_like(a)
-        
+
         def setup_context(ctx, inputs, output):
             a, b = inputs
             ctx.save_for_backward(a, b)
-            
+
         def backward(ctx, grad_output):
             a, b = ctx.saved_tensors
             # Gradient for element-wise multiplication: d/da = b, d/db = a
             grad_a = elem_mul_op(grad_output, b) if a.requires_grad else None
             grad_b = elem_mul_op(grad_output, a) if b.requires_grad else None
             return grad_a, grad_b
-        
+
         elem_mul_op.register_autograd(backward, setup_context=setup_context)
-        
+
         # Test forward and backward
-        device = torch.device('cuda:0')
+        device = torch.device("cuda:0")
         size = (256,)
-        
+
         a = torch.randn(size, device=device, dtype=torch.float32, requires_grad=True)
         b = torch.randn(size, device=device, dtype=torch.float32, requires_grad=True)
-        
+
         # Forward pass
         result = elem_mul_op(a, b)
         loss = result.sum()
-        
+
         # Backward pass
         loss.backward()
-        
+
         # Check gradients
         expected_grad_a = b
         expected_grad_b = a
-        
+
         torch.testing.assert_close(a.grad, expected_grad_a, rtol=1e-5, atol=1e-5)
         torch.testing.assert_close(b.grad, expected_grad_b, rtol=1e-5, atol=1e-5)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_custom_op_validation(self):
-        
         kernel_source = """
         __global__ void add_scalar(const float* input, float* output, float scalar, int n) {
             int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -6722,38 +6720,38 @@ class TestCompileKernel(TestCase):
             }
         }
         """
-        
+
         @torch.library.custom_op("test_compile_kernel::add_scalar", mutates_args=())
         def add_scalar_op(input_tensor: torch.Tensor, scalar: float) -> torch.Tensor:
             from torch.cuda import _compile_kernel
-            
+
             compiled_kernel = _compile_kernel(kernel_source, "add_scalar")
-            
+
             output = torch.empty_like(input_tensor)
             n = input_tensor.numel()
-            
+
             threads_per_block = 256
             blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
             compiled_kernel(
                 grid=(blocks_per_grid, 1, 1),
                 block=(threads_per_block, 1, 1),
-                args=[input_tensor, output, scalar, n]
+                args=[input_tensor, output, scalar, n],
             )
-            
+
             return output
-        
+
         @add_scalar_op.register_fake
         def _(input_tensor, scalar):
             return torch.empty_like(input_tensor)
-        
+
         # Test with opcheck
-        device = torch.device('cuda:0')
+        device = torch.device("cuda:0")
         input_data = torch.randn((64,), device=device, dtype=torch.float32)
         scalar_val = 3.14
-        
+
         # Run opcheck validation
         torch.library.opcheck(add_scalar_op, (input_data, scalar_val), {})
-        
+
         # Also test the actual functionality
         result = add_scalar_op(input_data, scalar_val)
         expected = input_data + scalar_val
@@ -6762,7 +6760,6 @@ class TestCompileKernel(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_custom_op_mutates_args(self):
-
         # Define a kernel that performs in-place vector addition: a = a + b
         kernel_source = """
         __global__ void vector_add_inplace(float* a, const float* b, int n) {
@@ -6773,7 +6770,9 @@ class TestCompileKernel(TestCase):
         }
         """
 
-        @torch.library.custom_op("test_compile_kernel::vector_add_inplace", mutates_args=("a",))
+        @torch.library.custom_op(
+            "test_compile_kernel::vector_add_inplace", mutates_args=("a",)
+        )
         def vector_add_inplace_op(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
             from torch.cuda import _compile_kernel
 
@@ -6784,7 +6783,7 @@ class TestCompileKernel(TestCase):
             compiled_kernel(
                 grid=(blocks_per_grid, 1, 1),
                 block=(threads_per_block, 1, 1),
-                args=[a, b, n]
+                args=[a, b, n],
             )
             return a
 
@@ -6792,7 +6791,7 @@ class TestCompileKernel(TestCase):
         def _(a, b):
             return a.clone()
 
-        device = torch.device('cuda:0')
+        device = torch.device("cuda:0")
         size = (1024,)
 
         a = torch.randn(size, device=device, dtype=torch.float32)
@@ -6808,7 +6807,9 @@ class TestCompileKernel(TestCase):
         torch.testing.assert_close(a, expected, rtol=1e-5, atol=1e-5)
         torch.testing.assert_close(b, b_original, rtol=1e-5, atol=1e-5)
         torch.testing.assert_close(result, a, rtol=1e-5, atol=1e-5)
-        assert result.data_ptr() == a.data_ptr(), "Result should share memory with input 'a'"
+        assert result.data_ptr() == a.data_ptr(), (
+            "Result should share memory with input 'a'"
+        )
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
