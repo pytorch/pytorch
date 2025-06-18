@@ -248,7 +248,7 @@ Please also note that we only support CUDA tensors since hardware compatibility 
 The following datatypes are supported for semi-structured sparsity. Note that each datatype has its own shape constraints and compression factor.
 
 ```{csv-table}
-:header: "PyTorch dtype", "Shape Constraints", "Compression Factor", "Sparsity Pattern"
+:header: ["PyTorch dtype", "Shape Constraints", "Compression Factor", "Sparsity Pattern"]
 :widths: 15, 45, 10, 10
 :delim: ;
 
@@ -1158,7 +1158,7 @@ scalar (float or 0-D PyTorch tensor), ``*`` is element-wise
 multiplication, and ``@`` is matrix multiplication.
 
 ```{csv-table}
-:header: "PyTorch operation", "Sparse grad?", "Layout signature"
+:header: ["PyTorch operation", "Sparse grad?", "Layout signature"]
 :widths: 20, 5, 60
 :delim: ;
 
