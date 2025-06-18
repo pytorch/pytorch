@@ -38,6 +38,10 @@ inline void _vec_log_softmax_lastdim(
     scalar_t* output_data_base,
     int64_t outer_size,
     int64_t dim_size) {
+  const auto chunk_size = vec_log_softmax_lastdim_chunk_size<scalar_t>(
+      at::internal::GRAIN_SIZE,
+      outer_size,
+      dim_size);
   // Note: grain_size value of 0
   // We don't change the number of OpenMP threads in the OpenMP thread-pool,
   // so some threads do useful work, while others don't.
@@ -49,7 +53,7 @@ inline void _vec_log_softmax_lastdim(
         input_data_base,
         output_data_base,
         dim_size,
-        vec_log_softmax_lastdim_chunk_size<scalar_t>(at::internal::GRAIN_SIZE, outer_size, dim_size),
+        chunk_size,
         begin,
         end);
   });
