@@ -38,9 +38,9 @@ inline std::string toStringConstantState(ConstantState state) {
 }
 
 template <typename ModelT = AOTInductorModel>
-class AOTInductorModelContainer {
+class AOTInductorModelContainerTemplate {
  public:
-  AOTInductorModelContainer(
+  AOTInductorModelContainerTemplate(
       size_t num_models,
       const std::string& device_str,
       const std::optional<std::string>& cubin_dir = std::nullopt) {
@@ -759,5 +759,9 @@ class AOTInductorModelContainer {
     available_models_.push_back(model);
   }
 };
+
+// Non-templated alias for default use
+using AOTInductorModelContainer =
+    AOTInductorModelContainerTemplate<AOTInductorModel>;
 
 } // namespace torch::aot_inductor
