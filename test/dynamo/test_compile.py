@@ -81,11 +81,11 @@ class InPlaceCompilationTests(TestCase):
         torch._dynamo.reset()
 
         @torch._dynamo.on_compile_start
-        def start_callback():
+        def start_callback(_):
             print("Compilation started.")
 
         @torch._dynamo.on_compile_end
-        def end_callback():
+        def end_callback(_):
             print("Compilation ended.")
 
         mod = ToyModel()
@@ -116,13 +116,13 @@ class InPlaceCompilationTests(TestCase):
         counter = 0
 
         @torch._dynamo.on_compile_start
-        def start_callback():
+        def start_callback(_):
             nonlocal counter
             counter += 1
             print(f"Counter = {counter}")
 
         @torch._dynamo.on_compile_end
-        def end_callback():
+        def end_callback(_):
             nonlocal counter
             counter += 1
             print(f"Counter = {counter}")
@@ -236,9 +236,17 @@ class PublicTorchCompilerTests(TestCase):
         public_sig = inspect.signature(public_fn)
         private_sig = inspect.signature(private_fn)
 
+        matching = public_sig == private_sig
+        matching |= len(public_sig.parameters) < len(private_sig.parameters) and all(
+            public == private
+            for public, private in zip(
+                public_sig.parameters.items(), private_sig.parameters.items()
+            )
+        )
+
         self.assertEqual(
-            public_sig,
-            private_sig,
+            matching,
+            True,
             f"Signatures do not match for function {public_fn_name}() \n Public: {public_sig} \n Private: {private_sig}",
         )
 

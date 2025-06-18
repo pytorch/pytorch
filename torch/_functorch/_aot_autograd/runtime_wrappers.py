@@ -20,6 +20,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
+from torch._dynamo.callback import callback_handler, CallbackTrigger
 from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
 from torch._guards import (
     compile_context,
@@ -2290,6 +2291,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
                         log_waitcounter=True,
                         waitcounter_name_override="entire_backward_compile",
+                    ), callback_handler.install_callbacks(
+                        CallbackTrigger.LAZY_BACKWARD,
+                        str(CompileContext.current_compile_id()),
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
                         # See Note: [Backward graph lazy lowering]

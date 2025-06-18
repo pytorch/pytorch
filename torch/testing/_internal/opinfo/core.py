@@ -3125,6 +3125,12 @@ def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     return op(input + input.mH, *args, **kwargs)
 
 
+def gradcheck_wrapper_ctc_loss(op, input, *args, **kwargs):
+    """Gradcheck wrapper for ctc loss to project onto log-simplex space."""
+    # See https://github.com/pytorch/pytorch/issues/52241
+    return op(input.log_softmax(dim=2), *args, **kwargs)
+
+
 def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
     """Gradcheck wrapper for functions that take lower or upper triangular matrices as input.
 
