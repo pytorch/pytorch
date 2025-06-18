@@ -67,11 +67,6 @@ else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
 fi
 
-# If ROCm package is a patch release, do not include patch number in package name
-if [[ ${DESIRED_CUDA} =~ ^rocm[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+${DESIRED_CUDA%.*}"
-fi
-
 export PYTORCH_BUILD_NUMBER=1
 
 # Set triton version as part of PYTORCH_EXTRA_INSTALL_REQUIREMENTS
