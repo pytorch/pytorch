@@ -276,8 +276,17 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
     return new_stride
 
 
+def _view_has_unbacked_input(a, shape):
+    from torch.fx.experimental.symbolic_shapes import has_hint
+    return (
+        any(not has_hint(s) for s in a.size())
+        or any(not has_hint(s) for s in a.stride())
+        or any(not has_hint(s) for s in shape)
+    )
+
+
 def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, has_hint, sym_eq
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
@@ -333,12 +342,10 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
     # then we redo everything by looking at hints and guarding instead of failing.
     # Also if the expression has unbacked symbols, then we run again with size_oblivious_enabled=False
     # to throw a data dependent error.
-    has_unbacked = any(not has_hint(s) for s in a.shape) or any(
-        not has_hint(s) for s in shape
-    )
 
     if size_oblivious_enabled and (
-        torch.fx.experimental._config.backed_size_oblivious or has_unbacked
+        torch.fx.experimental._config.backed_size_oblivious
+        or _view_has_unbacked_input(a, shape)
     ):
         return _view_unbacked_meta(a, shape, size_oblivious_enabled=False)
 
@@ -348,23 +355,12 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
 
 @register_meta(aten.view.default)
 def _view_meta(a, *shape):
-    all_hinted = True
-
-    def update_all_hinted(all_hinted, ls):
-        for x in ls:
-            all_hinted = all_hinted and (
-                not isinstance(x, torch.SymInt) or x.node.has_hint()
-            )
-        return all_hinted
-
-    all_hinted = update_all_hinted(all_hinted, shape)
-    all_hinted = update_all_hinted(all_hinted, a.size())
-    all_hinted = update_all_hinted(all_hinted, a.stride())
-
-    if all_hinted:
-        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
-    else:
+    if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
+        a, shape
+    ):
         return _view_unbacked_meta(a, shape)
+    else:
+        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
 
 
 @register_meta(aten.linalg_matrix_exp)
