@@ -7955,6 +7955,20 @@ class TestMPS(TestCaseMPS):
             x[::2].bitwise_not_()
         self.assertEqual(x_mps.cpu(), x_cpu)
 
+
+class TestLargeTensors(TestCaseMPS):
+    def test_64bit_binops(self):
+        if torch.mps.recommended_max_memory() < 16_000_000_000:
+            raise unittest.SkipTest("Needs at least 16Gb of RAM")
+        a = torch.rand(1, 1024, 1024, dtype=torch.float16, device='mps')
+        b = torch.rand(5000, 1, 1, dtype=torch.float16, device='mps')
+        rc = (a + b).sin()
+        slice_idx = -2
+        rc_slice = rc[slice_idx:]
+        rc_slice_cpu = (a.cpu() + b.cpu()[slice_idx:]).sin()
+        self.assertEqual(rc_slice, rc_slice_cpu)
+
+
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
         return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -8400,6 +8414,14 @@ class TestTopK(TestCase):
             for largest_val in largest_vals:
                 with self.subTest(shape=shape, largest_val=largest_val):
                     self._test_topk(shape, largest_val)
+
+    def test_topk_gt_4d(self):
+        a = torch.ones(5, 4, 3, 2, 1, dtype=torch.float).to('mps')
+        try:
+            t_mps = torch.ops.aten.topk(a, k=5, dim=0)
+        except Exception as e:
+            e_string = str(e)
+            self.assertEqual(e_string, "On-going issue on MPSGraph topk when ndims() - axis > 4, see issue #154890")
 
 class TestNNMPS(NNTestCase):
 
