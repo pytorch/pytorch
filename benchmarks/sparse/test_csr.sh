@@ -8,7 +8,7 @@ echo "----- USE_MKL=1 -----" >> $OUTFILE
 rm -rf build
 
 export USE_MKL=1
-CMAKE_ONLY=1 python setup.py build
+python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 
 python setup.py install

@@ -347,26 +347,26 @@ class TestConfigFilter(TestCase):
             {
                 "job_name": "a-ci-job",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "description": "Replicate each periodic mode in a different config",
+                "descripion": "Replicate each periodic mode in a different config",
             },
             {
                 "job_name": "a-ci-cuda11.8-job",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "description": "Replicate each periodic mode in a different config for a CUDA job",
+                "descripion": "Replicate each periodic mode in a different config for a CUDA job",
             },
             {
                 "job_name": "a-ci-rocm-job",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "description": "Replicate each periodic mode in a different config for a ROCm job",
+                "descripion": "Replicate each periodic mode in a different config for a ROCm job",
             },
             {
                 "job_name": "",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "description": "Empty job name",
+                "descripion": "Empty job name",
             },
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "description": "Missing job name",
+                "descripion": "Missing job name",
             },
         ]
 

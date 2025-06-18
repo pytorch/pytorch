@@ -229,7 +229,7 @@ skip:
       - doctr_det_predictor
       - doctr_reco_predictor
       - moondream
-      # doesn't fit in memory
+      # doesnt fit in memory
       - phi_1_5
       - detectron2_fcos_r_50_fpn
 
