@@ -325,6 +325,9 @@ skip_torchrec = True
 # Don't apply most trace_rules.py rules
 dont_skip_tracing = False
 
+# If True, enforce fullgraph=True - raise errors on graph break
+error_on_graph_break = False
+
 # No longer used
 optimize_ddp_lazy_compile = False
 
@@ -566,20 +569,6 @@ compiled_autograd_kwargs_override: dict[str, Any] = {}
 # invariant is inviolated, you will likely deadlock NCCL and encounter a
 # NCCL timeout.
 enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") == "1"
-
-# Enables use of collectives *during* guard evaluation to synchronize behavior
-# across ranks.  This is expensive: we have to issue a collective every time
-# we enter a compiled code region, even if no rank actually would need to
-# compile.  This can help prevent NCCL hangs by ensuring that we never have a
-# situation where one rank starts recompiling while other ranks don't compile;
-# it is especially useful in conjunction with enable_compiler_collectives
-# where such a situation would immediately cause a hang (as it is necessary
-# for all ranks to compile at the same time to run compiler collectives).  Like
-# compiler collectives, you can only run this on SPMD programs; you will hang
-# otherwise.  Note that a guard collective is only issued if there is any
-# compiled code to guard on; if this the first time we encounter a frame or
-# the frame is skipped, we don't issue collectives.
-enable_guard_collectives = os.environ.get("TORCH_GUARD_COLLECTIVES", "0") == "1"
 
 # Enables a local, filesystem "profile" which can be used for automatic
 # dynamic decisions, analogous to profile-guided optimization.  This config
