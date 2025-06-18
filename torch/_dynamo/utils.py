@@ -2615,6 +2615,22 @@ def _get_fake_tensor(vt):
     return fake_tensor
 
 
+def slice_length(s: slice, seq_len: int) -> int:
+    start, stop, step = s.indices(seq_len)
+    return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
+
+
+def raise_args_mismatch(tx, name):
+    from torch._dynamo.exc import raise_observed_exception
+    from torch._dynamo.variables import ConstantVariable
+
+    raise_observed_exception(
+        TypeError,
+        tx,
+        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
+    )
+
+
 def iter_contains(items, search, tx, check_tensor_identity=False):
     from .variables import (
         BuiltinVariable,
