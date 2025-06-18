@@ -542,10 +542,18 @@ class BuiltinVariable(VariableTracker):
         def expand_list_like(tx: "InstructionTranslator", lst, const):
             if isinstance(lst, ConstantVariable):
                 lst, const = const, lst
-            return lst.__class__(
-                items=lst.items * const.as_python_constant(),
-                mutation_type=ValueMutationNew(),
-            )
+            try:
+                return lst.__class__(
+                    items=lst.items * const.as_python_constant(),
+                    mutation_type=ValueMutationNew(),
+                )
+            except Exception as exc:
+                # MemoryError
+                raise_observed_exception(
+                    type(exc),
+                    tx,
+                    args=list(map(ConstantVariable.create, exc.args)),
+                )
 
         list_like_expansion_handlers: list[
             tuple[
@@ -2044,7 +2052,6 @@ class BuiltinVariable(VariableTracker):
                     "assertNotWarns",
                     "assertWarnsRegex",
                     "assertDictEqual",
-                    "assertSequenceEqual",
                     "assertWarns",
                 )
             ):
