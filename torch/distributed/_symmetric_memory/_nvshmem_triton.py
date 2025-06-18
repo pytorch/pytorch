@@ -91,8 +91,15 @@ if has_triton():
         )
 
     @core.extern
-    def putmem_signal_block(
-        dst, src, nelems, sig_addr, signal, sig_op, pe, _builder=None
+    def putmem_signal_block(  # type: ignore[no-untyped-def]
+        dst,
+        src,
+        nelems,
+        sig_addr,
+        signal,
+        sig_op,
+        pe,
+        _builder=None,
     ):  # type: ignore[no-untyped-def]
         return core.extern_elementwise(
             "",
