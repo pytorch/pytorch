@@ -52,15 +52,15 @@ namespace cuda::CUDACachingAllocator {
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
+// Included here as this is externally used in CUDAAllocatorConfig
+const size_t kLargeBuffer =
+    20971520; // "large" allocations may be packed in 20 MiB blocks
+
 enum class Expandable_Segments_Handle_Type : int {
   UNSPECIFIED = 0,
   POSIX_FD = 1,
   FABRIC_HANDLE = 2,
 };
-
-// Included here as this is externally used in CUDAAllocatorConfig
-const size_t kLargeBuffer =
-    20971520; // "large" allocations may be packed in 20 MiB blocks
 
 namespace Native {
 
@@ -291,6 +291,7 @@ struct SegmentConfig {
   std::atomic<Expandable_Segments_Handle_Type> type{
       Expandable_Segments_Handle_Type::UNSPECIFIED};
 }
+
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 
 /*
@@ -482,7 +483,7 @@ struct ExpandableSegment {
           trimHandles();
           return rangeFromHandles(begin, begin);
         } else if (
-            SegmentConfig::expandable_segments_handle_type() ==
+          SegmentConfig::expandable_segments_handle_type() ==
             Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
           // we are testing if we can use fabric handle.
           // if we can, we will use it.
