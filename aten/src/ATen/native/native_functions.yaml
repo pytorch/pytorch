@@ -4891,7 +4891,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: reciprocal_out
+    CPU, CUDA, MTIA: reciprocal_out
     MPS: reciprocal_out_mps
   tags: pointwise
 
@@ -4920,7 +4920,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: neg_out
+    CPU, CUDA, MPS, MTIA: neg_out
     SparseCPU, SparseCUDA: neg_out_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: neg_sparse_csr_out
   tags: pointwise
@@ -9967,7 +9967,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: remainder_out
+    CPU, CUDA, MPS, MTIA: remainder_out
   tags: pointwise
 
 - func: remainder.Tensor(Tensor self, Tensor other) -> Tensor
