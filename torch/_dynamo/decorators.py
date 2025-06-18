@@ -619,7 +619,12 @@ def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None):
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
-        t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
+        # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
+        # TypeError: 'Attribute' object does not support item assignment
+        if isinstance(t._specialize_on, dict):
+            t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
         return
 
     assert isinstance(index, (list, tuple))
