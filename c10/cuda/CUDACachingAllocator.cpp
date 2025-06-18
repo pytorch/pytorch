@@ -274,12 +274,12 @@ struct SegmentConfig {
   ~SegmentConfig() = default;
 
   static Expandable_Segments_Handle_Type expandable_segments_handle_type() {
-    return instance().m_expandable_segments_handle_type;
+    return instance().handle_type;
   }
 
   static void set_expandable_segments_handle_type(
       Expandable_Segments_Handle_Type handle_type) {
-    instance().m_expandable_segments_handle_type = handle_type;
+    instance().handle_type = handle_type;
   }
 
  private:
@@ -288,10 +288,9 @@ struct SegmentConfig {
     return instance;
   }
 
-  std::atomic<Expandable_Segments_Handle_Type> type{
+  std::atomic<Expandable_Segments_Handle_Type> handle_type{
       Expandable_Segments_Handle_Type::UNSPECIFIED};
 }
-
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 
 /*
@@ -483,7 +482,7 @@ struct ExpandableSegment {
           trimHandles();
           return rangeFromHandles(begin, begin);
         } else if (
-          SegmentConfig::expandable_segments_handle_type() ==
+            SegmentConfig::expandable_segments_handle_type() ==
             Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
           // we are testing if we can use fabric handle.
           // if we can, we will use it.
