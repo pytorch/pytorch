@@ -169,6 +169,21 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
   return it.value();
 }
 
+void Dispatcher::unsafeSetTags(const std::vector<at::Tag>& tags, const char* name, const char* overload_name) {
+  auto op = findOp({name, overload_name});
+  if (op.has_value()) {
+    op->operatorDef_->op.unsafeSetTags(tags);
+  }
+}
+
+const std::vector<at::Tag> Dispatcher::getTags(const char* name, const char* overload_name) {
+  auto op = findOp({name, overload_name});
+  if (op.has_value()) {
+    return op->operatorDef_->op.getTags();
+  }
+  return {};
+}
+
 const std::vector<OperatorName> Dispatcher::getAllOpNames() {
   return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
     std::vector<OperatorName> allOpNames;

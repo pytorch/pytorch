@@ -63,6 +63,24 @@ class TestDispatcherPythonBindings(TestCase):
         y = torch._C._dispatch_call_boxed(sin, x)
         self.assertEqual(y, x.sin())
 
+    def test_unsafe_set_tags(self) -> None:
+        @torch.library.custom_op(
+            "mylib::foo", mutates_args=(), tags=[torch._C.Tag.pointwise]
+        )
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        self.assertEqual(
+            torch.ops.mylib.foo.default.tags,
+            [
+                torch._C.Tag.pt2_compliant_tag,
+                torch._C.Tag.pointwise,
+            ],
+        )
+        torch._C._unsafe_set_tags([torch._C.Tag.core], "mylib::foo", "")
+        r = torch.ops.mylib.foo.default.tags
+        self.assertEqual(r, [torch._C.Tag.core])
+
 
 class TestPythonRegistration(TestCase):
     test_ns = "_test_python_registration"

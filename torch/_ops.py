@@ -803,6 +803,11 @@ class OpOverload(OperatorBase):
             )
         return self._lazy_handle
 
+    def _unsafe_set_tags(self, tags: list[torch._C.Tag]):
+        return torch._C._unsafe_set_tags(
+            tags, self._schema.name, self._schema.overload_name
+        )
+
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
@@ -982,7 +987,7 @@ class OpOverload(OperatorBase):
 
     @property
     def tags(self):
-        return self._tags
+        return torch._C._get_tags(self._schema.name, self._schema.overload_name)
 
     # TODO: add more methods to expose information about input and output arguments
 
