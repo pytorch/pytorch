@@ -16,6 +16,8 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
       m_garbage_collection_threshold(0),
       m_pinned_num_register_threads(1),
       m_expandable_segments(false),
+      m_expandable_segments_handle_type(
+          Expandable_Segments_Handle_Type::UNSPECIFIED),
       m_release_lock_on_cudamalloc(false),
       m_pinned_use_cuda_host_register(false),
       m_pinned_use_background_threads(false) {
