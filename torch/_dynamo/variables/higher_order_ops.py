@@ -65,6 +65,7 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 
 
 def raise_hard_error_if_graph_break(reason):
@@ -261,7 +262,7 @@ def _check_supported_callable_arg(
         )
 
 
-def are_same_graph_modules(a_mod, b_mod, fake_mode):
+def are_same_graph_modules(fn_name, a_mod, b_mod, fake_mode):
     from torch._subclasses._fake_tensor_utils import _CacheKeyState
     from torch._subclasses.fake_tensor import extract_tensor_metadata
 
@@ -322,7 +323,11 @@ def are_same_graph_modules(a_mod, b_mod, fake_mode):
             a_flat, _ = pytree.tree_flatten((a_node.args, a_node.kwargs))
             b_flat, _ = pytree.tree_flatten((b_node.args, b_node.kwargs))
             if not check_all_args(a_flat, b_flat):
-                # print("call_function args failed")
+                hc_log.debug(
+                    "%s: Graph comparison failed at node (call_function): %s",
+                    fn_name,
+                    a_node,
+                )
                 return False
         elif a_node.op == "call_method":
             if a_node.target != b_node.target:
@@ -330,13 +335,17 @@ def are_same_graph_modules(a_mod, b_mod, fake_mode):
             a_flat, _ = pytree.tree_flatten((a_node.args, a_node.kwargs))
             b_flat, _ = pytree.tree_flatten((b_node.args, b_node.kwargs))
             if not check_all_args(a_flat, b_flat):
-                # print("call_method args failed")
+                hc_log.debug(
+                    "%s: Graph comparison failed at node (call_method) : %s",
+                    fn_name,
+                    a_node,
+                )
                 return False
         elif a_node.op == "output":
             a_flat, _ = pytree.tree_flatten((a_node.args, a_node.kwargs))
             b_flat, _ = pytree.tree_flatten((b_node.args, b_node.kwargs))
             if not check_all_args(a_flat, b_flat):
-                # print("output args failed")
+                hc_log.debug("%s: Graph comparison failed at the output node", fn_name)
                 return False
         elif a_node.op == "get_attr":
             a_attr = getattr(a_mod, a_node.target)
@@ -345,7 +354,7 @@ def are_same_graph_modules(a_mod, b_mod, fake_mode):
                 if not isinstance(b_attr, torch.fx.GraphModule):
                     return False
                 # This is an example of a HOP inside a HOP
-                if not are_same_graph_modules(a_attr, b_attr, fake_mode):
+                if not are_same_graph_modules(fn_name, a_attr, b_attr, fake_mode):
                     return False
             else:
                 # TODO - write an example with tensor as a graph attribute in
@@ -3359,9 +3368,11 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         if isinstance(fn_vt, UserFunctionVariable):
             fn_id = id(fn_vt.get_function())
+            fn_name = fn_vt.get_function().__name__
         else:
             assert isinstance(fn_vt, UnspecializedNNModuleVariable)
             fn_id = id(fn_vt.value.forward.__func__)
+            fn_name = fn_vt.value.forward.__name__
         previously_installed_submodules = []
         if invoke_subgraph_cache:
             previously_installed_submodules = (
@@ -3373,17 +3384,29 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             for submodule_name in reversed(previously_installed_submodules):
                 assert submodule_name in tx.output.nn_modules
                 previous_mod = tx.output.nn_modules[submodule_name]
-                if are_same_graph_modules(previous_mod, current_mod, tx.fake_mode):
+                if are_same_graph_modules(
+                    fn_name, previous_mod, current_mod, tx.fake_mode
+                ):
                     return submodule_name
 
         body_name = super().install_subgraph_in_output_graph(
             tx, fn_vt, fn_args_vt, kwargs, body_gmod, "subgraph"
+        )
+        hc_log.debug(
+            "%s: Installing subgraph with identifier '%s', bringing total count for '%s' function to %s",
+            fn_name,
+            body_name,
+            fn_name,
+            len(previously_installed_submodules) + 1,
         )
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_dynamo_installed_submodule(fn_id, body_name)
 
         return body_name
 
+    @raise_hard_error_if_graph_break(
+        reason="torch.compile requires the `mark_compile_region` decorated function to be capturable into a single graph",
+    )
     def call_function(
         self,
         tx: "InstructionTranslator",
