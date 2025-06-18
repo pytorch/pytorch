@@ -30,9 +30,9 @@ from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
 
-from .. import polyfills, variables
+from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import is_from_local_source
 from ..utils import (
@@ -302,18 +302,8 @@ class ConstDictVariable(VariableTracker):
             return id(value.realize()) != id(other.realize())
         return id(value) != id(other)
 
-    def reconstruct(self, codegen: "PyCodegen"):
-        # instructions to load collections.OrderedDict if necessary
-        if self.user_cls is collections.OrderedDict:
-            codegen.add_push_null(
-                lambda: codegen.extend_output(
-                    [
-                        codegen.create_load_python_module(collections),
-                        codegen.create_load_attr("OrderedDict"),
-                    ]
-                )
-            )
-        # instructions to build the dict keys and values
+    def reconstruct_kvs_into_new_dict(self, codegen):
+        # Build a dictionary that contains the keys and values.
         num_args = 0
         for key, value in self.items.items():
             # We can safely call realize() here as it won't introduce any new guards
@@ -322,18 +312,23 @@ class ConstDictVariable(VariableTracker):
                 codegen(key.vt)
                 codegen(value)
                 num_args += 1
+        codegen.append_output(create_instruction("BUILD_MAP", arg=num_args))
 
-        # BUILD_MAP and calling collections.OrderedDict if necessary
+    def reconstruct(self, codegen: "PyCodegen"):
         if self.user_cls is collections.OrderedDict:
-            codegen.extend_output(
-                [
-                    create_instruction("BUILD_MAP", arg=num_args),
-                    *create_call_function(1, False),
-                ]
+            # emit `OrderedDict(constructed_dict)`
+            codegen.add_push_null(
+                lambda: codegen.extend_output(
+                    [
+                        codegen.create_load_python_module(collections),
+                        codegen.create_load_attr("OrderedDict"),
+                    ]
+                )
             )
-        # BUILD_MAP only if user_cls is dict
+            self.reconstruct_kvs_into_new_dict(codegen)
+            codegen.extend_output(create_call_function(1, False))
         else:
-            codegen.append_output(create_instruction("BUILD_MAP", arg=num_args))
+            self.reconstruct_kvs_into_new_dict(codegen)
 
     def getitem_const_raise_exception_if_absent(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -346,7 +341,16 @@ class ConstDictVariable(VariableTracker):
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
-            unimplemented(f"dict KeyError: {arg.value}")
+            msg = f"Dictionary key {arg.value} not found during tracing"
+            unimplemented_v2(
+                gb_type="key not found in dict",
+                context=f"Key {arg.value}",
+                explanation=msg,
+                hints=[
+                    "Check if the key exists in the dictionary before accessing it.",
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
         return self.items[key]
 
     def maybe_getitem_const(self, arg: VariableTracker):
@@ -591,7 +595,17 @@ class ConstDictVariable(VariableTracker):
             if name in self.user_cls.__dict__:
                 return ConstantVariable.create(True)
             return ConstantVariable.create(False)
-        unimplemented(f"hasattr on {self.user_cls} is not supported")
+
+        msg = f"hasattr on {self.user_cls} is not supported"
+        unimplemented_v2(
+            gb_type="unsupported hasattr operation",
+            context=f"Class {self.user_cls}",
+            explanation=msg,
+            hints=[
+                "Consider using a regular dictionary instead",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def clone(self, **kwargs):
         self.install_dict_keys_match_guard()
@@ -611,9 +625,18 @@ class MappingProxyVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen"):
         # load types.MappingProxyType
         if self.source:
-            unimplemented(
-                "Can't reconstruct an existing mapping variable because"
-                " the connection to the original dict will be lost"
+            msg = (
+                f"Preexisting MappingProxyVariable (source: {self.source}) cannot be reconstructed "
+                "because the connection to the original dict will be lost."
+            )
+            unimplemented_v2(
+                gb_type="mapping proxy cannot be reconstructed",
+                context=f"Source: {self.source}",
+                explanation=msg,
+                hints=[
+                    "Use a mapping proxy constructed in the same `torch.compile` region.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
         codegen.add_push_null(
             lambda: codegen.extend_output(
@@ -634,7 +657,7 @@ class MappingProxyVariable(VariableTracker):
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if self.source and tx.output.side_effects.has_existing_dict_mutation():
-            unimplemented(
+            msg = (
                 "A dict has been modified while we have an existing mappingproxy object. "
                 "A mapping proxy object, as the name suggest, proxies a mapping "
                 "object (usually a dict). If the original dict object mutates, it "
@@ -642,6 +665,16 @@ class MappingProxyVariable(VariableTracker):
                 "object, we do not know the original dict it points to. Therefore, "
                 "for correctness we graph break when there is dict mutation and we "
                 "are trying to access a proxy object."
+            )
+
+            unimplemented_v2(
+                gb_type="mapping proxy affected by dictionary mutation",
+                context=f"Source: {self.source}, Dict mutation detected",
+                explanation=msg,
+                hints=[
+                    "Avoid modifying dictionaries that might be referenced by mapping proxy objects",
+                    "Or avoid using the mapping proxy objects after modifying its underlying dictionary",
+                ],
             )
         return self.dv_dict.call_method(tx, name, args, kwargs)
 
@@ -703,6 +736,20 @@ class DefaultDictVariable(ConstDictVariable):
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen):
+        # emit `defaultdict(default_factory, new_dict)`
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(collections),
+                    codegen.create_load_attr("defaultdict"),
+                ]
+            )
+        )
+        codegen(self.default_factory)
+        self.reconstruct_kvs_into_new_dict(codegen)
+        codegen.extend_output(create_call_function(2, False))
 
 
 # TODO: Implementing this via inheritance rather than composition is a

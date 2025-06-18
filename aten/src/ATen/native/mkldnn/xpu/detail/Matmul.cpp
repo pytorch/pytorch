@@ -20,6 +20,10 @@ sycl::event matmul(
     bool m2_trans,
     Attr attr,
     const std::vector<sycl::event>& deps) {
+  // m2_trans means mat2 is transposed from the nn.Linear perspective.
+  // m2_trans==true means mat2 is [k, n] layout.
+  // m2_trans==false means mat2 is [n, k] layout, aka, the default layout in
+  // nn.Linear.
   int64_t dims = result.dim();
   TORCH_CHECK(
       dims == 2 || dims == 3,

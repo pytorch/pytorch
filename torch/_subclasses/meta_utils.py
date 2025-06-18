@@ -385,7 +385,7 @@ class MetaTensorDescriber:
             is_leaf=is_leaf,
             requires_grad=t.requires_grad,
             # NB: ndim should be OK too but there is a disaster at
-            # python test/dynamo/test_subclasses.py -k test_user_overidden_property_unsupported
+            # python test/dynamo/test_subclasses.py -k test_user_overridden_property_unsupported
             # Actually, this means that we have a little bit of a problem
             # here, which is that there is some sensitivity to how exactly an
             # access is done if you have a __torch_function__ subclass.  Maybe
@@ -1813,9 +1813,9 @@ class MetaConverter(Generic[_TensorT]):
             # Thanks to storage resizing, it's possible to end up with a tensor
             # that advertises a real size, but has a storage that actually has zero bytes.
             # Need to reflect this in the generated FakeTensor.
-            from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+            from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-            if t.storage is not None and guard_size_oblivious(t.storage.size == 0):
+            if t.storage is not None and guard_or_false(t.storage.size == 0):
                 r.untyped_storage().resize_(0)
 
             if t.is_parameter:

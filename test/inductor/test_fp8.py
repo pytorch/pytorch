@@ -17,7 +17,13 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    _quantize_rowwise,
+    _quantize_tensorwise,
+    _to_fp8_saturated,
+    HAS_CPU,
+    HAS_CUDA,
+)
 from torch.utils._triton import has_triton_tma_device
 
 
@@ -25,70 +31,6 @@ torch.set_float32_matmul_precision("high")
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
-
-# define the e4m3/e5m2 constants
-E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
-E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
-E4M3FNUZ_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
-E5M2FNUZ_MAX_POS = torch.finfo(torch.float8_e5m2fnuz).max
-
-FP16_MAX_POS: float = torch.finfo(torch.float16).max
-EPS: float = 1e-12
-
-
-def _to_fp8_saturated(x: Tensor, float8_dtype: torch.dtype) -> Tensor:
-    # The default behavior in PyTorch for casting to `float8_e4m3fn`
-    # and `e5m2` is to not saturate. In this context, we should saturate.
-    # A common case where we want to saturate is when the history of a
-    # tensor has a maximum value of `amax1`, and the current amax value
-    # is `amax2`, where `amax1 < amax2`. This is common when using delayed
-    # scaling.
-    if float8_dtype == torch.float8_e4m3fn:
-        x = x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
-    elif float8_dtype == torch.float8_e5m2:
-        x = x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
-    elif float8_dtype == torch.float8_e4m3fnuz:
-        x = x.clamp(min=-1 * E4M3FNUZ_MAX_POS, max=E4M3FNUZ_MAX_POS)
-    elif float8_dtype == torch.float8_e5m2fnuz:
-        x = x.clamp(min=-1 * E5M2FNUZ_MAX_POS, max=E5M2FNUZ_MAX_POS)
-    else:
-        raise TypeError(f"Unsupported float8_dtype: {float8_dtype}")
-    return x.to(float8_dtype)
-
-
-@torch.no_grad()
-def _amax_to_scale(
-    amax: torch.Tensor, float8_dtype: torch.dtype, orig_dtype: torch.dtype
-) -> torch.Tensor:
-    # To make scale dtype to be fp32 for accuracy
-    amax = amax.float()
-    if float8_dtype == torch.float8_e4m3fn:
-        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
-    else:  # e5m2
-        res = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
-
-    # Ensure that the scale is representable in float16,
-    # this helps when amax is small. We are assuming that we don't need
-    # to care about this for float32/bfloat16.
-    if orig_dtype is torch.float16:
-        res = torch.clamp(res, max=FP16_MAX_POS)
-    return res
-
-
-def _quantize_tensorwise(x: Tensor, float8_dtype: torch.dtype):
-    amax = torch.max(torch.abs(x))
-    scale = _amax_to_scale(amax, float8_dtype, x.dtype)
-    x_fp8 = _to_fp8_saturated(x * scale, float8_dtype)
-    inverse_scale = scale.reciprocal()
-    return x_fp8, inverse_scale
-
-
-def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
-    amax = torch.max(torch.abs(x), dim=1, keepdim=True).values
-    scale = _amax_to_scale(amax, float8_dtype, x.dtype)
-    x_fp8 = _to_fp8_saturated(x * scale, float8_dtype)
-    inverse_scale = scale.reciprocal()
-    return x_fp8, inverse_scale
 
 
 def _fix_fp8_dtype_for_rocm(

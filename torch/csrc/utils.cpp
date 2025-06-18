@@ -300,7 +300,7 @@ char* tensor_repr(const at::Tensor& tensor) {
   return result;
 
 error:
-  fprintf(stderr, "torch::gdb::tensor_repr: unexpected error\n");
+  fmt::print(stderr, "torch::gdb::tensor_repr: unexpected error\n");
   if (PyErr_Occurred())
     PyErr_Print();
   Py_XDECREF(pytensor);
