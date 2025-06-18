@@ -101,7 +101,7 @@ def aten_scaled_dot_product_attention_23(
     assert (not is_causal) or (is_causal and attn_mask is None), (
         "is_causal and attn_mask cannot be set at the same time"
     )
-    assert (len(query.shape) == 4 and len(key.shape) == 4 and len(value.shape) == 4), (
+    assert len(query.shape) == 4 and len(key.shape) == 4 and len(value.shape) == 4, (
         "only 4D query, key, and value are supported"
     )
 
