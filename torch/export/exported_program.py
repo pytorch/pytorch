@@ -272,7 +272,7 @@ def _override_composite_implicit_decomp(cia_ops_to_callable):
 
 
 def _split_decomp_table_to_cia_and_python_decomp(
-    decomp_table: dict[torch._ops.OperatorBase, Callable]
+    decomp_table: dict[torch._ops.OperatorBase, Callable],
 ) -> tuple[dict[torch._ops.OperatorBase, Callable], ...]:
     all_preservable_cia_ops = set(_collect_all_valid_cia_ops())
     cia_ops_to_callable = {}
@@ -443,9 +443,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
         tx = TracingContext(fake_mode)
 
-        with fake_mode, _override_composite_implicit_decomp(
-            cia_to_decomp,
-        ), _enable_graph_inputs_of_type_nn_module(ep.example_inputs), tracing(tx):
+        with (
+            fake_mode,
+            _override_composite_implicit_decomp(
+                cia_to_decomp,
+            ),
+            _enable_graph_inputs_of_type_nn_module(ep.example_inputs),
+            tracing(tx),
+        ):
             retracing_args_unwrapped = pytree.tree_unflatten(
                 retracing_args, mod._in_spec
             )
@@ -573,9 +578,12 @@ def _decompose_and_get_gm_with_new_signature_constants(
         if decompose_custom_triton_ops
         else _disable_custom_triton_op_functional_decomposition
     )
-    with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
-        cia_to_decomp
-    ), custom_triton_ops_decomposition_ctx():
+    with (
+        _ignore_backend_decomps(),
+        fake_mode,
+        _override_composite_implicit_decomp(cia_to_decomp),
+        custom_triton_ops_decomposition_ctx(),
+    ):
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
@@ -1514,9 +1522,9 @@ class ExportedProgram:
                 if node.op != "placeholder":
                     break
 
-                assert i < len(
-                    old_signature.input_specs
-                ), "Number of inputs changed after transformation"
+                assert i < len(old_signature.input_specs), (
+                    "Number of inputs changed after transformation"
+                )
                 old_input_spec = old_signature.input_specs[i]
                 arg = (
                     old_input_spec.arg
@@ -1539,9 +1547,9 @@ class ExportedProgram:
 
             new_output_specs = []
             for i, node in enumerate(output_node.args[0]):
-                assert i < len(
-                    old_signature.output_specs
-                ), "Number of outputs changed after transformation"
+                assert i < len(old_signature.output_specs), (
+                    "Number of outputs changed after transformation"
+                )
                 old_output_spec = old_signature.output_specs[i]
                 arg = (
                     old_output_spec.arg
@@ -1599,9 +1607,9 @@ class ExportedProgram:
     # TODO: remove this
     @final
     def _validate(self):
-        assert (
-            len(self.verifiers) > 0
-        ), "ExportedProgram must have at least one verifier."
+        assert len(self.verifiers) > 0, (
+            "ExportedProgram must have at least one verifier."
+        )
         for v in self.verifiers:
             v().check(self)
 
