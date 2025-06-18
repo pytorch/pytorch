@@ -4578,6 +4578,20 @@ def forward(self, x, b, y):
         out = graph(x)
         self.assertEqual(ref_out, out)
 
+    def test_strict_fake_tensor_prop_real_tensors(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return bool(x.eq(0.1).any().item())
+
+        model = Foo()
+        inputs = (torch.randn(64),)
+        ref = model(*inputs)
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = torch.export.export(model, inputs, strict=True)
+            res = ep.module()(*inputs)
+
+        self.assertEqual(ref, res)
+
 
 class ExportTestsDevice(torch._dynamo.test_case.TestCase):
     def test_export_with_parameters(self, device):
