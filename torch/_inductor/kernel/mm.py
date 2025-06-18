@@ -215,11 +215,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
     static_shape, is_nonzero = _is_static_problem(layout)
 
     kernel_inputs = MMKernelInputs((mat1, mat2))
-    mm_params = V.choices.get_base_mm_params(kernel_inputs)
-    persistent_mm_params = V.choices.get_persistent_mm_params(kernel_inputs)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
     if is_nonzero and use_triton_template(layout):
+        mm_params = V.choices.get_mm_params(mm_template, kernel_inputs)
         for config in mm_params():
             mm_template.maybe_append_choice(
                 choices,
@@ -229,6 +228,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
 
         if use_triton_tma_template(mat1, mat2):
+            persistent_mm_params = V.choices.get_mm_params(
+                persistent_tma_mm_template, kernel_inputs
+            )
             for config in persistent_mm_params():
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
