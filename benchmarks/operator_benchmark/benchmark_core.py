@@ -561,7 +561,7 @@ class BenchmarkRunner:
         output_csv_filename = self.args.output_csv
         headers = [
             "Benchmarking Framework",
-            "Benchmarking Module Name",
+            "Benchamrking Module Name",
             "Case Name",
             "tag",
             "run_backward",
