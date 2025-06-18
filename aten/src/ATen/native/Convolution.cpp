@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/ConvolutionMM3d.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/Pool.h>
@@ -446,11 +447,6 @@ struct ConvParams {
       }
     }
     if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous) {
-      // bypass dilation checks for channels_last convolution
-      if (deterministic && is_dilated()) {
-        // cudnn doesn't support deterministic dilated convolution fully yet
-        return false;
-      }
       if (is_dilated()) {
         return detail::getCUDAHooks().supportsDilatedConvolutionWithCuDNN() && !is_output_padding_big();
       }
@@ -468,7 +464,7 @@ struct ConvParams {
       return true;
     }
     // native kernel doesn't support 64-bit non-splittable case
-    if (cudnn_enabled && needs_64bit_indexing_no_split(input, weight)) {
+    if (cudnn_enabled && !(canUse32BitIndexMath(input) && canUse32BitIndexMath(weight))) {
       static long cudnn_version = detail::getCUDAHooks().compiledWithCuDNN() ? detail::getCUDAHooks().versionCuDNN() : -1;
       if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
         TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"

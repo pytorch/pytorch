@@ -12,7 +12,7 @@ import torch._inductor.mock_cache as mock_cache
 import torch.compiler.config
 import torch.nested
 from torch._dynamo.testing import CompileCounter
-from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
+from torch._inductor.utils import clear_caches, fresh_cache
 
 
 class PgoTest(torch._dynamo.test_case.TestCase):
@@ -24,7 +24,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             torch._dynamo.config.patch(automatic_dynamic_local_pgo=True)
         )
         if os.environ.get("INDUCTOR_TEST_DISABLE_FRESH_CACHE") != "1":
-            self._test_stack.enter_context(fresh_inductor_cache())
+            self._test_stack.enter_context(fresh_cache())
         mock_cache.PatchCaches.setUp()
 
     def tearDown(self):
@@ -35,7 +35,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
 
     def reset(self):
         torch._dynamo.reset()
-        clear_inductor_caches()
+        clear_caches()
 
     def test_basic(self):
         cnts = CompileCounter()
@@ -115,6 +115,41 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             f.attr = torch.randn(8)
             f(torch.randn(8, 8), torch.randn(8))
             self.assertEqual(cnts.frame_count, 1)
+
+    def test_pgo_dynamic_false(self):
+        @torch.compile(backend="eager", dynamic=False)
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x += 2
+                y += 2
+                torch._dynamo.graph_break()
+                x -= 2
+                y *= 2
+                return x, y
+
+        self.reset()
+        f = Foo()
+        f(torch.randn(2, 4), torch.randn(2, 4))
+        f(torch.randn(4, 4), torch.randn(6, 8))
+
+        # check PGO code state is overwritten with static value, both before/after graph break
+        for code_state in torch._dynamo.pgo.get_code_state().values():
+            self.assertEqual(code_state.automatic_dynamic["L['x']"].size, (4, 4))
+            self.assertEqual(code_state.automatic_dynamic["L['y']"].size, (6, 8))
+
+    def test_whitelist_ints_floats(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        f = Bar()
+        f(2, 2.0)
+        f(3, 2.0)
+        state = torch._dynamo.pgo.render_code_state(torch._dynamo.pgo.get_code_state())
+        whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(1)
+        self.assertTrue("L['x']" in whitelist)
+        self.assertTrue("L['y']" in whitelist)
 
     def test_pgo_dynamic_params(self):
         cnts = CompileCounter()
@@ -209,7 +244,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
 
         torch._dynamo.reset()
-        clear_inductor_caches()
+        clear_caches()
         cnts.clear()
 
         with torch.compiler.config.patch(job_id="foo"):
