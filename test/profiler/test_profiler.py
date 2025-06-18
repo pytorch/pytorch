@@ -53,7 +53,6 @@ from torch.profiler._pattern_matcher import (
     SynchronizedDataLoaderPattern,
 )
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_ARM64,
@@ -102,7 +101,6 @@ except ModuleNotFoundError:
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerCUDA(TestCase):
-    @skipCUDAVersionIn([(11, 5)])  # https://github.com/pytorch/pytorch/issues/69023
     def test_mem_leak(self):
         """Checks that there's no memory leak when using profiler with CUDA"""
         t = torch.rand(1, 1).cuda()
@@ -2032,6 +2030,19 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 self.assertTrue(evt.is_user_annotation)
             else:
                 self.assertFalse(evt.is_user_annotation)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_basic_profile(self):
+        # test a really basic profile to make sure no erroneous aten ops are run
+        x = torch.randn(4, device="cuda")
+        with torch.profiler.profile(with_stack=True) as p:
+            x *= 2
+        names = [e.name for e in p.events()]
+        for name in names:
+            if name.startswith("aten") and name != "aten::mul_":
+                self.assertTrue(False, "Found unexpected event: " + name)
+        self.assertTrue("aten::mul_" in names)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")

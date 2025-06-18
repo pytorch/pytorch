@@ -197,3 +197,10 @@ class TestException(TestCase):
             "jit.myexception.MyKeyError: This is a user defined key error",
         ):
             fn()
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )
