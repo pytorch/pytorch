@@ -57,12 +57,14 @@ struct Schedule {
   using PongEpilogueSchedule =
       cutlass::epilogue::PtrArrayTmaWarpSpecializedPingpong;
   // SM100
-  using AutoKernelSchedule = cutlass::gemm::collective::KernelScheduleAuto;
-  using AutoEpilogueSchedule = cutlass::epilogue::collective::EpilogueScheduleAuto;
+  using MMA1SMKernelSchedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecialized1SmSm100;
+  using MMA1SMEpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized1Sm;
+  using MMA2SMKernelSchedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecialized2SmSm100;
+  using MMA2SMEpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized2Sm;
 
-  using KernelSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, AutoKernelSchedule,
+  using KernelSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, cute::conditional_t<PONG, MMA2SMKernelSchedule, MMA1SMKernelSchedule>,
     cute::conditional_t<PONG, PongSchedule, CooperativeSchedule>>;
-  using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, AutoEpilogueSchedule, 
+  using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, cute::conditional_t<PONG, MMA2SMEpilogueSchedule, MMA1SMEpilogueSchedule>, 
     cute::conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>>;
 
 };
@@ -329,16 +331,15 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
   const bool sm9x = properties != nullptr && properties->major == 9;
   const bool sm10x = properties != nullptr && properties->major == 10;
 
-// TODO: figure out correct numbers here...
   if (sm10x) {
     bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm100,
         a_row_major,
         b_row_major,
         true,
+        cute::_64,
         cute::_128,
-        cute::_256,
-        Int<128/sizeof(cutlass::bfloat16_t)>(mat_a, mat_b, offs, bias, out);
+        cute::_128>(mat_a, mat_b, offs, bias, out);
   } else if (small) {
     bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm90,
