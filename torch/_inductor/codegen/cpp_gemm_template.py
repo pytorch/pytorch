@@ -780,7 +780,7 @@ class CppGemmTemplate(CppTemplate):
             dtype_B = self.input_nodes[1].get_dtype()
             num_byte_A = get_num_byte(dtype_A)
             num_byte_B = get_num_byte(dtype_B)
-            if dtype_A is torch.bfloat16 and dtype_B is torch.int8 and Kr != 1:
+            if dtype_A is torch.bfloat16 and dtype_B in [torch.int8, torch.uint8] and Kr != 1:
                 # We will cache dequantized weights (BF16) in L1D for AMX micro-kernel.
                 # In this case, the choice of the micro-kernel being used can't be decoupled from
                 # the cache blocking.
@@ -801,6 +801,12 @@ class CppGemmTemplate(CppTemplate):
             Kc_blocks = Kt_blocks
             if size_cache_B > L1:
                 Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
+            
+            if dtype_A is torch.bfloat16 and dtype_B is torch.uint8 and Mt_blocks == 1:
+                # since Mt_blocks == 1, L1-reside B block can't be reused by A.
+                # In this case, we just make a small dequant_B buffer
+                if Kc_blocks * Kr >= self.q_group_size():
+                    Kc_blocks = self.q_group_size() // Kr 
 
             # Step 2: Decide Mc assuming A block is L2-reside.
             min_Mc_ratio = 2  # TODO(jgong5): something to tune?
