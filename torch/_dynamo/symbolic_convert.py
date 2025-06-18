@@ -208,28 +208,19 @@ class SpeculationEntry:
     lineno: int
     instruction_pointer: int
     inst: Instruction  # for debugging only
-    _failed: bool = False
-    error_on_graph_break: Optional[bool] = None
+    failed: bool = False
     reason: Optional[GraphCompileReason] = None
 
-    def fail_and_restart_analysis(self, error_on_graph_break: bool):
+    def fail_and_restart_analysis(self):
         """
         Start tracing of the current frame over again, and don't take this branch.
         """
-        self._failed = True
-        self.error_on_graph_break = error_on_graph_break
+        self.failed = True
         if self.reason is not None:
             restart_reason = self.reason.reason
         else:
             restart_reason = "Unknown fail_and_restart_analysis"
         raise exc.SpeculationRestartAnalysis(restart_reason=restart_reason)
-
-    def failed(self, tx):
-        if self._failed:
-            assert self.error_on_graph_break is not None
-            tx.error_on_graph_break = self.error_on_graph_break
-            return True
-        return False
 
 
 @dataclasses.dataclass
@@ -836,7 +827,7 @@ def break_graph_if_unsupported(*, push):
         @functools.wraps(inner_fn)
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
             speculation = self.speculate()
-            if speculation.failed(self):
+            if speculation.failed:
                 assert speculation.reason is not None
                 return handle_graph_break(self, inst, speculation.reason)
             try:
@@ -881,7 +872,7 @@ def break_graph_if_unsupported(*, push):
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
                 speculation.reason = GraphCompileReason(excp.msg, excp.real_stack)
-            speculation.fail_and_restart_analysis(self.error_on_graph_break)
+            speculation.fail_and_restart_analysis()
 
         def handle_graph_break(
             self: "InstructionTranslatorBase",
@@ -1264,7 +1255,7 @@ class InstructionTranslatorBase(
             and self.is_non_empty_graph()
         ):
             self.current_speculation = self.speculate()
-            if self.current_speculation.failed(self):
+            if self.current_speculation.failed:
                 return self.step_graph_break(inst)
 
         if self.is_trace_bytecode_log_enabled:
@@ -1290,7 +1281,7 @@ class InstructionTranslatorBase(
                 raise
             log.debug("step triggered compile", exc_info=True)
 
-        self.current_speculation.fail_and_restart_analysis(self.error_on_graph_break)
+        self.current_speculation.fail_and_restart_analysis()
 
     if sys.version_info >= (3, 11):
 
@@ -2306,7 +2297,7 @@ class InstructionTranslatorBase(
 
     def STORE_ATTR(self, inst):
         speculation = self.speculate()
-        if speculation.failed(self):
+        if speculation.failed:
             return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
 
@@ -2330,7 +2321,7 @@ class InstructionTranslatorBase(
             log.debug("STORE_ATTR triggered compile", exc_info=True)
             e.remove_from_stats()
             e.add_to_stats("graph_break")
-        speculation.fail_and_restart_analysis(self.error_on_graph_break)
+        speculation.fail_and_restart_analysis()
 
     def store_attr_graph_break(self, inst):
         log_graph_break(self.code_options, reason="STORE_ATTR-caused graph break")
@@ -3931,9 +3922,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except Exception:
             log.debug("FAILED INLINING %s", code)
             raise
-        finally:
-            parent.error_on_graph_break = self.error_on_graph_break
-
         assert self.symbolic_result is not None
 
         if self.f_globals is parent.f_globals:
