@@ -59,6 +59,7 @@ class TestCompileWorker(TestCase):
         try:
             a = pool.submit(operator.add, 100, 1)
             pool.quiesce()
+            pool.wakeup()
             b = pool.submit(operator.sub, 100, 1)
             self.assertEqual(a.result(), 101)
             self.assertEqual(b.result(), 99)
