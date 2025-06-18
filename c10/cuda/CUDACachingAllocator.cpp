@@ -56,6 +56,12 @@ using namespace c10::CachingDeviceAllocator;
 const size_t kLargeBuffer =
     20971520; // "large" allocations may be packed in 20 MiB blocks
 
+enum class Expandable_Segments_Handle_Type : int {
+  UNSPECIFIED = 0,
+  POSIX_FD = 1,
+  FABRIC_HANDLE = 2,
+};
+
 namespace Native {
 
 //
@@ -261,6 +267,31 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
+struct SegmentConfig {
+  C10_DISABLE_COPY_AND_ASSIGN(SegmentConfig);
+  SegmentConfig(SegmentConfig&&) = delete;
+  SegmentConfig& operator=(SegmentConfig&&) = delete;
+  ~SegmentConfig() = default;
+
+  static Expandable_Segments_Handle_Type expandable_segments_handle_type() {
+    return instance().m_expandable_segments_handle_type;
+  }
+
+  static void set_expandable_segments_handle_type(
+      Expandable_Segments_Handle_Type handle_type) {
+    instance().m_expandable_segments_handle_type = handle_type;
+  }
+
+ private:
+  static SegmentConfig& instance() {
+    static SegmentConfig instance;
+    return instance;
+  }
+
+  std::atomic<Expandable_Segments_Handle_Type> type{
+      Expandable_Segments_Handle_Type::UNSPECIFIED};
+}
+
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 
 /*
@@ -399,16 +430,16 @@ struct ExpandableSegment {
 
     // if the handle type is not specified, try to use fabric handle first.
     // if it fails, use posix file handle
-    if (CUDAAllocatorConfig::expandable_segments_handle_type() ==
+    if (SegmentConfig::expandable_segments_handle_type() ==
         Expandable_Segments_Handle_Type::UNSPECIFIED) {
-      CUDAAllocatorConfig::set_expandable_segments_handle_type(
+      SegmentConfig::set_expandable_segments_handle_type(
           Expandable_Segments_Handle_Type::FABRIC_HANDLE);
       auto output = map(range);
       if (output.ptr != nullptr) {
         return output;
       }
       // if fabric handle is not supported, use posix file handle.
-      CUDAAllocatorConfig::set_expandable_segments_handle_type(
+      SegmentConfig::set_expandable_segments_handle_type(
           Expandable_Segments_Handle_Type::POSIX_FD);
       return map(range);
     }
@@ -422,7 +453,7 @@ struct ExpandableSegment {
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
 #ifndef FBCODE_CAFFE2
-      if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
+      if (SegmentConfig::expandable_segments_handle_type() !=
           Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
       } else {
@@ -452,7 +483,7 @@ struct ExpandableSegment {
           trimHandles();
           return rangeFromHandles(begin, begin);
         } else if (
-            CUDAAllocatorConfig::expandable_segments_handle_type() ==
+          SegmentConfig::expandable_segments_handle_type() ==
             Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
           // we are testing if we can use fabric handle.
           // if we can, we will use it.
@@ -499,7 +530,7 @@ struct ExpandableSegment {
     for (auto i : c10::irange(begin, end)) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto& handle = handles_.at(i).value();
-      if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
+      if (SegmentConfig::expandable_segments_handle_type() !=
           Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         if (!handle.shareable_handle) {
           int fd = 0;
@@ -550,7 +581,7 @@ struct ExpandableSegment {
 #ifndef SYS_pidfd_getfd
 #define SYS_pidfd_getfd 438
 #endif
-    if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
+    if (SegmentConfig::expandable_segments_handle_type() !=
         Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
       auto pidfd = syscall(SYS_pidfd_open, header.pid, 0);
       TORCH_CHECK(
@@ -1633,7 +1664,7 @@ class DeviceCachingAllocator {
 
     block->allocated = false;
 
-    // following logic might modifying underlaying Block, causing the size
+    // following logic might modifying underlying Block, causing the size
     // changed. We store ahead for reporting
     auto orig_block_ptr = block->ptr;
     auto orig_block_size = block->size;
@@ -2183,7 +2214,7 @@ class DeviceCachingAllocator {
   // For example, if we need to round-up 1200 and number of divisions is 4,
   // the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
   // them, the values are 1024, 1280, 1536, and 1792. So the function will
-  // return 1280 as the nearest ceiling of power-2 divison.
+  // return 1280 as the nearest ceiling of power-2 division.
   static size_t roundup_power2_next_division(size_t size, size_t divisions) {
     if (llvm::isPowerOf2_64(size)) {
       return size;
@@ -2841,7 +2872,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  // This function assumes that global lock has been taken whle calling into
+  // This function assumes that global lock has been taken while calling into
   // this function. We do cudaMalloc sync call in this function which
   // can be expensive while holding the lock. Hence, we pass-in the lock to the
   // function to temporarily release the lock before cudaMalloc call and acquire
