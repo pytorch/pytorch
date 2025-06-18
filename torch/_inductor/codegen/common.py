@@ -2436,7 +2436,7 @@ class CSEProxy(DefaultHandler):
         Else, if the variable when codegen'ing another op, we try to compute its bounds
         """
         from ..bounds import ValueRangeAnalysis
-        from ..select_algorithm import TritonTemplateKernel
+        from ..codegen.triton_templates.kernel import TritonTemplateKernel
         from .cuda.cuda_kernel import CUDATemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):

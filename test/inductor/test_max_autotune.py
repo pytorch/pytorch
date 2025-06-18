@@ -27,14 +27,12 @@ from torch._inductor.autotune_process import (
     TuningProcess,
     TuningProcessPool,
 )
+from torch._inductor.codegen.triton_templates.caller import TritonTemplateCaller
+from torch._inductor.codegen.triton_templates.template import TritonTemplate
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
-from torch._inductor.select_algorithm import (
-    AlgorithmSelectorCache,
-    TritonTemplate,
-    TritonTemplateCaller,
-)
+from torch._inductor.select_algorithm import AlgorithmSelectorCache
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -83,7 +81,8 @@ class FailChoiceCaller(ChoiceCaller):
 
 
 @unittest.mock.patch(
-    "torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True
+    "torch._inductor.codegen.triton_templates.template.TritonTemplate.test_cache",
+    new=True,
 )
 @config.patch(enable_caching_generated_triton_templates=True)
 @instantiate_parametrized_tests
@@ -1132,7 +1131,7 @@ class TestMaxAutotune(TestCase):
     def test_triton_template_generated_code_cache_key(self):
         generate_and_load_args = len(
             inspect.signature(
-                torch._inductor.select_algorithm.TritonTemplate.generate_and_load
+                torch._inductor.codegen.triton_templates.template.TritonTemplate.generate_and_load
             ).parameters
         )
         make_key_args = len(
@@ -1164,7 +1163,7 @@ class TestMaxAutotune(TestCase):
         b = torch.rand(22, 30, device=GPU_TYPE)
         # Test that the testing strategy works by overriding input_dependent_preserved_state and simulate a cache hit.
         with unittest.mock.patch(
-            "torch._inductor.select_algorithm.TritonTemplateKernel.input_dependent_preserved_state",
+            "torch._inductor.codegen.triton_templates.template.TritonTemplateKernel.input_dependent_preserved_state",
             new=(lambda self: "same always"),
         ):
             with self.assertRaisesRegex(
