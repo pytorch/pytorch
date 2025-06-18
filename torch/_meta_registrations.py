@@ -392,9 +392,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
             sorted_dims = _sort_dims(self, sorted_dims)
             max_dims = min(cufft_max_ndim, len(sorted_dims))
             last_dims = sorted_dims[len(sorted_dims) - max_dims :]
-            _exec_fft(
-                out, working_tensor, onesided_sizes, last_dims, forward=True
-            )
+            _exec_fft(out, working_tensor, onesided_sizes, last_dims, forward=True)
             sorted_dims = sorted_dims[: len(sorted_dims) - max_dims]
 
         return out
