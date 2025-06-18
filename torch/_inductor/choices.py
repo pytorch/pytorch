@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
+    from .kernel_inputs import MMKernelInputs
     from .kernel_params.params import KernelTemplateParams
 
 
@@ -123,25 +124,34 @@ class InductorChoices:
 
     # MM params configs
     def get_base_mm_params(
-        self, device_type: Optional[str] = "cuda"
+        self, kernel_inputs: MMKernelInputs
     ) -> partial[Generator[KernelTemplateParams, None, None]]:
+        device_type = (
+            "cuda" if kernel_inputs.device_type is None else kernel_inputs.device_type
+        )
         mm_heuristics = self.get_config_heuristics(device_type)
         if config.max_autotune_gemm_search_space != "EXHAUSTIVE":
-            return mm_heuristics.get_mm_params()  # type: ignore[return-value] # Generator invariance
+            return mm_heuristics.get_mm_params(kernel_inputs)  # type: ignore[return-value] # Generator invariance
         else:
-            return mm_heuristics.get_exhaustive_mm_params()  # type: ignore[return-value] # Generator invariance
+            return mm_heuristics.get_exhaustive_mm_params(kernel_inputs)  # type: ignore[return-value] # Generator invariance
 
     def get_exhaustive_mm_params(
-        self, device_type: Optional[str] = "cuda"
+        self, kernel_inputs: MMKernelInputs
     ) -> partial[Generator[KernelTemplateParams, None, None]]:
+        device_type = (
+            "cuda" if kernel_inputs.device_type is None else kernel_inputs.device_type
+        )
         mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_exhaustive_mm_params()  # type: ignore[return-value] # Generator invariance
+        return mm_heuristics.get_exhaustive_mm_params(kernel_inputs)  # type: ignore[return-value] # Generator invariance
 
     def get_persistent_mm_params(
-        self, device_type: Optional[str] = "cuda"
+        self, kernel_inputs: MMKernelInputs
     ) -> partial[Generator[KernelTemplateParams, None, None]]:
+        device_type = (
+            "cuda" if kernel_inputs.device_type is None else kernel_inputs.device_type
+        )
         mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_persistent_mm_params()  # type: ignore[return-value] # Generator invariance
+        return mm_heuristics.get_persistent_mm_params(kernel_inputs)  # type: ignore[return-value] # Generator invariance
 
     # Conv configs
     def get_conv_configs(

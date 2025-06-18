@@ -32,6 +32,7 @@ from ..codegen.triton_templates.scaled_mm_device_tma_template import (
     scaled_mm_device_tma_template,
 )
 from ..ir import FlexibleLayout, is_triton
+from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -213,34 +214,25 @@ def tuned_mm(mat1, mat2, *, layout=None):
     )
     static_shape, is_nonzero = _is_static_problem(layout)
 
-    mm_params = V.choices.get_base_mm_params(device_type)
-    persistent_mm_params = V.choices.get_persistent_mm_params(device_type)
+    kernel_inputs = MMKernelInputs((mat1, mat2))
+    mm_params = V.choices.get_base_mm_params(kernel_inputs)
+    persistent_mm_params = V.choices.get_persistent_mm_params(kernel_inputs)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
     if is_nonzero and use_triton_template(layout):
-        for config in mm_params(
-            (mat1, mat2),
-            m,
-            n,
-            k,
-        ):
+        for config in mm_params():
             mm_template.maybe_append_choice(
                 choices,
-                input_nodes=(mat1, mat2),
+                input_nodes=kernel_inputs.nodes(),
                 layout=layout,
                 **config.kwargs(),
             )
 
         if use_triton_tma_template(mat1, mat2):
-            for config in persistent_mm_params(
-                (mat1, mat2),
-                m,
-                n,
-                k,
-            ):
+            for config in persistent_mm_params():
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
-                    input_nodes=(mat1, mat2),
+                    input_nodes=kernel_inputs.nodes(),
                     layout=layout,
                     **config.kwargs(),
                 )
@@ -322,7 +314,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         ):
             mm_template.maybe_append_choice(
                 choices,
-                input_nodes=(mat1, mat2),
+                input_nodes=kernel_inputs.nodes(),
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
