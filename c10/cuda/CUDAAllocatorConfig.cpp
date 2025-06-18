@@ -158,7 +158,7 @@ size_t CUDAAllocatorConfig::parseRoundUpPower2Divisions(
         }
         TORCH_CHECK(
             val2 == 0 || llvm::isPowerOf2_64(val2),
-            "For roundups, the divisons has to be power of 2 or 0 to disable roundup ",
+            "For roundups, the divisions has to be power of 2 or 0 to disable roundup ",
             "");
 
         if (std::string_view(val1) == ">") {
@@ -204,7 +204,7 @@ size_t CUDAAllocatorConfig::parseRoundUpPower2Divisions(
       size_t val1 = stoi(config[i]);
       TORCH_CHECK(
           llvm::isPowerOf2_64(val1),
-          "For roundups, the divisons has to be power of 2 ",
+          "For roundups, the divisions has to be power of 2 ",
           "");
       std::fill(
           m_roundup_power2_divisions.begin(),

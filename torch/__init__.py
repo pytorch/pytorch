@@ -39,9 +39,9 @@ if TYPE_CHECKING:
     from .types import Device, IntLikeType
 
 
-# multipy/deploy is setting this import before importing torch, this is the most
+# multipy/deploy is setting this import before importing torch, this is the most  # codespell:ignore multipy
 # reliable way we have to detect if we're running within deploy.
-# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
+# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137  # codespell:ignore multipy # noqa: B950
 def _running_with_deploy() -> builtins.bool:
     return sys.modules.get("torch._meta_registrations", None) is object
 
@@ -2154,7 +2154,7 @@ __all__.extend(
 )
 
 ################################################################################
-# Import TorchDynamo's lazy APIs to avoid circular dependenices
+# Import TorchDynamo's lazy APIs to avoid circular dependencies
 ################################################################################
 
 # needs to be before from torch.functional import * to avoid circular dependencies
@@ -2514,7 +2514,7 @@ def compile(
 
     Args:
        model (Callable or None): Module/function to optimize
-       fullgraph (bool): If False (default), torch.compile attempts to discover compileable regions
+       fullgraph (bool): If False (default), torch.compile attempts to discover compilable regions
         in the function that it will optimize. If True, then we require that the entire function be
         capturable into a single graph. If this is not possible (that is, if there are graph breaks),
         then this will raise an error.
