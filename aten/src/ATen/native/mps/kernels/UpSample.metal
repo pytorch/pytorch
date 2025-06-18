@@ -168,10 +168,10 @@ inline linear_return_t<T> linear_interp(T v0, T v1, float x) {
 inline uint3 coords_from_threadidx(
     constant UpsampleParams<5>& params,
     uint thread_index) {
-  const auto size_y = static_cast<uint>(params.output_sizes[3]);
-  const auto size_xy = static_cast<uint>(params.output_sizes[4]) * size_y;
+  const auto size_x = static_cast<uint>(params.output_sizes[4]);
+  const auto size_xy = static_cast<uint>(params.output_sizes[3]) * size_x;
   auto output_xy = thread_index % size_xy;
-  return uint3(output_xy % size_y, output_xy / size_y, thread_index / size_xy);
+  return uint3(output_xy % size_x, output_xy / size_x, thread_index / size_xy);
 }
 
 inline float3 coords_to_real_coords(
