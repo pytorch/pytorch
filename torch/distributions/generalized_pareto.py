@@ -134,8 +134,8 @@ class GeneralizedPareto(Distribution):
         return torch.where(valid, result, nan)
 
     def entropy(self):
-        and = torch.log(self.scale) + self.concentration + 1
-        return torch.broadcast_to(and, self._batch_shape)
+        ans = torch.log(self.scale) + self.concentration + 1
+        return torch.broadcast_to(ans, self._batch_shape)
 
     @property
     def mode(self):
