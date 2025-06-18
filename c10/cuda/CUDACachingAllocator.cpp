@@ -52,6 +52,12 @@ namespace cuda::CUDACachingAllocator {
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
+enum class Expandable_Segments_Handle_Type : int {
+  UNSPECIFIED = 0,
+  POSIX_FD = 1,
+  FABRIC_HANDLE = 2,
+};
+
 namespace Native {
 
 //
@@ -395,17 +401,17 @@ struct ExpandableSegment {
 
     // if the handle type is not specified, try to use fabric handle first.
     // if it fails, use posix file handle
-    if (CUDAAllocatorConfig::expandable_segments_handle_type() ==
+    if (expandable_segments_handle_type == 
         Expandable_Segments_Handle_Type::UNSPECIFIED) {
-      CUDAAllocatorConfig::set_expandable_segments_handle_type(
-          Expandable_Segments_Handle_Type::FABRIC_HANDLE);
+      expandable_segments_handle_type =
+          Expandable_Segments_Handle_Type::FABRIC_HANDLE
       auto output = map(range);
       if (output.ptr != nullptr) {
         return output;
       }
       // if fabric handle is not supported, use posix file handle.
-      CUDAAllocatorConfig::set_expandable_segments_handle_type(
-          Expandable_Segments_Handle_Type::POSIX_FD);
+      expandable_segments_handle_type =
+          Expandable_Segments_Handle_Type::POSIX_FD;
       return map(range);
     }
 
@@ -418,7 +424,7 @@ struct ExpandableSegment {
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
 #ifndef FBCODE_CAFFE2
-      if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
+      if (expandable_segments_handle_type !=
           Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
       } else {
@@ -448,7 +454,7 @@ struct ExpandableSegment {
           trimHandles();
           return rangeFromHandles(begin, begin);
         } else if (
-            CUDAAllocatorConfig::expandable_segments_handle_type() ==
+            expandable_segments_handle_type ==
             Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
           // we are testing if we can use fabric handle.
           // if we can, we will use it.
@@ -495,7 +501,7 @@ struct ExpandableSegment {
     for (auto i : c10::irange(begin, end)) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto& handle = handles_.at(i).value();
-      if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
+      if (expandable_segments_handle_type !=
           Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         if (!handle.shareable_handle) {
           int fd = 0;
@@ -546,7 +552,7 @@ struct ExpandableSegment {
 #ifndef SYS_pidfd_getfd
 #define SYS_pidfd_getfd 438
 #endif
-    if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
+    if (expandable_segments_handle_type !=
         Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
       auto pidfd = syscall(SYS_pidfd_open, header.pid, 0);
       TORCH_CHECK(
@@ -729,6 +735,8 @@ struct ExpandableSegment {
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
   std::vector<c10::DeviceIndex> peers_;
+  // the type of handle used for expandable segments.
+  std::atomic<Expandable_Segments_Handle_Type> expandable_segments_handle_type;
 };
 #else
 struct ExpandableSegment {
