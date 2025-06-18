@@ -682,20 +682,92 @@ def _tree_map_with_path(
         raise
 
 
+def _signature(f):
+    if isinstance(f, ExportedProgram):
+        f = f.module()
+    return (
+        inspect.signature(f.forward)
+        if isinstance(f, torch.nn.Module)
+        else inspect.signature(f)
+    )
+
+
+def _split_positional_args(f, args) -> tuple[dict[str, Any], dict[str, Any]]:
+    # splits args into named args and synthetically-named variadic positional args
+    # following the signature of f
+    sig = _signature(f)
+    params = list(sig.parameters.values())
+    named_args: dict[str, Any] = {}
+    for i, arg in enumerate(args):
+        param = params[i]
+        if param.kind == param.VAR_POSITIONAL:
+            var_positional_args = {
+                f"{param.name}[{i}]": v for i, v in enumerate(args[i:])
+            }
+            return named_args, var_positional_args
+        else:
+            named_args[param.name] = arg
+    return named_args, {}
+
+
 def _combine_args(f, args, kwargs, _is_torch_jit_trace=False) -> dict[str, Any]:
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
-    if isinstance(f, ExportedProgram):
-        f = f.module()
     if not _is_torch_jit_trace:
-        signature = (
-            inspect.signature(f.forward)
-            if isinstance(f, torch.nn.Module)
-            else inspect.signature(f)
-        )
-        kwargs = kwargs if kwargs is not None else {}
-        return signature.bind(*args, **kwargs).arguments
+        named_args, var_positional_args = _split_positional_args(f, args)
+        if kwargs is None:
+            kwargs = {}
+        return {**named_args, **var_positional_args, **kwargs}  # type: ignore[dict-item]
+
     return args
+
+
+def _normalize_dynamic_shapes(dynamic_shapes, mod, args, kwargs):
+    from torch._dynamo.exc import UserError, UserErrorType
+
+    n_args, n_kwargs = len(args), len(kwargs)
+    n = n_args + n_kwargs
+    if n != len(dynamic_shapes):
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            f"Expected `dynamic_shapes` to have {n} items ({n_args} `args`, {n_kwargs} `kwargs`)"
+            f", but got {len(dynamic_shapes)} items.",
+        )
+
+    if isinstance(dynamic_shapes, dict):
+        items = list(dynamic_shapes.items())
+        named_args, _var_positional_args = _split_positional_args(mod, args)
+        positional_dynamic_shapes = dict(items[:n_args])
+        for i, (arg_name, arg_ds_name) in enumerate(
+            zip(named_args, positional_dynamic_shapes)
+        ):
+            if arg_name != arg_ds_name:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected `dynamic_shapes` to have key '{arg_name}' instead of "
+                    f"'{arg_ds_name}' (name of item #{i} in `args`).",
+                )
+        args_dynamic_shapes = tuple(positional_dynamic_shapes.values())
+        kwargs_dynamic_shapes = dict(items[n_args:])
+        for i, (kwarg_name, kwarg_ds_name) in enumerate(
+            zip(kwargs, kwargs_dynamic_shapes)
+        ):
+            if kwarg_name != kwarg_ds_name:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected `dynamic_shapes` to have key '{kwarg_name}' instead of "
+                    f"'{kwarg_ds_name}' (name of item #{i} in `kwargs`).",
+                )
+        dynamic_shapes = _combine_args(mod, args_dynamic_shapes, kwargs_dynamic_shapes)
+
+    elif isinstance(dynamic_shapes, (tuple, list)):
+        args_dynamic_shapes = dynamic_shapes[:n_args]  # type: ignore[assignment]
+        kwargs_dynamic_shapes = {
+            k: dynamic_shapes[n_args + i] for i, k in enumerate(kwargs)
+        }
+        dynamic_shapes = _combine_args(mod, args_dynamic_shapes, kwargs_dynamic_shapes)
+
+    return dynamic_shapes
 
 
 class ShapesCollection:
@@ -976,34 +1048,6 @@ def _check_dynamic_shapes(
                 case_name="dynamic_shapes_validation",
             )
 
-    assert isinstance(dynamic_shapes, (dict, tuple, list))
-    if isinstance(dynamic_shapes, dict):
-        got_keys = list(dynamic_shapes.keys())
-        expected_arg_names = list(combined_args.keys())
-        if sorted(got_keys) != sorted(expected_arg_names):
-            msg = (
-                f"When `dynamic_shapes` is specified as a dict, its top-level keys "
-                f"must be the arg names {expected_arg_names} of `inputs`, but "
-                f"here they are {got_keys}. "
-            )
-            if (
-                len(combined_args) == 1
-                and expected_arg_names[0] not in got_keys
-                and isinstance(combined_args[expected_arg_names[0]], dict)
-            ):
-                msg += (
-                    "Since here `inputs` is a list/tuple enclosing a single dict, "
-                    "maybe you just forgot to enclose `dynamic_shapes` in a list/tuple?"
-                )
-            else:
-                msg += (
-                    "Alternatively, you could also ignore arg names entirely "
-                    "and specify `dynamic_shapes` as a list/tuple matching `inputs`."
-                )
-            raise UserError(
-                UserErrorType.INVALID_INPUT, msg, case_name="dynamic_shapes_validation"
-            )
-
     def check_shape(path, t, dynamic_shape):
         if isinstance(t, torch.Tensor):
             check_symbols(path, t, dynamic_shape)
@@ -1024,6 +1068,7 @@ def _check_dynamic_shapes(
                     case_name="dynamic_shapes_validation",
                 )
 
+    assert isinstance(dynamic_shapes, (dict, tuple, list))
     _tree_map_with_path(check_shape, combined_args, dynamic_shapes, tree_name="inputs")
 
 
