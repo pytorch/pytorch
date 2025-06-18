@@ -700,7 +700,7 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 }
 
 // Print the traceback of the collective at call time
-void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
+std::string ProcessGroupNCCL::WorkNCCL::getTraceback() const {
   // First step we get the corresponding record entry from FR, based on work's
   // trace_id_
   std::optional<FlightRecorderCUDA::Entry> entry =
@@ -716,10 +716,19 @@ void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
     // Wait for the future to complete or timeout
     auto status = future.wait_for(std::chrono::seconds(8));
     if (status == std::future_status::ready) {
-      std::string tracebackStr = future.get();
-      LOG(ERROR) << "Stack trace of the failed collective: \n" << tracebackStr;
-    } // else, symbolizer probably timed out, we skip logging the stack trace.
-  } else {
+      return future.get();
+    }
+  }
+  return "";
+}
+
+// Print the traceback of the collective at call time
+void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
+  std::string tracebackStr = getTraceback();
+  if (!tracebackStr.empty()) {
+    LOG(ERROR) << "Stack trace of the failed collective: \n" << tracebackStr;
+  } // else, symbolizer probably timed out, we skip logging the stack trace.
+  else {
     LOG(ERROR)
         << "Stack trace of the failed collective not found, "
         << "potentially because FlightRecorder is disabled. "
@@ -2288,6 +2297,24 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
           // We are just pushing back a shared_ptr here, so the cost should be
           // minimal
           pg_->shelvesToUnstash_.push_back(work.stashed_for_allocator_safety_);
+        }
+
+        if (pg_->enableTiming_ && logger) {
+          ::c10d::C10dLoggingData data;
+          // logging integers
+          data.strings["collective_duration"] =
+              std::to_string(work.getDuration());
+          data.integers["global_rank"] = pg_->globalRank();
+          data.integers["pg_id"] = static_cast<int64_t>(pg_->local_id_);
+          data.strings["pg_name"] = pg_->pg_uid_;
+          data.strings["pg_desc"] = pg_->pg_desc_;
+          data.integers["pg_rank"] = pg_->rank_;
+          data.integers["world_size"] = pg_->size_;
+          data.strings["comm_backend"] = "nccl";
+          data.strings["comm_backend_version"] = getNcclVersion();
+          data.strings["collective_stack"] = work.getTraceback();
+          data.strings["collective_name"] = opTypeToString(work.opType_);
+          logger->log(data);
         }
 
         // Work status logging for desync debug

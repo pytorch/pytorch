@@ -621,6 +621,7 @@ def run_test(
                 stepcurrent_key,
                 output,
                 options.continue_through_error,
+                test_file,
             )
         else:
             command.extend([f"--sc={stepcurrent_key}", "--print-items"])
@@ -699,6 +700,7 @@ def run_test_retries(
     stepcurrent_key,
     output,
     continue_through_error,
+    test_file,
 ):
     # Run the test with -x to stop at first failure.  Rerun the test by itself.
     # If it succeeds, move on to the rest of the tests in a new process.  If it
@@ -774,6 +776,8 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
+    if "null" in num_failures:
+        num_failures[f"'{test_file}'"] = num_failures.pop("null")
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
     flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
