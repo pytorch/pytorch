@@ -151,7 +151,7 @@ void set_group_info(
   group_info_map.emplace(group_name, std::move(group_info));
 }
 
-const GroupInfo& get_group_info(const std::string& group_name) {
+GroupInfo& get_group_info(const std::string& group_name) {
   TORCH_CHECK(
       group_info_map.find(group_name) != group_info_map.end(),
       "get_group_info: no group info associated with the group name ",
