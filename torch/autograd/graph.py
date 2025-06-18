@@ -241,7 +241,7 @@ class saved_tensors_hooks:
     Use this context-manager to define how intermediary results of an operation
     should be packed before saving, and unpacked on retrieval.
 
-    In that context, the ``pack_hook`` function will be called everytime an
+    In that context, the ``pack_hook`` function will be called every time an
     operation saves a tensor for backward (this includes intermediary results
     saved using
     :func:`~torch.autograd.function._ContextMethodMixin.save_for_backward` but

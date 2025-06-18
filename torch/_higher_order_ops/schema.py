@@ -18,7 +18,7 @@ class HopArgumentInfo:
     example_value: Any
     # Provide an default_value
     default_value: Any
-    # Whether this arugment gets mutated in the hop subgraph.
+    # Whether this argument gets mutated in the hop subgraph.
     # For output, this should always be False
     is_mutated: bool
     kw_only: bool
