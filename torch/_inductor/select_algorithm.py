@@ -2125,6 +2125,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # cache for prescreening results to ensure deterministic candidate selection
         self.prescreening_cache: dict[str, OrderedSet[str]] = {}
 
+        # registers `self.cache_clear(...)` to be called when a fresh Inductor cache is requested
         clear_on_fresh_cache(self)
 
     def cache_clear(self) -> None:
@@ -2197,10 +2198,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
-        @functools.cache
-        def make_benchmark_fn():
-            return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
-
         inputs_key = create_inputs_key(input_nodes)
 
         def autotune(choices):
@@ -2225,13 +2222,19 @@ class AlgorithmSelectorCache(PersistentCache):
                     ),
                 },
             ):
-                return make_benchmark_fn()(choices)
+                return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)(choices)
 
         if config.autotune_in_subproc:
             # Initialize the suprocess pool so it will warmup early.
             torch._inductor.autotune_process.get_tuning_process_pool()
 
         def do_autotuning(choices, precompile_fn):
+            # `self.make_benchmark_fn` is cached, and we use the size of the cache to
+            # determine if autotuning has occured (as opposed to a local/global/etc. cache
+            # hit, in which case we do not autotune). save the current size of the function
+            # cache here, so that we can know if it has incremented
+            has_autotuned_prior_count = self.make_benchmark_fn.cache_info().currsize
+            
             precompile_start_ts = time.time()
             with dynamo_timed(
                 f"{name}_template_precompiling",
@@ -2276,11 +2279,15 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 raise NoValidChoicesError
 
-            if make_benchmark_fn.cache_info().currsize:
+            # here we are again checking the cache size of `self.make_benchmark_fn` to make the final
+            # determination of whether autotuning has occured or if the autotuning results were cached
+            has_autotuned = (self.make_benchmark_fn.cache_info().currsize > has_autotune_prior_count)
+
+            if has_autotuned:
                 counters["inductor"]["select_algorithm_autotune"] += 1
 
             if (
-                make_benchmark_fn.cache_info().currsize
+                has_autotuned
                 or log.getEffectiveLevel() == logging.DEBUG
                 or config.trace.log_autotuning_results
             ):
@@ -2737,6 +2744,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return timings
 
     @classmethod
+    @functools.lru_cache(None)
     def make_benchmark_fn(
         cls,
         choices: Sequence[ChoiceCaller],
