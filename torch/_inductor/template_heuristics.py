@@ -555,6 +555,18 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             config_gen_fn=self.get_mm_configs(),
         )
 
+    def get_exhaustive_mm_params(
+        self, kernel_inputs: MMKernelInputs
+    ) -> partial[Generator[TritonTemplateMMParams, None, None]]:
+        """
+        Return a partial function that generates TritonTemplateMMParams for exhaustive matrix multiplication.
+        """
+        return partial(
+            self._to_params,
+            kernel_inputs=kernel_inputs,
+            config_gen_fn=self.get_exhaustive_mm_configs(),
+        )
+
     def get_int8_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.int8_mm_configs)
 

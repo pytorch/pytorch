@@ -8,6 +8,7 @@ import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
+from ..codegen.triton_templates.common import SymbolicGridFn
 from ..codegen.triton_templates.template import TritonTemplate
 from ..lowering import (
     add_layout_constraint,
@@ -15,11 +16,7 @@ from ..lowering import (
     lowerings as L,
     register_lowering,
 )
-from ..select_algorithm import (
-    autotune_select_algorithm,
-    ExternKernelChoice,
-    SymbolicGridFn,
-)
+from ..select_algorithm import autotune_select_algorithm, ExternKernelChoice
 from ..utils import (
     is_ones,
     is_zeros,

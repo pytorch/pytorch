@@ -6,12 +6,9 @@ from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import ir, lowering as L
+from ..codegen.triton_templates.common import SymbolicGridFn
 from ..codegen.triton_templates.template import TritonTemplate
-from ..select_algorithm import (
-    autotune_select_algorithm,
-    ExternKernelChoice,
-    SymbolicGridFn,
-)
+from ..select_algorithm import autotune_select_algorithm, ExternKernelChoice
 from ..utils import (
     _use_cutlass_for_op,
     use_aten_gemm_kernels,

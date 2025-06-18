@@ -8,6 +8,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from ..._dynamo.utils import counters
+from ..codegen.triton_templates.common import SymbolicGridFn
 from ..codegen.triton_templates.template import TritonTemplate
 from ..ir import (
     ComputedBuffer,
@@ -26,11 +27,7 @@ from ..pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
-from ..select_algorithm import (
-    autotune_select_algorithm,
-    ExternKernelChoice,
-    SymbolicGridFn,
-)
+from ..select_algorithm import autotune_select_algorithm, ExternKernelChoice
 from ..utils import ceildiv
 
 
@@ -675,9 +672,9 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     graph, module = inner_mm.graph, inner_mm.graph.owning_module
 
     # construct the new (sub)graph
-    subgraph_node_list: list[
-        torch.fx.Node
-    ] = []  # ordered list of nodes used for node removal later
+    subgraph_node_list: list[torch.fx.Node] = (
+        []
+    )  # ordered list of nodes used for node removal later
     new_graph: torch.fx.Graph = torch.fx.Graph()
     node_remapping: dict[torch.fx.Node, torch.fx.Node] = {}
     new_input_anchor: torch.fx.Node  # inner_mm, to be changed to an input node

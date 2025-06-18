@@ -9,11 +9,12 @@ import torch
 from torch._inductor.virtualized import V
 
 from .. import config, ir
+from ..codegen.triton_templates.common import SymbolicGridFn
 from ..codegen.triton_templates.template import TritonTemplate
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty, empty_strided, lowerings
 from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
-from ..select_algorithm import autotune_select_algorithm, SymbolicGridFn
+from ..select_algorithm import autotune_select_algorithm
 from .flex_attention import (
     compute_forward_block_mn,
     compute_forward_inner,
@@ -371,9 +372,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
-        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    )
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
+    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
 
     B = Bq
     kernel_options = dict(kernel_options)
