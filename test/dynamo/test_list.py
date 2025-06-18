@@ -56,7 +56,6 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         # Wrong number of arguments
         self.assertRaises(TypeError, p.index)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_binop_add(self):
         p, q = map(self.thetype, ["abc", "bcd"])
@@ -66,6 +65,9 @@ class TupleTests(torch._dynamo.test_case.TestCase):
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.__add__)
+
+        # can only concatenate items of the same type
+        self.assertRaises(TypeError, p.__add__, dict.fromkeys(q))
 
     @make_dynamo_test
     def test_cmp_eq(self):
@@ -271,7 +273,6 @@ class ListTests(TupleTests):
         self.assertIsNone(p.sort())
         self.assertEqual(p, self.thetype("abcd"))
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_binop_iadd(self):
         p, q = map(self.thetype, ["abc", "bcd"])
@@ -282,6 +283,9 @@ class ListTests(TupleTests):
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.__iadd__)
+
+        # can only concatenate items of the same type
+        self.assertRaises(TypeError, p.__add__, dict.fromkeys(q))
 
     @make_dynamo_test
     def test___setitem__(self):
