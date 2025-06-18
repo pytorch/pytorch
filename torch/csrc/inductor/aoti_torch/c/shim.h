@@ -129,6 +129,7 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex128();
+AOTI_TORCH_EXPORT size_t aoti_torch_dtype_element_size(int32_t dtype);
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_layout_strided();
 AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_coo();

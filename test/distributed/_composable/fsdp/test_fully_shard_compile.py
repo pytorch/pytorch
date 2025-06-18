@@ -543,7 +543,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 )
                 if fwd_fullgraph:
                     self.assertEqual(len(counters["graph_break"]), 1)
-                    self.assertIn("Tensor.backward", counters["graph_break"])
+                    self.assertExpectedInline(
+                        next(iter(counters["graph_break"].keys())),
+                        """\
+Unsupported Tensor.backward() call
+  Explanation: Dynamo currently does not support tracing `Tensor.backward()`.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+
+  Developer debug context: call_method TensorVariable() backward () {}
+""",  # noqa: B950
+                    )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
                 return res
