@@ -61,7 +61,7 @@ if torch._C._has_mkldnn:
 
     def grouped_gemm_pass(graph: torch.fx.Graph):
         """
-        Group GEMM has multi output nodes which is compilicated to define a Pattern.
+        Group GEMM has multi output nodes which is complicated to define a Pattern.
         Use below way to connect the pattern to the lowering.
         TODO: Use MultiOutputPattern, current limitation is the pattern requires
         fixed number of output nodes. Extend to support Group GEMM for pattern matcher.

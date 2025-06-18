@@ -14,7 +14,7 @@ from torch._ops import OpOverload
 
 def warn_deploy(stacklevel=3):
     warnings.warn(
-        "Python torch.library APIs do nothing under torch::deploy (multipy). "
+        "Python torch.library APIs do nothing under torch::deploy (multipy). "  # codespell:ignore multipy
         "Please instead use C++ custom operator registration APIs.",
         RuntimeWarning,
         stacklevel=stacklevel,
@@ -442,7 +442,7 @@ class MutationChecker:
                     f"{self.op._name}: for argument '{info.name}': the operator's schema "
                     f"{self.op._schema} specified that "
                     f"the operator {'mutates' if info.is_write else 'does not mutate'} "
-                    f"the argument, but this seems to be emperically wrong. "
+                    f"the argument, but this seems to be empirically wrong. "
                     f"Please make the schema and operator behavior consistent. "
                     f"You can specify that an operator mutates a Tensor by "
                     f"e.g. changing its schema type from 'Tensor name' to 'Tensor(a!) name'"
