@@ -2517,7 +2517,8 @@ def forward(self, x):
         dynamic_shapes = {"x": (dim0,)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            "You marked.*but your code specialized it to be a constant.*"
+            "If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
         ):
             torch.export.export(bar, (t,), dynamic_shapes=dynamic_shapes, strict=True)
 

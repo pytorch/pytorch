@@ -592,11 +592,15 @@ libtorch_core_jit_sources = sorted(jit_sources_full)
 
 libtorch_nativert_sources = [
     "torch/nativert/graph/Graph.cpp",
+    "torch/nativert/graph/GraphPasses.cpp",
     "torch/nativert/graph/GraphSignature.cpp",
     "torch/nativert/graph/Serialization.cpp",
     "torch/nativert/graph/TensorMeta.cpp",
+    "torch/nativert/executor/DelegateExecutor.cpp",
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/ExecutionPlanner.cpp",
+    "torch/nativert/executor/ExecutionFrame.cpp",
+    "torch/nativert/executor/OpKernel.cpp",
     "torch/nativert/executor/PlacementUtils.cpp",
     "torch/nativert/executor/Weights.cpp",
     "torch/nativert/executor/memory/FunctionSchema.cpp",
@@ -1517,7 +1521,7 @@ aten_cuda_cu_with_sort_by_key_source_list = [
     "aten/src/ATen/native/cuda/Unique.cu",
 ]
 
-# Followings are source code for xnnpack delegate
+# Following are source code for xnnpack delegate
 
 xnnpack_delegate_serializer_header = [
     "torch/csrc/jit/backends/xnnpack/serialization/serializer.h",

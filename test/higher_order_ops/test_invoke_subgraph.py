@@ -1245,6 +1245,49 @@ class GraphModule(torch.nn.Module):
             "Encountered input mutation during higher order op tracing" in str(cause)
         )
 
+    def test_redundant_compile_region(self):
+        @mark_compile_region
+        @mark_compile_region
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x) + gn(x)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        x = torch.randn(8, 8, requires_grad=True)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[8, 8]"):
+        l_x_ = L_x_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_);  subgraph_0 = None
+        getitem: "f32[8, 8]" = invoke_subgraph[0];  invoke_subgraph = None
+        subgraph_1 = self.subgraph_0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_x_);  subgraph_1 = l_x_ = None
+        getitem_1: "f32[8, 8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+
+        add: "f32[8, 8]" = getitem + getitem_1;  getitem = getitem_1 = None
+        return (add,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[8, 8]"):
+            sin: "f32[8, 8]" = torch.sin(l_x_);  l_x_ = None
+            return (sin,)
+""",
+            )
+
     def test_kwargs_only(self):
         @mark_compile_region
         def gn(x, *, y):
@@ -1501,6 +1544,21 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(8, 8, requires_grad=True)
         torch._dynamo.mark_dynamic(x, 0)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_complex(self):
+        # Observed in Wan2.1
+        @mark_compile_region
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x) + gn(x)
+
+        x = torch.randn(2, 2, dtype=torch.complex64)
         ref = fn(x)
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         res = opt_fn(x)
@@ -2242,6 +2300,89 @@ class GraphModule(torch.nn.Module):
                 y = x.transpose(2, 3).contiguous().transpose(2, 3)
                 z = y.sin().transpose(2, 3)
                 return gn(y, z)
+
+            with config.patch(
+                post_grad_custom_post_pass=g,
+            ):
+                f_compile = torch.compile(f, fullgraph=True)
+                self.assertEqual(f(x, other), f_compile(x, other))
+                self.assertTrue(called)
+
+    @requires_gpu
+    def test_preserves_output_strides(self):
+        # Have a graph pass that changes strides for the output op of the
+        # invoke_subgraph, and check if the output strides are preserved
+        x = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
+        other = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
+
+        class _CustomPass(PatternMatcherPass):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def __call__(self, g: torch.fx.Graph):
+                self.apply(g)
+
+        g = _CustomPass()
+        called = False
+
+        @register_graph_pattern(
+            CallFunctionVarArgs(torch.ops.aten.permute),
+            pass_dict=g,
+        )
+        def _(match, *args, **kwargs):
+            flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+            def decomp(*flat_args):
+                args, kwargs = pytree.tree_unflatten(flat_args, spec)
+                return torch.ops.mylib.force_channels_last(
+                    torch.ops.aten.permute(*args, **kwargs)
+                )
+
+            nonlocal called
+            called = True
+            match.replace_by_example(decomp, flat_args)
+
+        from torch._inductor import config
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "force_channels_last(Tensor x) -> Tensor",
+                tags=[torch._C.Tag.flexible_layout],
+            )
+
+            def impl2(x):
+                return x.clone(memory_format=torch.channels_last)
+
+            lib.impl("force_channels_last", impl2, "CompositeExplicitAutograd")
+
+            lib.define(
+                "add_op(Tensor x, Tensor y) -> Tensor",
+            )
+
+            def impl(x, y):
+                # Check that the input strides are preserved. This helps in
+                # testing that the HOP preserves the output strides.
+                assert x.stride() == (16, 4, 1, 2)
+                assert y.stride() == (16, 4, 2, 1)
+                out = y.clone()  # contiguous with strides (16, 4, 2, 1)
+                out.add_(x.transpose(-1, -2))
+                return out
+
+            def meta(x, y):
+                return torch.empty_like(y, memory_format=torch.contiguous_format)
+
+            lib.impl("add_op", impl, "CompositeExplicitAutograd")
+            lib.impl("add_op", meta, "Meta")
+
+            @mark_compile_region
+            def gn(x, other):
+                y = x.transpose(2, 3).contiguous().transpose(2, 3)
+                z = y.sin().transpose(2, 3)
+                return y, z
+
+            def f(x, other):
+                y, z = gn(x, other)
+                return torch.ops.mylib.add_op.default(y, z)
 
             with config.patch(
                 post_grad_custom_post_pass=g,
