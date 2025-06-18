@@ -105,7 +105,7 @@ jobs:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
         run: |
-          tag=${ECR_DOCKER_IMAGE##*/}
+          tag=${ECR_DOCKER_IMAGE##*:}
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
@@ -147,7 +147,7 @@ jobs:
         run: .github/scripts/parse_ref.py
 
       - name: Check for keep-going label and re-enabled test issues
-        # This uses the filter-test-configs action because it conviniently
+        # This uses the filter-test-configs action because it conveniently
         # checks for labels and re-enabled test issues.  It does not actually do
         # any filtering.  All filtering is done in the build step.
         id: keep-going

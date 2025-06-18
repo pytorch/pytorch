@@ -43,7 +43,7 @@ import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same, skipIfPy312
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -4994,6 +4994,66 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = opt_fn(x_weak, y)
         self.assertEqual(ref, res)
 
+    # The programming model around (weak)references is that we DO NOT guarantee
+    # any behavior that depends on deallocation order. We do guarantee "eventual consistency",
+    # that is, after the torch.compile'd function is finished running (including any graph breaks),
+    # refcount semantics will match eager's.
+    def test_weakref_callback(self):
+        called1 = False
+
+        def callback1(ref):
+            nonlocal called1
+            called1 = True
+            if not torch.compiler.is_compiling():
+                raise RuntimeError("callback1 expected to be compiled")
+
+        # weakref callbacks that should be called in the compiled region will be compiled.
+        # But the exact place in the compiled code that the callback is made is undefined.
+        @torch.compile(backend="eager")
+        def fn(x):
+            y = x + 1
+            ref = weakref.ref(y, callback1)
+            torch._dynamo.graph_break()
+            return ref
+
+        fn(torch.ones(3))
+        self.assertTrue(called1)
+
+        called2 = False
+
+        def callback2(ref):
+            nonlocal called2
+            called2 = True
+            if torch.compiler.is_compiling():
+                raise RuntimeError("callback2 expected to not be compiled")
+
+        # weakref callbacks that fire outside the compiled region work
+        @torch.compile(backend="eager")
+        def gn(x):
+            y = x + 1
+            ref = weakref.ref(y, callback2)
+            torch._dynamo.graph_break()
+            return y, ref
+
+        y, _ = gn(torch.ones(3))
+        del y
+        self.assertTrue(called2)
+
+        def callback3(ref):
+            raise RuntimeError("callback3 should not be called")
+
+        # The callback will NOT be called if both the weakref and the referrent are
+        # deleted in the same compiled region (graph breaks act like a "memory sync"
+        # and thus make things tricky - the callback is actually expected to be called).
+        # This test does NOT mean that this behavior is part of the (weak)ref programming
+        # model, but rather reminds us that this is an intentionally allowed weakref-Dynamo behavior.
+        @torch.compile(backend="eager")
+        def hn(x):
+            y = x + 1
+            _ = weakref.ref(y, callback3)
+
+        hn(torch.ones(3))
+
     #     @torch._functorch.config.patch(
     #         recompute_views=True,
     #     )
@@ -5467,7 +5527,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             y = torch.randn(100, 10)
             return torch.mm(x, y).sum()
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             torch.compile(fn)()
 
         torch.compile(fn2)()
@@ -5741,6 +5801,17 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.view_as_real(out_ref).sum().backward()
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
+
+    def test_add_complex_conj(self):
+        def f(x):
+            return x + x.conj()
+
+        x = torch.randn(4, dtype=torch.complex64, requires_grad=True)
+        out = torch.compile(f)(x)
+        expected_complex = (2 * x.real).to(dtype=out.dtype)
+
+        self.assertTrue(out.dtype == torch.complex64)
+        self.assertEqual(out, expected_complex)
 
     # https://github.com/pytorch/pytorch/issues/132200
     def test_partitioner_cse_respects_mutation_boundaries(self):
@@ -6844,6 +6915,36 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         ref = f()
         res = torch.compile(f, backend="aot_eager")()
         self.assertEqual(ref, res)
+
+    def test_delete_local_error(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y = x + 1
+            del y
+            z = y + 1  # noqa: F821
+            return z
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            fn(torch.ones(3))
+
+    def test_nested_compile_with_guard(self):
+        @torch.compile(backend="eager", dynamic=True)
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        x = torch.randn(10, 1)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        @torch.compile(backend="eager")
+        def fn(mod, x):
+            return mod(x)
+
+        fn(Model(), x)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
