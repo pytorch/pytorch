@@ -2,9 +2,17 @@
 # mypy: allow-untyped-defs
 import math as pymath
 import warnings
-from typing import Any, TypeVar
+from functools import wraps
+from typing import Any, Callable, TypeVar
 
-from .triton_compat import _log2, libdevice, math, tl, triton  # noqa: F401
+from .triton_compat import (  # noqa: F401
+    _log2,
+    builtins_use_semantic_kwarg,
+    libdevice,
+    math,
+    tl,
+    triton,
+)
 
 
 _T = TypeVar("_T")
@@ -682,7 +690,7 @@ def x_grid_barrier(sem):
     tl.debug_barrier()
 
 
-def triton_builtin(f: _T) -> _T:
+def triton_builtin(f: Callable[..., _T]) -> Callable[..., _T]:
     """
     Decorator to mark a function as a Triton built-in function.  These functions
     are evaluated at compile time.
@@ -693,8 +701,18 @@ def triton_builtin(f: _T) -> _T:
     Returns:
         function: The same function, marked as a Triton built-in.
     """
-    f.__triton_builtin__ = True  # type: ignore[attr-defined]
-    return f
+    if builtins_use_semantic_kwarg:
+        # support Triton before and after https://github.com/triton-lang/triton/pull/7054
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            kwargs["_builder"] = kwargs["_semantic"]
+            del kwargs["_semantic"]
+            return f(*args, **kwargs)
+    else:
+        wrapper = f  # type: ignore[assignment]
+
+    wrapper.__triton_builtin__ = True  # type: ignore[attr-defined]
+    return wrapper
 
 
 @triton_builtin

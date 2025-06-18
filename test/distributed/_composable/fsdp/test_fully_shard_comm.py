@@ -3,6 +3,8 @@
 import copy
 import functools
 import itertools
+import os
+import tempfile
 from typing import Callable, Optional, Union
 
 import torch
@@ -34,7 +36,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_multicast_support,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DoubleLinear,
@@ -1281,6 +1286,61 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
         model.unshard()  # no lazy init yet
         for ref_param, param in zip(ref_model.parameters(), model.parameters()):
             self.assertEqual(ref_param, param)
+
+
+class TestFullyShardAllocFromPG(FSDPTest):
+    # The messages might change when we move to a different NCCL version.
+    # Please update this test if it starts failing.
+    MEMORY_REGISTER_RE = (
+        "NCCL INFO register comm 0x[0-9a-f]+ buffer 0x[0-9a-f]+ size [0-9]+"
+    )
+
+    @classmethod
+    def _run(cls, *args, **kwargs):
+        cls.nccl_log_dir = tempfile.TemporaryDirectory()
+        os.environ["NCCL_DEBUG"] = "INFO"
+        os.environ["NCCL_DEBUG_SUBSYS"] = "INIT,ENV,REG"
+        os.environ["NCCL_DEBUG_FILE"] = cls.nccl_log_dir.name + "/nccl_log"
+        super()._run(*args, **kwargs)
+
+    @skip_if_lt_x_gpu(2)
+    # The NCCL PG refuses to allocate tensors if multicast is unavailable, see
+    # https://github.com/pytorch/pytorch/blob/503362d019b3782581492af7767945dbd75ca1c9/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp#L5634
+    @requires_multicast_support()
+    def test_fully_shard_alloc_from_pg(self):
+        torch.manual_seed(42)
+        model_args = ModelArgs()
+        model = Transformer(model_args)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module)
+        fully_shard(model)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+
+        loss = model(inp)
+        loss.sum().backward()
+
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
+
+        with open(self.nccl_log_dir.name + "/nccl_log") as f:
+            self.assertNotRegex(f.read(), self.MEMORY_REGISTER_RE)
+
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                module.set_allocate_memory_from_process_group_for_comm(True)
+        model.set_allocate_memory_from_process_group_for_comm(True)
+
+        loss = model(inp)
+        loss.sum().backward()
+
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
+
+        with open(self.nccl_log_dir.name + "/nccl_log") as f:
+            self.assertRegex(f.read(), self.MEMORY_REGISTER_RE)
 
 
 if __name__ == "__main__":
