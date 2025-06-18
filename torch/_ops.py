@@ -2,6 +2,7 @@
 import abc
 import contextlib
 import ctypes
+import functools
 import importlib
 import inspect
 import sys
@@ -183,6 +184,7 @@ class OperatorBase:
         )
 
         def check_user_subclass_decorator(func: Any) -> Any:
+            @functools.wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 # Check if any tensor arguments are user subclasses
                 flat_args, _ = pytree.tree_flatten(args)
