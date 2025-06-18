@@ -105,7 +105,6 @@ def _nvrtc_compile(
     kernel_name: str,
     compute_capability: Optional[str] = None,
     header_code: str = "",
-    cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
 ) -> bytes:
     """
@@ -117,7 +116,6 @@ def _nvrtc_compile(
         compute_capability (str, None): The compute capability to target (e.g., "86").
                                            If None, will detect from current device.
         header_code (str, optional): Additional header code to prepend to the kernel source
-        cuda_include_dirs (list, None): List of directories containing CUDA headers
         nvcc_options (list, None): Additional options to pass to NVRTC
 
     Returns:
@@ -161,6 +159,10 @@ def _nvrtc_compile(
     if compute_capability is None:
         props = torch.cuda.get_device_properties(torch.cuda.current_device())
         compute_capability = f"{props.major}{props.minor}"
+
+    # Auto-discover CUDA include directories
+    from torch.utils.cpp_extension import include_paths
+    cuda_include_dirs = include_paths(device_type="cuda")
 
     # Prepare compilation options
     options = []
@@ -294,10 +296,8 @@ class _CudaKernel:
 
         for arg in args:
             if isinstance(arg, torch.Tensor):
-                if not arg.is_cuda and not (arg.is_cpu and arg.is_pinned()):
-                    raise ValueError(
-                        "All tensor arguments must be CUDA tensors or pinned CPU tensors"
-                    )
+                if not arg.is_cuda:
+                    raise ValueError("All tensor arguments must be CUDA tensors")
                 # Get pointer to tensor data
                 ptr = ctypes.c_void_p(arg.data_ptr())
                 processed_args.append(ptr)
@@ -328,21 +328,23 @@ class _CudaKernel:
 
             stream = torch.cuda.current_stream()
 
-        _check_cuda(
-            libcuda.cuLaunchKernel(
-                self.func,
-                grid[0],
-                grid[1],
-                grid[2],
-                block[0],
-                block[1],
-                block[2],
-                shared_mem,
-                stream._as_parameter_,
-                c_args_array,
-                None,
+        # Launch the kernel with the current stream
+        with stream:
+            _check_cuda(
+                libcuda.cuLaunchKernel(
+                    self.func,
+                    grid[0],
+                    grid[1],
+                    grid[2],
+                    block[0],
+                    block[1],
+                    block[2],
+                    shared_mem,
+                    None,
+                    c_args_array,
+                    None,
+                )
             )
-        )
 
 
 def _cuda_load_module(
