@@ -782,7 +782,7 @@ Note: this will be updated with some information generated from native backend_c
 
 ## Quantization API Reference
 
-The [Quantization API Reference](./quantization-support.md) contains documentation
+The {doc}`Quantization API Reference <quantization-support>` contains documentation
 of quantization APIs, such as quantization passes, quantized tensor operations,
 and supported quantized modules and functions.
 
@@ -795,7 +795,7 @@ and supported quantized modules and functions.
 
 ## Quantization Backend Configuration
 
-The :doc:`Quantization Backend Configuration <quantization-backend-configuration>` contains documentation
+The {doc}`Quantization Backend Configuration <quantization-backend-configuration>` contains documentation
 on how to configure the quantization workflows for various backends.
 
 ```{eval-rst}
@@ -807,7 +807,7 @@ on how to configure the quantization workflows for various backends.
 
 ## Quantization Accuracy Debugging
 
-The [Quantization Accuracy Debugging](./quantization-accuracy-debugging.md) contains documentation
+The {doc}`Quantization Accuracy Debugging <quantization-accuracy-debugging>` contains documentation
 on how to debug quantization accuracy.
 
 ```{eval-rst}
