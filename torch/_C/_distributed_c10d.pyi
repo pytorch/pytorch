@@ -643,6 +643,10 @@ class ProcessGroupNCCL(Backend):
     def uid(self) -> int: ...
     @property
     def options(self) -> Options: ...  # type: ignore[override]
+    @staticmethod
+    def get_build_nccl_version(self) -> tuple[int, int, int]: ...
+    @staticmethod
+    def get_runtime_nccl_version(self) -> tuple[int, int, int]: ...
 
 class ProcessGroupUCC(Backend):
     def __init__(
