@@ -60,6 +60,20 @@ PyObject* THPGradientEdgeClass = nullptr;
 // Anonymous namespace for helpful functions used in this file
 namespace {
 
+inline void check_legacy_fn_attr_access(
+    const std::shared_ptr<torch::autograd::Node>& cdata,
+    const char* attr) {
+  TORCH_CHECK(
+      cdata,
+      "Attribute '",
+      attr,
+      "' is invalid for this instance of _C._FunctionBase. "
+      "Accessing this attribute directly on an instance of autograd.Function "
+      "is a legacy access pattern that is no longer supported. For examples "
+      "on how to use new‑style autograd functions, see "
+      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+}
+
 // TODO: We shouldn't need to call this function because the engine
 // can already persist the errors for us. This still seems to be
 // needed for the DistEngine however.
@@ -1142,13 +1156,7 @@ PyObject* process_outputs(
 PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto cdata = ((THPFunction*)self)->cdata.lock();
-  TORCH_CHECK(
-      cdata,
-      "Attribute 'name' is invalid for this instance of _C._FunctionBase. "
-      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
-      "access pattern that is no longer supported. For examples on how to use new-style "
-      "autograd functions, see "
-      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  check_legacy_fn_attr_access(cdata, "name");
   return THPUtils_packString(cdata->name());
   END_HANDLE_TH_ERRORS
 }
@@ -1156,6 +1164,7 @@ PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
 PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS;
   auto cdata = ((THPFunction*)self)->cdata.lock();
+  check_legacy_fn_attr_access(cdata, "_sequence_nr");
   return THPUtils_packUInt64(cdata->sequence_nr());
   END_HANDLE_TH_ERRORS
 }
@@ -1163,6 +1172,7 @@ PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
 PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
   HANDLE_TH_ERRORS;
   auto cdata = ((THPFunction*)self)->cdata.lock();
+  check_legacy_fn_attr_access(cdata, "_set_sequence_nr");
   cdata->set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1171,6 +1181,7 @@ PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
 PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
   HANDLE_TH_ERRORS;
   auto cdata = ((THPFunction*)self)->cdata.lock();
+  check_legacy_fn_attr_access(cdata, "_input_metadata");
   const auto num_inputs = cdata->num_inputs();
   THPObjectPtr list(PyTuple_New(num_inputs));
   if (!list) {
@@ -1388,13 +1399,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
       new PyFunctionTensorPreHook(var->backward_hooks, tensor.output_nr()));
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
-  TORCH_CHECK(
-      cdata,
-      "Attribute '_register_hook_dict' is invalid for this instance of _C._FunctionBase. "
-      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
-      "access pattern that is no longer supported. For examples on how to use new-style "
-      "autograd functions, see "
-      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  check_legacy_fn_attr_access(cdata, "_register_hook_dict");
   cdata->add_tensor_pre_hook(std::move(hook));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1404,13 +1409,7 @@ PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
   HANDLE_TH_ERRORS
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
-  TORCH_CHECK(
-      cdata,
-      "Attribute 'register_hook' is invalid for this instance of _C._FunctionBase. "
-      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
-      "access pattern that is no longer supported. For examples on how to use new-style "
-      "autograd functions, see "
-      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  check_legacy_fn_attr_access(cdata, "register_hook");
   return torch::autograd::registerFunctionHook(*cdata, hook);
   END_HANDLE_TH_ERRORS
 }
@@ -1419,13 +1418,7 @@ PyObject* THPFunction_register_prehook(PyObject* _self, PyObject* hook) {
   HANDLE_TH_ERRORS
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
-  TORCH_CHECK(
-      cdata,
-      "Attribute 'register_prehook' is invalid for this instance of _C._FunctionBase. "
-      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
-      "access pattern that is no longer supported. For examples on how to use new-style "
-      "autograd functions, see "
-      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  check_legacy_fn_attr_access(cdata, "register_prehook");
   return torch::autograd::registerFunctionPreHook(*cdata, hook);
   END_HANDLE_TH_ERRORS
 }
@@ -1568,13 +1561,7 @@ PyObject* THPFunction_raw_saved_tensors(THPFunction* self, void* _unused) {
 PyObject* THPFunction_next_functions(THPFunction* self, void* _unused) {
   HANDLE_TH_ERRORS
   auto cdata = self->cdata.lock();
-  TORCH_CHECK(
-      cdata,
-      "Attribute 'next_functions' is invalid for this instance of _C._FunctionBase. "
-      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
-      "access pattern that is no longer supported. For examples on how to use new-style "
-      "autograd functions, see "
-      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  check_legacy_fn_attr_access(cdata, "next_functions");
   const auto num_outputs = cdata->num_outputs();
   THPObjectPtr result(PyTuple_New(num_outputs));
   if (!result)

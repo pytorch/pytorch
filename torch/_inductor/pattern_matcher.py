@@ -1010,7 +1010,7 @@ class PatternPrettyPrinter:
         self.memoized_objs_pp: dict[PatternExpr, str] = {}
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def run(obj: PatternExpr, output_name: str = "output") -> str:
         """
         Serializes obj to python code with obj written out to `output_name`
@@ -1558,7 +1558,7 @@ def register_replacement(
             normalize_args=normalize_args,
         )
         pattern.register(pass_dicts)
-        return pattern.pattern
+        return pattern.pattern  # type: ignore[return-value]
 
 
 _serialized_patterns: OrderedSet[str] = OrderedSet()
@@ -2195,7 +2195,7 @@ def stable_topological_sort(graph: torch.fx.Graph) -> None:
 def init_once_fakemode(fn: Callable[..., Any]) -> Callable[[], Any]:
     """Wrapper around lazy init functions in fx_passes/"""
 
-    @functools.lru_cache(None)
+    @functools.cache
     @functools.wraps(fn)
     def lazy_init() -> Any:
         counters_ref = counters["inductor"].copy()
