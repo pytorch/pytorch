@@ -14,7 +14,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     precisionOverride,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, TEST_XPU
 
 
 d_hid = 512
@@ -60,7 +60,7 @@ class MicrobatchTests(TestCase):
         torch.testing.assert_close(merged_kwargs, kwargs)
         print("Microbatch test passed")
 
-    @precisionOverride({torch.float: 2e-4})
+    @precisionOverride({torch.float: 2e-4} if TEST_XPU else {})
     @dtypes(torch.float)
     def test_chunk_spec(self, device, dtype):
         mod = ModelWithKwargs().to(device)

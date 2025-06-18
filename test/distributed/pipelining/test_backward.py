@@ -15,7 +15,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     precisionOverride,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, TEST_XPU
 
 
 d_hid = 512
@@ -23,7 +23,7 @@ batch_size = 256
 
 
 class StageBackwardTests(TestCase):
-    @precisionOverride({torch.float: 1e-4})
+    @precisionOverride({torch.float: 1e-4} if TEST_XPU else {})
     @dtypes(torch.float)
     def test_stage_backward(self, device, dtype):
         # MLP as a stage module
@@ -99,7 +99,7 @@ class StageBackwardTests(TestCase):
             # Check that the weight gradients were not updated
             self.assertEqual(p.grad, None)
 
-    @precisionOverride({torch.float: 1e-4})
+    @precisionOverride({torch.float: 1e-4} if TEST_XPU else {})
     @dtypes(torch.float)
     def test_stage_backward_weight(self, device, dtype):
         # MLP as a stage module
@@ -141,7 +141,7 @@ class StageBackwardTests(TestCase):
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
 
-    @precisionOverride({torch.float: 1e-4})
+    @precisionOverride({torch.float: 1e-4} if TEST_XPU else {})
     @dtypes(torch.float)
     def test_stage_backward_weight_multiple_iters(self, device, dtype):
         # MLP as a stage module
