@@ -1805,6 +1805,7 @@
 # We need this to be able to properly copy from a CPU to an XLA tensor with different sizes.
 # See https://github.com/pytorch/xla/issues/2881
 - func: _copy_from_and_resize(Tensor self, Tensor dst) -> Tensor
+  device_check: NoCheck  # Explicitly designed for cross-device operations
   dispatch:
     MPS: _copy_from_and_resize_mps
   autogen: _copy_from_and_resize.out
@@ -2310,6 +2311,7 @@
     CompositeImplicitAutograd: embedding_backward_symint
 
 - func: embedding_dense_backward(Tensor grad_output, Tensor indices, SymInt num_weights, SymInt padding_idx, bool scale_grad_by_freq) -> Tensor
+  device_check: FallbackAware  # Test uses CPU/MPS mixing
   dispatch:
     CPU: embedding_dense_backward_cpu
     CUDA: embedding_dense_backward_cuda
@@ -2859,6 +2861,7 @@
   variants: function, method
 
 - func: lcm.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: FallbackAware  # Allow CPU/MPS mixing with fallback
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -2866,11 +2869,13 @@
   tags: pointwise
 
 - func: lcm(Tensor self, Tensor other) -> Tensor
+  device_check: FallbackAware  # Allow CPU/MPS mixing with fallback
   structured_delegate: lcm.out
   variants: function, method
   tags: pointwise
 
 - func: lcm_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  device_check: FallbackAware  # Allow CPU/MPS mixing with fallback
   structured_delegate: lcm.out
   variants: function, method
 
@@ -9424,6 +9429,7 @@
 
 - func: linalg_solve_triangular.out(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+  device_check: FallbackAware  # Allow CPU/MPS mixing with fallback
   dispatch:
     CPU, CUDA: linalg_solve_triangular_out
     MPS: linalg_solve_triangular_mps_out
@@ -9431,6 +9437,7 @@
 - func: linalg_solve_triangular(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False) -> Tensor
   python_module: linalg
   variants: function
+  device_check: FallbackAware  # Allow CPU/MPS mixing with fallback
   dispatch:
     CPU, CUDA: linalg_solve_triangular
     MPS: linalg_solve_triangular_mps
