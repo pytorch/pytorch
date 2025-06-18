@@ -2012,7 +2012,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
         self.assertTrue(any("aten" in e.name for e in p.events()))
 
-        self.assertTrue(any("cuda" in e.name for e in p.events()))
+        self.assertTrue(any("cuda" in e.name for e in p.events()) or any("hip" in e.name for e in p.events()))
 
         self.assertTrue(any("kernel" in e.name for e in p.events()))
 
