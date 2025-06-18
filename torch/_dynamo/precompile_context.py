@@ -143,7 +143,19 @@ class PrecompileContext(CacheArtifactManager):
 
     @staticmethod
     def populate_caches(artifacts: CacheArtifactsResult) -> CacheInfo:
-        raise NotImplementedError("TODO")
+        for artifact_type, artifact_list in artifacts.items():
+            for artifact in artifact_list:
+                PrecompileContext.record_artifact(
+                    artifact_type, artifact.key, artifact.content
+                )
+        from torch._dynamo.package import DynamoCache
+
+        for dynamo_entry in artifacts["precompile_dynamo"]:
+            assert isinstance(dynamo_entry, PrecompileCacheArtifact)
+            cache_entry = dynamo_entry.after_deserialization()
+            DynamoCache.save_cache_entry(cache_entry, dynamo_entry.key)
+
+        return CacheInfo()
 
     @classmethod
     def _ensure_cache_artifacts_registered(cls) -> None:
