@@ -5706,7 +5706,6 @@ def scoped_load_inline(func):
 
     return wrapper
 
-# Skips a test if the Python version is not in the specified range.
 def skipIfPythonVersionMismatch(predicate):
     from torch._vendor.packaging import version
     vi = sys.version_info
