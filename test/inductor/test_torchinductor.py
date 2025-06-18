@@ -13564,6 +13564,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ignore_empty_lines=True,
         )
 
+    @config.patch("min_num_split", 256)
     @xfail_if_mps  # TypeError: cannot determine truth value of Relational
     def test_split_reduction_dynamic_shape(self):
         from torch._dynamo.decorators import mark_dynamic
@@ -13768,7 +13769,6 @@ if RUN_GPU:
 
             return kernels
 
-        @config.patch(min_num_split=1)
         def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()
 
