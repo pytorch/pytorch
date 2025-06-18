@@ -21,7 +21,7 @@ const size_t kLargeBuffer = 20971520;
  * This class configures the allocator for both device and host memory
  * management. A single AllocatorConfig is used across all devices, such as CUDA
  * and XPU, assuming that environment variables apply universally.
- * 
+ *
  * It is designed to *ONLY* contain configuration options that can be set via
  * environment variables.
  *
