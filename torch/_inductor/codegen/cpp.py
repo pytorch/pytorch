@@ -2333,6 +2333,7 @@ class CppKernel(Kernel):
                         f"{local_buf_dtype}* {local_buffer_name} = buf_{local_buffer_name}.get();"
                     )
             gen_loop_nest(loop_nest)
+            worksharing.close()
 
     def codegen_loops(self, code, worksharing):
         loop_nest = LoopNest.build(self)
