@@ -1,4 +1,3 @@
-#include <c10/core/AllocatorConfig.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
@@ -21,6 +20,8 @@ constexpr size_t kMinBlockSize = 512;
 constexpr size_t kSmallSize = 1048576;
 // "small" allocations are packed in 2 MiB blocks
 constexpr size_t kSmallBuffer = 2097152;
+// "large" allocations may be packed in 20 MiB blocks
+constexpr size_t kLargeBuffer = 20971520;
 // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kMinLargeAlloc = 10485760;
 // round up large allocations to 2 MiB
