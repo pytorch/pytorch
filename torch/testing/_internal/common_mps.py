@@ -376,6 +376,7 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST = {
             # Failures due to lack of op implementation on MPS backend
+            "login": None,
             "logspace": None,
             "logspacetensor_overload": None,
             "linalg.eig": None,
