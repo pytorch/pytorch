@@ -16,10 +16,10 @@ collection support for PyTorch APIs.
 
 import os as _os
 import sys as _sys
-from typing import Any as _Any, Optional as _Optional
+from types import ModuleType as _ModuleType
+from typing import Any as _Any, Optional as _Optional, TYPE_CHECKING as _TYPE_CHECKING
 
 import torch.utils._pytree as python
-from torch.utils._exposed_in import exposed_in as _exposed_in
 from torch.utils._pytree import (  # these type aliases are identical in both implementations
     FlattenFunc,
     FlattenWithKeysFunc,
@@ -28,6 +28,10 @@ from torch.utils._pytree import (  # these type aliases are identical in both im
     ToDumpableContextFunc,
     UnflattenFunc,
 )
+
+
+if _TYPE_CHECKING:
+    import torch.utils._cxx_pytree as cxx
 
 
 __all__ = [
@@ -64,9 +68,7 @@ PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in 
 }
 
 
-if PYTORCH_USE_CXX_PYTREE:
-    import torch.utils._cxx_pytree as cxx  # noqa: F401
-
+def _import_cxx_pytree_and_store() -> _ModuleType:
     if not python._cxx_pytree_dynamo_traceable:
         raise ImportError(
             "Cannot import package `optree`. "
@@ -74,8 +76,65 @@ if PYTORCH_USE_CXX_PYTREE:
             "Or set the environment variable `PYTORCH_USE_CXX_PYTREE=0`."
         )
 
+    import torch.utils._cxx_pytree as cxx
 
-_sys.modules[f"{__name__}.cxx"] = _sys.modules.get("torch.utils._cxx_pytree")  # type: ignore[assignment]
+    # This allows the following statements to work properly:
+    #
+    #     import torch.utils.pytree
+    #
+    #     torch.utils.pytree.cxx
+    #     torch.utils.pytree.cxx.tree_map
+    #
+    _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
+    return cxx
+
+
+if PYTORCH_USE_CXX_PYTREE:
+    cxx = _import_cxx_pytree_and_store()  # noqa: F811
+else:
+    cxx = _sys.modules.get("torch.utils._cxx_pytree")  # type: ignore[assignment]
+
+
+_sys.modules[f"{__name__}.python"] = python
+if cxx is not None:
+    _sys.modules[f"{__name__}.cxx"] = cxx
+else:
+    del cxx
+
+    class LazyCxxModule(_ModuleType):
+        def __getattr__(self, name: str) -> _Any:
+            if name == "__name__":
+                return f"{__name__}.cxx"
+            if name == "__file__":
+                return python.__file__.removesuffix("_python.py") + "_cxx_pytree.py"
+
+            cxx = globals().get("cxx")
+            if cxx is None:
+                if name.startswith("_"):
+                    raise AttributeError(
+                        f"module {self.__name__!r} has not been imported yet: "
+                        f"accessing attribute {name!r}. "
+                        f"Please import {self.__name__!r} explicitly first."
+                    )
+
+                # Lazy import on first member access
+                cxx = _import_cxx_pytree_and_store()
+
+            return getattr(cxx, name)
+
+        def __setattr__(self, name: str, value: _Any) -> None:
+            # Lazy import
+            cxx = _import_cxx_pytree_and_store()
+            return setattr(cxx, name, value)
+
+    # This allows the following statements to work properly:
+    #
+    #     import torch.utils.pytree.cxx
+    #     from torch.utils.pytree.cxx import tree_map
+    #
+    _sys.modules[f"{__name__}.cxx"] = LazyCxxModule(f"{__name__}.cxx")
+
+    del LazyCxxModule
 
 
 if not PYTORCH_USE_CXX_PYTREE:
@@ -103,8 +162,6 @@ if not PYTORCH_USE_CXX_PYTREE:
         tree_unflatten,
         treespec_pprint,
     )
-
-    PyTreeSpec = _exposed_in(__name__)(PyTreeSpec)  # type: ignore[misc]
 else:
     from torch.utils._cxx_pytree import (  # type: ignore[assignment,no-redef]
         is_namedtuple,
@@ -130,41 +187,6 @@ else:
         tree_unflatten,
         treespec_pprint,
     )
-
-
-# Change `__module__` of reexported public APIs to 'torch.utils.pytree'
-__func_names = frozenset(
-    {
-        "tree_all",
-        "tree_all_only",
-        "tree_any",
-        "tree_any_only",
-        "tree_flatten",
-        "tree_iter",
-        "tree_leaves",
-        "tree_map",
-        "tree_map_",
-        "tree_map_only",
-        "tree_map_only_",
-        "tree_structure",
-        "tree_unflatten",
-        "treespec_pprint",
-        "is_namedtuple",
-        "is_namedtuple_class",
-        "is_namedtuple_instance",
-        "is_structseq",
-        "is_structseq_class",
-        "is_structseq_instance",
-    }
-)
-globals().update(
-    {
-        name: _exposed_in(__name__)(member)
-        for name, member in globals().items()
-        if name in __func_names
-    }
-)
-del __func_names, _exposed_in
 
 
 def register_pytree_node(
@@ -208,9 +230,6 @@ def register_pytree_node(
 def __getattr__(name: str) -> _Any:
     if name == "cxx":
         # Lazy import
-        import torch.utils._cxx_pytree as cxx  # noqa: F811
-
-        _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
-        return cxx
+        return _import_cxx_pytree_and_store()
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
