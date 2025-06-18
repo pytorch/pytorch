@@ -15623,9 +15623,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
                DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule'),
-               # NotImplementedError: The operator 'aten::_upsample_nearest_exact3d.out' is not currently implemented
-               # for the MPS device.
-               DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
