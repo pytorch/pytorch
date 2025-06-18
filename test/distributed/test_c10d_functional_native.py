@@ -9,11 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C import FileCheck
-from torch._inductor.utils import (
-    fresh_cache,
-    run_and_get_code,
-    run_and_get_triton_code,
-)
+from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
     all_gather_into_tensor_coalesced,
     all_gather_tensor,
@@ -736,8 +732,8 @@ class CompileTestCPU(TestCase):
     def tearDown(self):
         dist.destroy_process_group()
 
-    @fresh_inductor_cache()
-    def test_inductor_all_reduce_cpu(self):
+    @fresh_cache()
+    def _test_inductor_all_reduce_cpu(self, cpp_wrapper=False):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
             ar0 = funcol.all_reduce(buf0, "avg", "0")
@@ -745,6 +741,7 @@ class CompileTestCPU(TestCase):
             return ar0
 
         arg = torch.rand(4, 4, device="cpu")
+        torch._inductor.config.cpp_wrapper = cpp_wrapper
         compiled = torch.compile(func)
 
         _, (code,) = run_and_get_code(compiled, arg)
@@ -753,7 +750,7 @@ class CompileTestCPU(TestCase):
                 "aoti_torch_cpu__c10d_functional_all_reduce_",
                 "aoti_torch_cpu__c10d_functional_wait_tensor",
             ]
-            if torch._inductor.config.cpp_wrapper
+            if cpp_wrapper
             else [
                 "torch.ops._c10d_functional.all_reduce_.default",
                 "torch.ops._c10d_functional.wait_tensor.default",
@@ -765,6 +762,10 @@ class CompileTestCPU(TestCase):
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
         torch.cpu.synchronize()
+
+    def test_inductor_all_reduce_cpu(self):
+        self._test_inductor_all_reduce_cpu(cpp_wrapper=False)
+        self._test_inductor_all_reduce_cpu(cpp_wrapper=True)
 
 
 class CompileTest(TestCase):
