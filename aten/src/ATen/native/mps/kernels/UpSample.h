@@ -3,18 +3,18 @@
 #ifndef __METAL__
 #include <array>
 using ulong = unsigned long;
-using namespace std;
+#define _ARRAY_NS std
 #else
 #include <metal_array>
-using namespace metal;
+#define _ARRAY_NS metal
 #endif
 
 template <unsigned N = 5>
 struct UpsampleParams {
-  array<ulong, N> input_strides;
-  array<ulong, N> input_sizes;
-  array<ulong, N> output_strides;
-  array<ulong, N> output_sizes;
-  array<float, N - 2> scales;
+  _ARRAY_NS::array<ulong, N> input_strides;
+  _ARRAY_NS::array<ulong, N> input_sizes;
+  _ARRAY_NS::array<ulong, N> output_strides;
+  _ARRAY_NS::array<ulong, N> output_sizes;
+  _ARRAY_NS::array<float, N - 2> scales;
   bool align_corners;
 };
