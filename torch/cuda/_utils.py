@@ -169,9 +169,8 @@ def _nvrtc_compile(
     options.append(f"--gpu-architecture=sm_{compute_capability}".encode())
 
     # Add custom include directories
-    if cuda_include_dirs:
-        for directory in cuda_include_dirs:
-            options.append(f"-I{directory}".encode())
+    for directory in cuda_include_dirs:
+        options.append(f"-I{directory}".encode())
 
     # Add custom NVCC options
     if nvcc_options:
