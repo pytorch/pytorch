@@ -429,10 +429,11 @@ std::vector<Node*> get_current_graph_task_execution_order() {
     return {};
   }
 
-  // We could potentially check if there is only a single device here
-  // but explicitly require this context doesn't seem bad either
+  // Either the entire graph is on a single device, or multithreading was
+  // explicitly disabled.
   TORCH_CHECK(
-      !c10::AutogradState::get_tls_state().get_multithreading_enabled(),
+      (!c10::AutogradState::get_tls_state().get_multithreading_enabled() ||
+       task->num_distinct_devices_ == 1),
       "get_current_graph_task_execution_order expects the current backward to be "
       "executed with multithreading disabled, e.g. by running:\n\n"
       ">>> with torch.autograd.set_multithreading_enabled(False):\n"
