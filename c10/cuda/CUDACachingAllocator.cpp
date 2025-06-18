@@ -290,7 +290,7 @@ struct SegmentConfig {
 
   std::atomic<Expandable_Segments_Handle_Type> handle_type{
       Expandable_Segments_Handle_Type::UNSPECIFIED};
-}
+};
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 
 /*
