@@ -425,14 +425,14 @@ def _write_files_from_queue(
                             transforms,
                             stream,
                             tensor,
-                            write_item,
+                            write_item,  # type: ignore[arg-type]
                             storage_key,
                             serialization_format,
                         )
                     )
-                    tensor_dict[write_item.index.fqn] = tensor
-                    metadata_dict[write_item.index.fqn] = {
-                        "saved_offsets": write_item.tensor_data.chunk.offsets
+                    tensor_dict[write_item.index.fqn] = tensor  # type: ignore[attr-defined]
+                    metadata_dict[write_item.index.fqn] = {  # type: ignore[attr-defined]
+                        "saved_offsets": write_item.tensor_data.chunk.offsets  # type: ignore[attr-defined]
                     }
 
                 if serialization_format == SerializationFormat.SAFETENSORS:
