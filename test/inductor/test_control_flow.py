@@ -1642,6 +1642,18 @@ class ScanModels:
                 torch.cat(grad_inputs, dim=0) / chunks,
             )
 
+    class ScanWithClamp(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, scan_op, initial, xs):
+            def step(h_prev, x_t):
+                h_next = (h_prev + x_t).clamp(min=0.1)
+                return h_next, h_next.clone()
+
+            final, ys = scan_op(step, initial, xs)
+            return final, ys
+
 
 class ScanTests(TestCase):
     def _run_test(
@@ -1823,6 +1835,24 @@ class ScanTests(TestCase):
                 ),
                 device=device,
             )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_scan_with_clamp(self, device, dynamic):
+        B = 4
+        T = 8
+        H = 16
+        self._run_test(
+            model=ScanModels.ScanWithClamp(),
+            inputs=(
+                torch.randn((B, H)),
+                torch.randn((T, B, H), requires_grad=True),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
 
 
 class MapModels:

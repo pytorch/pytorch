@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import copy
 import os
 import shutil
 import unittest
@@ -24,7 +25,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.runtime.triton_compat import tl, triton
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -164,7 +165,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         b = torch.rand(100, 100, dtype=dtype, device=device, requires_grad=True)
 
         # Record artifacts
-        with fresh_inductor_cache():
+        with fresh_cache():
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
             # A first call should miss in the cache.
@@ -200,7 +201,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
         # We did not load anything so dont hit yet
-        with fresh_inductor_cache():
+        with fresh_cache():
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             self.assertEqual(eager_result, compiled_result)
@@ -220,7 +221,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
         # Hot load and hit
-        with fresh_inductor_cache():
+        with fresh_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
             self.assertEqual(len(cache_info.inductor_artifacts), 2)
@@ -821,6 +822,44 @@ class AOTAutogradCacheTests(InductorTestCase):
         compiled_fn(a2, b2).sum().backward()
         self.assertEqual(a.grad, a2.grad)
         self.assertEqual(b.grad, b2.grad)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch({"fx_graph_cache": True})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"strict_autograd_cache": True})
+    def test_autograd_no_dynamo_trace_backward(self):
+        """
+        Test that dynamo does not trace into the backward compiled function,
+        even on cache hit.
+        """
+        torch._dynamo.eval_frame.clear_dynamo_tls()
+
+        @torch.compile
+        def fn(x):
+            # Calls x.sum().backward() during forward execution of fn
+            (x_grad,) = torch.autograd.grad(x.sum(), x)
+            return x_grad
+
+        a = torch.randn(10, 10, requires_grad=True, device="cpu")
+        result = fn(a)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        # Backward of `sum` will run during execution of graph break
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        traced_frame_infos = copy.deepcopy(
+            torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos
+        )
+
+        torch._dynamo.reset()
+        torch._dynamo.eval_frame.clear_dynamo_tls()
+        result2 = fn(a)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        new_traced_frame_infos = torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos
+        self.assertEqual(result, result2)
+        # Dynamo should trace exactly the same frames on cache hit
+        self.assertEqual(traced_frame_infos, new_traced_frame_infos)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
