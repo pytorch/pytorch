@@ -56,19 +56,19 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
             self.scale = Parameter(torch.tensor([scale]))
             self.zero_point = Parameter(torch.tensor([zero_point]))
         else:
-            assert (
-                isinstance(channel_len, int) and channel_len > 0
-            ), "Channel size must be a positive integer."
+            assert isinstance(channel_len, int) and channel_len > 0, (
+                "Channel size must be a positive integer."
+            )
             self.scale = Parameter(torch.tensor([scale] * channel_len))
             self.zero_point = Parameter(torch.tensor([zero_point] * channel_len))
 
         self.activation_post_process = observer(**observer_kwargs)
-        assert (
-            torch.iinfo(self.activation_post_process.dtype).min <= quant_min
-        ), "quant_min out of bound"
-        assert (
-            quant_max <= torch.iinfo(self.activation_post_process.dtype).max
-        ), "quant_max out of bound"
+        assert torch.iinfo(self.activation_post_process.dtype).min <= quant_min, (
+            "quant_min out of bound"
+        )
+        assert quant_max <= torch.iinfo(self.activation_post_process.dtype).max, (
+            "quant_max out of bound"
+        )
         self.dtype = self.activation_post_process.dtype
         self.qscheme = self.activation_post_process.qscheme
         self.ch_axis = (
@@ -145,7 +145,7 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
         print(f"_LearnableFakeQuantize Zero Point: {self.zero_point.detach()}")
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         self.scale.data.clamp_(min=self.eps.item())  # type: ignore[operator]
         scale = self.scale.detach()
         zero_point = (

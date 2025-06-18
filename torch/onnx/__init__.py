@@ -393,7 +393,7 @@ def export(
         from torch.onnx.utils import export
 
         warnings.warn(
-            "You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.8, "
+            "You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, "
             "the new torch.export-based ONNX exporter will be the default. To switch now, set "
             "dynamo=True in torch.onnx.export. This new exporter supports features like exporting "
             "LLMs with DynamicCache. We encourage you to try it and share feedback to help improve "

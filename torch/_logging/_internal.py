@@ -251,6 +251,7 @@ def set_logs(
     autotuning: bool = False,
     graph_region_expansion: bool = False,
     inductor_metrics: bool = False,
+    hierarchical_compile: bool = False,
 ) -> None:
     """
     Sets the log level for individual components and toggles individual log
@@ -448,6 +449,9 @@ def set_logs(
         inductor_metrics (:class:`bool`):
             Whether to estimate the runtimes of the nodes in a graph and log them to the metrics table. Default: ``False``
 
+        hierarchical_compile (:class:`bool`):
+            Whether to emit debug info for hierarchical compilation. Default: ``False``
+
     Example::
 
         >>> # xdoctest: +SKIP
@@ -560,6 +564,7 @@ def set_logs(
         autotuning=autotuning,
         graph_region_expansion=graph_region_expansion,
         inductor_metrics=inductor_metrics,
+        hierarchical_compile=hierarchical_compile,
     )
 
 
@@ -1138,7 +1143,7 @@ class LazyTraceHandler(logging.StreamHandler):
             super().emit(record)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def warning_once(logger_obj, *args, **kwargs) -> None:
     """
     This function is similar to `logger.warning()`, but will emit the warning with the same message only once

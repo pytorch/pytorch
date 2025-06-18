@@ -680,6 +680,120 @@ graph():
     return (1,)""",
         )
 
+    def test_inline_script_function(self):
+        @torch.jit.script
+        def _forward(x: torch.Tensor):
+            if torch.jit.is_scripting():
+                return x.cos()
+            return x.sin()
+
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return _forward(x)
+
+        x = torch.randn(3, 4)
+        ep = torch.export.export(M(), (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
+        res = ep.module()(x)
+        # We're inlining the original _forward function
+        # instead of the scripted function, so we get x.sin()
+        self.assertEqual(res, x.sin())
+
+    def test_inline_script_class_method(self):
+        class M(torch.nn.Module):
+            @staticmethod
+            @torch.jit.script
+            def _forward(x: torch.Tensor):
+                if torch.jit.is_scripting():
+                    return x.cos()
+                return x.sin()
+
+            def forward(self, x: torch.Tensor):
+                return M._forward(x)
+
+        x = torch.randn(3, 4)
+        ep = torch.export.export(M(), (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
+        res = ep.module()(x)
+        # We're inlining the original _forward function
+        # instead of the scripted function, so we get x.sin()
+        self.assertEqual(res, x.sin())
+
+    def test_inline_script_class_method_recursive(self):
+        f = 0.4
+        i = 2
+        s = "foo"
+
+        @torch.jit.script
+        def _inner(x: torch.Tensor, y: torch.Tensor, f: float, i: int, s_len: int):
+            return x * y * f * i * s_len
+
+        class M(torch.nn.Module):
+            @staticmethod
+            @torch.jit.script
+            def _forward(x: torch.Tensor, y: torch.Tensor, f: float, i: int, s: str):
+                if torch.jit.is_scripting():
+                    return _inner(x.cos(), y.cos(), f, i, len(s))
+                return _inner(x.sin(), y.sin(), f, i, len(s))
+
+            def forward(self, x: torch.Tensor):
+                return M._forward(x, y=x, f=f, i=i, s=s)
+
+        x = torch.randn(3, 4)
+        ep = torch.export.export(M(), (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 2, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
+        res = ep.module()(x)
+        # We're inlining the original _forward function
+        # instead of the scripted function, so we get x.sin()
+        self.assertEqual(res, _inner(x.sin(), x.sin(), f, i, len(s)))
+
+    def test_inline_script_method(self):
+        class M(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def _forward(self, x: torch.Tensor):
+                if torch.jit.is_scripting():
+                    return x.cos()
+                return x.sin()
+
+            def forward(self, x):
+                return self._forward(x)
+
+        class Wrapped(torch.nn.Module):
+            def __init__(self, mod):
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        x = torch.randn(3, 4)
+        ep = torch.export.export(Wrapped(M()), (x,))
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("torch.ops.aten.cos", 0, exactly=True).run(
+            str(ep.graph)
+        )
+        res = ep.module()(x)
+        # We're inlining the original _forward function
+        # instead of the scripted function, so we get x.sin()
+        self.assertEqual(res, x.sin())
+
     def test_no_tensor_computation_2(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -2621,7 +2735,8 @@ graph():
         }
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            r"You marked.*but your code specialized it to be a constant.*"
+            r"If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
@@ -4112,6 +4227,34 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         vr = next(iter(ep.range_constraints.values()))
         self.assertEqual(vr.lower, 3)
 
+    def test_unbacked_linear_layer_norm_input(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(387, 128, bias=True)
+                self.layer_norm = torch.nn.LayerNorm(387)
+
+            def forward(self, x, mask):
+                masked_select = x.masked_select(mask)
+                view = masked_select.view(-1, 387)
+
+                linear = self.linear(view)
+                layer_norm = self.layer_norm(view)
+                return linear, layer_norm
+
+        inputs = (
+            torch.randn((256, 387), dtype=torch.float),
+            torch.randint(low=0, high=1, size=(256, 1), dtype=torch.bool),
+        )
+
+        model = MyModel()
+        ep = export(model, inputs)
+
+        ref = model(*inputs)
+        actual = ep.module()(*inputs)
+        self.assertTrue(torch.allclose(ref[0], actual[0]))
+        self.assertTrue(torch.allclose(ref[1], actual[1]))
+
     def test_dynamic_shapes_builder_basic(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -4245,7 +4388,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             # 4->5, 4->5, 3->4
             bad_args=(torch.randn(5), [torch.randn(5)], {"k": torch.randn(4)}),
             run_time_msg="Expected input.*to be equal to 3, but got 4",
-            compile_time_msg=r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            compile_time_msg=r"You marked.*but your code specialized it to be a constant.*If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
         )
 
     def test_additional_inputs_constants(self):
@@ -5746,7 +5889,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.(.*\n)*.*"
+                "You marked.*but your code specialized it to be a constant.*"
+                "If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "batch = 10"
             ),
@@ -5912,7 +6056,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO(.*\n)*"
+                "You marked.*but your code specialized it to be a constant.*"
+                "If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO(.*\n)*"
                 "Suggested fixes:(.*\n)*.*"
                 "K1 = 3"
             ),
@@ -6160,7 +6305,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder"
         ]
         self.assertEqual(len(input_shapes), 9)
-        self.assertTrue(all(shape == "torch.Size([s3])" for shape in input_shapes))
+        self.assertEqual(len(set(input_shapes)), 1)
 
     def test_error_does_not_reference_eager_fallback(self):
         class Module(torch.nn.Module):
@@ -6554,6 +6699,109 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertIn(torch.ops.aten._to_copy.default, ops)
 
         self.assertEqual(ep.module()(*inputs), model(*inputs))
+
+    def test_export_aten_to_unflatten(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                to = x.to(torch.float)
+                return self.bar(to).sum()
+
+        inp = torch.randn(4, 4)
+
+        ep = export(
+            Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
+        )
+        mod = ep.module()
+        self.assertTrue(torch.allclose(mod(inp), Foo()(inp)))
+
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
+    @testing.expectedFailureRetraceabilityNonStrict  # when we retrace, ep.module() is hierarchical
+    @testing.expectedFailureRetraceability  # when we retrace, ep.module() is hierarchical
+    def test_export_aten_to_unflatten_subclass(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.param = torch.nn.Parameter(
+                    TwoTensor(torch.ones(4, 4), torch.ones(4, 4))
+                )
+
+            def forward(self, x):
+                to = self.param.to(torch.float)
+                return (self.bar(to).sum() + x.sum()).get_elem_a()
+
+        inp = torch.randn(4, 4)
+
+        with self.assertRaisesRegex(
+            ValueError, "It looks like p_param is a tensor subclass."
+        ):
+            export(
+                Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
+            ).run_decompositions({})
+
+    def test_export_aten_to_unflatten_subclass_pre_dispatch(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.param = torch.nn.Parameter(
+                    TwoTensor(torch.ones(4, 4), torch.ones(4, 4))
+                )
+
+            def forward(self, x):
+                to = self.param.to(torch.float)
+                return (self.bar(to).sum() + x.sum()).get_elem_a()
+
+        inp = torch.randn(4, 4)
+
+        ep = export_for_training(
+            Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
+        )
+        unflat = unflatten(ep).bar
+        self.assertExpectedInline(
+            str(unflat.graph).strip(),
+            """\
+graph():
+    %_positional_arg_0 : [num_users=1] = placeholder[target=_positional_arg_0]
+    %_spec_0 : [num_users=1] = get_attr[target=_spec_0]
+    %tree_flatten_spec : [num_users=1] = call_function[target=torch.fx._pytree.tree_flatten_spec](args = (((%_positional_arg_0,), {}), %_spec_0), kwargs = {})
+    %to : [num_users=1] = call_function[target=operator.getitem](args = (%tree_flatten_spec, 0), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%to,), kwargs = {})
+    %_spec_1 : [num_users=1] = get_attr[target=_spec_1]
+    %tree_unflatten : [num_users=1] = call_function[target=torch.utils._pytree.tree_unflatten](args = ((%sum_1,), %_spec_1), kwargs = {})
+    return tree_unflatten""",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "It looks like p_param is a tensor subclass."
+        ):
+            ep.run_decompositions()
 
     def test_float_conversion(self):
         class Module(torch.nn.Module):
@@ -7396,6 +7644,24 @@ def forward(self, x):
         ep = torch.export.export_for_training(f, (torch.randn(2, 2), mod), strict=False)
         self.assertEqual(ref_out, ep.module()(ref_x, mod))
 
+    def test_unbacked_noncontig_lin(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(32, 64)
+
+            def forward(self, x):
+                n = x.item()
+                y = torch.empty(x).view(1, -1, 32)
+                return self.lin(y)
+
+        mod = Foo()
+        x = torch.tensor([128])
+        ep = export(mod, (x,))
+        self.assertEqual(mod(x).shape, ep.module()(x).shape)
+        x = torch.tensor([512])
+        self.assertEqual(mod(x).shape, ep.module()(x).shape)
+
     def test_runtime_assert_for_prim(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -7460,9 +7726,7 @@ def forward(self, x):
             RuntimeError, r".* expression Eq\(u0, 2\) \| Eq\(u0, 4\) \| Eq\(u0, 6\) .*"
         ):
             ep.module()(torch.tensor([3, 6, 5]))
-        with self.assertRaisesRegex(
-            RuntimeError, r".* expression Eq\(u2, 5\) & \(4 <= u1\) & \(u1 <= 8\) .*"
-        ):
+        with self.assertRaisesRegex(RuntimeError, r".* expression u[\d]+ <= 5 .*"):
             ep.module()(torch.tensor([6, 6, 6]))
 
     def test_redundant_assert_max_upper_bound(self):
@@ -10507,7 +10771,8 @@ graph():
         inp = (3, torch.randn(4, 4))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            r"You marked.*but your code specialized it to be a constant.*"
+            r"If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
         ):
             ep = export(
                 M(),
@@ -10628,6 +10893,36 @@ graph():
         self.assertEqual(ep.module()(5, 5), 10)
         self.assertEqual(ep.module()(3, 5), 8)
         self.assertEqual(ep.module()(5, 4), 9)
+
+    def test_dynamic_shapes_bounds(self):
+        class M(torch.nn.Module):
+            """
+            Example: bounds on dynamic shapes
+            """
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor, zs: list[torch.Tensor]):
+                return x[:3] + y @ torch.cat(zs)
+
+        m = M()
+        x = torch.randn(7, 5)
+        y = torch.randn(3, 6)
+        zs = [torch.randn(2, 5), torch.randn(4, 5)]
+
+        from torch.export import Dim, ShapesCollection
+
+        dynamic_shapes = ShapesCollection()
+        dynamic_shapes[x] = (Dim.DYNAMIC, Dim.DYNAMIC)
+        dynamic_shapes[y] = (Dim.DYNAMIC, Dim.DYNAMIC)
+        for z in zs:
+            dynamic_shapes[z] = (Dim.DYNAMIC, Dim.DYNAMIC)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Constraints violated.*\n.*"
+            r"You marked L\['y'\].size\(\)\[0\] as dynamic but your code specialized it to be a constant \(3\).*"
+            r"If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO.",
+        ):
+            export(m, (x, y, zs), dynamic_shapes=dynamic_shapes)
 
     def test_unflatten_random_dag_const_preserving_3_1(self):
         class N2(torch.nn.Module):
@@ -11315,6 +11610,59 @@ graph():
 
         ep = export(
             Foo(),
+            (torch.randn(4, 4),),
+        ).run_decompositions({})
+        # check correct lines are in stack trace
+        trace_mul = [node for node in ep.graph.nodes if node.name == "mul"][0].meta.get(
+            "stack_trace", ""
+        )
+        self.assertTrue(
+            re.search(r"test_export.py.*in forward\n.*x \*= 2.0", trace_mul)
+        )
+        trace_addmm = [
+            node for node in ep.graph.nodes if node.name in ["addmm", "linear"]
+        ][0].meta.get("stack_trace", "")
+        self.assertTrue(
+            re.search(
+                r"test_export.py.*in forward\n.*x = self.linear\(x\)", trace_addmm
+            )
+        )
+
+    def test_stack_trace_make_fx(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x *= 2.0
+                return x
+
+        inp = torch.randn(4, 4)
+        gm = torch.fx.experimental.proxy_tensor.make_fx(Foo(), stack_trace=True)(
+            inp,
+        )
+
+        # check correct lines are in stack trace
+        trace_mul = [node for node in gm.graph.nodes if node.name == "mul_"][
+            0
+        ].meta.get("stack_trace", "")
+        self.assertTrue(
+            re.search(r"test_export.py.*in forward\n.*x \*= 2.0", trace_mul)
+        )
+        trace_addmm = [node for node in gm.graph.nodes if node.name in ["addmm", "t"]][
+            0
+        ].meta.get("stack_trace", "")
+        self.assertTrue(
+            re.search(
+                r"test_export.py.*in forward\n.*x = self.linear\(x\)", trace_addmm
+            )
+        )
+
+        # check correct lines are still in stack trace after export
+        ep = export(
+            gm,
             (torch.randn(4, 4),),
         ).run_decompositions({})
         # check correct lines are in stack trace
@@ -13950,7 +14298,8 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            r"You marked.*but your code specialized it to be a constant.*"
+            r"If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
         ):
             ep = export(
                 Specialize(),
