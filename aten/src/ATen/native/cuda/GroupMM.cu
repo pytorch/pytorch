@@ -62,9 +62,11 @@ struct Schedule {
   using MMA2SMKernelSchedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecialized2SmSm100;
   using MMA2SMEpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized2Sm;
 
-  using KernelSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, cute::conditional_t<PONG, MMA2SMKernelSchedule, MMA1SMKernelSchedule>,
+  using KernelSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>,
+    cute::conditional_t<PONG, MMA2SMKernelSchedule, MMA1SMKernelSchedule>,
     cute::conditional_t<PONG, PongSchedule, CooperativeSchedule>>;
-  using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>, cute::conditional_t<PONG, MMA2SMEpilogueSchedule, MMA1SMEpilogueSchedule>, 
+  using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>,
+    cute::conditional_t<PONG, MMA2SMEpilogueSchedule, MMA1SMEpilogueSchedule>, 
     cute::conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>>;
 
 };
@@ -328,29 +330,33 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
   //        (K >= 2048 && N >= 2048));
   bool small = (M <= 128 || N <= 128);
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool sm9x = properties != nullptr && properties->major == 9;
+  // const bool sm9x = properties != nullptr && properties->major == 9;
   const bool sm10x = properties != nullptr && properties->major == 10;
 
-  if (sm10x && small) {
-    bf16bf16_grouped_gemm_impl_sm90_sm100<
+
+  if (sm10x) {
+    if (small){
+      bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm100,
         a_row_major,
         b_row_major,
-        false,
+        /*2SM*/ false,
         cute::_128,
         cute::_256,
-        cute::Int<128/sizeof(cutlass::bfloat16_t)>>(mat_a, mat_b, offs, bias, out);
-  } else if (sm10x){
-    bf16bf16_grouped_gemm_impl_sm90_sm100<
+        cute::_64>(mat_a, mat_b, offs, bias, out);
+    } else {
+      bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm100,
         a_row_major,
         b_row_major,
-        true,
+        /*2SM*/ true,
         cute::_256,
         cute::_256,
-        cute::Int<128/sizeof(cutlass::bfloat16_t)>>(mat_a, mat_b, offs, bias, out);
-  } else if (small) {
-    bf16bf16_grouped_gemm_impl_sm90_sm100<
+        cute::_64>(mat_a, mat_b, offs, bias, out);
+    }
+  } else {
+    if(small) {
+      bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm90,
         a_row_major,
         b_row_major,
@@ -358,8 +364,8 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         cute::_64,
         cute::_128,
         cute::_128>(mat_a, mat_b, offs, bias, out);
-  } else {
-    bf16bf16_grouped_gemm_impl_sm90_sm100<
+    } else {
+      bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm90,
         a_row_major,
         b_row_major,
@@ -367,6 +373,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         cute::_128,
         cute::_256,
         cute::_64>(mat_a, mat_b, offs, bias, out);
+    }
   }
 }
 
