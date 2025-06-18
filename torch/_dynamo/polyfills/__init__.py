@@ -200,6 +200,10 @@ def mapping_get(obj, key, value=None):
         return value
 
 
+def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
+    self_.assertTrue(seq1 == seq2, msg)
+
+
 def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     obj = cls.__new__(cls, *args, **kwargs)
 
