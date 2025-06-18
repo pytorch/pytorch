@@ -42,12 +42,12 @@ std::string getSymmMemBackendCUDA() {
         "TORCH_SYMMMEM environment variable must be one of 'CUDA', 'NVSHMEM', 'NCCL'.")
     return val.value();
   }
-
   // If TORCH_SYMMMEM is not set, check if NVSHMEM is available (for broader
   // support).
-  if (is_nvshmem_available()) {
-    return "NVSHMEM";
-  }
+  // TODO: uncomment this once all single-node tests work with NVSHMEM
+  // if (is_nvshmem_available()) {
+  //   return "NVSHMEM";
+  // }
   return "CUDA";
 }
 
