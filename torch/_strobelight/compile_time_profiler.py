@@ -127,7 +127,7 @@ class StrobelightCompileTimeProfiler:
 
             if not shutil.which("strobeclient"):
                 logger.info(
-                    "strobeclient not found, cant enable compile time strobelight profiling, seems"
+                    "strobeclient not found, can't enable compile time strobelight profiling, seems"
                     "like you are not on a FB machine."
                 )
                 return

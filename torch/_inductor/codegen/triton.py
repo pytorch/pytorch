@@ -624,7 +624,7 @@ class TritonPrinter(PythonPrinter):
 
     def _print_min_max_helper(self, expr: sympy.Expr, cmp: str) -> str:
         """
-        Helper for max/min code genereration.
+        Helper for max/min code generation.
         cmp: > or <
         """
         if len(expr.args) == 1:
@@ -916,7 +916,7 @@ class TritonOverrides(OpOverrides):
             return triton_val
 
         # NOTE: We use a tensor here in order to get the expected type.
-        # Otherwise, e.g. float64 constants would be trunctated to float32.
+        # Otherwise, e.g. float64 constants would be truncated to float32.
         if value < 0 and not dtype.is_signed:
             triton_signed_type = f"tl.{triton_type[4:]}"
             return f"tl.full({shape}, {triton_val}, {triton_signed_type}).to({triton_type})"
@@ -1933,7 +1933,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # Compute the ND block shape from the linear block size.
                 # Use CielDiv to round leading dimensions up to 1.
                 # Non-leading dimensions are clamped to the size of the iteration range,
-                # while the leading dimension can exceed this to accomodate a larger
+                # while the leading dimension can exceed this to accommodate a larger
                 # block size.
                 linear_block_size = TritonSymbols.get_block_size(range_tree)
                 block_shape: list[sympy.Expr] = [

@@ -115,8 +115,8 @@ bool isSortableListOfObjectsOrTuples(
   }
 
   auto type = ivalues.get(0).type();
-  // We assume lists have homogenous types, use first element to determine
-  // best sorting methods. If in the future we need to support heterogenous
+  // We assume lists have homogeneous types, use first element to determine
+  // best sorting methods. If in the future we need to support heterogeneous
   // types inside list, then sorting needs to have runtime sortable checks.
   const size_t n = ivalues.size();
   for (const auto i : c10::irange(n)) {
@@ -1141,7 +1141,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     //
     // create a clone of these declarations with a _hacked_twin overload name
     // and nullability scrubbed from TensorList arg types
-    // TOOD find out why this exists and how to do it without the hack
+    // TODO find out why this exists and how to do it without the hack
     //
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
@@ -2839,7 +2839,7 @@ void hashValue(Stack& stack) {
 }
 
 static const std::vector<OperatorGeneratorArgs> opGenArgs2{
-    // registered as Any[] so that heterogenous tuples can be called with len()
+    // registered as Any[] so that heterogeneous tuples can be called with len()
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::len.any(Any[] a) -> int"),
         listLen,
