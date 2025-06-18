@@ -43,6 +43,7 @@ from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
+from ..exc import unimplemented_v2
 
 
 if TYPE_CHECKING:
@@ -116,7 +117,16 @@ class BaseListVariable(VariableTracker):
             )
         else:
             assert isinstance(index, (int, torch.SymInt))
-            return self.items[index]
+            try:
+                return self.items[index]
+            except IndexError as e:
+                raise unimplemented_v2(
+                    gb_type="bad_list_access",
+                    context=f"list = f{self.items}",
+                    from_exc=e,
+                    explanation="We can't evaluate code that throws in general, please only access valid list indices",
+                    hints=[],
+                )
 
     def unpack_var_sequence(self, tx):
         return list(self.items)
