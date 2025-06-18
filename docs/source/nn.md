@@ -13,9 +13,9 @@
 These are the basic building blocks for graphs:
 
 ```{contents} torch.nn
-local: true
-depth: 2
-backlinks: top
+:local:
+:depth: 2
+:backlinks: top
 ```
 
 ```{eval-rst}
