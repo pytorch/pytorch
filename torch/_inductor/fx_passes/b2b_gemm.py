@@ -672,9 +672,9 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     graph, module = inner_mm.graph, inner_mm.graph.owning_module
 
     # construct the new (sub)graph
-    subgraph_node_list: list[torch.fx.Node] = (
-        []
-    )  # ordered list of nodes used for node removal later
+    subgraph_node_list: list[
+        torch.fx.Node
+    ] = []  # ordered list of nodes used for node removal later
     new_graph: torch.fx.Graph = torch.fx.Graph()
     node_remapping: dict[torch.fx.Node, torch.fx.Node] = {}
     new_input_anchor: torch.fx.Node  # inner_mm, to be changed to an input node

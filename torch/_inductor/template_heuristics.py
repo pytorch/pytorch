@@ -627,30 +627,6 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
             # Create and yield a CPUTritonKernelParams object
             yield CPUTritonTemplateKernelParams(**options, exclude=exclude)
 
-    def get_mm_params(
-        self, kernel_inputs: MMKernelInputs
-    ) -> partial[Generator[TritonTemplateMMParams, None, None]]:
-        """
-        Return a partial function that generates TritonTemplateMMParams for matrix multiplication.
-        """
-        return partial(
-            self._to_params,
-            kernel_inputs=kernel_inputs,
-            config_gen_fn=self.get_mm_configs(),
-        )
-
-    def get_exhaustive_mm_params(
-        self, kernel_inputs: MMKernelInputs
-    ) -> partial[Generator[TritonTemplateMMParams, None, None]]:
-        """
-        Return a partial function that generates TritonTemplateMMParams for exhaustive matrix multiplication.
-        """
-        return partial(
-            self._to_params,
-            kernel_inputs=kernel_inputs,
-            config_gen_fn=self.get_exhaustive_mm_configs(),
-        )
-
 
 class CUDAConfigHeuristic(BaseConfigHeuristic):
     pass
@@ -893,30 +869,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
             # Create and yield a ROCmTritonTemplateMMParams object
             yield ROCmTritonTemplateMMParams(**options)
-
-    def get_mm_params(
-        self, kernel_inputs: MMKernelInputs
-    ) -> partial[Generator[TritonTemplateMMParams, None, None]]:
-        """
-        Return a partial function that generates TritonTemplateMMParams for matrix multiplication.
-        """
-        return partial(
-            self._to_params,
-            kernel_inputs=kernel_inputs,
-            config_gen_fn=self.get_mm_configs(),
-        )
-
-    def get_exhaustive_mm_params(
-        self, kernel_inputs: MMKernelInputs
-    ) -> partial[Generator[TritonTemplateMMParams, None, None]]:
-        """
-        Return a partial function that generates TritonTemplateMMParams for exhaustive matrix multiplication.
-        """
-        return partial(
-            self._to_params,
-            kernel_inputs=kernel_inputs,
-            config_gen_fn=self.get_exhaustive_mm_configs(),
-        )
 
 
 class PersistentTMAConfigHeuristics(BaseConfigHeuristic):
