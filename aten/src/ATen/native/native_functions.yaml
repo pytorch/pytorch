@@ -1323,7 +1323,7 @@
 - func: logical_and.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: logical_and_out
+    CPU, CUDA, MTIA: logical_and_out
     MPS: logical_and_out_mps
   tags: pointwise
 
