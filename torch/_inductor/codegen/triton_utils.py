@@ -36,24 +36,24 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
         # Related PR: https://github.com/triton-lang/triton/pull/2279/
         if arg.dtype == torch.float8_e4m3fn:
-            tye = "*fp8e4nv"
+            typ = "*fp8e4nv"
         elif arg.dtype == torch.float8_e5m2:
-            tye = "*fp8e5"
+            typ = "*fp8e5"
         elif arg.dtype == torch.float8_e4m3fnuz:
-            tye = "*fp8e4b8"
+            typ = "*fp8e4b8"
         elif arg.dtype == torch.float8_e5m2fnuz:
-            tye = "*fp8e5b16"
+            typ = "*fp8e5b16"
         else:
-            tye = _type_of(arg.dtype)
+            typ = _type_of(arg.dtype)
         if should_unwrap_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
-            new_tye = tye.lstrip("*")
-            if new_tye in ["fp16", "bf16"]:
+            new_typ = typ.lstrip("*")
+            if new_typ in ["fp16", "bf16"]:
                 return "fp32"
             else:
-                return new_tye
+                return new_typ
         else:
-            return tye
+            return typ
     if isinstance(arg, SizeArg):
         if arg.expr is None:
             if triton_version_uses_attrs_dict():
