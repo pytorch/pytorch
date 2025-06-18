@@ -284,6 +284,67 @@ class MultiKernelCall:
 
         self._recorded = False
 
+        # Shape-based dispatch for matmul kernels
+        self._shape_based_dispatch = self._is_matmul_kernel()
+        self._shape_dispatch_cache = {}  # Cache for shape-based choices
+
+    def _is_matmul_kernel(self):
+        """Check if this is a matmul kernel that should use shape-based dispatch"""
+        if not self._kernels:
+            return False
+
+        # Check if any kernel has matmul-related metadata
+        for kernel in self._kernels:
+            if hasattr(kernel, "inductor_meta"):
+                kernel_name = kernel.inductor_meta.get("kernel_name", "")
+                if any(
+                    name in kernel_name.lower() for name in ["mm", "gemm", "matmul"]
+                ):
+                    return True
+        return False
+
+    def _get_shape_key(self, *args):
+        """Extract shape information from tensor arguments for dispatch caching"""
+        shapes = []
+        for arg in args:
+            if hasattr(arg, "shape") and hasattr(arg, "dtype"):
+                shapes.append((tuple(arg.shape), str(arg.dtype)))
+        return tuple(shapes)
+
+    def _select_kernel_by_shape(self, *args):
+        """Select the best kernel based on input shapes using configured hints"""
+        if not args:
+            return 0
+
+        # Extract the primary dimension for dispatch (e.g., M dimension for matmul)
+        primary_dim = self._extract_primary_dimension(args)
+        if primary_dim is None:
+            return 0
+
+        # Use config.multi_kernel hints to determine best kernel
+        hints = config.multi_kernel
+        best_kernel_idx = 0
+
+        # Find the kernel index that corresponds to the closest hint
+        min_diff = float("inf")
+        for i, hint in enumerate(hints):
+            if i >= len(self._kernels):
+                break
+            diff = abs(primary_dim - hint)
+            if diff < min_diff:
+                min_diff = diff
+                best_kernel_idx = i % len(self._kernels)
+
+        return best_kernel_idx
+
+    def _extract_primary_dimension(self, args):
+        """Extract the primary dimension for kernel selection (e.g., M for matmul)"""
+        for arg in args:
+            if hasattr(arg, "shape") and len(arg.shape) >= 2:
+                # For matmul, use the M dimension (first matrix dimension)
+                return arg.shape[-2]
+        return None
+
     def cache_file_path(self):
         key = code_hash(
             ",".join(
@@ -389,6 +450,28 @@ class MultiKernelCall:
         return V.graph.multi_kernel_to_choice[multi_kernel_name]
 
     def run(self, *args, **kwargs):
+        # Use shape-based dispatch for matmul kernels
+        if self._shape_based_dispatch:
+            shape_key = self._get_shape_key(*args)
+
+            # Check if we've already selected a kernel for this shape
+            if shape_key in self._shape_dispatch_cache:
+                selected_kernel_idx = self._shape_dispatch_cache[shape_key]
+            else:
+                # Select kernel based on shape hints
+                selected_kernel_idx = self._select_kernel_by_shape(*args)
+                self._shape_dispatch_cache[shape_key] = selected_kernel_idx
+
+                log.debug(
+                    "Shape-based dispatch: selected kernel %d for shape %s",
+                    selected_kernel_idx,
+                    shape_key,
+                )
+
+            # Run the selected kernel directly
+            return self.kernels[selected_kernel_idx].run(*args, **kwargs)
+
+        # Original benchmarking-based selection for non-matmul kernels
         if self.picked_kernel is None:
             timings = self.benchmark_sub_kernels(*args, **kwargs)
             self.picked_kernel = timings.index(min(timings))

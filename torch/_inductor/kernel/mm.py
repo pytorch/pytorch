@@ -842,6 +842,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
     for k in inductor_config.external_matmul:
         choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
 
+    # Check if we should generate multiple kernels for different hints
+    if len(inductor_config.multi_kernel) > 1 and use_triton_template(layout):
+        multi_kernel_choices = _generate_multi_kernel_choices(
+            choices, mat1, mat2, layout, m, n, k, device_type
+        )
+        if multi_kernel_choices:
+            return _create_multi_kernel_buffer(
+                name, multi_kernel_choices, [mat1, mat2], layout
+            )
+
     return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
 
 
@@ -1358,3 +1368,101 @@ def get_size_hints_strides(mat1, mat2):
             )
         strides_hints.append(stride)
     return strides_hints[0], strides_hints[1]
+
+
+def _generate_multi_kernel_choices(choices, mat1, mat2, layout, m, n, k, device_type):
+    """Generate multiple kernel variants with different block size hints"""
+
+    multi_kernels = []
+    hints = inductor_config.multi_kernel
+
+    # Generate one kernel variant for each hint
+    for hint in hints:
+        kernel_choices = []
+
+        # Get base configs and modify block sizes based on hint
+        mm_configs = V.choices.get_base_mm_configs(device_type)
+
+        # Create configs with block sizes scaled by hint
+        for config in mm_configs(
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+        ):
+            # Scale block sizes based on hint
+            modified_config = _scale_config_by_hint(config, hint)
+
+            mm_template.maybe_append_choice(
+                kernel_choices,
+                input_nodes=(mat1, mat2),
+                layout=layout,
+                **mm_options(modified_config, m, n, k, layout),
+            )
+
+        # If we have valid choices for this hint, create a kernel
+        if kernel_choices:
+            # Take the first choice as representative for this hint
+            multi_kernels.append(kernel_choices[0])
+
+    return multi_kernels if len(multi_kernels) > 1 else None
+
+
+def _scale_config_by_hint(config, hint):
+    """Scale kernel configuration parameters based on the hint value"""
+    # Create a copy of the config
+    import copy
+
+    scaled_config = copy.deepcopy(config)
+
+    # Scale block sizes based on hint
+    # Smaller hints -> smaller blocks, larger hints -> larger blocks
+    if hint <= 64:
+        block_scale = 0.5
+    elif hint <= 256:
+        block_scale = 1.0
+    else:
+        block_scale = 1.5
+
+    # Apply scaling to block size parameters if they exist
+    if hasattr(scaled_config, "kwargs"):
+        if "BLOCK_M" in scaled_config.kwargs:
+            scaled_config.kwargs["BLOCK_M"] = max(
+                16, int(scaled_config.kwargs["BLOCK_M"] * block_scale)
+            )
+        if "BLOCK_N" in scaled_config.kwargs:
+            scaled_config.kwargs["BLOCK_N"] = max(
+                16, int(scaled_config.kwargs["BLOCK_N"] * block_scale)
+            )
+        if "BLOCK_K" in scaled_config.kwargs:
+            scaled_config.kwargs["BLOCK_K"] = max(
+                16, int(scaled_config.kwargs["BLOCK_K"] * block_scale)
+            )
+
+    return scaled_config
+
+
+def _create_multi_kernel_buffer(name, multi_kernel_choices, input_nodes, layout):
+    """Create a MultiTemplateBuffer that can dispatch between different kernels at runtime"""
+    from ..ir import MultiTemplateBuffer
+
+    def get_timings():
+        # For multi-kernel matmul, we'll use shape-based dispatch rather than benchmarking
+        # Return empty dict to indicate no pre-computed timings
+        return {}
+
+    # Create allowed prologue inputs (empty for now)
+    from torch.utils._ordered_set import OrderedSet
+
+    allowed_prologue_inps = OrderedSet()
+
+    # Create the MultiTemplateBuffer
+    return ir.TensorBox.create(
+        MultiTemplateBuffer(
+            layout,
+            input_nodes,
+            get_timings,
+            multi_kernel_choices,
+            allowed_prologue_inps,
+        )
+    )

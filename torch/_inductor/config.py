@@ -372,6 +372,10 @@ reorder_for_compute_comm_overlap_passes: list[
 # Maximum number of positions to advance a given collective, unlimited by default
 reorder_prefetch_limit: Optional[int] = None
 
+# multi kernel configuration - list of int hints for generating multiple kernels
+# that can be dispatched to at runtime based on input shapes
+multi_kernel: list[int] = [64, 256, 4096]
+
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
