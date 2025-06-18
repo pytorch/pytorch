@@ -6594,93 +6594,63 @@ class TestCompileKernel(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_reduction(self):
-        """Test fast reduction kernel using _compile_kernel with shared memory optimization."""
-        reduction_kernel_source = """
-        __global__ void fast_reduction(const float* input, float* output, int n) {
-            extern __shared__ float shared_mem[];
-            int tid = threadIdx.x;
-            int gid = blockIdx.x * blockDim.x + threadIdx.x;
-            float val = 0.0f;
-            if (gid < n) {
-                val = input[gid];
+        """Test CUB-based reduction kernel using _compile_kernel for speed of light performance."""
+        cub_reduction_kernel_source = """
+        #include <cub/cub.cuh>
+        #include <cuda/std/span>
+        #include <cuda/atomic>
+
+        template <int block_size>
+        __global__ void reduce(cuda::std::span<float const> data, cuda::std::span<float> result) {
+            using BlockReduce = cub::BlockReduce<float, block_size>;
+            __shared__ typename BlockReduce::TempStorage temp_storage;
+
+            int const index = threadIdx.x + blockIdx.x * blockDim.x;
+            float sum = 0.0f;
+            if (index < data.size()) {
+                sum = data[index];
             }
-            shared_mem[tid] = val;
-            __syncthreads();
-            for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                if (tid < stride) {
-                    shared_mem[tid] += shared_mem[tid + stride];
-                }
-                __syncthreads();
-            }
-            if (tid == 0) {
-                output[blockIdx.x] = shared_mem[0];
+            sum = BlockReduce(temp_storage).Sum(sum);
+
+            if (threadIdx.x == 0) {
+                cuda::atomic_ref<float, cuda::thread_scope_device> atomic_result(result.front());
+                atomic_result.fetch_add(sum, cuda::memory_order_relaxed);
             }
         }
-        __global__ void final_reduction(const float* input, float* output, int n) {
-            extern __shared__ float shared_mem[];
-            int tid = threadIdx.x;
-            int gid = blockIdx.x * blockDim.x + threadIdx.x;
-            float val = 0.0f;
-            if (gid < n) {
-                val = input[gid];
-            }
-            shared_mem[tid] = val;
-            __syncthreads();
-            for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                if (tid < stride) {
-                    shared_mem[tid] += shared_mem[tid + stride];
-                }
-                __syncthreads();
-            }
-            if (tid == 0) {
-                *output = shared_mem[0];
-            }
+
+        extern "C" __global__ void cub_reduce_256(const float* input, float* output, int n) {
+            cuda::std::span<float const> data_span(input, n);
+            cuda::std::span<float> result_span(output, 1);
+            reduce<256>(data_span, result_span);
         }
         """
+        
         from torch.cuda import _compile_kernel
-        reduction_kernel = _compile_kernel(reduction_kernel_source, "fast_reduction")
-        final_reduction_kernel = _compile_kernel(reduction_kernel_source, "final_reduction")
-        n = 1024 * 1024
-        device = torch.device('cuda:0')
-        input_data = torch.randn(n, device=device, dtype=torch.float32)
-        expected_sum = input_data.sum().item()
-        threads_per_block = 256
-        blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
-        intermediate = torch.zeros(blocks_per_grid, device=device, dtype=torch.float32)
-        reduction_kernel(
-            grid=(blocks_per_grid, 1, 1),
-            block=(threads_per_block, 1, 1),
-            args=[input_data, intermediate, n],
-            shared_mem=threads_per_block * 4
-        )
-        final_result = torch.zeros(1, device=device, dtype=torch.float32)
-        final_reduction_kernel(
-            grid=(1, 1, 1),
-            block=(min(blocks_per_grid, 256), 1, 1),
-            args=[intermediate, final_result, blocks_per_grid],
-            shared_mem=min(blocks_per_grid, 256) * 4
-        )
-        result = final_result.item()
-        torch.testing.assert_close(result, expected_sum, rtol=1e-4, atol=1e-4)
+        
+        # Test with different data sizes
         for size in [1024, 1024*1024, 10*1024*1024]:
-            test_data = torch.randn(size, device=device, dtype=torch.float32)
-            expected = test_data.sum().item()
-            blocks = (size + threads_per_block - 1) // threads_per_block
-            intermediate = torch.zeros(blocks, device=device, dtype=torch.float32)
+            device = torch.device('cuda:0')
+            input_data = torch.randn(size, device=device, dtype=torch.float32)
+            expected_sum = input_data.sum().item()
+            
+            # Initialize result to zero for atomic accumulation
+            result = torch.zeros(1, device=device, dtype=torch.float32)
+            
+            # Compile the CUB-based reduction kernel
+            reduction_kernel = _compile_kernel(cub_reduction_kernel_source, "cub_reduce_256")
+            
+            threads_per_block = 256
+            blocks_per_grid = (size + threads_per_block - 1) // threads_per_block
+            
+            # Launch the kernel
             reduction_kernel(
-                grid=(blocks, 1, 1),
+                grid=(blocks_per_grid, 1, 1),
                 block=(threads_per_block, 1, 1),
-                args=[test_data, intermediate, size],
-                shared_mem=threads_per_block * 4
+                args=[input_data, result, size]
             )
-            final_reduction_kernel(
-                grid=(1, 1, 1),
-                block=(min(blocks, 256), 1, 1),
-                args=[intermediate, final_result, blocks],
-                shared_mem=min(blocks, 256) * 4
-            )
-            result = final_result.item()
-            torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
+            
+            kernel_result = result.item()
+            torch.testing.assert_close(kernel_result, expected_sum, rtol=1e-4, atol=1e-4)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
