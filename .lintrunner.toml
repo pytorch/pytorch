@@ -1159,8 +1159,6 @@ exclude_patterns = [
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     'aten/**',
-    'functorch/**',
-    'scripts/**',
     'test/**',
     'torch/**',
 ]
