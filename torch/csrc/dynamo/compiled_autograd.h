@@ -78,8 +78,7 @@ struct TORCH_API PyCompilerInterface {
   virtual void call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
-      const at::Tensor& grad,
-      bool has_post_hooks) const {
+      const at::Tensor& grad) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 };

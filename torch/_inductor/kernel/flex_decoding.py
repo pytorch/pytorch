@@ -508,7 +508,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
     query = lowerings[aten.as_strided](query, gqa_query_shape, gqa_query_stride)
 
-    V.graph.sizevars.guard_leq(
+    V.graph.sizevars.check_leq(
         seq_len_q * gqa_shared_heads, sympy.Integer(kernel_options["BLOCK_M"])
     )
 
