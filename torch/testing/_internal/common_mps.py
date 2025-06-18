@@ -69,6 +69,7 @@ if torch.backends.mps.is_available():
             "flatten",
             "fill",
             "full",
+            "full_like",
             "H",
             "hsplit",
             "imag",
@@ -376,7 +377,6 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST = {
             # Failures due to lack of op implementation on MPS backend
-            "login": None,
             "logspace": None,
             "logspacetensor_overload": None,
             "linalg.eig": None,
@@ -492,7 +492,6 @@ if torch.backends.mps.is_available():
             "log_softmaxwith_dtype": None,
             "softmaxwith_dtype": None,
             "float_power": None,
-            "full_like": None,
             "linalg.matrix_rankhermitian": None,
             "linalg.pinvhermitian": None,
             "nonzero_static": None,
