@@ -27,14 +27,12 @@ from torch._inductor.autotune_process import (
     TuningProcess,
     TuningProcessPool,
 )
+from torch._inductor.codegen.triton_templates.caller import TritonTemplateCaller
+from torch._inductor.codegen.triton_templates.template import TritonTemplate
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
-from torch._inductor.select_algorithm import (
-    AlgorithmSelectorCache,
-    TritonTemplate,
-    TritonTemplateCaller,
-)
+from torch._inductor.select_algorithm import AlgorithmSelectorCache
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,

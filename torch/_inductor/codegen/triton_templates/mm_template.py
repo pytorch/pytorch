@@ -17,8 +17,8 @@ except ImportError:
     triton_version = TorchVersion("0.0.0")
     has_triton = False
 
+from torch._inductor.codegen.triton_templates.template import TritonTemplate
 from torch._inductor.kernel.mm_common import mm_grid
-from torch._inductor.select_algorithm import TritonTemplate
 
 
 mm_template = TritonTemplate(

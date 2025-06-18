@@ -3,12 +3,9 @@
 import torch
 
 from .. import ir
+from ..codegen.triton_templates.template import TritonTemplate
 from ..lowering import lowerings
-from ..select_algorithm import (
-    autotune_select_algorithm,
-    ExternKernelChoice,
-    TritonTemplate,
-)
+from ..select_algorithm import autotune_select_algorithm, ExternKernelChoice
 from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
 from .mm_common import mm_args, mm_grid, mm_options
