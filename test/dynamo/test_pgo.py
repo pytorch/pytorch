@@ -143,6 +143,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             def __init__(self, c):
                 super().__init__()
                 self.c = c
+
             def forward(self, x, y, z):
                 if self.c == 1.0:
                     return x + y + torch.tensor([z])
@@ -154,7 +155,9 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(1)
         self.assertTrue("L['x']" in whitelist)
         self.assertTrue("L['y']" in whitelist)
-        self.assertTrue("___as_tensor(L['y'])" not in whitelist)  # ephemeral FloatTensor source
+        self.assertTrue(
+            "___as_tensor(L['y'])" not in whitelist
+        )  # ephemeral FloatTensor source
         self.assertTrue("L['z']" not in whitelist)  # static float
         self.assertTrue("L['self'].c" not in whitelist)  # static float property
 
