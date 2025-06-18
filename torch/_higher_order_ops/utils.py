@@ -934,11 +934,13 @@ F = TypeVar("F", bound=Callable)
 
 
 @overload
-def register_fake(hop, fn: None = None) -> Callable[[F], F]: ...
+def register_fake(hop, fn: None = None) -> Callable[[F], F]:
+    ...
 
 
 @overload
-def register_fake(hop, fn: F) -> F: ...
+def register_fake(hop, fn: F) -> F:
+    ...
 
 
 def register_fake(hop, fn=None):
