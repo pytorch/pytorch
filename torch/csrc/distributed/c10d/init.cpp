@@ -3228,7 +3228,10 @@ ncclConfig_t data type for configuring NCCL communicators.
 See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
 for details.
 )")
-      .def(py::init<>())
+      .def(py::init([]() {
+        ncclConfig_t defaultCfg = NCCL_CONFIG_INITIALIZER;
+        return std::make_unique<ncclConfig_t>(defaultCfg);
+      }))
       .def_readwrite("blocking", &ncclConfig_t::blocking)
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
@@ -3256,7 +3259,16 @@ for details.
           // shouldn't leak because of allocation in strdup.
           [](ncclConfig_t& self, const char* tmp) {
             self.netName = strdup(tmp);
-          });
+          })
+      .def(
+          "__copy__",
+          [](const ncclConfig_t& self) { return ncclConfig_t(self); })
+      .def(
+          "__deepcopy__",
+          [](const ncclConfig_t& self, const py::dict& memo) {
+            return ncclConfig_t(self);
+          },
+          py::arg("memo"));
 #endif // NCCL_HAS_CONFIG
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
@@ -3307,7 +3319,20 @@ Example::
           "global_ranks_in_group",
           &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
       .def_readwrite(
-          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name);
+          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name)
+      .def(
+          "__copy__",
+          [](const ::c10d::ProcessGroupNCCL::Options& self) {
+            return ::c10d::ProcessGroupNCCL::Options(self);
+          })
+      .def(
+          "__deepcopy__",
+          [](const ::c10d::ProcessGroupNCCL::Options& self,
+             const py::dict& memo) {
+            return ::c10d::ProcessGroupNCCL::Options(self);
+          },
+          py::arg("memo"));
+
 #endif
 
 #ifdef USE_C10D_MPI
