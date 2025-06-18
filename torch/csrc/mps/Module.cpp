@@ -1,3 +1,5 @@
+#define PYBIND11_DETAILED_ERROR_MESSAGES
+
 #include <ATen/ATen.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Generator.h>
