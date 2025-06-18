@@ -2,6 +2,7 @@
 import abc
 import contextlib
 import ctypes
+import functools
 import importlib
 import inspect
 import sys
@@ -147,37 +148,70 @@ class OperatorBase:
 
         return inner
 
-    # Registers an implementation to all **3** variants of functionalization that we have:
-    # - DispatchKey.Functionalize
-    # - functorch.TransformType.Functionalize
-    # - FunctionalTensorMode
-    # Example:
-    #   @py_functionalize_impl
-    #   def functionalize_rule(ctx, inner_f, *args):
-    #       args_unwrapped = ctx.unwrap_tensors(args)
-    #       with ctx.redispatch_to_next():
-    #           out = ctx.functionalize(inner_f)(*args_unwrapped)
-    #           return ctx.wrap_tensors(out)
     def py_functionalize_impl(
         self, fn: Callable[Concatenate["BaseFunctionalizeAPI", _P], _T]
     ) -> Callable[Concatenate["BaseFunctionalizeAPI", _P], _T]:
+        """Register an implementation to all 3 variants of functionalization.
+
+        This decorator registers a single implementation that will be used for:
+        - DispatchKey.Functionalize
+        - functorch.TransformType.Functionalize
+        - FunctionalTensorMode
+
+        Args:
+            fn: A callable that takes a BaseFunctionalizeAPI context as its first
+                argument, followed by the function to functionalize and its arguments.
+
+        Returns:
+            The same callable, now registered to handle all functionalization variants.
+
+        Example:
+            >>> @py_functionalize_impl
+            ... def functionalize_rule(ctx, inner_f, *args):
+            ...     args_unwrapped = ctx.unwrap_tensors(args)
+            ...     with ctx.redispatch_to_next():
+            ...         out = ctx.functionalize(inner_f)(*args_unwrapped)
+            ...         return ctx.wrap_tensors(out)
+
+        """
+        from torch._subclasses.fake_tensor import FakeTensor
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI,
+            FunctionalTensor,
             FunctionalTensorMode,
             FunctorchFunctionalizeAPI,
             PythonFunctionalizeAPI,
         )
 
+        def check_user_subclass_decorator(func: Any) -> Any:
+            @functools.wraps(func)
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                # Check if any tensor arguments are user subclasses
+                flat_args, _ = pytree.tree_flatten(args)
+                if any(
+                    isinstance(a, torch.Tensor)
+                    and type(a) is not torch.Tensor
+                    and not isinstance(a, (FakeTensor, FunctionalTensor))
+                    for a in flat_args
+                ):
+                    return NotImplemented
+                return func(*args, **kwargs)
+
+            return wrapper
+
         # Construct our three flavors of functionalization,
         # each of which have slightly different wrap/unwrap/redispatch policies
+        @check_user_subclass_decorator
         def functionalize_dk_fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             return fn(CppFunctionalizeAPI(), *args, **kwargs)
 
+        @check_user_subclass_decorator
         def functionalize_dispatch_mode_fn(
             mode: Optional[FunctionalTensorMode], *args: _P.args, **kwargs: _P.kwargs
         ) -> _T:
             return fn(PythonFunctionalizeAPI(mode), *args, **kwargs)
 
+        @check_user_subclass_decorator
         def functionalize_functorch_fn(
             interpreter, *args: _P.args, **kwargs: _P.kwargs
         ) -> _T:
