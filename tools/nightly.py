@@ -14,7 +14,7 @@ Or if you would like to check out the nightly commit in detached HEAD mode::
     $ ./tools/nightly.py checkout
     $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
-Or if you would like to re-use an existing virtual environment, you can pass in
+Or if you would like to reuse an existing virtual environment, you can pass in
 the prefix argument (--prefix)::
 
     $ ./tools/nightly.py checkout -b my-nightly-branch -p my-env
@@ -686,7 +686,7 @@ def _nightly_version(site_dir: Path) -> str:
 
 @timed("Checking out nightly PyTorch")
 def checkout_nightly_version(branch: str | None, site_dir: Path) -> None:
-    """Get's the nightly version and then checks it out."""
+    """Gets the nightly version and then checks it out."""
     nightly_version = _nightly_version(site_dir)
     if branch is None:
         # Detached mode - explicitly use --detach flag
