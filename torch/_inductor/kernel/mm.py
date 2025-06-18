@@ -242,10 +242,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     choices,
                     input_nodes=(mat1, mat2),
                     layout=layout,
-                    workspace_arg=get_tma_workspace_arg(
-                        num_tma_descriptors=2,
-                        device=mat1.get_device(),
-                    ),
                     **mm_options(config, m, n, k, layout),
                     **persistent_mm_options(mat1, mat2),
                 )
@@ -507,10 +503,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     choices,
                     input_nodes=(inp_expanded, mat1, mat2),
                     layout=layout,
-                    workspace_arg=get_tma_workspace_arg(
-                        num_tma_descriptors=2,
-                        device=mat1.get_device(),
-                    ),
                     **mm_options(config, m, n, k, layout),
                     **persistent_mm_options(mat1, mat2),
                     prefix_args=1,
