@@ -6773,7 +6773,7 @@ class TestCompileKernel(TestCase):
         }
         """
 
-        @torch.library.custom_op("test_compile_kernel::vector_add_inplace", mutates_args=(0,))
+        @torch.library.custom_op("test_compile_kernel::vector_add_inplace", mutates_args=("a",))
         def vector_add_inplace_op(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
             from torch.cuda import _compile_kernel
 
