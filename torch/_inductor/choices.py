@@ -38,9 +38,9 @@ if TYPE_CHECKING:
 
     from torch.utils._ordered_set import OrderedSet
 
+    from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
-    from .common import KernelTemplate
     from .kernel_inputs import MMKernelInputs
     from .kernel_params.params import KernelTemplateParams
 
