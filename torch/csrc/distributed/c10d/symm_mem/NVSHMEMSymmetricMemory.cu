@@ -47,18 +47,30 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
         buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name) {
+    // For logging only
+    static int exchanged_n_times = 0;
     c10::cuda::CUDAGuard guard(device_idx_);
 
     auto global_rank = get_group_info("0").rank;
-    auto group_info = get_group_info(group_name_);
+    GroupInfo& group_info = get_group_info(group_name_);
     auto store = group_info.store;
     rank_ = group_info.rank;
     world_size_ = group_info.world_size;
-    rank_to_global_rank_ =
-        storeExchange.all_gather(store, rank_, world_size_, global_rank);
-    LOG(INFO) << "[rank " << rank_ << "]"
-              << "rank_to_global_rank: " << rank_to_global_rank_;
-
+    // Exchange rank to global rank mapping for this group.
+    // If it is already available, skip the exchange.
+    if (group_info.rank_to_global_rank.empty()) {
+      group_info.rank_to_global_rank =
+          storeExchange.all_gather(store, rank_, world_size_, global_rank);
+      exchanged_n_times++;
+      if (rank_ == 0) {
+        LOG(INFO) << "[rank " << rank_ << "]"
+                  << " rank_to_global_rank: " << group_info.rank_to_global_rank
+                  << ", group_name: " << group_name_
+                  << ", exchanged_n_times: " << exchanged_n_times;
+      }
+    }
+    TORCH_INTERNAL_ASSERT(!group_info.rank_to_global_rank.empty());
+    rank_to_global_rank_ = group_info.rank_to_global_rank;
     for (int r = 0; r < world_size_; ++r) {
       buffers_.push_back(nvshmem_ptr(
           allocation->ptr, rank_to_global_rank_[r]));
@@ -228,7 +240,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return world_size_;
   }
 
-  virtual std::vector<int> get_rank_to_global_rank() override {
+  virtual const std::vector<int>& get_rank_to_global_rank() override {
     return rank_to_global_rank_;
   };
 

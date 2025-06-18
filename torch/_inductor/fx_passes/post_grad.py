@@ -653,7 +653,7 @@ def register_lowering_pattern(
 
 
 def is_valid_mm_plus_mm(match: Match):
-    if not torch._inductor.utils.use_max_autotune():
+    if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
     *_b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
