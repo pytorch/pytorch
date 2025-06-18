@@ -1,7 +1,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/impl/GPUTrace.h>
-#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -52,9 +52,11 @@ namespace cuda::CUDACachingAllocator {
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
-// Included here as this is externally used in CUDAAllocatorConfig
-const size_t kLargeBuffer =
-    20971520; // "large" allocations may be packed in 20 MiB blocks
+enum class Expandable_Segments_Handle_Type : int {
+  UNSPECIFIED = 0,
+  POSIX_FD = 1,
+  FABRIC_HANDLE = 2,
+};
 
 namespace Native {
 
@@ -399,17 +401,17 @@ struct ExpandableSegment {
 
     // if the handle type is not specified, try to use fabric handle first.
     // if it fails, use posix file handle
-    if (CUDAAllocatorConfig::expandable_segments_handle_type() ==
+    if (expandable_segments_handle_type == 
         Expandable_Segments_Handle_Type::UNSPECIFIED) {
-      CUDAAllocatorConfig::set_expandable_segments_handle_type(
-          Expandable_Segments_Handle_Type::FABRIC_HANDLE);
+      expandable_segments_handle_type =
+          Expandable_Segments_Handle_Type::FABRIC_HANDLE
       auto output = map(range);
       if (output.ptr != nullptr) {
         return output;
       }
       // if fabric handle is not supported, use posix file handle.
-      CUDAAllocatorConfig::set_expandable_segments_handle_type(
-          Expandable_Segments_Handle_Type::POSIX_FD);
+      expandable_segments_handle_type =
+          Expandable_Segments_Handle_Type::POSIX_FD;
       return map(range);
     }
 
@@ -422,7 +424,7 @@ struct ExpandableSegment {
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
 #ifndef FBCODE_CAFFE2
-      if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
+      if (expandable_segments_handle_type !=
           Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
       } else {
@@ -452,7 +454,7 @@ struct ExpandableSegment {
           trimHandles();
           return rangeFromHandles(begin, begin);
         } else if (
-            CUDAAllocatorConfig::expandable_segments_handle_type() ==
+            expandable_segments_handle_type ==
             Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
           // we are testing if we can use fabric handle.
           // if we can, we will use it.
@@ -499,7 +501,7 @@ struct ExpandableSegment {
     for (auto i : c10::irange(begin, end)) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto& handle = handles_.at(i).value();
-      if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
+      if (expandable_segments_handle_type !=
           Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         if (!handle.shareable_handle) {
           int fd = 0;
@@ -550,7 +552,7 @@ struct ExpandableSegment {
 #ifndef SYS_pidfd_getfd
 #define SYS_pidfd_getfd 438
 #endif
-    if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
+    if (expandable_segments_handle_type !=
         Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
       auto pidfd = syscall(SYS_pidfd_open, header.pid, 0);
       TORCH_CHECK(
@@ -733,6 +735,8 @@ struct ExpandableSegment {
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
   std::vector<c10::DeviceIndex> peers_;
+  // the type of handle used for expandable segments.
+  std::atomic<Expandable_Segments_Handle_Type> expandable_segments_handle_type;
 };
 #else
 struct ExpandableSegment {
@@ -1219,7 +1223,7 @@ class DeviceCachingAllocator {
   DeviceCachingAllocator()
       : large_blocks(/*small=*/false), small_blocks(/*small=*/true) {
     stats.max_split_size =
-        static_cast<int64_t>(CUDAAllocatorConfig::max_split_size());
+        static_cast<int64_t>(AllocatorConfig::max_split_size());
     context_recorder_.store(nullptr);
   }
 
@@ -1355,7 +1359,7 @@ class DeviceCachingAllocator {
       // Do garbage collection if the flag is set.
       if (C10_UNLIKELY(
               set_fraction &&
-              CUDAAllocatorConfig::garbage_collection_threshold() > 0.0)) {
+              AllocatorConfig::garbage_collection_threshold() > 0.0)) {
         garbage_collect_cached_blocks(context);
       }
       // Attempt allocate
@@ -1607,7 +1611,7 @@ class DeviceCachingAllocator {
       stats.active_bytes[stat_type].increase(block->size);
       stats.requested_bytes[stat_type].increase(block->requested_size);
     });
-    if (block->size >= CUDAAllocatorConfig::max_split_size())
+    if (block->size >= AllocatorConfig::max_split_size())
       stats.oversize_allocations.increase(1);
 
     auto allocated_bytes_gauge =
@@ -1658,7 +1662,7 @@ class DeviceCachingAllocator {
         block->pool->owner_MempoolId(),
         context ? context : block->context_when_allocated);
 
-    if (block->size >= CUDAAllocatorConfig::max_split_size())
+    if (block->size >= AllocatorConfig::max_split_size())
       stats.oversize_allocations.decrease(1);
 
     if (!block->stream_uses.empty()) {
@@ -2208,7 +2212,7 @@ class DeviceCachingAllocator {
     if (size < kMinBlockSize) {
       return kMinBlockSize;
     } else {
-      auto divisions = CUDAAllocatorConfig::roundup_power2_divisions(size);
+      auto divisions = AllocatorConfig::roundup_power2_divisions(size);
       if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
       } else {
@@ -2698,7 +2702,7 @@ class DeviceCachingAllocator {
     if (block->pool->is_small || isExpandableSegmentEnabled()) {
       return remaining >= kMinBlockSize;
     } else {
-      return (size < CUDAAllocatorConfig::max_split_size()) &&
+      return (size < AllocatorConfig::max_split_size()) &&
           (remaining > kSmallSize);
     }
   }
@@ -2718,7 +2722,7 @@ class DeviceCachingAllocator {
 
     if (C10_UNLIKELY(
             set_fraction &&
-            CUDAAllocatorConfig::garbage_collection_threshold() > 0.0)) {
+            AllocatorConfig::garbage_collection_threshold() > 0.0)) {
       // Track block reuse interval only when garbage collection is enabled.
       ++pool.get_free_blocks_call_count;
     }
@@ -2760,13 +2764,13 @@ class DeviceCachingAllocator {
     }
 
     // Do not return an oversized block for a large request
-    if ((p.size() < CUDAAllocatorConfig::max_split_size()) &&
-        ((*it)->size >= CUDAAllocatorConfig::max_split_size()))
+    if ((p.size() < AllocatorConfig::max_split_size()) &&
+        ((*it)->size >= AllocatorConfig::max_split_size()))
       return false;
     // Allow oversized block size to be rounded up but within a limit
-    if ((p.size() >= CUDAAllocatorConfig::max_split_size()) &&
+    if ((p.size() >= AllocatorConfig::max_split_size()) &&
         ((*it)->size >=
-         p.size() + CUDAAllocatorConfig::max_non_split_rounding_size()))
+         p.size() + AllocatorConfig::max_non_split_rounding_size()))
       return false;
     p.block = *it;
     pool.blocks.erase(it);
@@ -2789,7 +2793,7 @@ class DeviceCachingAllocator {
     // therefore should be of less overheads.
 
     size_t gc_threshold = static_cast<size_t>(
-        CUDAAllocatorConfig::garbage_collection_threshold() *
+        AllocatorConfig::garbage_collection_threshold() *
         static_cast<double>(allowed_memory_maximum));
     // No need to trigger GC yet
     if (total_allocated_memory <= gc_threshold) {
@@ -2892,7 +2896,7 @@ class DeviceCachingAllocator {
       }
       return bool(p.block);
     } else {
-      if (CUDAAllocatorConfig::release_lock_on_cudamalloc()) {
+      if (AllocatorConfig::use_release_lock_on_device_malloc()) {
         // At scope exit, acquire the lock again. This provides safety against
         // any potential exceptions in the cudaMallocMaybeCapturing function.
         auto sg = c10::make_scope_exit([&]() { lock.lock(); });
@@ -2901,7 +2905,7 @@ class DeviceCachingAllocator {
       } else {
         p.err = cudaMallocMaybeCapturing(&ptr, size, p);
       }
-      if (CUDAAllocatorConfig::release_lock_on_cudamalloc()) {
+      if (AllocatorConfig::use_release_lock_on_device_malloc()) {
         TORCH_CHECK(
             lock.owns_lock(), "Failed to acquire lock after cudaMalloc");
       }
@@ -2937,7 +2941,7 @@ class DeviceCachingAllocator {
       stats.segment[stat_type].increase(1);
       stats.reserved_bytes[stat_type].increase(size);
     });
-    if (size >= CUDAAllocatorConfig::max_split_size())
+    if (size >= AllocatorConfig::max_split_size())
       stats.oversize_segments.increase(1);
     auto reserved_bytes_gauge =
         STATIC_GAUGE(pytorch.CUDACachingAllocator.reserved_bytes);
@@ -2966,16 +2970,15 @@ class DeviceCachingAllocator {
   bool release_available_cached_blocks(
       const AllocParams& p,
       const std::shared_ptr<GatheredContext>& context) {
-    if (CUDAAllocatorConfig::max_split_size() ==
-        std::numeric_limits<size_t>::max())
+    if (AllocatorConfig::max_split_size() == std::numeric_limits<size_t>::max())
       return false;
     BlockPool& pool = *p.pool;
 
     // because of std::unique_ptr, block cannot be trivially copied
     // Use constructor for search key.
     Block key(p.search_key.device, p.search_key.stream, p.search_key.size);
-    key.size = (key.size < CUDAAllocatorConfig::max_split_size())
-        ? CUDAAllocatorConfig::max_split_size()
+    key.size = (key.size < AllocatorConfig::max_split_size())
+        ? AllocatorConfig::max_split_size()
         : key.size;
     auto it = pool.blocks.lower_bound(&key);
     if (it == pool.blocks.end() || (*it)->stream != p.stream() ||
@@ -2988,7 +2991,7 @@ class DeviceCachingAllocator {
       --it; // Back up one item.  Now on the largest block for the correct
             // stream
       while ((totalReleased < key.size) &&
-             ((*it)->size >= CUDAAllocatorConfig::max_split_size()) &&
+             ((*it)->size >= AllocatorConfig::max_split_size()) &&
              ((*it)->stream == p.stream())) {
         auto cur = it;
         bool is_first = cur == pool.blocks.begin();
@@ -3112,7 +3115,7 @@ class DeviceCachingAllocator {
         stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
             .current);
 
-    if (block->size >= CUDAAllocatorConfig::max_split_size())
+    if (block->size >= AllocatorConfig::max_split_size())
       stats.oversize_segments.decrease(1);
     pool->blocks.erase(block);
     delete block;
@@ -3739,18 +3742,17 @@ class NativeCachingAllocator : public CUDAAllocator {
 
     auto& md = result.config_metadata;
     md.garbage_collection_threshold =
-        CUDAAllocatorConfig::garbage_collection_threshold();
-    md.max_split_size = CUDAAllocatorConfig::max_split_size();
+        AllocatorConfig::garbage_collection_threshold();
+    md.max_split_size = AllocatorConfig::max_split_size();
     md.pinned_num_register_threads =
-        CUDAAllocatorConfig::pinned_num_register_threads();
-    md.expandable_segments = CUDAAllocatorConfig::expandable_segments();
+        AllocatorConfig::pinned_num_register_threads();
+    md.expandable_segments = AllocatorConfig::use_expandable_segments();
     md.release_lock_on_malloc =
-        CUDAAllocatorConfig::release_lock_on_cudamalloc();
+        AllocatorConfig::use_release_lock_on_device_malloc();
     md.pinned_use_host_register =
-        CUDAAllocatorConfig::pinned_use_cuda_host_register();
-    md.last_allocator_settings = CUDAAllocatorConfig::last_allocator_settings();
-    md.roundup_power2_divisions =
-        CUDAAllocatorConfig::roundup_power2_divisions();
+        AllocatorConfig::pinned_use_device_host_register();
+    md.last_allocator_settings = AllocatorConfig::last_allocator_settings();
+    md.roundup_power2_divisions = AllocatorConfig::roundup_power2_divisions();
 
     return result;
   }
