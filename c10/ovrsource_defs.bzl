@@ -123,14 +123,14 @@ def define_ovrsource_targets():
     gen_cmake_header(
         src = "macros/cmake_macros.h.in",
         defines = common_c10_cmake_defines + mobile_c10_cmake_defines,
-        header = "c10/macros/cmake_macros.h",
+        header = "torch/standalone/macros/cmake_macros.h",
         prefix = "ovrsource_c10_mobile_",
     )
 
     gen_cmake_header(
         src = "macros/cmake_macros.h.in",
         defines = common_c10_cmake_defines + non_mobile_c10_cmake_defines,
-        header = "c10/macros/cmake_macros.h",
+        header = "torch/standalone/macros/cmake_macros.h",
         prefix = "ovrsource_c10_non_mobile_",
     )
 
