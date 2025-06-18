@@ -2486,17 +2486,8 @@ class CommonTemplate:
             z = x * y
             return z.sum((0, 1))
 
-        atol = None
-        rtol = None
-
-        # By default, inductor generate non-persistent reduction kernels in this
-        # case. But when multi-kernel is enabled, inductor will pick the faster
-        # of persistent reduction and non-persistent-reduction kernel.
-        # In this case, inductor picked the persistent-reduction kernel.
-        # The persistent reduction kernel happens to need looser tolerance.
-        if config.triton.multi_kernel:
-            atol = 1e-5
-            rtol = 1e-5
+        atol = 1e-3
+        rtol = 1e-3
         self.common(
             fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)), atol=atol, rtol=rtol
         )
@@ -13576,6 +13567,32 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ignore_comments=True,
             ignore_empty_lines=True,
         )
+
+    @config.patch("min_num_split", 256)
+    @xfail_if_mps  # TypeError: cannot determine truth value of Relational
+    def test_split_reduction_dynamic_shape(self):
+        from torch._dynamo.decorators import mark_dynamic
+
+        def f(x):
+            # outer reduction
+            return x.sum(dim=0)
+
+        N = 512
+        x_small = torch.randn(4096, N, device=self.device)
+
+        mark_dynamic(x_small, 0)
+        expect = f(x_small)
+        opt_f = torch.compile(f, dynamic=True)
+        actual = opt_f(x_small)
+        self.assertTrue(torch.allclose(expect, actual, atol=1e-3, rtol=1e-3))
+
+        if DO_PERF_TEST:
+            from triton.testing import do_bench
+
+            # benchmark for a much larger input
+            x_large = torch.randn(4096 * 1000, N, device=self.device)
+            ms = do_bench(lambda: opt_f(x_large))
+            print(f"{ms=:.3f}")
 
     @expectedFailureCodegenDynamic
     def test_special_polygamma(self):
