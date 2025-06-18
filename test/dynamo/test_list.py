@@ -321,6 +321,9 @@ class ListTests(TupleTests):
         self.assertIsNone(p.__setitem__(2, "a"))
         self.assertEqual(p, self.thetype("aba"))
 
+        p[0:] = []
+        self.assertEqual(p, [])
+
         # Wrong number of arguments
         self.assertRaises(TypeError, p.__setitem__)
         self.assertRaises(TypeError, p.__setitem__, 1)
