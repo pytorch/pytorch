@@ -266,6 +266,48 @@ def cmd_update_gb_type(
     return True
 
 
+def test_verify_gb_id_mapping(dynamo_dir, registry_path):
+    """
+    Verifies that all unimplemented_v2 calls in torch/_dynamo match entries in the registry.
+    """
+    script_dir = Path(__file__).resolve().parent
+    dynamo_dir = script_dir.parent.parent / "torch" / "_dynamo"
+    registry_path = (
+        script_dir.parent.parent / "torch" / "_dynamo" / "graph_break_registry.json"
+    )
+
+    python_files = list(dynamo_dir.glob("**/*.py"))
+
+    reg = load_registry(registry_path)
+    gb_type_to_entry = {entries[0]["Gb_type"]: entries[0] for _, entries in reg.items()}
+
+    mismatches = []
+    for file_path in python_files:
+        calls = find_unimplemented_v2_calls(file_path)
+        for call in calls:
+            gb_type = call["gb_type"]
+            if gb_type not in gb_type_to_entry:
+                mismatches.append((gb_type, file_path, "Not found in registry"))
+                continue
+
+            entry = gb_type_to_entry[gb_type]
+            if call["context"] != entry["Context"]:
+                mismatches.append((gb_type, file_path, "Context mismatch"))
+            elif call["explanation"] != entry["Explanation"]:
+                mismatches.append((gb_type, file_path, "Explanation mismatch"))
+            elif sorted(call["hints"]) != sorted(entry["Hints"]):
+                mismatches.append((gb_type, file_path, "Hints mismatch"))
+
+    if mismatches:
+        print("Found unimplemented_v2 calls that don't match the registry.")
+        for gb_type, file_path, reason in mismatches:
+            print(f"  - {gb_type} in {file_path}: {reason}")
+        return False
+
+    print("All unimplemented_v2 calls match the registry.")
+    return True
+
+
 def create_registry(dynamo_dir, registry_path):
     calls = find_unimplemented_v2_calls(dynamo_dir)
     registry = {}
@@ -338,6 +380,16 @@ def main():
         "--additional-info", help="Optional additional information to include"
     )
 
+    verify_parser = subparsers.add_parser(
+        "verify", help="Verify all unimplemented_v2 calls match registry entries"
+    )
+    verify_parser.add_argument(
+        "--dynamo_dir",
+        type=str,
+        default=default_dynamo_dir,
+        help="Directory to search for unimplemented_v2 calls.",
+    )
+
     parser.add_argument(
         "--registry-path",
         type=str,
@@ -363,6 +415,10 @@ def main():
             args.new_gb_type,
             args.additional_info,
         )
+        if not success:
+            sys.exit(1)
+    elif args.command == "verify":
+        success = test_verify_gb_id_mapping(args.dynamo_dir, args.registry_path)
         if not success:
             sys.exit(1)
     else:
