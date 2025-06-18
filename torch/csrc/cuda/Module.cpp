@@ -20,7 +20,7 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/cuda/jiterator.h>
 #include <ATen/cuda/tunable/Tunable.h>
-#include <c10/core/AllocaorConfig.h>
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
