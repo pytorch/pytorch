@@ -68,10 +68,11 @@ inline static c10::SymBool _compute_contiguous_sym(
     const c10::SymInt& numel) {
   c10::SymBool is_empty = sym_eq(numel, 0);
   c10::SymBool is_contiguous_cond = true;
+  c10::SymInt one(1);
 
   c10::SymInt expected_stride = 1;
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
-    const auto& size_d = sizes[d];
+    const auto& size_d = sizes[d].max(one);
     is_contiguous_cond = is_contiguous_cond.sym_and(
         size_d.sym_eq(1).sym_or(sym_eq(strides[d], expected_stride)));
     expected_stride = size_d;
