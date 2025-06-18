@@ -6,9 +6,6 @@
 
 namespace c10d::nvshmem_extension {
 
-// Returns true if NVSHMEM is available at runtime.
-bool is_nvshmem_available_at_runtime();
-
 void initialize_nvshmem_with_store(
     c10::intrusive_ptr<c10d::Store> store,
     int rank,

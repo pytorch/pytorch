@@ -1,4 +1,3 @@
-#include <dlfcn.h>
 #include <c10/cuda/CUDAGuard.h>
 
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
@@ -12,27 +11,6 @@
 #include <nvshmem.h>
 
 namespace c10d::nvshmem_extension {
-
-// Returns true if NVSHMEM is available at runtime, false otherwise.
-bool is_nvshmem_available_at_runtime() {
-  static std::mutex mutex;
-  static int is_available = -2;
-  std::lock_guard<std::mutex> lock(mutex);
-  if (is_available == -2) {
-    void *handle{};
-    // Open the shared library, RTLD_LAZY defers symbol resolution until needed
-    handle = dlopen("libnvshmem_host.so.3", RTLD_LAZY);
-    if (!handle) {
-      std::cerr << dlerror() << std::endl;
-      is_available = 0;
-    } else {
-      is_available = 1;
-      // Close the shared library
-      dlclose(handle);
-    }
-  }
-  return is_available == 1;
-}
 
 using c10d::symmetric_memory::StoreExchange;
 static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
