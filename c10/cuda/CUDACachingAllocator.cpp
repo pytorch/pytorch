@@ -283,6 +283,8 @@ struct SegmentConfig {
   }
 
  private:
+  SegmentConfig() = default;
+
   static SegmentConfig& instance() {
     static SegmentConfig instance;
     return instance;
