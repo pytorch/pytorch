@@ -611,9 +611,7 @@ class DebugFormatter:
                     static_layout = FixedLayout(
                         layout.device,
                         dtype=layout.dtype,
-                        size=list(
-                            V.graph.sizevars.size_hints_or_throw(layout.size)
-                        ),
+                        size=list(V.graph.sizevars.size_hints_or_throw(layout.size)),
                         stride=list(
                             V.graph.sizevars.size_hints_or_throw(layout.stride)
                         ),
