@@ -15,4 +15,4 @@ call conda run -n %PYTHON_PREFIX% pip install wheel pybind11 certifi cython cmak
 dir "%VC_INSTALL_PATH%"
 
 call "%VC_INSTALL_PATH%\VC\Auxiliary\Build\vcvarsall.bat" x64
-call conda run -n %PYTHON_PREFIX% python .github/scripts/build_triton_wheel.py --device=%BUILD_DEVICE% %TRITON_VERSION% %RELEASE%
+call conda run -n %PYTHON_PREFIX% python .github/scripts/build_triton_wheel.py --device=%BUILD_DEVICE% %RELEASE%
