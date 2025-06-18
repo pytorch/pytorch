@@ -38,6 +38,20 @@ class TestPythonTracer(TestCase):
                             break
                 self.assertTrue(found)
 
+    @skipIfPythonVersionMismatch(lambda major, minor, micro: major == 3 and minor == 12)
+    def test_monitoring_callback(self):
+        from torch._vendor.packaging import version
+        vi = sys.version_info
+        from sys import monitoring
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True) as prof:
+            name = monitoring.get_tool(2)
+            if vi.micro < 5:
+                self.assertEqual(name, "PyTorch Profiler")
+            else:
+                self.assertEqual(name, None)
+        name = monitoring.get_tool(2)
+        self.assertEqual(name, None)
+
 
 if __name__ == "__main__":
     run_tests()

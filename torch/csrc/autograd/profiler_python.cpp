@@ -817,23 +817,27 @@ static void registerMonitoringCallback() {
   auto sys_module = THPObjectPtr(PyImport_ImportModule("sys"));
   if (!sys_module) {
     TORCH_WARN("Failed to import sys module.");
+    PyErr_Clear();
     return;
   }
   auto monitoring =
       THPObjectPtr(PyObject_GetAttrString(sys_module, "monitoring"));
   if (!monitoring) {
     TORCH_WARN("Failed to get monitoring from sys moudle.");
+    PyErr_Clear();
     return;
   }
   auto result = THPObjectPtr(PyObject_CallMethod(
       monitoring, "use_tool_id", "is", PROFILER_ID, "PyTorch Profiler"));
   if (!result) {
     TORCH_WARN("Failed to call sys.monitoring.use_tool_id");
+    PyErr_Clear();
     return;
   }
   auto handler = THPObjectPtr(PyObject_NEW(PyObject, &_PyEventHandler_Type));
   if (!handler) {
     TORCH_WARN("Failed to create _PyEventHandler object.");
+    PyErr_Clear();
     return;
   }
   reinterpret_cast<_PyEventHandler*>(handler.get())->vectorcall =
@@ -847,6 +851,7 @@ static void registerMonitoringCallback() {
       handler.get()));
   if (!result) {
     TORCH_WARN("Failed to call sys.monitoring.register_callback.");
+    PyErr_Clear();
     return;
   }
   result = THPObjectPtr(PyObject_CallMethod(
@@ -857,6 +862,7 @@ static void registerMonitoringCallback() {
       1 << PY_MONITORING_EVENT_CALL));
   if (!result) {
     TORCH_WARN("Failed to call sys.monitoring.set_events.");
+    PyErr_Clear();
     return;
   }
 }
@@ -869,43 +875,57 @@ static void unregisterMonitoringCallback() {
   auto sys_module = THPObjectPtr(PyImport_ImportModule("sys"));
   if (!sys_module) {
     TORCH_WARN("Failed to import sys module.");
+    PyErr_Clear();
     return;
   }
   auto monitoring =
       THPObjectPtr(PyObject_GetAttrString(sys_module, "monitoring"));
   if (!monitoring) {
     TORCH_WARN("Failed to get monitoring from sys moudle.");
+    PyErr_Clear();
     return;
   }
   auto tool_name = THPObjectPtr(
       PyObject_CallMethod(monitoring, "get_tool", "i", PROFILER_ID));
   if (!tool_name) {
     TORCH_WARN("Failed to call sys.monitoring.use_tool_id");
+    PyErr_Clear();
     return;
   }
-  if (THPUtils_checkString(tool_name)) {
-    const char* str = THPUtils_unpackStringView(tool_name).data();
-    if (strcmp(str, "PyTorch Profiler") == 0) {
-      auto none = THPObjectPtr(Py_None);
-      Py_INCREF(Py_None);
-      auto result = THPObjectPtr(PyObject_CallMethod(
-          monitoring,
-          "register_callback",
-          "iiO",
-          PROFILER_ID,
-          1 << PY_MONITORING_EVENT_CALL,
-          none.get()));
-      if (!result) {
-        TORCH_WARN("Failed to call sys.monitoring.register_callback.");
-        return;
-      }
-      result = THPObjectPtr(
-          PyObject_CallMethod(monitoring, "set_events", "ii", PROFILER_ID, 0));
-      if (!result) {
-        TORCH_WARN("Failed to call sys.monitoring.set_events.");
-        return;
-      }
-    }
+  if (!THPUtils_checkString(tool_name)) {
+    return;
+  }
+  const char* str = THPUtils_unpackStringView(tool_name).data();
+  if (strcmp(str, "PyTorch Profiler") != 0) {
+    return;
+  }
+  auto none = THPObjectPtr(Py_None);
+  Py_INCREF(Py_None);
+  auto result = THPObjectPtr(PyObject_CallMethod(
+      monitoring,
+      "register_callback",
+      "iiO",
+      PROFILER_ID,
+      1 << PY_MONITORING_EVENT_CALL,
+      none.get()));
+  if (!result) {
+    TORCH_WARN("Failed to call sys.monitoring.register_callback.");
+    PyErr_Clear();
+    return;
+  }
+  result = THPObjectPtr(
+      PyObject_CallMethod(monitoring, "set_events", "ii", PROFILER_ID, 0));
+  if (!result) {
+    TORCH_WARN("Failed to call sys.monitoring.set_events.");
+    PyErr_Clear();
+    return;
+  }
+  result = THPObjectPtr(
+      PyObject_CallMethod(monitoring, "free_tool_id", "i", PROFILER_ID));
+  if (!result) {
+    TORCH_WARN("Failed to call sys.monitoring.free_tool_id.");
+    PyErr_Clear();
+    return;
   }
 }
 #endif
