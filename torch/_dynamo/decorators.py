@@ -698,7 +698,7 @@ def mark_static(t, index=None):
 
     if not isinstance(t, torch.Tensor):
         raise TypeError(
-            f"mark_static expects a tensor/nn.Module class but recieved {type(t)}"
+            f"mark_static expects a tensor/nn.Module class but received {type(t)}"
         )
 
     if isinstance(index, int):
@@ -724,7 +724,7 @@ def mark_static_address(t, guard=True):
     Tensors marked in this way will be kept alive until `torch._dynamo.reset()` is called.
     """
     if not isinstance(t, torch.Tensor):
-        raise TypeError(f"mark_static_address expects a tensor but recieved {type(t)}")
+        raise TypeError(f"mark_static_address expects a tensor but received {type(t)}")
 
     if guard:
         t._dynamo_static_input_type = "guarded"  # type: ignore[attr-defined]
@@ -846,7 +846,7 @@ def patch_dynamo_config(
 
     See _allowed_config_patches for the list of allowed config patches.
 
-    Arguments are the same as with torch._dynamo.confing.patch.
+    Arguments are the same as with torch._dynamo.config.patch.
 
     Can be used as a decorator or a context manager.
 
