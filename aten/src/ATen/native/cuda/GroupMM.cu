@@ -66,7 +66,7 @@ struct Schedule {
     cute::conditional_t<PONGOr2SM, MMA2SMKernelSchedule, MMA1SMKernelSchedule>,
     cute::conditional_t<PONGOr2SM, PongSchedule, CooperativeSchedule>>;
   using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>,
-    cute::conditional_t<PONGOr2SM, MMA2SMEpilogueSchedule, MMA1SMEpilogueSchedule>, 
+    cute::conditional_t<PONGOr2SM, MMA2SMEpilogueSchedule, MMA1SMEpilogueSchedule>,
     cute::conditional_t<PONGOr2SM, PongEpilogueSchedule, CooperativeEpilogueSchedule>>;
 
 };
@@ -330,9 +330,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
   //        (K >= 2048 && N >= 2048));
   bool small = (M <= 128 || N <= 128);
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  // const bool sm9x = properties != nullptr && properties->major == 9;
   const bool sm10x = properties != nullptr && properties->major == 10;
-
 
   if (sm10x) {
     if (small){
