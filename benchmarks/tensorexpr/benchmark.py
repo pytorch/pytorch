@@ -89,7 +89,7 @@ class Benchmark:
 
     @staticmethod
     def default_configs():
-        """return a list of defualt configs for this benchmark"""
+        """return a list of default configs for this benchmark"""
         raise ValueError("this method should be reimplemented by subclass")
 
     def is_supported(self):

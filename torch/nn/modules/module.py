@@ -2041,7 +2041,10 @@ class Module:
                     # register_buffer() method that doesn't have the "persistent"
                     # argument. Only pass it in if it is accepted otherwise assume
                     # it is always true
-                    if self.register_buffer is torch.nn.Module.register_buffer:
+                    if (
+                        getattr(self.register_buffer, "__func__", None)
+                        is torch.nn.Module.register_buffer
+                    ):
                         self.register_buffer(name, value, persistent)
                     else:
                         sign = inspect.signature(self.register_buffer)
