@@ -2059,12 +2059,6 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
     def call_function(
         self, tx, args: list[VariableTracker], kwargs: dict[str, VariableTracker]
     ) -> VariableTracker:
-        if not torch._dynamo.config.inline_inbuilt_nn_modules:
-            unimplemented(
-                "torch.func.functional_call capture is disabled, "
-                "it can be turned on by setting "
-                "`torch._dynamo.config.inline_inbuilt_nn_modules=True`"
-            )
         ctx_manager_vt = super().call_function(tx, args, kwargs)
         return RepararametrizeModuleContextVariable(ctx_manager_vt, args[0])
 

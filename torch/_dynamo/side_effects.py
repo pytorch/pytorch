@@ -608,7 +608,6 @@ class SideEffects:
             return
 
         self.check_allowed_side_effect(var)
-
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
         if (
