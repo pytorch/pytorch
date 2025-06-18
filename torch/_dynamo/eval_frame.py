@@ -66,6 +66,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._export.utils import _compiling_state_context
+from torch._inductor.utils import OrderedSet
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -125,6 +126,18 @@ class Unset(Enum):
 
 
 cached_backends: dict[int, CompilerFn] = {}
+
+#
+# always_alive_callbacks is to prevent a rare segfault
+#    >> opt_fn = torch.compile(fn)
+#    >> opt_fn(x)
+# The next line deletes the earlier opt_fn object because we overwrite to the
+# same varname. The deletion of earlier opt_fn oject, which is an
+# OptimizeCtx object, frees the older callback object.
+#    >> opt_fn = torch.compile(fn)
+# The next line causes a segfault because older callback is dangling
+#    >> opt_fn(x)
+always_alive_callbacks: OrderedSet[DynamoCallback] = OrderedSet()
 
 unset = Unset.token
 
@@ -580,6 +593,7 @@ class _TorchDynamoContext:
         # Save the backends so that we can reset them during torch._dynamo.reset
         backend = innermost_fn(callback)
         cached_backends.setdefault(id(backend), backend)
+        always_alive_callbacks.add(callback)
 
         if dynamic is not None:
             self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))

@@ -5114,6 +5114,23 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(Unsupported):
             a.call_function(None, [], {})
 
+    def test_seqgfault_callbacks(self):
+        def fn(x):
+            return 2 * x
+
+        x = torch.randn(2, 2)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        # This calls cached_backend.clear() which removes any strong references
+        # to the callback
+        torch._dynamo.reset()
+
+        opt_fn(x)
+
+        # Overwriting the opt_fn could lead to gc of callback ptr.
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(x)
+
 
 instantiate_parametrized_tests(FunctionTests)
 instantiate_parametrized_tests(DefaultsTests)
