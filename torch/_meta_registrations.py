@@ -395,6 +395,11 @@ def meta_fft_r2c(self, dim, normalization, onesided):
             _exec_fft(out, working_tensor, onesided_sizes, last_dims, forward=True)
             sorted_dims = sorted_dims[: len(sorted_dims) - max_dims]
 
+        if not onesided:
+            if out.size(last_dim) != out_sizes[last_dim]:
+                working_tensor.resize_(out_sizes, memory_format=torch.contiguous_format)
+                out = working_tensor
+
         return out
     else:
         return self.new_empty(
