@@ -459,7 +459,6 @@ def flex_attention_fake_impl(
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
 ) -> tuple[torch.Tensor, torch.Tensor]:
-
     # TODO: Figure out a better way to handle this for NJT than using sum()
     if query.is_nested:
         out = torch.empty_like(query, memory_format=torch.contiguous_format)
