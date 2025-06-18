@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the Resilient backpropagation."""
+
 from typing import cast, Optional, Union
 
 import torch
@@ -248,7 +249,9 @@ def _single_tensor_rprop(
             assert (
                 param.device.type == step.device.type
                 and param.device.type in capturable_supported_devices
-            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            ), (
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
         step += 1
 
@@ -315,7 +318,9 @@ def _multi_tensor_rprop(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        ), (
+            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, prevs, step_sizes, state_steps]  # type: ignore[list-item]
