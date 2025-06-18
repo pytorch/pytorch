@@ -50,6 +50,7 @@ torch.signal <signal>
 torch.special <special>
 torch.overrides
 torch.package <package>
+torch.pytree <pytree>
 profiler
 nn.init
 nn.attention
