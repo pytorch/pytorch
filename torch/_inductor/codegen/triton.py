@@ -227,7 +227,12 @@ class IndexingOptions:
 
     @property
     def mask_str(self) -> str:
-        return " & ".join(map(str, self.mask_vars)) if self.mask_vars else "None"
+        # The sorted call is added to make sure the order is still
+        # deterministic if self.mask_vars contains mix of string
+        # and TritonCSEVariable
+        return (
+            " & ".join(sorted(map(str, self.mask_vars))) if self.mask_vars else "None"
+        )
 
 
 @dataclasses.dataclass
@@ -1306,7 +1311,7 @@ class TritonKernelOverrides(TritonOverrides):
         self._setup_libdevice_routing()
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _setup_libdevice_routing(cls):
         """Set up routing to libdevice implementations for fp64 inputs."""
 
@@ -2737,13 +2742,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 assert reduction_type == "welford_reduce"
                 result_mean, result_m2, result_weight = result_var
                 peer_mean = self.codegen_cooperative_reduction_peer_combine(
-                    result_mean, upcast_acc_dtype(src_dtype), default[0]
+                    result_mean,
+                    upcast_acc_dtype(src_dtype),
+                    default[0],  # type: ignore[index]
                 )
                 peer_m2 = self.codegen_cooperative_reduction_peer_combine(
-                    result_m2, upcast_acc_dtype(src_dtype), default[1]
+                    result_m2,
+                    upcast_acc_dtype(src_dtype),
+                    default[1],  # type: ignore[index]
                 )
                 peer_weight = self.codegen_cooperative_reduction_peer_combine(
-                    result_weight, upcast_acc_dtype(src_dtype), default[2]
+                    result_weight,
+                    upcast_acc_dtype(src_dtype),
+                    default[2],  # type: ignore[index]
                 )
                 self.welford_reduce_final_reduction(
                     self.post_loop_store,

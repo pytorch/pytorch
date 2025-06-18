@@ -146,6 +146,26 @@ def has_higher_order_op(gm):
     return False
 
 
+def propagate_metadata(orig_gm, split_gm) -> None:
+    for name, module in split_gm.named_modules():
+        if "." not in name and len(name):
+            # TODO: add split id to CompileId: https://github.com/pytorch/tlparse/pull/83/files#r1880649384
+            module.meta = orig_gm.meta
+            module._param_name_to_source = orig_gm._param_name_to_source
+
+
+def propagate_dynamo_source(orig_gm, split_gm) -> None:
+    name_to_dynamo_source = {}
+    for node in orig_gm.graph.find_nodes(op="placeholder"):
+        name_to_dynamo_source[node.name] = node._dynamo_source
+
+    for name, module in split_gm.named_modules():
+        if "." not in name and len(name):
+            for node in module.graph.find_nodes(op="placeholder"):
+                # non-placeholder in original_gm may become placeholder in submodules
+                node._dynamo_source = name_to_dynamo_source.get(node.name, None)
+
+
 # compile each of the partitioned submodules using the user-provided compiler
 class SubmodCompiler(torch.fx.interpreter.Interpreter):
     def __init__(self, module, compiler, fake_mode) -> None:
@@ -515,6 +535,10 @@ class DDPOptimizer:
         split_gm = fx.passes.split_module.split_module(
             gm, None, lambda node: partition_map[node]
         )
+
+        # See note [Assumption on Dynamo Metadata]
+        propagate_dynamo_source(gm, split_gm)
+        propagate_metadata(gm, split_gm)
 
         debug_str = (
             f"\n---orig graph---\n{gm.graph}\n"

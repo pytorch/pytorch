@@ -135,9 +135,9 @@ class TestIinfo(TestCase):
         [
             np.uint8,
             # xfail: unsupported add (uint[16,32,64])
-            subtest(np.uint16, decorators=[xfail]),
-            subtest(np.uint32, decorators=[xfail]),
-            subtest(np.uint64, decorators=[xfail]),
+            subtest(np.uint16, decorators=[] if TEST_WITH_TORCHDYNAMO else [xfail]),
+            subtest(np.uint32, decorators=[] if TEST_WITH_TORCHDYNAMO else [xfail]),
+            subtest(np.uint64, decorators=[] if TEST_WITH_TORCHDYNAMO else [xfail]),
         ],
     )
     def test_unsigned_max(self, T):

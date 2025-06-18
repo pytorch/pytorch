@@ -999,8 +999,8 @@ class TestTiling(TestCase):
         self.assertEqual(out, f(*inps))
 
     def test_penalized_small_dim(self):
-        x = torch.rand([2000, 1], device="cuda")
-        y = torch.rand([4, 1], device="cuda").T
+        x = torch.rand([2000, 1], device=GPU_TYPE)
+        y = torch.rand([4, 1], device=GPU_TYPE).T
 
         # dont tile when it doesnt affect total coalesced mem accesses much
         def f(x, y):
