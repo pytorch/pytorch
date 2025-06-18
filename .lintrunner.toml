@@ -1176,7 +1176,6 @@ exclude_patterns = [
     'torch/[j-o]*/**',
     'torch/utils/**',
     'torch/csrc/jit/[a-o]*/**',
-    'torch/csrc/[a-i]*/**',
     'torch/csrc/distributed/**',
 ]
 init_command = [

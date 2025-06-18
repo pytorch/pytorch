@@ -21,7 +21,7 @@ std::string cuGDSFileGetErrorString(T status) {
                                : std::string(c10::utils::str_error(errno));
 }
 
-// To get error message for Buf/Handle registeration APIs that return
+// To get error message for Buf/Handle registration APIs that return
 // CUfileError_t
 template <
     class T,
