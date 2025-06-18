@@ -5345,7 +5345,7 @@
 - func: logit(Tensor self, float? eps=None) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: logit
+    CPU, CUDA, MTIA: logit
     MPS: logit_mps
   tags: pointwise
 
