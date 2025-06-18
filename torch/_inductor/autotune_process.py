@@ -39,7 +39,7 @@ from torch.utils._ordered_set import OrderedSet
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from torch._inductor.select_algorithm import TritonTemplateCaller
+    from torch._inductor.codegen.triton_templates.caller import TritonTemplateCaller
 
 from . import config
 from .runtime.benchmarking import benchmarker
@@ -134,9 +134,9 @@ class TuningProcess:
             # Some internal usages need a modified LD_LIBRARY_PATH.
             "LD_LIBRARY_PATH": get_ld_library_path(),
             # This will cause the subprocs to profile using the profiler.
-            "TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING": "1"
-            if config.profile_bandwidth_with_do_bench_using_profiling
-            else "0",
+            "TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING": (
+                "1" if config.profile_bandwidth_with_do_bench_using_profiling else "0"
+            ),
         }
         if self.device is not None:
             extra_env[CUDA_VISIBLE_DEVICES] = str(self.device)

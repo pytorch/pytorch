@@ -7,9 +7,9 @@
 from typing import Any, Optional
 
 from torch._inductor.kernel.mm_common import persistent_mm_grid
-from torch._inductor.select_algorithm import TritonTemplate
 
 from ...utils import get_tma_workspace_arg
+from .template import TritonTemplate
 
 
 class PersistentTMATritonTemplate(TritonTemplate):
