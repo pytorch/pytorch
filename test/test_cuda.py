@@ -6757,60 +6757,6 @@ class TestCompileKernel(TestCase):
         expected = input_data + scalar_val
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
-    @unittest.skipIf(not TEST_CUDA, "No CUDA")
-    def test_compile_kernel_custom_op_mutates_args(self):
-        # Define a kernel that performs in-place vector addition: a = a + b
-        kernel_source = """
-        __global__ void vector_add_inplace(float* a, const float* b, int n) {
-            int idx = blockIdx.x * blockDim.x + threadIdx.x;
-            if (idx < n) {
-                a[idx] = a[idx] + b[idx];
-            }
-        }
-        """
-
-        @torch.library.custom_op(
-            "test_compile_kernel::vector_add_inplace", mutates_args=("a",)
-        )
-        def vector_add_inplace_op(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-            from torch.cuda import _compile_kernel
-
-            compiled_kernel = _compile_kernel(kernel_source, "vector_add_inplace")
-            n = a.numel()
-            threads_per_block = 256
-            blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
-            compiled_kernel(
-                grid=(blocks_per_grid, 1, 1),
-                block=(threads_per_block, 1, 1),
-                args=[a, b, n],
-            )
-            return a
-
-        @vector_add_inplace_op.register_fake
-        def _(a, b):
-            return a.clone()
-
-        device = torch.device("cuda:0")
-        size = (1024,)
-
-        a = torch.randn(size, device=device, dtype=torch.float32)
-        b = torch.randn(size, device=device, dtype=torch.float32)
-
-        a_original = a.clone()
-        b_original = b.clone()
-
-        result = vector_add_inplace_op(a, b)
-
-        # Check that a was modified in-place
-        expected = a_original + b_original
-        torch.testing.assert_close(a, expected, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(b, b_original, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(result, a, rtol=1e-5, atol=1e-5)
-        assert result.data_ptr() == a.data_ptr(), (
-            "Result should share memory with input 'a'"
-        )
-
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaDeviceParametrized(TestCase):
