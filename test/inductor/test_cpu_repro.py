@@ -2644,6 +2644,16 @@ class CPUReproTests(TestCase):
             self.common(fn, inps)
             assert metrics.generated_cpp_vec_kernel_count == 2
 
+    # TODO remove requires_vectorization when scalar cascade sum suport is added
+    @requires_vectorization
+    def test_large_mean(self):
+        size = (30000, 100000)
+        t = torch.rand(size, dtype=torch.float, device="cpu")
+        op = torch.mean
+        expected = op(t)
+        actual = torch.compile(op)(t)
+        self.assertEqual(expected, actual)
+
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
