@@ -77,7 +77,7 @@ inline static c10::SymBool _compute_contiguous_sym(
     const auto& size_d = sizes[d].max(one);
     is_contiguous_cond = is_contiguous_cond.sym_and(
         size_d.sym_eq(1).sym_or(sym_eq(strides[d], expected_stride)));
-    expected_stride = expected_stride*size_d;
+    expected_stride = expected_stride * size_d;
   }
   return is_contiguous_cond.sym_or(is_empty);
 }
