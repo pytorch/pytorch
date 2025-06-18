@@ -456,7 +456,7 @@ class TestCaseWrapper(TestCase):
         self.assertEqual(result, result_exp)
 
         # Return the result of the functions under test for further investigations
-        return result
+        return result, result_exp
 
     def check_autograd(self, result, result_exp, params, params_exp=None):
         params_flatten = pytree.tree_leaves(params)
@@ -3617,7 +3617,7 @@ class AssociativeScanTests(TestCaseWrapper):
             "combine_mode": combine_mode,
         }
         kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        results = self._run_test(
+        results, _ = self._run_test(
             model=AssociativeScanModels.Simple(**kwargs),
             model_fake=AssociativeScanModels.Simple(**kwargs_fake),
             inputs=x,
@@ -3639,7 +3639,7 @@ class AssociativeScanTests(TestCaseWrapper):
             "combine_mode": combine_mode,
         }
         kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        result = self._run_test(
+        result, _ = self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=x,
@@ -3693,7 +3693,7 @@ class AssociativeScanTests(TestCaseWrapper):
                 "combine_mode": combine_mode,
             }
             kwargs_fake = self._prepare_fake_kwargs(kwargs)
-            results = self._run_test(
+            results, _ = self._run_test(
                 model=AssociativeScanModels.Simple(**kwargs),
                 model_fake=AssociativeScanModels.Simple(**kwargs_fake),
                 inputs=x,
@@ -4990,6 +4990,37 @@ class ScannedModuleModels:
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class ScannedModuleTests(TestCaseWrapper):
+    def check_autograd(
+        self, result, result_exp, params, params_exp=None, stack_grads=False
+    ):
+        params_flatten = pytree.tree_leaves(params)
+        if params_exp is not None:
+            params_exp_flatten, tree_spec = pytree.tree_flatten(params_exp)
+        else:
+            params_exp_flatten = params_flatten
+            tree_spec = None
+        result_flatten = pytree.tree_leaves(result)
+        result_exp_flatten = pytree.tree_leaves(result_exp)
+        grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
+        expected_grads = torch.autograd.grad(
+            result_exp_flatten, params_exp_flatten, grad_exp_init, retain_graph=True
+        )
+        if stack_grads:
+            expected_grads = pytree.tree_unflatten(expected_grads, tree_spec)
+            expected_grads_stacked = [p.unsqueeze(0) for p in expected_grads[0]]
+            for lg in expected_grads[1:]:
+                for ind, g in enumerate(expected_grads_stacked):
+                    expected_grads_stacked[ind] = torch.concat(
+                        [g, lg[ind].unsqueeze(0)]
+                    )
+        else:
+            expected_grads_stacked = expected_grads
+        grad_init = [torch.ones_like(el) for el in result_flatten]
+        grads = torch.autograd.grad(
+            result_flatten, params_flatten, grad_init, retain_graph=True
+        )
+        self.assertEqual(grads, expected_grads_stacked, atol=6e-05, rtol=6e-06)
+
     @staticmethod
     class ScannedModuleFake(torch.nn.Module):
         def __init__(
@@ -5069,6 +5100,18 @@ class ScannedModuleTests(TestCaseWrapper):
             )
             return parameters_and_buffers
 
+        def _get_parameters_per_mod(self):
+            parameters = []
+            for idx in range(self.stacked_len):
+                parameters.append(list(self.mods[idx].parameters()))
+            return parameters
+
+        def _get_buffers_per_mod(self):
+            buffers = []
+            for idx in range(self.stacked_len):
+                buffers.append(list(self.mods[idx].buffers()))
+            return buffers
+
         def forward(self, x):
             for idx in range(self.stacked_len):
                 x = self.mods[idx](x)
@@ -5087,7 +5130,9 @@ class ScannedModuleTests(TestCaseWrapper):
     @requires_cuda
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
-    @parametrize("autograd", [False])
+    @parametrize("autograd", [False, True])
+    # @parametrize("autograd", [False])
+    # @parametrize("autograd", [True])
     @parametrize("stacked_len", [1, 3, 7])
     def test_scannedmodule_simple(self, device, dtype, autograd, stacked_len):
         torch._dynamo.config.capture_scalar_outputs = True
@@ -5096,7 +5141,31 @@ class ScannedModuleTests(TestCaseWrapper):
             dtype=dtype, device=device, requires_grad=autograd
         ):
             model, model_fake = self._create_model_and_fake_model(layer, stacked_len)
-            self._run_test(model, model_fake, xs)
+            # params = dict(model.named_parameters())
+            # import torch.utils._pytree as pytree
+            # layer_state_dict = pytree.tree_map(lambda p: torch.zeros_like(p[0]), params)
+            # model.init_layer(0, layer_state_dict)
+            # layer_state_dict = pytree.tree_map(lambda p: torch.ones_like(p[0]), params)
+            # model.init_layer(1, layer_state_dict)
+            # params2 = dict(model.named_parameters())
+            result, result_exp = self._run_test(model, model_fake, xs)
+
+            if autograd:
+                self.check_autograd(
+                    result,
+                    result_exp,
+                    params=(xs,),
+                    params_exp=(xs,),
+                    stack_grads=False,
+                )
+                parameters_fake = model_fake._get_parameters_per_mod()
+                self.check_autograd(
+                    result,
+                    result_exp,
+                    params=list(model.parameters()),
+                    params_exp=parameters_fake,
+                    stack_grads=True,
+                )
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")

@@ -341,11 +341,30 @@ class ScannedModule(nn.Module):
     def select_sliced_parameters_and_buffers(self, idx):
         import torch.utils._pytree as pytree
 
-        parameters_and_buffers = pytree.tree_map(lambda x: x[idx][0], self._parameters)
+        parameters_and_buffers = pytree.tree_map(lambda p: p[idx][0], self._parameters)
         parameters_and_buffers.update(
-            pytree.tree_map(lambda x: x[idx][0], self._buffers)
+            pytree.tree_map(lambda b: b[idx][0], self._buffers)
         )
         return parameters_and_buffers
+
+    def init_layer(self, idx, parameters, buffers=None):
+        import torch.utils._pytree as pytree
+
+        with torch.no_grad():
+            pytree.tree_map(
+                lambda p, pi, new_p: p.scatter_(0, idx * pi, new_p.unsqueeze(0)),
+                self._parameters,
+                self._idxs_parameters,
+                parameters,
+            )
+
+            if buffers:
+                pytree.tree_map(
+                    lambda b, bi, new_b: b.scatter_(0, idx * bi, new_b.unsqueeze(0)),
+                    self._buffers,
+                    self._idxs_buffers,
+                    buffers,
+                )
 
     def forward(self, xs):
         from torch._higher_order_ops.scan import scan
