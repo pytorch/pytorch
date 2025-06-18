@@ -7835,14 +7835,10 @@ class Conditional(ExternKernel):
 
         # make sure true and false outputs are structurally equivalent
         assert len(true_outputs) == len(false_outputs), (true_outputs, false_outputs)
-        for i, (true_o, false_o) in enumerate(zip(true_outputs, false_outputs)):
-            assert true_o.get_device() == false_o.get_device(), (i, true_o, false_o)
-            assert true_o.get_dtype() == false_o.get_dtype(), (i, true_o, false_o)
-            assert true_o.get_layout().offset == false_o.get_layout().offset, (
-                i,
-                true_o,
-                false_o,
-            )
+        for i, (t_o, f_o) in enumerate(zip(true_outputs, false_outputs)):
+            assert t_o.get_device() == f_o.get_device(), (i, t_o, f_o)
+            assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
+            assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
         device = next(
             o.get_device()
