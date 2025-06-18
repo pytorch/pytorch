@@ -97,8 +97,8 @@ calculate_swa(std::optional<int64_t> window_size_left,
   bool needs_swa = false;
   using aotriton::v3::flash::WindowValue;
   // Default values when std::optional window_size_left/right have no value
-  int window_left = seqlen_q;
-  int window_right = seqlen_k;
+  int window_left = max_seqlen_q;
+  int window_right = max_seqlen_k;
   if (is_causal) {
     window_left = WindowValue::TopLeftAligned;
     window_right = WindowValue::TopLeftAligned;
@@ -280,30 +280,29 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
 #if V3_API
     using aotriton::v3::flash::CausalType;
     using aotriton::v3::flash::VarlenType;
-    using aotriton::v3::flash::attn_fwd_params;
-    attn_fwd_params params {
-      .Q = mk_aotensor(q_t, "q"),
-      .K = mk_aotensor(k_t, "k"),
-      .V = mk_aotensor(v_t, "v"),
-      .Sm_scale = softmax_scale,
-      .L = mk_aotensor<2>(M, "M"),
-      .Out = mk_aotensor(output_t, "Out"),
-      .Max_seqlen_q = seqlen_q,    // Unused if cu_seqlens_q is empty
-      .Max_seqlen_k = seqlen_k,    // Unused if cu_seqlens_k is empty
-      .dropout_p = p_dropout,
-      .philox_seed_ptr = seed,
-      .philox_offset1 = offset1,
-      .philox_offset2 = offset2,
-      .philox_seed_output = seed_output,
-      .philox_offset_output = offset_output,
-      .persistent_atomic_counter = persistent_counter,
-      .causal_type = CausalType::WindowedAttention,
-      .varlen_type = VarlenType::None,
-      .window_left = window_left,
-      .window_right = window_right,
-    };
+    aotriton::v3::flash::attn_fwd_params params;
+    params.Q = mk_aotensor(q_t, "q");
+    params.K = mk_aotensor(k_t, "k");
+    params.V = mk_aotensor(v_t, "v");
+    params.Sm_scale = softmax_scale;
+    params.L = mk_aotensor<2>(M, "M");
+    params.Out = mk_aotensor(output_t, "Out");
+    params.Max_seqlen_q = seqlen_q;    // Unused if cu_seqlens_q is empty
+    params.Max_seqlen_k = seqlen_k;    // Unused if cu_seqlens_k is empty
+    params.dropout_p = p_dropout;
+    params.philox_seed_ptr = seed;
+    params.philox_offset1 = offset1;
+    params.philox_offset2 = offset2;
+    params.philox_seed_output = seed_output;
+    params.philox_offset_output = offset_output;
+    params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
+    params.persistent_atomic_counter = persistent_counter;
+    params.causal_type = CausalType::WindowedAttention;
+    params.varlen_type = VarlenType::None;
+    params.window_left = window_left;
+    params.window_right = window_right;
     err = aotriton::v3::flash::attn_fwd(params,
-                                        attn_fwd_params::kVersion,
+                                        aotriton::v3::flash::attn_fwd_params::kVersion,
                                         stream);
 #endif
   } else {
@@ -481,32 +480,31 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     if (uses_swa) {
       using aotriton::v3::flash::CausalType;
       using aotriton::v3::flash::VarlenType;
-      using aotriton::v3::flash::attn_fwd_params;
-      attn_fwd_params params {
-        .Q = mk_aotensor(q_t, "q"),
-        .K = mk_aotensor(k_t, "k"),
-        .V = mk_aotensor(v_t, "v"),
-        .Sm_scale = softmax_scale,
-        .L = mk_aotensor<2>(M, "M"),
-        .Out = mk_aotensor(output_t, "Out"),
-        .cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q"),
-        .cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k"),
-        .Max_seqlen_q = max_seqlen_q,    // Unused if cu_seqlens_q is empty
-        .Max_seqlen_k = max_seqlen_k,    // Unused if cu_seqlens_k is empty
-        .dropout_p = p_dropout,
-        .philox_seed_ptr = seed,
-        .philox_offset1 = offset1,
-        .philox_offset2 = offset2,
-        .philox_seed_output = seed_output,
-        .philox_offset_output = offset_output,
-        .persistent_atomic_counter = persistent_counter,
-        .causal_type = CausalType::WindowedAttention,
-        .varlen_type = VarlenType::CompactVarlen,
-        .window_left = window_left,
-        .window_right = window_right,
-      };
+      aotriton::v3::flash::attn_fwd_params params;
+      params.Q = mk_aotensor(q_padded, "q");
+      params.K = mk_aotensor(k_padded, "k");
+      params.V = mk_aotensor(v_padded, "v");
+      params.Sm_scale = softmax_scale;
+      params.L = mk_aotensor<2>(M, "M");
+      params.Out = mk_aotensor(out_padded, "Out");
+      params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
+      params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
+      params.Max_seqlen_q = max_seqlen_q;    // Unused if cu_seqlens_q is empty
+      params.Max_seqlen_k = max_seqlen_k;    // Unused if cu_seqlens_k is empty
+      params.dropout_p = p_dropout;
+      params.philox_seed_ptr = seed;
+      params.philox_offset1 = offset1;
+      params.philox_offset2 = offset2;
+      params.philox_seed_output = seed_output;
+      params.philox_offset_output = offset_output;
+      params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
+      params.persistent_atomic_counter = persistent_counter;
+      params.causal_type = CausalType::WindowedAttention;
+      params.varlen_type = VarlenType::CompactVarlen;
+      params.window_left = window_left;
+      params.window_right = window_right;
       err = aotriton::v3::flash::attn_fwd(params,
-                                          attn_fwd_params::kVersion,
+                                          aotriton::v3::flash::attn_fwd_params::kVersion,
                                           stream);
     } else {
       err = attn_fwd_compact_varlen(mk_aotensor(q_padded, "q"),
@@ -679,32 +677,32 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
   if (uses_swa) {
     // Fused BWD does not support SWA
     at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
+    using aotriton::v3::flash::CausalType;
     using aotriton::v3::flash::VarlenType;
-    aotriton::v3::flash::attn_bwd_params params = {
-      .Q = mk_aotensor(q_t, "q"),
-      .K = mk_aotensor(k_t, "k"),
-      .V = mk_aotensor(v_t, "v"),
-      .Sm_scale = softmax_scale,
-      .Out = mk_aotensor(out_t, "out"),
-      .DO = mk_aotensor(dout_t, "dout"),
-      .DK = mk_aotensor(dq_t, "dq"),
-      .DV = mk_aotensor(dk_t, "dk"),
-      .DQ = mk_aotensor(dv_t, "dv"),
-      .L = mk_aotensor<2>(softmax_lse_cont, "L"),
-      .D = mk_aotensor<2>(delta, "delta"),
-      .Max_seqlen_q = seqlen_q,        // Unused if cu_seqlens_q is empty
-      .Max_seqlen_k = seqlen_k,        // Unused if cu_seqlens_k is empty
-      .dropout_p = p_dropout,
-      .philox_seed_ptr =  mk_aoscalartensor(philox_seed),
-      .philox_offset1 = mk_aoscalartensor(philox_offset),
-      .philox_offset2 = 0,
-      .causal_type = CausalType::WindowedAttention,
-      .varlen_type = VarlenType::None;
-      .window_left = window_left,
-      .window_right = window_right,
-    };
+    aotriton::v3::flash::attn_bwd_params params;
+    params.Q = mk_aotensor(q_t, "q");
+    params.K = mk_aotensor(k_t, "k");
+    params.V = mk_aotensor(v_t, "v");
+    params.Sm_scale = softmax_scale;
+    params.Out = mk_aotensor(out_t, "out");
+    params.DO = mk_aotensor(dout_t, "dout");
+    params.DK = mk_aotensor(dq_t, "dq");
+    params.DV = mk_aotensor(dk_t, "dk");
+    params.DQ = mk_aotensor(dv_t, "dv");
+    params.L = mk_aotensor<2>(softmax_lse_cont, "L");
+    params.D = mk_aotensor<2>(delta, "delta");
+    params.Max_seqlen_q = seqlen_q;        // Unused if cu_seqlens_q is empty
+    params.Max_seqlen_k = seqlen_k;        // Unused if cu_seqlens_k is empty
+    params.dropout_p = p_dropout;
+    params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
+    params.philox_offset1 = mk_aoscalartensor(philox_offset);
+    params.philox_offset2 = 0;
+    params.causal_type = CausalType::WindowedAttention;
+    params.varlen_type = VarlenType::None;
+    params.window_left = window_left;
+    params.window_right = window_right;
     err = aotriton::v3::flash::attn_bwd(params,
-                                        attn_bwd_params::kVersion,
+                                        aotriton::v3::flash::attn_bwd_params::kVersion,
                                         stream);
   } else if (use_fused_bwd) {
     using aotriton::v2::flash::attn_bwd_fused;
@@ -891,8 +889,8 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
 
   auto [needs_swa, window_left, window_right] = calculate_swa(window_size_left,
                                                               window_size_right,
-                                                              seqlen_q,
-                                                              seqlen_k,
+                                                              max_seqlen_q,
+                                                              max_seqlen_k,
                                                               is_causal);
 #if V3_API
   const bool uses_swa = needs_swa;
@@ -918,34 +916,34 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     if (uses_swa) {
+      using aotriton::v3::flash::CausalType;
       using aotriton::v3::flash::VarlenType;
-      aotriton::v3::flash::attn_bwd_params params = {
-        .Q = mk_aotensor(q_t, "q"),
-        .K = mk_aotensor(k_t, "k"),
-        .V = mk_aotensor(v_t, "v"),
-        .Sm_scale = softmax_scale,
-        .Out = mk_aotensor(out_t, "out"),
-        .DO = mk_aotensor(dout_t, "dout"),
-        .DK = mk_aotensor(dq_t, "dq"),
-        .DV = mk_aotensor(dk_t, "dk"),
-        .DQ = mk_aotensor(dv_t, "dv"),
-        .L = mk_aotensor<2>(softmax_lse_cont, "L"),
-        .D = mk_aotensor<2>(delta, "delta"),
-        .cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q"),
-        .cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k"),
-        .Max_seqlen_q = max_seqlen_q,        // Unused if cu_seqlens_q is empty
-        .Max_seqlen_k = max_seqlen_k,        // Unused if cu_seqlens_k is empty
-        .dropout_p = p_dropout,
-        .philox_seed_ptr =  mk_aoscalartensor(philox_seed),
-        .philox_offset1 = mk_aoscalartensor(philox_offset),
-        .philox_offset2 = 0,
-        .causal_type = CausalType::WindowedAttention,
-        .varlen_type = VarlenType::CompactVarlen;
-        .window_left = window_left,
-        .window_right = window_right,
-      };
+      aotriton::v3::flash::attn_bwd_params params;
+      params.Q = mk_aotensor(q_padded, "q");
+      params.K = mk_aotensor(k_padded, "k");
+      params.V = mk_aotensor(v_padded, "v");
+      params.Sm_scale = softmax_scale;
+      params.Out = mk_aotensor(out_t, "out");
+      params.DO = mk_aotensor(dout_t, "dout");
+      params.DK = mk_aotensor(dq_padded, "dq");
+      params.DV = mk_aotensor(dk_padded, "dk");
+      params.DQ = mk_aotensor(dv_padded, "dv");
+      params.L = mk_aotensor<2>(softmax_lse_cont, "L");
+      params.D = mk_aotensor<2>(delta, "delta");
+      params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
+      params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
+      params.Max_seqlen_q = max_seqlen_q;        // Unused if cu_seqlens_q is empty
+      params.Max_seqlen_k = max_seqlen_k;        // Unused if cu_seqlens_k is empty
+      params.dropout_p = p_dropout;
+      params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
+      params.philox_offset1 = mk_aoscalartensor(philox_offset);
+      params.philox_offset2 = 0;
+      params.causal_type = CausalType::WindowedAttention;
+      params.varlen_type = VarlenType::CompactVarlen;
+      params.window_left = window_left;
+      params.window_right = window_right;
       err = aotriton::v3::flash::attn_bwd(params,
-                                          attn_bwd_params::kVersion,
+                                          aotriton::v3::flash::attn_bwd_params::kVersion,
                                           stream);
     } else {
       using aotriton::v2::flash::attn_bwd_compact_varlen;
