@@ -39,7 +39,6 @@ from ..utils import (
     odict_values,
     raise_args_mismatch,
     set_example_value,
-    slice_length,
 )
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
@@ -541,12 +540,14 @@ class ListVariable(CommonListMethodsVariable):
                     raise_observed_exception(ValueError, tx, args=[msg])
 
                 value = value.force_unpack_var_sequence(tx)
-                if (sz := slice_length(key, len(self.items))) and sz > len(value):
-                    msg = ConstantVariable.create(
-                        f"attempt to assign a sequence of size {len(value)} to extended slice of size {sz}"
+                try:
+                    self.items[key] = value
+                except Exception as exc:
+                    raise_observed_exception(
+                        type(exc),
+                        tx,
+                        args=list(map(ConstantVariable.create, exc.args)),
                     )
-                    raise_observed_exception(ValueError, tx, args=[msg])
-                self.items[key] = value
             else:
                 key = key.as_python_constant()
                 if key >= len(self.items) or key < -len(self.items):
