@@ -25,7 +25,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.runtime.triton_compat import tl, triton
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -165,7 +165,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         b = torch.rand(100, 100, dtype=dtype, device=device, requires_grad=True)
 
         # Record artifacts
-        with fresh_inductor_cache():
+        with fresh_cache():
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
             # A first call should miss in the cache.
@@ -201,7 +201,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
         # We did not load anything so dont hit yet
-        with fresh_inductor_cache():
+        with fresh_cache():
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             self.assertEqual(eager_result, compiled_result)
@@ -221,7 +221,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
         # Hot load and hit
-        with fresh_inductor_cache():
+        with fresh_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
             self.assertEqual(len(cache_info.inductor_artifacts), 2)
