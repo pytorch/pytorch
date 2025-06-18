@@ -46,7 +46,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 namespace {
 using Strides = at::cuda::detail::Strides; // std::array<int64_t, 3>;
 
-template <typename ArchTag, bool PONG, typename TB_M, typename TB_N, typename TB_K>
+template <typename ArchTag, bool PONGOr2SM, typename TB_M, typename TB_N, typename TB_K>
 struct Schedule {
   // SM90
   using CooperativeSchedule =
@@ -63,11 +63,11 @@ struct Schedule {
   using MMA2SMEpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized2Sm;
 
   using KernelSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>,
-    cute::conditional_t<PONG, MMA2SMKernelSchedule, MMA1SMKernelSchedule>,
-    cute::conditional_t<PONG, PongSchedule, CooperativeSchedule>>;
+    cute::conditional_t<PONGOr2SM, MMA2SMKernelSchedule, MMA1SMKernelSchedule>,
+    cute::conditional_t<PONGOr2SM, PongSchedule, CooperativeSchedule>>;
   using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>,
-    cute::conditional_t<PONG, MMA2SMEpilogueSchedule, MMA1SMEpilogueSchedule>, 
-    cute::conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>>;
+    cute::conditional_t<PONGOr2SM, MMA2SMEpilogueSchedule, MMA1SMEpilogueSchedule>, 
+    cute::conditional_t<PONGOr2SM, PongEpilogueSchedule, CooperativeEpilogueSchedule>>;
 
 };
 
