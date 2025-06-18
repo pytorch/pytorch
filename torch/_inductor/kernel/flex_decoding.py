@@ -372,9 +372,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
-    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
+        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    )
 
     B = Bq
     kernel_options = dict(kernel_options)
