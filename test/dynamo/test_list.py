@@ -60,9 +60,9 @@ class TupleTests(torch._dynamo.test_case.TestCase):
     @make_dynamo_test
     def test_binop_add(self):
         p, q = map(self.thetype, ["abc", "bcd"])
-        r = p + q
-        self.assertIsInstance(r, self.thetype)
-        self.assertEqual(r, self.thetype("abcbcd"))
+        self.assertIsInstance(p + q, self.thetype)
+        self.assertEqual(p + q, self.thetype("abcbcd"))
+        self.assertEqual(p.__add__(q), self.thetype("abcbcd"))
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.__add__)
@@ -271,6 +271,18 @@ class ListTests(TupleTests):
         p = self.thetype("dbca")
         self.assertIsNone(p.sort())
         self.assertEqual(p, self.thetype("abcd"))
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_binop_iadd(self):
+        p, q = map(self.thetype, ["abc", "bcd"])
+        r = p.__iadd__(q)
+        self.assertIsInstance(r, self.thetype)
+        self.assertEqual(r, self.thetype("abcbcd"))
+        self.assertEqual(p, self.thetype("abcbcd"))
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.__iadd__)
 
     @make_dynamo_test
     def test___setitem__(self):
