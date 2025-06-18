@@ -28,7 +28,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
-from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
@@ -1291,7 +1291,7 @@ class TritonTemplate(KernelTemplate):
         self.debug = debug
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
-        clear_on_fresh_inductor_cache(self._generated_code_cache)
+        clear_on_fresh_cache(self._generated_code_cache)
         # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
         # by adding all inputs.
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
@@ -2123,7 +2123,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # list of callbacks that are called after benchmarking
         self.feedback_saver_fns: list[FeedbackFunction] = []
 
-        clear_on_fresh_inductor_cache(self)
+        clear_on_fresh_cache(self)
 
     def cache_clear(self) -> None:
         self.precompile_cache.clear()
