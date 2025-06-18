@@ -234,7 +234,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
-    ROCM_VERSION=6.4.1
+    ROCM_VERSION=6.4
     NINJA_VERSION=1.9.0
     TRITON=yes
     KATEX=yes

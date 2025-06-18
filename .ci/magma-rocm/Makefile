@@ -1,7 +1,7 @@
 SHELL=/usr/bin/env bash
 
 DOCKER_CMD ?= docker
-DESIRED_ROCM ?= 6.4.1
+DESIRED_ROCM ?= 6.4
 DESIRED_ROCM_SHORT = $(subst .,,$(DESIRED_ROCM))
 PACKAGE_NAME = magma-rocm
 # inherit this from underlying docker image, do not pass this env var to docker
@@ -25,7 +25,7 @@ clean:
 	$(RM) -r output
 
 .PHONY: magma-rocm64
-magma-rocm64: DESIRED_ROCM := 6.4.1
+magma-rocm64: DESIRED_ROCM := 6.4
 magma-rocm64:
 	$(DOCKER_RUN)
 
