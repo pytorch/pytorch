@@ -127,6 +127,27 @@ void upsample_increment_value_bounded(
       static_cast<scalar_t>(value));
 }
 
+template <typename scalar_t>
+void upsample_increment_value_bounded(
+    device AtomicType_t<scalar_t>* data,
+    uint3 dim,
+    array<ulong, 5> strides,
+    uint n,
+    uint c,
+    uint z,
+    uint y,
+    uint x,
+    float value) {
+  auto access_z = max(min(z, dim.z - 1), 0U);
+  auto access_y = max(min(y, dim.y - 1), 0U);
+  auto access_x = max(min(x, dim.x - 1), 0U);
+  AtomicType<scalar_t>::atomic_add(
+      data,
+      n * strides[0] + c * strides[1] + access_z * strides[2] +
+          access_y * strides[3] + access_x * strides[4],
+      static_cast<scalar_t>(value));
+}
+
 template <typename T>
 struct linear_return_type {
   typedef float type;
@@ -174,6 +195,87 @@ kernel void upsample_nearest_exact_3d(
           real_z + .5,
           real_y + .5,
           real_x + .5);
+      outputData
+          [n * params.output_strides[0] + c * params.output_strides[1] +
+           output_z * params.output_strides[2] +
+           output_y * params.output_strides[3] +
+           output_x * params.output_strides[4]] = static_cast<T>(res);
+    }
+  }
+}
+
+template <typename T>
+kernel void upsample_nearest_exact_3d_backward(
+    device AtomicType_t<T>* gradInputData [[buffer(0)]],
+    constant T* gradOutputData [[buffer(1)]],
+    constant UpsampleParams<5>& params [[buffer(2)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const auto input_sizes = uint3(
+      params.input_sizes[4], params.input_sizes[3], params.input_sizes[2]);
+  const auto size_y = static_cast<uint>(params.output_sizes[3]);
+  const auto size_xy = static_cast<uint>(params.output_sizes[4]) * size_y;
+  auto output_xy = thread_index % size_xy;
+  auto output_z = thread_index / size_xy;
+  auto output_y = output_xy / size_y;
+  auto output_x = output_xy % size_y;
+  auto real_x = area_pixel_compute_source_index(
+      params.scales[0], output_x, params.align_corners, /*cubic=*/false);
+  auto real_y = area_pixel_compute_source_index(
+      params.scales[1], output_y, params.align_corners, /*cubic=*/false);
+  auto real_z = area_pixel_compute_source_index(
+      params.scales[2], output_z, params.align_corners, /*cubic=*/false);
+  for (uint n = 0; n < params.output_sizes[0]; n++) {
+    for (uint c = 0; c < params.output_sizes[1]; c++) {
+      auto res = gradOutputData
+          [n * params.output_strides[0] + c * params.output_strides[1] +
+           output_z * params.output_strides[2] +
+           output_y * params.output_strides[3] +
+           output_x * params.output_strides[4]];
+      upsample_increment_value_bounded<T>(
+          gradInputData,
+          input_sizes,
+          params.input_strides,
+          n,
+          c,
+          real_z + .5,
+          real_y + .5,
+          real_x + .5,
+          res);
+    }
+  }
+}
+
+template <typename T>
+kernel void upsample_nearest_3d(
+    constant T* inputData [[buffer(0)]],
+    device T* outputData [[buffer(1)]],
+    constant UpsampleParams<5>& params [[buffer(2)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const auto input_sizes = uint3(
+      params.input_sizes[4], params.input_sizes[3], params.input_sizes[2]);
+  const auto size_y = static_cast<uint>(params.output_sizes[3]);
+  const auto size_xy = static_cast<uint>(params.output_sizes[4]) * size_y;
+  auto output_xy = thread_index % size_xy;
+  auto output_z = thread_index / size_xy;
+  auto output_y = output_xy / size_y;
+  auto output_x = output_xy % size_y;
+  auto real_x = area_pixel_compute_source_index(
+      params.scales[0], output_x, /*align_corners=*/true, /*cubic=*/false);
+  auto real_y = area_pixel_compute_source_index(
+      params.scales[1], output_y, /*align_corners=*/true, /*cubic=*/false);
+  auto real_z = area_pixel_compute_source_index(
+      params.scales[2], output_z, /*align_corners=*/true, /*cubic=*/false);
+  for (uint n = 0; n < params.output_sizes[0]; n++) {
+    for (uint c = 0; c < params.output_sizes[1]; c++) {
+      auto res = upsample_get_value_bounded<T>(
+          inputData,
+          input_sizes,
+          params.input_strides,
+          n,
+          c,
+          real_z,
+          real_y,
+          real_x);
       outputData
           [n * params.output_strides[0] + c * params.output_strides[1] +
            output_z * params.output_strides[2] +
@@ -655,13 +757,28 @@ kernel void upsample_bicubic2d_backward(
       constant UpsampleParams<5> & params [[buffer(2)]],           \
       uint thread_index [[thread_position_in_grid]])
 
-#define INSTANTIATE_UPSAMPLE_NEAREST_EXACT_3D(DTYPE)                      \
+#define INSTANTIATE_UPSAMPLE_NEAREST_3D(DTYPE)                            \
+  template [[host_name("upsample_nearest_3d_" #DTYPE)]] kernel void       \
+  upsample_nearest_3d<DTYPE>(                                             \
+      constant DTYPE * inputData [[buffer(0)]],                           \
+      device DTYPE * outputData [[buffer(1)]],                            \
+      constant UpsampleParams<5> & params [[buffer(2)]],                  \
+      uint thread_index [[thread_position_in_grid]]);                     \
   template [[host_name("upsample_nearest_exact_3d_" #DTYPE)]] kernel void \
   upsample_nearest_exact_3d<DTYPE>(                                       \
       constant DTYPE * inputData [[buffer(0)]],                           \
       device DTYPE * outputData [[buffer(1)]],                            \
       constant UpsampleParams<5> & params [[buffer(2)]],                  \
       uint thread_index [[thread_position_in_grid]])
+
+#define INSTANTIATE_UPSAMPLE_NEAREST_3D_BACKWARD(DTYPE)                       \
+  template                                                                    \
+      [[host_name("upsample_nearest_exact_3d_backward_" #DTYPE)]] kernel void \
+      upsample_nearest_exact_3d_backward<DTYPE>(                              \
+          device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],           \
+          constant DTYPE * gradOutputData [[buffer(1)]],                      \
+          constant UpsampleParams<5> & params [[buffer(2)]],                  \
+          uint thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_UPSAMPLE_ALL(DTYPE)                              \
   INSTANTIATE_UPSAMPLE_2D(bicubic2d, DTYPE);                         \
@@ -671,9 +788,11 @@ kernel void upsample_bicubic2d_backward(
   INSTANTIATE_UPSAMPLE_2D_AA(bilinear2d_aa, BilinearFunctor, DTYPE); \
   INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);                                \
   INSTANTIATE_UPSAMPLE_TRILINEAR(DTYPE);                             \
-  INSTANTIATE_UPSAMPLE_NEAREST_EXACT_3D(DTYPE);
+  INSTANTIATE_UPSAMPLE_NEAREST_3D_BACKWARD(DTYPE);                   \
+  INSTANTIATE_UPSAMPLE_NEAREST_3D(DTYPE);
 
 INSTANTIATE_UPSAMPLE_2D(bilinear2d, uchar);
+INSTANTIATE_UPSAMPLE_NEAREST_3D(uchar);
 INSTANTIATE_UPSAMPLE_ALL(float);
 INSTANTIATE_UPSAMPLE_ALL(half);
 #if __METAL_VERSION__ >= 310

@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef __METAL__
 #include <array>
 using ulong = unsigned long;

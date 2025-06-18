@@ -336,6 +336,44 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
                                                   IntArrayRef output_size,
                                                   IntArrayRef input_size,
                                                   bool align_corners,
+                                                  std::optional<double> scale_d_opt,
+                                                  std::optional<double> scale_h_opt,
+                                                  std::optional<double> scale_w_opt,
+                                                  const std::string& name) {
+  grad_input.zero_();
+  if (grad_output.numel() == 0) {
+    return;
+  }
+  auto upsamplePSO =
+      lib.getPipelineStateForFunc(fmt::format("upsample_{}_backward_{}", name, scalarToMetalTypeString(grad_input)));
+  UpsampleParams<5> params;
+  memcpy(params.input_sizes.data(), grad_input.sizes().data(), 5 * sizeof(long));
+  memcpy(params.input_strides.data(), grad_input.strides().data(), 5 * sizeof(long));
+  memcpy(params.output_strides.data(), grad_output.strides().data(), 5 * sizeof(long));
+  memcpy(params.output_sizes.data(), grad_output.sizes().data(), 5 * sizeof(long));
+  params.scales[0] =
+      area_pixel_compute_scale<float>(grad_input.size(4), grad_output.size(4), align_corners, scale_w_opt);
+  params.scales[1] =
+      area_pixel_compute_scale<float>(grad_input.size(3), grad_output.size(3), align_corners, scale_h_opt);
+  params.scales[2] =
+      area_pixel_compute_scale<float>(grad_input.size(2), grad_output.size(2), align_corners, scale_d_opt);
+  params.align_corners = align_corners;
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:upsamplePSO];
+      mtl_setArgs(computeEncoder, grad_input, grad_output, params);
+      mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1] * output_size[2]);
+    }
+  });
+}
+
+static void upsample_kernel_backward_out_template(const Tensor& grad_input,
+                                                  const Tensor& grad_output,
+                                                  IntArrayRef output_size,
+                                                  IntArrayRef input_size,
+                                                  bool align_corners,
                                                   std::optional<double> scale_h_opt,
                                                   std::optional<double> scale_w_opt,
                                                   const std::string& name) {
@@ -526,7 +564,9 @@ TORCH_IMPL_FUNC(upsample_nearest3d_out_mps)(const Tensor& input,
                                             std::optional<double> scales_d,
                                             std::optional<double> scales_h,
                                             std::optional<double> scales_w,
-                                            const Tensor& output) {}
+                                            const Tensor& output) {
+  mps::upsample_kernel_out_template(input, output_size, false, scales_d, scales_h, scales_w, output, "nearest_3d");
+}
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact3d_out_mps)(const Tensor& input,
                                                    IntArrayRef output_size,
@@ -545,8 +585,10 @@ TORCH_IMPL_FUNC(upsample_nearest3d_backward_out_mps)(const Tensor& grad_output,
                                                      std::optional<double> scales_h,
                                                      std::optional<double> scales_w,
                                                      const Tensor& grad_input) {
-  grad_input.zero_();
+  mps::upsample_kernel_backward_out_template(
+      grad_input, grad_output, output_size, input_size, false, scales_d, scales_h, scales_w, "nearest_3d");
 }
+
 TORCH_IMPL_FUNC(_upsample_nearest_exact3d_backward_out_mps)(const Tensor& grad_output,
                                                             IntArrayRef output_size,
                                                             IntArrayRef input_size,
@@ -554,7 +596,8 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact3d_backward_out_mps)(const Tensor& grad_o
                                                             std::optional<double> scales_h,
                                                             std::optional<double> scales_w,
                                                             const Tensor& grad_input) {
-  grad_input.zero_();
+  mps::upsample_kernel_backward_out_template(
+      grad_input, grad_output, output_size, input_size, false, scales_d, scales_h, scales_w, "nearest_exact_3d");
 }
 
 TORCH_IMPL_FUNC(upsample_trilinear3d_out_mps)(const Tensor& input,
