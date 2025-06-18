@@ -1314,6 +1314,11 @@ class ConvertFrame:
             )
             assert error_on_graph_break is not None
             if self._inner_convert._box.error_on_graph_break:
+                # NOTE we _might_ have to wrap the current in a custom exception
+                # in order to correctly bubble up to the top-level compile wrapper in
+                # eval_frame.py. But re-raising seems to work for now because exceptions from tracing
+                # a nested call that results in a top-level frame compile will be handled by the caller
+                # as an observed exception - we don't expect that exception to be suppressed.
                 raise
 
             # These two exception types are "soft" failure, in the sense that
