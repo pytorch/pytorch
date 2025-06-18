@@ -171,6 +171,8 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 
 
 class TritonTemplateKernel(TritonKernel):
+    """A TritonKernel that can be templated and used to generate Triton kernel nodes"""
+
     def __init__(
         self,
         kernel_name,

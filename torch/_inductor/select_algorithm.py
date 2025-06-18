@@ -12,9 +12,7 @@ import time
 from collections.abc import Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
-from typing_extensions import Self
 
-import sympy
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -24,8 +22,8 @@ from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
 from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
+from typing_extensions import Self
 
-from ..utils._sympy.functions import CeilDiv
 from . import config, ir
 from .autotune_process import TritonGPUBenchmarkRequest
 from .codecache import code_hash, PersistentCache
@@ -34,7 +32,7 @@ from .codegen.triton_templates.caller import TritonTemplateCaller
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .runtime.benchmarking import benchmarker
-from .utils import ceildiv, do_bench_using_profiling, is_gpu, restore_stdout_stderr
+from .utils import do_bench_using_profiling, is_gpu, restore_stdout_stderr
 from .virtualized import V
 
 
@@ -130,9 +128,9 @@ class PartialRender:
                 )
             else:
                 return
-        assert self.replacement_hooks[hook_key] is not None, (
-            "hook_key can only be called once"
-        )
+        assert (
+            self.replacement_hooks[hook_key] is not None
+        ), "hook_key can only be called once"
         self.code = self.code.replace(hook_key, self.replacement_hooks[hook_key]())
         self.replacement_hooks[hook_key] = None
 
@@ -266,9 +264,9 @@ class ExternKernelCaller(ChoiceCaller):
 
     def output_node(self):
         if self.choice.use_fallback_kernel:
-            assert self.choice.op_overload is not None, (
-                "Please provide an op_overload to use ir.FallbackKernel"
-            )
+            assert (
+                self.choice.op_overload is not None
+            ), "Please provide an op_overload to use ir.FallbackKernel"
             inner = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
@@ -1503,36 +1501,6 @@ def realize_inputs(*args):
     if len(args) == 1:
         return ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(args[0]))
     return [realize_inputs(x) for x in args]
-
-
-class SymbolicGridFn:
-    """
-    Wrapper around a grid function that allows either int or sympy inputs.
-
-        @SymbolicGridFn
-        def grid(x, meta, *, cdiv):
-            return cdiv(x, meta["BLOCK_X"])
-    """
-
-    def __init__(self, fn: Callable[..., tuple[Any, Any, Any]]):
-        self.fn = fn
-        self.kwargs_int = {}
-        self.kwargs_sym = {}
-        params = inspect.signature(fn).parameters
-        for name, fn_sym, fn_int in [
-            ("cdiv", CeilDiv, ceildiv),
-            ("min", sympy.Min, min),
-            ("max", sympy.Max, max),
-        ]:
-            if name in params:
-                self.kwargs_int[name] = fn_int
-                self.kwargs_sym[name] = fn_sym
-
-    def __call__(self, *args, **kwargs) -> tuple[int, int, int]:
-        return self.fn(*args, **kwargs, **self.kwargs_int)
-
-    def sympy_call(self, *args, **kwargs):
-        return self.fn(*args, **kwargs, **self.kwargs_sym)
 
 
 # ensure lowering is imported so that `extern_kernels.*` is populated

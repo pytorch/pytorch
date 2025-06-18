@@ -30,8 +30,8 @@ class SymbolicGridFn:
                 self.kwargs_int[name] = fn_int
                 self.kwargs_sym[name] = fn_sym
 
-    def __call__(self, *args, **kwargs) -> tuple[int, int, int]:
+    def __call__(self, *args: Any, **kwargs: Any) -> tuple[int, ...]:
         return self.fn(*args, **kwargs, **self.kwargs_int)
 
-    def sympy_call(self, *args, **kwargs):
+    def sympy_call(self, *args: Any, **kwargs: Any) -> tuple[sympy.Expr, ...]:
         return self.fn(*args, **kwargs, **self.kwargs_sym)
