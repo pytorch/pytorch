@@ -52,12 +52,6 @@ namespace cuda::CUDACachingAllocator {
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
-enum class Expandable_Segments_Handle_Type : int {
-  UNSPECIFIED = 0,
-  POSIX_FD = 1,
-  FABRIC_HANDLE = 2,
-};
-
 // Included here as this is externally used in CUDAAllocatorConfig
 const size_t kLargeBuffer =
     20971520; // "large" allocations may be packed in 20 MiB blocks
@@ -267,30 +261,6 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
-struct SegmentConfig {
-  C10_DISABLE_COPY_AND_ASSIGN(SegmentConfig);
-  SegmentConfig(SegmentConfig&&) = delete;
-  SegmentConfig& operator=(SegmentConfig&&) = delete;
-  ~SegmentConfig() = default;
-
-  static Expandable_Segments_Handle_Type expandable_segments_handle_type() {
-    return instance().m_expandable_segments_handle_type;
-  }
-
-  static void set_expandable_segments_handle_type(
-      Expandable_Segments_Handle_Type handle_type) {
-    instance().m_expandable_segments_handle_type = handle_type;
-  }
-
- private:
-  static SegmentConfig& instance() {
-    static SegmentConfig instance;
-    return instance;
-  }
-
-  std::atomic<Expandable_Segments_Handle_Type> type{
-      Expandable_Segments_Handle_Type::UNSPECIFIED};
-}
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 
 /*
@@ -429,16 +399,16 @@ struct ExpandableSegment {
 
     // if the handle type is not specified, try to use fabric handle first.
     // if it fails, use posix file handle
-    if (SegmentConfig::expandable_segments_handle_type() ==
+    if (CUDAAllocatorConfig::expandable_segments_handle_type() ==
         Expandable_Segments_Handle_Type::UNSPECIFIED) {
-      SegmentConfig::set_expandable_segments_handle_type(
+      CUDAAllocatorConfig::set_expandable_segments_handle_type(
           Expandable_Segments_Handle_Type::FABRIC_HANDLE);
       auto output = map(range);
       if (output.ptr != nullptr) {
         return output;
       }
       // if fabric handle is not supported, use posix file handle.
-      SegmentConfig::set_expandable_segments_handle_type(
+      CUDAAllocatorConfig::set_expandable_segments_handle_type(
           Expandable_Segments_Handle_Type::POSIX_FD);
       return map(range);
     }
@@ -452,7 +422,7 @@ struct ExpandableSegment {
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
 #ifndef FBCODE_CAFFE2
-      if (SegmentConfig::expandable_segments_handle_type() !=
+      if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
           Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
       } else {
@@ -482,7 +452,7 @@ struct ExpandableSegment {
           trimHandles();
           return rangeFromHandles(begin, begin);
         } else if (
-            SegmentConfig::expandable_segments_handle_type() ==
+            CUDAAllocatorConfig::expandable_segments_handle_type() ==
             Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
           // we are testing if we can use fabric handle.
           // if we can, we will use it.
@@ -529,7 +499,7 @@ struct ExpandableSegment {
     for (auto i : c10::irange(begin, end)) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto& handle = handles_.at(i).value();
-      if (SegmentConfig::expandable_segments_handle_type() !=
+      if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
           Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         if (!handle.shareable_handle) {
           int fd = 0;
@@ -580,7 +550,7 @@ struct ExpandableSegment {
 #ifndef SYS_pidfd_getfd
 #define SYS_pidfd_getfd 438
 #endif
-    if (SegmentConfig::expandable_segments_handle_type() !=
+    if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
         Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
       auto pidfd = syscall(SYS_pidfd_open, header.pid, 0);
       TORCH_CHECK(
@@ -1268,17 +1238,6 @@ class DeviceCachingAllocator {
     if (!enabled || clearHistory) {
       alloc_buffer.clear();
     }
-  }
-
-  bool isExpandableSegmentEnabled() {
-#ifndef PYTORCH_C10_DRIVER_API_SUPPORTED
-    if (AllocatorConfig::use_expandable_segments()) {
-      TORCH_WARN_ONCE("expandable_segments not supported on this platform")
-    }
-    return false;
-#else
-    return AllocatorConfig::use_expandable_segments();
-#endif
   }
 
   bool isHistoryEnabled() {
@@ -2725,7 +2684,7 @@ class DeviceCachingAllocator {
 
   bool should_split(const Block* block, size_t size) {
     size_t remaining = block->size - size;
-    if (block->pool->is_small || isExpandableSegmentEnabled()) {
+    if (block->pool->is_small || CUDAAllocatorConfig::expandable_segments()) {
       return remaining >= kMinBlockSize;
     } else {
       return (size < CUDAAllocatorConfig::max_split_size()) &&
@@ -2757,7 +2716,7 @@ class DeviceCachingAllocator {
       return false;
 
     if ((*it)->expandable_segment_) {
-      if (isExpandableSegmentEnabled()) {
+      if (CUDAAllocatorConfig::expandable_segments()) {
         // if we are allocated to the part of the block that is expandable
         // for the purposes of "best fit" we consider its size to be the size it
         // can expand to, not the size it currently is. This means that we
@@ -2904,7 +2863,7 @@ class DeviceCachingAllocator {
       return false;
       // Temporarily disable checkpointing & cudagraphs internally
     } else if (
-        isExpandableSegmentEnabled() &&
+        CUDAAllocatorConfig::expandable_segments() &&
         !(in_fbcode && p.pool->owner_PrivatePool)) {
       TORCH_CHECK(
           !active_pool,
@@ -4158,9 +4117,49 @@ CUDAAllocator* allocator();
 } // namespace CudaMallocAsync
 
 struct BackendStaticInitializer {
+  // Parses env for backend at load time, duplicating some logic from
+  // CUDAAllocatorConfig. CUDAAllocatorConfig double-checks it later (at
+  // runtime). Defers verbose exceptions and error checks, including Cuda
+  // version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
+  // works, maybe we should move all of CUDAAllocatorConfig here?
   CUDAAllocator* parseEnvForBackend() {
-    if (c10::CachingAllocator::AllocatorConfig::use_async_allocator()) {
-      return CudaMallocAsync::allocator();
+    auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+#ifdef USE_ROCM
+    // convenience for ROCm users to allow either CUDA or HIP env var
+    if (!val.has_value()) {
+      val = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
+    }
+#endif
+    if (val.has_value()) {
+      const std::string& config = val.value();
+
+      std::regex exp("[\\s,]+");
+      std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
+      std::sregex_token_iterator end;
+      std::vector<std::string> options(it, end);
+
+      for (auto option : options) {
+        std::regex exp2("[:]+");
+        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
+        std::sregex_token_iterator end2;
+        std::vector<std::string> kv(it2, end2);
+        if (kv.size() >= 2) {
+          if (kv[0] == "backend") {
+#ifdef USE_ROCM
+            // convenience for ROCm users to allow either CUDA or HIP env var
+            if (kv[1] ==
+                    "cud"
+                    "aMallocAsync" ||
+                kv[1] == "hipMallocAsync")
+#else
+            if (kv[1] == "cudaMallocAsync")
+#endif
+              return CudaMallocAsync::allocator();
+            if (kv[1] == "native")
+              return &Native::allocator;
+          }
+        }
+      }
     }
     return &Native::allocator;
   }
@@ -4168,7 +4167,6 @@ struct BackendStaticInitializer {
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
     allocator.store(r);
-    c10::CachingAllocator::AllocatorConfig::set_allocator_loaded();
   }
 };
 
