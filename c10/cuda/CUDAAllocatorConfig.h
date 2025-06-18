@@ -24,7 +24,6 @@ class C10_CUDA_API CUDAAllocatorConfig
   static bool pinned_use_cuda_host_register() {
     return CachingAllocator::AllocatorConfig::pinned_use_device_host_register();
   }
-
 };
 
 // Keep this for backwards compatibility
