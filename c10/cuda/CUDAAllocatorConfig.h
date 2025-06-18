@@ -9,10 +9,9 @@
 namespace c10::cuda::CUDACachingAllocator {
 
 // Keep this for backwards compatibility
-C10_DEPRECATED_MESSAGE(
+class C10_CUDA_API C10_DEPRECATED_MESSAGE(
     "CUDAAllocatorConfig is deprecated. Please use c10::CachingAllocator::AllocatorConfig instead.")
-class C10_CUDA_API CUDAAllocatorConfig
-    : public CachingAllocator::AllocatorConfig {
+    CUDAAllocatorConfig : public CachingAllocator::AllocatorConfig {
  public:
   static bool expandable_segments() {
     return CachingAllocator::AllocatorConfig::use_expandable_segments();
