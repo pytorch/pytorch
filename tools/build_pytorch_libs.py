@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+import subprocess
 
 from .optional_submodules import checkout_nccl
 from .setup_helpers.cmake import CMake, USE_NINJA
@@ -96,4 +97,20 @@ def build_pytorch(
     )
     if cmake_only:
         return
+    pre_build_command = os.getenv("PRE_BUILD_COMMAND")
+    if pre_build_command:
+        try:
+            output = subprocess.check_output(
+                pre_build_command,
+                shell=True,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            print("Command output:")
+            print(output)
+        except subprocess.CalledProcessError as e:
+            print("Command failed with return code:", e.returncode)
+            print("Output (stdout and stderr):")
+            print(e.output)
+            raise
     cmake.build(my_env)
