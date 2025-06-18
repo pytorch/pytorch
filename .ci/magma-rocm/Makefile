@@ -25,7 +25,7 @@ clean:
 	$(RM) -r output
 
 .PHONY: magma-rocm64
-magma-rocm64: DESIRED_ROCM := 6.4
+magma-rocm64: DESIRED_ROCM := 6.4.1
 magma-rocm64:
 	$(DOCKER_RUN)
 
