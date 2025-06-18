@@ -553,7 +553,11 @@ def mark_unbacked(t, index, strict=False, specialize_on=None):
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
 
-        t._specialize_on[index] = specialize_on if specialize_on is not None else []
+        # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
+        # TypeError: 'Attribute' object does not support item assignment
+        if isinstance(t._specialize_on, dict):
+            t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
         t._dynamo_unbacked_indices.add(index)
         return
 
