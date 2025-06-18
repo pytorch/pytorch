@@ -2064,10 +2064,9 @@ def get_num_workers() -> int:
     )
     assert cpu_count
 
-    # divide number of cpus by number of gpus for distributed workloads
-    num_gpus = torch.cuda.device_count()
-    if config.is_fbcode() and num_gpus > 0:
-        cpu_count = cpu_count // num_gpus
+    # Divide the number of CPUs by the number of GPUs for distributed workloads
+    if config.is_fbcode() and torch.cuda.is_available() and torch.cuda.device_count() > 0:
+        cpu_count = cpu_count // torch.cuda.device_count()
 
     return cpu_count
 
