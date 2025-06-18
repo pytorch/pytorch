@@ -356,7 +356,7 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             {"kw2": torch.ones(4, 4), "kw1": torch.zeros(4, 4)},
             # We are specifying dynamism on the first kwarg even though user passed in
             # different order
-            dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
+            dynamic_shapes=(None, {0: dim}, None, {0: dim_for_kw1}),
         )
 
         # This should work even if the kwarg order are flipped.
