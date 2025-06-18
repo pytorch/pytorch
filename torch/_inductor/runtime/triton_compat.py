@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from typing import Any, Union
 
 import torch
@@ -75,10 +74,6 @@ if triton is not None:
         from triton import knobs
     except ImportError:
         knobs = None
-
-    builtins_use_semantic_kwarg = (
-        "_semantic" in inspect.signature(triton.language.core.view).parameters
-    )
 else:
 
     def _raise_error(*args: Any, **kwargs: Any) -> Any:
@@ -99,7 +94,6 @@ else:
     libdevice = None
     math = None
     knobs = None
-    builtins_use_semantic_kwarg = False
 
     class triton:  # type: ignore[no-redef]
         @staticmethod
