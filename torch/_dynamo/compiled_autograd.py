@@ -1382,6 +1382,8 @@ in_compiled_autograd_region = False
 
 active_disable_ctx = False
 
+depth = 0
+
 
 @contextlib.contextmanager
 def _enable(compiler_fn, dynamic: bool = True, ignore_active_disable_ctx=True):
@@ -1437,6 +1439,9 @@ def _enable(compiler_fn, dynamic: bool = True, ignore_active_disable_ctx=True):
                 torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)  # type:ignore[arg-type]
             global compiled_autograd_enabled
             compiled_autograd_enabled = True
+            global depth
+            prior_depth = depth
+            depth += 1
             try:
                 with torch.autograd.set_multithreading_enabled(False):
                     yield
@@ -1445,6 +1450,10 @@ def _enable(compiler_fn, dynamic: bool = True, ignore_active_disable_ctx=True):
                     compiled_autograd_enabled = False
                 torch._C._dynamo.compiled_autograd.set_autograd_compiler(
                     prior_compiler, prior_dynamic
+                )
+                depth -= 1
+                assert depth == prior_depth, (
+                    "Nested Compiled Autograd Contexts must return before their parent context"
                 )
 
 
