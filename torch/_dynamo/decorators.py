@@ -69,7 +69,7 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None, recursive=True, *, reason=None):
+def disable(fn=None, recursive=True, *, reason=None, wrapping=True):
     """
     Decorator to disable TorchDynamo
 
@@ -85,8 +85,8 @@ def disable(fn=None, recursive=True, *, reason=None):
         if fn is not None:
             fn = innermost_fn(fn)
             assert callable(fn)
-            return DisableContext(msg=reason)(fn)
-        return DisableContext(msg=reason)
+            return DisableContext(msg=reason, wrapping=wrapping)(fn)
+        return DisableContext(msg=reason, wrapping=wrapping)
     else:
 
         def wrap(fn):
