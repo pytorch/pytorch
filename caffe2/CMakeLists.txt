@@ -1049,7 +1049,7 @@ elseif(USE_CUDA)
       $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/include>
       $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/cutlass/include>
       $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src>
-      $<INSTALL_INTERFACE:include>  # Or the install destination for your headers
+      $<INSTALL_INTERFACE:include>
     )
   endif()
   if(USE_MEM_EFF_ATTENTION)
