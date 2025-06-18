@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
-from torch._inductor.utils import clear_inductor_caches
+from torch._inductor.utils import clear_caches
 from torch.export import Dim
 from torch.testing._internal.logging_utils import log_settings
 
@@ -38,7 +38,7 @@ from torch._inductor.exc import InductorError
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
@@ -173,7 +173,7 @@ class TestCutlassBackend(TestCase):
 
     def tearDown(self):
         super().tearDown()
-        clear_inductor_caches()
+        clear_caches()
 
     def run_evt_test(self, model, op, shape, num_fusions=1):
         M, N = shape
@@ -618,7 +618,7 @@ class TestCutlassBackend(TestCase):
         ]
         for x_shape in x_shapes:
             torch._dynamo.reset()
-            clear_inductor_caches()
+            clear_caches()
 
             inputs = [
                 (
@@ -1065,7 +1065,7 @@ class TestCutlassBackend(TestCase):
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             with config.patch(
                 {
                     "max_autotune": True,
@@ -1113,7 +1113,7 @@ class TestCutlassBackend(TestCase):
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             with config.patch(
                 {
                     "max_autotune": True,
@@ -1187,7 +1187,7 @@ class TestCutlassBackend(TestCase):
             raise NoValidChoicesError
 
         def run_test(use_fast_accum):
-            with fresh_inductor_cache():
+            with fresh_cache():
                 with config.patch(
                     {
                         "max_autotune": True,
@@ -1266,7 +1266,7 @@ class TestCutlassBackend(TestCase):
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
 
-        with fresh_inductor_cache(), config.patch(
+        with fresh_cache(), config.patch(
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
@@ -1324,7 +1324,7 @@ class TestCutlassBackend(TestCase):
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
 
-        with fresh_inductor_cache(), config.patch(
+        with fresh_cache(), config.patch(
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
