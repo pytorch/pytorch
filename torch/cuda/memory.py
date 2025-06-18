@@ -884,7 +884,7 @@ def _record_memory_history(
     Args:
         enabled (Literal[None, "state", "all"], optional):
             `None`, disable recording memory history.
-            `"state"`, keep information for currenly allocated memory.
+            `"state"`, keep information for currently allocated memory.
             `"all"`, additionally keep a history of all alloc/free calls.
             Defaults to "all".
         context (Literal[None, "state", "alloc", "all"], optional):

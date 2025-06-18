@@ -667,11 +667,11 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         if bias is not None
             - inputs = [x, x_scale, x_zp, w,  w_scale, w_zp, accum, b]
             - const_args = [stride, padding, dilation, groups, o_scale, o_zp,
-            output_dtype, accum_scale, accum_zp, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+            output_dtype, accum_scale, accum_zp, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
         else
             - inputs = [x, x_scale, x_zp, w,  w_scale, w_zp, accum]
             - const_args [b, stride, padding, dilation, groups, o_scale, o_zp,
-             output_dtype, accum_scale, accum_zp, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+             output_dtype, accum_scale, accum_zp, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = len(inputs) == 8
         self.idx_for_inplace_sum = 6
@@ -1022,11 +1022,11 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         if bias is not None
             - inputs = [x, w, x_scale, x_zp, weight_scale, weight_zp, x2, bias]
             - const_args is: [o_scale, o_zp,
-              fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+              fp32_output, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
         else
             - inputs = [x, w, x_scale, x_zp, weight_scale, weight_zp, x2]
             - const_args is: [bias, o_scale, o_zp,
-              fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+              fp32_output, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = has_bias
         self.idx_for_inplace_sum = 6

@@ -593,7 +593,7 @@ def _tuned_grouped_mm_common(
 
     _, is_nonzero = _is_static_problem(layout)
 
-    # Checking only for the equality of correspoding dims of
+    # Checking only for the equality of corresponding dims of
     # multiplicands here, relying on meta function checks for
     # everything else.
     if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result):

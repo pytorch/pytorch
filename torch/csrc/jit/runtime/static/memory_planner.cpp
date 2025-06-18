@@ -76,7 +76,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
   // This set maps each Value* to its assigned storage group.
   c10::FastMap<const Value*, size_t> storage_group_mapping;
   // On each iteration, this vector stores the set of storage groups that
-  // are available for re-use.
+  // are available for reuse.
   std::vector<size_t> free_storage_groups;
 
   auto makeNewStorageGroup = [&](const Value* value) {
