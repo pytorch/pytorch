@@ -44,7 +44,7 @@ class NCCLSymmetricMemory : public SymmetricMemory {
       const std::string& group_name,
       ncclWindow_t handle,
       ncclWindow_t signal_handle)
-      : allocation_(std::move(allocation)),
+      : allocation_(allocation),
         buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name),
