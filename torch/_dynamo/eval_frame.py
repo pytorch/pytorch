@@ -562,8 +562,8 @@ class _TorchDynamoContext:
 
         # Save the backends so that we can reset them during torch._dynamo.reset
         backend = innermost_fn(callback)
-        cached_backends.setdefault(id(backend), backend)
-        always_alive_callbacks.add(callback)
+        # cached_backends.setdefault(id(backend), backend)
+        # always_alive_callbacks.add(callback)
 
         if dynamic is not None:
             self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
