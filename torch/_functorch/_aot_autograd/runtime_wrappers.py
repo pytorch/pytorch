@@ -30,6 +30,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._inductor.async_compile import async_compile_pool_manager
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
@@ -2282,7 +2283,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     metrics_context = get_metrics_context()
                     with tracing(saved_context), compile_context(
                         saved_compile_context
-                    ), context(), track_graph_compiling(
+                    ), async_compile_pool_manager(), context(), track_graph_compiling(
                         aot_config, "backward"
                     ), metrics_context, dynamo_timed(
                         "backward._backward_impl",

@@ -52,7 +52,6 @@ from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._guards import compile_context, CompileContext, CompileId, tracing
-from torch._inductor.async_compile import async_compile_pool_manager
 from torch._logging import structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
@@ -703,6 +702,7 @@ def _compile(
     skip: int = 0,
     package: Optional[CompilePackage] = None,
 ) -> ConvertFrameReturn:
+    from torch._inductor.async_compile import async_compile_pool_manager
     from torch.fx.experimental.validator import (
         bisect,
         BisectValidationException,
