@@ -793,7 +793,11 @@ def check_input_alias_and_mutation_return_outputs(
     # This function can be called under autograd, functional, proxy and fake tensor mode.
     # We need to return either a fake tensor or a real tensor depending on the mode.
     # to detect the input mutation/aliasing.
-    with disable_proxy_modes_tracing(), disable_functional_mode(), suspend_functionalization():
+    with (
+        disable_proxy_modes_tracing(),
+        disable_functional_mode(),
+        suspend_functionalization(),
+    ):
 
         def _from_functional_tensor(t: torch.Tensor) -> torch.Tensor:
             if isinstance(t, FunctionalTensor) or torch._is_functional_tensor(t):
@@ -864,16 +868,18 @@ def check_input_alias_and_mutation_return_outputs(
 
             # create new fake tensors in new fake mode to avoid mutating original tensors
             cloned = [
-                torch.empty_strided(
-                    arg.size(),
-                    arg.stride(),
-                    dtype=arg.dtype,
-                    device=arg.device,
-                    requires_grad=arg.requires_grad,
-                    layout=arg.layout,
+                (
+                    torch.empty_strided(
+                        arg.size(),
+                        arg.stride(),
+                        dtype=arg.dtype,
+                        device=arg.device,
+                        requires_grad=arg.requires_grad,
+                        layout=arg.layout,
+                    )
+                    if isinstance(arg, torch.Tensor)
+                    else arg
                 )
-                if isinstance(arg, torch.Tensor)
-                else arg
                 for arg in fake_args
             ]
             before = [_tensor_version(arg) for arg in cloned]
@@ -1098,30 +1104,6 @@ def materialize_callable_in_args(op: HopInstance, args, kwargs):
             materialized_args.append(flat_args[i])
 
     return pytree.tree_unflatten(materialized_args, flat_spec)
-
-
-def has_user_subclass(args, allowed_subclasses):
-    """Check if any tensor arguments are user subclasses.
-
-    This is used to determine if tensor subclasses should get a chance to run
-    their own implementation first before falling back to the default implementation.
-
-    Args:
-        args: Arguments to check (will be flattened with pytree)
-        allowed_subclasses: Tuple of allowed subclass types
-
-    Returns:
-        True if user tensor subclasses are found, False otherwise
-    """
-    flat_args, _ = pytree.tree_flatten(args)
-
-    val = any(
-        isinstance(a, torch.Tensor)
-        and type(a) is not torch.Tensor
-        and not isinstance(a, allowed_subclasses)
-        for a in flat_args
-    )
-    return val
 
 
 def _has_gen_schema(op: HigherOrderOperator):
