@@ -213,8 +213,8 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         self.old_flattened_and_spec = _make_inlined(tx, pytree.tree_flatten)(
             (self.old_parameters_var, self.old_buffer_var)
         )
-        tx.output.side_effects.allow_mutation_in_hop_subgraph(self.old_parameters_var)
-        tx.output.side_effects.allow_mutation_in_hop_subgraph(self.old_buffer_var)
+        tx.output.side_effects.skip_mutation(self.old_parameters_var)
+        tx.output.side_effects.skip_mutation(self.old_buffer_var)
         return self.cm_vt.enter(tx)
 
     def _check_param_restored(self, tx):
@@ -246,10 +246,8 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
     def exit(self, tx: "InstructionTranslator", *args):
         # Custom exit implementation with side effects
         x = self.cm_vt.exit(tx, *args)
-        tx.output.side_effects.disallow_mutation_in_hop_subgraph(self.old_buffer_var)
-        tx.output.side_effects.disallow_mutation_in_hop_subgraph(
-            self.old_parameters_var
-        )
+        tx.output.side_effects.remove_skip_mutation(self.old_buffer_var)
+        tx.output.side_effects.remove_skip_mutation(self.old_parameters_var)
         self._check_param_restored(tx)
         return x
 
