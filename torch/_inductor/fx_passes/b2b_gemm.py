@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-import typing
 from collections import deque
 
 import torch
@@ -8,7 +7,6 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from ..._dynamo.utils import counters
-from ..codegen.triton_templates.template import TritonTemplate
 from ..ir import (
     ComputedBuffer,
     FixedLayout,
@@ -30,6 +28,8 @@ from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     SymbolicGridFn,
+    TritonTemplate,
+    TritonTemplateCaller,
 )
 from ..utils import ceildiv
 
@@ -37,9 +37,6 @@ from ..utils import ceildiv
 B2B_GEMM_PASS = PatternMatcherPass(
     pass_name="b2b_gemm_pass",
 )
-
-if typing.TYPE_CHECKING:
-    from ..codegen.triton_templates.caller import TritonTemplateCaller
 
 
 @SymbolicGridFn
