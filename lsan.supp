@@ -28,3 +28,4 @@ leak:torch::jit::tensorexpr::TensorExprKernel::preAllocIntermediateBufs
 leak:optree
 leak:python
 leak:torch::tensors::initialize_aten_types
+leak:libclang_rt
