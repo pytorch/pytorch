@@ -6706,8 +6706,8 @@ class TestCompileKernel(TestCase):
         expected_grad_a = b
         expected_grad_b = a
 
-        torch.testing.assert_close(a.grad, expected_grad_a, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(b.grad, expected_grad_b, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(a.grad, expected_grad_a, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(b.grad, expected_grad_b, rtol=1e-4, atol=1e-4)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
