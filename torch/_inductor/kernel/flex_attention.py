@@ -2495,6 +2495,7 @@ def process_joint_outputs(
     torch.ops.higher_order.flex_attention_backward, type_promotion_kind=None
 )
 def flex_attention_backward(*args, **kwargs):
+    """Lowering for the flex_attention_backward op"""
     (
         query,
         key,
