@@ -292,10 +292,10 @@ at::Tensor nvshmem_all_to_all_vdev(
       (input_size < 4 * MiB ? 32 : 64));
 
   // Inter-node: limit the total the number of blocks to 8 which is able to
-  // drive 57 GB/s bandwidth in test, enough to drive a 400 Gb/s NIC.
+  // drive 90 GB/s bandwidth in test, enough to drive a 400 Gb/s NIC.
   // TODO: better intra vs inter detection, currently it is based on world_size
   if (world_size > 8) {
-    num_blocks = std::min(num_blocks, 8);
+    num_blocks = std::min(num_blocks, 16);
   }
 
   // Stride at dim 0 (assuming input is contiguous, TODO)
