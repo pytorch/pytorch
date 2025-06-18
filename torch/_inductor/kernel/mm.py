@@ -213,37 +213,36 @@ def tuned_mm(mat1, mat2, *, layout=None):
     )
     static_shape, is_nonzero = _is_static_problem(layout)
 
-    mm_configs = V.choices.get_base_mm_configs(device_type)
-    persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
+    mm_params = V.choices.get_base_mm_params(device_type)
+    persistent_mm_params = V.choices.get_persistent_mm_params(device_type)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(
+        for config in mm_params(
+            (mat1, mat2),
             m,
             n,
             k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
         ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
-                **mm_options(config, m, n, k, layout),
+                **config.kwargs(),
             )
 
         if use_triton_tma_template(mat1, mat2):
-            for config in persistent_mm_configs(
+            for config in persistent_mm_params(
+                (mat1, mat2),
                 m,
                 n,
                 k,
-                **mm_config_kwargs(device_type, _is_large_block_for_cpu),
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
                     input_nodes=(mat1, mat2),
                     layout=layout,
-                    **mm_options(config, m, n, k, layout),
-                    **persistent_mm_options(mat1, mat2),
+                    **config.kwargs(),
                 )
 
         from torch._inductor.ir import get_free_symbols
