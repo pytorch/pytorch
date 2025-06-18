@@ -1,10 +1,13 @@
 ans
 BU
+contiguities
+contiguity
 coo
 Din
 Dout
 dOut
 ElementE
+followings
 fro
 froms
 hsa
@@ -13,6 +16,7 @@ nin
 nout
 optins
 OT
+ptd
 rebuild
 rebuilt
 reenable
