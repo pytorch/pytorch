@@ -6,7 +6,8 @@ from typing import Any
 import sympy
 
 import torch
-from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
+from torch._inductor.codegen.triton_templates.common import SymbolicGridFn
+from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.utils import sympy_product
 from torch._inductor.virtualized import V
 
@@ -55,7 +56,8 @@ def mm_options(config, sym_m, sym_n, sym_k, layout):
     """
     even_k_symbolic = (
         # it isn't worth guarding on this
-        sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
+        sympy.gcd(sym_k, config.kwargs["BLOCK_K"])
+        == config.kwargs["BLOCK_K"]
     )
     allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
         not inductor_config.force_same_precision
