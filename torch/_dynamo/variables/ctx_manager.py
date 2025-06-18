@@ -196,6 +196,67 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return True
 
 
+class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
+    def __init__(self, ctx_manager_vt, mod):
+        self.cm_vt = ctx_manager_vt
+        self.mod = mod
+        # We don't call super().__init__() because we're delegating most methods to cm_vt
+
+    def enter(self, tx: "InstructionTranslator"):
+        # Custom enter implementation with side effects
+        from torch._dynamo.variables.higher_order_ops import _make_inlined
+        from torch.utils import _pytree as pytree
+
+        self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
+        self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
+        # Snapshot the flattened parameters and bufers
+        self.old_flattened_and_spec = _make_inlined(tx, pytree.tree_flatten)(
+            (self.old_parameters_var, self.old_buffer_var)
+        )
+        tx.output.side_effects.skip_mutation(self.old_parameters_var)
+        tx.output.side_effects.skip_mutation(self.old_buffer_var)
+        return self.cm_vt.enter(tx)
+
+    def _check_param_restored(self, tx):
+        from torch._dynamo.variables.higher_order_ops import _make_inlined
+        from torch.utils import _pytree as pytree
+
+        new_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
+        new_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
+        new_spec_and_flattened = _make_inlined(tx, pytree.tree_flatten)(
+            (new_parameters_var, new_buffer_var)
+        )
+        old_flat_params_buffers, old_spec = (
+            self.old_flattened_and_spec.unpack_var_sequence(tx)
+        )
+        new_flat_params_buffers, new_spec = new_spec_and_flattened.unpack_var_sequence(
+            tx
+        )
+        assert _make_inlined(tx, pytree.TreeSpec.__eq__)(
+            new_spec, old_spec
+        ).as_python_constant()
+        assert all(
+            (param1 is param2)
+            for param1, param2 in zip(
+                old_flat_params_buffers.unpack_var_sequence(tx),
+                new_flat_params_buffers.unpack_var_sequence(tx),
+            )
+        )
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        # Custom exit implementation with side effects
+        x = self.cm_vt.exit(tx, *args)
+        tx.output.side_effects.remove_skip_mutation(self.old_buffer_var)
+        tx.output.side_effects.remove_skip_mutation(self.old_parameters_var)
+        self._check_param_restored(tx)
+        return x
+
+    # Forward all other method calls to self.cm_vt
+    def __getattr__(self, name):
+        # This will be called for any attribute not explicitly defined in this class
+        return getattr(self.cm_vt, name)
+
+
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
     """represents torch grad requries grad"""
 
