@@ -18,7 +18,7 @@ import torch
 from torch._inductor.codecache import get_kernel_bin_format
 from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -157,7 +157,7 @@ class TestAOTInductorPackage(TestCase):
             torch.manual_seed(0)
             with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
                 ep = torch.export.export(model, example_inputs, strict=True)
-                with fresh_inductor_cache():
+                with fresh_cache():
                     # cubin files are removed when exiting this context
                     package_path = torch._inductor.aoti_compile_and_package(
                         ep,
