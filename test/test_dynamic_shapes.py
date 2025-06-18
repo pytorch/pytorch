@@ -3050,6 +3050,7 @@ def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
 
 
 class TestUnbacked(TestCase):
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
     def test_deferred_neq_assert(self, backend):
@@ -3097,6 +3098,7 @@ class TestUnbacked(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.rand(2, 50), torch.tensor([51]))
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
     def test_deferred_sym_or_assert(self, backend):
@@ -3118,6 +3120,7 @@ class TestUnbacked(TestCase):
         self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
         self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
     def test_deferred_sym_eq_assert(self, backend):

@@ -3653,6 +3653,11 @@ class CUDACodeCache:
     _SOURCE_CODE_SUFFIX = "cu"
 
     @staticmethod
+    def cache_clear() -> None:
+        CUDACodeCache.cache.clear()
+        CUDACodeCache.aot_kernels_o.clear()
+
+    @staticmethod
     @lru_cache(maxsize=4)
     def get_kernel_binary_remote_cache(
         caching_enabled: bool, caching_available: bool
@@ -3684,11 +3689,6 @@ class CUDACodeCache:
                 "CUTLASSKernelBinaryRemoteCache not available, remote caching disabled"
             )
             return None
-
-    @staticmethod
-    def cache_clear() -> None:
-        CUDACodeCache.cache.clear()
-        CUDACodeCache.aot_kernels_o.clear()
 
     @classmethod
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:

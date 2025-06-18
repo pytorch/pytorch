@@ -1160,14 +1160,11 @@ exclude_patterns = [
     # as necessary
     'aten/**',
     'c10/**',
-    'cmake/**',
     'docs/**',
     'functorch/**',
     'scripts/**',
     'test/**',
-    'tools/**',
     'torch/**',
-    'torchgen/**',
 ]
 init_command = [
     'python3',

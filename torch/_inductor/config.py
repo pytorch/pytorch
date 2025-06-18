@@ -1703,6 +1703,11 @@ _cache_config_ignore_prefix: list[str] = [
     "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
+    # cache related options are not relevant to cache results
+    "fx_graph_cache",
+    "fx_graph_remote_cache",
+    "autotune_local_cache",
+    "autotune_remote_cache",
 ]
 
 # External callable for matmul tuning candidates

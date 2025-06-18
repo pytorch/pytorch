@@ -1350,7 +1350,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
     # The messages might change when we move to a different NCCL version.
     # Please update this test if it starts failing.
     COLLECTIVE_RE = (
-        "NCCL INFO {coll}: opCount [0-9]+ sendbuff 0x[0-9a-f]+ recvbuff 0x[0-9a-f]+ "
+        "NCCL INFO {coll}: opCount [0-9a-f]+ sendbuff 0x[0-9a-f]+ recvbuff 0x[0-9a-f]+ "
         "count {count} datatype [0-9]+ op {reduce_op} root [0-9]+ comm 0x[0-9a-f]+"
     )
     # See here for the numerical values for each reduction op:
