@@ -1158,7 +1158,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
-    # NOTE: remove the pattern in the order they are listed
+    # NOTE: remove the patterns in the order they are listed
     'aten/**',
     'aten/src/ATen/native/**',
     'aten/src/ATen/native/q*/**',
