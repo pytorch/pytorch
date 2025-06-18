@@ -1026,6 +1026,7 @@ elseif(USE_CUDA)
         nvshmem_device
     )
     target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
+    target_compile_definitions(nvshmem_extension PUBLIC USE_NVSHMEM)
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
   endif()
@@ -1490,6 +1491,11 @@ if(USE_DISTRIBUTED)
   # can only be compiled with USE_TENSORPIPE is set.
   if(USE_TENSORPIPE)
     target_compile_definitions(torch_cpu PUBLIC USE_TENSORPIPE)
+  endif()
+  # Pass USE_NVSHMEM to torch_cpu because availability determination needs to be
+  # generically callable from torch_cpu side
+  if(USE_NVSHMEM)
+    target_compile_definitions(torch_cpu PUBLIC USE_NVSHMEM)
   endif()
 endif()
 

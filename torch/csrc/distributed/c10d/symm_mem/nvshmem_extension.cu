@@ -12,6 +12,33 @@
 
 namespace c10d::nvshmem_extension {
 
+/* Start of NVSHMEM runtime detection */
+
+static bool __has_nvshmem = true;
+
+// Returns true if NVSHMEM is available at runtime, false otherwise.
+bool is_nvshmem_available_at_runtime() {
+  // Check by calling a NVSHMEM function without side effects.
+  // If NVSHMEM is not available, this function will be replaced by the weak
+  // symbol defined below.
+  int major, minor;
+  nvshmem_info_get_version(&major, &minor);
+
+  return __has_nvshmem;
+}
+
+// This is a weak symbol, so it will be overridden by the real
+// nvshmem_info_get_version if the real one is loaded. Otherwise, this weak
+// function will set `__has_nvshmem` to false.
+#pragma weak nvshmem_info_get_version
+void nvshmem_info_get_version(int *major, int *minor) {
+  *major = 0;
+  *minor = 0;
+  __has_nvshmem = false;
+}
+
+/* End of NVSHMEM runtime detection */
+
 using c10d::symmetric_memory::StoreExchange;
 static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
 
@@ -71,6 +98,11 @@ void initialize_nvshmem_with_store(
       "nvshmemx_init_attr failed");
 
   is_initialized = true;
+
+  // Print version
+  int major, minor;
+  ::nvshmem_info_get_version(&major, &minor);
+  LOG(INFO) << "NVSHMEM is available, version: " << major << "." << minor;
 }
 
 // Intializes the device state in CUmodule so that it’s able to perform NVSHMEM

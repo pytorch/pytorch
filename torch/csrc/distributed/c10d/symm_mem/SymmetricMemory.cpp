@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 
 namespace {
 
@@ -208,6 +209,18 @@ TORCH_API bool has_multicast_support(
     return allocator->has_multicast_support(device_idx);
   }
 }
+
+// Check if NVSHMEM is available
+TORCH_API bool is_nvshmem_available() {
+#ifndef USE_NVSHMEM
+  // Compile-time check
+  return false;
+#else
+  // Runtime check
+  return c10d::nvshmem_extension::is_nvshmem_available_at_runtime();
+#endif
+}
+
 } // namespace c10d::symmetric_memory
 
 namespace {

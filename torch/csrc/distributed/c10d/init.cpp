@@ -1014,6 +1014,9 @@ This class does not support ``__members__`` property.)");
       py::arg("module"));
 #endif
 
+  module.def(
+      "_is_nvshmem_available", &::c10d::symmetric_memory::is_nvshmem_available);
+
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
