@@ -330,17 +330,16 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
   const bool sm10x = properties != nullptr && properties->major == 10;
 
 // TODO: figure out correct numbers here...
-#if __CUDA_ARCH__ >= 1000 && __CUDA_ARCH__ < 1090
-  bf16bf16_grouped_gemm_impl_sm90_sm100<
-      cutlass::arch::Sm100,
-      a_row_major,
-      b_row_major,
-      true,
-      cute::_64,
-      cute::_128,
-      cute::_128>(mat_a, mat_b, offs, bias, out);
-#elif __CUDA_ARCH__ >= 900 && __CUDA_ARCH__ < 1000
-  if (small) {
+  if (sm10x) {
+    bf16bf16_grouped_gemm_impl_sm90_sm100<
+        cutlass::arch::Sm100,
+        a_row_major,
+        b_row_major,
+        true,
+        cute::_128,
+        cute::_256,
+        Int<128/sizeof(cutlass::bfloat16_t)>(mat_a, mat_b, offs, bias, out);
+  } else if (small) {
     bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm90,
         a_row_major,
@@ -359,7 +358,6 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         cute::_256,
         cute::_64>(mat_a, mat_b, offs, bias, out);
   }
-#endif
 }
 
 void dispatch_bf16_grouped_kernel_on_ab_transpose(
