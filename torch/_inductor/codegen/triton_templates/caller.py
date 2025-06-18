@@ -9,6 +9,7 @@ from ...codegen.common import WorkspaceArg
 from ...ir import PrimitiveInfoType
 from ...utils import do_bench_using_profiling
 
+
 if typing.TYPE_CHECKING:
     from ...autotune_process import TritonBenchmarkRequest
 
