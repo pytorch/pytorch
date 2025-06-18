@@ -27,6 +27,7 @@ from typing import Optional, TYPE_CHECKING, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.external_utils import (
+    call_accumulate_grad,
     call_backward,
     call_hook,
     FakeCompiledAutogradEngine,
@@ -111,7 +112,7 @@ class NaNChecker:
     def prep_with_graph(self, graph: torch.fx.Graph):
         inputs_node = next(iter(graph.nodes))
         acc_grad_nodes = graph.find_nodes(
-            op="call_function", target=torch.ops.inductor.accumulate_grad_.default
+            op="call_function", target=call_accumulate_grad
         )
         output_nodes = graph.find_nodes(op="output")[0].args[0]
         assert self.accumulate_grad == bool(
@@ -232,7 +233,7 @@ _impure_targets = OrderedSet(
         call_hook,
         call_backward,
         FakeCompiledAutogradEngine._exec_final_callbacks_stub,
-        torch.ops.inductor.accumulate_grad_.default,
+        call_accumulate_grad,
     ]
 )
 
@@ -727,13 +728,14 @@ class AutogradCompilerInstance:
         self.bind_objects_to_proxies([result], [proxy_out])
         return result
 
-    def accumulate_grad(self, variable, grad):
+    def accumulate_grad(self, variable, grad, has_post_hooks):
         self.fx_tracer.create_proxy(
             "call_function",
-            torch.ops.inductor.accumulate_grad_.default,
+            call_accumulate_grad,
             args=(
                 self.to_proxy(variable),
                 self.to_proxy(grad),
+                has_post_hooks,
             ),
             kwargs={},
         )
@@ -1091,7 +1093,7 @@ class AutogradCompilerInstance:
         pass attempts to reorder the graph to mimic eager behavior.
         """
         for node in self.fx_tracer.graph.find_nodes(
-            op="call_function", target=torch.ops.inductor.accumulate_grad_.default
+            op="call_function", target=call_accumulate_grad
         ):
             param_node, grad_node = node.args[0], node.args[1]
             getitem_node = None
@@ -1233,10 +1235,7 @@ class AutogradCompilerInstance:
             # find the corresponding acc_grad node
             acc_grad_node = None
             for n in list(param_node.users.keys()):
-                if (
-                    n.op == "call_function"
-                    and n.target == torch.ops.inductor.accumulate_grad_.default
-                ):
+                if n.op == "call_function" and n.target == call_accumulate_grad:
                     acc_grad_node = n
                     break
 
@@ -1285,10 +1284,7 @@ class AutogradCompilerInstance:
                 )
 
             arg = max(input_nodes_and_users)  # last input users
-            if (
-                arg.op == "call_function"
-                and arg.target == torch.ops.inductor.accumulate_grad_.default
-            ):
+            if arg.op == "call_function" and arg.target == call_accumulate_grad:
                 param_node = arg.args[0]
                 post_acc_grad_hook_node = None
                 for n in list(param_node.users.keys()):
@@ -1386,6 +1382,8 @@ in_compiled_autograd_region = False
 
 active_disable_ctx = False
 
+depth = 0
+
 
 @contextlib.contextmanager
 def _enable(compiler_fn, dynamic: bool = True, ignore_active_disable_ctx=True):
@@ -1441,6 +1439,9 @@ def _enable(compiler_fn, dynamic: bool = True, ignore_active_disable_ctx=True):
                 torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)  # type:ignore[arg-type]
             global compiled_autograd_enabled
             compiled_autograd_enabled = True
+            global depth
+            prior_depth = depth
+            depth += 1
             try:
                 with torch.autograd.set_multithreading_enabled(False):
                     yield
@@ -1449,6 +1450,10 @@ def _enable(compiler_fn, dynamic: bool = True, ignore_active_disable_ctx=True):
                     compiled_autograd_enabled = False
                 torch._C._dynamo.compiled_autograd.set_autograd_compiler(
                     prior_compiler, prior_dynamic
+                )
+                depth -= 1
+                assert depth == prior_depth, (
+                    "Nested Compiled Autograd Contexts must return before their parent context"
                 )
 
 

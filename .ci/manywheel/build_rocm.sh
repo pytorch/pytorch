@@ -187,7 +187,7 @@ do
     OS_SO_FILES[${#OS_SO_FILES[@]}]=$file_name # Append lib to array
 done
 
-ARCH=$(echo $PYTORCH_ROCM_ARCH | sed 's/;/|/g') # Replace ; seperated arch list to bar for grep
+ARCH=$(echo $PYTORCH_ROCM_ARCH | sed 's/;/|/g') # Replace ; separated arch list to bar for grep
 
 # rocBLAS library files
 ROCBLAS_LIB_SRC=$ROCM_HOME/lib/rocblas/library
