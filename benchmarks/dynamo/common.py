@@ -610,11 +610,15 @@ def empty_gpu_cache(device):
     """
     Explicitly empty gpu cache to avoid OOM in subsequent run.
     """
+    if device == "cpu":
+        return
 
-    if device not in ["cuda", "xpu", "mps"]:
+    recognized_devices = {"cuda", "mps", "xpu"}
+    if device not in recognized_devices:
         log.warning(
-            "Trying to call the empty_gpu_cache for device: %s, which is not in list [cuda, xpu]",
+            "Trying to call the empty_gpu_cache for device: %s, which is not in %s",
             device,
+            recognized_devices,
         )
         return
 
