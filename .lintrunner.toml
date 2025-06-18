@@ -1158,20 +1158,13 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
-    '.ci/**',
-    '.circleci/**',
-    '.github/**',
     'aten/**',
-    'benchmarks/**',
     'c10/**',
-    'cmake/**',
     'docs/**',
     'functorch/**',
     'scripts/**',
     'test/**',
-    'tools/**',
     'torch/**',
-    'torchgen/**',
 ]
 init_command = [
     'python3',
