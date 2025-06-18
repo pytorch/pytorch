@@ -3167,6 +3167,7 @@
 - func: isin.Tensor_Tensor_out(Tensor elements, Tensor test_elements, *, bool assume_unique=False, bool invert=False, Tensor(a!) out) -> Tensor(a!)
   variants: function
   structured: True
+  device_check: NoCheck  # Preserve existing device validation behavior
   dispatch:
     CPU, CUDA: isin_Tensor_Tensor_out
     MPS: isin_Tensor_Tensor_out_mps
@@ -3174,6 +3175,7 @@
 - func: isin.Tensor_Tensor(Tensor elements, Tensor test_elements, *, bool assume_unique=False, bool invert=False) -> Tensor
   variants: function
   structured_delegate: isin.Tensor_Tensor_out
+  device_check: NoCheck  # Preserve existing device validation behavior
 
 - func: isin.Tensor_Scalar_out(Tensor elements, Scalar test_element, *, bool assume_unique=False, bool invert=False, Tensor(a!) out) -> Tensor(a!)
   variants: function
