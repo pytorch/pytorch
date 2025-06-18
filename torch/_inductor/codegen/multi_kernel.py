@@ -224,7 +224,7 @@ class MultiKernel:
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        seen = OrderedSet[str]()
+        seen: OrderedSet[str] = OrderedSet()
         for k in self.kernels:
             _, call_args, precompile_args, _ = k.args.python_argdefs()
             for arg, precompile_arg in zip(call_args, precompile_args):
