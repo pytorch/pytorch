@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import TritonBenchmarkRequest
+from torch._inductor.codegen.triton_templates.caller import TritonTemplateCaller
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
@@ -346,6 +347,7 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     def test_TritonTemplateCaller_str(self):
+        # TODO(coconutruben): move this into triton_templates as a test once that's ready
         """
         Make sure str(TritonTemplateCaller) does not raise exceptions.
         """
@@ -362,9 +364,7 @@ class TestSelectAlgorithm(TestCase):
             input_tensor_meta=None,
             output_tensor_meta=None,
         )
-        caller = select_algorithm.TritonTemplateCaller(
-            None, None, None, None, "extra", bmreq
-        )
+        caller = TritonTemplateCaller(None, None, None, None, "extra", bmreq)
         caller_str = str(caller)
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 

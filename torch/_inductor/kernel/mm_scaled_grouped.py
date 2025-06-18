@@ -9,13 +9,13 @@ from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
 
+from ..codegen.triton_templates.template import TritonTemplate
 from ..ir import ChoiceCaller, Layout, TensorBox
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     realize_inputs,
-    TritonTemplate,
 )
 from ..utils import (
     get_gpu_shared_memory,

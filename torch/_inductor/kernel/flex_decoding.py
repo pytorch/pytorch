@@ -9,10 +9,11 @@ import torch
 from torch._inductor.virtualized import V
 
 from .. import config, ir
+from ..codegen.triton_templates.template import TritonTemplate
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty, empty_strided, lowerings
 from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
-from ..select_algorithm import autotune_select_algorithm, SymbolicGridFn, TritonTemplate
+from ..select_algorithm import autotune_select_algorithm, SymbolicGridFn
 from .flex_attention import (
     compute_forward_block_mn,
     compute_forward_inner,
@@ -378,9 +379,11 @@ def create_flex_decoding_kernel(*args, **kwargs):
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
-        k: V.graph.sizevars.evaluate_static_shape(v)
-        if isinstance(v, sympy.Symbol)
-        else v
+        k: (
+            V.graph.sizevars.evaluate_static_shape(v)
+            if isinstance(v, sympy.Symbol)
+            else v
+        )
         for k, v in kernel_options.items()
     }
 

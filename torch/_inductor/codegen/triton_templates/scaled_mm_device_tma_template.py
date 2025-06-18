@@ -5,7 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 
 from torch._inductor.kernel.mm_common import persistent_mm_grid
-from torch._inductor.select_algorithm import TritonTemplate
+
+from .template import TritonTemplate
 
 
 # Helper functions for scaled matrix multiplication
