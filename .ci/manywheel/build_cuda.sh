@@ -5,10 +5,6 @@ set -ex
 SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P ))"
 
 export TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
-## WAR to resolve the ld error in libtorch build with CUDA 12.9
-if [[ "$DESIRED_CUDA" == "cu129" && "$PACKAGE_TYPE" == "libtorch" ]]; then
-    export TORCH_NVCC_FLAGS="$TORCH_NVCC_FLAGS --host-linker-script=use-lcs"
-fi
 export NCCL_ROOT_DIR=/usr/local/cuda
 export TH_BINARY_BUILD=1
 export USE_STATIC_CUDNN=1
@@ -107,12 +103,15 @@ DEPS_SONAME=(
 )
 
 
-# CUDA_VERSION 12.6, 12.8
+# CUDA_VERSION 12.6, 12.8, 12.9
 if [[ $CUDA_VERSION == 12* ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
     export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
-
+    # WAR to resolve the ld error in libtorch build with CUDA 12.9
+    if [[ "$DESIRED_CUDA" == "cu129" && "$PACKAGE_TYPE" == "libtorch" ]]; then
+        export TORCH_NVCC_FLAGS="$TORCH_NVCC_FLAGS --host-linker-script=use-lcs"
+    fi
     if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
         echo "Bundling with cudnn and cublas."
         DEPS_LIST+=(
