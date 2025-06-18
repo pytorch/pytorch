@@ -271,9 +271,9 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             ...
             ValueError: foo
         """
-        assert isinstance(
-            result, Exception
-        ), f"{result} is of type {type(result)}, not an Exception."
+        assert isinstance(result, Exception), (
+            f"{result} is of type {type(result)}, not an Exception."
+        )
 
         def raise_error(fut_result):
             raise fut_result

@@ -102,7 +102,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     """
 
     def _mm_options(
-        self, config: TritonConfig, sym_m: int, sym_n: int, sym_k: int, layout: Any
+        self, tconfig: TritonConfig, sym_m: int, sym_n: int, sym_k: int, layout: Any
     ) -> dict[str, Any]:
         """
         Common options to matmul triton templates.
@@ -110,7 +110,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         even_k_symbolic = (
             # it isn't worth guarding on this
-            sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
+            sympy.gcd(sym_k, tconfig.kwargs["BLOCK_K"]) == tconfig.kwargs["BLOCK_K"]
         )
         allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
             not config.force_same_precision
@@ -128,14 +128,14 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             ALLOW_TF32=allow_tf32,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
             ACC_TYPE=acc_type_val,
-            num_stages=config.num_stages,
-            num_warps=config.num_warps,
-            **config.kwargs,
+            num_stages=tconfig.num_stages,
+            num_warps=tconfig.num_warps,
+            **tconfig.kwargs,
         )
 
         # If GROUP_M not specified then default to 8
-        if "GROUP_M" not in config.kwargs:
-            group_m = config.kwargs.get("GROUP_M", 8)
+        if "GROUP_M" not in tconfig.kwargs:
+            group_m = tconfig.kwargs.get("GROUP_M", 8)
             options_dict["GROUP_M"] = group_m
 
         return options_dict

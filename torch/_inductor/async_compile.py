@@ -42,7 +42,7 @@ from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
-from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.utils import clear_on_fresh_cache
 from torch._inductor.virtualized import V
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
@@ -162,7 +162,7 @@ def get_compile_threads() -> int:
     return config.compile_threads
 
 
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
 class CompiledTritonKernels:
     """
     In memory cache for storing compiled triton kernels.
@@ -442,7 +442,8 @@ class AsyncCompile:
             if aot_compile:
                 # We rely on JITInductor to compile the CUDA code,
                 # so that we can load it into AOTInductor.
-                CUDACodeCache.compile(source_code, "o")
+                output_path, *_ = CUDACodeCache.compile(source_code, "o")
+                CUDACodeCache.aot_kernels_o.append(output_path)
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
@@ -457,7 +458,8 @@ class AsyncCompile:
 
         def task():
             if aot_compile:
-                _ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+                output_path, *_ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+                ROCmCodeCache.aot_kernels_o.append(output_path)
             if config.rocm.generate_test_runner:
                 _ = ROCmCodeCache.compile(source_code, dst_file_ext="exe")
             return ROCmCodeCache.load(source_code, dst_file_ext)[0]

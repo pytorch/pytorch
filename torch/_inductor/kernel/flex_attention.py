@@ -19,6 +19,7 @@ from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config
+from ..codegen.triton_templates.template import TritonTemplate
 from ..ir import (
     Buffer,
     ComputedBuffer,
@@ -45,12 +46,7 @@ from ..lowering import (
     register_lowering,
     to_dtype,
 )
-from ..select_algorithm import (
-    autotune_select_algorithm,
-    realize_inputs,
-    SymbolicGridFn,
-    TritonTemplate,
-)
+from ..select_algorithm import autotune_select_algorithm, realize_inputs, SymbolicGridFn
 
 
 log = logging.getLogger(__name__)
@@ -1456,9 +1452,11 @@ def flex_attention(
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
-        k: V.graph.sizevars.evaluate_static_shape(v)
-        if isinstance(v, sympy.Symbol)
-        else v
+        k: (
+            V.graph.sizevars.evaluate_static_shape(v)
+            if isinstance(v, sympy.Symbol)
+            else v
+        )
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -2571,9 +2569,11 @@ def flex_attention_backward(*args, **kwargs):
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
-        k: V.graph.sizevars.evaluate_static_shape(v)
-        if isinstance(v, sympy.Symbol)
-        else v
+        k: (
+            V.graph.sizevars.evaluate_static_shape(v)
+            if isinstance(v, sympy.Symbol)
+            else v
+        )
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
