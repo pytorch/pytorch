@@ -437,13 +437,9 @@ test_inductor_cpp_wrapper_shard() {
 
   # Run certain inductor unit tests with cpp wrapper. In the end state, we
   # should be able to run all the inductor unit tests with cpp_wrapper.
-  #
-  # TODO: I'm pretty sure that "TestInductorOpInfoCPU" is not a valid filter,
-  # but change that in another PR to more accurately monitor the increased CI
-  # usage.
   python test/run_test.py \
     --include inductor/test_torchinductor_opinfo \
-    -k 'linalg or to_sparse or TestInductorOpInfoCPU' \
+    -k 'linalg or to_sparse or cpu' \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py \
