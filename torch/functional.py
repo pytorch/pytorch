@@ -412,7 +412,7 @@ def einsum(*args: Any) -> Tensor:
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         _operands = operands[0]
-        # recurse incase operands contains value that has torch function
+        # recurse in case operands contains value that has torch function
         # in the original implementation this line is omitted
         return einsum(equation, *_operands)
 
