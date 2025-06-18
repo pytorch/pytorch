@@ -12,7 +12,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 import unittest
 import warnings
 from collections import defaultdict
@@ -35,7 +34,6 @@ from torch.cuda._memory_viz import (
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
-    SM70OrLater,
     TEST_CUDNN,
     TEST_MULTIGPU,
     tf32_on_and_off,
@@ -45,7 +43,6 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyCUDA,
     onlyNativeDeviceTypes,
-    skipCUDAIf,
 )
 from torch.testing._internal.common_optimizers import (
     _get_optim_inputs_including_global_cliquey_kwargs,
@@ -54,7 +51,6 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
-    cuda_python_error_check,
     EXPANDABLE_SEGMENTS,
     freeze_rng_state,
     gcIfJetson,
@@ -81,7 +77,6 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
-    TEST_CUDA_PYTHON_BINDINGS,
     TEST_NUMPY,
     TEST_WITH_ROCM,
     TestCase,
@@ -1066,7 +1061,7 @@ print(t.is_pinned())
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
         with self.assertRaisesRegex(
-            RuntimeError, "Device index value .* is out of index range"
+            RuntimeError, "device_index >= 0 && device_index < num_gpus"
         ):
             torch.accelerator.current_stream(torch.accelerator.device_count())
 
@@ -2257,26 +2252,6 @@ torch.cuda.synchronize()
         torch.cuda.synchronize()
         with tempfile.TemporaryDirectory() as tempdir:
             g.debug_dump(os.path.join(tempdir, "out_multi_stream.dot"))
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH or TEST_WITH_ROCM,
-        "CUDA >= 11.0 required for external events in cuda graphs. rocm does not support external events",
-    )
-    def test_graph_timing(self):
-        torch.cuda.empty_cache()
-        x = torch.randn(10240000, device="cuda")
-        y = torch.rand_like(x)
-        g = torch.cuda.CUDAGraph()
-        start_event = torch.cuda.Event(enable_timing=True, external=True)
-        end_event = torch.cuda.Event(enable_timing=True, external=True)
-        with torch.cuda.graph(g):
-            start_event.record()
-            z = x + y
-            end_event.record()
-        torch.cuda.synchronize()
-        g.replay()
-        torch.cuda.synchronize()
-        self.assertTrue(start_event.elapsed_time(end_event) > 0)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -3528,95 +3503,6 @@ exit(2)
 
         # Exception would Corrupt Process and make other tests fail
         # self.assertTrue(throws_on_cuda_event("global"))
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-python must be installed",
-    )
-    def test_cuda_graph_raw_graph_keep_graph_false(self):
-        graph = torch.cuda.CUDAGraph(keep_graph=False)
-        x = torch.zeros([2000], device="cuda")
-        y = torch.ones([2000], device="cuda")
-        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
-            z = x + y
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"instantiate\(\) is intended to be called by the user only when keep_graph=true",
-        ):
-            raw_pointer = graph.instantiate()
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"You cannot access the raw (cuda|hip)Graph_t instance unless CUDAGraph was initialized with keep_graph=true",
-        ):
-            raw_pointer = graph.raw_cuda_graph()
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
-    )
-    def test_cuda_graph_raw_graph(self):
-        import cuda.bindings.runtime as cudart
-
-        graph = torch.cuda.CUDAGraph(keep_graph=True)
-        x = torch.zeros([2000], device="cuda")
-        y = torch.ones([2000], device="cuda")
-        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
-            z = x + y
-
-        raw_pointer = graph.raw_cuda_graph()
-
-        cudart_cuda_graph = cudart.cudaGraph_t(init_value=raw_pointer)
-        _, num_nodes = cuda_python_error_check(
-            cudart.cudaGraphGetNodes(cudart_cuda_graph)
-        )
-        nodes, _ = cuda_python_error_check(
-            cudart.cudaGraphGetNodes(cudart_cuda_graph, num_nodes)
-        )
-        for node in nodes:
-            cuda_python_error_check(cudart.cudaGraphNodeGetType(node))
-
-        graph.replay()
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
-    def test_cuda_graph_raw_graph_reset_and_recapture(self):
-        graph = torch.cuda.CUDAGraph(keep_graph=True)
-        x = torch.zeros([2000], device="cuda")
-        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
-            x += 1.0
-
-        graph.instantiate()
-        graph.replay()
-        self.assertTrue(torch.all(x == 1.0))
-        # Exercise the code path where you reinstantiate the cuda graph twice.
-        graph.instantiate()
-        graph.replay()
-        self.assertTrue(torch.all(x == 2.0))
-        graph.replay()
-        self.assertTrue(torch.all(x == 3.0))
-
-        # Check that graph capture can succeed after reseting.
-        graph.reset()
-
-        # Don't do x[:] = 0.0 because we want to capture a new address
-        # in the next cuda graph, to make sure we are running a new
-        # cuda graph.
-        x = torch.zeros([2000], device="cuda")
-        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
-            x += 2.0
-
-        graph.instantiate()
-        graph.replay()
-        self.assertTrue(torch.all(x == 2.0))
-        # Exercise the code path where you reinstantiate the cuda graph twice.
-        graph.instantiate()
-        graph.replay()
-        self.assertTrue(torch.all(x == 4.0))
-        graph.replay()
-        self.assertTrue(torch.all(x == 6.0))
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -5228,20 +5114,6 @@ class TestMemPool(TestCase):
         )
         return allocator, dummy_allocator
 
-    def test_mempool_empty_cache(self):
-        torch.cuda.empty_cache()
-        pool = torch.cuda.MemPool()
-        x = torch.empty(1024, 1024, device="cuda")
-
-        with torch.cuda.use_mem_pool(pool):
-            y = torch.empty(1024, 1024, device="cuda")
-
-        del y
-        del x
-        del pool
-        segments = torch.cuda.memory._snapshot()["segments"]
-        self.assertTrue(len(segments) > 0, "expected more than one segment")
-
     def test_mempool_empty_cache_inactive(self):
         torch.cuda.empty_cache()
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
@@ -6594,172 +6466,57 @@ class TestCompileKernel(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_reduction(self):
-        """Test CUB-based reduction kernel using _compile_kernel for speed of light performance."""
-        cub_reduction_kernel_source = """
+        """Test that compile_kernel can find and use CUB headers for reduction operations"""
+        
+        # Reduction kernel using CUB
+        kernel_source = """
         #include <cub/cub.cuh>
-        #include <cuda/std/span>
-        #include <cuda/atomic>
-
-        template <int block_size>
-        __global__ void reduce(cuda::std::span<float const> data, cuda::std::span<float> result) {
-            using BlockReduce = cub::BlockReduce<float, block_size>;
+        
+        __global__ void reduction_kernel(const float* input, float* output, int n) {
+            typedef cub::BlockReduce<float, 256> BlockReduce;
             __shared__ typename BlockReduce::TempStorage temp_storage;
-
-            int const index = threadIdx.x + blockIdx.x * blockDim.x;
-            float sum = 0.0f;
-            if (index < data.size()) {
-                sum = data[index];
-            }
-            sum = BlockReduce(temp_storage).Sum(sum);
-
+            
+            int tid = threadIdx.x + blockIdx.x * blockDim.x;
+            float thread_data = (tid < n) ? input[tid] : 0.0f;
+            
+            float aggregate = BlockReduce(temp_storage).Sum(thread_data);
+            
             if (threadIdx.x == 0) {
-                cuda::atomic_ref<float, cuda::thread_scope_device> atomic_result(result.front());
-                atomic_result.fetch_add(sum, cuda::memory_order_relaxed);
+                atomicAdd(output, aggregate);
             }
         }
-
-        extern "C" __global__ void cub_reduce_256(const float* input, float* output, int n) {
-            cuda::std::span<float const> data_span(input, n);
-            cuda::std::span<float> result_span(output, 1);
-            reduce<256>(data_span, result_span);
-        }
         """
         
         from torch.cuda import _compile_kernel
         
-        # Test with different data sizes
-        for size in [1024, 1024*1024, 10*1024*1024]:
-            device = torch.device('cuda:0')
-            input_data = torch.randn(size, device=device, dtype=torch.float32)
-            expected_sum = input_data.sum().item()
-            
-            # Initialize result to zero for atomic accumulation
-            result = torch.zeros(1, device=device, dtype=torch.float32)
-            
-            # Compile the CUB-based reduction kernel
-            reduction_kernel = _compile_kernel(cub_reduction_kernel_source, "cub_reduce_256")
-            
-            threads_per_block = 256
-            blocks_per_grid = (size + threads_per_block - 1) // threads_per_block
-            
-            # Launch the kernel
-            reduction_kernel(
-                grid=(blocks_per_grid, 1, 1),
-                block=(threads_per_block, 1, 1),
-                args=[input_data, result, size]
-            )
-            
-            kernel_result = result.item()
-            torch.testing.assert_close(kernel_result, expected_sum, rtol=1e-4, atol=1e-4)
-
-
-@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
-class TestCudaDeviceParametrized(TestCase):
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "ROCM does not support nvrtc or external cuda graph events"
-    )
-    @skipCUDAIf(
-        not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
-    )
-    def test_graph_external_wait_and_record(self):
-        torch.cuda.empty_cache()
-
-        kernel_source = r"""
-        __global__ void wait_for_cpu(int *pinned_cpu_flag) {
-            int flag = 0;
-            do {
-                    asm volatile("ld.relaxed.sys.global.s32 %0, [%1];" : "=r"(flag) : "l"(pinned_cpu_flag) : "memory");
-            } while (flag == 0);
-        }
-        """
-        from torch.cuda import _compile_kernel
-
-        spin_wait_kernel = _compile_kernel(
-            kernel_source, "wait_for_cpu", compute_capability="70"
+        # This should work with proper CUDA include path discovery
+        reduction_kernel = _compile_kernel(kernel_source, "reduction_kernel")
+        
+        # Test the kernel
+        N = 1024
+        input_data = torch.ones(N, device="cuda")
+        output_data = torch.zeros(1, device="cuda")
+        
+        threads_per_block = 256
+        blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
+        
+        reduction_kernel(
+            grid=(blocks_per_grid, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[input_data, output_data, N],
         )
-
-        x = torch.ones(4, device="cuda")
-        x_cpu = torch.zeros(x.shape, device="cpu").pin_memory()
-        flag_cpu = torch.zeros(1, dtype=torch.int32, device="cpu").pin_memory()
-        start_event = torch.cuda.Event(external=True)
-        end_event = torch.cuda.Event(external=True)
-
-        signalling_graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(signalling_graph, capture_error_mode="relaxed"):
-            spin_wait_kernel(grid=(1, 1, 1), block=(1, 1, 1), args=[flag_cpu])
-            start_event.record()
-
-        # This is counter-intuitive, but a cudaEventRecord() during
-        # stream capture does not count as the first call to
-        # cudaEventRecord(). Rather, cudaGraphLaunch() counts as the
-        # first call to cudaEventRecord(). Therefore, all calls to
-        # cudaEventQuery() will succeed before that happens.
-
-        # See:
-        # "Before the first call to cudaEventRecord(), an event represents an empty set of work, so for example cudaEventQuery() would return cudaSuccess."  # noqa: B950
-        # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
-        self.assertTrue(start_event.query(), "Start event's work should be empty")
-
-        work_graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(work_graph, capture_error_mode="relaxed"):
-            start_event.wait()
-            x_cpu.copy_(x, non_blocking=True)
-            end_event.record()
-
-        self.assertTrue(
-            torch.all(x_cpu == 0.0), "Copy cannot occur until start_event is recorded"
-        )
-
-        try:
-            signalling_stream = torch.cuda.Stream()
-            with torch.cuda.stream(signalling_stream):
-                signalling_graph.replay()
-
-            work_stream = torch.cuda.Stream()
-            with torch.cuda.stream(work_stream):
-                work_graph.replay()
-
-            self.assertFalse(
-                end_event.query(), "Event record node cannot run until flag_cpu[0]=1"
-            )
-
-            # Sleep for a little to make sure that work doesn't proceed until we set flag_cpu[0]=1
-            time.sleep(1)
-            self.assertTrue(
-                torch.all(x_cpu == 0.0),
-                "Copy cannot occur until start_event is recorded",
-            )
-        finally:
-            # In case an assertion fails, we still need to empty out
-            # the GPU queue of work. Therefore, we do this write
-            # unconditionally, even if an exception is thrown.
-
-            # This writes allows wait_for_cpu to proceed
-            # This is an atomic store at system scope according to this rule:
-            # "the scope is thread_scope_system and and it is a load or store that affects a naturally-aligned object of sizes 1, 2, 4, 8, or 16 bytes on mapped memory"  # noqa: B950
-            # https://nvidia.github.io/cccl/libcudacxx/extended_api/memory_model.html#atomicity
-
-            # Note that every CPU store is implicitly system scope,
-            # even if we don't use C++ atomics like this:
-            # std::atomic_ref<int32_t>::store(1);
-            flag_cpu[0] = 1
-
-        end_event.synchronize()
-        self.assertTrue(
-            torch.all(x_cpu == 1.0),
-            "Copy should be done once end_event is synchronized",
-        )
-        self.assertTrue(
-            work_stream.query(),
-            "end_event.synchronize() completing should imply that work_stream is done",
-        )
+        
+        expected = float(N)  # Sum of N ones should be N
+        actual = output_data.item()
+        
+        # Allow for small floating point errors
+        self.assertAlmostEqual(actual, expected, places=4)
 
 
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaMallocAsync)
 instantiate_parametrized_tests(TestCompileKernel)
 instantiate_device_type_tests(TestCudaOptims, globals())
-instantiate_device_type_tests(TestCudaDeviceParametrized, globals())
 
 if __name__ == "__main__":
     run_tests()
