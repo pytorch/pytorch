@@ -210,8 +210,13 @@ TORCH_API bool has_multicast_support(
   }
 }
 
-// Returns true if NVSHMEM is available at runtime, false otherwise.
-static bool is_nvshmem_available_at_runtime() {
+// Check if NVSHMEM is available
+TORCH_API bool is_nvshmem_available() {
+#ifndef USE_NVSHMEM
+  // Compile-time check
+  return false;
+#else
+  // Runtime check
   static std::mutex mutex;
   static int is_available = -2;
   std::lock_guard<std::mutex> lock(mutex);
@@ -229,16 +234,6 @@ static bool is_nvshmem_available_at_runtime() {
     }
   }
   return is_available == 1;
-}
-
-// Check if NVSHMEM is available
-TORCH_API bool is_nvshmem_available() {
-#ifndef USE_NVSHMEM
-  // Compile-time check
-  return false;
-#else
-  // Runtime check
-  return is_nvshmem_available_at_runtime();
 #endif
 }
 
