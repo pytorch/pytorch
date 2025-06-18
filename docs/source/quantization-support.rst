@@ -1,16 +1,16 @@
-# Quantization API Reference
+Quantization API Reference
+-------------------------------
 
-## torch.ao.quantization
+torch.ao.quantization
+~~~~~~~~~~~~~~~~~~~~~
 
 This module contains Eager mode quantization APIs.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.quantization
-```
 
-### Top level APIs
+Top level APIs
+^^^^^^^^^^^^^^
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -22,11 +22,10 @@ This module contains Eager mode quantization APIs.
     prepare
     prepare_qat
     convert
-```
 
-### Preparing model for quantization
+Preparing model for quantization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -37,11 +36,10 @@ This module contains Eager mode quantization APIs.
     DeQuantStub
     QuantWrapper
     add_quant_dequant
-```
 
-### Utility functions
+Utility functions
+^^^^^^^^^^^^^^^^^
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -50,17 +48,15 @@ This module contains Eager mode quantization APIs.
     swap_module
     propagate_qconfig_
     default_eval_fn
-```
 
-## torch.ao.quantization.quantize_fx
+
+torch.ao.quantization.quantize_fx
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains FX graph mode quantization APIs (prototype).
 
-```{eval-rst}
 .. currentmodule:: torch.ao.quantization.quantize_fx
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -70,17 +66,14 @@ This module contains FX graph mode quantization APIs (prototype).
     prepare_qat_fx
     convert_fx
     fuse_fx
-```
 
-## torch.ao.quantization.qconfig_mapping
+torch.ao.quantization.qconfig_mapping
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains QConfigMapping for configuring FX graph mode quantization.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.quantization.qconfig_mapping
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -89,19 +82,16 @@ This module contains QConfigMapping for configuring FX graph mode quantization.
     QConfigMapping
     get_default_qconfig_mapping
     get_default_qat_qconfig_mapping
-```
 
-## torch.ao.quantization.backend_config
+torch.ao.quantization.backend_config
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains BackendConfig, a config object that defines how quantization is supported
 in a backend. Currently only used by FX Graph Mode Quantization, but we may extend Eager Mode
 Quantization to work with this as well.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.quantization.backend_config
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -112,17 +102,15 @@ Quantization to work with this as well.
     DTypeConfig
     DTypeWithConstraints
     ObservationType
-```
 
-## torch.ao.quantization.fx.custom_config
+torch.ao.quantization.fx.custom_config
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains a few CustomConfig classes that's used in both eager mode and FX graph mode quantization
 
-```{eval-rst}
-.. currentmodule:: torch.ao.quantization.fx.custom_config
-```
 
-```{eval-rst}
+.. currentmodule:: torch.ao.quantization.fx.custom_config
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -132,62 +120,48 @@ This module contains a few CustomConfig classes that's used in both eager mode a
     PrepareCustomConfig
     ConvertCustomConfig
     StandaloneModuleConfigEntry
-```
 
-## torch.ao.quantization.quantizer
+torch.ao.quantization.quantizer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-```{eval-rst}
 .. automodule:: torch.ao.quantization.quantizer
-```
 
-## torch.ao.quantization.pt2e (quantization in pytorch 2.0 export implementation)
+torch.ao.quantization.pt2e (quantization in pytorch 2.0 export implementation)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-```{eval-rst}
 .. automodule:: torch.ao.quantization.pt2e
 .. automodule:: torch.ao.quantization.pt2e.representation
-```
 
-## torch.ao.quantization.pt2e.export_utils
+torch.ao.quantization.pt2e.export_utils
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-```{eval-rst}
 .. currentmodule:: torch.ao.quantization.pt2e.export_utils
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
     :template: classtemplate.rst
 
     model_is_exported
-```
 
-```{eval-rst}
 .. currentmodule:: torch.ao.quantization
-```
 
-## torch.ao.quantization.pt2e.lowering
+torch.ao.quantization.pt2e.lowering
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-```{eval-rst}
 .. currentmodule:: torch.ao.quantization.pt2e.lowering
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
     :template: classtemplate.rst
 
     lower_pt2e_quantized_to_x86
-```
 
-```{eval-rst}
 .. currentmodule:: torch.ao.quantization
-```
 
-## PT2 Export (pt2e) Numeric Debugger
-
-```{eval-rst}
+PT2 Export (pt2e) Numeric Debugger
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -199,17 +173,14 @@ This module contains a few CustomConfig classes that's used in both eager mode a
     prepare_for_propagation_comparison
     extract_results_from_loggers
     compare_results
-```
 
-## torch (quantization related functions)
+torch (quantization related functions)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This describes the quantization related functions of the `torch` namespace.
 
-```{eval-rst}
 .. currentmodule:: torch
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -218,18 +189,15 @@ This describes the quantization related functions of the `torch` namespace.
     quantize_per_tensor
     quantize_per_channel
     dequantize
-```
 
-## torch.Tensor (quantization related methods)
+torch.Tensor (quantization related methods)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Quantized Tensors support a limited subset of data manipulation methods of the
 regular full-precision tensor.
 
-```{eval-rst}
 .. currentmodule:: torch.Tensor
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -262,18 +230,16 @@ regular full-precision tensor.
     resize_
     sort
     topk
-```
 
-## torch.ao.quantization.observer
+
+torch.ao.quantization.observer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
 
-```{eval-rst}
 .. currentmodule:: torch.ao.quantization.observer
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -310,18 +276,15 @@ the values observed during calibration (PTQ) or training (QAT).
     TorchAODType
     ZeroPointDomain
     get_block_size
-```
 
-## torch.ao.quantization.fake_quantize
+torch.ao.quantization.fake_quantize
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module implements modules which are used to perform fake quantization
 during QAT.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.quantization.fake_quantize
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -342,18 +305,15 @@ during QAT.
     enable_fake_quant
     disable_observer
     enable_observer
-```
 
-## torch.ao.quantization.qconfig
+torch.ao.quantization.qconfig
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module defines `QConfig` objects which are used
 to configure quantization settings for individual ops.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.quantization.qconfig
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -372,23 +332,17 @@ to configure quantization settings for individual ops.
     default_weight_only_qconfig
     default_activation_only_qconfig
     default_qat_qconfig_v2
-```
 
-## torch.ao.nn.intrinsic
-
-```{eval-rst}
+torch.ao.nn.intrinsic
+~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: torch.ao.nn.intrinsic
 .. automodule:: torch.ao.nn.intrinsic.modules
-```
 
 This module implements the combined (fused) modules conv + relu which can
 then be quantized.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.nn.intrinsic
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -406,23 +360,18 @@ then be quantized.
     ConvBnReLU3d
     BNReLU2d
     BNReLU3d
-```
 
-## torch.ao.nn.intrinsic.qat
-
-```{eval-rst}
+torch.ao.nn.intrinsic.qat
+~~~~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: torch.ao.nn.intrinsic.qat
 .. automodule:: torch.ao.nn.intrinsic.qat.modules
-```
+
 
 This module implements the versions of those fused operations needed for
 quantization aware training.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.nn.intrinsic.qat
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -439,24 +388,19 @@ quantization aware training.
     ConvReLU3d
     update_bn_stats
     freeze_bn_stats
-```
 
-## torch.ao.nn.intrinsic.quantized
-
-```{eval-rst}
+torch.ao.nn.intrinsic.quantized
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: torch.ao.nn.intrinsic.quantized
 .. automodule:: torch.ao.nn.intrinsic.quantized.modules
-```
+
 
 This module implements the quantized implementations of fused operations
 like conv + relu. No BatchNorm variants as it's usually folded into convolution
 for inference.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.nn.intrinsic.quantized
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -468,47 +412,35 @@ for inference.
     ConvReLU2d
     ConvReLU3d
     LinearReLU
-```
 
-## torch.ao.nn.intrinsic.quantized.dynamic
-
-```{eval-rst}
+torch.ao.nn.intrinsic.quantized.dynamic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: torch.ao.nn.intrinsic.quantized.dynamic
 .. automodule:: torch.ao.nn.intrinsic.quantized.dynamic.modules
-```
 
 This module implements the quantized dynamic implementations of fused operations
 like linear + relu.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.nn.intrinsic.quantized.dynamic
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
     :template: classtemplate.rst
 
     LinearReLU
-```
 
-## torch.ao.nn.qat
-
-```{eval-rst}
+torch.ao.nn.qat
+~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: torch.ao.nn.qat
 .. automodule:: torch.ao.nn.qat.modules
-```
 
 This module implements versions of the key nn modules **Conv2d()** and
 **Linear()** which run in FP32 but with rounding applied to simulate the
 effect of INT8 quantization.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.nn.qat
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -517,48 +449,36 @@ effect of INT8 quantization.
     Conv2d
     Conv3d
     Linear
-```
 
-## torch.ao.nn.qat.dynamic
-
-```{eval-rst}
+torch.ao.nn.qat.dynamic
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: torch.ao.nn.qat.dynamic
 .. automodule:: torch.ao.nn.qat.dynamic.modules
-```
 
 This module implements versions of the key nn modules such as **Linear()**
 which run in FP32 but with rounding applied to simulate the effect of INT8
 quantization and will be dynamically quantized during inference.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.nn.qat.dynamic
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
     :template: classtemplate.rst
 
     Linear
-```
 
-## torch.ao.nn.quantized
-
-```{eval-rst}
+torch.ao.nn.quantized
+~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: torch.ao.nn.quantized
    :noindex:
 .. automodule:: torch.ao.nn.quantized.modules
-```
 
 This module implements the quantized versions of the nn layers such as
 `~torch.nn.Conv2d` and `torch.nn.ReLU`.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.nn.quantized
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -588,25 +508,17 @@ This module implements the quantized versions of the nn layers such as
     InstanceNorm1d
     InstanceNorm2d
     InstanceNorm3d
-```
 
-## torch.ao.nn.quantized.functional
-
-```{eval-rst}
+torch.ao.nn.quantized.functional
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: torch.ao.nn.quantized.functional
-```
 
-```{eval-rst}
 This module implements the quantized versions of the functional layers such as
 `~torch.nn.functional.conv2d` and `torch.nn.functional.relu`. Note:
-:math:`~torch.nn.functional.relu` supports quantized inputs.
-```
+:meth:`~torch.nn.functional.relu` supports quantized inputs.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.nn.quantized.functional
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -634,19 +546,16 @@ This module implements the quantized versions of the functional layers such as
     upsample
     upsample_bilinear
     upsample_nearest
-```
 
-## torch.ao.nn.quantizable
+torch.ao.nn.quantizable
+~~~~~~~~~~~~~~~~~~~~~~~
 
 This module implements the quantizable versions of some of the nn layers.
 These modules can be used in conjunction with the custom module mechanism,
 by providing the ``custom_module_config`` argument to both prepare and convert.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.nn.quantizable
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -654,24 +563,19 @@ by providing the ``custom_module_config`` argument to both prepare and convert.
 
     LSTM
     MultiheadAttention
-```
 
-## torch.ao.nn.quantized.dynamic
 
-```{eval-rst}
+torch.ao.nn.quantized.dynamic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: torch.ao.nn.quantized.dynamic
 .. automodule:: torch.ao.nn.quantized.dynamic.modules
-```
 
-Dynamically quantized {class}`~torch.nn.Linear`, {class}`~torch.nn.LSTM`,
-{class}`~torch.nn.LSTMCell`, {class}`~torch.nn.GRUCell`, and
-{class}`~torch.nn.RNNCell`.
+Dynamically quantized :class:`~torch.nn.Linear`, :class:`~torch.nn.LSTM`,
+:class:`~torch.nn.LSTMCell`, :class:`~torch.nn.GRUCell`, and
+:class:`~torch.nn.RNNCell`.
 
-```{eval-rst}
 .. currentmodule:: torch.ao.nn.quantized.dynamic
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -683,9 +587,9 @@ Dynamically quantized {class}`~torch.nn.Linear`, {class}`~torch.nn.LSTM`,
     RNNCell
     LSTMCell
     GRUCell
-```
 
-## Quantized dtypes and quantization schemes
+Quantized dtypes and quantization schemes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Note that operator implementations currently only
 support per channel quantization for weights of the **conv** and **linear**
@@ -693,7 +597,6 @@ operators. Furthermore, the input data is
 mapped linearly to the quantized data and vice versa
 as follows:
 
-```{eval-rst}
     .. math::
 
         \begin{aligned}
@@ -702,15 +605,11 @@ as follows:
             \text{Dequantization:}&\\
             &x_\text{out} = (Q_\text{input}-z)*s
         \end{aligned}
-```
 
-```{eval-rst}
 where :math:`\text{clamp}(.)` is the same as :func:`~torch.clamp` while the
 scale :math:`s` and zero point :math:`z` are then computed
 as described in :class:`~torch.ao.quantization.observer.MinMaxObserver`, specifically:
-```
 
-```{eval-rst}
     .. math::
 
         \begin{aligned}
@@ -726,7 +625,6 @@ as described in :class:`~torch.ao.quantization.observer.MinMaxObserver`, specifi
                     \left( Q_\text{max} - Q_\text{min} \right ) \\
                 &z = Q_\text{min} - \text{round}(x_\text{min} / s)
         \end{aligned}
-```
 
 where :math:`[x_\text{min}, x_\text{max}]` denotes the range of the input data while
 :math:`Q_\text{min}` and :math:`Q_\text{max}` are respectively the minimum and maximum values of the quantized dtype.
@@ -737,7 +635,6 @@ the range of the input data or symmetric quantization is being used.
 Additional data types and quantization schemes can be implemented through
 the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_.
 
-```{eval-rst}
 * :attr:`torch.qscheme` — Type to describe the quantization scheme of a tensor.
   Supported types:
 
@@ -751,9 +648,8 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
   * :attr:`torch.quint8` — 8-bit unsigned integer
   * :attr:`torch.qint8` — 8-bit signed integer
   * :attr:`torch.qint32` — 32-bit signed integer
-```
 
-```{eval-rst}
+
 .. These modules are missing docs. Adding them here only for tracking
 .. automodule:: torch.ao.nn.quantizable.modules
    :noindex:
@@ -782,4 +678,3 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. automodule:: torch.nn.quantized.dynamic.modules
 .. automodule:: torch.quantization
 .. automodule:: torch.nn.intrinsic.modules
-```
