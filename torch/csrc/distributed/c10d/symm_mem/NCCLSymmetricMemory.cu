@@ -1,13 +1,15 @@
 #ifdef USE_C10D_NCCL
+#include <nccl.h>
+#include <torch/csrc/cuda/nccl.h>
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 1)
 #define NCCL_HAS_SYMMEM_SUPPORT
 #endif
 
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
-
-#include <nccl.h>
-
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
@@ -232,7 +234,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     c10::cuda::CUDAGuard guard(device_idx);
     // TODO: we might need to use a roundup or mempool for mem allocation.
     void* ptr;
-    NCCLCHECK(ncclMemAlloc(&ptr, size));
+    C10D_NCCL_CHECK(ncclMemAlloc(&ptr, size), "ncclMemAlloc");
     auto allocation =
         std::make_shared<NCCLAllocation>(ptr, size, device_idx);
     // TODO: thread safety
@@ -297,7 +299,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
           "Failed to window register segment with ptr ",
           ptr,
           ", size ",
-          size,
+          alloc->buffer_size,
           " on ncclComm_ ",
           comm));
 
