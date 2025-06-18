@@ -1025,7 +1025,7 @@ def check_cpu_supported():
 
 
 def contiguous_last_dim(x):
-    """Ensure that realized IR node has a contigous stride in the last dimension."""
+    """Ensure that realized IR node has a contiguous stride in the last dimension."""
     strides = x.maybe_get_stride()
     if strides and strides[-1] != 1:
         contiguous_stride_order = list(reversed(range(len(x.get_size()))))
@@ -1080,7 +1080,7 @@ def lower_cpu(
     cur_kvSplitSize = V.graph.sizevars.shape_env.create_unbacked_symint().node.expr
     shape_env = V.graph.sizevars.shape_env
 
-    # We don't know the concret value of cur_qSplitSize and cur_kvSplitSize during the compilation.
+    # We don't know the concrete value of cur_qSplitSize and cur_kvSplitSize during the compilation.
     # Mark symbols > 1 to ensure broadcasting is always applied.
     # This avoids treating them as equal when `eq(var, 1)` is evaluated in `broadcast_symbolic_shapes`.
     shape_env.var_to_range[cur_qSplitSize] = ValueRanges(2, int_oo)
@@ -1826,7 +1826,7 @@ flex_attention_backward_template = TritonTemplate(
         sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + off_pid_mask
         sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + off_pid_mask * stride_kv_idx_m  # noqa: B950
 
-        # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads.
+        # Offset Q, DQ, DO, DELTA & LSE. These inputs are offsetted by query heads.
         q_adj2 = (stride_qh * off_hq2 + stride_qz * off_zq).to(tl.int64)
         do_adj2 = (stride_doh * off_hq2 + stride_doz * off_zq).to(tl.int64)
         dq_adj2 = (stride_dqh * off_hq2 + stride_dqz * off_zq).to(tl.int64)
@@ -1934,7 +1934,7 @@ flex_attention_backward_template = TritonTemplate(
         for off_g in range(0, GQA_SHARED_HEADS):
             off_hq1 = off_hkv * GQA_SHARED_HEADS + off_g
 
-            # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads.
+            # Offset Q, DQ, DO, DELTA & LSE. These inputs are offsetted by query heads.
             q_adj1 = (stride_qh * off_hq1 + stride_qz * off_zq).to(tl.int64)
             do_adj1 = (stride_doh * off_hq1 + stride_doz * off_zq).to(tl.int64)
             dq_adj1 = (stride_dqh * off_hq1 + stride_dqz * off_zq).to(tl.int64)
