@@ -937,6 +937,9 @@ def parse_dependencies(
         raise RuntimeError(
             f"Expected METADATA file in {dist_info_dir}, but it does not exist."
         )
+
+    # Use the Python interpreter in the virtual environment instead of the interpreter
+    # running this script, so that we can evaluate markers correctly.
     dependencies = (
         venv.python(
             "-c",
