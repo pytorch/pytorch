@@ -14,11 +14,7 @@ constexpr auto kInternalModule = "torch.distributed.rpc.internal";
 #define PROFILE_GIL_SCOPED_ACQUIRE                                       \
   std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
   auto shouldProfileGIL =                                                \
-<<<<<<< HEAD
       RpcAgent::getCurrentRpcAgent()->isGILProfilingEnabled();           \
-=======
-      RpcAgent::getCurrentRpcAgent()->isGILProfilingEnabled();         \
->>>>>>> da732dfb805 (Fix a fmt bug and one error)
   if (shouldProfileGIL) {                                                \
     startTime = std::chrono::high_resolution_clock::now();               \
   }                                                                      \
