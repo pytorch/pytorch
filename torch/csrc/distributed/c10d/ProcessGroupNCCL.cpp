@@ -2312,7 +2312,8 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
           data.integers["world_size"] = pg_->size_;
           data.strings["comm_backend"] = "nccl";
           data.strings["comm_backend_version"] = getNcclVersion();
-          data.strings["collective_stack"] = work.getTraceback();
+          // TODO: We see errors for this line, revert it for now.
+          data.strings["collective_stack"] = "";
           data.strings["collective_name"] = opTypeToString(work.opType_);
           logger->log(data);
         }
