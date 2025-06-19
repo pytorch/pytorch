@@ -1002,9 +1002,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual c10::SymBool sym_is_contiguous_custom(
       at::MemoryFormat memory_format) const;
 
-  // TODO This does not need to be virtual, but its temporary until XLA code is
-  // changed.
-  virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const {
+  bool is_contiguous_custom(at::MemoryFormat memory_format) const {
     return sym_is_contiguous_custom(memory_format)
         .guard_bool(__FILE__, __LINE__);
   }

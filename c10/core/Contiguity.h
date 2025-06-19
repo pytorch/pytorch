@@ -45,18 +45,24 @@ bool _compute_contiguous_or_false(
   }
 
   c10::SymInt one(1);
+  // This is an interesting case. When computing the expected stride, we can put
+  // a max(1, size) or not put it. Either way, if this function returns true, it
+  // is correct, since if size is 0, then the tensor is empty and it is
+  // contiguous. The reason we do this is to maximize when we can return true.
   T expected_stride = 1;
+  T expected_stride2 = 1;
   // NB: make sure we do signed arithmetic
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
-    const auto& size_d = sizes[d].max(one);
-    if (TORCH_GUARD_OR_FALSE(sym_eq(size_d, 1))) {
+    if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
       continue;
     }
 
-    if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride))) {
+    if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride)) &&
+        TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride2))) {
       return false;
     }
-    expected_stride *= size_d;
+    expected_stride *= sizes[d].max(one);
+    expected_stride2 *= sizes[d];
   }
   return true;
 }
