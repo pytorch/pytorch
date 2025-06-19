@@ -6464,7 +6464,7 @@ class ShapeEnv:
                             ),
                         },
                     )
-                    self.defer_runtime_assert(
+                    self.guard_or_defer_runtime_assert(
                         sympy.Eq(result_expr, unsound_expr),
                         f"propagate_real_tensors: {result_expr} == {unsound_expr}",
                     )
@@ -7565,7 +7565,7 @@ class ShapeEnv:
                 g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
 
             if transmute_into_runtime_assert:
-                self.defer_runtime_assert(
+                self.guard_or_defer_runtime_assert(
                     g, f"propagate_real_tensors: {orig_expr} == {concrete_val}"
                 )
                 return concrete_val
@@ -7596,7 +7596,7 @@ class ShapeEnv:
                     # it's fine to defer simple guards here without checking,
                     # the _maybe_guard_rel() call above will set replacements if possible,
                     # and so the result here will be statically known
-                    self.defer_runtime_assert(g, f"evaluate_expr: {orig_expr}")
+                    self.guard_or_defer_runtime_assert(g, f"evaluate_expr: {orig_expr}")
             else:
                 self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 
@@ -7641,17 +7641,18 @@ class ShapeEnv:
 
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
-    def defer_runtime_assert(
+    def guard_or_defer_runtime_assert(
         self, orig_expr: SympyBoolean, msg: str, fx_node: Optional[torch.fx.Node] = None
     ) -> bool:
-        """Create an assert that is checked at runtime
+        """
+        Adds a guard that orig_expr is True if we can or fall back to adding an assert
+        that is checked at runtime.
 
         Args:
             orig_expr (sympy.Expr): Boolean expression to assert is true
             msg (str): Message to display on assertion failure
             fx_node (Optional, torch.fx.Node): node in ``self.graph`` corresponding
                 to the expression, if applicable
-
         """
         expr = orig_expr
 

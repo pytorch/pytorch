@@ -554,7 +554,7 @@ class SymNode:
         # a regular guard if we can!)
         # TODO: file/line here is very important, because the assert has been
         # deferred so you can't backtrace easily
-        return self.shape_env.defer_runtime_assert(
+        return self.shape_env.guard_or_defer_runtime_assert(
             self.expr, f"{file}:{line}", fx_node=self.fx_node
         )
 
