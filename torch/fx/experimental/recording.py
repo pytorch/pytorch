@@ -175,7 +175,7 @@ class ShapeEnvEvent:
         return self.name == "evaluate_expr"
 
     def is_defer_runtime_assert(self) -> bool:
-        return self.name == "defer_runtime_assert"
+        return self.name == "guard_or_defer_runtime_assert"
 
 
 NEST = 0
