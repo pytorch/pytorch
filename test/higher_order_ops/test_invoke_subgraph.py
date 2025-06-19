@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 
+
 mark_compile_region = torch.compiler.mark_compile_region
 
 if HAS_GPU:
