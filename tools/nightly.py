@@ -250,7 +250,6 @@ class Venv:
         self._env = {
             "PIP_EXTRA_INDEX_URL": self.pip_source.index_url,
             "UV_EXTRA_INDEX_URL": self.pip_source.index_url,
-            "UV_TORCH_BACKEND": os.path.basename(self.pip_source.index_url),
             "FORCE_COLOR": "1",
         }
 
