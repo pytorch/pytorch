@@ -335,7 +335,7 @@ def rotary_embedding(
     Returns:
         Tensor with same shape as input.
     """
-    return _impl.rotary_embedding(
+    return _impl.rotary_embedding_23(
         X,
         cos_cache,
         sin_cache,
@@ -425,7 +425,7 @@ def attention(
         - The output of QK matmul. 4D tensor with shape `(batch_size, q_num_heads, q_sequence_length, total_sequence_length)`
           where `total_sequence_length = past_sequence_length + kv_sequence_length`.
     """
-    return _impl.attention(
+    return _impl.attention_23(
         Q,
         K,
         V,

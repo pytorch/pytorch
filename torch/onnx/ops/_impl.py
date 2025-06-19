@@ -32,7 +32,7 @@ def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
 
 
 @_onnx_op("RotaryEmbedding", 23)
-def rotary_embedding(
+def rotary_embedding_23(
     x: torch.Tensor,
     cos_cache: torch.Tensor,
     sin_cache: torch.Tensor,
@@ -114,6 +114,47 @@ def rotary_embedding(
     return output
 
 
+def _reshape_3d_to_4d(
+    tensor: torch.Tensor, batch_size: int, num_heads: int
+) -> torch.Tensor:
+    """Reshape 3D tensor to 4D for multi-head attention."""
+    sequence_length, hidden_size = tensor.shape[1], tensor.shape[2]
+    head_size = hidden_size // num_heads
+    return (
+        tensor.view(batch_size, sequence_length, num_heads, head_size)
+        .transpose(1, 2)
+        .contiguous()
+    )
+
+
+def _get_qk_output(
+    Q: torch.Tensor,
+    K: torch.Tensor,
+    current_q_num_heads: int,
+    current_kv_num_heads: int,
+    scale: Optional[float],
+    qk_matmul_output_mode: int,
+) -> torch.Tensor:
+    """Get QK output tensor based on the specified mode."""
+    if qk_matmul_output_mode == 0:
+        return _compute_qk_output_for_mode_0(
+            Q, K, current_q_num_heads, current_kv_num_heads, scale
+        )
+    else:
+        # For other modes, return a zero tensor with correct shape
+        return torch.zeros_like(torch.matmul(Q, K.transpose(-2, -1)))
+
+
+def _validate_gqa_configuration(
+    current_q_num_heads: int, current_kv_num_heads: int
+) -> None:
+    """Validate Group Query Attention configuration."""
+    if current_q_num_heads != current_kv_num_heads:
+        assert current_q_num_heads % current_kv_num_heads == 0, (
+            f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA"
+        )
+
+
 def _compute_qk_output_for_mode_0(
     Q: torch.Tensor,
     K: torch.Tensor,
@@ -123,12 +164,10 @@ def _compute_qk_output_for_mode_0(
 ) -> torch.Tensor:
     """Helper function to compute QK output for qk_matmul_output_mode == 0."""
     # Handle GQA manually for QK output
+    _validate_gqa_configuration(current_q_num_heads, current_kv_num_heads)
+
     K_for_qk = K
-    enable_gqa = current_q_num_heads != current_kv_num_heads
-    if enable_gqa:
-        assert current_q_num_heads % current_kv_num_heads == 0, (
-            f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA"
-        )
+    if current_q_num_heads != current_kv_num_heads:
         repeat_factor = current_q_num_heads // current_kv_num_heads
         K_for_qk = K.repeat_interleave(repeat_factor, dim=1)
 
@@ -137,7 +176,7 @@ def _compute_qk_output_for_mode_0(
 
 
 @_onnx_op("Attention", 23)
-def attention(
+def attention_23(
     Q: torch.Tensor,
     K: torch.Tensor,
     V: torch.Tensor,
@@ -164,35 +203,10 @@ def attention(
         assert q_num_heads != 0 and kv_num_heads != 0, (
             "q_num_heads and kv_num_heads must be provided for 3D inputs"
         )
-
-        # Q: (batch_size, q_sequence_length, q_hidden_size) -> (batch_size, q_num_heads, q_sequence_length, head_size)
         q_sequence_length = Q.shape[1]
-        q_hidden_size = Q.shape[2]
-        head_size_q = q_hidden_size // q_num_heads
-        Q = (
-            Q.view(batch_size, q_sequence_length, q_num_heads, head_size_q)
-            .transpose(1, 2)
-            .contiguous()
-        )
-
-        # K: (batch_size, kv_sequence_length, k_hidden_size) -> (batch_size, kv_num_heads, kv_sequence_length, head_size)
-        kv_sequence_length = K.shape[1]
-        k_hidden_size = K.shape[2]
-        head_size_k = k_hidden_size // kv_num_heads
-        K = (
-            K.view(batch_size, kv_sequence_length, kv_num_heads, head_size_k)
-            .transpose(1, 2)
-            .contiguous()
-        )
-
-        # V: (batch_size, kv_sequence_length, v_hidden_size) -> (batch_size, kv_num_heads, kv_sequence_length, v_head_size)
-        v_hidden_size = V.shape[2]
-        v_head_size = v_hidden_size // kv_num_heads
-        V = (
-            V.view(batch_size, kv_sequence_length, kv_num_heads, v_head_size)
-            .transpose(1, 2)
-            .contiguous()
-        )
+        Q = _reshape_3d_to_4d(Q, batch_size, q_num_heads)
+        K = _reshape_3d_to_4d(K, batch_size, kv_num_heads)
+        V = _reshape_3d_to_4d(V, batch_size, kv_num_heads)
 
     assert len(Q.shape) == 4 and len(K.shape) == 4 and len(V.shape) == 4
 
@@ -202,19 +216,11 @@ def attention(
         scale = 1.0 / (q_head_size**0.5)
 
     # Handle past key/value caches
-    if past_key is not None:
-        present_key = torch.cat([past_key, K], dim=2)
-    else:
-        present_key = K
-
-    if past_value is not None:
-        present_value = torch.cat([past_value, V], dim=2)
-    else:
-        present_value = V
+    present_key = torch.cat([past_key, K], dim=2) if past_key is not None else K
+    present_value = torch.cat([past_value, V], dim=2) if past_value is not None else V
 
     # Update K and V to include past states
-    K = present_key
-    V = present_value
+    K, V = present_key, present_value
 
     # Get current dimensions
     current_q_num_heads = Q.shape[1]
@@ -229,8 +235,9 @@ def attention(
         and softmax_precision is None  # No custom softmax precision
         and (
             attn_mask is None
-            or not (attn_mask.dtype != torch.bool and torch.any(attn_mask != 0))
-        )  # No float mask or zero float mask
+            or attn_mask.dtype == torch.bool
+            or not torch.any(attn_mask != 0)
+        )  # Boolean mask or zero float mask only
     )
 
     # Check if we can use flex_attention (flexible and optimized)
@@ -243,21 +250,13 @@ def attention(
     if can_use_sdpa:
         # Use PyTorch's optimized scaled_dot_product_attention
         enable_gqa = current_q_num_heads != current_kv_num_heads
-
-        # Validate GQA configuration
-        if enable_gqa:
-            assert current_q_num_heads % current_kv_num_heads == 0, (
-                f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA"
-            )
+        _validate_gqa_configuration(current_q_num_heads, current_kv_num_heads)
 
         # Prepare attention mask for SDPA
         sdpa_attn_mask = None
         if attn_mask is not None:
-            if attn_mask.dtype == torch.bool:
-                # Convert boolean mask: True means participate, SDPA expects True to mask out
-                sdpa_attn_mask = ~attn_mask
-            else:
-                sdpa_attn_mask = attn_mask
+            # Convert boolean mask: True means participate, SDPA expects True to mask out
+            sdpa_attn_mask = ~attn_mask if attn_mask.dtype == torch.bool else attn_mask
 
         output = torch.nn.functional.scaled_dot_product_attention(
             Q,
@@ -270,23 +269,18 @@ def attention(
             enable_gqa=enable_gqa,
         )
 
-        # For QK output mode 0, we need to compute QK manually since SDPA doesn't return it
-        if qk_matmul_output_mode == 0:
-            qk_output = _compute_qk_output_for_mode_0(
-                Q, K, current_q_num_heads, current_kv_num_heads, scale
-            )
-        else:
-            # For other modes, we need fallback implementation
-            qk_output = torch.zeros_like(torch.matmul(Q, K.transpose(-2, -1)))
+        qk_output = _get_qk_output(
+            Q,
+            K,
+            current_q_num_heads,
+            current_kv_num_heads,
+            scale,
+            qk_matmul_output_mode,
+        )
     elif can_use_flex_attention:
         # Use PyTorch's flexible flex_attention for complex cases
         enable_gqa = current_q_num_heads != current_kv_num_heads
-
-        # Validate GQA configuration
-        if enable_gqa:
-            assert current_q_num_heads % current_kv_num_heads == 0, (
-                f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA"
-            )
+        _validate_gqa_configuration(current_q_num_heads, current_kv_num_heads)
 
         # Create score modification function for flex_attention
         def score_mod(score, b, h, q_idx, kv_idx):
@@ -296,23 +290,19 @@ def attention(
 
             # Apply attention mask
             if attn_mask is not None:
+                # Get mask value based on dimensions
+                if attn_mask.ndim == 4:  # (batch, heads, q_seq, kv_seq)
+                    mask_value = attn_mask[b, h, q_idx, kv_idx]
+                elif attn_mask.ndim == 3:  # (batch, q_seq, kv_seq)
+                    mask_value = attn_mask[b, q_idx, kv_idx]
+                else:  # (q_seq, kv_seq)
+                    mask_value = attn_mask[q_idx, kv_idx]
+
                 if attn_mask.dtype == torch.bool:
                     # Boolean mask: True means participate in attention
-                    if attn_mask.ndim == 4:  # (batch, heads, q_seq, kv_seq)
-                        mask_value = attn_mask[b, h, q_idx, kv_idx]
-                    elif attn_mask.ndim == 3:  # (batch, q_seq, kv_seq)
-                        mask_value = attn_mask[b, q_idx, kv_idx]
-                    else:  # (q_seq, kv_seq)
-                        mask_value = attn_mask[q_idx, kv_idx]
                     score = torch.where(mask_value, score, float("-inf"))
                 else:
                     # Float mask: added to attention scores
-                    if attn_mask.ndim == 4:  # (batch, heads, q_seq, kv_seq)
-                        mask_value = attn_mask[b, h, q_idx, kv_idx]
-                    elif attn_mask.ndim == 3:  # (batch, q_seq, kv_seq)
-                        mask_value = attn_mask[b, q_idx, kv_idx]
-                    else:  # (q_seq, kv_seq)
-                        mask_value = attn_mask[q_idx, kv_idx]
                     score = score + mask_value
 
             # Apply softcap if provided
@@ -322,7 +312,7 @@ def attention(
             return score
 
         # FlexAttention returns a single tensor of shape (B, Hq, L, Ev)
-        output = flex_attention.flex_attention(
+        flex_output = flex_attention.flex_attention(
             Q,
             K,
             V,
@@ -332,25 +322,23 @@ def attention(
             scale=scale,
             enable_gqa=enable_gqa,
         )
-        assert not isinstance(output, tuple), (
-            "flex_attention should return a single tensor"
-        )
+        # Ensure we have a single tensor (flex_attention may return tuple in some cases)
+        output = flex_output[0] if isinstance(flex_output, tuple) else flex_output
 
-        # For QK output mode 0, we need to compute QK manually since flex_attention doesn't return it
-        if qk_matmul_output_mode == 0:
-            qk_output = _compute_qk_output_for_mode_0(
-                Q, K, current_q_num_heads, current_kv_num_heads, scale
-            )
-        else:
-            # For other modes, we need fallback implementation
-            qk_output = torch.zeros_like(torch.matmul(Q, K.transpose(-2, -1)))
+        qk_output = _get_qk_output(
+            Q,
+            K,
+            current_q_num_heads,
+            current_kv_num_heads,
+            scale,
+            qk_matmul_output_mode,
+        )
     else:
         # Fallback to manual implementation for complex cases
+        _validate_gqa_configuration(current_q_num_heads, current_kv_num_heads)
+
         # Handle Group Query Attention (GQA) and Multi-Query Attention (MQA)
         if current_q_num_heads != current_kv_num_heads:
-            assert current_q_num_heads % current_kv_num_heads == 0, (
-                "q_num_heads must be divisible by kv_num_heads"
-            )
             repeat_factor = current_q_num_heads // current_kv_num_heads
             K = K.repeat_interleave(repeat_factor, dim=1)
             V = V.repeat_interleave(repeat_factor, dim=1)
