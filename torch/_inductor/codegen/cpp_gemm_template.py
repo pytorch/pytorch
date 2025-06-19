@@ -806,7 +806,7 @@ class CppGemmTemplate(CppTemplate):
                 blockings = [int(i) for i in config.cpp.gemm_cache_blocking.split(",")]
                 assert len(blockings) == 3
                 if blockings[2] != 0:
-                    Kc_blocks = blockings[2]
+                    Kc_blocks = min(blockings[2], Kt_blocks)
 
             if not Kc_blocks:
                 size_cache_B = Kr * Kt_blocks * Nr * num_byte_B
