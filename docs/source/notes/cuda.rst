@@ -148,6 +148,9 @@ For more information about TF32, see:
 Reduced Precision Reduction in FP16 GEMMs
 -----------------------------------------
 
+(Distinct from full FP16 accumulation that is intended for hardware that has higher throughput
+with FP16 accumulation than FP32 accumulation, see :ref:`Full FP16 accumulation<fp16accumulation>`)
+
 fp16 GEMMs are potentially done with some intermediate reduced precision reductions (e.g., in fp16 rather than fp32). These selective reductions in precision can allow for higher performance on certain workloads (particularly those with a large `k` dimension) and GPU architectures at the cost of numerical precision and potential for overflow.
 
 Some example benchmark data on V100:
@@ -205,6 +208,28 @@ To toggle the reduced precision reduction flags in C++, one can do
 .. code:: C++
 
   at::globalContext().setAllowBF16ReductionCuBLAS(true);
+
+.. _fp16accumulation:
+
+Full FP16 Accmumulation in FP16 GEMMs
+-------------------------------------
+
+Certain GPUs have increased performance when doing _all_ FP16 GEMM accumulation
+in FP16, at the cost of numerical precision and greater likelihood of overflow.
+Note that this setting only has an effect on GPUs of compute capability 7.0 (Volta)
+or newer.
+
+This behavior can be enabled via:
+
+.. code:: python
+
+  torch.backends.cuda.matmul.allow_fp16_accumulation = True
+
+To toggle the reduced precision reduction flags in C++, one can do
+
+.. code:: C++
+
+  at::globalContext().setAllowFP16AccumulationCuBLAS(true);
 
 Asynchronous execution
 ----------------------
@@ -471,6 +496,13 @@ Available options:
   set the knob value to: [256:1,512:2,1024:4,>:8].
   ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
+* ``max_non_split_rounding_mb`` will allow non-split blocks for better reuse, eg,
+   a 1024MB cached block can be re-used for a 512MB allocation request. In the default
+   case, we only allow up to 20MB of rounding of non-split blocks, so a 512MB block
+   can only be served with between 512-532 MB size block. If we set the value of this
+   option to 1024, it will alow 512-1536 MB size blocks to be used for a 512MB block
+   which increases reuse of larger blocks. This will also help in reducing the stalls
+   in avoiding expensive cudaMalloc calls.
 * ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
   avoid triggering expensive sync-and-reclaim-all operation (release_cached_blocks),
   which can be unfavorable to latency-critical GPU applications (e.g., servers).
@@ -479,6 +511,8 @@ Available options:
   80% of the total memory allocated to the GPU application). The algorithm prefers
   to free old & unused blocks first to avoid freeing blocks that are actively being
   reused. The threshold value should be between greater than 0.0 and less than 1.0.
+  The default value is set at 1.0.
+
   ``garbage_collection_threshold`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``garbage_collection_threshold`` is ignored.
 * ``expandable_segments`` (experimental, default: `False`) If set to `True`, this setting instructs
@@ -514,18 +548,22 @@ Available options:
   appended to the end of the segment. This process does not create as many slivers
   of unusable memory, so it is more likely to succeed at finding this memory.
 
-  `pinned_use_cuda_host_register` option is a boolean flag that determines whether to
+* `pinned_use_cuda_host_register` option is a boolean flag that determines whether to
   use the CUDA API's cudaHostRegister function for allocating pinned memory instead
   of the default cudaHostAlloc. When set to True, the memory is allocated using regular
   malloc and then pages are mapped to the memory before calling cudaHostRegister.
   This pre-mapping of pages helps reduce the lock time during the execution
   of cudaHostRegister.
 
-  `pinned_num_register_threads` option is only valid when pinned_use_cuda_host_register
+* `pinned_num_register_threads` option is only valid when pinned_use_cuda_host_register
   is set to True. By default, one thread is used to map the pages. This option allows
   using more threads to parallelize the page mapping operations to reduce the overall
   allocation time of pinned memory. A good value for this option is 8 based on
   benchmarking results.
+
+* `pinned_use_background_threads` option is a boolean flag to enable background thread
+  for processing events. This avoids any slow path associated with querying/processing of
+  events in the fast allocation path. This feature is disabled by default.
 
 .. note::
 
@@ -598,6 +636,222 @@ of the alloc/free functions that match the signatures specified above.
    torch.cuda.memory.change_current_allocator(new_alloc)
 
 .. cublas-workspaces:
+
+Mixing different CUDA system allocators in the same program
+-----------------------------------------------------------
+Depending on your use case, :meth:`~torch.cuda.change_current_allocator` may not be what you
+want to use, since it swaps the CUDA allocator for the entire program (similar to
+``PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync``). For instance, if the swapped allocator doesn't
+have caching mechanism, you will lose all the benefits of PyTorch's CUDACachingAllocator. Instead,
+you can selectively mark a region of PyTorch code to use a custom allocator using
+:class:`torch.cuda.MemPool`. This will let you use multiple CUDA system allocators in the same
+PyTorch program, along with most of the benefits of the CUDACachingAllocator (e.g. caching).
+Using :class:`torch.cuda.MemPool`, you can utilize custom allocators that enable several features,
+such as:
+
+* Allocating output buffers for an all-reduce using ``ncclMemAlloc`` allocator can enable NVLink
+  Switch Reductions (NVLS). This can reduce contention between overlapping compute and communication
+  kernels on GPU resources (SMs, and Copy Engines), especially on tensor-parallel workloads.
+* For Grace CPU based systems, allocating host outputs buffers for an all-gather using ``cuMemCreate``
+  and specifying ``CU_MEM_LOCATION_TYPE_HOST_NUMA`` can enable Extended GPU Memory (EGM) based memory transfers
+  from source GPUs to the destination CPU. This accelerates the all-gather since the transfer
+  happens over NVLinks, which otherwise would have happened over bandwidth-limited, Network Interface
+  Card (NIC) links. Such an accelerated all-gather can in turn speed up model checkpointing.
+* If you are crafting a model and don't want to think about the optimal memory placements of a memory
+  intensive module at first (e.g. an embedding table), or perhaps you have a module which is not
+  performance sensitive and doesn't fit in the GPU, then you could just allocate that module with
+  ``cudaMallocManaged`` with preferred CPU location and get your model working first.
+
+.. note::
+
+    While ``cudaMallocManaged`` offers convenient automatic memory management using CUDA Unified Virtual Memory (UVM),
+    it is not recommended for DL workloads. For DL workloads that fit in GPU memory, explicit placement consistently
+    outperforms UVM, since there are no page faults and access patterns remain predictable. When GPU memory gets
+    saturated, UVM has to perform costly double transfers, evicting pages to CPU before bringing in new ones.
+
+The code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cuda.memory.CUDAPluggableAllocator`.
+
+.. code:: python
+
+   import os
+
+   import torch
+   import torch.distributed as dist
+   from torch.cuda.memory import CUDAPluggableAllocator
+   from torch.distributed.distributed_c10d import _get_default_group
+   from torch.utils import cpp_extension
+
+
+   # create allocator
+   nccl_allocator_source = """
+   #include <nccl.h>
+   #include <iostream>
+   extern "C" {
+
+   void* nccl_alloc_plug(size_t size, int device, void* stream) {
+     std::cout << "Using ncclMemAlloc" << std::endl;
+     void* ptr;
+     ncclResult_t err = ncclMemAlloc(&ptr, size);
+     return ptr;
+
+   }
+
+   void nccl_free_plug(void* ptr, size_t size, int device, void* stream) {
+     std::cout << "Using ncclMemFree" << std::endl;
+     ncclResult_t err = ncclMemFree(ptr);
+   }
+
+   }
+   """
+   nccl_allocator_libname = "nccl_allocator"
+   nccl_allocator = torch.utils.cpp_extension.load_inline(
+       name=nccl_allocator_libname,
+       cpp_sources=nccl_allocator_source,
+       with_cuda=True,
+       extra_ldflags=["-lnccl"],
+       verbose=True,
+       is_python_module=False,
+       build_directory="./",
+   )
+
+   allocator = CUDAPluggableAllocator(
+       f"./{nccl_allocator_libname}.so", "nccl_alloc_plug", "nccl_free_plug"
+   ).allocator()
+
+   # setup distributed
+   rank = int(os.getenv("RANK"))
+   local_rank = int(os.getenv("LOCAL_RANK"))
+   world_size = int(os.getenv("WORLD_SIZE"))
+   torch.cuda.set_device(local_rank)
+   dist.init_process_group(backend="nccl")
+   device = torch.device(f"cuda:{local_rank}")
+   default_pg = _get_default_group()
+   backend = default_pg._get_backend(device)
+
+   # Note: for convenience, ProcessGroupNCCL backend provides
+   # the ncclMemAlloc allocator as backend.mem_allocator
+   allocator = backend.mem_allocator
+
+
+You can now define a new memory pool by passing this allocator to :class:`torch.cuda.MemPool`:
+
+.. code:: python
+
+   pool = torch.cuda.MemPool(allocator)
+
+
+The pool can then be used with the :class:`torch.cuda.use_mem_pool` context manager to
+allocate tensors into that pool:
+
+.. code:: python
+
+   with torch.cuda.use_mem_pool(pool):
+       # tensor gets allocated with ncclMemAlloc passed in the pool
+       tensor = torch.arange(1024 * 1024 * 2, device=device)
+       print(f"tensor ptr on rank {rank} is {hex(tensor.data_ptr())}")
+
+   # register user buffers using ncclCommRegister (called under the hood)
+   backend.register_mem_pool(pool)
+
+   # Collective uses Zero Copy NVLS
+   dist.all_reduce(tensor[0:4])
+   torch.cuda.synchronize()
+   print(tensor[0:4])
+
+
+Note the usage of ``register_mem_pool`` in the above example. This is an extra step for
+NVLS reductions, where the user buffers need to be registered with NCCL. A user can
+de-register the buffers with a similar ``deregister_mem_pool`` call.
+
+To reclaim memory, users will first need to ensure nothing is using the pool. When none
+of the tensors are holding a reference to the pool, :meth:`~torch.cuda.empty_cache` will
+be called internally on deletion of the pool, hence returning all the memory to the system.
+
+.. code:: python
+
+   del tensor, del pool
+
+
+Users can optionally specify a ``use_on_oom`` bool (which is False by default) during MemPool
+creation. If true, then the CUDACachingAllocator will be able to use memory in this pool as
+a last resort instead of OOMing.
+
+.. code:: python
+
+    pool = torch.cuda.MemPool(allocator, use_on_oom=True)
+    with torch.cuda.use_mem_pool(pool):
+        a = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+    del a
+
+    # at the memory limit, this will succeed by using pool's memory in order to avoid the oom
+    b = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+
+
+The following :meth:`torch.cuda.MemPool.use_count` and :meth:`torch.cuda.MemPool.snapshot`
+APIs can be used for debugging purposes:
+
+.. code:: python
+
+   pool = torch.cuda.MemPool(allocator)
+
+   # pool's use count should be 1 at this point as MemPool object
+   # holds a reference
+   assert pool.use_count() == 1
+
+   nelem_1mb = 1024 * 1024 // 4
+
+   with torch.cuda.use_mem_pool(pool):
+       out_0 = torch.randn(nelem_1mb, device="cuda")
+
+       # pool's use count should be 2 at this point as use_mem_pool
+       # holds a reference
+       assert pool.use_count() == 2
+
+   # pool's use count should be back to 1 at this point as use_mem_pool
+   # released its reference
+   assert pool.use_count() == 1
+
+   with torch.cuda.use_mem_pool(pool):
+       # pool should have 1 segment since we made a small allocation (1 MB)
+       # above and so the CUDACachingAllocator packed it into a 2 MB buffer
+       assert len(pool.snapshot()) == 1
+
+       out_1 = torch.randn(nelem_1mb, device="cuda")
+
+       # pool should still have 1 segment since we made another small allocation
+       # (1 MB) that got packed into the existing 2 MB buffer
+       assert len(pool.snapshot()) == 1
+
+       out_2 = torch.randn(nelem_1mb, device="cuda")
+
+       # pool now should have 2 segments since the CUDACachingAllocator had
+       # to make a new 2 MB buffer to accomodate out_2
+       assert len(pool.snapshot()) == 2
+
+
+.. note::
+
+   * :class:`torch.cuda.MemPool` holds a reference to the pool. When you use the
+     :class:`torch.cuda.use_mem_pool` context manager, it will also acquire another reference
+     to the pool. On exit of the context manager, it will release its reference. After that,
+     ideally it should only be tensors holding references to the pool. Once the tensors release
+     their references, the use count of the pool will be 1, reflecting that only the
+     :class:`torch.cuda.MemPool` object is holding a reference. Only at that point, can the memory
+     held by the pool be returned to the system when the pool's destructor is called using
+     ``del``.
+   * :class:`torch.cuda.MemPool` doesn't currently support ``expandable_segments`` mode of
+     CUDACachingAllocator.
+   * `NCCL has specific requirements`_ for a buffer to be compatible with NVLS reductions.
+     These requirements can be broken in a dynamic workload, for instance, the buffer being
+     sent to NCCL by the CUDACachingAllocator might be split and hence, not correctly aligned.
+     In those cases, NCCL can use a fallback algorithm instead of NVLS.
+   * Allocators like ``ncclMemAlloc`` can use more memory than requested, due to alignment
+     requirements (``CU_MULTICAST_GRANULARITY_RECOMMENDED``, ``CU_MULTICAST_GRANULARITY_MINIMUM``),
+     and can cause your workload to run out of memory.
+
+.. _NCCL has specific requirements:
+    https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/bufferreg.html#memory-allocator
+
 
 cuBLAS workspaces
 -----------------

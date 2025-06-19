@@ -120,8 +120,12 @@ def _unary_helper(fn, args, kwargs, inplace):
                 "MaskedTensor unary ops do not support additional Tensor arguments"
             )
 
-    mask_args, mask_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x._masked_mask)
-    data_args, data_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x._masked_data)
+    mask_args, _mask_kwargs = _map_mt_args_kwargs(
+        args, kwargs, lambda x: x._masked_mask
+    )
+    data_args, _data_kwargs = _map_mt_args_kwargs(
+        args, kwargs, lambda x: x._masked_data
+    )
 
     if args[0].layout == torch.sparse_coo:
         data_args[0] = data_args[0].coalesce()

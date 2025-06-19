@@ -5,11 +5,9 @@
 
 #include <oneapi/dnnl/dnnl_graph.hpp>
 #include <torch/csrc/jit/ir/ir.h>
+#include <utility>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 // Engine represents a device and its context. From the device kind, the engine
 // knows how to generate code for the target device and what kind of device
@@ -17,7 +15,8 @@ namespace onednn {
 // being created for each device. The device handle passed from PyTorch allows
 // oneDNN Graph implementation to work on the device specified by PyTorch, which
 // is currently CPU, so we only have one engine.
-// Ref: https://spec.oneapi.io/onednn-graph/latest/programming_model.html#engine
+// Ref:
+// https://oneapi-spec.uxlfoundation.org/specifications/oneapi/latest/elements/onednn/source/graph/programming_model#engine
 struct Engine {
   // CPU engine singleton
   static dnnl::engine& getEngine();
@@ -45,8 +44,8 @@ struct LlgaTensorDesc {
       desc::data_type dtype,
       desc::property_type property_type)
       : tid_(tid),
-        sizes_(sizes),
-        strides_(strides),
+        sizes_(std::move(sizes)),
+        strides_(std::move(strides)),
         dtype_(dtype),
         property_type_(property_type),
         layout_type_(desc::layout_type::strided),
@@ -224,7 +223,7 @@ struct LlgaTensorDesc {
 
  private:
   bool is_dimensionality_unknown() const {
-    return sizes_.size() == 0;
+    return sizes_.empty();
   }
 
   size_t tid_;
@@ -239,7 +238,7 @@ struct LlgaTensorDesc {
   // compute_inplace would be true, and input_tensor_index would be the index of
   // the corresponding input tensor in inputSpecs_ of the LlgaKernel object.
   bool compute_inplace_ = false;
-  size_t input_tensor_index_;
+  size_t input_tensor_index_{};
 };
 
 // Initially, oneDNN Graph also used to have blocked layout for tensors between
@@ -270,7 +269,4 @@ at::Tensor empty_llga(
 
 dnnl::graph::tensor llga_from_aten_tensor(const at::Tensor& tensor);
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn

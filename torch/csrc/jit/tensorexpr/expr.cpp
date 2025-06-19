@@ -87,7 +87,7 @@ ExprHandle ExprHandle::operator>>(const ExprHandle& other) const {
 
 #define IMM_EXPR_DECLARE(Type, Name) \
   ExprHandle::ExprHandle(Type v) : ExprHandle(Name##Imm::make(v)) {}
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_EXPR_DECLARE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_EXPR_DECLARE)
 #undef IMM_EXPR_DECLARE
 
 ExprHandle sin(const ExprHandle& v) {
@@ -143,7 +143,7 @@ ExprHandle abs(const ExprHandle& v) {
 }
 
 // The default tanh is quite slow, use the Eigen version from here:
-// https://bitbucket.org/eigen/eigen/src/94875feeeeb9abe5509b314197da1991ba2070f5/Eigen/src/Core/MathFunctionsImpl.h#lines-26
+// https://github.com/TUW-VieVS/VieSchedpp/blob/master/Eigen/src/Core/MathFunctionsImpl.h#L26
 ExprHandle fast_tanh(const ExprHandle& v) {
   // TODO: use a dedicated bind-var to make sure v is not evaluated multiple
   // times. Clamp the input expression to [-9, 9]
@@ -205,7 +205,7 @@ ExprHandle fast_sigmoid(const ExprHandle& x) {
 
 ExprHandle fast_log(const ExprHandle& v) {
   // this implementation is taken from sleef:
-  // https://github.com/shibatch/sleef/blob/master/src/libm/sleefsp.c#L1131
+  // https://github.com/shibatch/sleef/blob/master/src/libm/sleefsimdsp.c#L1277
   // to generate coefficients, this tool is provided
   // https://github.com/shibatch/sleef/blob/master/src/gencoef/gencoef.txt
   auto ilogb2kf = [](const ExprHandle& x) {
@@ -552,7 +552,7 @@ bool Buf::is_stride_one(int cur_dim) const {
   return exprEquals(strides_[cur_dim], alloc<LongImm>(1));
 }
 
-ExprHandle expr_to_vec(ExprHandle v, int lanes) {
+ExprHandle expr_to_vec(const ExprHandle& v, int lanes) {
   if (lanes == 1) {
     return v;
   } else {

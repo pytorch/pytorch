@@ -4,10 +4,7 @@
 #include <c10/core/CPUAllocator.h>
 #include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 // Non-default dnnl::graph::allocator needs an allocator.
 // We would let it use c10::GetCPUAllocator's allocator,
@@ -34,7 +31,7 @@ dnnl::engine& Engine::getEngine() {
   static dnnl::graph::allocator alloc{
       pytorch_default_allocator, pytorch_default_deallocator};
   static dnnl::engine cpu_engine = dnnl::graph::make_engine_with_allocator(
-      dnnl::engine::kind::cpu, /* device_id = */ 0, alloc);
+      dnnl::engine::kind::cpu, /* index = */ 0, alloc);
   return cpu_engine;
 }
 
@@ -152,9 +149,6 @@ at::ScalarType LlgaTensorDesc::aten_scalar_type() const {
   }
 }
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn
 
 #endif // AT_MKLDNN_ENABLED()

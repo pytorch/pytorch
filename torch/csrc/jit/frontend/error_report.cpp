@@ -6,7 +6,7 @@ namespace torch::jit {
 
 // Avoid storing objects with destructor in thread_local for mobile build.
 #ifndef C10_MOBILE
-thread_local std::vector<Call> calls;
+static thread_local std::vector<Call> calls;
 #endif // C10_MOBILE
 
 ErrorReport::ErrorReport(const ErrorReport& e)
@@ -63,7 +63,7 @@ std::string ErrorReport::current_call_stack() {
 #ifndef C10_MOBILE
   return get_stacked_errors(calls);
 #else
-  AT_ERROR("Call stack not supported on mobile");
+  TORCH_CHECK(false, "Call stack not supported on mobile");
 #endif // C10_MOBILE
 }
 

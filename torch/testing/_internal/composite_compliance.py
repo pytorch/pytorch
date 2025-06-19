@@ -127,7 +127,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             # by a Composite operation; if the Composite
             # operator attempts to read from the storage without dispatching then it'll
             # raise a RuntimeError due to it being a meta storage.
-            r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            r = torch.Tensor._make_wrapper_subclass(
                 cls, elem.size(),
                 dtype=elem.dtype, layout=elem.layout,
                 device=elem.device, requires_grad=elem.requires_grad,
@@ -136,10 +136,21 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             if elem.requires_grad:
                 # CompositeCompliantTensor steals the "requires_grad"-ness.
                 # Why a new copy of `elem`? Because sometimes OpInfo shares inputs between tests...
-                tmp = torch.empty_strided(elem.shape, elem.stride(), dtype=elem.dtype,
-                                          device=elem.device, layout=elem.layout,
-                                          requires_grad=False)
-                tmp.copy_(elem.detach())
+                tmp = torch.empty(
+                    (),
+                    dtype=elem.dtype,
+                    device=elem.device,
+                    layout=elem.layout,
+                    requires_grad=False,
+                )
+                # Use set_ rather than empty_strided() + copy_ so that we can preserve
+                # things like storage_offset.
+                tmp.set_(
+                    source=elem.untyped_storage().clone(),
+                    storage_offset=elem.storage_offset(),
+                    size=elem.size(),
+                    stride=elem.stride(),
+                )
                 r.elem = tmp
             else:
                 r.elem = elem
@@ -402,8 +413,8 @@ def check_with_mode(op, args, kwargs, assert_equal_fn):
 
 def gather_leaf_tensors(args, kwargs):
     leaf_tensors = []
-    args, args_spec = tree_flatten(args)
-    kwargs, kwargs_spec = tree_flatten(kwargs)
+    args, _args_spec = tree_flatten(args)
+    kwargs, _kwargs_spec = tree_flatten(kwargs)
     args = args + kwargs
     for arg in args:
         if not isinstance(arg, torch.Tensor):
@@ -541,8 +552,16 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
 
         expected = compute_expected_grad(args, tangent_args, kwargs, tangent_kwargs)
         expected = tree_map(fwAD.unpack_dual, expected)
-        expected_primals = tree_map(lambda x: x.primal, expected)
-        expected_tangents = tree_map(lambda x: x.tangent, expected)
+        expected_primals = tree_map(
+            lambda x: x.primal,
+            expected,
+            is_leaf=lambda x: type(x) is fwAD.UnpackedDualTensor,
+        )
+        expected_tangents = tree_map(
+            lambda x: x.tangent,
+            expected,
+            is_leaf=lambda x: type(x) is fwAD.UnpackedDualTensor,
+        )
 
         # Permutations of arg and kwargs in CCT.
         for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT, cct_mode):
@@ -575,7 +594,15 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
                     return e.elem if isinstance(e, CCT) else e
 
                 actual = tree_map(fwAD.unpack_dual, actual)
-                actual_primals = tree_map(lambda x: unwrap(x.primal), actual)
-                actual_tangents = tree_map(lambda x: unwrap(x.tangent), actual)
+                actual_primals = tree_map(
+                    lambda x: unwrap(x.primal),
+                    actual,
+                    is_leaf=lambda x: type(x) is fwAD.UnpackedDualTensor,
+                )
+                actual_tangents = tree_map(
+                    lambda x: unwrap(x.tangent),
+                    actual,
+                    is_leaf=lambda x: type(x) is fwAD.UnpackedDualTensor,
+                )
                 assert_equal_fn(actual_primals, expected_primals, equal_nan=True)
                 assert_equal_fn(actual_tangents, expected_tangents, equal_nan=True)

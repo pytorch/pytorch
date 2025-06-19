@@ -10,6 +10,7 @@
 #include <ATen/cudnn/Handle.h>
 #include <ATen/native/cudnn/ConvShared.h>
 #include <ATen/native/quantized/cudnn/utils.h>
+#include <ATen/native/quantized/library.h>
 #include <ATen/native/quantized/ConvUtils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/utils/ParamsHash.h>
@@ -21,12 +22,6 @@
 #include <iostream>
 #include <unordered_map>
 #include <vector>
-
-template <int kSpatialDim = 2>
-int register_conv_params();
-
-extern template int register_conv_params<2>();
-extern template int register_conv_params<3>();
 
 // TODO: there is a table from input dtype and weight dtype to operator qdtype,
 // we can derive the operator dtype based on input dtype
@@ -58,7 +53,7 @@ std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, at::native::ParamsHa
 } // anonymous namespace
 // TODO: we can use cudnn_frontend::ExecutionPlanCache when it supports caching
 // multiple operators
-// reference: https://github.com/NVIDIA/cudnn-frontend/blob/main/samples/conv_sample.cpp#L293
+// reference: https://github.com/NVIDIA/cudnn-frontend/blob/main/samples/legacy_samples/conv_sample.cpp#L295
 //static cudnn_frontend::ExecutionPlanCache plan_cache("sample_cache");
 
 // the parameter quantized_output is a quantized tensor

@@ -1,0 +1,46 @@
+# Basic tests
+import tempfile
+from torch.utils._ordered_set import OrderedSet
+
+
+print(f"{tempfile.gettempdir()}/memory_snapshot.pickle")
+
+ignored = set()  # noqa: set_linter
+a = OrderedSet()
+b = "set()"
+c = OrderedSet
+d = c.set
+f = (
+   OrderedSet(
+   )
+)
+ignored = (
+   set(  # noqa: set_linter
+   )
+)
+
+# Non-sets
+
+d = {}
+long_string = """ set()
+set() set x.set set()
+\""""
+
+class A:
+    def set(self, x):
+        self.x = x
+
+set = A().set
+
+# Braced sets
+
+set1 = OrderedSet([1])
+set2 = OrderedSet([1, 2])
+
+iterator_set = OrderedSet([i for i in range(10)])
+
+# A dict with two sets.
+dict_set = {"a": OrderedSet([2, 3]), "b": OrderedSet([i for i in range(3)])}
+
+# A set containing an object constructed with a dict and a set
+sos_set = OrderedSet([Something({i: i + 1 for i in range(3)}, OrderedSet([i + 1 for i in range(3)]))])

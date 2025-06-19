@@ -35,9 +35,10 @@ def aot_autograd_check(
         kwargs,
         dynamic,
         assert_raises_regex_fn=assert_raises_regex,
-        assert_equals_fn=torch.testing._comparison.assert_close,
+        assert_equals_fn=torch.testing.assert_close,
         check_gradients=True,
-        try_check_data_specialization=False):
+        try_check_data_specialization=False,
+        skip_correctness_check=False):
     """Compares func(*args, **kwargs) in eager-mode to under AOTAutograd.
 
     Compares outputs and (if check_gradients=True) gradients produced by
@@ -47,7 +48,6 @@ def aot_autograd_check(
 
     """
     flat_args, args_spec = pytree.tree_flatten((args, kwargs))
-    args_is_tensor = [isinstance(arg, torch.Tensor) for arg in flat_args]
     args = [arg for arg in flat_args if isinstance(arg, torch.Tensor)]
 
     # We construct a new function that only accepts Tensors as inputs
@@ -73,23 +73,24 @@ def aot_autograd_check(
         check_gradients = any_tensor_requires_grad and any_output_requires_grad
     if not check_gradients:
         compiled_out = wrapper_set_seed(compiled_f, args)
-        assert_equals_fn(compiled_out, out, msg=outputs_msg)
+        if not skip_correctness_check:
+            assert_equals_fn(compiled_out, out, msg=outputs_msg)
         return
     _test_aot_autograd_forwards_backwards_helper(
         func_no_tensors, compiled_f, args, assert_raises_regex_fn, assert_equals_fn,
-        try_check_data_specialization)
+        try_check_data_specialization, skip_correctness_check)
 
 outputs_msg = (
     "Outputs of the operator are different in eager-mode PyTorch vs "
-    "AOTAutograd. This means the operator will have incorrect output "
+    "AOTDispatcher tracing. This means the operator will have incorrect output "
     "underneath torch.compile. This could be because the operator's "
-    "implementation not traceable or that there is a bug in AOTAutograd."
+    "implementation not traceable."
 )
 
 
 def _test_aot_autograd_forwards_backwards_helper(
         f, compiled_f, args, assert_raises_regex_fn, assert_equals_fn,
-        try_check_data_specialization):
+        try_check_data_specialization, skip_correctness_check=False):
     # Verify grads are equal between compiled and non-compiled versions of f.
 
     def call_forwards_backwards(f, args):
@@ -118,22 +119,30 @@ def _test_aot_autograd_forwards_backwards_helper(
             raise
 
         # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all(x is None for x in orig_grad):
+        tensor_args = [x for x in pytree.tree_flatten(args)[0] if isinstance(x, torch.Tensor)]
+        any_non_leaves = any(x.grad_fn is not None for x in tensor_args)
+        if all(x is None for x in orig_grad) and any_non_leaves:
             with assert_raises_regex_fn(RuntimeError, 'does not require grad and does not have a grad_fn'):
                 call_forwards_backwards(compiled_f, args)
             return
 
         msg = (
             "Gradients of the operator are different in eager-mode PyTorch vs "
-            "AOTAutograd. This means the operator will have incorrect gradients "
+            "AOTDispatcher. This means the operator will have incorrect gradients "
             "underneath torch.compile. This could be because the operator's "
-            "backward is incorrectly registered or not traceable or that there "
-            "is a bug in AOTAutograd."
+            "backward is incorrectly registered or not traceable."
         )
 
         compiled_out, compiled_grad = call_forwards_backwards(compiled_f, args)
-        assert_equals_fn(compiled_out, orig_out, msg=outputs_msg)
-        assert_equals_fn(compiled_grad, orig_grad, msg=msg)
+        if not skip_correctness_check:
+            try:
+                assert_equals_fn(compiled_out, orig_out)
+            except Exception as e:
+                raise type(e)(outputs_msg) from e
+            try:
+                assert_equals_fn(compiled_grad, orig_grad)
+            except Exception as e:
+                raise type(e)(msg) from e
 
     check(args, ignore_failure=False)
 

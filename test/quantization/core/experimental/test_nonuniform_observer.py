@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# ruff: noqa: F841
 
 from torch.ao.quantization.experimental.observer import APoTObserver
 import unittest

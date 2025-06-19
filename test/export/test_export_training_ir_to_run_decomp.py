@@ -5,29 +5,26 @@ import torch
 try:
     from . import test_export, testing
 except ImportError:
-    import test_export
+    import test_export  # @manual=fbcode//caffe2/test:test_export-library
 
-    import testing
+    import testing  # @manual=fbcode//caffe2/test:test_export-library
 
 
 test_classes = {}
 
 
 def mocked_training_ir_to_run_decomp_export_strict(*args, **kwargs):
-    ep = torch.export.export_for_training(*args, **kwargs)
-    return ep.run_decompositions(
-        {}, _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY
-    )
-
-
-def mocked_training_ir_to_run_decomp_export_non_strict(*args, **kwargs):
     if "strict" in kwargs:
         ep = torch.export.export_for_training(*args, **kwargs)
     else:
-        ep = torch.export.export_for_training(*args, **kwargs, strict=False)
-    return ep.run_decompositions(
-        {}, _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY
-    )
+        ep = torch.export.export_for_training(*args, **kwargs, strict=True)
+    return ep.run_decompositions({})
+
+
+def mocked_training_ir_to_run_decomp_export_non_strict(*args, **kwargs):
+    ep = torch.export.export_for_training(*args, **kwargs)
+
+    return ep.run_decompositions({})
 
 
 def make_dynamic_cls(cls, strict):

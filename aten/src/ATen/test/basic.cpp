@@ -89,7 +89,7 @@ void TestAdd(DeprecatedTypeProperties& type) {
 void TestZeros(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor a = zeros({1024, 1024}, type);
-  for (C10_UNUSED const auto i : c10::irange(1, 1000)) {
+  for ([[maybe_unused]] const auto i : c10::irange(1, 1000)) {
     a = zeros({128, 128}, type);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -107,7 +107,7 @@ void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (C10_UNUSED const auto i : c10::irange(1000)) {
+  for ([[maybe_unused]] const auto i : c10::irange(1000)) {
     add_out(r, r, d);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -124,7 +124,7 @@ void TestLoadOfAddsWithCopy(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (C10_UNUSED const auto i : c10::irange(1000)) {
+  for ([[maybe_unused]] const auto i : c10::irange(1000)) {
     r = add(r, d);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -166,8 +166,10 @@ void TestSqueeze(DeprecatedTypeProperties& type) {
   ASSERT_EQ_RESOLVED(b.dim(), 1);
   a = rand({1}, type);
   b = squeeze(a);
-  // TODO 0-dim squeeze
   ASSERT_TRUE(a[0].equal(b));
+  Tensor c = at::scalar_tensor(1, type.options());
+  Tensor d = squeeze(c);
+  ASSERT_TRUE(c.equal(d));
 }
 
 void TestCopy(DeprecatedTypeProperties& type) {

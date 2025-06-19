@@ -33,7 +33,7 @@ TEST(TypeMetaTest, Names) {
   TypeMeta int_meta = TypeMeta::Make<int>();
   EXPECT_EQ("int", int_meta.name());
   TypeMeta string_meta = TypeMeta::Make<string>();
-  EXPECT_TRUE(c10::string_view::npos != string_meta.name().find("string"));
+  EXPECT_TRUE(std::string_view::npos != string_meta.name().find("string"));
 }
 
 TEST(TypeMetaTest, TypeMeta) {
@@ -66,24 +66,26 @@ TEST(TypeMetaTest, TypeMeta) {
   EXPECT_EQ(bar_meta.itemsize(), TypeMeta::ItemSize<TypeMetaTestBar>());
   EXPECT_EQ(int_meta.name(), "int");
   EXPECT_EQ(float_meta.name(), "float");
-  EXPECT_NE(foo_meta.name().find("TypeMetaTestFoo"), c10::string_view::npos);
-  EXPECT_NE(bar_meta.name().find("TypeMetaTestBar"), c10::string_view::npos);
+  EXPECT_NE(foo_meta.name().find("TypeMetaTestFoo"), std::string_view::npos);
+  EXPECT_NE(bar_meta.name().find("TypeMetaTestBar"), std::string_view::npos);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class ClassAllowAssignment {
  public:
-  ClassAllowAssignment() : x(42) {}
+  ClassAllowAssignment() = default;
   ClassAllowAssignment(const ClassAllowAssignment& src) = default;
   ClassAllowAssignment& operator=(const ClassAllowAssignment& src) = default;
-  int x;
+  int x{42};
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class ClassNoAssignment {
  public:
-  ClassNoAssignment() : x(42) {}
+  ClassNoAssignment() = default;
   ClassNoAssignment(const ClassNoAssignment& src) = delete;
   ClassNoAssignment& operator=(const ClassNoAssignment& src) = delete;
-  int x;
+  int x{42};
 };
 } // namespace
 

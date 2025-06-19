@@ -3,7 +3,7 @@
 
 import os
 import time
-from typing import List, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -472,7 +472,7 @@ class SummaryWriter:
             values (torch.Tensor, numpy.ndarray, or string/blobname): Values to build histogram
             global_step (int): Global step value to record
             bins (str): One of {'tensorflow','auto', 'fd', ...}. This determines how the bins are made. You can find
-              other options in: https://docs.scipy.org/doc/numpy/reference/generated/numpy.histogram.html
+              other options in: https://numpy.org/doc/stable/reference/generated/numpy.histogram.html
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
 
@@ -723,7 +723,7 @@ class SummaryWriter:
     def add_figure(
         self,
         tag: str,
-        figure: Union["Figure", List["Figure"]],
+        figure: Union["Figure", list["Figure"]],
         global_step: Optional[int] = None,
         close: bool = True,
         walltime: Optional[float] = None,

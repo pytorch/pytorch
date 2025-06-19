@@ -10,7 +10,7 @@
 
 namespace torch::jit::tensorexpr {
 
-RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
+static RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
 
 int64_t InterpValue::intValue() const {
 #define TYPE_CASE(Type, Name)        \
@@ -24,43 +24,42 @@ int64_t InterpValue::intValue() const {
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_integral_v<T>, T> mod_value(T lhs, T rhs) {
+static inline std::enable_if_t<std::is_integral_v<T>, T> mod_value(
+    T lhs,
+    T rhs) {
   return lhs % rhs;
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_floating_point_v<T>, T> mod_value(
+static inline std::enable_if_t<std::is_floating_point_v<T>, T> mod_value(
     T lhs,
     T rhs) {
   return std::fmod(lhs, rhs);
 }
 
-inline bool mod_value(bool lhs, bool rhs) {
+static inline bool mod_value(bool lhs, bool rhs) {
   throw std::runtime_error("Attempted modulus of bool");
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_integral_v<T>, T> div_value(T lhs, T rhs) {
+static inline std::enable_if_t<std::is_integral_v<T>, T> div_value(
+    T lhs,
+    T rhs) {
   TORCH_CHECK(rhs != 0, "Division by zero");
   return lhs / rhs;
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_floating_point_v<T>, T>
+static inline std::enable_if_t<std::is_floating_point_v<T>, T>
     __ubsan_ignore_float_divide_by_zero__ div_value(T lhs, T rhs) {
   return lhs / rhs;
 }
 
-inline bool div_value(bool lhs, bool rhs) {
-  LOG(FATAL) << "Attempted division of bool";
-  return false;
-}
-
-inline c10::Half div_value(c10::Half lhs, c10::Half rhs) {
+static inline c10::Half div_value(c10::Half lhs, c10::Half rhs) {
   return lhs / rhs;
 }
 
-inline c10::BFloat16 div_value(c10::BFloat16 lhs, c10::BFloat16 rhs) {
+static inline c10::BFloat16 div_value(c10::BFloat16 lhs, c10::BFloat16 rhs) {
   return lhs / rhs;
 }
 
@@ -375,7 +374,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   case ScalarType::Name:                                                    \
     value = compare_select_op<T, Type>(lhs, rhs, retval1, retval2, cmp_op); \
     break;
-      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
       default:
         throw unsupported_dtype();
@@ -407,7 +406,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     value_ = compare_select_op_helper<Type>(           \
         lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op); \
     break;
-      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
       default:
         throw unsupported_dtype();
@@ -418,7 +417,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   TORCH_API void visit(const Name##ImmPtr& v) override { \
     value_ = InterpValue(v->value());                    \
   }
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT)
 #undef IMM_VISIT
 
   TORCH_API void visit(const BlockPtr& v) override {
@@ -472,7 +471,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   case ScalarType::Name:                                                 \
     this->value_ = InterpValue(castValues<SrcType, Type>(src_dtype, v)); \
     break;
-      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DST_TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DST_TYPE_CASE)
 #undef DST_TYPE_CASE
 #define DST_TYPE_CASE_QUANT(Type, Name, CppType)                           \
   case ScalarType::Name: {                                                 \
@@ -507,7 +506,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   case ScalarType::Name:                               \
     doCastFromSrc<Type>(src_dtype, dst_dtype, value_); \
     break;
-        AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, SRC_TYPE_CASE);
+        AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, SRC_TYPE_CASE)
         SRC_TYPE_CASE(c10::quint8, QUInt8);
         SRC_TYPE_CASE(c10::qint8, QInt8);
 #undef SRC_TYPE_CASE
@@ -615,7 +614,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<Type> v(lanes, value.as<Type>()); \
     value_ = InterpValue(v);                      \
   } break;
-      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
       default:
         throw unsupported_dtype();
@@ -758,7 +757,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }                                                \
     value_ = InterpValue(val);                       \
   } break;
-      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
       TYPE_CASE(c10::quint8, QUInt8);
       TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
@@ -805,7 +804,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       ptr##Name[index[i]] = value[i];                           \
     }                                                           \
   } break;
-      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
       TYPE_CASE(c10::quint8, QUInt8);
       TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
@@ -1044,7 +1043,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           v->buffer_var()->name_hint());
     }
     buffer_mapping_[b] = buffer->data();
-    internal_buffers_.insert(std::make_pair(b, std::move(buffer)));
+    internal_buffers_.emplace(std::move(b), std::move(buffer));
   }
 
   void visit(const PlacementAllocatePtr& v) override {
@@ -1268,7 +1267,7 @@ void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {
     impl_->bindVar(bufArg.var(), typed_data); \
     break;                                    \
   }
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();

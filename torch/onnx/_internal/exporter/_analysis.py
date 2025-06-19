@@ -5,12 +5,11 @@
 from __future__ import annotations
 
 import dataclasses
+import operator
 import textwrap
 import traceback
 from collections import defaultdict
 from typing import TYPE_CHECKING
-
-import onnxscript
 
 import torch
 import torch._export.serde.schema
@@ -101,7 +100,9 @@ def _format_model_info(model_info: ModelInfo) -> str:
     lines.append("\n")
     lines.append("Of the call_function nodes, the counts of operators used are:\n")
     sorted_targets = sorted(
-        model_info.fx_node_target_count.items(), key=lambda x: x[1], reverse=True
+        model_info.fx_node_target_count.items(),
+        key=operator.itemgetter(1),
+        reverse=True,
     )
     for target, count in sorted_targets:
         lines.append(f"- `{target}`: {count}")
@@ -129,7 +130,7 @@ def _format_model_info(model_info: ModelInfo) -> str:
                 target_to_messages[str(node.target)] = message
 
         for target, nodes in sorted(
-            target_to_nodes.items(), key=lambda x: x[0], reverse=True
+            target_to_nodes.items(), key=operator.itemgetter(0), reverse=True
         ):
             message = textwrap.indent(
                 f"{target_to_messages[target]}. Example node: `{nodes[0].format_node()}`. All nodes: `{nodes}`",
@@ -203,13 +204,7 @@ def analyze(
     model_info.outputs = outputs
 
     if registry is None:
-        # Trigger op registration
-        from onnxscript.function_libs.torch_lib import ops  # noqa: F401
-
-        del ops
-        registry = _registration.ONNXRegistry.from_torchlib(
-            onnxscript.function_libs.torch_lib.registration.default_registry  # type: ignore[arg-type]
-        )
+        registry = _registration.ONNXRegistry.from_torchlib()
 
     # Try to find ops for every node in the graph
     for node in exported_program.graph.nodes:

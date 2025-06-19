@@ -2,64 +2,61 @@
 
 from __future__ import annotations
 
+
+__all__ = [
+    "OnnxExporterWarning",
+    "SymbolicValueError",
+    "UnsupportedOperatorError",
+]
+
 import textwrap
 from typing import TYPE_CHECKING
-
-from torch.onnx import _constants
-from torch.onnx._internal import diagnostics
 
 
 if TYPE_CHECKING:
     from torch import _C
 
-__all__ = [
-    "OnnxExporterError",
-    "OnnxExporterWarning",
-    "CheckerError",
-    "SymbolicValueError",
-    "UnsupportedOperatorError",
-]
-
 
 class OnnxExporterWarning(UserWarning):
-    """Base class for all warnings in the ONNX exporter."""
+    """Warnings in the ONNX exporter."""
 
 
 class OnnxExporterError(RuntimeError):
-    """Errors raised by the ONNX exporter."""
-
-
-class CheckerError(OnnxExporterError):
-    """Raised when ONNX checker detects an invalid model."""
+    """Errors raised by the ONNX exporter. This is the base class for all exporter errors."""
 
 
 class UnsupportedOperatorError(OnnxExporterError):
     """Raised when an operator is unsupported by the exporter."""
 
+    # NOTE: This is legacy and is only used by the torchscript exporter
+    # Clean up when the torchscript exporter is removed
     def __init__(self, name: str, version: int, supported_version: int | None):
         if supported_version is not None:
-            diagnostic_rule: diagnostics.infra.Rule = (
-                diagnostics.rules.operator_supported_in_newer_opset_version
+            msg = (
+                f"Exporting the operator '{name}' to ONNX opset version {version} "
+                "is not supported. Support for this operator was added in version "
+                f"{supported_version}, try exporting with this version"
             )
-            msg = diagnostic_rule.format_message(name, version, supported_version)
-            diagnostics.diagnose(diagnostic_rule, diagnostics.levels.ERROR, msg)
+        elif name.startswith(("aten::", "prim::", "quantized::")):
+            msg = (
+                f"Exporting the operator '{name}' to ONNX opset version {version} "
+                "is not supported"
+            )
         else:
-            if name.startswith(("aten::", "prim::", "quantized::")):
-                diagnostic_rule = diagnostics.rules.missing_standard_symbolic_function
-                msg = diagnostic_rule.format_message(
-                    name, version, _constants.PYTORCH_GITHUB_ISSUES_URL
-                )
-                diagnostics.diagnose(diagnostic_rule, diagnostics.levels.ERROR, msg)
-            else:
-                diagnostic_rule = diagnostics.rules.missing_custom_symbolic_function
-                msg = diagnostic_rule.format_message(name)
-                diagnostics.diagnose(diagnostic_rule, diagnostics.levels.ERROR, msg)
+            msg = (
+                "ONNX export failed on an operator with unrecognized namespace {op_name}. "
+                "If you are trying to export a custom operator, make sure you registered it with "
+                "the right domain and version."
+            )
+
         super().__init__(msg)
 
 
 class SymbolicValueError(OnnxExporterError):
     """Errors around TorchScript values and nodes."""
 
+    # NOTE: This is legacy and is only used by the torchscript exporter
+    # Clean up when the torchscript exporter is removed
     def __init__(self, msg: str, value: _C.Value):
         message = (
             f"{msg}  [Caused by the value '{value}' (type '{value.type()}') in the "

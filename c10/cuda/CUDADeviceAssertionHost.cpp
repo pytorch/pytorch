@@ -3,6 +3,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <cuda_runtime.h>
 
@@ -80,8 +81,8 @@ bool dsa_check_if_all_devices_support_managed_memory() {
 }
 
 bool env_flag_set(const char* env_var_name) {
-  const char* const env_string = std::getenv(env_var_name);
-  return (env_string == nullptr) ? false : std::strcmp(env_string, "0");
+  const auto env_flag = c10::utils::check_env(env_var_name);
+  return env_flag.has_value() && env_flag.value();
 }
 
 /// Deleter for UVM/managed memory pointers
@@ -195,7 +196,7 @@ CUDAKernelLaunchRegistry::CUDAKernelLaunchRegistry()
           dsa_check_if_all_devices_support_managed_memory()),
       gather_launch_stacktrace(check_env_for_enable_launch_stacktracing()),
       enabled_at_runtime(check_env_for_dsa_enabled()) {
-  for (C10_UNUSED const auto _ : c10::irange(dsa_get_device_count())) {
+  for ([[maybe_unused]] const auto _ : c10::irange(dsa_get_device_count())) {
     uvm_assertions.emplace_back(nullptr, uvm_deleter);
   }
 
@@ -212,11 +213,11 @@ bool CUDAKernelLaunchRegistry::check_env_for_dsa_enabled() const {
 }
 
 uint32_t CUDAKernelLaunchRegistry::insert(
-    const char* launch_filename,
-    const char* launch_function,
-    const uint32_t launch_linenum,
-    const char* kernel_name,
-    const int32_t stream_id) {
+    const char* launch_filename [[maybe_unused]],
+    const char* launch_function [[maybe_unused]],
+    const uint32_t launch_linenum [[maybe_unused]],
+    const char* kernel_name [[maybe_unused]],
+    const int32_t stream_id [[maybe_unused]]) {
 #ifdef TORCH_USE_CUDA_DSA
   if (!enabled_at_runtime) {
     return 0;

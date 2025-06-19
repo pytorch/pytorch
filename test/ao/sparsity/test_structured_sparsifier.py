@@ -1,6 +1,5 @@
 # Owner(s): ["module: unknown"]
 import copy
-import logging
 import random
 
 import torch
@@ -29,12 +28,12 @@ from torch.testing._internal.common_pruning import (
     SimpleConv2d,
     SimpleLinear,
 )
-from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
-
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+    TestCase,
 )
+
 
 DEVICES = {
     torch.device("cpu"),
@@ -269,7 +268,6 @@ class TestBaseStructuredSparsifier(TestCase):
 
     def _test_step_linear_on_device(self, model, device):
         model = model.to(device)
-        x = torch.ones(7, 7, device=device)
         pruner = SimplePruner(None)
         pruner.prepare(model, None)
         pruner.enable_mask_update = True
@@ -808,7 +806,7 @@ class TestBaseStructuredSparsifier(TestCase):
         pruned_model = fx_pruner.prune()
         pruned_model.eval()
         out_pruned, lstm_out_pruned = pruned_model(lstm_input)
-        r, c = lstm_out_expected.size()
+        _, c = lstm_out_expected.size()
 
         # We cannot check that y_expected == y_pruned as usual because
         # zeros vs. missing elements yield different numerical results.
@@ -891,7 +889,7 @@ class TestBaseStructuredSparsifier(TestCase):
         pruned_model = fx_pruner.prune()
         pruned_model.eval()
         out_pruned, lstm_out_pruned = pruned_model(lstm_input)
-        r, c = lstm_out_expected.size()
+        _, c = lstm_out_expected.size()
 
         # We cannot check that y_expected == y_pruned as usual because
         # zeros vs. missing elements yield different numerical results.
@@ -1090,3 +1088,7 @@ class TestFPGMPruner(TestCase):
             self._test_update_mask_on_multiple_layer(
                 expected_conv1, expected_conv2, device
             )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

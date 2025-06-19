@@ -3,23 +3,23 @@
 
 import itertools
 from copy import deepcopy
-from typing import Dict, NamedTuple, Optional
+from typing import NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from torch.distributed._tensor import (
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper,
-    CheckpointImpl,
-)
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     loss_parallel,
@@ -52,9 +52,9 @@ reduce_scatter, all_gather, all_reduce = (
 
 
 class ExpCommCounts(NamedTuple):
-    fwd: Optional[Dict] = None
-    bwd: Optional[Dict] = None
-    optim: Optional[Dict] = None
+    fwd: Optional[dict] = None
+    bwd: Optional[dict] = None
+    optim: Optional[dict] = None
 
 
 class DistTensorParallelExampleTest(DTensorTestBase):
@@ -117,8 +117,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         output = model(inp)
         output.sum().backward()
-
-        from torch.distributed._tensor.debug import CommDebugMode
 
         comm_mode = CommDebugMode()
         with comm_mode:
@@ -261,7 +259,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         check_comms=True,
     ):
         optim.step()  # Ensure model weights are still the same after update.
-        from torch.distributed._tensor.experimental import implicit_replication
+        from torch.distributed.tensor.experimental import implicit_replication
 
         with implicit_replication():
             with CommDebugMode() as comm_mode:
@@ -313,7 +311,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         torch.manual_seed(0)
         steps = 10 if type(model) is torch.float64 else 1
-        for iter in range(steps):
+        for _ in range(steps):
             inp = torch.randint(
                 model_args.vocab_size, inp_size, device=self.device_type
             )

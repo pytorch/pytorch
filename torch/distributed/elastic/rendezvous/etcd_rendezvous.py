@@ -14,7 +14,11 @@ import threading
 import time
 from typing import Optional
 
-import etcd  # type: ignore[import]
+
+try:
+    import etcd  # type: ignore[import]
+except ModuleNotFoundError:
+    from . import _etcd_stub as etcd
 
 from torch.distributed.elastic.rendezvous import (
     RendezvousClosedError,
@@ -149,8 +153,15 @@ class EtcdRendezvousHandler(RendezvousHandler):
     +--------------------------------------------+--------------------------+
     """
 
-    def __init__(self, rdzv_impl):
+    def __init__(self, rdzv_impl: "EtcdRendezvous", local_addr: Optional[str]):
+        """
+        Args:
+            rdzv_impl: the implementation of the rendezvous
+            local_addr: the local address of the current node
+        """
+
         self._rdzv_impl = rdzv_impl
+        self._local_addr = local_addr
 
     def __del__(self):
         # TODO: look into using weakref here instead.
@@ -165,7 +176,9 @@ class EtcdRendezvousHandler(RendezvousHandler):
         logger.info("Creating EtcdStore as the c10d::Store implementation")
         store = self._rdzv_impl.setup_kv_store(rdzv_version)
 
-        bootstrap_store_info = RendezvousStoreInfo.build(rank, store)
+        bootstrap_store_info = RendezvousStoreInfo.build(
+            rank, store, local_addr=self._local_addr
+        )
         return RendezvousInfo(store, rank, world_size, bootstrap_store_info)
 
     def is_closed(self):
@@ -400,9 +413,9 @@ class EtcdRendezvous:
         active_version = self.wait_for_peers(expected_version)
         state = json.loads(active_version.value)
 
-        assert (
-            state["version"] == expected_version
-        ), "Logic error: failed to observe version mismatch"
+        assert state["version"] == expected_version, (
+            "Logic error: failed to observe version mismatch"
+        )
 
         return self.confirm_phase(expected_version, this_rank)
 
@@ -520,9 +533,9 @@ class EtcdRendezvous:
                     "Rendezvous version changed. Must try join the new one."
                 )
 
-            assert (
-                len(state["participants"]) < self._num_max_workers
-            ), "Logic error: joinable rendezvous should always have space left"
+            assert len(state["participants"]) < self._num_max_workers, (
+                "Logic error: joinable rendezvous should always have space left"
+            )
 
             this_rank = len(state["participants"])
             state["participants"].append(this_rank)
@@ -1062,4 +1075,7 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
             "last_call_timeout", _DEFAULT_LAST_CALL_TIMEOUT
         ),
     )
-    return EtcdRendezvousHandler(rdzv_impl=rdzv)
+    return EtcdRendezvousHandler(
+        rdzv_impl=rdzv,
+        local_addr=params.local_addr,
+    )

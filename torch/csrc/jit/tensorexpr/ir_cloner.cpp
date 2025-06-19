@@ -116,7 +116,7 @@ ExprPtr IRCloner::mutate(const CompareSelectPtr& v) {
   ExprPtr IRCloner::mutate(const Name##ImmPtr& v) { \
     return v;                                       \
   }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DEFINE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DEFINE)
 #undef IMM_MUTATE_DEFINE
 
 ExprPtr IRCloner::mutate(const CastPtr& v) {

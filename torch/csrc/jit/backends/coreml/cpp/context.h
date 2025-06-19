@@ -1,13 +1,9 @@
 #ifndef PTM_COREML_Context_h
 #define PTM_COREML_Context_h
 
-#include <atomic>
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace mobile {
-namespace coreml {
+namespace torch::jit::mobile::coreml {
 
 struct ContextInterface {
   virtual ~ContextInterface() = default;
@@ -21,9 +17,6 @@ class BackendRegistrar {
 
 void setModelCacheDirectory(std::string path);
 
-} // namespace coreml
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile::coreml
 
 #endif

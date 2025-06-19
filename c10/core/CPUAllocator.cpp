@@ -11,7 +11,7 @@
 C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
     false,
-    "If set, print out detailed memory usage");
+    "If set, print out detailed memory usage")
 
 namespace c10 {
 
@@ -75,9 +75,6 @@ ProfiledCPUMemoryReporter& profiledCPUMemoryReporter() {
 template <uint32_t PreGuardBytes, uint32_t PostGuardBytes>
 class DefaultMobileCPUAllocator final : public at::Allocator {
  public:
-  DefaultMobileCPUAllocator() = default;
-  ~DefaultMobileCPUAllocator() override = default;
-
   static void deleter(void* const pointer) {
     if (C10_UNLIKELY(!pointer)) {
       return;
@@ -114,8 +111,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
 
     auto alloc_size = PreGuardBytes + nbytes + PostGuardBytes;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    void* data;
+    void* data = nullptr;
     auto allocator_ptr = GetThreadLocalCachingAllocator();
     auto profiling_allocator_ptr = GetThreadLocalProfilingAllocator();
     if (allocator_ptr != nullptr) {
@@ -200,7 +196,7 @@ at::Allocator* GetDefaultCPUAllocator() {
   return &g_cpu_alloc;
 }
 
-REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
+REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc)
 
 #endif /* C10_Mobile */
 
@@ -293,7 +289,9 @@ void ProfiledCPUMemoryReporter::OutOfMemory(size_t nbytes) {
   }
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_API at::Allocator* cpu_caching_alloc = nullptr;
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_API uint8_t cpu_caching_alloc_priority = 0;
 
 void SetCPUCachingAllocator(Allocator* alloc, uint8_t priority) {

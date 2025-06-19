@@ -518,7 +518,7 @@ flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
   } else {
     size_t num_attr = class_ptr->numAttributes();
     std::vector<flatbuffers::Offset<flatbuffers::String>> names;
-    std::vector<uint32_t> type_index;
+    names.reserve(num_attr);
     for (size_t i = 0; i < num_attr; ++i) {
       names.push_back(fbb.CreateSharedString(class_ptr->getAttributeName(i)));
     }
@@ -589,6 +589,7 @@ flatbuffers::Offset<mobile::serialization::Object> FlatbufferSerializer::
   } else {
     size_t num_attr = type->numAttributes();
     std::vector<uint32_t> tuple_index;
+    tuple_index.reserve(num_attr);
     for (size_t i = 0; i < num_attr; ++i) {
       tuple_index.push_back(storeIValueAndGetIndex(fbb, obj->getSlot(i)));
     }
@@ -785,7 +786,8 @@ flatbuffers::Offset<mobile::serialization::IValue> FlatbufferSerializer::
                  ival_pos)
                  .Union();
   } else {
-    AT_ERROR("Invalid IValue type for serialization: ", ivalue.tagKind());
+    TORCH_CHECK(
+        false, "Invalid IValue type for serialization: ", ivalue.tagKind());
   }
   return CreateIValue(fbb, ivalue_type, offset);
 }

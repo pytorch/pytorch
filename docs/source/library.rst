@@ -11,7 +11,7 @@ custom operators, and extending operators defined with PyTorch's C++ operator
 registration APIs (e.g. aten operators).
 
 For a detailed guide on effectively using these APIs, please see
-Please see :ref:`custom-ops-landing-page`
+`PyTorch Custom Operators Landing Page <https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html>`_
 for more details on how to effectively use these APIs.
 
 Testing custom ops
@@ -30,16 +30,19 @@ Creating new custom ops in Python
 Use :func:`torch.library.custom_op` to create new custom ops.
 
 .. autofunction:: custom_op
+.. autofunction:: triton_op
+.. autofunction:: wrap_triton
 
 Extending custom ops (created from Python or C++)
 -------------------------------------------------
 
 Use the register.* methods, such as :func:`torch.library.register_kernel` and
-func:`torch.library.register_fake`, to add implementations
+:func:`torch.library.register_fake`, to add implementations
 for any operators (they may have been created using :func:`torch.library.custom_op` or
 via PyTorch's C++ operator registration APIs).
 
 .. autofunction:: register_kernel
+.. autofunction:: register_autocast
 .. autofunction:: register_autograd
 .. autofunction:: register_fake
 .. autofunction:: register_vmap
@@ -51,6 +54,7 @@ via PyTorch's C++ operator registration APIs).
 
     .. automethod:: set_kernel_enabled
 
+
 Low-level APIs
 --------------
 
@@ -61,7 +65,7 @@ operator registration APIs.
    The low-level operator registration APIs and the PyTorch Dispatcher are a
    complicated PyTorch concept. We recommend you use the higher level APIs above
    (that do not require a torch.library.Library object) when possible.
-   This blog post <http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/>`_
+   `This blog post <http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/>`_
    is a good starting point to learn about the PyTorch Dispatcher.
 
 A tutorial that walks you through some examples on how to use this API is available on `Google Colab <https://colab.research.google.com/drive/1RRhSfk7So3Cn02itzLWE9K4Fam-8U011?usp=sharing>`_.

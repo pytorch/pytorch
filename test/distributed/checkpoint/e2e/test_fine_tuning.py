@@ -7,7 +7,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
 import torch.nn as nn
-from torch.distributed._tensor import init_device_mesh
 from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
     get_state_dict,
@@ -15,6 +14,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_state_dict,
     StateDictOptions,
 )
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
@@ -96,7 +96,7 @@ class TestFineTuning(DTensorTestBase):
         optim = torch.optim.Adam(model.parameters(), lr=1e-3)
 
         # Training
-        for i in range(3):
+        for _ in range(3):
             batch = torch.rand(32, DIM, device="cuda")
             loss = model(batch).sum()
             loss.backward()
@@ -106,7 +106,7 @@ class TestFineTuning(DTensorTestBase):
         # Save state_dict
         model_state_dict, optim_state_dict = get_state_dict(model, optimizers=optim)
         saved_state_dict = {"model": model_state_dict, "optim": optim_state_dict}
-        dist_cp.save_state_dict(
+        dist_cp.save(
             state_dict=saved_state_dict,
             storage_writer=dist_cp.FileSystemWriter(pretrain_dir),
         )
@@ -127,7 +127,7 @@ class TestFineTuning(DTensorTestBase):
                 submodules={model.pretrain},
                 options=StateDictOptions(keep_submodule_prefixes=False),
             )
-            dist_cp.load_state_dict(
+            dist_cp.load(
                 {"model": pretrain_state_dict},
                 storage_reader=dist_cp.FileSystemReader(pretrain_dir),
             )
@@ -161,7 +161,7 @@ class TestFineTuning(DTensorTestBase):
                 self.assertEqual(i, 0)
 
             # Training
-            for j in range(3):
+            for _ in range(3):
                 batch = torch.rand(32, DIM, device="cuda")
                 loss = model(batch).sum()
                 loss.backward()
@@ -175,7 +175,7 @@ class TestFineTuning(DTensorTestBase):
                 options=StateDictOptions(ignore_frozen_params=True),
             )
             saved_state_dict = {"model": model_state_dict, "optim": optim_state_dict}
-            dist_cp.save_state_dict(
+            dist_cp.save(
                 state_dict=saved_state_dict,
                 storage_writer=dist_cp.FileSystemWriter(finetune_dir),
             )

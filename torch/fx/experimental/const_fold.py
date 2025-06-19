@@ -1,13 +1,18 @@
 # mypy: allow-untyped-defs
 import re
-from typing import Callable, Dict, Optional, Set, Union
+from typing import Callable, Optional, Union
 
 import torch.fx
 from torch.fx.node import map_arg
 from torch.fx.passes.split_module import split_module
 
 
-__all__ = ['FoldedGraphModule', 'get_unique_attr_name_in_module', 'split_const_subgraphs']
+__all__ = [
+    "FoldedGraphModule",
+    "get_unique_attr_name_in_module",
+    "split_const_subgraphs",
+]
+
 
 class FoldedGraphModule(torch.fx.GraphModule):
     """
@@ -93,7 +98,9 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
     # Now actually do the swap. Note that we have to keep track of new nodes that are
     # copied into `gm` -- we do this via replacement_mapping.
     call_mod_args = call_mod_node_to_replace.args
-    replacement_mapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    call_mod_kwargs = call_mod_node_to_replace.kwargs
+
+    replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
     ph_count = 0
 
     def replacement_fn(node):
@@ -103,7 +110,12 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
 
     for inline_node in inline_mod.graph.nodes:
         if inline_node.op == "placeholder":
-            replacement_mapping[inline_node] = call_mod_args[ph_count]
+            replacement_mapping[inline_node] = (
+                call_mod_kwargs[inline_node.name]
+                if inline_node.name in call_mod_kwargs
+                else call_mod_args[ph_count]
+            )
+
             ph_count += 1
             continue
 
@@ -159,7 +171,7 @@ def split_const_subgraphs(
 
     # Build up a list of const_nodes, defined as nodes that are themselves
     # get_attrs, or have all get_attr or other constant node inputs.
-    const_nodes: Set[torch.fx.Node] = set()
+    const_nodes: set[torch.fx.Node] = set()
     found_const_folding = False
     for node in mod_traced.graph.nodes:
         # Skip over placeholders/outputs because they can't be const folded and
@@ -240,13 +252,20 @@ def split_const_subgraphs(
     #    %add : [num_users=1] = call_function[target=operator.add](args = (%inp_1, %inp_1), kwargs = {})
     #    return add
     root_const_gm = torch.fx.GraphModule(split, const_gm.graph)
+
+    # The order of placeholders in the const_gm graph should match the order of
+    # args in the outer module, so we can simply use an index for the
+    # placeholder mapping
+    ph_idx = 0
     for node in root_const_gm.graph.nodes:
         if node.op == "output":
             multiple_outputs = isinstance(node.args[0], tuple)
             continue
         if node.op != "placeholder":
             continue
-        in_node = next(n for n in call_const_gm_args if n.name == node.target)
+        assert ph_idx < len(call_const_gm_args)
+        in_node = call_const_gm_args[ph_idx]
+        ph_idx += 1
         assert in_node.op == "get_attr"
         with root_const_gm.graph.inserting_before(node):
             new_node = root_const_gm.graph.get_attr(in_node.target)

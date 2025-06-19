@@ -10,13 +10,10 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 #endif
 
-#if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
 #if defined(CL_SYCL_LANGUAGE_VERSION)
 #include <CL/sycl.hpp> // for SYCL 1.2.1
-#else
+#elif defined(SYCL_LANGUAGE_VERSION)
 #include <sycl/sycl.hpp> // for SYCL 2020
-#endif
-#include <ext/oneapi/bfloat16.hpp>
 #endif
 
 namespace c10 {
@@ -57,24 +54,6 @@ inline C10_HOST_DEVICE BFloat16::operator __nv_bfloat16() const {
   return *reinterpret_cast<const __nv_bfloat16*>(&x);
 }
 #endif
-#if defined(__HIPCC__) && defined(USE_ROCM)
-// 6.2.0 introduced __hip_bfloat16_raw
-#if defined(__BF16_HOST_DEVICE__)
-inline C10_HOST_DEVICE BFloat16::BFloat16(const __hip_bfloat16& value) {
-  x = __hip_bfloat16_raw(value).x;
-}
-inline C10_HOST_DEVICE BFloat16::operator __hip_bfloat16() const {
-  return __hip_bfloat16(__hip_bfloat16_raw{x});
-}
-#else // !defined(__BF16_HOST_DEVICE__)
-inline C10_HOST_DEVICE BFloat16::BFloat16(const __hip_bfloat16& value) {
-  x = value.data;
-}
-inline C10_HOST_DEVICE BFloat16::operator __hip_bfloat16() const {
-  return __hip_bfloat16{x};
-}
-#endif // !defined(__BF16_HOST_DEVICE__)
-#endif // defined(__HIPCC__) && defined(USE_ROCM)
 
 #if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
 inline C10_HOST_DEVICE BFloat16::BFloat16(

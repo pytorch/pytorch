@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <c10/macros/Export.h>
@@ -107,110 +108,128 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   }
   virtual SymNode neg() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode sym_min(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode sym_max(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode sym_or(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode sym_and(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode sym_not() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode sym_ite(const SymNode& then_val, const SymNode& else_val) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   // NB: self is ignored here, only the arguments are used
   virtual SymNode is_contiguous(
       ArrayRef<SymNode> sizes,
       ArrayRef<SymNode> strides) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode is_channels_last_contiguous_2d(
       ArrayRef<SymNode> sizes,
       ArrayRef<SymNode> strides) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode is_channels_last_contiguous_3d(
       ArrayRef<SymNode> sizes,
       ArrayRef<SymNode> strides) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode is_channels_last_strides_2d(
       ArrayRef<SymNode> sizes,
       ArrayRef<SymNode> strides) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode is_channels_last_strides_3d(
       ArrayRef<SymNode> sizes,
       ArrayRef<SymNode> strides) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode is_non_overlapping_and_dense(
       ArrayRef<SymNode> sizes,
       ArrayRef<SymNode> strides) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode clone() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode sym_float() {
     TORCH_CHECK(false, "NYI");
   }
   virtual SymNode wrap_int(int64_t num) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode wrap_float(double num) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode wrap_bool(bool num) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual int64_t guard_int(const char* file, int64_t line) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual bool guard_bool(const char* file, int64_t line) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual double guard_float(const char* file, int64_t line) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual bool guard_size_oblivious(const char* file, int64_t line) {
     // No improvement for unbacked SymBools by default, replace this
     // with a better implementation!
+    return guard_bool(file, line);
+  }
+  virtual bool guard_or_false(const char* file, int64_t line) {
+    // Note: PT2 primarily uses PythonSymNodeImpl for this functionality.
+    // XLA is currently the main consumer of this fallback path since it uses
+    // ahead-of-time compilation and cannot depend on Python runtime.
+    return guard_bool(file, line);
+  }
+  virtual bool statically_known_true(const char* file, int64_t line) {
+    // Note: PT2 primarily uses PythonSymNodeImpl for this functionality.
+    // XLA is currently the main consumer of this fallback path since it uses
+    // ahead-of-time compilation and cannot depend on Python runtime.
+    return guard_bool(file, line);
+  }
+  virtual bool guard_or_true(const char* file, int64_t line) {
+    // Note: PT2 primarily uses PythonSymNodeImpl for this functionality.
+    // XLA is currently the main consumer of this fallback path since it uses
+    // ahead-of-time compilation and cannot depend on Python runtime.
     return guard_bool(file, line);
   }
   virtual bool expect_true(const char* file, int64_t line) {
     // No improvement for unbacked SymBools by default, replace this
     // with a better implementation!
     return guard_bool(file, line);
-  };
+  }
   virtual bool expect_size(const char* file, int64_t line) {
     // No improvement for unbacked SymInts by default, replace this
     // with a better implementation!
     return ge(wrap_int(0))->guard_bool(file, line);
-  };
+  }
   virtual int64_t int_() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual bool bool_() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual bool has_hint() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual std::string _graph_repr() {
     return str();
-  };
+  }
   virtual std::optional<int64_t> nested_int() {
     return std::nullopt;
   }
@@ -239,5 +258,4 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
 };
 
 } // namespace c10
-
-C10_CLANG_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()

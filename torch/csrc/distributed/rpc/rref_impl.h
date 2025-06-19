@@ -29,10 +29,15 @@ constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
 
 // Represents fork of an RRef to be sent over the wire.
 struct TORCH_API RRefForkData {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const worker_id_t ownerId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const RRefId rrefId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const ForkId forkId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const worker_id_t parent_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::string typeStr_;
 
   RRefForkData(

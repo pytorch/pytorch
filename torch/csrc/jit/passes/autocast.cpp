@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
+#include <atomic>
 #include <optional>
 
 #include <stack>
@@ -17,7 +18,7 @@ namespace torch::jit {
 
 namespace {
 
-bool autocast_enabled = true;
+std::atomic<bool> autocast_enabled = true;
 
 struct AutocastContext {
   bool gpu_enabled = false;
@@ -108,7 +109,7 @@ std::optional<AutocastScope> parseAutocast(
     TORCH_CHECK(
         dtype != c10::ScalarType::Undefined,
         "Autocast has invalid fast_dtype attribute");
-    if (device == "cuda") {
+    if (device == "cuda" || device == "mps") {
       scope.context.gpu_enabled = enabled.value();
       scope.context.gpu_scalar_type = dtype;
     } else if (device == "cpu") {
@@ -131,7 +132,7 @@ std::optional<AutocastScope> parseAutocast(
     //
     // TODO: better error message
     //
-    AT_ERROR("Unsupported autocast syntax");
+    TORCH_CHECK(false, "Unsupported autocast syntax");
   }
 
   return std::nullopt;
@@ -330,7 +331,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
                 parseAutocast(node->input(), current_state())) {
           if (node->hasUses()) {
             // TODO: better error message
-            AT_ERROR("`with autocast() as ...` is not supported");
+            TORCH_CHECK(false, "`with autocast() as ...` is not supported");
           }
           TORCH_INTERNAL_ASSERT(
               !incompatible_amp.has_value() || !incompatible_amp.value(),
@@ -492,7 +493,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       // Banned in autocast, see binary_cross_entropy_banned()
       case aten::binary_cross_entropy:
         if (current_state()) {
-          AT_ERROR("Unsafe to autocast");
+          TORCH_CHECK(false, "Unsafe to autocast");
         }
     }
 
@@ -509,9 +510,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
 } // namespace
 
 bool setAutocastMode(bool value) {
-  auto old_value = autocast_enabled;
-  autocast_enabled = value;
-  return old_value;
+  return autocast_enabled.exchange(value);
 }
 
 bool autocastEnabled() {

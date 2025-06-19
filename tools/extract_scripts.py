@@ -6,13 +6,13 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from typing_extensions import TypedDict  # Python 3.11+
 
 import yaml
 
 
-Step = Dict[str, Any]
+Step = dict[str, Any]
 
 
 class Script(TypedDict):
@@ -42,7 +42,7 @@ def extract(step: Step) -> Script | None:
             "bash": f"#!/usr/bin/env bash\nset -eo pipefail\n{run}",
             "sh": f"#!/usr/bin/env sh\nset -e\n{run}",
         }.get(shell, run)
-        return {"extension": extension, "script": script}
+        return {"extension": extension, "script": script}  # type: ignore[typeddict-item]
     elif is_gh_script and gh_script is not None:
         return {"extension": ".js", "script": gh_script}
     else:

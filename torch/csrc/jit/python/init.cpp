@@ -77,6 +77,7 @@
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
+#include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
@@ -162,7 +163,8 @@ std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
 }
 } // anonymous namespace
 
-#if !defined(USE_ROCM)
+#if defined(BUILDING_TESTS) && !defined(USE_ROCM)
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 TORCH_API void runJITCPPTests();
 #endif
 
@@ -291,6 +293,9 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) {
             return EliminateDeadCode(g->block()); // overload resolution
           })
+      .def(
+          "_jit_pass_dce_graph",
+          [](std::shared_ptr<Graph>& g) { return EliminateDeadCode(g); })
       .def(
           "_jit_pass_dce_allow_deleting_nodes_with_side_effects",
           [](std::shared_ptr<Graph>& g) {
@@ -1389,28 +1394,46 @@ void initJITBindings(PyObject* module) {
           "fallback", [](GraphExecutorState& s) { return s.fallback; });
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
-      .def(py::init<std::string>())
-      .def(py::init([](const py::object& buffer) {
-        auto writer_func = [=](const void* data, size_t size) {
-          // Writing an empty file is a noop
-          if (size == 0) {
-            return size;
-          }
-          py::gil_scoped_acquire acquire;
-          if (!data) {
-            // See [Note: write_record_metadata]
-            buffer.attr("seek")(
-                size, py::module::import("os").attr("SEEK_CUR"));
-          } else {
-            auto memory_view = py::memoryview::from_memory(
-                reinterpret_cast<const char*>(data), size);
-            buffer.attr("write")(std::move(memory_view));
-          }
-          return size;
-        };
-        return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
-      }))
-      .def(py::init<const std::function<size_t(const void*, size_t)>&>())
+      .def(
+          py::init<std::string, bool, uint64_t>(),
+          py::arg("file_name"),
+          py::arg("compute_crc32") = true,
+          py::arg("storage_alignment") = 64)
+      .def(
+          py::init([](const py::object& buffer,
+                      bool compute_crc32 = true,
+                      uint64_t storage_alignment = 64) {
+            auto writer_func = [=](const void* data, size_t size) {
+              // Writing an empty file is a noop
+              if (size == 0) {
+                return size;
+              }
+              py::gil_scoped_acquire acquire;
+              if (!data) {
+                // See [Note: write_record_metadata]
+                buffer.attr("seek")(
+                    size, py::module::import("os").attr("SEEK_CUR"));
+              } else {
+                auto memory_view = py::memoryview::from_memory(
+                    reinterpret_cast<const char*>(data), size);
+                buffer.attr("write")(std::move(memory_view));
+              }
+              return size;
+            };
+            return std::make_unique<PyTorchStreamWriter>(
+                std::move(writer_func), compute_crc32, storage_alignment);
+          }),
+          py::arg("buffer"),
+          py::arg("compute_crc32") = true,
+          py::arg("storage_alignment") = 64)
+      .def(
+          py::init<
+              const std::function<size_t(const void*, size_t)>&,
+              bool,
+              uint64_t>(),
+          py::arg("writer_func"),
+          py::arg("compute_crc32") = true,
+          py::arg("storage_alignment") = 64)
       // [Note: write_record_metadata]
       // The write_record_metadata function is intended to write metadata (i.e.
       // the zipfile header and end of central directory record) for a file
@@ -1504,7 +1527,7 @@ void initJITBindings(PyObject* module) {
       // Jump to the end of the buffer to get its size
       auto current = buffer.attr("tell")();
       start_offset_ = py::cast<size_t>(current);
-      buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
+      buffer.attr("seek")(0, py::module::import("os").attr("SEEK_END"));
       size_ = py::cast<size_t>(buffer.attr("tell")()) - start_offset_;
       buffer.attr("seek")(current);
       // If we can read directly into a buffer, do that instead of an extra copy
@@ -1609,6 +1632,21 @@ void initJITBindings(PyObject* module) {
           "get_record_offset",
           [](PyTorchStreamReader& self, const std::string& key) {
             return self.getRecordOffset(key);
+          })
+      .def(
+          "get_record_header_offset",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordHeaderOffset(key);
+          })
+      .def(
+          "get_record_offset_no_read",
+          [](PyTorchStreamReader& self,
+             size_t zipfile_header_offset,
+             const std::string& filename,
+             size_t size,
+             uint64_t storage_alignment) {
+            return self.getRecordOffsetNoRead(
+                zipfile_header_offset, filename, size, storage_alignment);
           });
 
   // Used by torch.Package to coordinate deserialization of storages across
@@ -1685,14 +1723,12 @@ void initJITBindings(PyObject* module) {
                                        c10::DispatchKey dk_,
                                        const py::args& args,
                                        const py::kwargs& kwargs) {
-                    std::optional<c10::DispatchKey> dk =
-                        std::make_optional(dk_);
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk);
+                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk_);
                   });
-              return std::make_optional(
-                  py::make_tuple(func, func_dk, py::cast(op->getTags().vec())));
+              return py::make_tuple(
+                  func, func_dk, py::cast(op->getTags().vec()));
             }
           }
           return std::nullopt;
@@ -1716,13 +1752,13 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_jit_resolve_packet",
-      [](const char* op_name, py::args args, const py::kwargs& kwargs) {
+      [](const char* op_name, const py::args& args, const py::kwargs& kwargs) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
           const auto overloads = getAllSortedOperatorsFor(symbol);
-          auto opWithStack = getOpWithStack(overloads, std::move(args), kwargs);
+          auto opWithStack = getOpWithStack(overloads, args, kwargs);
           std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
           auto result = overload->schema().overload_name();
           if (result.empty()) {
@@ -1905,6 +1941,13 @@ void initJITBindings(PyObject* module) {
         self.addArgumentValues(value_map);
       });
   py::class_<FunctionSchema>(m, "FunctionSchema")
+      .def(py::init<
+           std::string,
+           std::string,
+           std::vector<Argument>,
+           std::vector<Argument>,
+           bool,
+           bool>())
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
       .def_property_readonly(
@@ -1962,6 +2005,13 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly(
           "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
   py::class_<Argument>(m, "Argument")
+      .def(py::init<
+           std::string,
+           const TypePtr&,
+           std::optional<int32_t>,
+           std::optional<IValue>,
+           bool,
+           std::optional<AliasInfo>>())
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
       .def_property_readonly(
@@ -1988,11 +2038,20 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly(
           "alias_info", [](Argument& self) { return self.alias_info(); })
       .def_property_readonly(
+          "is_write",
+          [](Argument& self) {
+            if (self.alias_info() == nullptr) {
+              return false;
+            }
+            return self.alias_info()->isWrite();
+          })
+      .def_property_readonly(
           "is_out", [](Argument& self) { return self.is_out(); })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();
       });
   py::class_<AliasInfo>(m, "_AliasInfo")
+      .def(py::init<bool, std::set<std::string>, std::set<std::string>>())
       .def_property_readonly(
           "is_write", [](AliasInfo& self) { return self.isWrite(); })
       .def_property_readonly(
@@ -2085,7 +2144,7 @@ void initJITBindings(PyObject* module) {
                 return py::make_tuple();
               },
               /* __setstate__ */
-              [](const py::tuple& /* unused */) { // NOLINT
+              [](const py::tuple& /* unused */) {
                 TORCH_CHECK(false, "Can not unpickle torch.futures.Future");
                 // Note that this return has no meaning since we always
                 // throw, it's only here to satisfy PyBind's API
@@ -2122,7 +2181,7 @@ void initJITBindings(PyObject* module) {
                 return py::make_tuple();
               },
               /* __setstate__ */
-              [](const py::tuple& /* unused */) { // NOLINT
+              [](const py::tuple& /* unused */) {
                 TORCH_CHECK(false, "Can not unpickle torch.jit._Await");
                 // Note that this return has no meaning since we always
                 // throw, it's only here to satisfy PyBind's API

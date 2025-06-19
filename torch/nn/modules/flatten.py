@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Tuple, Union
+from typing import Union
 
 from torch import Tensor
 from torch.types import _size
@@ -96,14 +96,14 @@ class Unflatten(Module):
         >>> output.size()
         torch.Size([2, 2, 5, 5])
         >>> # With namedshape (tuple of tuples)
-        >>> input = torch.randn(2, 50, names=('N', 'features'))
-        >>> unflatten = nn.Unflatten('features', (('C', 2), ('H', 5), ('W', 5)))
+        >>> input = torch.randn(2, 50, names=("N", "features"))
+        >>> unflatten = nn.Unflatten("features", (("C", 2), ("H", 5), ("W", 5)))
         >>> output = unflatten(input)
         >>> output.size()
         torch.Size([2, 2, 5, 5])
     """
 
-    NamedShape = Tuple[Tuple[str, int]]
+    NamedShape = tuple[tuple[str, int]]
 
     __constants__ = ["dim", "unflattened_size"]
     dim: Union[int, str]

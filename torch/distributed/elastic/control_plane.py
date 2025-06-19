@@ -1,6 +1,6 @@
 import os
+from collections.abc import Generator
 from contextlib import contextmanager, ExitStack
-from typing import Generator
 
 from torch.distributed.elastic.multiprocessing.errors import record
 
@@ -23,8 +23,8 @@ def _worker_server(socket_path: str) -> Generator[None, None, None]:
         server.shutdown()
 
 
-@contextmanager
 @record
+@contextmanager
 def worker_main() -> Generator[None, None, None]:
     """
     This is a context manager that wraps your main entry function. This combines
@@ -40,8 +40,9 @@ def worker_main() -> Generator[None, None, None]:
      def main():
          pass
 
-     if __name__=="__main__":
-        main()
+
+     if __name__ == "__main__":
+         main()
 
     """
     with ExitStack() as stack:

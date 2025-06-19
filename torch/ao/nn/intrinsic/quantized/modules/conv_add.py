@@ -19,6 +19,7 @@ class ConvAdd2d(nnq.Conv2d):
         Same as torch.ao.nn.quantized.Conv2d
 
     """
+
     _FLOAT_MODULE = torch.ao.nn.intrinsic.ConvAdd2d  # type: ignore[assignment]
 
     def __init__(
@@ -49,7 +50,7 @@ class ConvAdd2d(nnq.Conv2d):
             dtype=dtype,
         )
 
-    def forward(self, input, extra_input):
+    def forward(self, input, extra_input):  # type: ignore[override]
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
@@ -67,7 +68,7 @@ class ConvAdd2d(nnq.Conv2d):
         return "QuantizedConvAdd2d"
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -87,6 +88,7 @@ class ConvAddReLU2d(nnq.Conv2d):
         Same as torch.ao.nn.quantized.Conv2d
 
     """
+
     _FLOAT_MODULE = torch.ao.nn.intrinsic.ConvAddReLU2d  # type: ignore[assignment]
 
     def __init__(
@@ -117,7 +119,7 @@ class ConvAddReLU2d(nnq.Conv2d):
             dtype=dtype,
         )
 
-    def forward(self, input, extra_input):
+    def forward(self, input, extra_input):  # type: ignore[override]
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
@@ -135,7 +137,7 @@ class ConvAddReLU2d(nnq.Conv2d):
         return "QuantizedConvAddReLU2d"
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )

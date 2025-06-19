@@ -52,11 +52,28 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
             get_tensor(input.dtype(), {}));
 }
 
+at::Tensor maia_to_dtype_override(
+  const at::Tensor & self, at::ScalarType dtype, bool non_blocking,
+  bool copy, ::std::optional<at::MemoryFormat> memory_format
+) {
+  return get_tensor(scalarTypeToTypeMeta(dtype), self.sizes());
+}
+
+at::Tensor maia_matmul_override(const at::Tensor & self, const at::Tensor & other) {
+  AT_ASSERT(self.dim() == 2);
+  AT_ASSERT(other.dim() == 2);
+  AT_ASSERT(self.dtype() == other.dtype());
+  AT_ASSERT(self.device() == other.device());
+  return get_tensor(self.dtype(), {self.size(0), other.size(1)});
+}
+
 TORCH_LIBRARY_IMPL(aten, MAIA, m) {
   m.impl("empty.memory_format",                empty_override);
   m.impl("add.out",                            add_out_override);
   m.impl("convolution_overrideable",           fake_convolution);
   m.impl("convolution_backward_overrideable",  fake_convolution_backward);
+  m.impl("to.dtype",                           maia_to_dtype_override);
+  m.impl("matmul",                             maia_matmul_override);
 }
 
 // TODO: Extend this to exercise multi-device setting.  In that case,

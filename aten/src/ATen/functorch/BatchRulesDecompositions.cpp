@@ -23,6 +23,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   OP_DECOMPOSE(dropout_);
   OP_DECOMPOSE(feature_alpha_dropout_);
   OP_DECOMPOSE(feature_dropout_);
+  OP_DECOMPOSE(dropout);
+  OP_DECOMPOSE(_scaled_dot_product_attention_math);
+  OP_DECOMPOSE(scaled_dot_product_attention);
 }
 
 static void unsupportedData(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
@@ -190,6 +193,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(_lu_with_info);
   OP_DECOMPOSE(matmul);
   OP_DECOMPOSE(matrix_H);
+  OP_DECOMPOSE(matrix_exp);
   OP_DECOMPOSE(matrix_power);
   OP_DECOMPOSE2(max, other );
   OP_DECOMPOSE(max_pool1d);
@@ -227,7 +231,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("reshape", native::reshape_symint);
   OP_DECOMPOSE(resolve_conj);
   OP_DECOMPOSE(resolve_neg);
-  OP_DECOMPOSE(rms_norm);
+  m.impl("rms_norm", native::rms_norm_symint);
   OP_DECOMPOSE(row_stack);
   OP_DECOMPOSE(rrelu);
   OP_DECOMPOSE(rrelu_);
@@ -235,7 +239,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(relu6_);
   OP_DECOMPOSE(prelu);
   OP_DECOMPOSE2(softmax, int);
-  OP_DECOMPOSE(scaled_dot_product_attention);
   OP_DECOMPOSE(special_gammainc);
   OP_DECOMPOSE(special_gammaincc);
   OP_DECOMPOSE(special_logit);
@@ -261,7 +264,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(special_xlogy);
   OP_DECOMPOSE2(special_xlogy, other_scalar);
   OP_DECOMPOSE2(special_xlogy, self_scalar);
-  OP_DECOMPOSE(_scaled_dot_product_attention_math);
 
 
   m.impl("split.sizes", native::split_symint);
@@ -386,6 +388,11 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(to, dtype);
   OP_DECOMPOSE2(to, dtype_layout);
   OP_DECOMPOSE2(to, other);
+
+  // Random ops that are also registered here
+  OP_DECOMPOSE(dropout);
+  OP_DECOMPOSE(_scaled_dot_product_attention_math);
+  OP_DECOMPOSE(scaled_dot_product_attention);
 }
 
 } // namespace at::functorch

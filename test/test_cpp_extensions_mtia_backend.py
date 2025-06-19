@@ -1,8 +1,6 @@
 # Owner(s): ["module: mtia"]
 
 import os
-import shutil
-import sys
 import tempfile
 import unittest
 
@@ -23,15 +21,6 @@ from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 # define TEST_ROCM before changing TEST_CUDA
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
-
-
-def remove_build_path():
-    if sys.platform == "win32":
-        # Not wiping extensions build folder because Windows
-        return
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
-    if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root, ignore_errors=True)
 
 
 @unittest.skipIf(
@@ -58,11 +47,11 @@ class TestCppExtensionMTIABackend(common.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
         build_dir = tempfile.mkdtemp()
         # Load the fake device guard impl.
         cls.module = torch.utils.cpp_extension.load(

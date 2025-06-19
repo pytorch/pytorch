@@ -37,25 +37,30 @@ std::string ExcludeFileExtension(const std::string& file_name) {
 
 // Narrows the wstr argument and then passes it to _str.
 // Assumes that the input (wide) text is encoded as UTF-16.
-std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString);
+static std::ostream& _strFromWide(
+    std::ostream& ss,
+    const std::wstring& wString);
 
 #ifndef _WIN32
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 // TODO (huydhn) https://en.cppreference.com/w/cpp/header/codecvt has been
 // deprecated in C++17 but there is no alternative yet, so I just ack it
-std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString) {
+static std::ostream& _strFromWide(
+    std::ostream& ss,
+    const std::wstring& wString) {
   std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
   return _str(ss, converter.to_bytes(wString));
 }
-#pragma GCC diagnostic pop
+C10_DIAGNOSTIC_POP()
 
 #else // #ifndef _WIN32
 // The WIN32 implementation of wstring_convert leaks memory; see
 // https://github.com/microsoft/STL/issues/443
 
-std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString) {
+static std::ostream& _strFromWide(
+    std::ostream& ss,
+    const std::wstring& wString) {
   return _str(ss, u16u8(wString));
 }
 
@@ -78,7 +83,7 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
   return out;
 }
 
-size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
+size_t ReplaceAll(std::string& s, std::string_view from, std::string_view to) {
   if (from.empty()) {
     return 0;
   }
@@ -87,7 +92,7 @@ size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
   std::string::size_type last_pos = 0u;
   std::string::size_type cur_pos = 0u;
   std::string::size_type write_pos = 0u;
-  const c10::string_view input(s);
+  const std::string_view input(s);
 
   if (from.size() >= to.size()) {
     // If the replacement string is not larger than the original, we
@@ -141,4 +146,73 @@ size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
   return numReplaced;
 }
 
+template <>
+std::optional<int64_t> tryToNumber<int64_t>(const std::string& symbol) {
+  return tryToNumber<int64_t>(symbol.c_str());
+}
+
+template <>
+std::optional<int64_t> tryToNumber<int64_t>(const char* symbol) {
+  // TODO Using strtoll for portability. Consider using std::from_chars in the
+  // future. According to https://libcxx.llvm.org/Status/Cxx17.html,
+  // std::from_chars is not supported until clang 20. We will need MSVC to also
+  // fully support std::from_chars.
+  if (!symbol) {
+    return std::nullopt;
+  }
+  char* end = nullptr;
+  errno = 0;
+  int64_t value = strtoll(symbol, &end, 0);
+  if (errno != 0) {
+    errno = 0;
+    return std::nullopt;
+  }
+  if (*end != '\0' || end == symbol) {
+    return std::nullopt;
+  }
+  return value;
+}
+
+template <>
+std::optional<double> tryToNumber<double>(const std::string& symbol) {
+  return tryToNumber<double>(symbol.c_str());
+}
+
+template <>
+std::optional<double> tryToNumber<double>(const char* symbol) {
+  // TODO Using strtod for portability. Consider using std::from_chars in the
+  // future. According to https://libcxx.llvm.org/Status/Cxx17.html,
+  // std::from_chars is not supported until clang 20. We will need MSVC to also
+  // fully support std::from_chars.
+  if (!symbol) {
+    return std::nullopt;
+  }
+  char* end = nullptr;
+  errno = 0;
+  double value = strtod(symbol, &end);
+  if (errno != 0) {
+    errno = 0;
+    return std::nullopt;
+  }
+  if (*end != '\0' || end == symbol) {
+    return std::nullopt;
+  }
+  return value;
+}
+
+std::vector<std::string_view> split(std::string_view target, char delimiter) {
+  std::vector<std::string_view> atoms;
+  std::string_view buffer = target;
+  while (!buffer.empty()) {
+    auto i = buffer.find(delimiter);
+    if (i == std::string_view::npos) {
+      atoms.push_back(buffer);
+      buffer.remove_prefix(buffer.size());
+    } else {
+      atoms.push_back(buffer.substr(0, i));
+      buffer.remove_prefix(i + 1);
+    }
+  }
+  return atoms;
+}
 } // namespace c10

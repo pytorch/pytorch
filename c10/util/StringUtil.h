@@ -3,12 +3,15 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/string_utils.h>
-#include <c10/util/string_view.h>
 
 #include <cstddef>
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <type_traits>
+#include <vector>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
@@ -49,13 +52,33 @@ inline std::ostream& _str(std::ostream& ss) {
   return ss;
 }
 
+template <class T, class = std::ostream&>
+struct Streamable : std::false_type {};
+
+template <class T>
+struct Streamable<T, decltype(std::declval<std::ostream&>() << T{})>
+    : std::true_type {};
+
 template <typename T>
 inline std::ostream& _str(std::ostream& ss, const T& t) {
-  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-  ss << t;
-  return ss;
+  if constexpr (std::is_enum_v<T> && !Streamable<T>::value) {
+    // NOLINTNEXTLINE(modernize-type-traits)
+    return _str(ss, static_cast<typename std::underlying_type<T>::type>(t));
+  } else {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+    ss << t;
+    return ss;
+  }
 }
 
+template <typename T>
+inline std::ostream& _str(std::ostream& ss, const std::optional<T>& t) {
+  if (t.has_value()) {
+    return _str(ss, t.value());
+  }
+  ss << "std::nullopt";
+  return ss;
+}
 // Overloads of _str for wide types; forces narrowing.
 C10_API std::ostream& _str(std::ostream& ss, const wchar_t* wCStr);
 C10_API std::ostream& _str(std::ostream& ss, const wchar_t& wChar);
@@ -124,13 +147,13 @@ inline std::string Join(const std::string& delimiter, const Container& v) {
   for (auto i = v.begin(); i != v.end(); ++i, --cnt) {
     s << (*i) << (cnt ? delimiter : "");
   }
-  return s.str();
+  return std::move(s).str();
 }
 
 // Replace all occurrences of "from" substring to "to" string.
 // Returns number of replacements
 size_t C10_API
-ReplaceAll(std::string& s, c10::string_view from, c10::string_view to);
+ReplaceAll(std::string& s, std::string_view from, std::string_view to);
 
 /// Represents a location in source code (for debugging).
 struct C10_API SourceLocation {
@@ -146,7 +169,7 @@ inline bool isPrint(char s) {
   return s > 0x1f && s < 0x7f;
 }
 
-inline void printQuotedString(std::ostream& stmt, const string_view str) {
+inline void printQuotedString(std::ostream& stmt, const std::string_view str) {
   stmt << "\"";
   for (auto s : str) {
     switch (s) {
@@ -204,6 +227,34 @@ inline void printQuotedString(std::ostream& stmt, const string_view str) {
   stmt << "\"";
 }
 
+template <typename T>
+std::optional<T> tryToNumber(const char* symbol) = delete;
+template <typename T>
+std::optional<T> tryToNumber(const std::string& symbol) = delete;
+
+/*
+ * Convert a string to a 64 bit integer. Trailing whitespaces are not supported.
+ * Similarly, integer string with trailing characters like "123abc" will be
+ * rejected.
+ */
+template <>
+C10_API std::optional<int64_t> tryToNumber<int64_t>(const char* symbol);
+template <>
+C10_API std::optional<int64_t> tryToNumber<int64_t>(const std::string& symbol);
+
+/*
+ * Convert a string to a double. Trailing whitespaces are not supported.
+ * Similarly, integer string with trailing characters like "123abc" will
+ * be rejected.
+ */
+template <>
+C10_API std::optional<double> tryToNumber<double>(const char* symbol);
+template <>
+C10_API std::optional<double> tryToNumber<double>(const std::string& symbol);
+
+C10_API std::vector<std::string_view> split(
+    std::string_view target,
+    char delimiter);
 } // namespace c10
 
 C10_CLANG_DIAGNOSTIC_POP()

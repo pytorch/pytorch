@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
 import io
 import os
@@ -15,15 +16,8 @@ from torch.testing import FileCheck
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase, make_global
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 @unittest.skipIf(sys.version_info < (3, 10), "Requires Python 3.10")
@@ -761,7 +755,7 @@ class TestUnion(JitTestCase):
             template,
             "List[str] | List[torch.Tensor]",
             lhs["list_literal_of_mixed"],
-            "none of those types match the types of the" " given list elements",
+            "none of those types match the types of the given list elements",
         )
 
         self._assert_passes(
@@ -789,21 +783,21 @@ class TestUnion(JitTestCase):
             template,
             "int | torch.Tensor",
             lhs["list_literal_empty"],
-            "Expected an Union type annotation with an " "inner List type",
+            "Expected an Union type annotation with an inner List type",
         )
 
         self._assert_raises(
             template,
             "int | torch.Tensor",
             lhs["list_literal_of_tensor"],
-            "Expected an Union type annotation with an " "inner List type",
+            "Expected an Union type annotation with an inner List type",
         )
 
         self._assert_raises(
             template,
             "int | torch.Tensor",
             lhs["list_comprehension_of_tensor"],
-            "Expected an Union type annotation with an " "inner List type",
+            "Expected an Union type annotation with an inner List type",
         )
 
         """
@@ -893,7 +887,7 @@ class TestUnion(JitTestCase):
             template,
             "List[str] | List[torch.Tensor]",
             lhs["dict_literal_empty"],
-            "Expected an Union type annotation with an " "inner Dict type",
+            "Expected an Union type annotation with an inner Dict type",
         )
 
         self._assert_passes(
@@ -977,14 +971,14 @@ class TestUnion(JitTestCase):
             template,
             "int | torch.Tensor",
             lhs["dict_literal_empty"],
-            "Expected an Union type annotation with " "an inner Dict type",
+            "Expected an Union type annotation with an inner Dict type",
         )
 
         self._assert_raises(
             template,
             "int | torch.Tensor",
             lhs["dict_literal_of_str_tensor"],
-            "Expected an Union type annotation with " "an inner Dict type",
+            "Expected an Union type annotation with an inner Dict type",
         )
 
         # See above--string frontend does not support tuple unpacking
@@ -1063,3 +1057,7 @@ class TestUnion(JitTestCase):
         #                    "Dict[str, torch.Tensor] | int",
         #                    lhs["dict_comprehension_of_mixed"],
         #                    "foobar")
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

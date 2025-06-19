@@ -4,7 +4,6 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
-#include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 #include <ATen/NamedTensorUtils.h>
@@ -89,7 +88,7 @@ Tensor binary_cross_entropy_with_logits_hack(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
+  const Tensor& pos_weight = pos_weight_opt.value_or(Tensor());
 
   Tensor loss;
   auto max_val = (-input).clamp_min(0);
@@ -136,7 +135,7 @@ static Tensor make_feature_noise(const Tensor& input) {
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
-  for (C10_UNUSED const auto i : c10::irange(2, input.dim())) {
+  for ([[maybe_unused]] const auto i : c10::irange(2, input.dim())) {
     sizes.push_back(1);
   }
   // NB: THIS WAS CHANGED FROM THE ORIGINAL
@@ -144,7 +143,7 @@ static Tensor make_feature_noise(const Tensor& input) {
 }
 
 static bool is_fused_kernel_acceptable(const Tensor& input, double p) {
-  return (input.is_cuda() || input.is_xpu() || input.is_lazy()) && p > 0 && p < 1 && input.numel() > 0;
+  return (input.is_cuda() || input.is_xpu() || input.is_lazy() || input.is_privateuseone()) && p > 0 && p < 1 && input.numel() > 0;
 }
 
 // NB: sure, we could have used different overloads here, but I would feel insecure

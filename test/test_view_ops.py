@@ -10,9 +10,11 @@ import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
+    dtypesIfMPS,
     instantiate_device_type_tests,
     onlyCPU,
     onlyNativeDeviceTypes,
+    onlyNativeDeviceTypesAnd,
     skipLazy,
     skipMeta,
     skipXLA,
@@ -22,6 +24,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     complex_types,
     floating_and_complex_types_and,
+    integral_types_and,
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
@@ -71,7 +74,7 @@ def _generate_input(shape, dtype, device, with_extremal):
 # TODO: replace this with make_tensor() in common_utils.py
 def _rand_shape(dim, min_size, max_size):
     shape = []
-    for i in range(dim):
+    for _ in range(dim):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
@@ -395,6 +398,9 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypesIfMPS(
+        *integral_types_and(torch.half, torch.bfloat16, torch.bool, torch.float32)
+    )
     def test_view_tensor_split(self, device, dtype):
         a = make_tensor((40, 30), dtype=dtype, device=device, low=-9, high=9)
         a_split_dim0 = a.tensor_split(7, 0)
@@ -434,8 +440,9 @@ class TestViewOps(TestCase):
         t[2, 2, 2] = 7
         self.assertEqual(t_dsplit[1][2, 2, 0], t[2, 2, 2])
 
-    @onlyNativeDeviceTypes
+    @onlyNativeDeviceTypesAnd("mps")
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @dtypesIfMPS(*integral_types_and(torch.half, torch.bool, torch.float32))
     def test_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
 
@@ -989,7 +996,7 @@ class TestViewOps(TestCase):
     # Testing that the generated view_copy kernel and its derivative are implemented correctly
     def test_view_copy(self, device):
         a = torch.randn(4, device=device, requires_grad=True)
-        a_ref = a.clone().detach().requires_grad_()
+        a_ref = a.detach().clone().requires_grad_()
         a_view = a_ref.view(2, 2)
         a_view_copy = torch.view_copy(a, (2, 2))
 
@@ -1539,7 +1546,7 @@ class TestOldViewOps(TestCase):
     def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):
         for ndims in range(0, 5):
             shape = _rand_shape(ndims, min_size=5, max_size=10)
-            for n in range(ndims + 1):
+            for _ in range(ndims + 1):
                 for with_extremal in [False, True]:
                     for contiguous in [False, True]:
                         # Generate Input.
@@ -1988,6 +1995,18 @@ class TestOldViewOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Stride calculation overflowed"):
             x.resize_([0, 4, 2305843009213693952])
 
+    @onlyNativeDeviceTypes
+    def test_as_strided_overflow_storage_offset(self, device):
+        t = torch.randn(2, 3, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.as_strided(t, [1], [1], 2**63 - 1)
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.as_strided(t, [1], [1], 2**61 - 1)
+
     def test_view_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
@@ -2030,7 +2049,7 @@ class TestOldViewOps(TestCase):
         t.col_indices()
 
 
-instantiate_device_type_tests(TestViewOps, globals(), include_lazy=True)
+instantiate_device_type_tests(TestViewOps, globals(), include_lazy=True, allow_mps=True)
 instantiate_device_type_tests(TestOldViewOps, globals())
 
 if __name__ == "__main__":

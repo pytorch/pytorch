@@ -1,11 +1,15 @@
 import contextlib
 import threading
-from typing import Callable, Generator, Iterable, Optional, Union
+from collections.abc import Generator, Iterable
+from typing import Any, Callable, Optional, Union
 
-from .custom_ops import custom_op
+from torch.utils._exposed_in import exposed_in
+
+from .custom_ops import custom_op, CustomOpDef
 from .infer_schema import infer_schema
 
 
+@exposed_in("torch.library")
 def triton_op(
     name: str,
     fn: Optional[Callable] = None,
@@ -16,7 +20,18 @@ def triton_op(
 ) -> Callable:
     """Create a custom operator whose implementation is backed by 1+ triton kernels.
 
-    Use this instead of :func:`torch.library.custom_op` when the implementation
+    This is a more structured way of using triton kernels with PyTorch.
+    Prefer using triton kernels with no ``torch.library`` custom operator wrappers
+    (like :func:`torch.library.custom_op`, :func:`torch.library.triton_op`) because
+    that is simpler;
+    only use :func:`torch.library.custom_op`/:func:`torch.library.triton_op` if you
+    want to create an operator that behaves like PyTorch built-in operators.
+    For example, you may use a ``torch.library`` wrapper API to define the
+    behavior of the triton kernel when passed a tensor subclass or under
+    a TorchDispatchMode.
+
+    Use :func:`torch.library.triton_op` instead of :func:`torch.library.custom_op`
+    when the implementation
     consists of 1+ triton kernels. :func:`torch.library.custom_op` treats
     custom operators as opaque (:func:`torch.compile` and
     :func:`torch.export.export` will never trace into them), but ``triton_op``
@@ -25,7 +40,7 @@ def triton_op(
 
     Note that ``fn`` must only consist of calls to PyTorch-understood
     operators and triton kernels. Any triton kernels called inside ``fn``
-    must be wrapped in a call to :func:`torch._library.capture_triton``.
+    must be wrapped in a call to :func:`torch.library.wrap_triton`.
 
     Args:
         name (str): A name for the custom op that looks like "{namespace}::{name}",
@@ -46,7 +61,7 @@ def triton_op(
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
-        >>> from torch._library import triton_op, capture_triton
+        >>> from torch.library import triton_op, wrap_triton
         >>>
         >>> import triton
         >>> from triton import language as tl
@@ -76,8 +91,8 @@ def triton_op(
         >>>     def grid(meta):
         >>>         return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
         >>>
-        >>>     # NB: we need to wrap the triton kernel in a call to capture_triton
-        >>>     capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+        >>>     # NB: we need to wrap the triton kernel in a call to wrap_triton
+        >>>     wrap_triton(add_kernel)[grid](x, y, output, n_elements, 16)
         >>>     return output
         >>>
         >>> @torch.compile
@@ -92,11 +107,11 @@ def triton_op(
 
     """
 
-    def dec(fn: Callable) -> Callable:
+    def dec(fn: Callable[..., object]) -> CustomOpDef:
         def backend_fn(*args, **kwargs):  # type: ignore[no-untyped-def]
             # Optimization: we're passing regular Tensors into the triton kernel, so
             # no need to go through HOP dispatch
-            with set_capture_triton_enabled(False):
+            with set_wrap_triton_enabled(False):
                 return fn(*args, **kwargs)
 
         result = custom_op(
@@ -116,14 +131,32 @@ def triton_op(
         # - With torch.compile, this means that the backend (usually Inductor)
         #   can see a call to the triton kernel(s) and so it can directly optimize
         #   them by inlining them into the lowering process.
-        # - With post-dispatch torch.export, this means that there will
-        #   be a call(s) to the triton_kernel_wrapper_functional HOP in the
-        #   graph (that we have yet to figure out how to serialize).
         def functional_decomp(  # type: ignore[no-untyped-def]
-            mode, _, types, args, kwargs
+            mode, op, types, args, kwargs
         ):
-            with mode:
-                return fn(*args, **kwargs)
+            # NOTE [Export custom triton op]
+            # For torch.export (strict and non-strict), we don't do functional decomposition.
+            # Instead, we preserve the custom triton ops as custom ops. This is because we want
+            # the exported program to be high-level and serializable. If we decompose
+            # the custom op to a functional hop and make it a node in exported program,
+            # we need to figure out ways of serializing the hop and its arguments, which can be triton.jited
+            # functions and triton dtypes. This is undesireble because:
+            # - it can be tedious to maintain a layer that serializes the jited function (e.g. with a string) and dtypes.
+            # - exported program will contain the implementation detail (e.g. triton source code) for a specific
+            #   backend (GPU), which is probably at a wrong level of abstraction.
+            # - changes to triton or the serialization logic for triton arguments can be BC breaking
+            #
+            # In the short term, we expect users to have a separate aot_compile stage that compiles the exported program
+            # into a Cubin file on the same machine that users call export, which does autotuning and removes triton
+            # dependency and serve the model with Cubin. This guarantees that triton changes won't break BC.
+            # In the long term, we may export multiple cubins for the triton op directly
+            from torch.export._trace import custom_triton_ops_decomposition_disabled
+
+            if custom_triton_ops_decomposition_disabled():
+                return mode.__torch_dispatch__(op, types, args, kwargs)
+            else:
+                with mode:
+                    return fn(*args, **kwargs)
 
         result.register_torch_dispatch(FunctionalTensorMode, functional_decomp)
         return result
@@ -134,39 +167,47 @@ def triton_op(
         return dec(fn)
 
 
-capture_triton_enabled = threading.local()
-capture_triton_enabled_default = True
+wrap_triton_enabled = threading.local()
+wrap_triton_enabled_default = True
 
 
 @contextlib.contextmanager
-def set_capture_triton_enabled(enabled: bool) -> Generator[None, None, None]:
-    """If triton kernels annotated with @capture_triton should dispatch via HOP
+def set_wrap_triton_enabled(enabled: bool) -> Generator[None, None, None]:
+    """If triton kernels annotated with @wrap_triton should dispatch via HOP
     or go straight to the triton kernel execution.
 
     We have this switch because eager-mode performance of HOP dispatch is slow
-    enough to matter (~1ms) and we know that capture_triton isn't necessary in
+    enough to matter (~1ms) and we know that wrap_triton isn't necessary in
     some situations (eager-mode with regular Tensors)
     """
     try:
-        prev = is_capture_triton_enabled()
-        capture_triton_enabled.value = enabled
+        prev = is_wrap_triton_enabled()
+        wrap_triton_enabled.value = enabled
         yield
     finally:
-        capture_triton_enabled.value = prev
+        wrap_triton_enabled.value = prev
 
 
-def is_capture_triton_enabled() -> bool:
-    return getattr(capture_triton_enabled, "value", capture_triton_enabled_default)
+def is_wrap_triton_enabled() -> bool:
+    return getattr(wrap_triton_enabled, "value", wrap_triton_enabled_default)
 
 
-def capture_triton(triton_kernel: Callable, /) -> Callable:
+def capture_triton(triton_kernel: Callable, /) -> Any:
+    """This API has been renamed to wrap_triton"""
+    return wrap_triton(triton_kernel)
+
+
+@exposed_in("torch.library")
+def wrap_triton(triton_kernel: Callable, /) -> Any:
     """Allows capture of a triton kernel into a graph via make_fx or
-    non-strict export (coming soon).
+    non-strict ``torch.export``.
 
     These technologies perform Dispatcher-based tracing (via
     ``__torch_dispatch__``) and cannot see calls to raw triton kernels.
-    The ``capture_triton`` API returns a new callable that can actually
-    be traced into a graph.
+    The ``wrap_triton`` API wraps a triton kernel into a callable that
+    can actually be traced into a graph.
+
+    Please use this API together with :func:`torch.library.triton_op`.
 
     Examples:
 
@@ -175,7 +216,7 @@ def capture_triton(triton_kernel: Callable, /) -> Callable:
         >>> import triton
         >>> from triton import language as tl
         >>> from torch.fx.experimental.proxy_tensor import make_fx
-        >>> from torch._higher_order_ops.triton_kernel_wrap import capture_triton
+        >>> from torch.library import wrap_triton
         >>>
         >>> @triton.jit
         >>> def add_kernel(
@@ -201,7 +242,7 @@ def capture_triton(triton_kernel: Callable, /) -> Callable:
         >>>     def grid_fn(meta):
         >>>         return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
         >>>
-        >>>     capture_triton(add_kernel)[grid_fn](x, y, output, n_elements, 16)
+        >>>     wrap_triton(add_kernel)[grid_fn](x, y, output, n_elements, 16)
         >>>     return output
         >>>
         >>> x = torch.randn(3, device="cuda")
@@ -226,8 +267,8 @@ def capture_triton(triton_kernel: Callable, /) -> Callable:
 
     if not isinstance(triton_kernel, (JITFunction, Autotuner)):
         raise RuntimeError(
-            "capture_triton only works on functions annotated with triton.jit or triton.autotune"
+            "wrap_triton only works on functions annotated with triton.jit or triton.autotune"
         )
-    if not is_capture_triton_enabled():
+    if not is_wrap_triton_enabled():
         return triton_kernel
     return TraceableTritonKernelWrapper(triton_kernel, None, None)

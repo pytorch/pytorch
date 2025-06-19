@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -135,9 +135,9 @@ class TestIinfo(TestCase):
         [
             np.uint8,
             # xfail: unsupported add (uint[16,32,64])
-            subtest(np.uint16, decorators=[xfail]),
-            subtest(np.uint32, decorators=[xfail]),
-            subtest(np.uint64, decorators=[xfail]),
+            subtest(np.uint16, decorators=[] if TEST_WITH_TORCHDYNAMO else [xfail]),
+            subtest(np.uint32, decorators=[] if TEST_WITH_TORCHDYNAMO else [xfail]),
+            subtest(np.uint64, decorators=[] if TEST_WITH_TORCHDYNAMO else [xfail]),
         ],
     )
     def test_unsigned_max(self, T):
@@ -212,7 +212,7 @@ class TestMisc(TestCase):
                 # This test may fail on some platforms
                 assert len(w) == 0
 
-    @xpassIfTorchDynamo  # (reason="None of nmant, minexp, maxexp is implemented.")
+    @xpassIfTorchDynamo_np  # (reason="None of nmant, minexp, maxexp is implemented.")
     def test_plausible_finfo(self):
         # Assert that finfo returns reasonable results for all types
         for ftype in (

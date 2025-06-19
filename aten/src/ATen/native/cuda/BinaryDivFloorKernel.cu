@@ -78,6 +78,6 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
 }
 } // namespace binary_internal
 
-REGISTER_DISPATCH(div_floor_stub, &binary_internal::div_floor_kernel_cuda);
+REGISTER_DISPATCH(div_floor_stub, &binary_internal::div_floor_kernel_cuda)
 
 } // namespace at::native

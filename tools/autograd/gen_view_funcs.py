@@ -40,8 +40,8 @@ FUNCTION_DECLARATION = CodeTemplate(
 #define ${uppercase_op}_AVAILABLE
 struct ${op} : public ${superclass} {
   ${op}(${constructor_args}) ${initializer_list}
-  {};
-  virtual ~${op}() override {};
+  {}
+  virtual ~${op}() override = default;
   virtual std::vector<c10::SymInt> get_symints() const override;
   virtual size_t num_symints() const override;
   virtual std::vector<at::Tensor> get_tensors() const override;
@@ -331,8 +331,7 @@ def gen_view_funcs(
             fname,
             lambda: {
                 "generated_comment": "@"
-                + f"generated from {fm.template_dir_for_comments()}/"
-                + fname,
+                + f"generated from {fm.template_dir_for_comments()}/{fname}",
                 "view_func_declarations": declarations,
                 "view_func_definitions": definitions,
                 "ops_headers": ops_headers,

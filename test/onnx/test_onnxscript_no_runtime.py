@@ -3,7 +3,6 @@
 """Test the support on onnxscript in PyTorch-ONNX converter."""
 
 import io
-from typing import List
 
 import onnx
 
@@ -51,7 +50,7 @@ class TestONNXScriptExport(common_utils.TestCase):
         # 2. Register layer_norm onnxscript function as custom Op
         @onnxscript.script(custom_opset)
         def layer_norm(
-            X, axes: List[int], weight: FLOAT[...], bias: FLOAT[...], eps: float
+            X, axes: list[int], weight: FLOAT[...], bias: FLOAT[...], eps: float
         ):
             mean = op.ReduceMean(X, axes=axes)
             D = X - mean  # op.Sub(X, mean)
@@ -161,3 +160,10 @@ class TestONNXScriptExport(common_utils.TestCase):
         )
         loop_selu_proto = onnx.load(io.BytesIO(saved_model.getvalue()))
         self.assertEqual(len(loop_selu_proto.functions), 1)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

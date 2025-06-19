@@ -17,13 +17,13 @@
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
     true,
-    "If set, keeps memory when a tensor is shrinking its size.");
+    "If set, keeps memory when a tensor is shrinking its size.")
 
 C10_DEFINE_int64(
     caffe2_max_keep_on_shrink_memory,
     LLONG_MAX,
     "The maximum memory in bytes to keep on shrink, if the difference between "
-    "tensor sizes is bigger than this then tensor will be reset.");
+    "tensor sizes is bigger than this then tensor will be reset.")
 
 namespace c10 {
 
@@ -81,11 +81,7 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     // Use std::forward to suppress static analyzer false positive.
-    : TensorImpl(
-          std::forward<Storage>(storage),
-          key_set,
-          data_type,
-          storage.device()) {}
+    : TensorImpl(std::move(storage), key_set, data_type, storage.device()) {}
 
 // [Note: Python key removal]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -106,12 +102,11 @@ TensorImpl::TensorImpl(
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
-    ImplType type,
+    ImplType /*type*/,
     Storage&& storage,
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     : storage_(std::move(storage)),
-
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
@@ -123,7 +118,6 @@ TensorImpl::TensorImpl(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
@@ -137,7 +131,6 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type,
     std::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
-
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {
@@ -167,7 +160,7 @@ TensorImpl::TensorImpl(
   if (inference_mode) {
     // See Note [Expected TLS state in InferenceMode] for why we exclude
     // Autograd & ADInplaceOrView keys. Normally key_set only contains backend
-    // keys but we do the substraction here to make sure.
+    // keys but we do the subtraction here to make sure.
     key_set_ = key_set - c10::autograd_dispatch_keyset_with_ADInplaceOrView;
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires
@@ -225,7 +218,7 @@ void TensorImpl::HandleResize() {
   }
 }
 
-bool TensorImpl::compute_contiguous(identity<bool>) const {
+bool TensorImpl::compute_contiguous() const {
   if (is_sparse()) {
     return false;
   }
@@ -235,7 +228,7 @@ bool TensorImpl::compute_contiguous(identity<bool>) const {
       numel_);
 }
 
-bool TensorImpl::compute_channels_last_contiguous_2d(identity<bool>) const {
+bool TensorImpl::compute_channels_last_contiguous_2d() const {
   if (is_sparse()) {
     return false;
   }
@@ -244,7 +237,7 @@ bool TensorImpl::compute_channels_last_contiguous_2d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
+bool TensorImpl::compute_channels_last_contiguous_3d() const {
   if (is_sparse()) {
     return false;
   }
@@ -253,7 +246,7 @@ bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
+bool TensorImpl::compute_strides_like_channels_last_2d() const {
   if (is_sparse()) {
     return false;
   }
@@ -262,7 +255,7 @@ bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
+bool TensorImpl::compute_strides_like_channels_last_3d() const {
   if (is_sparse()) {
     return false;
   }
@@ -271,7 +264,7 @@ bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_non_overlapping_and_dense(identity<bool>) const {
+bool TensorImpl::compute_non_overlapping_and_dense() const {
   if (is_sparse()) {
     return false;
   }
@@ -509,7 +502,9 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
     r = (pyobj_slot_.load_pyobj_interpreter())->detach(this);
   }
   if (r) {
-    r->set_version_counter(std::forward<VariableVersion>(version_counter));
+    if (!r->is_inference()) {
+      r->set_version_counter(std::forward<VariableVersion>(version_counter));
+    }
     r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
     return r;
   }

@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
 import collections.abc
 import copy
-from typing import List, Optional, Sequence, TYPE_CHECKING
+import itertools
+from collections.abc import Sequence
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch.distributed import distributed_c10d as c10d, rpc
@@ -68,7 +70,7 @@ def _validate_output_tensor_for_gather(
             )
     elif dst_tensor:
         raise ValueError(
-            "Argument ``dst_tensor`` must NOT be specified " "on non-destination ranks."
+            "Argument ``dst_tensor`` must NOT be specified on non-destination ranks."
         )
 
 
@@ -109,13 +111,13 @@ def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
 
 
 def build_metadata_from_local_shards(
-    local_shards: List[Shard],
+    local_shards: list[Shard],
     global_size: torch.Size,
     current_rank: int,
     pg: c10d.ProcessGroup,
 ) -> ShardedTensorMetadata:
     assert len(local_shards) > 0, "must have local shards!"
-    local_shard_metadatas: List[ShardMetadata] = []
+    local_shard_metadatas: list[ShardMetadata] = []
 
     first_shard_dtype = local_shards[0].tensor.dtype
     first_shard_layout = local_shards[0].tensor.layout
@@ -201,6 +203,7 @@ def build_metadata_from_local_shards(
 
 def build_global_metadata(
     gathered_metadatas: Sequence[Optional[ShardedTensorMetadata]],
+    recalc_metadata: bool = False,
 ):
     global_sharded_tensor_metadata = None
     global_metadata_rank = 0
@@ -251,6 +254,12 @@ def build_global_metadata(
             )
 
     if global_sharded_tensor_metadata is not None:
+        if recalc_metadata:
+            recalc_global_sharded_tensor_metadata(
+                global_sharded_tensor_metadata,
+                0,  # sharded on 0th dim
+            )
+
         # check if shards_metadata have overlap shards
         validate_non_overlapping_shards_metadata(
             global_sharded_tensor_metadata.shards_metadata
@@ -265,3 +274,50 @@ def build_global_metadata(
         raise ValueError("ShardedTensor have no local shards on all ranks!")
 
     return global_sharded_tensor_metadata
+
+
+def recalc_global_sharded_tensor_metadata(
+    global_sharded_tensor_metadata: ShardedTensorMetadata, sharded_dim: int
+) -> None:
+    # recalculate global ShardedTensorMetadata
+
+    # reorder here in case shard metadata is not sorted on sharded_dim
+    placement_idx_pairs = []
+    for i, shard_metadata in enumerate(global_sharded_tensor_metadata.shards_metadata):
+        if shard_metadata.placement:
+            placement_idx_pairs.append((shard_metadata.placement.rank(), i))
+        else:
+            raise AssertionError(
+                "currently only support rw, it should alwyas have vaid rank info"
+            )
+    sorted_idx = sorted(placement_idx_pairs)
+    shard_sizes = [
+        global_sharded_tensor_metadata.shards_metadata[idx].shard_sizes[sharded_dim]
+        for _, idx in sorted_idx
+    ]
+    cum_sum = [0] + list(itertools.accumulate(shard_sizes))
+
+    for shard_id, shard_metadata in enumerate(
+        global_sharded_tensor_metadata.shards_metadata
+    ):
+        # update shard offset for each shard on the sharded dimension
+        shard_metadata.shard_offsets[sharded_dim] = cum_sum[shard_id]
+        for other_dim in range(
+            len(global_sharded_tensor_metadata.shards_metadata[0].shard_sizes)
+        ):
+            if other_dim != sharded_dim:
+                # shard offset for each shard on the unsharded dimension
+                shard_metadata.shard_offsets[other_dim] = 0
+
+    # update global size for ShardedTensorMetadata
+    global_size_list = []
+    for other_dim in range(
+        len(global_sharded_tensor_metadata.shards_metadata[0].shard_sizes)
+    ):
+        if other_dim != sharded_dim:
+            global_size_list.append(
+                global_sharded_tensor_metadata.shards_metadata[0].shard_sizes[other_dim]
+            )
+        else:
+            global_size_list.append(cum_sum[-1])
+    global_sharded_tensor_metadata.size = torch.Size(global_size_list)

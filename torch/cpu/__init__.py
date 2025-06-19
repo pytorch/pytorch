@@ -15,6 +15,7 @@ from . import amp
 
 __all__ = [
     "is_available",
+    "is_initialized",
     "synchronize",
     "current_device",
     "current_stream",
@@ -29,25 +30,35 @@ __all__ = [
 _device_t = Union[_device, str, int, None]
 
 
-def _is_cpu_support_avx2() -> bool:
+def _is_avx2_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AVX2."""
-    return torch._C._cpu._is_cpu_support_avx2()
+    return torch._C._cpu._is_avx2_supported()
 
 
-def _is_cpu_support_avx512() -> bool:
+def _is_avx512_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AVX512."""
-    return torch._C._cpu._is_cpu_support_avx512()
+    return torch._C._cpu._is_avx512_supported()
 
 
-def _is_cpu_support_vnni() -> bool:
+def _is_avx512_bf16_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports AVX512_BF16."""
+    return torch._C._cpu._is_avx512_bf16_supported()
+
+
+def _is_vnni_supported() -> bool:
     r"""Returns a bool indicating if CPU supports VNNI."""
     # Note: Currently, it only checks avx512_vnni, will add the support of avx2_vnni later.
-    return torch._C._cpu._is_cpu_support_avx512_vnni()
+    return torch._C._cpu._is_avx512_vnni_supported()
 
 
-def _is_cpu_support_amx_tile() -> bool:
+def _is_amx_tile_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AMX_TILE."""
-    return torch._C._cpu._is_cpu_support_amx_tile()
+    return torch._C._cpu._is_amx_tile_supported()
+
+
+def _is_amx_fp16_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports AMX FP16."""
+    return torch._C._cpu._is_amx_fp16_supported()
 
 
 def _init_amx() -> bool:
@@ -83,6 +94,12 @@ class Stream:
         pass
 
     def wait_stream(self, stream) -> None:
+        pass
+
+    def record_event(self) -> None:
+        pass
+
+    def wait_event(self, event) -> None:
         pass
 
 
@@ -177,3 +194,11 @@ def current_device() -> str:
     N.B. This function only exists to facilitate device-agnostic code
     """
     return "cpu"
+
+
+def is_initialized() -> bool:
+    r"""Returns True if the CPU is initialized. Always True.
+
+    N.B. This function only exists to facilitate device-agnostic code
+    """
+    return True

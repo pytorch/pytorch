@@ -148,7 +148,7 @@ Module::Module(
 // as we bring up the system since it will degrade performance
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
-thread_local bool inline_everything = false;
+static thread_local bool inline_everything = false;
 bool& getInlineEverythingMode() {
   return inline_everything;
 }
@@ -451,7 +451,8 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   const auto classType =
       _ivalue()->compilation_unit()->get_class(c10::QualifiedName(name));
   if (!classType) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Could not find class with name: '",
         name.qualifiedName(),
         "' in module.");
@@ -564,7 +565,6 @@ std::string Module::dump_to_str(
   std::stringstream parameters_ss;
   std::stringstream attributes_ss;
   std::stringstream methods_ss;
-  std::stringstream submodules_ss;
 
   for (const NameTensor& p : named_parameters(/*recurse=*/false)) {
     parameters_ss << p.name << " = ";

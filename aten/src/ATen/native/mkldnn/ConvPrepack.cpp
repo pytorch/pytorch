@@ -11,11 +11,7 @@
 
 #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
-namespace mkldnn {
-namespace internal {
-namespace convolution {
+namespace at::native::mkldnn::internal::convolution {
 
 c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     Tensor weight,
@@ -86,7 +82,7 @@ ContextConv create(
 
   return ContextConv{
       std::move(packed_weight),
-      bias.has_value() ? std::make_optional(*bias) : std::nullopt,
+      bias,
       {padding_expanded.begin(), padding_expanded.end()},
       {stride_expanded.begin(), stride_expanded.end()},
       {dilation_expanded.begin(), dilation_expanded.end()},
@@ -280,10 +276,6 @@ Tensor conv_run(
   return op_context->run(input);
 }
 
-} // namespace convolution
-} // namespace internal
-} // namespace mkldnn
-} // namespace native
-} // namespace at
+} // namespace at::native::mkldnn::internal::convolution
 
 #endif // AT_MKLDNN_ENABLED()

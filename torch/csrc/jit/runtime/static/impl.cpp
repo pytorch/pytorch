@@ -38,7 +38,6 @@
 #include <iterator>
 #include <limits>
 #include <sstream>
-#include <stdexcept>
 
 #ifdef FBCODE_CAFFE2
 #include <common/logging/logging.h>
@@ -47,10 +46,11 @@
 #endif
 
 // used in test only
+// clang-format off
 C10_DEFINE_bool(
     static_runtime_disable_debug_memory_overlap_check,
     false,
-    "If true, disable the memory overlap check in debug mode in ProcessedNode::run()");
+    "If true, disable the memory overlap check in debug mode in ProcessedNode::run()")
 
 namespace torch::jit {
 
@@ -394,25 +394,35 @@ bool isPureFunction(const Node* node) {
 
 } // namespace
 
+void ManagedTensorRanges::extendLifetime(Value* input, size_t new_end) {
+  auto* lifetime = getLifetime(input);
+  if (lifetime) {
+    TORCH_DCHECK_LE(lifetime->end, new_end);
+    lifetime->end = new_end;
+  }
+}
+
+void ManagedTensorRanges::extendInputLifetime(Node* node, size_t new_end) {
+  for (auto* input : node->inputs()) {
+    extendLifetime(input, new_end);
+  }
+  for (auto* subblock : node->blocks()) {
+    for (auto* subnode : subblock->nodes()) {
+      extendInputLifetime(subnode, new_end);
+    }
+  }
+}
+
 ManagedTensorRanges::ManagedTensorRanges(
     Block& block,
     const AliasDb& alias_db,
     const c10::FastSet<const Value*>& managed_tensor_values) {
   const std::vector<Node*> nodes(block.nodes().begin(), block.nodes().end());
-  const c10::FastSet<const Value*> graph_inputs(
-      block.inputs().begin(), block.inputs().end());
 
   const auto num_nodes = static_cast<uint32_t>(nodes.size());
   for (const auto i : c10::irange(num_nodes)) {
     auto* node = nodes[i];
-    for (auto* input : node->inputs()) {
-      auto* lifetime = getLifetime(input);
-      if (!lifetime) {
-        continue;
-      }
-      DCHECK(lifetime->end <= i);
-      lifetime->end = i;
-    }
+    extendInputLifetime(node, i);
     for (auto* output : node->outputs()) {
       if (!alias_db.isMutableType(output)) {
         continue;
@@ -942,11 +952,11 @@ BlockRunner::BlockRunner(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 BlockRunner::BlockRunner(BlockRunner&&) noexcept = default;
 
 BlockRunner::~BlockRunner() = default;
 
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 void BlockRunner::set_arg(const size_t idx, std::vector<IValue>&& args) {
   DCHECK(idx < args.size());
   Input(idx + first_input_is_self_) = std::move(args[idx]);
@@ -968,8 +978,12 @@ void check_type(const Argument& schema_arg, const IValue& arg) {
       schema_arg.type()->kind() == c10::TypeKind::TensorType) {
     return;
   }
+  if (arg.isGenericDict() && arg.toGenericDict().empty()) {
+    return;
+  }
   TORCH_CHECK(
-      arg.type()->isSubtypeOf(schema_arg.type()),
+      arg.type()->isSubtypeOf(schema_arg.type()) ||
+      arg.type()->isSubtypeOfExt(schema_arg.type(), /*why_not=*/nullptr),
       arg.type()->annotation_str(),
       " is not a subtype of ",
       schema_arg.type()->annotation_str(),
@@ -1583,8 +1597,7 @@ float BlockRunner::benchmark_model(
 
   const bool is_kwargs_empty = kwargs_list.empty();
   const KeywordArgs empty_kwargs;
-  for (const auto _n_run : c10::irange(warmup_runs)) {
-    (void)_n_run; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto _n_run : c10::irange(warmup_runs)) {
     const auto num_args = static_cast<uint32_t>(args_list.size());
     for (const auto j : c10::irange(num_args)) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
@@ -1594,8 +1607,7 @@ float BlockRunner::benchmark_model(
     }
   }
   caffe2::Timer timer;
-  for (const auto _n_run : c10::irange(main_runs)) {
-    (void)_n_run; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto _n_run : c10::irange(main_runs)) {
     const auto num_args = static_cast<uint32_t>(args_list.size());
     for (const auto j : c10::irange(num_args)) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
@@ -1747,8 +1759,7 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   results.first_iter_time = timer.MilliSeconds();
 
   // warmup runs
-  for (const auto _n_run : c10::irange(warmup_runs)) {
-    (void)_n_run; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto _n_run : c10::irange(warmup_runs)) {
     const auto num_args = static_cast<uint32_t>(args_list.size());
     for (const auto j : c10::irange(num_args)) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
@@ -1759,8 +1770,7 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   }
 
   // main runs
-  for (const auto i : c10::irange(main_runs)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(main_runs)) {
     const auto num_args = static_cast<uint32_t>(args_list.size());
     for (const auto j : c10::irange(num_args)) {
       set_inputs(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);

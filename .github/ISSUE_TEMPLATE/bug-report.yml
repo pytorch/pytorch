@@ -5,14 +5,16 @@ body:
 - type: markdown
   attributes:
     value: >
-      #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the existing and past issues](https://github.com/pytorch/pytorch/issues?q=is%3Aissue+sort%3Acreated-desc+).
+      #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the existing and past issues](https://github.com/pytorch/pytorch/issues?q=is%3Aissue+sort%3Acreated-desc+). Note: Please write your bug report in English to ensure it can be understood and addressed by the development team. If you are filing a bug for torch.compile, please use the [torch.compile issue template](https://github.com/pytorch/pytorch/issues/new?q=sort%3Aupdated-desc+is%3Aissue+is%3Aopen&template=pt2-bug-report.yml).
 - type: textarea
   attributes:
     label: 🐛 Describe the bug
     description: |
       Please provide a clear and concise description of what the bug is.
 
-      If relevant, add a minimal example so that we can reproduce the error by running the code. It is very important for the snippet to be as succinct (minimal) as possible, so please take time to trim down any irrelevant code to help us debug efficiently. We are going to copy-paste your code and we expect to get the same result as you did: avoid any external data, and include the relevant imports, etc. For example:
+      If relevant, add a minimal example so that we can reproduce the error by running the code. It is very important for the snippet to be as succinct (minimal) as possible, so please take time to trim down any irrelevant code to help us debug efficiently.
+      Your example should be fully self-contained and not rely on any artifact that should be downloaded.
+      For example:
 
       ```python
       # All necessary imports at the beginning
@@ -26,6 +28,7 @@ body:
       If the code is too long (hopefully, it isn't), feel free to put it in a public gist and link it in the issue: https://gist.github.com.
 
       Please also paste or describe the results you observe instead of the expected results. If you observe an error, please paste the error message including the **full** traceback of the exception. It may be relevant to wrap error messages in ```` ```triple quotes blocks``` ````.
+      If your issue is related to numerical accuracy or reproducibility, please read the [numerical accuracy](https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html) and [reproducibility](https://docs.pytorch.org/docs/stable/notes/randomness.html) notes. If the difference is not expected as described in these documents, please provide appropriate justification on why one result is wrong and the other is correct.
     placeholder: |
       A clear and concise description of what the bug is.
 

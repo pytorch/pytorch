@@ -52,12 +52,17 @@ if __name__ == "__main__":
         stream=sys.stderr,
     )
 
-    uv_available = shutil.which("uv") is not None
+    uv_available = (
+        any(prefix in sys.base_prefix for prefix in ["uv/python", "uv\\python"])
+        and shutil.which("uv") is not None
+    )
 
     if uv_available:
         pip_args = ["uv", "pip", "install"]
+    elif sys.executable:
+        pip_args = [sys.executable, "-mpip", "install"]
     else:
-        pip_args = ["pip", "install"]
+        pip_args = ["pip3", "install"]
 
     # If we are in a global install, use `--user` to install so that you do not
     # need root access in order to initialize linters.

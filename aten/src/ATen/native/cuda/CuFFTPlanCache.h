@@ -16,7 +16,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace at { namespace native { namespace detail {
+namespace at::native::detail {
 
 // Enum representing the FFT type
 enum class CuFFTTransformType : int8_t {
@@ -58,7 +58,7 @@ struct CuFFTParams
   }
 };
 
-static_assert(std::is_trivial<CuFFTParams>::value, "");
+static_assert(std::is_trivial_v<CuFFTParams> );
 
 // Returns true if the transform type has complex input
 inline bool cufft_complex_input(CuFFTTransformType type) {
@@ -491,4 +491,4 @@ void cufft_set_plan_cache_max_size_impl(DeviceIndex device_index, int64_t max_si
 int64_t cufft_get_plan_cache_size_impl(DeviceIndex device_index);
 void cufft_clear_plan_cache_impl(DeviceIndex device_index);
 
-}}} // namespace at::native::detail
+} // namespace at::native::detail

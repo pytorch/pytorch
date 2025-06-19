@@ -4,19 +4,13 @@ import os
 import sys
 
 import torch
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
 
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestModules(JitTestCase):
@@ -36,3 +30,7 @@ class TestModules(JitTestCase):
                 self.x = 0
 
         self.checkModule(Net(), (torch.randn(5),))
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

@@ -7,7 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, cast, Optional, Tuple
+from typing import Any, Callable, cast, Optional
 
 from torch.distributed.elastic.rendezvous import RendezvousStateError
 from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
@@ -32,12 +32,12 @@ class RendezvousBackendTestMixin(ABC):
 
     def _set_state(
         self, state: bytes, token: Optional[Any] = None
-    ) -> Tuple[bytes, Token, bool]:
+    ) -> tuple[bytes, Token, bool]:
         result = self._backend.set_state(state, token)
 
         self.assertIsNotNone(result)
 
-        return cast(Tuple[bytes, Token, bool], result)
+        return cast(tuple[bytes, Token, bool], result)
 
     def test_get_state_returns_backend_state(self) -> None:
         self._backend.set_state(b"x")
@@ -46,7 +46,7 @@ class RendezvousBackendTestMixin(ABC):
 
         self.assertIsNotNone(result)
 
-        state, token = cast(Tuple[bytes, Token], result)
+        state, token = cast(tuple[bytes, Token], result)
 
         self.assertEqual(b"x", state)
         self.assertIsNotNone(token)
@@ -70,7 +70,7 @@ class RendezvousBackendTestMixin(ABC):
         self.assertTrue(has_set)
 
     def test_set_state_sets_backend_state_if_token_is_current(self) -> None:
-        state1, token1, has_set1 = self._set_state(b"x")
+        _, token1, has_set1 = self._set_state(b"x")
 
         state2, token2, has_set2 = self._set_state(b"y", token1)
 
@@ -80,7 +80,7 @@ class RendezvousBackendTestMixin(ABC):
         self.assertTrue(has_set2)
 
     def test_set_state_returns_current_backend_state_if_token_is_old(self) -> None:
-        state1, token1, _ = self._set_state(b"x")
+        _, token1, _ = self._set_state(b"x")
 
         state2, token2, _ = self._set_state(b"y", token1)
 

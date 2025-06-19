@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from collections.abc import Sequence
+from typing import Any, Callable
 
-import onnxscript
 from onnxscript import ir
 
 import torch
@@ -27,11 +27,15 @@ _TORCH_DTYPE_TO_ONNX_COMPATIBLE: dict[torch.dtype, ir.DataType] = {
     torch.float8_e4m3fnuz: ir.DataType.FLOAT8E4M3FNUZ,
     torch.float8_e5m2: ir.DataType.FLOAT8E5M2,
     torch.float8_e5m2fnuz: ir.DataType.FLOAT8E5M2FNUZ,
+    torch.float4_e2m1fn_x2: ir.DataType.FLOAT4E2M1,
     torch.int16: ir.DataType.INT16,
     torch.int32: ir.DataType.INT32,
     torch.int64: ir.DataType.INT64,
     torch.int8: ir.DataType.INT8,
     torch.uint8: ir.DataType.UINT8,
+    torch.uint16: ir.DataType.UINT16,
+    torch.uint32: ir.DataType.UINT32,
+    torch.uint64: ir.DataType.UINT64,
 }
 
 
@@ -92,6 +96,7 @@ def _param_type_compatible_with_arg(
         ir.TensorType(ir.DataType.INT32),
         ir.TensorType(ir.DataType.INT64),
         # Int inputs can be casted to a float too
+        ir.TensorType(ir.DataType.FLOAT4E2M1),
         ir.TensorType(ir.DataType.FLOAT8E4M3FN),
         ir.TensorType(ir.DataType.FLOAT8E4M3FNUZ),
         ir.TensorType(ir.DataType.FLOAT8E5M2),
@@ -102,6 +107,7 @@ def _param_type_compatible_with_arg(
     }:
         return True
     if isinstance(value, float) and param.type_constraint.allowed_types & {
+        ir.TensorType(ir.DataType.FLOAT4E2M1),
         ir.TensorType(ir.DataType.FLOAT8E4M3FN),
         ir.TensorType(ir.DataType.FLOAT8E4M3FNUZ),
         ir.TensorType(ir.DataType.FLOAT8E5M2),
@@ -163,10 +169,22 @@ def _param_type_compatible_with_arg(
 
 
 def _get_type_from_tensor(
-    tensor: torch.Tensor | Sequence[torch.Tensor],
+    tensor: torch.Tensor
+    | torch.SymBool
+    | torch.SymInt
+    | torch.SymFloat
+    | Sequence[torch.Tensor],
 ) -> ir.TypeProtocol:
     if isinstance(tensor, torch.Tensor):
         return ir.TensorType(_torch_dtype_to_onnx_compatible_dtype(tensor.dtype))
+    if isinstance(tensor, torch.SymBool):
+        return ir.TensorType(ir.DataType.BOOL)
+    if isinstance(tensor, torch.SymInt):
+        return ir.TensorType(ir.DataType.INT64)
+    if isinstance(tensor, torch.SymFloat):
+        return ir.TensorType(ir.DataType.FLOAT)
+
+    # Handle sequences
     first_tensor = next((item for item in tensor if item is not None), None)
     if first_tensor is None:
         return ir.SequenceType(ir.TensorType(ir.DataType.UNDEFINED))
@@ -176,11 +194,11 @@ def _get_type_from_tensor(
 
 
 def _get_first_tensor_in_node_list(
-    nodes: Sequence[torch.fx.Node | None],
+    nodes: Sequence[torch.fx.Node | Any],
 ) -> torch.Tensor | None:
     for node in nodes:
         if (
-            node is not None
+            isinstance(node, torch.fx.Node)
             and "val" in node.meta
             and isinstance(node.meta["val"], torch.Tensor)
         ):
@@ -189,7 +207,7 @@ def _get_first_tensor_in_node_list(
 
 
 def _get_named_fx_node_args(node: torch.fx.Node) -> dict[str, torch.fx.node.Argument]:
-    # FIXME: node.target may not have a schema
+    assert hasattr(node.target, "_schema")
     torch_schema: torch.FunctionSchema = node.target._schema  # type: ignore[union-attr]
     node_args = {}
     for arg, schema_arg in zip(node.args, torch_schema.arguments):
@@ -201,19 +219,25 @@ def _get_named_fx_node_args(node: torch.fx.Node) -> dict[str, torch.fx.node.Argu
 
 def get_matching_overload(
     node: torch.fx.Node,
-    overloads: Sequence[onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction],
-) -> tuple[onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction | None, str]:
+    overloads: Sequence[_registration.OnnxDecompMeta],
+) -> tuple[Callable | None, str]:
     """Get the overload that matches the node's arguments.
 
     Args:
         node: The node to match.
-        overloads: The overloads to match against.
+        overloads: The OnnxDecompMeta with overloads and their signatures to match against.
 
     Returns:
         A tuple containing the matched overload and a string describing the reason for failure or success.
     """
+    if not hasattr(node.target, "_schema"):
+        # FIXME(justinchuby): When the target is a builtin, we should instead
+        # Match only the inputs positionally. Figure out how to do that as right
+        # now we assume all inputs are named.
+        return overloads[
+            0
+        ].onnx_function, "The node target does not have a schema. Return the first one."
     named_args = _get_named_fx_node_args(node)
-    # FIXME: node.target may and builtin and not have a schema
     # FIXME: Handle when we don't know the names of the arguments
     schema_args: dict[str, torch.Argument] = {
         arg.name: arg
@@ -223,10 +247,10 @@ def get_matching_overload(
     for overload in overloads:
         assigned_types: dict[str, ir.TypeProtocol] = {}
         fail_reason = ""
-        if not hasattr(overload, "signature"):
+        if overload.signature is None:
             # When an overload does not have a signature, we assume it is a custom op and should be matched
             return (
-                overload,
+                overload.onnx_function,
                 "The overload does not have a signature. Assuming it is a custom op and matching it.",
             )
         for param in overload.signature:
@@ -248,7 +272,7 @@ def get_matching_overload(
                 arg = schema_args[param.name].default_value
             elif param.has_default():
                 # Provided in the ONNX op definition
-                arg = param.default
+                arg = param.default  # type: ignore[assignment]
             else:
                 fail_reason = "Parameter not provided"
                 break
@@ -259,7 +283,7 @@ def get_matching_overload(
                 if isinstance(arg, (list, tuple)) and any(
                     isinstance(t, torch.fx.Node) for t in arg
                 ):
-                    first_tensor = _get_first_tensor_in_node_list(arg)
+                    first_tensor = _get_first_tensor_in_node_list(arg)  # type: ignore[arg-type]
                     assert first_tensor is not None
                     # FIXME: Handle symfloat here
                     arg = ir.SequenceType(_get_type_from_tensor(first_tensor))  # type: ignore[assignment]
@@ -279,8 +303,10 @@ def get_matching_overload(
                 if not _attribute_type_compatible_with_arg(param, arg):  # type: ignore[arg-type]
                     fail_reason = f"Attribute type not compatible with argument: param=`{param}`, arg=`{arg}`"
                     break
+            else:
+                raise TypeError(f"Unknown parameter type: {type(param)}")
         if not fail_reason:
-            return overload, "Successfully matched overload"
+            return overload.onnx_function, "Successfully matched overload"
         else:
             failure_messages.append(
                 f"- Failed to match overload `{overload}`: {fail_reason}"
@@ -308,7 +334,7 @@ def _arg_has_complex_dtype(arg) -> bool:
 
 def dispatch(
     node: torch.fx.Node, registry: _registration.ONNXRegistry
-) -> tuple[onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction | None, str]:
+) -> tuple[Callable | None, str]:
     """Dispatch a node to an ONNX function based on the node's target and the ONNX registry.
 
     Args:
@@ -339,7 +365,5 @@ def dispatch(
             "Fast path: Only one decomposition is defined",
         )
 
-    overload, message = get_matching_overload(
-        node, [decomp.onnx_function for decomp in decomp_metas]
-    )
+    overload, message = get_matching_overload(node, decomp_metas)
     return overload, message

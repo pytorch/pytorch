@@ -12,7 +12,7 @@
 namespace at::native {
 
 void nextafter_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.common_dtype(), "nextafter_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "nextafter_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return std::nextafter(a, b);
     });
@@ -27,7 +27,7 @@ void heaviside_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel_cuda);
-REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel_cuda);
+REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel_cuda)
+REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel_cuda)
 
 } // namespace at::native

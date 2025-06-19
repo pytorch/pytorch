@@ -175,7 +175,7 @@ WarningHandler* get_warning_handler() noexcept(true) {
   return ThreadWarningHandler::get_handler();
 }
 
-bool warn_always = false;
+static bool warn_always = false;
 
 void set_warnAlways(bool setting) noexcept(true) {
   warn_always = setting;
@@ -213,7 +213,7 @@ Warning::Warning(
 Warning::Warning(
     warning_variant_t type,
     SourceLocation source_location,
-    detail::CompileTimeEmptyString msg,
+    detail::CompileTimeEmptyString /*msg*/,
     const bool verbatim)
     : Warning(type, source_location, "", verbatim) {}
 

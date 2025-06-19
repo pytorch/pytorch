@@ -2,6 +2,7 @@
 
 import functools
 import itertools
+import math
 import sys
 from typing import Callable, Union
 
@@ -11,6 +12,7 @@ import torch._logging
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
+    definitely_contiguous_for_memory_format,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -67,6 +69,8 @@ _like_tensor_constructors = ordered_set(
     aten.randn_like.default,
     aten.randn_like.out,
     aten.randint_like.default,
+    aten.randint_like.Tensor,
+    aten.randint_like.Tensor_out,
     aten.randint_like.out,
     aten.randint_like.low_dtype,
     aten.randint_like.low_dtype_out,
@@ -110,7 +114,7 @@ def contains_tensor_types(type):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_tensor_constructor(func: OpOverload):
     assert isinstance(func, OpOverload)
     schema = func._schema
@@ -139,6 +143,19 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
         return op_impl
 
     return impl_decorator
+
+
+def _is_op_registered_to_fake_rule(op):
+    return op in op_implementations_dict
+
+
+def _deregister_op_impl(op):
+    if op in op_implementations_dict:
+        del op_implementations_dict[op]
+    for check, impl in op_implementations_checks:
+        if check is op:
+            op_implementations_checks.remove((check, impl))
+            break
 
 
 @register_op_impl(op_implementations_dict.__contains__)
@@ -208,14 +225,6 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
 
 
 def stride_incorrect_op(op):
-    if op.namespace not in ("aten", "prims"):
-        return False
-    if op is aten._fft_c2c.default:
-        return False
-
-    op_name = op.name()
-    if "fft" in op_name:
-        return True
     return False
 
 
@@ -268,7 +277,15 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
 
 
 def _unique(
-    fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
+    fake_mode,
+    func,
+    arg,
+    dim,
+    sorted=True,
+    return_inverse=False,
+    return_counts=False,
+    *,
+    unique_consecutive=False,
 ):
     if (
         fake_mode.shape_env is None
@@ -277,8 +294,10 @@ def _unique(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
+    nnz = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
+
     # Do not use a memo for unique_dim
-    if dim is not None or (nnz := arg.unique_memo) is None:
+    if dim is not None or nnz is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -307,7 +326,10 @@ def _unique(
             _constrain_range_for_size(nnz, max=maxval)
 
         if dim is None:
-            arg.unique_memo = nnz
+            if unique_consecutive:
+                arg.unique_consecutive_memo = nnz
+            else:
+                arg.unique_memo = nnz
 
     if dim is None:
         ret = [arg.new_empty((nnz,))]
@@ -353,6 +375,20 @@ def unique_dim(
     )
 
 
+@register_op_impl(aten.unique_consecutive.default)
+def _(fake_mode, func, arg, return_inverse=False, return_counts=False, dim=None):
+    return _unique(
+        fake_mode,
+        func,
+        arg,
+        dim,
+        False,
+        return_inverse,
+        return_counts,
+        unique_consecutive=True,
+    )
+
+
 @register_op_impl(aten.repeat_interleave.Tensor)
 def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     if output_size is None:
@@ -372,6 +408,7 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
+@register_op_impl(torch.ops.aten.item.default)
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
     if (r := arg.item_memo) is not None:
@@ -394,6 +431,11 @@ def local_scalar_dense(fake_mode, func, arg):
     return r
 
 
+@register_op_impl(torch.ops.aten.nonzero_numpy.default)
+def nonzero_numpy(fake_mode, func, arg):
+    return torch.ops.aten.nonzero.default(arg).unbind(1)
+
+
 @register_op_impl(torch.ops.aten.nonzero.default)
 def nonzero(fake_mode, func, arg):
     if (
@@ -409,6 +451,8 @@ def nonzero(fake_mode, func, arg):
             _constrain_range_for_size,
             has_free_symbols,
         )
+        from torch.utils._sympy.numbers import IntInfinity
+        from torch.utils._sympy.value_ranges import bound_sympy
 
         if not has_free_symbols(arg.numel()) and arg.numel() == 0:
             # If numel is zero, then the output size must be zero.
@@ -427,12 +471,53 @@ def nonzero(fake_mode, func, arg):
 
             if not has_free_symbols(arg.numel()):
                 maxval = int(arg.numel())
+            else:
+                prod_node = math.prod(arg.shape).node
+                prod_range = bound_sympy(
+                    prod_node.expr, prod_node.shape_env.var_to_range
+                )
+                if isinstance(prod_range.upper, IntInfinity):
+                    maxval = sys.maxsize - 1
+                else:
+                    maxval = prod_range.upper
 
             _constrain_range_for_size(nnz, max=maxval)
 
         arg.nonzero_memo = nnz
 
-    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
+    return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)
+
+
+@register_op_impl(torch.ops.aten._padded_dense_to_jagged_forward.default)
+def _padded_dense_to_jagged_forward(fake_mode, func, padded, offsets, total_L=None):
+    # only one jagged dim is supported for now
+    assert len(offsets) == 1
+
+    if not total_L:
+        if (
+            fake_mode.shape_env is None
+            or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+        ):
+            # Without symints/symfloats, cannot handle this
+            raise DynamicOutputShapeException(func)
+
+        total_L = fake_mode.shape_env.create_unbacked_symint()
+
+        maxval = sys.maxsize - 1
+
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import (
+            _constrain_range_for_size,
+            has_free_symbols,
+        )
+
+        if not has_free_symbols(padded.numel()):
+            maxval = int(padded.numel())
+
+        _constrain_range_for_size(total_L, min=0, max=maxval)
+
+    output_shape = (total_L, *padded.shape[2:])
+    return padded.new_empty(output_shape)
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)
@@ -454,14 +539,61 @@ def masked_select(fake_mode, func, self, mask):
         _constrain_range_for_size,
         has_free_symbols,
     )
+    from torch.utils._sympy.numbers import IntInfinity
+    from torch.utils._sympy.value_ranges import bound_sympy
 
+    # If num elements is expressed symbolically, calculate
+    # the concrete value based on upper bounds. Otherwise,
+    # we can set max val directly.
     if not has_free_symbols(self.numel()):
-        if self.numel() > 2:
-            maxval = int(self.numel())
+        num_elements = int(self.numel())
+    else:
+        prod_node = math.prod(self.shape).node
+        prod_range = bound_sympy(prod_node.expr, prod_node.shape_env.var_to_range)
+        if isinstance(prod_range.upper, IntInfinity):
+            num_elements = sys.maxsize - 1
+        else:
+            num_elements = prod_range.upper
+    if num_elements > 2:
+        maxval = num_elements
 
     _constrain_range_for_size(nnz, max=maxval)
 
     return self.new_empty((nnz,))
+
+
+@register_op_impl(torch.ops.aten._assert_tensor_metadata.default)
+def assert_tensor_metadata(
+    fake_mode,
+    func,
+    t,
+    sizes=None,
+    strides=None,
+    dtype=None,
+    *,
+    device=None,
+    layout=None,
+) -> None:
+    if sizes is not None:
+        assert (
+            t.size() == sizes
+        ), f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
+    if strides is not None:
+        assert (
+            t.stride() == strides
+        ), f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
+    if dtype is not None:
+        assert (
+            t.dtype == dtype
+        ), f"Tensor dtype mismatch! Expected: {dtype}, Got: {t.dtype}"
+    if layout is not None:
+        assert (
+            t.layout == layout
+        ), f"Tensor layout mismatch! Expected: {layout}, Got: {t.layout()}"
+    if device is not None:
+        assert (
+            t.device == device
+        ), f"Tensor device mismatch! Expected: {device}, Got: {t.device}"
 
 
 # NB: this must be ordered after local_scalar_dense
@@ -505,23 +637,25 @@ def has_meta(func):
     return torch._C._dispatch_has_computed_kernel_for_dispatch_key(func.name(), "Meta")
 
 
+# These are for the `torch._foreach_...` ops like `torch._foreach_add`.
 @register_op_impl(
-    lambda func: is_builtin(func) and "foreach" in func.name() and has_meta(func)
+    lambda func: is_builtin(func)
+    and func.name().startswith("aten::_foreach_")
+    and has_meta(func)
 )
 def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
-    tensor_lists = []
-    for arg in itertools.chain(args, kwargs.values()):
-        if (
-            isinstance(arg, (list, tuple))
-            and len(arg)
-            and isinstance(arg[0], torch.Tensor)
-        ):
-            tensor_lists.append(arg)
+    tensor_lists = [
+        arg
+        for arg in itertools.chain(args, kwargs.values())
+        if isinstance(arg, (list, tuple))
+        and len(arg)
+        and isinstance(arg[0], torch.Tensor)
+    ]
 
     try:
         with in_kernel_invocation_manager(fake_mode):
             out_meta = func(*args, **kwargs)
-    except NotImplementedError as not_implemented_error:
+    except NotImplementedError:
         return NotImplemented
 
     if not out_meta:
@@ -583,7 +717,7 @@ def multi_device_op_default(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten.slice_scatter.out)
 def multi_device_op_out(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
-        out = func(*args, **kwargs)
+        func(*args, **kwargs)
 
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -703,6 +837,24 @@ def conv(fake_mode, func, *args, **kwargs):
             )
 
 
+@register_op_impl(torch.ops.aten.bincount.default)
+def bincount(fake_mode, func, inputs, weights=None, minlength=0):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    new_size = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(new_size)
+    torch._check(new_size >= minlength)
+    return inputs.new_empty(new_size)
+
+
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)
 def _pack_padded_sequence(fake_mode, func, inputs, lengths, batch_first):
     if (
@@ -743,7 +895,7 @@ def register_fast_op_impl(func: OpOverload):
 
 # infer_size_impl in ExpandUtils
 def infer_size(a, b):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     dimsA = len(a)
     dimsB = len(b)
@@ -768,18 +920,18 @@ def infer_size(a, b):
         # were not the case, we'd need to write this using torch.sym_or() or
         # something like that).
         torch._check(
-            guard_size_oblivious(sizeA == 1)
-            or guard_size_oblivious(sizeB == 1)
-            or sizeA == sizeB,
+            guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
             f"at non-singleton dimension {i})",
         )
-        expandedSizes[i] = sizeB if guard_size_oblivious(sizeA == 1) else sizeA
+        expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
     return tuple(expandedSizes)
 
 
-def make_fast_binary_impl(slow_ref):
+def make_fast_binary_impl(
+    slow_ref, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+):
     def fast_binary_impl(mode, *args, **kwargs):
         def slow(msg):
             count_label(f"slow {msg}")
@@ -799,15 +951,9 @@ def make_fast_binary_impl(slow_ref):
         operands = args
 
         # compute_shape
-        has_scalars = False
-        has_tensors = False
         final_shape = None
         for op in operands:
             shape = op.shape if isinstance(op, torch.Tensor) else ()
-            if len(shape) == 0:
-                has_scalars = True
-            else:
-                has_tensors = True
             if final_shape is None:
                 final_shape = shape
             # TODO: Minor optimization: track if the shapes
@@ -834,7 +980,6 @@ def make_fast_binary_impl(slow_ref):
         cpu = torch.device("cpu")
         common_device = cpu
         common_dtype = None
-        output_dtype = None
         has_different_input_dtypes = False
         for op in operands:
             if not isinstance(op, torch.Tensor):
@@ -853,7 +998,7 @@ def make_fast_binary_impl(slow_ref):
             # compute promotion
             # TODO: we don't need the compute type
             _, common_dtype = elementwise_dtypes(
-                *operands, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+                *operands, type_promotion_kind=type_promotion_kind
             )
 
         # check all tensors on same device
@@ -871,8 +1016,8 @@ def make_fast_binary_impl(slow_ref):
                 return slow("error")
 
         # compute_fast_setup_type
-        is_contiguous = True
-        is_channels_last = True
+        definitely_contiguous = True
+        definitely_channels_last = True
         # TODO: is_non-overlapping_and_dense (not bound from Python
         # no inplace, no out, everything defined
 
@@ -880,13 +1025,19 @@ def make_fast_binary_impl(slow_ref):
             for op in operands:
                 if not isinstance(op, torch.Tensor):
                     continue
-                is_contiguous = is_contiguous and op.is_contiguous(
-                    memory_format=torch.contiguous_format
+                definitely_contiguous = (
+                    definitely_contiguous
+                    and definitely_contiguous_for_memory_format(
+                        op, memory_format=torch.contiguous_format
+                    )
                 )
-                is_channels_last = is_channels_last and op.is_contiguous(
-                    memory_format=torch.channels_last
+                definitely_channels_last = (
+                    definitely_channels_last
+                    and definitely_contiguous_for_memory_format(
+                        op, memory_format=torch.channels_last
+                    )
                 )
-        if is_contiguous:
+        if definitely_contiguous:
             # do contiguous
             count_label("fast is_contiguous")
             return FakeTensor(
@@ -899,7 +1050,7 @@ def make_fast_binary_impl(slow_ref):
                 ),
                 device=common_device,
             )
-        if is_channels_last:
+        if definitely_channels_last:
             count_label("fast channels_last")
             # do channels last
             return FakeTensor(
@@ -920,13 +1071,15 @@ def make_fast_binary_impl(slow_ref):
 
 # disable the python dispatcher to avoid decomposing detach() further
 # (proxy_mode should still decompose detach() though)
-def fast_detach(fake_mode, x):
+def fast_detach(fake_mode, x, include_real=False):
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
+    if include_real:
+        return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
     return FakeTensor(fake_mode, out, x.device)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_fast_op_impls():
     import torch._refs
 
@@ -938,7 +1091,10 @@ def get_fast_op_impls():
     )
     register_fast_op_impl(torch.ops.aten.mul.Tensor)(make_fast_binary_impl(torch._refs.mul))  # type: ignore[has-type]
     register_fast_op_impl(torch.ops.aten.div.Tensor)(
-        make_fast_binary_impl(torch._refs.div)
+        make_fast_binary_impl(
+            torch._refs.div,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        )
     )
     register_fast_op_impl(torch.ops.aten.detach.default)(fast_detach)
     return FAST_OP_IMPLEMENTATIONS

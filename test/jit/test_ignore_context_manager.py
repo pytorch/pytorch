@@ -11,15 +11,8 @@ import torch
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.jit.frontend import _IS_ASTUNPARSE_INSTALLED
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestIgnoreContextManager(JitTestCase):
@@ -82,7 +75,7 @@ class TestIgnoreContextManager(JitTestCase):
                 a: int = 4
                 b: int = 5
                 with torch.jit._IgnoreContextManager(a="inp:int", b="inp:int"):
-                    l = [2 + b for i in range(a) if i > 2]
+                    l = [2 + b for i in range(a) if i > 2]  # noqa: F841
                 return a
 
         model = A()
@@ -103,3 +96,7 @@ class TestIgnoreContextManager(JitTestCase):
         s = torch.jit.script(model)
         self.assertEqual(s(), 5)
         self.assertEqual(s(), model())
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

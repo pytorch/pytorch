@@ -7,7 +7,8 @@ import inspect
 import logging
 import types
 import typing
-from typing import Any, Iterator, Mapping, Optional, Sequence, TypeVar, Union
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, Optional, TypeVar, Union
 
 import onnx
 
@@ -121,6 +122,8 @@ class Parameter:
 
 @dataclasses.dataclass(frozen=True)
 class AttributeParameter:
+    """A parameter in the function signature that represents an ONNX attribute."""
+
     name: str
     type: ir.AttributeType
     required: bool
@@ -222,9 +225,9 @@ def _get_attr_type(type_: type) -> ir.AttributeType:
         if origin_type in (
             collections.abc.Sequence,
             Sequence,
-            typing.List,
             list,
-            typing.Tuple,
+            list,
+            tuple,
             tuple,
         ):
             inner_type = typing.get_args(type_)[0]
@@ -304,9 +307,9 @@ def _get_allowed_types_from_type_annotation(
         allowed_types = set()
         subtypes = typing.get_args(type_)
         for subtype in subtypes:
-            assert (
-                subtype is not type(None)
-            ), "Union should not contain None type because it is handled by _is_optional."
+            assert subtype is not type(None), (
+                "Union should not contain None type because it is handled by _is_optional."
+            )
             allowed_types.update(_get_allowed_types_from_type_annotation(subtype))
         return allowed_types
 
@@ -343,6 +346,7 @@ class OpSignature:
     params_map: Mapping[str, Parameter | AttributeParameter] = dataclasses.field(
         init=False, repr=False
     )
+    opset_version: int | None = None
 
     def __post_init__(self):
         self.params_map = {param.name: param for param in self.params}
@@ -422,11 +426,18 @@ class OpSignature:
             overload="",
             params=params,
             outputs=outputs,
+            opset_version=opschema.since_version,
         )
 
     @classmethod
     def from_function(
-        cls, func, domain: str, name: str | None = None, overload: str = ""
+        cls,
+        func,
+        domain: str,
+        name: str | None = None,
+        overload: str = "",
+        *,
+        opset_version: int = 1,
     ) -> OpSignature:
         """Produce an OpSignature from a function using type annotation."""
 
@@ -435,7 +446,7 @@ class OpSignature:
         # https://github.com/python/cpython/issues/102405
         type_hints = typing.get_type_hints(func)
 
-        params = []
+        params: list[Parameter | AttributeParameter] = []
         # Create a mapping from type to a unique name
         type_constraints: dict[str, TypeConstraintParam] = {}
 
@@ -446,8 +457,19 @@ class OpSignature:
                     param.name,
                     py_signature,
                 )
-                type_constraints[param.name] = TypeConstraintParam.any_value(
-                    f"T_{param.name}"
+                type_constraint = TypeConstraintParam.any_value(f"T_{param.name}")
+                type_constraints[param.name] = type_constraint
+                params.append(
+                    Parameter(
+                        name=param.name,
+                        type_constraint=type_constraint,
+                        required=param.default is inspect.Parameter.empty,
+                        # TODO: Handle variadic
+                        variadic=False,
+                        default=param.default
+                        if param.default is not inspect.Parameter.empty
+                        else _EMPTY_DEFAULT,
+                    )
                 )
             else:
                 type_ = type_hints[param.name]
@@ -490,7 +512,7 @@ class OpSignature:
                         type_constraints[type_constraint_name] = type_constraint
                     # 4. Create Parameter
                     params.append(
-                        Parameter(  # type: ignore[arg-type]
+                        Parameter(
                             name=param.name,
                             type_constraint=type_constraint,
                             required=param.default is inspect.Parameter.empty,
@@ -545,4 +567,5 @@ class OpSignature:
             overload=overload,
             params=params,
             outputs=outputs,
+            opset_version=opset_version,
         )

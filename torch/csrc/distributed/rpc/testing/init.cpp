@@ -4,14 +4,14 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 #include <torch/csrc/distributed/rpc/testing/faulty_tensorpipe_agent.h>
+#include <torch/csrc/distributed/rpc/testing/testing.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <pybind11/chrono.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
-namespace testing {
+#include <utility>
+
+namespace torch::distributed::rpc::testing {
 
 namespace {
 
@@ -68,7 +68,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
       module, "FaultyTensorPipeAgent", rpc_module.attr("TensorPipeAgent"))
       .def(
           py::init(
-              [](const c10::intrusive_ptr<::c10d::Store> store,
+              [](const c10::intrusive_ptr<::c10d::Store>& store,
                  std::string name,
                  worker_id_t rank,
                  int world_size,
@@ -81,9 +81,9 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
                         std::move(name),
                         rank,
                         world_size,
-                        opts,
-                        reverse_device_maps,
-                        devices,
+                        std::move(opts),
+                        std::move(reverse_device_maps),
+                        std::move(devices),
                         std::make_unique<RequestCallbackImpl>()),
                     impl::destroy_without_gil<FaultyTensorPipeAgent>);
               }),
@@ -139,7 +139,4 @@ PyMethodDef* python_functions() {
   return methods;
 }
 
-} // namespace testing
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc::testing

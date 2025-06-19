@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Callable, Optional
+from typing import Callable
 from typing_extensions import deprecated
 
 import torch
@@ -13,62 +13,76 @@ class FakeImplHolder:
 
     def __init__(self, qualname: str):
         self.qualname: str = qualname
-        self.kernel: Optional[Kernel] = None
-        self.lib: Optional[torch.library.Library] = None
+        # kernels stores all registered fake kernels, ordered by registration
+        # time ascendingly (newer registration after older registration). If an
+        # operator library gets loaded that overrides an existing fake kernel,
+        # both kernels will be in the list, but the newest one will be the one
+        # that is run. If the library is unloaded, we will remove the kernel
+        # from this list.
+        self.kernels: list[Kernel] = []
 
-    def register(self, func: Callable, source: str) -> RegistrationHandle:
+    @property
+    def kernel(self):
+        if len(self.kernels) == 0:
+            return None
+        return self.kernels[-1]
+
+    @kernel.setter
+    def kernel(self, value):
+        raise RuntimeError("Unable to directly set kernel.")
+
+    def register(
+        self, func: Callable, source: str, lib, *, allow_override=False
+    ) -> RegistrationHandle:
         """Register an fake impl.
 
         Returns a RegistrationHandle that one can use to de-register this
         fake impl.
         """
-        if self.kernel is not None:
-            raise RuntimeError(
-                f"register_fake(...): the operator {self.qualname} "
-                f"already has an fake impl registered at "
-                f"{self.kernel.source}."
-            )
-        if torch._C._dispatch_has_kernel_for_dispatch_key(self.qualname, "Meta"):
-            raise RuntimeError(
-                f"register_fake(...): the operator {self.qualname} "
-                f"already has an DispatchKey::Meta implementation via a "
-                f"pre-existing torch.library or TORCH_LIBRARY registration. "
-                f"Please either remove that registration or don't call "
-                f"register_fake."
-            )
 
-        if torch._C._dispatch_has_kernel_for_dispatch_key(
-            self.qualname, "CompositeImplicitAutograd"
-        ):
-            raise RuntimeError(
-                f"register_fake(...): the operator {self.qualname} "
-                f"already has an implementation for this device type via a "
-                f"pre-existing registration to "
-                f"DispatchKey::CompositeImplicitAutograd."
-                f"CompositeImplicitAutograd operators do not need an fake "
-                f"impl; "
-                f"instead, the operator will decompose into its constituents "
-                f"and those "
-                f"can have fake impls defined on them."
-            )
+        if not allow_override:
+            if self.kernel is not None:
+                raise RuntimeError(
+                    f"register_fake(...): the operator {self.qualname} "
+                    f"already has an fake impl registered at "
+                    f"{self.kernel.source}."
+                )
+            if torch._C._dispatch_has_kernel_for_dispatch_key(self.qualname, "Meta"):
+                raise RuntimeError(
+                    f"register_fake(...): the operator {self.qualname} "
+                    f"already has an DispatchKey::Meta implementation via a "
+                    f"pre-existing torch.library or TORCH_LIBRARY registration. "
+                    f"Please either remove that registration or don't call "
+                    f"register_fake."
+                )
+
+            if torch._C._dispatch_has_kernel_for_dispatch_key(
+                self.qualname, "CompositeImplicitAutograd"
+            ):
+                raise RuntimeError(
+                    f"register_fake(...): the operator {self.qualname} "
+                    f"already has an implementation for this device type via a "
+                    f"pre-existing registration to "
+                    f"DispatchKey::CompositeImplicitAutograd."
+                    f"CompositeImplicitAutograd operators do not need an fake "
+                    f"impl; "
+                    f"instead, the operator will decompose into its constituents "
+                    f"and those "
+                    f"can have fake impls defined on them."
+                )
 
         # Store the kernel in this holder
-        self.kernel = Kernel(func, source)
+        kernel = Kernel(func, source)
+        self.kernels.append(kernel)
 
-        # Also register the fake impl to Meta key
-        if self.lib is None:
-            ns = self.qualname.split("::")[0]
-            self.lib = torch.library.Library(ns, "FRAGMENT")  # noqa: TOR901
+        def deregister_fake_kernel():
+            self.kernels.remove(kernel)
+
         meta_kernel = construct_meta_kernel(self.qualname, self)
-        self.lib.impl(self.qualname, meta_kernel, "Meta")
+        lib.impl(self.qualname, meta_kernel, "Meta", allow_override=allow_override)
 
-        def deregister_fake_class():
-            if self.lib:
-                self.lib._destroy()
-                self.lib = None
-            self.kernel = None
-
-        return RegistrationHandle(deregister_fake_class)
+        handle = RegistrationHandle(deregister_fake_kernel)
+        return handle
 
 
 def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Callable:
@@ -81,12 +95,14 @@ def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Ca
 
         def error_on_ctx():
             raise RuntimeError(
-                f"Attempted to call get_ctx() for the meta implementation "
-                f"for {qualname} (implemented at {source})"
-                f"You have presumably called get_ctx() because the operator "
-                f"has a data-dependent output shape; if so, there is no "
-                f"such meta implementation and this error is the correct "
-                f"behavior."
+                f"{qualname} ({source}): You're trying to run this operator "
+                f"with meta Tensors (as opposed to FakeTensors), but this "
+                f"operator may return an output Tensor with data-dependent shape. Meta "
+                f"Tensors don't support operators with outputs that have data-dependent shapes "
+                f"but FakeTensors do. "
+                f"If your operator does not return an output with data-dependent shape, "
+                f"make sure the FakeTensor and/or meta kernel does not call "
+                f"torch.library.get_ctx(). Otherwise, please use FakeTensors."
             )
 
         with set_ctx_getter(error_on_ctx):
@@ -200,8 +216,12 @@ class FakeImplCtx:
                 f"non-negative sizes."
             )
 
-        result = self._shape_env.create_unbacked_symint()
-        torch.fx.experimental.symbolic_shapes._constrain_range_for_size(
-            result, min=min, max=max
-        )
-        return result
+        return allocate_size(self._shape_env, min, max)
+
+
+def allocate_size(shape_env, min_val=0, max_val=None):
+    result = shape_env.create_unbacked_symint()
+    torch.fx.experimental.symbolic_shapes._constrain_range_for_size(
+        result, min=min_val, max=max_val
+    )
+    return result

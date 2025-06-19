@@ -90,7 +90,7 @@ detectron2_maskrcnn_r_50_fpn,fail_to_run,0
 
 
 
-dlrm,fail_to_run,0
+dlrm,pass,0
 
 
 
@@ -130,6 +130,10 @@ hf_Bert_large,pass,0
 
 
 
+hf_BigBird,pass,0
+
+
+
 hf_DistilBert,pass,0
 
 
@@ -139,6 +143,14 @@ hf_GPT2,pass,0
 
 
 hf_GPT2_large,pass_due_to_skip,0
+
+
+
+hf_Roberta_base,pass,0
+
+
+
+hf_T5,pass,0
 
 
 
@@ -158,7 +170,7 @@ lennard_jones,pass,0
 
 
 
-llama,fail_to_run,0
+llama,pass,0
 
 
 
@@ -167,6 +179,14 @@ maml,pass_due_to_skip,0
 
 
 maml_omniglot,pass,0
+
+
+
+microbench_unbacked_tolist_sum,pass,0
+
+
+
+mnasnet1_0,pass,0
 
 
 
@@ -242,6 +262,10 @@ resnext50_32x4d,pass,0
 
 
 
+shufflenet_v2_x1_0,pass,0
+
+
+
 soft_actor_critic,fail_to_run,0
 
 
@@ -302,4 +326,4 @@ vision_maskrcnn,fail_to_run,0
 
 
 
-yolov3,fail_to_run,0
+yolov3,pass,0

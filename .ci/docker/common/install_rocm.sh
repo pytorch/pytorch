@@ -8,10 +8,6 @@ ver() {
 
 install_ubuntu() {
     apt-get update
-    if [[ $UBUNTU_VERSION == 18.04 ]]; then
-      # gpg-agent is not available by default on 18.04
-      apt-get install -y --no-install-recommends gpg-agent
-    fi
     if [[ $UBUNTU_VERSION == 20.04 ]]; then
       # gpg-agent is not available by default on 20.04
       apt-get install -y --no-install-recommends gpg-agent
@@ -22,6 +18,18 @@ install_ubuntu() {
     # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
     apt-get install -y libc++1
     apt-get install -y libc++abi1
+
+    # Make sure rocm packages from repo.radeon.com have highest priority
+    cat << EOF > /etc/apt/preferences.d/rocm-pin-600
+Package: *
+Pin: release o=repo.radeon.com
+Pin-Priority: 600
+EOF
+
+    # we want the patch version of 6.4 instead
+    if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
+        ROCM_VERSION="${ROCM_VERSION}.1"
+    fi
 
     # Add amdgpu repository
     UBUNTU_VERSION_NAME=`cat /etc/os-release | grep UBUNTU_CODENAME | awk -F= '{print $2}'`
@@ -61,6 +69,34 @@ install_ubuntu() {
     do
         sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
     done
+
+    # ROCm 6.3 had a regression where initializing static code objects had significant overhead
+    # ROCm 6.4 did not yet fix the regression, also HIP branch names are different
+    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.3) ]] && [[ $(ver $ROCM_VERSION) -lt $(ver 7.0) ]]; then
+        if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.1) ]]; then
+            HIP_BRANCH=release/rocm-rel-6.4
+            VER_STR=6.4
+            VER_PATCH=.1
+        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
+            HIP_BRANCH=release/rocm-rel-6.4
+            VER_STR=6.4
+        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.3) ]]; then
+            HIP_BRANCH=rocm-6.3.x
+            VER_STR=6.3
+        fi
+        # clr build needs CppHeaderParser but can only find it using conda's python
+        /opt/conda/bin/python -m pip install CppHeaderParser
+        git clone https://github.com/ROCm/HIP -b $HIP_BRANCH
+        HIP_COMMON_DIR=$(readlink -f HIP)
+        git clone https://github.com/jeffdaily/clr -b release/rocm-rel-${VER_STR}${VER_PATCH}-statco-hotfix
+        mkdir -p clr/build
+        pushd clr/build
+        cmake .. -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
+        make -j
+        cp hipamd/lib/libamdhip64.so.${VER_STR}.* /opt/rocm/lib/libamdhip64.so.${VER_STR}.*
+        popd
+        rm -rf HIP clr
+    fi
 
     # Cleanup
     apt-get autoclean && apt-get clean

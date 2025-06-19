@@ -5,13 +5,13 @@ load("@bazel_skylib//lib:paths.bzl", "paths")
 load("//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
 load("//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
+load("//tools/build_defs/windows:windows_flag_map.bzl", "windows_convert_gcc_clang_flags")
 load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:platform_defs.bzl", "APPLETVOS", "IOS", "MACOSX")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
 load("//tools/build_defs/android:build_mode_defs.bzl", is_production_build_android = "is_production_build")
 load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build")
-load("//tools/build_defs/windows:windows_flag_map.bzl", "windows_convert_gcc_clang_flags")
 load(
     ":build_variables.bzl",
     "aten_cpu_source_list",
@@ -178,11 +178,12 @@ THIRD_PARTY_LIBS = {
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
     "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
     "pthreadpool_header": ["//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
-    "pyyaml": ["//third-party/pyyaml:pyyaml", "//third_party:pyyaml"],
+    "moodycamel": ["//third-party/moodycamel:moodycamel", "//third_party:moodycamel"],
+    "pyyaml": ["//third-party/pypi/pyyaml:pyyaml", "//third_party:pyyaml"],
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
-    "sleef_arm": ["//third-party/sleef:sleef_arm", "//third_party:sleef_arm"],
-    "typing-extensions": ["//third-party/typing-extensions:typing-extensions", "//third_party:typing-extensions"],
+    "nlohmann-json": ["fbsource//third-party/nlohmann-json:nlohmann-json", "//third_party:nlohmann-json"],
+    "sleef_arm": ["//third-party/sleef:sleef", "//third_party:sleef_arm"],
 }
 
 def third_party(name):
@@ -194,6 +195,9 @@ def get_pt_compiler_flags():
     return select({
         "DEFAULT": _PT_COMPILER_FLAGS,
         "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(_PT_COMPILER_FLAGS),
+    }) + select({
+        "DEFAULT": [],
+        "ovr_config//os:macos": ["-fvisibility=default"],
     })
 
 _PT_COMPILER_FLAGS = [
@@ -213,7 +217,6 @@ _PT_COMPILER_FLAGS = [
 ATEN_COMPILER_FLAGS = [
     "-fexceptions",
     "-frtti",
-    "-fPIC",
     "-Os",
     "-Wno-absolute-value",
     "-Wno-deprecated-declarations",
@@ -225,10 +228,20 @@ ATEN_COMPILER_FLAGS = [
     "-Wno-unused-variable",
     "-Wno-pass-failed",
     "-Wno-shadow",
-]
+] + select({
+    # Not supported by clang on Windows
+    "DEFAULT": ["-fPIC"],
+    "ovr_config//compiler:clang-windows": [],
+}) + select({
+    "DEFAULT": [],
+    "ovr_config//os:macos": ["-fvisibility=default"],
+})
 
 def get_aten_compiler_flags():
-    return ATEN_COMPILER_FLAGS
+    return select({
+        "DEFAULT": ATEN_COMPILER_FLAGS,
+        "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(ATEN_COMPILER_FLAGS),
+    })
 
 _COMMON_PREPROCESSOR_FLAGS = [
     "-DC10_MOBILE",
@@ -240,6 +253,9 @@ _COMMON_PREPROCESSOR_FLAGS = [
 ) + (
     ["-DDISABLE_WARN"] if get_disable_warn() else []
 )
+
+def get_no_as_needed_linker_flag():
+    return select({"DEFAULT": ["-Wl,--no-as-needed"], "ovr_config//os:macos": []})
 
 def get_aten_preprocessor_flags():
     # read_config is not allowed outside of function in Starlark
@@ -282,7 +298,7 @@ def get_pt_preprocessor_flags():
         PT_PREPROCESSOR_FLAGS.append("-DENABLE_PYTORCH_NON_PRODUCTION_BUILDS")
     return PT_PREPROCESSOR_FLAGS
 
-# This needs to be kept in sync with https://github.com/pytorch/pytorch/blob/release/1.9/torchgen/gen.py#L892
+# This needs to be kept in sync with https://github.com/pytorch/pytorch/blob/release/1.9/torchgen/gen.py#L892  @lint-ignore
 PT_BACKEND_HEADERS = [
     "CPU",
     "CUDA",
@@ -347,10 +363,10 @@ def get_aten_generated_files(enabled_backends):
     # and is intentionally omitted from here
     src_files = [
         "RegisterBackendSelect.cpp",
-        "RegisterCompositeImplicitAutograd.cpp",
-        "RegisterCompositeImplicitAutogradNestedTensor.cpp",
-        "RegisterCompositeExplicitAutograd.cpp",
-        "RegisterCompositeExplicitAutogradNonFunctional.cpp",
+        "RegisterCompositeImplicitAutograd_0.cpp",
+        "RegisterCompositeImplicitAutogradNestedTensor_0.cpp",
+        "RegisterCompositeExplicitAutograd_0.cpp",
+        "RegisterCompositeExplicitAutogradNonFunctional_0.cpp",
         "CompositeViewCopyKernels.cpp",
         "RegisterSchema.cpp",
         "Declarations.yaml",
@@ -386,7 +402,7 @@ def get_aten_generated_files(enabled_backends):
 
     # This is tiresome.  A better strategy would be to unconditionally
     # generate these files, and then only actually COMPILE them depended
-    # on the generated set.  C'est la vie...
+    # on the generated set.  C'est la vie...  # codespell:ignore vie
     if "CPU" in enabled_backends:
         src_files.extend(aten_ufunc_generated_cpu_sources())
         src_files.extend(aten_ufunc_generated_cpu_kernel_sources())
@@ -403,20 +419,22 @@ def get_aten_generated_files(enabled_backends):
 
 def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
     return [
-        ":{}[{}]".format(aten_rule_name, "Register" + backend + ".cpp")
-        for backend in enabled_backends
-    ]
+        ":{}[{}]".format(aten_rule_name, "Register" + backend + "_0.cpp")
+        for backend in enabled_backends if backend != "CPU"
+    ] + ([
+        ":{}[RegisterCPU_{}.cpp]".format(aten_rule_name, x) for x in range(4)
+    ] if "CPU" in enabled_backends else [])
 
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeImplicitAutogradNestedTensor.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd_0.cpp", "RegisterCompositeImplicitAutogradNestedTensor_0.cpp", "RegisterCompositeExplicitAutograd_0.cpp", "RegisterCompositeExplicitAutogradNonFunctional_0.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
     return [
-        "Register" + derived_type + ".cpp"
-        for derived_type in enabled_backends
+        "Register" + derived_type + "_0.cpp"
+        for derived_type in enabled_backends if derived_type != "CPU"
     ] + [
         derived_type + "Functions.h"
         for derived_type in enabled_backends
@@ -425,7 +443,9 @@ def get_aten_derived_type_srcs(enabled_backends):
         derived_type + "Functions_inl.h"
         for derived_type in enabled_backends
         if derived_type in PT_BACKEND_HEADERS or derived_type in get_static_dispatch_backend()
-    ]
+    ] + ([
+        "RegisterCPU_{}.cpp".format(x) for x in range(4)
+    ] if "CPU" in enabled_backends else [])
 
 def gen_aten_files(
         name,
@@ -505,7 +525,7 @@ def copy_template_registration_files(name, apple_sdks = None):
 
     # Ideally, we would run one copy command for a single source directory along
     # with all its child directories, but it's somewhat hard to know if a directory
-    # is a child of another just bu looking at the metadata (directory relative
+    # is a child of another just by looking at the metadata (directory relative
     # path) that we currently have since 1 directory could look like a parent of
     # another and yet come from a different filegroup() rule.
     #
@@ -718,7 +738,6 @@ def vulkan_spv_shader_library(name, spv_filegroup):
         },
         cmd = " ".join(genrule_cmd),
         default_outs = ["."],
-        labels = ["uses_dotslash"],
     )
 
     fb_xplat_cxx_library(
@@ -757,7 +776,7 @@ def copy_metal(name, apple_sdks = None):
 
     # Metal custom ops currently have to be brought into selective build because they directly reference metal ops instead of
     # going through the dispatcher. There is some weird issues with the genrule and these files locations on windows though, so
-    # for now we simply skip building them for windows where they very likely arent needed anyway.
+    # for now we simply skip building them for windows where they very likely aren't needed anyway.
     # Metal MaskRCNN custom op
     for full_path in METAL_MASKRCNN_SOURCE_LIST:
         path_prefix = paths.dirname(full_path)
@@ -773,7 +792,7 @@ def copy_metal(name, apple_sdks = None):
         name = name,
         cmd = " && ".join(cmd),
         cmd_exe = "@powershell -Command " + ("; ".join(cmd_exe)),
-        # due to an obscure bug certain custom ops werent being copied correctly on windows. ARVR also sometimes builds android targets on windows,
+        # due to an obscure bug certain custom ops weren't being copied correctly on windows. ARVR also sometimes builds android targets on windows,
         # so we just exclude those targets from being copied for those platforms (They end up uncompiled anyway).
         outs = select({
             "DEFAULT": get_metal_registration_files_outs(),
@@ -807,9 +826,7 @@ def get_pt_operator_registry_dict(
 
     return dict(
         srcs = code_gen_files["srcs"],
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         soname = "libtorch-code-gen.$(ext)",
@@ -927,6 +944,7 @@ def define_buck_targets(
             [
                 ("torch/csrc/api/include", "torch/**/*.h"),
                 ("", "torch/csrc/**/*.h"),
+                ("", "torch/standalone/**/*.h"),
                 ("", "torch/script.h"),
                 ("", "torch/library.h"),
                 ("", "torch/custom_class.h"),
@@ -971,6 +989,10 @@ def define_buck_targets(
     fb_xplat_cxx_library(
         name = "torch_mobile_headers",
         header_namespace = "",
+        compiler_flags = select({
+            "DEFAULT": [],
+            "ovr_config//os:macos": ["-fvisibility=default"],
+        }),
         exported_headers = subdir_glob(
             [
                 ("", "torch/csrc/jit/mobile/*.h"),
@@ -987,6 +1009,7 @@ def define_buck_targets(
             "Config.h": ":generate_aten_config[Config.h]",
         },
         labels = labels,
+        visibility = ["PUBLIC"],
     )
 
     fb_xplat_cxx_library(
@@ -1064,6 +1087,7 @@ def define_buck_targets(
         ],
     )
 
+    # TODO: Enable support for KleidiAI bazel build
     # @lint-ignore BUCKLINT
     fb_native.genrule(
         name = "generate_aten_config",
@@ -1116,6 +1140,9 @@ def define_buck_targets(
             "--replace",
             "@AT_BLAS_USE_CBLAS_DOT@",
             "AT_BLAS_USE_CBLAS_DOT_FBXPLAT",
+            "--replace",
+            "@AT_KLEIDIAI_ENABLED@",
+            "0",
         ]),
         outs = {
             "Config.h": ["Config.h"],
@@ -1169,7 +1196,10 @@ def define_buck_targets(
         srcs = [
             "torch/csrc/jit/mobile/observer.cpp",
         ] + ([] if IS_OSS else ["torch/fb/observers/MobileObserverUtil.cpp"]),
-        compiler_flags = ["-fexceptions"],
+        compiler_flags = ["-fexceptions"] + select({
+            "DEFAULT": [],
+            "ovr_config//os:macos": ["-fvisibility=default"],
+        }),
         header_namespace = "",
         exported_headers = subdir_glob(
             [
@@ -1226,14 +1256,14 @@ def define_buck_targets(
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],
         },
-        # torch_mobile_deserialize brings in sources neccessary to read a module
+        # torch_mobile_deserialize brings in sources necessary to read a module
         # which depends on mobile module definition
-        # link_whole is enable so that all symbols neccessary for mobile module are compiled
+        # link_whole is enable so that all symbols necessary for mobile module are compiled
         # instead of only symbols used while loading; this prevents symbol
-        # found definied in runtime
+        # found defined in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = ["-Wl,--no-as-needed"],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":aten_cpu",
@@ -1265,9 +1295,7 @@ def define_buck_targets(
         },
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":aten_cpu",
@@ -1298,9 +1326,7 @@ def define_buck_targets(
         header_namespace = "",
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":torch_mobile_deserialize",
@@ -1320,9 +1346,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":generated-autograd-headers",
@@ -1352,16 +1376,14 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/import.h",
             "torch/csrc/jit/mobile/flatbuffer_loader.h",
         ],
-        # torch_mobile_deserialize brings in sources neccessary to read a module
+        # torch_mobile_deserialize brings in sources necessary to read a module
         # which depends on mobile module definition
-        # link_whole is enable so that all symbols neccessary for mobile module are compiled
+        # link_whole is enable so that all symbols necessary for mobile module are compiled
         # instead of only symbols used while loading; this prevents symbol
-        # found definied in runtime
+        # found defined in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":aten_cpu",
@@ -1385,14 +1407,12 @@ def define_buck_targets(
         exported_headers = [],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
-        # torch_mobile_core brings in sources neccessary to read and run a module
+        # torch_mobile_core brings in sources necessary to read and run a module
         # link_whole is enabled so that all symbols linked
-        # operators, registerations and other few symbols are need in runtime
+        # operators, registrations and other few symbols are need in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":generated-autograd-headers",
@@ -1503,10 +1523,10 @@ def define_buck_targets(
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],
-        # torch_mobile_train brings in sources neccessary to read and run a mobile
+        # torch_mobile_train brings in sources necessary to read and run a mobile
         # and save and load mobile params along with autograd
         # link_whole is enabled so that all symbols linked
-        # operators, registerations and autograd related symbols are need in runtime
+        # operators, registrations and autograd related symbols are need in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         visibility = ["PUBLIC"],
@@ -1528,9 +1548,9 @@ def define_buck_targets(
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags(),
-        # torch brings in all sources neccessary to read and run a mobile module/jit module
+        # torch brings in all sources necessary to read and run a mobile module/jit module
         # link_whole is enabled so that all symbols linked
-        # operators, registerations and other few symbols are need in runtime
+        # operators, registrations and other few symbols are need in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         visibility = ["PUBLIC"],
@@ -1555,7 +1575,7 @@ def define_buck_targets(
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],
-        # torch_mobile_train_import_data brings in sources neccessary to read a mobile module
+        # torch_mobile_train_import_data brings in sources necessary to read a mobile module
         # link_whole is enabled so that all symbols linked
         # operators other few symbols are need in runtime
         # @lint-ignore BUCKLINT link_whole
@@ -1634,15 +1654,13 @@ def define_buck_targets(
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
-        # torch_mobile_model_tracer brings in sources neccessary to read and run a jit module
+        # torch_mobile_model_tracer brings in sources necessary to read and run a jit module
         # and trace the ops
         # link_whole is enabled so that all symbols linked
-        # operators, registerations and other few symbols are need in runtime
+        # operators, registrations and other few symbols are need in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":caffe2_serialize",
@@ -1671,9 +1689,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":generated-autograd-headers",
@@ -1696,9 +1712,7 @@ def define_buck_targets(
         fbandroid_compiler_flags = c2_fbandroid_xplat_compiler_flags,
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":aten_cpu",
@@ -1718,13 +1732,12 @@ def define_buck_targets(
         ],
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             third_party("glog"),
             third_party("kineto"),
+            third_party("nlohmann-json"),
         ],
         exported_deps = [
             ":aten_cpu",
@@ -1742,9 +1755,7 @@ def define_buck_targets(
         ],
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":torch_common",
@@ -1831,16 +1842,14 @@ def define_buck_targets(
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],
         },
-        # torch_mobile_deserialize brings in sources neccessary to read a module
+        # torch_mobile_deserialize brings in sources necessary to read a module
         # which depends on mobile module definition
-        # link_whole is enable so that all symbols neccessary for mobile module are compiled
+        # link_whole is enable so that all symbols necessary for mobile module are compiled
         # instead of only symbols used while loading; this prevents symbol
-        # found definied in runtime
+        # found defined in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":mobile_bytecode",
@@ -1866,9 +1875,7 @@ def define_buck_targets(
         srcs = [
             "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
         ],
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":flatbuffer_loader",
@@ -1910,9 +1917,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [],
         exported_deps = [
@@ -2034,7 +2039,7 @@ def define_buck_targets(
                 ("", "torch/csrc/utils/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
             ] + ([
-                ("third_party/miniz-2.1.0", "*.h"),
+                ("third_party/miniz-3.0.2", "*.h"),
             ] if NOT_OSS else []),
             exclude = [
                 "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
@@ -2045,14 +2050,12 @@ def define_buck_targets(
             "ovr_config//os:xtensa-xos": [
                 "-fdata-sections",
                 "-ffunction-sections",
-            ],
+            ]
         }),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DMIN_EDGE_RUNTIME",
         ],
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ] + select({
+        linker_flags = get_no_as_needed_linker_flag() + select({
             "DEFAULT": [],
             "ovr_config//os:macos": [
                 "-dead_strip",
@@ -2102,9 +2105,7 @@ def define_buck_targets(
         }),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":generated_aten_config_header",
@@ -2166,9 +2167,7 @@ def define_buck_targets(
         }),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":min_runtime_lib",
@@ -2227,9 +2226,7 @@ def define_buck_targets(
         }),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":aten_header",

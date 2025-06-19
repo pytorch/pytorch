@@ -2,12 +2,26 @@ from __future__ import annotations
 
 import os
 import platform
-from glob import glob
 
-from setuptools import distutils  # type: ignore[import]
-
+from .optional_submodules import checkout_nccl
 from .setup_helpers.cmake import CMake, USE_NINJA
-from .setup_helpers.env import check_negative_env_flag, IS_64BIT, IS_WINDOWS
+from .setup_helpers.env import (
+    check_env_flag,
+    check_negative_env_flag,
+    IS_64BIT,
+    IS_WINDOWS,
+)
+
+
+def _get_vc_env(vc_arch: str) -> dict[str, str]:
+    try:
+        from setuptools import distutils  # type: ignore[import]
+
+        return distutils._msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
+    except AttributeError:
+        from setuptools._distutils import _msvccompiler  # type: ignore[import]
+
+        return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
 
 
 def _overlay_windows_vcvars(env: dict[str, str]) -> dict[str, str]:
@@ -33,7 +47,7 @@ def _overlay_windows_vcvars(env: dict[str, str]) -> dict[str, str]:
                 "emulation is enabled!"
             )
 
-    vc_env: dict[str, str] = distutils._msvccompiler._get_vc_env(vc_arch)
+    vc_env = _get_vc_env(vc_arch)
     # Keys in `_get_vc_env` are always lowercase.
     # We turn them into uppercase before overlaying vcvars
     # because OS environ keys are always uppercase on Windows.
@@ -52,15 +66,6 @@ def _create_build_env() -> dict[str, str]:
     # you should NEVER add something to this list. It is bad practice to
     # have cmake read the environment
     my_env = os.environ.copy()
-    if (
-        "CUDA_HOME" in my_env
-    ):  # Keep CUDA_HOME. This env variable is still used in other part.
-        my_env["CUDA_BIN_PATH"] = my_env["CUDA_HOME"]
-    elif IS_WINDOWS:  # we should eventually make this as part of FindCUDA.
-        cuda_win = glob("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*")
-        if len(cuda_win) > 0:
-            my_env["CUDA_BIN_PATH"] = cuda_win[0]
-
     if IS_WINDOWS and USE_NINJA:
         # When using Ninja under Windows, the gcc toolchain will be chosen as
         # default. But it should be set to MSVC as the user's first choice.
@@ -70,7 +75,7 @@ def _create_build_env() -> dict[str, str]:
     return my_env
 
 
-def build_caffe2(
+def build_pytorch(
     version: str | None,
     cmake_python_library: str | None,
     build_python: bool,
@@ -79,6 +84,12 @@ def build_caffe2(
     cmake: CMake,
 ) -> None:
     my_env = _create_build_env()
+    if (
+        not check_negative_env_flag("USE_CUDA")
+        and not check_negative_env_flag("USE_NCCL")
+        and not check_env_flag("USE_SYSTEM_NCCL")
+    ):
+        checkout_nccl()
     build_test = not check_negative_env_flag("BUILD_TEST")
     cmake.generate(
         version, cmake_python_library, build_python, build_test, my_env, rerun_cmake

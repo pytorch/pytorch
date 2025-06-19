@@ -7,7 +7,6 @@ import pickle
 import socket
 import tempfile
 from contextlib import contextmanager
-from typing import Dict
 
 from urllib3.connection import HTTPConnection
 from urllib3.connectionpool import HTTPConnectionPool
@@ -58,9 +57,10 @@ class WorkerServerTest(TestCase):
             self.assertEqual(resp.status, 200)
             self.assertEqual(
                 resp.data,
-                b"""<h1>torch.distributed.WorkerServer</h1>
-<a href="/handler/">Handler names</a>
-""",
+                b"<h1>torch.distributed.WorkerServer</h1>\n"
+                b'<a href="'
+                b"/handler/"
+                b'">Handler names</a>\n',
             )
 
             resp = pool.request("POST", "/handler/ping")
@@ -181,7 +181,7 @@ class WorkerServerTest(TestCase):
             def body(self) -> bytes:
                 return b"dummy"
 
-            def params(self) -> Dict[str, str]:
+            def params(self) -> dict[str, str]:
                 return {}
 
         class Response(_Response):

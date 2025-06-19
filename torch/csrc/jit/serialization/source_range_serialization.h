@@ -19,7 +19,7 @@ class SourceRangeSerializer;
 static constexpr size_t kByteOffsetIndex = 0;
 static constexpr size_t kSourceRangeIndex = 1;
 static constexpr size_t kSourceRangeTagIndex = 2;
-constexpr c10::string_view kFormatWithStringTable = "FORMAT_WITH_STRING_TABLE";
+constexpr std::string_view kFormatWithStringTable = "FORMAT_WITH_STRING_TABLE";
 
 class SourceRangePickler {
  public:

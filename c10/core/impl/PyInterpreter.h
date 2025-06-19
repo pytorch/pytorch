@@ -143,9 +143,9 @@ struct C10_API PyInterpreterVTable {
   virtual void reportErrorCallback(PyObject* callback, DispatchKey key)
       const = 0;
 
-  // This is only invoked in the multipy/torchdeploy situation from
-  // pythonOpRegistrationTrampoline; this lets us get to the Python
-  // interpreter to actually find the appropriate Python op registration
+  // This is only invoked in the multipy/torchdeploy // codespell:ignore multipy
+  // situation from pythonOpRegistrationTrampoline; this lets us get to the
+  // Python interpreter to actually find the appropriate Python op registration
   // entry to call.
   virtual void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
@@ -220,7 +220,7 @@ struct C10_API PyInterpreterVTable {
 struct C10_API PyInterpreter {
   const PyInterpreterVTable* vtable_;
 
-  PyInterpreter(const PyInterpreterVTable* vtable) : vtable_(vtable){};
+  PyInterpreter(const PyInterpreterVTable* vtable) : vtable_(vtable) {}
 
   const PyInterpreterVTable& operator*() const noexcept {
     return *vtable_;

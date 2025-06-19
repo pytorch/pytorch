@@ -58,6 +58,20 @@ AOTIRuntimeError AOTInductorModelContainerRun(
     AOTInductorStreamHandle stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle);
 
+// Single-threaded variant of previous.
+AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
+    AOTInductorModelContainerHandle container_handle,
+    AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
+                                     // are stolen; the array itself is borrowed
+    size_t num_inputs,
+    AtenTensorHandle*
+        output_handles, // array for writing output AtenTensorHandle; handles
+                        // will be stolen by the caller; the array itself is
+                        // borrowed
+    size_t num_outputs,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle);
+
 // Retrieves the number of constants for the model.
 AOTIRuntimeError AOTInductorModelContainerGetNumConstants(
     AOTInductorModelContainerHandle container_handle,
@@ -87,6 +101,14 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantFromFolded(
     size_t idx,
     bool* from_folded);
 
+// Retrieves the inductor constant type.
+// idx is the index of the internal's constants.
+// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
+AOTIRuntimeError AOTInductorModelContainerGetConstantType(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    int32_t* type);
+
 // Retrieves a constant's dtype.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
@@ -94,6 +116,28 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     int32_t* dtype);
+
+// Retrieves a constant's data size.
+// idx is the index of the internal's constants.
+// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
+AOTIRuntimeError AOTInductorModelContainerGetConstantDataSize(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    size_t* data_size);
+
+// Extract the constants that is being used in the container.
+AOTIRuntimeError AOTInductorModelContainerExtractConstantsMap(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive);
+
+// Setup the constant buffer in model container with provided ConstantMap.
+// The ConstantMap is user managed, and the user would retain ownership.
+AOTIRuntimeError AOTInductorModelContainerUpdateUserManagedConstantBuffer(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update);
 
 // Setup the constant buffer in model container with provided ConstantMap
 // use_inactive should be set as true if the inactive buffer is to be updated.
@@ -109,6 +153,10 @@ AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
 AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle);
+
+// Free the inactive constant buffer in model container.
+AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
+    AOTInductorModelContainerHandle container_handle);
 
 // Run constant folding on constant buffer.
 AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(

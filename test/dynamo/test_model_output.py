@@ -43,7 +43,22 @@ class TestHFPretrained(torch._dynamo.test_case.TestCase):
         x = torch.randn(2)
         tmp = PretrainedConfig(return_dict=True, max_length=20)
         ref = fn(x, tmp)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, tmp)
+        self.assertTrue(same(ref, res))
+
+    @maybe_skip
+    def test_pretrained_non_const_attr(self):
+        def fn(a, tmp):
+            if tmp.pruned_heads:
+                return a + 1
+            else:
+                return a - 1
+
+        x = torch.randn(2)
+        tmp = PretrainedConfig()
+        ref = fn(x, tmp)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(x, tmp)
         self.assertTrue(same(ref, res))
 
@@ -172,7 +187,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
 
         obj2 = MyDataClass(*tensors)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(obj2), correct1))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -185,11 +200,11 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
             x: torch.FloatTensor = None
 
         def fn(x):
-            obj = MyDataClass(x=x)
+            obj = MyDataClass(x=x * 3)
             return obj
 
         inp = torch.randn(3, 3)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(inp).x, opt_fn(inp).x)
 
     @maybe_skip
@@ -206,7 +221,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
             return MyDataClass(x=x)
 
         inp = torch.randn(3, 3)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(inp).x, opt_fn(inp).x)
 
     @maybe_skip
@@ -218,7 +233,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(3, 3)
         obj["wwww"] = inp
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(obj), opt_fn(obj))
 
     @maybe_skip
@@ -227,7 +242,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
             return obj.attentions + 1
 
         obj = BaseModelOutput(attentions=torch.randn(3, 3))
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(obj), opt_fn(obj))
 
     @maybe_skip
@@ -236,7 +251,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
             return BaseModelOutput(attentions=inp + 1)
 
         inp = torch.randn(3, 3)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(inp).attentions, opt_fn(inp).attentions)
 
     @maybe_skip

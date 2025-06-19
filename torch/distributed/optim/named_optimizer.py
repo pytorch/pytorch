@@ -1,18 +1,8 @@
-# mypy: allow-untyped-defs
 import logging
 import warnings
+from collections.abc import Collection, Mapping
 from copy import deepcopy
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Dict,
-    List,
-    Mapping,
-    Optional,
-    overload,
-    Union,
-)
+from typing import Any, Callable, Optional, overload, Union
 
 import torch
 import torch.nn as nn
@@ -21,7 +11,7 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +66,8 @@ class _NamedOptimizer(optim.Optimizer):
         optimizer_class: optim.Optimizer,
         param_groups: Optional[Collection[Mapping[str, Any]]] = None,
         module: Optional[nn.Module] = None,
-        *args,
-        **kwargs,
+        *args: tuple[Any, ...],
+        **kwargs: dict[str, Any],
     ) -> None:
         torch._C._log_api_usage_once("torch.distributed.optim._NamedOptimizer")
         self.param_groups: Collection[Mapping[str, Any]] = param_groups  # type: ignore[assignment]
@@ -112,7 +102,7 @@ class _NamedOptimizer(optim.Optimizer):
         # Update param_groups from optimizer.
         self.param_groups = self._optimizer.param_groups
 
-    def _param_groups_check(self):
+    def _param_groups_check(self) -> None:
         if self.param_groups is not None:
             for param_group in self.param_groups:
                 assert isinstance(param_group, dict), "param group must be a dict"
@@ -129,7 +119,7 @@ class _NamedOptimizer(optim.Optimizer):
                         )
                 param_group["params"] = params
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """
         Return the ``state_dict`` of the optimizer.
 
@@ -146,9 +136,7 @@ class _NamedOptimizer(optim.Optimizer):
 
         ret_groups = []
         for group in param_groups:
-            param_keys = []
-            for param in group["params"]:
-                param_keys.append(self.ordered_param_keys[param])
+            param_keys = [self.ordered_param_keys[param] for param in group["params"]]
             ret_group = {"params": sorted(param_keys)}
             for k, v in group.items():
                 if k != "params":
@@ -158,12 +146,10 @@ class _NamedOptimizer(optim.Optimizer):
         return self._post_state_dict({"state": ret_state, "param_groups": ret_groups})
 
     @overload
-    def step(self, closure: None = ...) -> None:
-        ...
+    def step(self, closure: None = None) -> None: ...
 
     @overload
-    def step(self, closure: Callable[[], float]) -> float:
-        ...
+    def step(self, closure: Callable[[], float]) -> float: ...
 
     def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
         """
@@ -178,7 +164,7 @@ class _NamedOptimizer(optim.Optimizer):
     def state(self) -> Mapping[torch.Tensor, Any]:  # type: ignore[override]
         return self._optimizer.state
 
-    def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """
         Define the default behavior to load a state_dict for ``_NamedOptimizer``.
 
@@ -196,7 +182,7 @@ class _NamedOptimizer(optim.Optimizer):
             ...
         ```
         Args:
-            state_dict (Dict[str, Any]) : A ``state_dict`` to load into the optimizer.
+            state_dict (dict[str, Any]) : A ``state_dict`` to load into the optimizer.
                 Note that this state dict update is performed in place.
 
         .. note:: PyTorch is using lazy init to initialize the optim states.
@@ -319,7 +305,7 @@ class _NamedOptimizer(optim.Optimizer):
         # Calling ``step`` will load the initial state for optimizer states.
         self.step(closure=None)
 
-    def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
+    def _pre_load_state_dict(self, state_dict: dict[str, Any]) -> dict[str, Any]:
         # TODO(chienchin): This API should be FSDP agnostic and should support
         # general user hooks.
         if isinstance(self.module, FSDP):
@@ -328,7 +314,7 @@ class _NamedOptimizer(optim.Optimizer):
             )
         return state_dict
 
-    def _post_state_dict(self, state_dict) -> Dict[str, Any]:
+    def _post_state_dict(self, state_dict: dict[str, Any]) -> dict[str, Any]:
         # TODO(chienchin): This API should be FSDP agnostic and should support
         # general user hooks.
         if isinstance(self.module, FSDP):
@@ -336,6 +322,6 @@ class _NamedOptimizer(optim.Optimizer):
         return state_dict
 
 
-def _gen_param_group_key(param_keys: List[str]) -> str:
+def _gen_param_group_key(param_keys: list[str]) -> str:
     """Concatenate all param keys as a unique indentifier for one param group."""
     return "/".join(sorted(param_keys))

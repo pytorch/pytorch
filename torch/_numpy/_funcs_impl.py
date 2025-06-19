@@ -12,7 +12,7 @@ from __future__ import annotations
 import builtins
 import itertools
 import operator
-from typing import Optional, Sequence, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import torch
 
@@ -20,6 +20,8 @@ from . import _dtypes_impl, _util
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ._normalizations import (
         ArrayLike,
         ArrayLikeOrScalar,
@@ -939,7 +941,7 @@ def choose(
     ]
 
     idx_list[0] = a
-    return choices[idx_list].squeeze(0)
+    return choices[tuple(idx_list)].squeeze(0)
 
 
 # ### unique et al. ###

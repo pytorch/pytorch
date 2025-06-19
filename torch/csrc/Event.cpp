@@ -15,7 +15,7 @@
 #include <structmember.h>
 #include <string>
 
-PyObject* THPEventClass = nullptr;
+PyTypeObject* THPEventClass = nullptr;
 
 static PyObject* THPEvent_pynew(
     PyTypeObject* type,
@@ -28,7 +28,7 @@ static PyObject* THPEvent_pynew(
   unsigned char interprocess = 0;
 
   static torch::PythonArgParser parser({
-      "Event(Device device=None, *, bool enable_timing=True, bool blocking=False, bool interprocess=False)",
+      "Event(Device device=None, *, bool enable_timing=False, bool blocking=False, bool interprocess=False)",
   });
 
   torch::ParsedArgs<4> parsed_args;
@@ -39,7 +39,7 @@ static PyObject* THPEvent_pynew(
   if (!device.has_value()) {
     device = at::Device(at::getAccelerator(false).value_or(at::kCPU));
   }
-  enable_timing = r.toBoolWithDefault(1, true);
+  enable_timing = r.toBoolWithDefault(1, false);
   blocking = r.toBoolWithDefault(2, false);
   interprocess = r.toBoolWithDefault(3, false);
 
@@ -114,7 +114,7 @@ static PyObject* THPEvent_record(
     auto stream = (THPStream*)_stream;
     self->event.record(c10::Stream::unpack3(
         stream->stream_id,
-        stream->device_index,
+        static_cast<c10::DeviceIndex>(stream->device_index),
         static_cast<c10::DeviceType>(stream->device_type)));
   } else {
     c10::impl::VirtualGuardImpl impl{
@@ -192,7 +192,7 @@ static PyObject* THPEvent_wait(
       auto stream = (THPStream*)_stream;
       self->event.block(c10::Stream::unpack3(
           stream->stream_id,
-          stream->device_index,
+          static_cast<c10::DeviceIndex>(stream->device_index),
           static_cast<c10::DeviceType>(stream->device_type)));
     } else {
       c10::impl::VirtualGuardImpl impl{
@@ -276,7 +276,8 @@ static PyMethodDef THPEvent_methods[] = {
     {nullptr}};
 
 PyTypeObject THPEventType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.Event", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.Event", /* tp_name */
     sizeof(THPEvent), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPEvent_dealloc, /* tp_dealloc */
@@ -316,7 +317,7 @@ PyTypeObject THPEventType = {
 };
 
 void THPEvent_init(PyObject* module) {
-  THPEventClass = (PyObject*)&THPEventType;
+  THPEventClass = &THPEventType;
   if (PyType_Ready(&THPEventType) < 0) {
     throw python_error();
   }

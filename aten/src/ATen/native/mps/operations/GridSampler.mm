@@ -71,8 +71,8 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
   };
 
   @autoreleasepool {
-    string key = "grid_sampler_2d_mps" + getTensorsStringKey({input, grid}) + ":" + std::to_string(interpolation_mode) +
-        ":" + std::to_string(padding_mode) + ":" + std::to_string(align_corners);
+    std::string key = "grid_sampler_2d_mps" + getTensorsStringKey({input, grid}) + ":" +
+        std::to_string(interpolation_mode) + ":" + std::to_string(padding_mode) + ":" + std::to_string(align_corners);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);

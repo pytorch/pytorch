@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Optional, Union
 
 import torch.ao.nn.intrinsic as nni
 import torch.nn as nn
@@ -34,9 +34,9 @@ def fuse_conv_bn(is_qat, conv, bn):
         >>> # xdoctest: +SKIP
         >>> m2 = fuse_conv_bn(m1, b1)
     """
-    assert (
-        conv.training == bn.training
-    ), "Conv and BN both must be in the same mode (train or eval)."
+    assert conv.training == bn.training, (
+        "Conv and BN both must be in the same mode (train or eval)."
+    )
 
     fused_module_class_map = {
         nn.Conv1d: nni.ConvBn1d,
@@ -45,13 +45,13 @@ def fuse_conv_bn(is_qat, conv, bn):
     }
 
     if is_qat:
-        assert (
-            bn.num_features == conv.out_channels
-        ), "Output channel of Conv2d must match num_features of BatchNorm2d"
+        assert bn.num_features == conv.out_channels, (
+            "Output channel of Conv2d must match num_features of BatchNorm2d"
+        )
         assert bn.affine, "Only support fusing BatchNorm2d with affine set to True"
-        assert (
-            bn.track_running_stats
-        ), "Only support fusing BatchNorm2d with tracking_running_stats set to True"
+        assert bn.track_running_stats, (
+            "Only support fusing BatchNorm2d with tracking_running_stats set to True"
+        )
         fused_module_class = fused_module_class_map.get((type(conv)), None)
         if fused_module_class is not None:
             return fused_module_class(conv, bn)
@@ -80,23 +80,23 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
         >>> # xdoctest: +SKIP
         >>> m2 = fuse_conv_bn_relu(m1, b1, r1)
     """
-    assert (
-        conv.training == bn.training == relu.training
-    ), "Conv and BN both must be in the same mode (train or eval)."
-    fused_module: Optional[Type[nn.Sequential]] = None
+    assert conv.training == bn.training == relu.training, (
+        "Conv and BN both must be in the same mode (train or eval)."
+    )
+    fused_module: Optional[type[nn.Sequential]] = None
     if is_qat:
         map_to_fused_module_train = {
             nn.Conv1d: nni.ConvBnReLU1d,
             nn.Conv2d: nni.ConvBnReLU2d,
             nn.Conv3d: nni.ConvBnReLU3d,
         }
-        assert (
-            bn.num_features == conv.out_channels
-        ), "Output channel of Conv must match num_features of BatchNorm"
+        assert bn.num_features == conv.out_channels, (
+            "Output channel of Conv must match num_features of BatchNorm"
+        )
         assert bn.affine, "Only support fusing BatchNorm with affine set to True"
-        assert (
-            bn.track_running_stats
-        ), "Only support fusing BatchNorm with tracking_running_stats set to True"
+        assert bn.track_running_stats, (
+            "Only support fusing BatchNorm with tracking_running_stats set to True"
+        )
         fused_module = map_to_fused_module_train.get(type(conv), None)
         if fused_module is not None:
             return fused_module(conv, bn, relu)
@@ -133,18 +133,18 @@ def fuse_linear_bn(is_qat, linear, bn):
         >>> # xdoctest: +SKIP
         >>> m2 = fuse_linear_bn(m1, b1)
     """
-    assert (
-        linear.training == bn.training
-    ), "Linear and BN both must be in the same mode (train or eval)."
+    assert linear.training == bn.training, (
+        "Linear and BN both must be in the same mode (train or eval)."
+    )
 
     if is_qat:
-        assert (
-            bn.num_features == linear.out_features
-        ), "Output features of Linear must match num_features of BatchNorm1d"
+        assert bn.num_features == linear.out_features, (
+            "Output features of Linear must match num_features of BatchNorm1d"
+        )
         assert bn.affine, "Only support fusing BatchNorm1d with affine set to True"
-        assert (
-            bn.track_running_stats
-        ), "Only support fusing BatchNorm1d with tracking_running_stats set to True"
+        assert bn.track_running_stats, (
+            "Only support fusing BatchNorm1d with tracking_running_stats set to True"
+        )
         return nni.LinearBn1d(linear, bn)
     else:
         return nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
@@ -166,9 +166,9 @@ def fuse_convtranspose_bn(is_qat, convt, bn):
         >>> # xdoctest: +SKIP
         >>> m2 = fuse_convtranspose_bn(m1, b1)
     """
-    assert (
-        convt.training == bn.training
-    ), "ConvTranspose and BN both must be in the same mode (train or eval)."
+    assert convt.training == bn.training, (
+        "ConvTranspose and BN both must be in the same mode (train or eval)."
+    )
 
     if is_qat:
         raise Exception(  # noqa: TRY002
@@ -191,7 +191,7 @@ def _sequential_wrapper2(sequential):
     return fuser_method
 
 
-_DEFAULT_OP_LIST_TO_FUSER_METHOD: Dict[Tuple, Union[nn.Sequential, Callable]] = {
+_DEFAULT_OP_LIST_TO_FUSER_METHOD: dict[tuple, Union[nn.Sequential, Callable]] = {
     (nn.Conv1d, nn.BatchNorm1d): fuse_conv_bn,
     (nn.Conv1d, nn.BatchNorm1d, nn.ReLU): fuse_conv_bn_relu,
     (nn.Conv2d, nn.BatchNorm2d): fuse_conv_bn,
@@ -264,11 +264,9 @@ def _get_valid_patterns(op_pattern):
      (MatchAllNode, (MatchAllNode, MatchAllNode)),
     ]
     """
-    result: List[Any]
+    result: list[Any]
     if isinstance(op_pattern, (tuple, list)):
-        sub_combs = []
-        for sub_pattern in op_pattern:
-            sub_combs.append(_get_valid_patterns(sub_pattern))
+        sub_combs = [_get_valid_patterns(sub_pattern) for sub_pattern in op_pattern]
         result = list(itertools.product(*sub_combs))
     else:
         result = [op_pattern, MatchAllNode]
@@ -277,7 +275,7 @@ def _get_valid_patterns(op_pattern):
 
 def get_fuser_method_new(
     op_pattern: Pattern,
-    fuser_method_mapping: Dict[Pattern, Union[nn.Sequential, Callable]],
+    fuser_method_mapping: dict[Pattern, Union[nn.Sequential, Callable]],
 ):
     """Get fuser method.
 

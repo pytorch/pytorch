@@ -46,7 +46,10 @@ class InPlaceCompilationTests(TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(model, os.path.join(tmpdirname, "model.pt"))
-            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            # weights_only=False as this is a legacy use case that loads a module
+            loaded_model = torch.load(
+                os.path.join(tmpdirname, "model.pt"), weights_only=False
+            )
             loaded_model(torch.randn(1, 10))
 
     def test_state_dict_save(self):
@@ -58,7 +61,8 @@ class InPlaceCompilationTests(TestCase):
             torch.save(model.state_dict(), os.path.join(tmpdirname, "model.pt"))
             loaded_model = ToyModel()
             loaded_model.load_state_dict(
-                torch.load(os.path.join(tmpdirname, "model.pt"))
+                # weights_only=False as this is a legacy use case that loads a module
+                torch.load(os.path.join(tmpdirname, "model.pt"), weights_only=False)
             )
             loaded_model(torch.randn(1, 10))
 
@@ -77,11 +81,11 @@ class InPlaceCompilationTests(TestCase):
         torch._dynamo.reset()
 
         @torch._dynamo.on_compile_start
-        def start_callback():
+        def start_callback(_):
             print("Compilation started.")
 
         @torch._dynamo.on_compile_end
-        def end_callback():
+        def end_callback(_):
             print("Compilation ended.")
 
         mod = ToyModel()
@@ -112,13 +116,13 @@ class InPlaceCompilationTests(TestCase):
         counter = 0
 
         @torch._dynamo.on_compile_start
-        def start_callback():
+        def start_callback(_):
             nonlocal counter
             counter += 1
             print(f"Counter = {counter}")
 
         @torch._dynamo.on_compile_end
-        def end_callback():
+        def end_callback(_):
             nonlocal counter
             counter += 1
             print(f"Counter = {counter}")
@@ -139,6 +143,88 @@ class InPlaceCompilationTests(TestCase):
             printed_output, "Counter = 1\nCounter = 2\nCounter = 3\nCounter = 4"
         )
 
+    def test_compilation_constant_hasattr_fail(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x.max()
+
+        # We should fallback to normal mode, and throw a AttributeError, not a internal dynamo exception
+        with self.assertRaises(AttributeError):
+            fn(None)
+
+    def test_compilation_evnum_hasattr_fail(self):
+        from enum import Enum
+
+        class TestEnum(Enum):
+            VALID = 1
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x.max()
+
+        # We should fallback to normal mode, and throw a AttributeError, not a internal dynamo exception
+        with self.assertRaises(AttributeError):
+            fn(TestEnum.VALID)
+
+    def test_compilation_name_error(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            does_not_exist()  # noqa: F821
+            return x
+
+        x = torch.randn(10, 10)
+        with self.assertRaises(NameError):
+            fn(x)
+
+    def test_compilation_tensor_invalid_method(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            y = torch.tensor(x)
+            return y.doesnotexist()
+
+        x = torch.randn(10, 10)
+
+        with self.assertRaises(AttributeError):
+            fn(x)
+
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    def test_compilation_nn_module_invalid_method(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + self.doesnotexist
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager")
+        x = torch.randn(1, 1)
+        with self.assertRaises(AttributeError):
+            opt_mod(x)
+
+    def test_torch_script_compilation(self):
+        @torch.jit.script
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        a = torch.randn(1, 1)
+        out = torch.compile(fn)(a)
+        self.assertEqual(out, a)
+
+    def test_to_sparse_to_dense_with_graph_break(self):
+        def fn(x):
+            x = x.to_sparse()
+            x = x.to_dense()
+            return x
+
+        x = torch.tensor([[1.0]])
+        c_fn = torch.compile(fn)
+
+        output = fn(x)
+        c_output = c_fn(x)
+        self.assertEqual(output, c_output)
+
 
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good
@@ -150,9 +236,17 @@ class PublicTorchCompilerTests(TestCase):
         public_sig = inspect.signature(public_fn)
         private_sig = inspect.signature(private_fn)
 
+        matching = public_sig == private_sig
+        matching |= len(public_sig.parameters) < len(private_sig.parameters) and all(
+            public == private
+            for public, private in zip(
+                public_sig.parameters.items(), private_sig.parameters.items()
+            )
+        )
+
         self.assertEqual(
-            public_sig,
-            private_sig,
+            matching,
+            True,
             f"Signatures do not match for function {public_fn_name}() \n Public: {public_sig} \n Private: {private_sig}",
         )
 

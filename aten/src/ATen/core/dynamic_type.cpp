@@ -60,7 +60,7 @@ DynamicType::Arguments::Arguments(c10::ArrayRef<TypePtr> args) {
 }
 
 DynamicType::Arguments::Arguments(
-    const std::vector<c10::string_view>& names,
+    const std::vector<std::string_view>& names,
     c10::ArrayRef<TypePtr> args)
     : Arguments(args) {
   TORCH_INTERNAL_ASSERT(names.size() == args.size());
@@ -78,21 +78,21 @@ DynamicType::~DynamicType() {
   arguments_.~Arguments();
 }
 
-std::shared_ptr<const DynamicType> DynamicType::create(const Type& other) {
+SingletonOrSharedTypePtr<const DynamicType> DynamicType::create(const Type& other) {
   if (auto dynRaw = other.castRaw<DynamicType>()) {
-    TORCH_INTERNAL_ASSERT(!dynRaw->weak_from_this().expired(),
+    TORCH_INTERNAL_ASSERT(
+        !dynRaw->weak_from_this().expired(),
         "Error creating dynamic type instance not managed by shared_ptr: ",
         other.str());
-  }
-  if (auto dyn = other.cast<DynamicType>()) {
-    return dyn;
+    return SingletonTypePtr<const DynamicType>(dynRaw);
   }
   return std::shared_ptr<const DynamicType>(new DynamicType{other});
 }
 
 DynamicTypePtr DynamicType::create(Type& other) {
   if (auto dynRaw = other.castRaw<DynamicType>()) {
-    TORCH_INTERNAL_ASSERT(!dynRaw->weak_from_this().expired(),
+    TORCH_INTERNAL_ASSERT(
+        !dynRaw->weak_from_this().expired(),
         "Error creating dynamic type instance not managed by shared_ptr: ",
         other.str());
   }
@@ -105,7 +105,7 @@ DynamicTypePtr DynamicType::create(Type& other) {
 DynamicType::DynamicType(Tag tag, Arguments arguments)
     : SharedType(Kind), tag_(tag), arguments_(std::move(arguments)) {}
 
-DynamicType::DynamicType(Tag tag, c10::string_view name, Arguments arguments)
+DynamicType::DynamicType(Tag tag, std::string_view name, Arguments arguments)
     : SharedType(Kind),
       tag_(tag),
       name_(std::string{name}),
@@ -258,11 +258,11 @@ TypePtr DynamicType::fallback() const {
         fallbacks.push_back(elem.ty->fallback());
       }
       if (name_) {
-        std::vector<c10::string_view> fields;
+        std::vector<std::string_view> fields;
         fields.reserve(arguments_.elems.size());
         for (const auto& elem : arguments_.elems) {
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-          fields.emplace_back(*elem.label);
+          fields.emplace_back(elem.label.value());
         }
         return TupleType::createNamed(*name_, fields, fallbacks);
       }
@@ -292,7 +292,7 @@ TypePtr DynamicType::fallback() const {
       return StorageType::get();
     case Tag::Var:
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      return VarType::create(*name_);
+      return VarType::create(name_.value());
     case Tag::AnyClass:
       return AnyClassType::get();
     case Tag::QScheme:
@@ -376,13 +376,13 @@ DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(
   return nullptr;
 }
 
-TORCH_API TupleTypePtr
-ivalue::TupleTypeFactory<TupleType>::fallback(C10_UNUSED const Type& type) {
+TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(
+    [[maybe_unused]] const Type& type) {
 #ifdef C10_MOBILE
   return nullptr;
 #else
   const auto& dyn = type.expectRef<DynamicType>();
-  std::vector<c10::string_view> fields;
+  std::vector<std::string_view> fields;
   std::vector<TypePtr> types;
 
   for (const auto& elem : dyn.arguments().elems) {
@@ -397,6 +397,5 @@ ivalue::TupleTypeFactory<TupleType>::fallback(C10_UNUSED const Type& type) {
   return TupleType::create(std::move(types));
 #endif
 }
-
 
 } // namespace c10

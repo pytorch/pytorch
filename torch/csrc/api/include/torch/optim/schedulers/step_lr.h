@@ -2,8 +2,7 @@
 
 #include <torch/optim/schedulers/lr_scheduler.h>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 class TORCH_API StepLR : public LRScheduler {
  public:
@@ -18,5 +17,4 @@ class TORCH_API StepLR : public LRScheduler {
   const unsigned step_size_;
   const double gamma_;
 };
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

@@ -2,7 +2,7 @@
 
 
 import torch
-from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._dynamo.utils import counters
 from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
@@ -27,7 +27,12 @@ def patch(f):
 
 
 class TestSplitCatFxPasses(TestCase):
-    @patch
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+        },
+        post_grad_fusion_options={},
+    )
     def test_split_normalization(self):
         def arg_only(x):
             return [torch.relu(s) for s in torch.split(x, 2, 1)]
@@ -76,27 +81,31 @@ class TestSplitCatFxPasses(TestCase):
         def cm_with_list(x):
             return [torch.relu(s) for s in x.split([16, 16], dim=-1)]
 
+        def normalize_reshape_with_dynamic_shape(x):
+            return x.reshape(4, 16)
+
         args = [
             torch.randn(2, 32),
         ]
-        for fn, expected_split_norm_count in [
-            (arg_only, 1),
-            (arg_only_dim0, 1),
-            (kwarg1, 1),
-            (kwarg2, 1),
-            (kwarg3, 1),
-            (list_replace, 0),
-            (multi_split, 17),
-            (unequal_split, 1),
-            (arg_only_cm, 1),
-            (kwarg1_cm, 1),
-            (kwarg2_cm, 1),
-            (multi_split_cm, 17),
-            (unequal_split_cm, 1),
-            (cm_with_list, 1),
+        for fn, dynamic, expected_split_norm_count in [
+            (arg_only, False, 1),
+            (arg_only_dim0, False, 1),
+            (kwarg1, False, 1),
+            (kwarg2, False, 1),
+            (kwarg3, False, 1),
+            (list_replace, False, 0),
+            (multi_split, False, 17),
+            (unequal_split, False, 1),
+            (arg_only_cm, False, 1),
+            (kwarg1_cm, False, 1),
+            (kwarg2_cm, False, 1),
+            (multi_split_cm, False, 17),
+            (unequal_split_cm, False, 1),
+            (cm_with_list, False, 1),
+            (normalize_reshape_with_dynamic_shape, True, 0),
         ]:
             expected = fn(*args)
-            actual = torch.compile(fn)(*args)
+            actual = torch.compile(fn, dynamic=dynamic)(*args)
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(
@@ -104,8 +113,6 @@ class TestSplitCatFxPasses(TestCase):
                 expected_split_norm_count,
                 msg=f"for {fn}",
             )
-            if expected_split_norm_count > 0:
-                self.assertIn("normalization_pass_pre_grad", optimus_scuba_log)
             counters.clear()
 
     @patch
@@ -251,6 +258,18 @@ class TestSplitCatFxPasses(TestCase):
 
             return torch.cat(final_items, dim=1)
 
+        def next_split_getitem_partial_used(x):
+            fs = torch.split(x, [4, 4, 24], dim=1)
+            item0 = fs[0]
+            item2 = fs[2]
+
+            final_items = [item0]
+            ns = item2.split((4, 4, 4, 4, 4, 4), 1)
+            final_items.extend(ns[0:1])
+            final_items.extend(ns[3:4])
+
+            return torch.cat(final_items, dim=1)
+
         args = [
             torch.randn(2, 32),
         ]
@@ -270,6 +289,7 @@ class TestSplitCatFxPasses(TestCase):
             (duplicate_getitems_neg_index, 1),
             (split_getitem_gap, 1),
             (split_getitem_out_of_order, 1),
+            (next_split_getitem_partial_used, 1),
             (split_partial_getitem_cat, 1),
         ]:
             expected = fn(*args)
@@ -280,8 +300,6 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["merge_splits_pass"],
                 expected_split_merged,
             )
-            if expected_split_merged > 0:
-                self.assertIn("merge_splits_pass_pre_grad", optimus_scuba_log)
             counters.clear()
 
     @patch
@@ -761,7 +779,7 @@ class TestSplitCatFxPasses(TestCase):
         def unbind_stack(x):
             return torch.stack(torch.unbind(x, 1), 1)
 
-        def unbind_cat(x):
+        def unbind_cat(x):  # noqa: F841
             return torch.cat(torch.unbind(x, dim=-3), 1)
 
         def unbind_stack_argspec1(x):

@@ -1,6 +1,6 @@
 /**
  * This file is adapted from PyTorch/XLA
- * https://github.com/pytorch/xla/blob/master/third_party/xla_client/metrics.h
+ * https://github.com/pytorch/xla/blob/e0e5f937a0ba8d904f9608137dc8c51ba439df2d/third_party/xla_client/metrics.h
  */
 
 #pragma once
@@ -11,9 +11,9 @@
 
 #include <c10/macros/Export.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class TORCH_API Completion {
  public:
   class Data;
@@ -33,5 +33,4 @@ TORCH_API void ScheduleIoClosure(std::function<void()> closure);
 TORCH_API Completion
 ScheduleIoClosureWithCompletion(std::function<void()> closure);
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

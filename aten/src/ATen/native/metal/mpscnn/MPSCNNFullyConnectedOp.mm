@@ -6,10 +6,10 @@
 
 @synthesize kernel = _kernel;
 
-+ (MPSCNNFullyConnectedOp*)linear:(const Conv2DParams&)params
++ (MPSCNNFullyConnectedOp*)linear:(const at::native::metal::Conv2DParams&)params
                           weights:(float*)w
                              bias:(float*)b
-                     neuronFilter:(NeuronType)t
+                     neuronFilter:(at::native::metal::NeuronType)t
     API_AVAILABLE(ios(11.0), macos(10.13)) {
   MPSCNNNeuron* neuron = at::native::metal::neuron(t);
   MPSCNNConvolutionDescriptor* desc = [MPSCNNConvolutionDescriptor

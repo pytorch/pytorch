@@ -68,7 +68,7 @@ void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
 
 } // namespace
 
-REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
-REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
+REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel)
+REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel)
 
 } // namespace at::native

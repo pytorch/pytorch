@@ -108,12 +108,11 @@ ExprPtr IRMutator::mutate(const CompareSelectPtr& v) {
   return v;
 }
 
-// NOLINTNEXTLINE
 #define IMM_MUTATE_DEFINE(_1, Name)                  \
   ExprPtr IRMutator::mutate(const Name##ImmPtr& v) { \
     return v;                                        \
   }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DEFINE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DEFINE)
 #undef IMM_MUTATE_DEFINE
 
 ExprPtr IRMutator::mutate(const CastPtr& v) {

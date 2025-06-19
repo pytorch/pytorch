@@ -21,13 +21,13 @@ on:
 jobs:
   stale:
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: linux.large.arc
+    runs-on: linux.large
     permissions:
       contents: read
       pull-requests: write
 
     steps:
-      - uses: actions/github-script@v6
+      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
             // Do some dumb retries on requests.

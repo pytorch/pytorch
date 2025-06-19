@@ -7,6 +7,7 @@
 
 namespace c10d {
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PythonCommHook::~PythonCommHook() {
   py::gil_scoped_acquire ag;
   state_.dec_ref();
@@ -27,7 +28,7 @@ c10::intrusive_ptr<c10::ivalue::Future> PythonCommHook::runHook(
   try {
     return py_fut.cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()->fut;
   } catch (const py::cast_error& e) {
-    auto type = py_fut.get_type();
+    auto type = py::type::handle_of(py_fut);
     auto errMsg = c10::str(
         e.what(),
         ". DDP communication hook's callback must return a "

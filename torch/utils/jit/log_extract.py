@@ -1,16 +1,15 @@
 # mypy: allow-untyped-defs
 from contextlib import contextmanager
-from typing import Any, List, Tuple, cast
+from typing import Any, cast
 import random
 import torch
 import time
 from torch.utils.benchmark import Timer
 
-def extract_ir(filename: str) -> List[str]:
+def extract_ir(filename: str) -> list[str]:
     BEGIN = "<GRAPH_EXPORT>"
     END = "</GRAPH_EXPORT>"
     pfx = None
-    current = ""
     graphs = []
     with open(filename) as f:
         split_strs = f.read().split(BEGIN)
@@ -39,7 +38,7 @@ def make_tensor_from_type(inp_type: torch._C.TensorType):
     assert dtype is not None
     return torch.empty_strided(size=size, stride=stride, device=device, dtype=dtype)
 
-def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
+def load_graph_and_inputs(ir: str) -> tuple[Any, list[Any]]:
     graph = torch._C.parse_ir(ir, parse_tensor_constants=True)
     graph.makeMultiOutputIntoTuple()
     inputs = []

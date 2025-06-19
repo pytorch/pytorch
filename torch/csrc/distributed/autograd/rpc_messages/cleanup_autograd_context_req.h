@@ -4,9 +4,7 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 // Used to request other workers to clean up their autograd context.
 class TORCH_API CleanupAutogradContextReq : public rpc::RpcCommandBase {
@@ -24,6 +22,4 @@ class TORCH_API CleanupAutogradContextReq : public rpc::RpcCommandBase {
   int64_t context_id_;
 };
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

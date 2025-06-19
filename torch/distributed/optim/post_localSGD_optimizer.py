@@ -61,7 +61,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         self.averager = averager
 
     @property
-    def state(self):
+    def state(self):  # type: ignore[override]
         return self.optim.state
 
     def __repr__(self):
@@ -96,7 +96,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
             )
             self.averager.step = 0
 
-    def step(self):
+    def step(self):  # type: ignore[override]
         r"""
         Performs a single optimization step (parameter update).
         """

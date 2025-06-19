@@ -1,14 +1,20 @@
+#pragma once
+
 #include <c10/core/Allocator.h>
+#include <c10/core/Stream.h>
+#include <c10/core/thread_pool.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/llvmMathExtras.h>
 #include <optional>
 
 #include <deque>
 #include <mutex>
-#include <set>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
+
+using c10::CachingAllocator::Stat;
+using c10::CachingAllocator::DurationStat;
 
 /**
  * HostBlock is typically a fundamental memory block used in pinned memory. It
@@ -38,8 +44,63 @@ struct alignas(64) FreeBlockList {
 
 namespace {
   // Max cached block sizes: (1 << MAX_SIZE_INDEX) bytes
+  // NOLINTNEXTLINE(misc-definitions-in-headers)
   constexpr size_t MAX_SIZE_INDEX = 64;
 }
+
+// Struct containing memory allocator summary statistics for host.
+struct TORCH_API HostStats {
+  // COUNT: allocations requested by client code. Note that active
+  // count can be extracted by looking at current allocations
+  Stat allocation;
+  // COUNT: number of allocated segments from host memory allocation.
+  Stat segment;
+
+  // SUM: bytes allocated by this memory alocator. Note that active bytes
+  // can be extracted by looking at current bytes allocated
+  Stat allocated_bytes;
+  // SUM: bytes reserved by this memory allocator (both free and used)
+  Stat reserved_bytes;
+
+  // SUM: time spent in cudaHostAlloc/cudaHostRegister in microseconds
+  DurationStat host_alloc_time;
+
+  // SUM: time spent in cudaHostFree/cudaHostUnregister in microseconds
+  DurationStat host_free_time;
+
+  // COUNT: number of times cudaHostAlloc/cudaHostRegister was called because
+  // the request could not be satisfied from existing free blocks.
+  int64_t num_host_alloc = 0; // This is derived from segment or timing
+
+  // COUNT: number of times cudaHostFree/cudaHostUnregister was called.
+  int64_t num_host_free = 0; // This is derived from segment or timing
+};
+
+// Struct containing memory allocator summary statistics for host, as they
+// are staged for reporting. This is a temporary struct that is used to
+// avoid locking the allocator while collecting stats.
+struct alignas(64) HostStatsStaged {
+  std::mutex timing_mutex_;
+  // COUNT: allocations requested by client code resulting in a new segment/block allocation
+  // LOCK: access to this stat is protected by the allocator's blocks_mutex_
+  Stat allocation;
+  // SUM: bytes within active memory blocks, including blocks that are
+  // currently in the free list.
+  // LOCK: access to this stat is protected by the allocator's blocks_mutex_
+  Stat allocated_bytes;
+  // COUNT: number of allocations per bucket
+  // LOCK: access to this stat is protected by the per bucket free_list_[index].mutex_
+  std::vector<Stat> allocation_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
+  // SUM: bytes of allocation per bucket
+  // LOCK: access to this stat is protected by the per bucket free_list_[index].mutex_
+  std::vector<Stat> allocated_bytes_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
+  // SUM: time spent in cudaHostAlloc/cudaHostRegister
+  // LOCK: access to this stat is protected by the timing_mutex_
+  DurationStat host_alloc_time;
+  // SUM: time spent in cudaHostFree/cudaHostUnregister
+  // LOCK: access to this stat is protected by the timing_mutex_
+  DurationStat host_free_time;
+};
 
 /**
  * Note [HostAllocator design]
@@ -102,6 +163,13 @@ namespace {
  *
  * Note that this caching host allocator does not split larger allocations into
  * smaller blocks, unlike the caching device allocator.
+ *
+ * In order to gather statistics about caching host allocator while minimally
+ * impacting performance, we use a HostStatsStaged struct to stage the stats
+ * before reporting them. This is done to avoid adding new locks to the allocator.
+ * Collecting stats is carefully done under existing locks, and then the staged
+ * stats are converted to the final stats when getStats is called. At that time
+ * we hold the same locks as empty_cache, to ensure the fidelity of the stats.
  */
 
 template <
@@ -109,7 +177,12 @@ template <
     typename E,
     typename B = HostBlock<S>>
 struct CachingHostAllocatorImpl {
-  virtual ~CachingHostAllocatorImpl() = default;
+  virtual ~CachingHostAllocatorImpl() {
+    active_ = false;
+    if (pinned_use_background_threads()) {
+      getBackgroundThreadPool()->waitWorkComplete();
+    }
+  }
 
  public:
   // return data_ptr and block pair.
@@ -118,17 +191,45 @@ struct CachingHostAllocatorImpl {
       return {nullptr, nullptr};
     }
 
-    process_events();
-
-    // First, try to allocate from the free list
-    auto* block = get_free_block(size);
-    if (block) {
-      return {block->ptr_, reinterpret_cast<void*>(block)};
+    // If we are using background threads, we can process events in the
+    // background.
+    if (!pinned_use_background_threads()) {
+      process_events();
     }
 
     // Round up the allocation to the nearest power of two to improve reuse.
     // These power of two sizes are also used to index into the free list.
     size_t roundSize = c10::llvm::PowerOf2Ceil(size);
+
+    // First, try to allocate from the free list
+    auto* block = get_free_block(roundSize);
+    if (block) {
+      return {block->ptr_, reinterpret_cast<void*>(block)};
+    }
+
+    // Check in the recently freed blocks with pending events to see if we
+    // can reuse them. Call get_free_block again after processing events
+    if (pinned_use_background_threads()) {
+      process_events_for_specific_size(roundSize);
+      block = get_free_block(roundSize);
+      if (block) {
+        return {block->ptr_, reinterpret_cast<void*>(block)};
+      }
+
+      // Launch the background thread and process events in a loop.
+      static bool background_thread_flag [[maybe_unused]] = [this] {
+        getBackgroundThreadPool()->run([&]() {
+          while (active_) {
+            process_events();
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+          }
+        });
+        return true;
+      }();
+    }
+
+    // Slow path: if we can't allocate from the cached free list, we need
+    // to create a new block.
     void* ptr = nullptr;
     allocate_host_memory(roundSize, &ptr);
 
@@ -170,6 +271,8 @@ struct CachingHostAllocatorImpl {
       auto index = size_index(block->size_);
       std::lock_guard<std::mutex> g(free_list_[index].mutex_);
       free_list_[index].list_.push_back(block);
+      stats_.allocation_bucket_stats[index].decrease(1);
+      stats_.allocated_bytes_bucket_stats[index].decrease(block->size_);
     } else {
       // restore these events that record by used streams.
       std::lock_guard<std::mutex> g(events_mutex_);
@@ -179,7 +282,8 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-  virtual bool record_event(void* ptr, void* ctx, S stream) {
+  virtual bool record_event(void* ptr, void* ctx, c10::Stream s) {
+    S stream = S(s);
     auto* block = reinterpret_cast<B*>(ctx);
 
     // Note: we need to check if the passed-in `ctx` is valid. This is because
@@ -224,9 +328,12 @@ struct CachingHostAllocatorImpl {
 
       std::vector<B*> blocks_to_remove(free_list_[i].list_.begin(), free_list_[i].list_.end());
       free_list_[i].list_.clear();
+
       for (auto* block : blocks_to_remove) {
         blocks_.erase(block);
         ptr_to_block_.erase(block->ptr_);
+        stats_.allocation.decrease(1);
+        stats_.allocated_bytes.decrease(block->size_);
         free_block(block);
         delete block;
       }
@@ -237,30 +344,165 @@ struct CachingHostAllocatorImpl {
     return c10::llvm::Log2_64_Ceil(size);
   }
 
+  virtual bool pinned_use_background_threads() {
+    return false;
+  }
+
   virtual void copy_data(void* dest [[maybe_unused]], const void* src [[maybe_unused]], std::size_t count [[maybe_unused]]) const {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for copy_data");
+  }
+
+  HostStats getStats() {
+    HostStats stats;
+
+    // To keep getStats lightweight we do *not* flush any available blocks
+    // into the free_list. This may skew the stats a bit.
+
+    auto add_bucket_stats = [](Stat& accumulator, const Stat& other) {
+      accumulator.allocated += other.allocated;
+      accumulator.current += other.current;
+      accumulator.freed += other.freed;
+      // Since peaks are measured per bucket independently, we add them up
+      // to estimate the total peak. This is not strictly correct, but it is
+      // the best approximation we can get after the fact.
+      accumulator.peak += other.peak;
+    };
+
+    // Accurate reading of memory stats requires concurrently holding both the
+    // free list mutexes and the blocks mutex. Previously, this was only done in
+    // empty_cache function.
+    for (size_t i = 0; i < free_list_.size(); ++i) {
+      std::lock(free_list_[i].mutex_, blocks_mutex_);
+      std::lock_guard<std::mutex> gf(free_list_[i].mutex_, std::adopt_lock);
+      std::lock_guard<std::mutex> gb(blocks_mutex_, std::adopt_lock);
+
+      // We collect the slow-path stats only once, since they are not collected
+      // per bucket (we pick index 0 arbitrarily). These are also all the host
+      // allocations, not taking into account caching and free lists.
+      if (i == 0) {
+        stats.segment = stats_.allocation;
+        stats.reserved_bytes = stats_.allocated_bytes;
+        stats.num_host_alloc = stats.segment.allocated;
+        stats.num_host_free = stats.segment.freed;
+      }
+
+      // Bucket stats need to be merged with the slow-path stats. We do this in
+      // a best effort manner, since we can't really replay the cached events per bucket.
+      add_bucket_stats(stats.allocation, stats_.allocation_bucket_stats[i]);
+      add_bucket_stats(stats.allocated_bytes, stats_.allocated_bytes_bucket_stats[i]);
+    }
+
+    // Get the timing stats
+    {
+      std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+
+      stats.host_alloc_time = stats_.host_alloc_time;
+      stats.host_free_time = stats_.host_free_time;
+    }
+
+    return stats;
+  }
+
+  void resetAccumulatedStats() {
+    // Reseting accumulated memory stats requires concurrently holding both the
+    // free list mutexes and the blocks mutex. Previously, this was only done in
+    // empty_cache function.
+    for (size_t i = 0; i < free_list_.size(); ++i) {
+      std::lock(free_list_[i].mutex_, blocks_mutex_);
+      std::lock_guard<std::mutex> gf(free_list_[i].mutex_, std::adopt_lock);
+      std::lock_guard<std::mutex> gb(blocks_mutex_, std::adopt_lock);
+
+      if (i == 0) {
+        stats_.allocation.reset_accumulated();
+        stats_.allocated_bytes.reset_accumulated();
+      }
+      stats_.allocation_bucket_stats[i].reset_accumulated();
+      stats_.allocated_bytes_bucket_stats[i].reset_accumulated();
+    }
+
+    // Also reset timing stats
+    {
+      std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      stats_.host_alloc_time.reset_accumulated();
+      stats_.host_free_time.reset_accumulated();
+    }
+  }
+
+  void resetPeakStats() {
+    // Reseting peak memory stats requires concurrently holding both the
+    // free list mutexes and the blocks mutex. Previously, this was only done in
+    // empty_cache function.
+    for (size_t i = 0; i < free_list_.size(); ++i) {
+      std::lock(free_list_[i].mutex_, blocks_mutex_);
+      std::lock_guard<std::mutex> gf(free_list_[i].mutex_, std::adopt_lock);
+      std::lock_guard<std::mutex> gb(blocks_mutex_, std::adopt_lock);
+
+      if (i == 0) {
+        stats_.allocation.reset_peak();
+        stats_.allocated_bytes.reset_peak();
+      }
+      stats_.allocation_bucket_stats[i].reset_peak();
+      stats_.allocated_bytes_bucket_stats[i].reset_peak();
+    }
+
+    // Also reset timing stats
+    {
+      std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      stats_.host_alloc_time.reset_peak();
+      stats_.host_free_time.reset_peak();
+    }
   }
 
  private:
   virtual void add_allocated_block(B* block) {
     std::lock_guard<std::mutex> g(blocks_mutex_);
     blocks_.insert(block);
+    stats_.allocation.increase(1);
+    stats_.allocated_bytes.increase(block->size_);
     ptr_to_block_.insert({block->ptr_, block});
+
+    // Unfortunately, we have to, on the slow path, quickly
+    // lock the bucket to record the allocation. This should
+    // be a rare event once the cache is warmed up.
+    auto size = block->size_;
+    auto index = size_index(size);
+    {
+      std::lock_guard<std::mutex> g(free_list_[index].mutex_);
+      stats_.allocation_bucket_stats[index].increase(1);
+      stats_.allocated_bytes_bucket_stats[index].increase(size);
+    }
   }
 
   virtual B* get_free_block(size_t size) {
     auto index = size_index(size);
     std::lock_guard<std::mutex> g(free_list_[index].mutex_);
-    if (free_list_[index].list_.size() > 0) {
+    if (!free_list_[index].list_.empty()) {
       B* block = free_list_[index].list_.back();
       free_list_[index].list_.pop_back();
       block->allocated_ = true;
+      stats_.allocation_bucket_stats[index].increase(1);
+      stats_.allocated_bytes_bucket_stats[index].increase(size);
       return block;
     }
     return nullptr;
   }
 
   virtual void process_events() {
+    // process all events until the last unready event, not for specific size.
+    process_events_for_specific_size(-1);
+  }
+
+  // If size is -1, process all events from backwards until the last unready
+  // event. Otherwise, process events for a specific size and on first ready block
+  // is found, add it to the free list and return.
+  virtual void process_events_for_specific_size(int64_t size) {
+    size_t event_count = 0;
+    size_t max_events = 0;
+    {
+      std::lock_guard<std::mutex> g(events_mutex_);
+      max_events = events_.size();
+    }
+
     while (true) {
       // Avoid calling cudaEventDestroy while holding a mutex, so move
       // intermediate events out of the lock into this object.
@@ -278,6 +520,25 @@ struct CachingHostAllocatorImpl {
         return;
       }
 
+      if (size != -1) {
+        if (event_count++ > max_events) {
+          {
+            std::lock_guard<std::mutex> g(events_mutex_);
+            events_.push_front(std::move(*processed));
+          }
+          return;
+        }
+        if (size != (int64_t)processed->second->size_) {
+          // if we are processing a specific size, and the size of the block
+          // doesn't match, we can't use it.
+          {
+            std::lock_guard<std::mutex> g(events_mutex_);
+            events_.push_front(std::move(*processed));
+          }
+          continue;
+        }
+      }
+
       // otherwise, query the event
       {
         // now, see if we can handle this element
@@ -286,9 +547,14 @@ struct CachingHostAllocatorImpl {
           // push the event onto the back if it's not ready.
           {
             std::lock_guard<std::mutex> g(events_mutex_);
-            events_.push_back(std::move(*processed));
+            if (size == -1) {
+              events_.push_back(std::move(*processed));
+              return;
+            } else {
+              events_.push_front(std::move(*processed));
+              continue;
+            }
           }
-          return;
         }
       }
 
@@ -309,8 +575,18 @@ struct CachingHostAllocatorImpl {
         auto index = size_index(block->size_);
         std::lock_guard<std::mutex> g(free_list_[index].mutex_);
         free_list_[index].list_.push_back(block);
+        stats_.allocation_bucket_stats[index].decrease(1);
+        stats_.allocated_bytes_bucket_stats[index].decrease(size);
+        if (size != -1) {
+          return;
+        }
       }
     }
+  }
+
+  TaskThreadPool* getBackgroundThreadPool() {
+    static TaskThreadPool* pool = new TaskThreadPool(1);
+    return pool;
   }
 
   /* These following functions are runtime-related. */
@@ -344,30 +620,62 @@ struct CachingHostAllocatorImpl {
   // size. This allows us to quickly find a free block of the right size.
   // We use deque to store per size free list and guard the list with its own
   // mutex.
-  alignas(64) std::vector<FreeBlockList<B>> free_list_ = std::vector<FreeBlockList<B>>(MAX_SIZE_INDEX);
+  alignas(64) std::vector<FreeBlockList<B>> free_list_ =
+      std::vector<FreeBlockList<B>>(MAX_SIZE_INDEX);
 
   alignas(64) std::mutex events_mutex_;
   std::deque<std::pair<E, B*>> events_; // event queue paired with block
+
+  // Indicates whether the object is active.
+  // Set to false in the destructor to signal background threads to stop.
+  std::atomic<bool> active_{true};
+protected:
+  alignas(64) HostStatsStaged stats_;
 };
 
-template <typename T>
-struct CachingHostAllocatorInterface : public at::Allocator {
+struct TORCH_API HostAllocator : public at::Allocator {
+  // Associates the pinned memory allocation with a stream to track
+  // dependencies. This ensures the memory won't be reused until the stream's
+  // operations complete
+  virtual bool record_event(void* ptr, void* ctx, c10::Stream stream) = 0;
+
+  // Frees all cached pinned memory and returns it to the system, clearing the
+  // allocator's internal cache
+  virtual void empty_cache() = 0;
+
+  // Returns comprehensive statistics about the allocator's memory usage,
+  // allocation patterns, and timing metrics
+  virtual HostStats get_stats() = 0;
+
+  // Resets the cumulative allocation statistics
+  virtual void reset_accumulated_stats() = 0;
+
+  // Resets the peak memory usage metrics
+  virtual void reset_peak_stats() = 0;
+};
+
+template <typename T, c10::DeleterFnPtr deleteFunc>
+struct CachingHostAllocatorInterface : public HostAllocator {
   CachingHostAllocatorInterface() : impl_(std::make_unique<T>()) {}
 
   at::DataPtr allocate(size_t size) override {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for allocate");
+    auto ptr_and_ctx = impl_->allocate(size);
+    return {
+        ptr_and_ctx.first,
+        ptr_and_ctx.second,
+        deleteFunc, // Use the template parameter deleter function
+        at::DeviceType::CPU};
   }
 
   void free(void* ctx) {
     impl_->free(ctx);
   }
 
-  template <typename S>
-  bool record_event(void* ptr, void* ctx, S stream) {
+  bool record_event(void* ptr, void* ctx, c10::Stream stream) override {
     return impl_->record_event(ptr, ctx, stream);
   }
 
-  void empty_cache() {
+  void empty_cache() override {
     impl_->empty_cache();
   }
 
@@ -376,8 +684,54 @@ struct CachingHostAllocatorInterface : public at::Allocator {
     impl_->copy_data(dest, src, count);
   }
 
+  HostStats get_stats() override {
+    return impl_->getStats();
+  }
+
+  void reset_accumulated_stats() override {
+    impl_->resetAccumulatedStats();
+  }
+
+  void reset_peak_stats() override {
+    impl_->resetPeakStats();
+  }
+
   std::unique_ptr<T> impl_;
 };
+
+#define DECLARE_HOST_ALLOCATOR(name, impl, deleter, instance)       \
+  void deleter(void* ptr);                                          \
+  struct name final                                                 \
+      : public at::CachingHostAllocatorInterface<impl, deleter> {}; \
+  static name instance;                                                    \
+  void deleter(void* ptr) {                                         \
+    instance.free(ptr);                                             \
+  }
+
+/**
+ * Set the host allocator for DeviceType `device_type`. This allocator manages
+ * pinned memory on the host that can be accessed efficiently by the specified
+ * device type. Note that this function is not thread-safe.
+ */
+TORCH_API void setHostAllocator(
+    at::DeviceType device_type,
+    at::HostAllocator* allocator,
+    uint8_t priority = 0);
+
+TORCH_API at::HostAllocator* getHostAllocator(at::DeviceType device_type);
+
+template <DeviceType device_type>
+struct HostAllocatorRegistry {
+  explicit HostAllocatorRegistry(HostAllocator* allocator) {
+    at::setHostAllocator(device_type, allocator);
+  }
+};
+
+#define REGISTER_HOST_ALLOCATOR(device_type, allocator) \
+  namespace {                                           \
+  static at::HostAllocatorRegistry<device_type>         \
+      g_host_allocator_registry_instance(allocator);    \
+  }
 
 } // namespace at
 C10_DIAGNOSTIC_POP()

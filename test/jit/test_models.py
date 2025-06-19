@@ -11,23 +11,18 @@ from torch.testing._internal.common_utils import (
     enable_profiling_mode_for_profiling_tests,
     GRAPH_EXECUTOR,
     ProfilingMode,
+    raise_on_run_directly,
     set_default_dtype,
+    slowTest,
+    suppress_warnings,
 )
 
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.common_utils import slowTest, suppress_warnings
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
 
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 try:
     import torchvision
@@ -84,7 +79,7 @@ class TestModels(JitTestCase):
                     nn.ReLU(True),
                     # state size. (ngf) x 32 x 32
                     nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
-                    nn.Tanh()
+                    nn.Tanh(),
                     # state size. (nc) x 64 x 64
                 )
 
@@ -376,7 +371,7 @@ class TestModels(JitTestCase):
                 batch_size = inputs.size()[1]
                 state_shape = self.config.n_cells, batch_size, self.config.d_hidden
                 h0 = c0 = inputs.new_zeros(state_shape)
-                outputs, (ht, ct) = self.rnn(inputs, (h0, c0))
+                _, (ht, _) = self.rnn(inputs, (h0, c0))
                 return (
                     ht[-1]
                     if not self.config.birnn
@@ -593,7 +588,6 @@ class TestModels(JitTestCase):
     @slowTest
     @skipIfNoTorchVision
     def test_script_module_trace_resnet18(self):
-        x = torch.ones(1, 3, 224, 224)
         m_orig = torch.jit.trace(
             torchvision.models.resnet18(), torch.ones(1, 3, 224, 224)
         )
@@ -755,3 +749,7 @@ class TestModels(JitTestCase):
         m = self.createFunctionFromGraph(g)
         with torch.random.fork_rng(devices=[]):
             self.assertEqual(outputs, m(*inputs))
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

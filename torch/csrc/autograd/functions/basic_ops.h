@@ -18,8 +18,9 @@ struct TORCH_API Error : public Node {
   Error(std::string msg) : msg(std::move(msg)) {}
 
   variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs) const;
 
-  void compiled_args(CompiledNodeArgs& args) override;
+  void compiled_args(CompiledNodeArgs& args) const override;
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
@@ -44,12 +45,14 @@ struct TORCH_API NotImplemented : public Error {
 // @once_differentiable
 struct TORCH_API DelayedError : public Node {
   DelayedError(std::string msg, int64_t num_inputs) : msg(std::move(msg)) {
-    for (const auto _ [[maybe_unused]] : c10::irange(num_inputs)) {
+    for ([[maybe_unused]] const auto _ [[maybe_unused]] :
+         c10::irange(num_inputs)) {
       add_input_metadata(Node::undefined_input());
     }
   }
 
   variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs) const;
 
   std::string msg;
 };
@@ -60,6 +63,7 @@ struct TORCH_API UndefinedGrad : public Node {
   }
 
   variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs) const;
 };
 
 struct TORCH_API UndefinedGradBackward : public Node {
@@ -68,8 +72,9 @@ struct TORCH_API UndefinedGradBackward : public Node {
   UndefinedGradBackward() = default;
 
   variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs) const;
 
-  void compiled_args(CompiledNodeArgs& args) override {}
+  void compiled_args(CompiledNodeArgs& args) const override {}
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override {
@@ -92,7 +97,7 @@ struct TORCH_API GraphRoot : public Node {
     return outputs;
   }
 
-  void compiled_args(CompiledNodeArgs& args) override;
+  void compiled_args(CompiledNodeArgs& args) const override;
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;

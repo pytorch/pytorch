@@ -37,6 +37,7 @@ std::atomic<int> sighupCount(0);
 std::atomic<int> hookedUpCount(0);
 
 void handleSignal(int signal) {
+  // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
   switch (signal) {
     // TODO: what if the previous handler uses sa_sigaction?
     case SIGHUP:
@@ -58,7 +59,7 @@ void hookupHandler() {
   if (hookedUpCount++) {
     return;
   }
-  struct sigaction sa {};
+  struct sigaction sa{};
   // Setup the handler
   sa.sa_handler = &handleSignal;
   // Restart the system call, if at all possible
@@ -79,7 +80,7 @@ void unhookHandler() {
   if (--hookedUpCount > 0) {
     return;
   }
-  struct sigaction sa {};
+  struct sigaction sa{};
   // Setup the sighub handler
   sa.sa_handler = SIG_DFL;
   // Restart the system call, if at all possible
@@ -107,14 +108,10 @@ FatalSignalHandler& FatalSignalHandler::getInstance() {
   return *handler;
 }
 
-FatalSignalHandler::~FatalSignalHandler() = default;
-
 FatalSignalHandler::FatalSignalHandler()
     : fatalSignalHandlersInstalled(false),
       fatalSignalReceived(false),
       fatalSignalName("<UNKNOWN>"),
-      writingCond(),
-      writingMutex(),
       signalReceived(false) {}
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -175,7 +172,7 @@ void FatalSignalHandler::stacktraceSignalHandler(bool needsLock) {
       ::getpid(),
       tid,
       c10::get_backtrace());
-  std::cerr << backtrace << std::endl;
+  std::cerr << backtrace << '\n';
   if (needsLock) {
     ul.unlock();
     writingCond.notify_all();
@@ -222,14 +219,13 @@ void FatalSignalHandler::fatalSignalHandler(int signum) {
       if (tid != currentTid) {
         signalReceived = false;
         syscall(SYS_tgkill, pid, tid, SIGUSR2);
-        auto now = std::chrono::system_clock::now();
         using namespace std::chrono_literals;
         // we use wait_until instead of wait because on ROCm there was
         // a single thread that wouldn't receive the SIGUSR2
-        if (std::cv_status::timeout == writingCond.wait_until(ul, now + 2s)) {
+        if (std::cv_status::timeout == writingCond.wait_for(ul, 2s)) {
           if (!signalReceived) {
             std::cerr << "signal lost waiting for stacktrace " << pid << ":"
-                      << tid << std::endl;
+                      << tid << '\n';
             break;
           }
         }
@@ -277,7 +273,7 @@ void FatalSignalHandler::installFatalSignalHandlers() {
     return;
   }
   fatalSignalHandlersInstalled = true;
-  struct sigaction sa {};
+  struct sigaction sa{};
   sigemptyset(&sa.sa_mask);
   // Since we'll be in an exiting situation it's possible there's memory
   // corruption, so make our own stack just in case.

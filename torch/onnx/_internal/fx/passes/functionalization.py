@@ -10,7 +10,7 @@ import torch.func
 import torch.fx
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
-from torch.onnx._internal.fx import _pass, diagnostics
+from torch.onnx._internal.fx import _pass
 from torch.onnx._internal.fx.passes import _utils
 from torch.utils import _pytree as pytree
 
@@ -62,12 +62,11 @@ class Functionalize(_pass.Transform):
 
     def __init__(
         self,
-        diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
         enable_dynamic_axes: bool,
         allow_fake_constant: bool | None = False,
     ):
-        super().__init__(diagnostic_context, module)
+        super().__init__(module)
         self.enable_dynamic_axes = enable_dynamic_axes
         self.allow_fake_constant = allow_fake_constant
 
@@ -84,12 +83,11 @@ class Functionalize(_pass.Transform):
                 out = function(*inputs_functional)
             finally:
                 torch._disable_functionalization()
-            flat_inputs = pytree.tree_leaves(inputs)
+
             flat_inputs_functional = pytree.tree_leaves(inputs_functional)
-            for inpt, input_functional in zip(flat_inputs, flat_inputs_functional):
+            for input_functional in flat_inputs_functional:
                 if isinstance(input_functional, torch.Tensor):
                     torch._sync(input_functional)
-                    inpt_new = torch._from_functional_tensor(input_functional)
             pytree.tree_map(torch._sync, out)
             out_unwrapped = pytree.tree_map(torch._from_functional_tensor, out)
             return out_unwrapped

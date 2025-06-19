@@ -9,7 +9,7 @@
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
@@ -64,7 +64,11 @@ class LaunchConfig:
         local_addr: address of the local node if any. If not set, a lookup on the local
                 machine's FQDN will be performed.
         local_ranks_filter: ranks for which to show logs in console. If not set, show from all.
-    ..note:
+        event_log_handler: name of the event logging handler as registered in
+          `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
+
+
+    .. note::
         `rdzv_timeout` is a legacy argument that will be removed in future.
         Set the timeout via `rdzv_configs['timeout']`
 
@@ -78,14 +82,15 @@ class LaunchConfig:
     role: str = "default_role"
     rdzv_endpoint: str = ""
     rdzv_backend: str = "etcd"
-    rdzv_configs: Dict[str, Any] = field(default_factory=dict)
+    rdzv_configs: dict[str, Any] = field(default_factory=dict)
     rdzv_timeout: int = -1
     max_restarts: int = 3
     monitor_interval: float = 0.1
     start_method: str = "spawn"
     log_line_prefix_template: Optional[str] = None
-    metrics_cfg: Dict[str, str] = field(default_factory=dict)
+    metrics_cfg: dict[str, str] = field(default_factory=dict)
     local_addr: Optional[str] = None
+    event_log_handler: str = "null"
 
     def __post_init__(self):
         default_timeout = 900
@@ -139,7 +144,7 @@ class elastic_launch:
 
 
 def _get_entrypoint_name(
-    entrypoint: Union[Callable, str, None], args: List[Any]
+    entrypoint: Union[Callable, str, None], args: list[Any]
 ) -> str:
     """Retrieve entrypoint name with the rule:
     1. If entrypoint is a function, use ``entrypoint.__qualname__``.
@@ -162,7 +167,7 @@ def _get_entrypoint_name(
 
 def _get_addr_and_port(
     rdzv_parameters: RendezvousParameters,
-) -> Tuple[Optional[str], Optional[int]]:
+) -> tuple[Optional[str], Optional[int]]:
     if rdzv_parameters.backend != "static":
         return (None, None)
     endpoint = rdzv_parameters.endpoint
@@ -182,8 +187,8 @@ def _get_addr_and_port(
 def launch_agent(
     config: LaunchConfig,
     entrypoint: Union[Callable, str, None],
-    args: List[Any],
-) -> Dict[int, Any]:
+    args: list[Any],
+) -> dict[int, Any]:
     if not config.run_id:
         run_id = str(uuid.uuid4().int)
         logger.warning("config has no run_id, generated a random run_id: %s", run_id)
@@ -193,18 +198,19 @@ def launch_agent(
 
     logger.info(
         "Starting elastic_operator with launch configs:\n"
-        "  entrypoint       : %(entrypoint)s\n"
-        "  min_nodes        : %(min_nodes)s\n"
-        "  max_nodes        : %(max_nodes)s\n"
-        "  nproc_per_node   : %(nproc_per_node)s\n"
-        "  run_id           : %(run_id)s\n"
-        "  rdzv_backend     : %(rdzv_backend)s\n"
-        "  rdzv_endpoint    : %(rdzv_endpoint)s\n"
-        "  rdzv_configs     : %(rdzv_configs)s\n"
-        "  max_restarts     : %(max_restarts)s\n"
-        "  monitor_interval : %(monitor_interval)s\n"
-        "  log_dir          : %(log_dir)s\n"
-        "  metrics_cfg      : %(metrics_cfg)s\n",
+        "  entrypoint         : %(entrypoint)s\n"
+        "  min_nodes          : %(min_nodes)s\n"
+        "  max_nodes          : %(max_nodes)s\n"
+        "  nproc_per_node     : %(nproc_per_node)s\n"
+        "  run_id             : %(run_id)s\n"
+        "  rdzv_backend       : %(rdzv_backend)s\n"
+        "  rdzv_endpoint      : %(rdzv_endpoint)s\n"
+        "  rdzv_configs       : %(rdzv_configs)s\n"
+        "  max_restarts       : %(max_restarts)s\n"
+        "  monitor_interval   : %(monitor_interval)s\n"
+        "  log_dir            : %(log_dir)s\n"
+        "  metrics_cfg        : %(metrics_cfg)s\n"
+        "  event_log_handler  : %(event_log_handler)s\n",
         {
             "entrypoint": entrypoint_name,
             "min_nodes": config.min_nodes,
@@ -218,6 +224,7 @@ def launch_agent(
             "monitor_interval": config.monitor_interval,
             "log_dir": config.logs_specs.root_log_dir,  # type: ignore[union-attr]
             "metrics_cfg": config.metrics_cfg,
+            "event_log_handler": config.event_log_handler,
         },
     )
 
@@ -244,6 +251,7 @@ def launch_agent(
         master_addr=master_addr,
         master_port=master_port,
         local_addr=config.local_addr,
+        event_log_handler=config.event_log_handler,
     )
 
     agent = LocalElasticAgent(
@@ -259,7 +267,7 @@ def launch_agent(
 
         result = agent.run()
         # records that agent.run() has succeeded NOT that workers have succeeded
-        events.record(agent.get_event_succeeded())
+        events.record(agent.get_event_succeeded(), config.event_log_handler)
 
         if result.is_failed():
             # ChildFailedError is treated specially by @record
@@ -279,10 +287,10 @@ def launch_agent(
         # since this closes the rendezvous on this rdzv_id permanently and
         # prevents any additional scaling events
         shutdown_rdzv = False
-        events.record(agent.get_event_failed())
+        events.record(agent.get_event_failed(), config.event_log_handler)
         raise
     except Exception:
-        events.record(agent.get_event_failed())
+        events.record(agent.get_event_failed(), config.event_log_handler)
         raise
     finally:
         if shutdown_rdzv:

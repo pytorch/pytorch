@@ -5,8 +5,7 @@
 #include <ATen/native/cuda/Pow.cuh>
 #include <utility>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 enum class ADAM_MODE : uint8_t { ORIGINAL = 0, ADAMW = 1 };
 
@@ -102,21 +101,15 @@ C10_DEVICE inline void adam_math(
 // parameter updates accordingly. To be functionally on par with `torch.optim`
 // optimizers and `_multi_tensor` ones, the kernel below writes out gradients
 // only when `grad_scale_ptr != nullptr.
-template <
-    typename scalar_type,
-    int depth,
-    ADAM_MODE adam_mode,
-    bool amsgrad,
-    bool large_kernel_arg>
+template <typename scalar_type, int depth, ADAM_MODE adam_mode, bool amsgrad>
 struct FusedAdamMathFunctor {
-  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   static_assert(
       depth == 4 || depth == 5,
       "depth of 4 for Adam, depth of 5 for Adam with AMSGrad.");
   using opmath_t = at::opmath_type<scalar_type>;
   C10_DEVICE __forceinline__ void operator()(
       int chunk_size,
-      FusedOptimizerTensorListMetadata<depth, large_kernel_arg>& tl,
+      FusedOptimizerTensorListMetadata<depth>& tl,
       const float* lr_ptr,
       const double& lr,
       const double& beta1,
@@ -204,5 +197,4 @@ struct FusedAdamMathFunctor {
 };
 } // namespace
 
-} // namespace native
-} // namespace at
+} // namespace at::native
