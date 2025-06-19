@@ -95,9 +95,9 @@ class InputSpec:
 
     def __post_init__(self):
         if self.kind == InputKind.BUFFER:
-            assert (
-                self.persistent is not None
-            ), "Failed to specify persistent flag on BUFFER."
+            assert self.persistent is not None, (
+                "Failed to specify persistent flag on BUFFER."
+            )
         assert isinstance(
             self.arg,
             (
@@ -187,48 +187,85 @@ class ExportGraphSignature:
                 self.my_parameter = nn.Parameter(torch.tensor(2.0))
 
                 # Define two buffers
-                self.register_buffer('my_buffer1', torch.tensor(3.0))
-                self.register_buffer('my_buffer2', torch.tensor(4.0))
+                self.register_buffer("my_buffer1", torch.tensor(3.0))
+                self.register_buffer("my_buffer2", torch.tensor(4.0))
 
             def forward(self, x1, x2):
                 # Use the parameter, buffers, and both inputs in the forward method
-                output = (x1 + self.my_parameter) * self.my_buffer1 + x2 * self.my_buffer2
+                output = (
+                    x1 + self.my_parameter
+                ) * self.my_buffer1 + x2 * self.my_buffer2
 
                 # Mutate one of the buffers (e.g., increment it by 1)
-                self.my_buffer2.add_(1.0) # In-place addition
+                self.my_buffer2.add_(1.0)  # In-place addition
 
                 return output
 
-    Resulting Graph would be::
+
+        mod = CustomModule()
+        ep = torch.export.export(mod, (torch.tensor(1.0), torch.tensor(2.0)))
+
+    Resulting Graph is non-functional::
 
         graph():
-            %arg0_1 := placeholder[target=arg0_1]
-            %arg1_1 := placeholder[target=arg1_1]
-            %arg2_1 := placeholder[target=arg2_1]
-            %arg3_1 := placeholder[target=arg3_1]
-            %arg4_1 := placeholder[target=arg4_1]
-            %add_tensor := call_function[target=torch.ops.aten.add.Tensor](args = (%arg3_1, %arg0_1), kwargs = {})
-            %mul_tensor := call_function[target=torch.ops.aten.mul.Tensor](args = (%add_tensor, %arg1_1), kwargs = {})
-            %mul_tensor_1 := call_function[target=torch.ops.aten.mul.Tensor](args = (%arg4_1, %arg2_1), kwargs = {})
-            %add_tensor_1 := call_function[target=torch.ops.aten.add.Tensor](args = (%mul_tensor, %mul_tensor_1), kwargs = {})
-            %add_tensor_2 := call_function[target=torch.ops.aten.add.Tensor](args = (%arg2_1, 1.0), kwargs = {})
-            return (add_tensor_2, add_tensor_1)
+            %p_my_parameter : [num_users=1] = placeholder[target=p_my_parameter]
+            %b_my_buffer1 : [num_users=1] = placeholder[target=b_my_buffer1]
+            %b_my_buffer2 : [num_users=2] = placeholder[target=b_my_buffer2]
+            %x1 : [num_users=1] = placeholder[target=x1]
+            %x2 : [num_users=1] = placeholder[target=x2]
+            %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x1, %p_my_parameter), kwargs = {})
+            %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %b_my_buffer1), kwargs = {})
+            %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%x2, %b_my_buffer2), kwargs = {})
+            %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %mul_1), kwargs = {})
+            %add_ : [num_users=0] = call_function[target=torch.ops.aten.add_.Tensor](args = (%b_my_buffer2, 1.0), kwargs = {})
+            return (add_1,)
 
-    Resulting ExportGraphSignature would be::
+    Resulting ExportGraphSignature of the non-functional Graph would be::
 
-        ExportGraphSignature(
-            input_specs=[
-                InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg0_1'), target='my_parameter'),
-                InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg1_1'), target='my_buffer1'),
-                InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg2_1'), target='my_buffer2'),
-                InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg3_1'), target=None),
-                InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg4_1'), target=None)
-            ],
-            output_specs=[
-                OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>, arg=TensorArgument(name='add_2'), target='my_buffer2'),
-                OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=TensorArgument(name='add_1'), target=None)
-            ]
-        )
+        # inputs
+        p_my_parameter: PARAMETER target='my_parameter'
+        b_my_buffer1: BUFFER target='my_buffer1' persistent=True
+        b_my_buffer2: BUFFER target='my_buffer2' persistent=True
+        x1: USER_INPUT
+        x2: USER_INPUT
+
+        # outputs
+        add_1: USER_OUTPUT
+
+    To get a functional Graph, you can use :func:`run_decompositions`::
+
+        mod = CustomModule()
+        ep = torch.export.export(mod, (torch.tensor(1.0), torch.tensor(2.0)))
+        ep = ep.run_decompositions()
+
+    Resulting Graph is functional::
+
+        graph():
+            %p_my_parameter : [num_users=1] = placeholder[target=p_my_parameter]
+            %b_my_buffer1 : [num_users=1] = placeholder[target=b_my_buffer1]
+            %b_my_buffer2 : [num_users=2] = placeholder[target=b_my_buffer2]
+            %x1 : [num_users=1] = placeholder[target=x1]
+            %x2 : [num_users=1] = placeholder[target=x2]
+            %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x1, %p_my_parameter), kwargs = {})
+            %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %b_my_buffer1), kwargs = {})
+            %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%x2, %b_my_buffer2), kwargs = {})
+            %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %mul_1), kwargs = {})
+            %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%b_my_buffer2, 1.0), kwargs = {})
+            return (add_2, add_1)
+
+    Resulting ExportGraphSignature of the functional Graph would be::
+
+        # inputs
+        p_my_parameter: PARAMETER target='my_parameter'
+        b_my_buffer1: BUFFER target='my_buffer1' persistent=True
+        b_my_buffer2: BUFFER target='my_buffer2' persistent=True
+        x1: USER_INPUT
+        x2: USER_INPUT
+
+        # outputs
+        add_2: BUFFER_MUTATION target='my_buffer2'
+        add_1: USER_OUTPUT
+
     """
 
     input_specs: list[InputSpec]
@@ -520,9 +557,9 @@ def _make_argument_spec(node, token_names) -> ArgumentSpec:
         # For const outputs we just directly return this
         return ConstantArgument(name="", value=node)
 
-    assert (
-        "val" in node.meta
-    ), f"{node} is not a constant or a node with a 'val' metadata field"
+    assert "val" in node.meta, (
+        f"{node} is not a constant or a node with a 'val' metadata field"
+    )
     val = node.meta["val"]
     if node.name in token_names:
         return TokenArgument(name=node.name)
@@ -565,9 +602,21 @@ def _convert_to_export_graph_signature(
     user_outputs = set(graph_signature.user_outputs)
     buffer_mutations = graph_signature.buffers_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
-    grad_params = graph_signature.backward_signature.gradients_to_parameter if is_joint else {}  # type: ignore[union-attr]
-    grad_user_inputs = graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {}  # type: ignore[union-attr]
-    loss_output = graph_signature.backward_signature.loss_output if is_joint else None  # type: ignore[union-attr]
+    grad_params = (
+        graph_signature.backward_signature.gradients_to_parameter  # type: ignore[union-attr]
+        if is_joint
+        else {}
+    )
+    grad_user_inputs = (
+        graph_signature.backward_signature.gradients_to_user_inputs  # type: ignore[union-attr]
+        if is_joint
+        else {}
+    )
+    loss_output = (
+        graph_signature.backward_signature.loss_output  # type: ignore[union-attr]
+        if is_joint
+        else None
+    )
     input_tokens = graph_signature.input_tokens
     output_tokens = graph_signature.output_tokens
 

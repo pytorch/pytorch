@@ -378,6 +378,12 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
 }
 
 std::string Context::float32Precision(const std::string& backend, const std::string& op) const {
+#ifdef USE_ROCM
+    const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+    if (allow_tf32 != true) {
+      return "ieee";
+    }
+#endif
   check_fp32_prec_backend_and_op(backend, op);
   auto precision = fp32_precision.find(backend)->second.find(op)->second;
   if (precision == "none")
