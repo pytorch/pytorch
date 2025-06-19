@@ -69,6 +69,7 @@ from torch.fx.experimental.recording import (
     ShapeEnvEvent,
 )
 from torch.fx.experimental.sym_node import SymNode, SymTypes
+from torch.fx.experimental.symbolic_shape_utils import SymbolicShapeUtils  # noqa: F401
 from torch.types import py_sym_types
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -8039,3 +8040,11 @@ def _get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
     if result in shape_env.unbacked_renamings:
         return shape_env.unbacked_renamings[result]
     return result
+
+
+# Inject dependencies into symbolic_shape_utils to avoid circular imports
+from torch.fx.experimental import symbolic_shape_utils
+
+
+symbolic_shape_utils.guard_bool = guard_bool
+symbolic_shape_utils.is_nested_int = is_nested_int
