@@ -157,4 +157,4 @@ runs:
         echo "Is keep-going label set? ${{ steps.filter.outputs.keep-going }}"
 
         echo
-        echo "Renabled issues? ${{ steps.filter.outputs.reenabled-issues }}"
+        echo "Reenabled issues? ${{ steps.filter.outputs.reenabled-issues }}"
