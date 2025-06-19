@@ -607,6 +607,9 @@ class ScheduleGPipe(_PipelineScheduleRuntime):
         self._stage = stage
         self._stage_initialized = False
         
+        # Set pp_group_size for schedule generation
+        self.pp_group_size = stage.group_size
+        
         # Generate pipeline_order for GPipe schedule (after parent init)
         self.pipeline_order = self._generate_gpipe_schedule()
         # Load the actions into the runtime
@@ -720,6 +723,9 @@ class Schedule1F1B(_PipelineScheduleRuntime):
         # Compatibility property for single-stage interface
         self._stage = stage
         self._stage_initialized = False
+        
+        # Set pp_group_size for schedule generation
+        self.pp_group_size = stage.group_size
         
         # Generate pipeline_order for 1F1B schedule (after parent init)
         self.pipeline_order = self._generate_1f1b_schedule()
