@@ -3793,6 +3793,10 @@ def defake(x):
     return y
 
 
+def _UNSAFE_allow_side_effects(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
+
+
 def is_utils_checkpoint(obj):
     # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
