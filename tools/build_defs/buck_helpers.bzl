@@ -24,7 +24,7 @@ ONLY_AVAILABLE_IN_BUCK2 = [
 def filter_attributes(kwgs):
     keys = list(kwgs.keys())
 
-    # drop unncessary attributes
+    # drop unnecessary attributes
     for key in keys:
         if key in IGNORED_ATTRIBUTES or key in ONLY_AVAILABLE_IN_BUCK2:
             kwgs.pop(key)

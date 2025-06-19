@@ -996,27 +996,23 @@ def output_node(gm: torch.fx.GraphModule) -> Node:
     return last_node
 
 
-_registered_caches: list[Any] = []
+def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
+    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
+    input_devices: OrderedSet[torch.device] = OrderedSet(
+        node.meta["val"].device
+        for node in placeholder_nodes
+        if isinstance(node.meta.get("val"), torch.Tensor)
+    )
 
-
-def clear_on_fresh_inductor_cache(obj: Any) -> Any:
-    """
-    Use this decorator to register any caches that should be cache_clear'd
-    with fresh_inductor_cache().
-    """
-    if not hasattr(obj, "cache_clear") or not callable(obj.cache_clear):
-        raise AttributeError(f"{obj} does not have a cache_clear method")
-
-    _registered_caches.append(obj)
-    return obj
-
-
-def clear_inductor_caches() -> None:
-    """
-    Clear all registered caches.
-    """
-    for obj in _registered_caches:
-        obj.cache_clear()
+    out_arg = output_node(gm).args[0]  # type: ignore[union-attr]
+    out_args = out_arg if isinstance(out_arg, tuple) else (out_arg,)
+    out_devices: OrderedSet[torch.device] = OrderedSet(
+        arg.meta["val"].device
+        for arg in out_args
+        if isinstance(arg, torch.fx.Node)
+        and isinstance(arg.meta.get("val"), torch.Tensor)
+    )
+    return input_devices | out_devices
 
 
 import gc
@@ -1051,19 +1047,42 @@ def unload_xpu_triton_pyds() -> None:
     gc.collect()
 
 
+_registered_caches: list[Any] = []
+
+
+def clear_on_fresh_cache(obj: Any) -> Any:
+    """
+    Use this decorator to register any caches that should be cache_clear'd
+    with fresh_cache().
+    """
+    if not hasattr(obj, "cache_clear") or not callable(obj.cache_clear):
+        raise AttributeError(f"{obj} does not have a cache_clear method")
+
+    _registered_caches.append(obj)
+    return obj
+
+
+def clear_caches() -> None:
+    """
+    Clear all registered caches.
+    """
+    for obj in _registered_caches:
+        obj.cache_clear()
+
+
 @contextlib.contextmanager
-def fresh_inductor_cache(
+def fresh_cache(
     cache_entries: Optional[dict[str, Any]] = None,
     dir: Optional[str] = None,
     delete: bool = True,
 ) -> Iterator[None]:
     """
-    Contextmanager that provides a clean tmp cachedir for inductor.
+    Contextmanager that provides a clean tmp cachedir for pt2 caches.
 
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
-    clear_inductor_caches()
+    clear_caches()
 
     inductor_cache_dir = tempfile.mkdtemp(dir=dir)
     try:
@@ -1104,7 +1123,13 @@ def fresh_inductor_cache(
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
     finally:
-        clear_inductor_caches()
+        clear_caches()
+
+
+# Deprecated functions -- only keeping them for BC reasons
+clear_on_fresh_inductor_cache = clear_on_fresh_cache
+clear_inductor_caches = clear_caches
+fresh_inductor_cache = fresh_cache
 
 
 def argsort(seq: Sequence[Any]) -> list[int]:
@@ -1578,6 +1603,14 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
+def _use_cutlass_for_op(op_name: str) -> bool:
+    """Check if CUTLASS should be used for the given operation."""
+    enabled_ops = config.cuda.cutlass_enabled_ops.upper()
+    if enabled_ops == "ALL":
+        return True
+    return op_name.upper() in [x.strip() for x in enabled_ops.split(",")]
+
+
 decompose_k_threshold = 32
 
 # To limit compile time
@@ -1810,6 +1843,7 @@ def use_cpp_gemm_template(
         use_4x2_dim=is_woq_int4,
     )
 
+    # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
 

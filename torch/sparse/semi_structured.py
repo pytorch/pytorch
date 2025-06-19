@@ -197,10 +197,10 @@ class SparseSemiStructuredTensor(torch.Tensor):
             requires_grad=requires_grad,
         )
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
+    __torch_function__ = torch._C._disabled_torch_function_impl  # type: ignore[assignment]
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:
+    def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:  # type: ignore[override]
         if func._overloadpacket not in cls.SPARSE_DISPATCH:
             raise NotImplementedError(
                 f"{cls.__name__} only supports a specific set of operations, "
