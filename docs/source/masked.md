@@ -1,39 +1,39 @@
+```{eval-rst}
 .. automodule:: torch.masked
 .. automodule:: torch.masked.maskedtensor
+```
 
+```{eval-rst}
 .. currentmodule:: torch
+```
 
-.. _masked-docs:
+(masked-docs)=
 
-torch.masked
-============
+# torch.masked
 
-Introduction
-++++++++++++
+## Introduction
 
-Motivation
-----------
+### Motivation
 
-.. warning::
+:::{warning}
+The PyTorch API of masked tensors is in the prototype stage and may or may not change in the future.
+:::
 
-  The PyTorch API of masked tensors is in the prototype stage and may or may not change in the future.
-
-MaskedTensor serves as an extension to :class:`torch.Tensor` that provides the user with the ability to:
+MaskedTensor serves as an extension to {class}`torch.Tensor` that provides the user with the ability to:
 
 * use any masked semantics (e.g. variable length tensors, nan* operators, etc.)
 * differentiate between 0 and NaN gradients
 * various sparse applications (see tutorial below)
 
 "Specified" and "unspecified" have a long history in PyTorch without formal semantics and certainly without
-consistency; indeed, MaskedTensor was born out of a build up of issues that the vanilla :class:`torch.Tensor`
+consistency; indeed, MaskedTensor was born out of a build up of issues that the vanilla {class}`torch.Tensor`
 class could not properly address. Thus, a primary goal of MaskedTensor is to become the source of truth for
 said "specified" and "unspecified" values in PyTorch where they are a first class citizen instead of an afterthought.
-In turn, this should further unlock `sparsity's <https://pytorch.org/docs/stable/sparse.html>`_ potential,
+In turn, this should further unlock [sparsity's](https://pytorch.org/docs/stable/sparse.html) potential,
 enable safer and more consistent operators, and provide a smoother and more intuitive experience
 for users and developers alike.
 
-What is a MaskedTensor?
------------------------
+### What is a MaskedTensor?
 
 A MaskedTensor is a tensor subclass that consists of 1) an input (data), and 2) a mask. The mask tells us
 which entries from the input should be included or ignored.
@@ -41,8 +41,10 @@ which entries from the input should be included or ignored.
 By way of example, suppose that we wanted to mask out all values that are equal to 0 (represented by the gray)
 and take the max:
 
+```{eval-rst}
 .. image:: _static/img/masked/tensor_comparison.jpg
       :scale: 50%
+```
 
 On top is the vanilla tensor example while the bottom is MaskedTensor where all the 0's are masked out.
 This clearly yields a different result depending on whether we have the mask, but this flexible structure
@@ -50,22 +52,14 @@ allows the user to systematically ignore any elements they'd like during computa
 
 There are already a number of existing tutorials that we've written to help users onboard, such as:
 
--  `Overview - the place to start for new users, discusses how to use MaskedTensors and why they're useful`_
--  `Sparsity - MaskedTensor supports sparse COO and CSR data and mask Tensors`_
--  `Adagrad sparse semantics - a practical example of how MaskedTensor can simplify sparse semantics and implementations`_
--  `Advanced semantics - discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations),
-   differences with NumPy's MaskedArray, and reduction semantics`_
+- [Overview – the place to start for new users, discusses how to use MaskedTensors and why they're useful](https://pytorch.org/tutorials/prototype/maskedtensor_overview)
+- [Sparsity – MaskedTensor supports sparse COO and CSR data and mask Tensors](https://pytorch.org/tutorials/prototype/maskedtensor_sparsity)
+- [Adagrad sparse semantics – a practical example of how MaskedTensor can simplify sparse semantics and implementations](https://pytorch.org/tutorials/prototype/maskedtensor_adagrad)
+- [Advanced semantics – discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations), differences with NumPy's MaskedArray, and reduction semantics](https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics)
 
-.. _Overview - the place to start for new users, discusses how to use MaskedTensors and why they're useful: https://pytorch.org/tutorials/prototype/maskedtensor_overview
-.. _Sparsity - MaskedTensor supports sparse COO and CSR data and mask Tensors: https://pytorch.org/tutorials/prototype/maskedtensor_sparsity
-.. _Adagrad sparse semantics - a practical example of how MaskedTensor can simplify sparse semantics and implementations: https://pytorch.org/tutorials/prototype/maskedtensor_adagrad
-.. _Advanced semantics - discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations), differences with NumPy's MaskedArray, and reduction semantics: https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics
+## Supported Operators
 
-Supported Operators
-+++++++++++++++++++
-
-Unary Operators
----------------
+### Unary Operators
 
 Unary operators are operators that only contain only a single input.
 Applying them to MaskedTensors is relatively straightforward: if the data is masked out at a given index,
@@ -73,6 +67,7 @@ we apply the operator, otherwise we'll continue to mask out the data.
 
 The available unary operators are:
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -139,9 +134,11 @@ The available unary operators are:
     tan
     tanh
     trunc
+```
 
 The available inplace unary operators are all of the above **except**:
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -150,11 +147,11 @@ The available inplace unary operators are all of the above **except**:
     positive
     signbit
     isnan
+```
 
-Binary Operators
-----------------
+### Binary Operators
 
-As you may have seen in the tutorial, :class:`MaskedTensor` also has binary operations implemented with the caveat
+As you may have seen in the tutorial, {class}`MaskedTensor` also has binary operations implemented with the caveat
 that the masks in the two MaskedTensors must match or else an error will be raised. As noted in the error, if you
 need support for a particular operator or have proposed semantics for how they should behave instead, please open
 an issue on GitHub. For now, we have decided to go with the most conservative implementation to ensure that users
@@ -162,6 +159,7 @@ know exactly what is going on and are being intentional about their decisions wi
 
 The available binary operators are:
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -202,9 +200,11 @@ The available binary operators are:
     fmax
     fmin
     not_equal
+```
 
 The available inplace binary operators are all of the above **except**:
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -215,16 +215,17 @@ The available inplace binary operators are all of the above **except**:
     fmin
     minimum
     fmax
+```
 
-Reductions
-----------
+### Reductions
 
 The following reductions are available (with autograd support). For more information, the
-`Overview <https://pytorch.org/tutorials/prototype/maskedtensor_overview.html>`_ tutorial
+[Overview](https://pytorch.org/tutorials/prototype/maskedtensor_overview.html) tutorial
 details some examples of reductions, while the
-`Advanced semantics <https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html>`_ tutorial
+[Advanced semantics](https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html) tutorial
 has some further in-depth discussions about how we decided on certain reduction semantics.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -240,14 +241,15 @@ has some further in-depth discussions about how we decided on certain reduction 
     norm
     var
     std
+```
 
-View and select functions
--------------------------
+### View and select functions
 
 We've included a number of view and select functions as well; intuitively, these operators will apply to
-both the data and the mask and then wrap the result in a :class:`MaskedTensor`. For a quick example,
-consider :func:`select`:
+both the data and the mask and then wrap the result in a {class}`MaskedTensor`. For a quick example,
+consider {func}`select`:
 
+```python
     >>> data = torch.arange(12, dtype=torch.float).reshape(3, 4)
     >>> data
     tensor([[ 0.,  1.,  2.,  3.],
@@ -263,9 +265,11 @@ consider :func:`select`:
     MaskedTensor(
       [      --,   5.0000,       --,       --]
     )
+```
 
 The following ops are currently supported:
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -298,7 +302,9 @@ The following ops are currently supported:
     Tensor.reshape_as
     Tensor.unfold
     Tensor.view
+```
 
+```{eval-rst}
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.masked.maskedtensor.binary
@@ -307,3 +313,4 @@ The following ops are currently supported:
 .. py:module:: torch.masked.maskedtensor.passthrough
 .. py:module:: torch.masked.maskedtensor.reductions
 .. py:module:: torch.masked.maskedtensor.unary
+```

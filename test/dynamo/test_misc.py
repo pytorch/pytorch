@@ -12787,6 +12787,30 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
             res = opt_fn2(x2)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @torch._dynamo.config.patch(recompile_limit=999)
+    def test_legacy_cuda_tensor(self):
+        typs = [
+            torch.cuda.FloatTensor,
+            torch.cuda.DoubleTensor,
+            torch.cuda.HalfTensor,
+            torch.cuda.BFloat16Tensor,
+            torch.cuda.ByteTensor,
+            torch.cuda.CharTensor,
+            torch.cuda.IntTensor,
+            torch.cuda.ShortTensor,
+            torch.cuda.LongTensor,
+        ]
+
+        def f2(typ):
+            return typ([1, 2, 3])
+
+        compiled_f2 = torch.compile(f2, backend="eager", fullgraph=True)
+        for typ in typs:
+            output = compiled_f2(typ)
+            expected = f2(typ)
+            self.assertEqual(output, expected)
+
     def test_get_device(self, device):
         def fn(x, y):
             x = x + 1
