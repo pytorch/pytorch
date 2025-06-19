@@ -126,6 +126,9 @@ def _compute_qk_output_for_mode_0(
     K_for_qk = K
     enable_gqa = current_q_num_heads != current_kv_num_heads
     if enable_gqa:
+        assert current_q_num_heads % current_kv_num_heads == 0, (
+            f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA"
+        )
         repeat_factor = current_q_num_heads // current_kv_num_heads
         K_for_qk = K.repeat_interleave(repeat_factor, dim=1)
 
@@ -241,6 +244,12 @@ def attention(
         # Use PyTorch's optimized scaled_dot_product_attention
         enable_gqa = current_q_num_heads != current_kv_num_heads
 
+        # Validate GQA configuration
+        if enable_gqa:
+            assert current_q_num_heads % current_kv_num_heads == 0, (
+                f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA"
+            )
+
         # Prepare attention mask for SDPA
         sdpa_attn_mask = None
         if attn_mask is not None:
@@ -272,6 +281,12 @@ def attention(
     elif can_use_flex_attention:
         # Use PyTorch's flexible flex_attention for complex cases
         enable_gqa = current_q_num_heads != current_kv_num_heads
+
+        # Validate GQA configuration
+        if enable_gqa:
+            assert current_q_num_heads % current_kv_num_heads == 0, (
+                f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA"
+            )
 
         # Create score modification function for flex_attention
         def score_mod(score, b, h, q_idx, kv_idx):

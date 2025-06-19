@@ -16,7 +16,6 @@ from collections.abc import Sequence
 from typing import Optional, Union
 
 import torch
-
 from torch.onnx.ops import _dtype_mappings
 
 
@@ -201,7 +200,9 @@ def _symbolic(
         onnx_dtype in _dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE,
         lambda: f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
     )
-    return torch.zeros(shape, dtype=_dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
+    return torch.zeros(
+        shape, dtype=_dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]
+    )
 
 
 @_symbolic.register_fake
@@ -228,7 +229,9 @@ def _(
     )
     # NOTE(justinchuby): Use zeros instead of torch.empty because I haven't figured
     # out how it can handle empty shapes
-    return torch.zeros(shape, dtype=_dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
+    return torch.zeros(
+        shape, dtype=_dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]
+    )
 
 
 @torch.library.custom_op(
@@ -269,7 +272,11 @@ def _symbolic_multi_out(
             onnx_dtype in _dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE,
             lambda: f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
         )
-        outputs.append(torch.zeros(shape, dtype=_dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]))
+        outputs.append(
+            torch.zeros(
+                shape, dtype=_dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]
+            )
+        )
     return outputs
 
 
@@ -303,5 +310,9 @@ def _(
         )
         # NOTE(justinchuby): Use zeros instead of torch.empty because I haven't figured
         # out how it can handle empty shapes
-        outputs.append(torch.zeros(shape, dtype=_dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]))
+        outputs.append(
+            torch.zeros(
+                shape, dtype=_dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]
+            )
+        )
     return outputs
