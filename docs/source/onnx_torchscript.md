@@ -10,8 +10,8 @@ To export an ONNX model using TorchDynamo instead of TorchScript, please see :do
 
 ## Example: AlexNet from PyTorch to ONNX
 
-Here is a simple script which exports a pretrained AlexNet to an ONNX file named ``alexnet.onnx``.
-The call to ``torch.onnx.export`` runs the model once to trace its execution and then exports the
+Here is a simple script which exports a pretrained AlexNet to an ONNX file named `alexnet.onnx`.
+The call to `torch.onnx.export` runs the model once to trace its execution and then exports the
 traced model to the specified file:
 
 ```{code-block} python
@@ -36,9 +36,9 @@ output_names = [ "output1" ]
 torch.onnx.export(model, dummy_input, "alexnet.onnx", verbose=True, input_names=input_names, output_names=output_names)
 ```
 
-The resulting ``alexnet.onnx`` file contains a binary [protocol buffer](https://developers.google.com/protocol-buffers/)
+The resulting `alexnet.onnx` file contains a binary [protocol buffer](https://developers.google.com/protocol-buffers/)
 which contains both the network structure and parameters of the model you exported
-(in this case, AlexNet).  The argument ``verbose=True`` causes the
+(in this case, AlexNet). The argument `verbose=True` causes the
 exporter to print out a human-readable representation of the model:
 
 ```{code-block} text
@@ -74,7 +74,7 @@ graph(%actual_input_1 : Float(10, 3, 224, 224)
 ```
 
 You can also verify the output using the [ONNX](https://github.com/onnx/onnx/) library,
-which you can install using ``pip``:
+which you can install using `pip`:
 
 ```{code-block} bash
 pip install onnx
@@ -116,37 +116,37 @@ print(outputs[0])
 Here is a more involved [tutorial on exporting a model and running it with ONNX Runtime](https://pytorch.org/tutorials/advanced/super_resolution_with_onnxruntime.html).
 
 (tracing-vs-scripting)=
+
 ## Tracing vs Scripting
 
 Internally, {func}`torch.onnx.export()` requires a {class}`torch.jit.ScriptModule` rather than
-a {class}`torch.nn.Module`. If the passed-in model is not already a ``ScriptModule``,
-``export()`` will use *tracing* to convert it to one:
+a {class}`torch.nn.Module`. If the passed-in model is not already a `ScriptModule`,
+`export()` will use _tracing_ to convert it to one:
 
 % TODO: justinchuby
 % Add a word on recommending tracing over scripting for most use cases.
 
-* **Tracing**: If ``torch.onnx.export()`` is called with a Module that is not already a
-  ``ScriptModule``, it first does the equivalent of {func}`torch.jit.trace`, which executes the model
-  once with the given ``args`` and records all operations that happen during that execution. This
+- **Tracing**: If `torch.onnx.export()` is called with a Module that is not already a
+  `ScriptModule`, it first does the equivalent of {func}`torch.jit.trace`, which executes the model
+  once with the given `args` and records all operations that happen during that execution. This
   means that if your model is dynamic, e.g., changes behavior depending on input data, the exported
-  model will *not* capture this dynamic behavior.
+  model will _not_ capture this dynamic behavior.
   We recommend examining the exported model and making sure the operators look
   reasonable. Tracing will unroll loops and if statements, exporting a static graph that is exactly
   the same as the traced run. If you want to export your model with dynamic control flow, you will
-  need to use *scripting*.
+  need to use _scripting_.
 
-* **Scripting**: Compiling a model via scripting preserves dynamic control flow and is valid for inputs
+- **Scripting**: Compiling a model via scripting preserves dynamic control flow and is valid for inputs
   of different sizes. To use scripting:
 
-  * Use {func}`torch.jit.script` to produce a ``ScriptModule``.
-  * Call ``torch.onnx.export()`` with the ``ScriptModule`` as the model. The ``args`` are still required,
+  - Use {func}`torch.jit.script` to produce a `ScriptModule`.
+  - Call `torch.onnx.export()` with the `ScriptModule` as the model. The `args` are still required,
     but they will be used internally only to produce example outputs, so that the types and shapes of the
     outputs can be captured. No tracing will be performed.
 
 See [Introduction to TorchScript](https://pytorch.org/tutorials/beginner/Intro_to_TorchScript_tutorial.html)
 and [TorchScript](https://docs.pytorch.org/docs/jit.html) for more details, including how to compose tracing and scripting to suit the
 particular requirements of different models.
-
 
 ## Avoiding Pitfalls
 
@@ -164,6 +164,7 @@ For example, rather than using numpy functions on numpy.ndarrays:
 x, y = np.random.rand(1, 2), np.random.rand(1, 2)
 np.concatenate((x, y), axis=1)
 ```
+
 Use torch operators on torch.Tensors:
 
 ```{code-block} python
@@ -180,6 +181,7 @@ built-in number):
 def forward(self, x, y):
     return x.reshape(y.item(), -1)
 ```
+
 Use torch's support for implicit casting of single-element tensors: :
 
 ```{code-block} python
@@ -196,7 +198,7 @@ Use {func}`torch.Tensor.detach` instead. (Work is ongoing to
 
 ### Avoid in-place operations when using tensor.shape in tracing mode
 
-In tracing mode, shapes obtained from ``tensor.shape`` are traced as tensors,
+In tracing mode, shapes obtained from `tensor.shape` are traced as tensors,
 and share the same memory. This might cause a mismatch the final output values.
 As a workaround, avoid the use of inplace operations in these scenarios.
 For example, in the model:
@@ -210,7 +212,7 @@ class Model(torch.nn.Module):
         return real_seq_length + seq_length
 ```
 
-``real_seq_length`` and ``seq_length`` share the same memory in tracing mode.
+`real_seq_length` and `seq_length` share the same memory in tracing mode.
 This could be avoided by rewriting the inplace operation:
 
 ```{code-block} python
@@ -221,17 +223,17 @@ real_seq_length = real_seq_length + 2
 
 ### Types
 
-* Only {class}`torch.Tensors`, numeric types that can be trivially converted to torch.Tensors (e.g. float, int),
+- Only {class}`torch.Tensors`, numeric types that can be trivially converted to torch.Tensors (e.g. float, int),
   and tuples and lists of those types are supported as model inputs or outputs. Dict and str inputs and
   outputs are accepted in {ref}`tracing<tracing-vs-scripting>` mode, but:
 
-  * Any computation that depends on the value of a dict or a str input **will be replaced with the
+  - Any computation that depends on the value of a dict or a str input **will be replaced with the
     constant value** seen during the one traced execution.
-  * Any output that is a dict will be silently replaced with a **flattened sequence of its values
-    (keys will be removed)**. E.g. ``{"foo": 1, "bar": 2}`` becomes ``(1, 2)``.
-  * Any output that is a str will be silently removed.
+  - Any output that is a dict will be silently replaced with a **flattened sequence of its values
+    (keys will be removed)**. E.g. `{"foo": 1, "bar": 2}` becomes `(1, 2)`.
+  - Any output that is a str will be silently removed.
 
-* Certain operations involving tuples and lists are not supported in
+- Certain operations involving tuples and lists are not supported in
   {ref}`scripting<tracing-vs-scripting>` mode due to limited support in ONNX for nested sequences.
   In particular appending a tuple to a list is not supported. In tracing mode, the nested sequences
   will be flattened automatically during the tracing.
@@ -244,12 +246,13 @@ numerically small, so this should only be a concern if your application is sensi
 small differences.
 
 (tensor-indexing)=
+
 ### Unsupported Tensor Indexing Patterns
 
 Tensor indexing patterns that cannot be exported are listed below.
 If you are experiencing issues exporting a model that does not include any of
 the unsupported patterns below, please double check that you are exporting with
-the latest ``opset_version``.
+the latest `opset_version`.
 
 ### Reads / Gets
 
@@ -313,7 +316,7 @@ During export, each node (which contains a PyTorch operator) in the TorchScript
 graph is visited by the exporter in topological order.
 Upon visiting a node, the exporter looks for a registered symbolic functions for
 that operator. Symbolic functions are implemented in Python. A symbolic function for
-an op named ``foo`` would look something like:
+an op named `foo` would look something like:
 
 ```{code-block} python
 def foo(
@@ -340,42 +343,43 @@ def foo(
     ...
 ```
 
-The ``torch._C`` types are Python wrappers around the types defined in C++ in
+The `torch._C` types are Python wrappers around the types defined in C++ in
 [ir.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/ir/ir.h).
 
 The process for adding a symbolic function depends on the type of operator.
 
 (adding-support-aten)=
+
 ### ATen operators
 
 [ATen] (https://pytorch.org/cppdocs/#aten) is PyTorch's built-in tensor library.
 If the operator is an ATen operator (shows up in the TorchScript graph with the prefix
-``aten::``), make sure it is not supported already.
+`aten::`), make sure it is not supported already.
 
 ### List of supported operators
 
 Visit the auto generated {doc}`list of supported TorchScript operators <../onnx_torchscript_supported_aten_ops>`
-for details on which operator are supported in each ``opset_version``.
+for details on which operator are supported in each `opset_version`.
 
 ### Adding support for an aten or quantized operator
 
 If the operator is not in the list above:
 
-* Define the symbolic function in ``torch/onnx/symbolic_opset<version>.py``, for example
+- Define the symbolic function in `torch/onnx/symbolic_opset<version>.py`, for example
   [torch/onnx/symbolic_opset9.py](https://github.com/pytorch/pytorch/blob/main/torch/onnx/symbolic_opset9.py).
   Make sure the function has the same name as the ATen function, which may be declared in
-  ``torch/_C/_VariableFunctions.pyi`` or ``torch/nn/functional.pyi`` (these files are generated at
+  `torch/_C/_VariableFunctions.pyi` or `torch/nn/functional.pyi` (these files are generated at
   build time, so will not appear in your checkout until you build PyTorch).
-* By default, the first arg is the ONNX graph.
-  Other arg names must EXACTLY match the names in the ``.pyi`` file,
+- By default, the first arg is the ONNX graph.
+  Other arg names must EXACTLY match the names in the `.pyi` file,
   because dispatch is done with keyword arguments.
-* In the symbolic function, if the operator is in the
+- In the symbolic function, if the operator is in the
   [ONNX standard operator set](https://github.com/onnx/onnx/blob/master/docs/Operators.md),
   we only need to create a node to represent the ONNX operator in the graph.
   If not, we can compose several standard operators that have the
   equivalent semantics to the ATen operator.
 
-Here is an example of handling missing symbolic function for the ``ELU`` operator.
+Here is an example of handling missing symbolic function for the `ELU` operator.
 
 If we run the following code:
 
@@ -387,6 +391,7 @@ print(
     ).graph
 )
 ```
+
 We see something like:
 
 ```{code-block} text
@@ -399,28 +404,27 @@ graph(%self : __torch__.torch.nn.modules.activation.___torch_mangle_0.ELU,
 return (%7)
 ```
 
-Since we see ``aten::elu`` in the graph, we know this is an ATen operator.
+Since we see `aten::elu` in the graph, we know this is an ATen operator.
 
 We check the [ONNX operator list](https://github.com/onnx/onnx/blob/master/docs/Operators.md),
-and confirm that ``Elu`` is standardized in ONNX.
+and confirm that `Elu` is standardized in ONNX.
 
-We find a signature for ``elu`` in ``torch/nn/functional.pyi``:
+We find a signature for `elu` in `torch/nn/functional.pyi`:
 
 ```{code-block} python
 def elu(input: Tensor, alpha: float = ..., inplace: bool = ...) -> Tensor: ...
 ```
 
-We add the following lines to ``symbolic_opset9.py``:
+We add the following lines to `symbolic_opset9.py`:
 
 ```{code-block} python
 def elu(g, input: torch.Value, alpha: torch.Value, inplace: bool = False):
     return g.op("Elu", input, alpha_f=alpha)
 ```
 
-Now PyTorch is able to export models containing the ``aten::elu`` operator!
+Now PyTorch is able to export models containing the `aten::elu` operator!
 
-See the ``torch/onnx/symbolic_opset*.py`` files for more examples.
-
+See the `torch/onnx/symbolic_opset*.py` files for more examples.
 
 ### torch.autograd.Functions
 
@@ -429,7 +433,7 @@ to export it.
 
 ### Static Symbolic Method
 
-You can add a static method named ``symbolic`` to your function class. It should return
+You can add a static method named `symbolic` to your function class. It should return
 ONNX operators that represent the function's behavior in ONNX. For example:
 
 ```{code-block} python
@@ -445,73 +449,73 @@ class MyRelu(torch.autograd.Function):
 ```
 
 % FIXME(justinchuby): PythonOps are too complicated and the example below
-%  uses private methods we do not expose. We are looking to
-%  improve the experience. Since SymbolicContext is deprecated, we think
-%  defining a symbolic staticmethod is a better way to go for now.
+% uses private methods we do not expose. We are looking to
+% improve the experience. Since SymbolicContext is deprecated, we think
+% defining a symbolic staticmethod is a better way to go for now.
 
 % PythonOp Symbolic
 % ~~~~~~~~~~~~~~~~~
 
 % Alternatively, you can register a custom symbolic function.
 % This gives the symbolic function access to more info through the
-% ``torch.onnx.SymbolicContext`` object, which gets passed in as the first
-% argument (before the ``Graph`` object).
+% `torch.onnx.SymbolicContext` object, which gets passed in as the first
+% argument (before the `Graph` object).
 
-% All autograd ``Function``\ s appear in the TorchScript graph as ``prim::PythonOp`` nodes.
-% In order to differentiate between different ``Function`` subclasses, the
-% symbolic function should use the ``name`` kwarg which gets set to the name of the class.
+% All autograd `Function`\ s appear in the TorchScript graph as `prim::PythonOp` nodes.
+% In order to differentiate between different `Function` subclasses, the
+% symbolic function should use the `name` kwarg which gets set to the name of the class.
 
-% Custom symbolic functions should add type and shape information by calling ``setType(...)``
+% Custom symbolic functions should add type and shape information by calling `setType(...)`
 % on Value objects before returning them (implemented in C++ by
-% . ``torch::jit::Value::setType``). This is not required, but it can help the exporter's
-% shape and type inference for down-stream nodes. For a non-trivial example of ``setType``, see
-% ``test_aten_embedding_2`` in
-% `test_operators.py <https://github.com/pytorch/pytorch/blob/release/2.5/test/onnx/test_operators.py#L1179>`_.
+% . `torch::jit::Value::setType`). This is not required, but it can help the exporter's
+% shape and type inference for down-stream nodes. For a non-trivial example of `setType`, see
+% `test_aten_embedding_2` in
+% `test_operators.py <https://github.com/pytorch/pytorch/blob/release/2.5/test/onnx/test_operators.py#L1179>`\_.
 
-% The example below shows how you can access ``requires_grad`` via the ``Node`` object:
+% The example below shows how you can access `requires_grad` via the `Node` object:
 
-%     class MyClip(torch.autograd.Function):
-%         @staticmethod
-%         def forward(ctx, input, min):
-%             ctx.save_for_backward(input)
-%             return input.clamp(min=min)
+% class MyClip(torch.autograd.Function):
+% @staticmethod
+% def forward(ctx, input, min):
+% ctx.save_for_backward(input)
+% return input.clamp(min=min)
 
-%     class MyRelu(torch.autograd.Function):
-%         @staticmethod
-%         def forward(ctx, input):
-%             ctx.save_for_backward(input)
-%             return input.clamp(min=0)
+% class MyRelu(torch.autograd.Function):
+% @staticmethod
+% def forward(ctx, input):
+% ctx.save_for_backward(input)
+% return input.clamp(min=0)
 
-%     def symbolic_python_op(g: "GraphContext", *args, **kwargs):
-%         n = ctx.cur_node
-%         print("original node: ", n)
-%         for i, out in enumerate(n.outputs()):
-%             print("original output {}: {}, requires grad: {}".format(i, out, out.requiresGrad()))
-%         import torch.onnx.symbolic_helper as sym_helper
-%         for i, arg in enumerate(args):
-%             requires_grad = arg.requiresGrad() if sym_helper._is_value(arg) else False
-%             print("arg {}: {}, requires grad: {}".format(i, arg, requires_grad))
+% def symbolic_python_op(g: "GraphContext", \*args, \*\*kwargs):
+% n = ctx.cur_node
+% print("original node: ", n)
+% for i, out in enumerate(n.outputs()):
+% print("original output {}: {}, requires grad: {}".format(i, out, out.requiresGrad()))
+% import torch.onnx.symbolic_helper as sym_helper
+% for i, arg in enumerate(args):
+% requires_grad = arg.requiresGrad() if sym_helper.\_is_value(arg) else False
+% print("arg {}: {}, requires grad: {}".format(i, arg, requires_grad))
 
-%         name = kwargs["name"]
-%         ret = None
-%         if name == "MyClip":
-%             ret = g.op("Clip", args[0], args[1])
-%         elif name == "MyRelu":
-%             ret = g.op("Relu", args[0])
-%         else:
-%             # Logs a warning and returns None
-%             return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
-%         # Copy type and shape from original node.
-%         ret.setType(n.type())
-%         return ret
+% name = kwargs["name"]
+% ret = None
+% if name == "MyClip":
+% ret = g.op("Clip", args[0], args[1])
+% elif name == "MyRelu":
+% ret = g.op("Relu", args[0])
+% else:
+% # Logs a warning and returns None
+% return \_unimplemented("prim::PythonOp", "unknown node kind: " + name)
+% # Copy type and shape from original node.
+% ret.setType(n.type())
+% return ret
 
-%     from torch.onnx import register_custom_op_symbolic
-%     register_custom_op_symbolic("prim::PythonOp", symbolic_python_op, 1)
+% from torch.onnx import register_custom_op_symbolic
+% register_custom_op_symbolic("prim::PythonOp", symbolic_python_op, 1)
 
 ### Inline Autograd Function
 
 In cases where a static symbolic method is not provided for its subsequent {class}`torch.autograd.Function` or
-where a function to register ``prim::PythonOp`` as custom symbolic functions is not provided,
+where a function to register `prim::PythonOp` as custom symbolic functions is not provided,
 {func}`torch.onnx.export` tries to inline the graph that corresponds to that {class}`torch.autograd.Function` such that
 this function is broken down into individual operators that were used within the function.
 The export should be successful as long as these individual operators are supported. For example:
@@ -536,7 +540,7 @@ graph(%input : Float(1, strides=[1], requires_grad=0, device=cpu)):
 ```
 
 If you need to avoid inlining of {class}`torch.autograd.Function`, you should export models with
-``operator_export_type`` set to ``ONNX_FALLTHROUGH`` or ``ONNX_ATEN_FALLBACK``.
+`operator_export_type` set to `ONNX_FALLTHROUGH` or `ONNX_ATEN_FALLBACK`.
 
 ### Custom operators
 
@@ -599,7 +603,7 @@ torch.onnx.export(
 
 The example above exports it as a custom operator in the "onnx-script" opset.
 When exporting a custom operator, you can specify the custom domain version using the
-``custom_opsets`` dictionary at export. If not specified, the custom opset version defaults to 1.
+`custom_opsets` dictionary at export. If not specified, the custom opset version defaults to 1.
 
 NOTE: Be careful to align the opset version mentioned in the above example, and make sure they are consumed in exporter step.
 The example usage of how to write a onnx-script function is a beta version in terms of the active development on onnx-script.
@@ -648,13 +652,12 @@ torch.onnx.export(
 
 The example above exports it as a custom operator in the "custom_domain" opset.
 When exporting a custom operator, you can specify the custom domain version using the
-``custom_opsets`` dictionary at export. If not specified, the custom opset version defaults to 1.
+`custom_opsets` dictionary at export. If not specified, the custom opset version defaults to 1.
 
 The runtime that consumes the model needs to support the custom op. See
 [Caffe2 custom ops](https://caffe2.ai/docs/custom-operators.html),
 [ONNX Runtime custom ops](https://onnxruntime.ai/docs/reference/operators/add-custom-op.html),
 or your runtime of choice's documentation.
-
 
 ## Discovering all unconvertible ATen ops at once
 
@@ -684,7 +687,7 @@ for op support requests.
 Q: I have exported my LSTM model, but its input size seems to be fixed?
 
 > The tracer records the shapes of the example inputs. If the model should accept
-> inputs of dynamic shapes, set ``dynamic_axes`` when calling {func}`torch.onnx.export`.
+> inputs of dynamic shapes, set `dynamic_axes` when calling {func}`torch.onnx.export`.
 
 Q: How to export models containing loops?
 
@@ -705,7 +708,7 @@ Q: Does ONNX support implicit scalar datatype casting?
 
 Q: Are lists of Tensors exportable to ONNX?
 
-> Yes, for ``opset_version`` >= 11, since ONNX introduced the Sequence type in opset 11.
+> Yes, for `opset_version` >= 11, since ONNX introduced the Sequence type in opset 11.
 
 ## Python API
 
