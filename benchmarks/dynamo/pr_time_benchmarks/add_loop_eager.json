@@ -1,0 +1,1 @@
+[{"benchmark": {"name": "pr_time_benchmarks", "mode": "", "extra_info": {"is_dynamic": false, "device": "cpu", "description": "a loop over 100 add node"}}, "model": {"name": "add_loop_eager", "type": "add_loop", "backend": "eager"}, "metric": {"name": "compile_time_instruction_count", "benchmark_values": [2802107357]}}]
