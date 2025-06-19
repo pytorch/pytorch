@@ -3,6 +3,7 @@ from typing import Callable, Optional
 
 import torch
 from torch.nn.attention import flex_attention
+from torch.onnx.ops import _dtype_mappings
 
 
 _T = typing.TypeVar("_T", bound=Callable)
@@ -391,15 +392,17 @@ def attention(
         # Apply softmax with optional precision casting
         if softmax_precision is not None:
             # Map ONNX data type to torch dtype
-            onnx_to_torch_dtype = {
-                1: torch.float32,  # FLOAT
-                10: torch.float16,  # FLOAT16
-                11: torch.double,  # DOUBLE
-                16: torch.bfloat16,  # BFLOAT16
+            allowed_intermediate_precisions = {
+                1,  # FLOAT
+                10,  # FLOAT16
+                11,  # DOUBLE
+                16,  # BFLOAT16
             }
-            if softmax_precision in onnx_to_torch_dtype:
+            if softmax_precision in allowed_intermediate_precisions:
                 original_dtype = qk_with_bias.dtype
-                qk_with_bias = qk_with_bias.to(onnx_to_torch_dtype[softmax_precision])
+                qk_with_bias = qk_with_bias.to(
+                    _dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[softmax_precision]
+                )
                 qk_softmax = torch.softmax(qk_with_bias, dim=-1)
                 qk_softmax = qk_softmax.to(original_dtype)
             else:
