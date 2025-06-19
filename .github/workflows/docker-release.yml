@@ -156,7 +156,7 @@ jobs:
 
           docker push ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}"
 
-          # Please note, here we ned to pin specific verison of CUDA as with latest label
+          # Please note, here we need to pin specific version of CUDA as with latest label
           if [[ ${CUDA_VERSION_SHORT} == "${STABLE_CUDA_VERSION}" ]]; then
             docker tag ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}" \
                     ghcr.io/pytorch/pytorch-nightly:latest

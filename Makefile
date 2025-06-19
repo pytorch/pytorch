@@ -68,16 +68,22 @@ setup-env-rocm:
 .PHONY: setup-lint
 setup-lint: .lintbin/.lintrunner.sha256
 
+.PHONY: lazy-setup-lint
+lazy-setup-lint: .lintbin/.lintrunner.sha256
+	@if [ ! -x "$(shell command -v lintrunner)" ]; then \
+		$(MAKE) setup-lint; \
+	fi
+
 .PHONY: lint
-lint: setup-lint
+lint: lazy-setup-lint
 	lintrunner --all-files
 
 .PHONY: quicklint
-quicklint: setup-lint
+quicklint: lazy-setup-lint
 	lintrunner
 
 .PHONY: quickfix
-quickfix: setup-lint
+quickfix: lazy-setup-lint
 	lintrunner --apply-patches
 
 # Deprecated target aliases
