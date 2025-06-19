@@ -1335,6 +1335,7 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
+# Note [guard_or_]
 # The following two functions are common utilities used while defining unbacked semantics
 # of various framework code. Those would be used in situations you prefer to guard and know
 # the result of the expression over not guarding, but in case you hit a data dependent error
@@ -1363,7 +1364,8 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
         assert isinstance(a, bool)
         return a
 
-    # if backed_size_oblivious is True we treat backed as unbacked here.
+    # xla nodes do not support sym_max, remove after this get merged.
+    # https://github.com/pytorch/xla/pull/9291
     if torch.fx.experimental._config.backed_size_oblivious:
         result = _static_eval_sym_bool(a)
         return result if result is not None else default
@@ -1462,11 +1464,9 @@ def sym_and(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
     """
     and, but for symbolic expressions, without bool casting.
     """
-    assert isinstance(x, (bool, SymBool))
     if len(others) == 0:
         return x
     for y in others:
-        assert isinstance(y, (bool, SymBool))
         x = operator.and_(x, y)
     return x
 
@@ -1490,11 +1490,9 @@ def sym_or(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
     """
     or, but for symbolic expressions, without bool casting.
     """
-    assert isinstance(x, (bool, SymBool))
     if len(others) == 0:
         return x
     for y in others:
-        assert isinstance(y, (bool, SymBool))
         x = operator.or_(x, y)
     return x
 
@@ -3837,7 +3835,8 @@ class ShapeEnv:
         # with something like effect token tracking.
         self.unbacked_alloc_order: dict[sympy.Symbol, int] = {}
 
-        self.specialization_stacks: dict[Source, traceback.StackSummary] = {}
+        self.user_specialization_stacks: dict[Source, traceback.StackSummary] = {}
+        self.framework_specialization_stacks: dict[Source, traceback.StackSummary] = {}
 
         self.trace_asserts = trace_asserts
 
@@ -3968,7 +3967,8 @@ class ShapeEnv:
             "replacements_slocs",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
-            "specialization_stacks",
+            "user_specialization_stacks",
+            "framework_specialization_stacks",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -5515,11 +5515,19 @@ class ShapeEnv:
                     var_with_range = self._render_range_for_constraint_violation(
                         source, constraint
                     )
-                    user_stack = self.specialization_stacks.get(source, None)
+                    user_stack = self.user_specialization_stacks.get(source, None)
+                    framework_stack = self.framework_specialization_stacks.get(
+                        source, None
+                    )
                     msg = (
                         f"You marked {self._debug_name(source)} as dynamic but your code "
                         f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
                         f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        + (
+                            "\n\nFramework stack:\n" + "".join(framework_stack.format())
+                            if framework_stack
+                            else ""
+                        )
                         + (
                             "\n\nUser stack:\n" + "".join(user_stack.format())
                             if user_stack
@@ -6742,7 +6750,10 @@ class ShapeEnv:
 
             for source in self.var_to_sources.get(a, []):
                 if user_tb:
-                    self.specialization_stacks[source] = user_tb
+                    self.user_specialization_stacks[source] = user_tb
+                self.framework_specialization_stacks[
+                    source
+                ] = CapturedTraceback.extract(cpp=True)
 
             if config.print_specializations:
                 self.log.warning(
@@ -6786,12 +6797,20 @@ class ShapeEnv:
         return self.replacements[a]
 
     @lru_cache(256)
-    def _maybe_guard_rel(self, expr: sympy.Rel) -> None:
+    def _maybe_guard_rel(self, expr: sympy.Expr) -> None:
         """
         The relational guard is guarded to be true.  Use this information to
         simplify shapes (i.e. a == b or a % 5 == 0)
         """
-        assert isinstance(expr, sympy.Rel)
+        if isinstance(expr, sympy.And):
+            for arg in expr.args:
+                self._maybe_guard_rel(arg)
+            return
+        elif not isinstance(expr, sympy.Rel):
+            log.warning(
+                "_maybe_guard_rel() was called on non-relation expression %s", expr
+            )
+            return
 
         # A good example of what goes wrong if you don't do this is
         # python test/functorch/test_aotdispatch.py -k
@@ -6985,13 +7004,12 @@ class ShapeEnv:
                 stack_info=True if log.getEffectiveLevel() < logging.WARNING else False,
             )
 
-    def _get_user_frame(self) -> types.FrameType:
+    def _get_user_frame(self) -> Optional[types.FrameType]:
         frame = inspect.currentframe()
         while frame is not None:
             if frame.f_code.co_filename not in uninteresting_files():
                 return frame
             frame = frame.f_back
-        assert frame is not None
         return frame
 
     def _get_stack_summary(
@@ -7001,11 +7019,12 @@ class ShapeEnv:
         if floc is None:
             frame = self._get_user_frame()
             try:
-                floc = traceback.FrameSummary(
-                    frame.f_code.co_filename,
-                    frame.f_lineno,
-                    frame.f_code.co_name,
-                )
+                if frame is not None:
+                    floc = traceback.FrameSummary(
+                        frame.f_code.co_filename,
+                        frame.f_lineno,
+                        frame.f_code.co_name,
+                    )
             finally:
                 del frame
 
@@ -7362,7 +7381,7 @@ class ShapeEnv:
 
         # Don't track this one. (Because this cache is inside this function the
         # cache only lasts for the invocation of this function call)
-        @functools.lru_cache(None)
+        @functools.cache
         def compute_concrete_val() -> sympy.Basic:
             if hint is None:
                 # This is only ever called for expressions WITHOUT unbacked
@@ -7573,15 +7592,14 @@ class ShapeEnv:
             if not self._suppress_guards_tls():
                 self._log_guard("eval", g, forcing_spec=forcing_spec)
 
-                if isinstance(g, sympy.Rel):
-                    # TODO: If we successfully eliminate a symbol via equality, it
-                    # is not actually necessary to save a guard for the equality,
-                    # as we will implicitly generate a guard when we match that
-                    # input against the symbol.  Probably the easiest way to
-                    # implement this is to have maybe_guard_rel return a bool
-                    # saying if it "subsumed" the guard (and therefore the guard
-                    # is no longer necessary)
-                    self._maybe_guard_rel(g)
+                # TODO: If we successfully eliminate a symbol via equality, it
+                # is not actually necessary to save a guard for the equality,
+                # as we will implicitly generate a guard when we match that
+                # input against the symbol.  Probably the easiest way to
+                # implement this is to have maybe_guard_rel return a bool
+                # saying if it "subsumed" the guard (and therefore the guard
+                # is no longer necessary)
+                self._maybe_guard_rel(g)
 
                 if not self.allow_complex_guards_as_runtime_asserts:
                     # at this point, we've evaluated the concrete expr value, and have
@@ -7695,8 +7713,7 @@ class ShapeEnv:
                 log.debug("runtime_asserts_frozen but then got %s", expr)
             self._check_frozen(expr, sympy.true)
             # eliminate symbols on equality tests / refine ranges
-            if isinstance(expr, sympy.Rel):
-                self._maybe_guard_rel(expr)
+            self._maybe_guard_rel(expr)
 
             # canonicalise to remove equations that are trivially equal
             orig_expr = expr

@@ -155,6 +155,10 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
+    def _release_ipc_counter(cls, *args, device=None, **kwargs):
+        return cls._release_ipc_counter_cuda(*args, **kwargs)
+
+    @classmethod
     def _release_ipc_counter_cuda(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 

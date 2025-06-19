@@ -1063,7 +1063,13 @@ if(USE_ROCM)
 
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsparselt roc::hipsolver roc::hipblaslt)
+      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt)
+    # hipsparselt is an optional component that will eventually be enabled by default.
+    if(hipsparselt_FOUND)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        roc::hipsparselt
+      )
+    endif()
 
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.

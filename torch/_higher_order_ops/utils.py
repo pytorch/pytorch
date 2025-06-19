@@ -10,9 +10,13 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
+from torch._higher_order_ops.schema import HopSchema
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._subclasses.functional_tensor import disable_functional_mode
+from torch._subclasses.functional_tensor import (
+    disable_functional_mode,
+    FunctionalTensor,
+)
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     disable_proxy_modes_tracing,
@@ -419,7 +423,6 @@ def unique_graph_name_with_root(
 
 def _from_fun(t):
     from torch._functorch.aot_autograd import from_fun
-    from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, torch.Tensor):
         if t.dtype != torch.bool:
@@ -773,11 +776,11 @@ def check_input_alias_and_mutation(
         inp_out_alias_map,
         out_out_alias_map,
         mutated_inputs,
-    ) = check_input_alias_and_mutation_return_ouputs(gm, fake_args)[:-1]
+    ) = check_input_alias_and_mutation_return_outputs(gm, fake_args)[:-1]
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 
-def check_input_alias_and_mutation_return_ouputs(
+def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
     fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
 ) -> tuple[
@@ -787,6 +790,25 @@ def check_input_alias_and_mutation_return_ouputs(
     list[int],
     Union[tuple[Any, ...], list[Any]],
 ]:
+    # This function can be called under autograd, functional, proxy and fake tensor mode.
+    # We need to return either a fake tensor or a real tensor depending on the mode.
+    # to detect the input mutation/aliasing.
+    with disable_proxy_modes_tracing(), disable_functional_mode(), suspend_functionalization():
+
+        def _from_functional_tensor(t: torch.Tensor) -> torch.Tensor:
+            if isinstance(t, FunctionalTensor) or torch._is_functional_tensor(t):
+                return torch.empty_strided(
+                    t.size(),
+                    t.stride(),
+                    dtype=t.dtype,
+                    requires_grad=t.requires_grad,
+                    device=t.device,
+                )
+            return t
+
+        fake_args = pytree.tree_map_only(
+            torch.Tensor, _from_functional_tensor, fake_args
+        )
     # We want to disable active functional, proxy and fake modes if any.
     # to create a encapsulated environment for fake tensor prop
     with torch.utils._python_dispatch._disable_current_modes():
@@ -798,7 +820,8 @@ def check_input_alias_and_mutation_return_ouputs(
 
         def _tensor_version(t) -> Optional[int]:
             if isinstance(t, torch.Tensor):
-                assert isinstance(t, FakeTensor), "Only fake tensor is allowed"
+                if not isinstance(t, FakeTensor):
+                    raise RuntimeError("Only fake tensor is allowed")
                 return t._version
             return None
 
@@ -816,13 +839,10 @@ def check_input_alias_and_mutation_return_ouputs(
             if len(fake_args) == 0:
                 return torch.fx.experimental.symbolic_shapes.ShapeEnv()
 
-            prev_fake_mode = None
             for arg in fake_args:
-                if isinstance(arg, torch.Tensor):
-                    assert isinstance(arg, FakeTensor)
-                    prev_fake_mode = arg.fake_mode
-            assert prev_fake_mode is not None
-            return prev_fake_mode.shape_env
+                if isinstance(arg, FakeTensor):
+                    return arg.fake_mode.shape_env
+            return None
 
         # Clone the fake args to avoid mutating the original fake args
         with ExitStack() as ctx_stack:
@@ -962,7 +982,7 @@ class FunctionalizeCtxWrapper:
 
 # A wrapper over HigherOrderOperator that also carries its schema
 class HopInstance:
-    def __init__(self, op: HigherOrderOperator, schema: torch.FunctionSchema):
+    def __init__(self, op: HigherOrderOperator, schema: HopSchema):
         assert isinstance(op, HigherOrderOperator), op
         self._op = op
         # Using "_" to be consistent with how we access _schema of OpOverload
@@ -971,7 +991,14 @@ class HopInstance:
     def __call__(self, *args, **kwargs):
         return self._op(*args, **kwargs)
 
+    @staticmethod
+    def create(hop: HigherOrderOperator, *args, **kwargs):
+        return HopInstance(hop, hop.gen_schema(*args, **kwargs))
 
+
+# This call_op can be used to call a HopInstance with
+# flat args and kwargs. We need to make use of the hop's schema's tree_spec
+# to unflatten the args and kwargs before calling the hop.
 def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
     if isinstance(op, OpOverload):
         return op(*args, **kwargs)
@@ -987,7 +1014,14 @@ def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
             bound_args.append(val)
         else:
             bound_kwargs[arg.name] = val
-    return op(*bound_args, **bound_kwargs)
+
+    if schema.tree_spec is not None:
+        assert len(bound_args) == len(schema.arguments) and len(bound_kwargs) == 0
+        args, kwargs = pytree.tree_unflatten(bound_args, schema.tree_spec)
+        return op(*args, **kwargs)
+    else:
+        assert len(bound_args) + len(bound_kwargs) == len(schema.arguments)
+        return op(*bound_args, **bound_kwargs)
 
 
 def materialize_as_graph(
@@ -1051,3 +1085,13 @@ def materialize_callable_in_args(op: HopInstance, args, kwargs):
             materialized_args.append(flat_args[i])
 
     return pytree.tree_unflatten(materialized_args, flat_spec)
+
+
+def _has_gen_schema(op: HigherOrderOperator):
+    # There is an InvokeQuant argument we cannot gen_schema.
+    if op is torch.ops.higher_order.invoke_quant_packed:
+        return False
+    method = "gen_schema"
+    return hasattr(type(op), method) and getattr(type(op), method) is not getattr(
+        HigherOrderOperator, method
+    )

@@ -403,35 +403,32 @@ compute_flex_attention = r"""
         desc_v = workspace_base + TMA_SIZE
         desc_k = workspace_base + 2 * TMA_SIZE
 
-        triton_helpers.make_tensor_descriptor(
-            base_ptr=Q,
-            global_shape=[Q_LEN*HQ*ZQ, QK_HEAD_DIM],
-            strides=[QK_HEAD_DIM, 1],
-            block_shape=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
+        triton.language.extra.cuda.experimental_device_tensormap_create2d(
             desc_ptr=desc_q,
+            global_address=Q,
+            load_size=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
+            global_size=[Q_LEN*HQ*ZQ, QK_HEAD_DIM],
             element_ty=Q.dtype.element_ty,
         )
-        triton_helpers.make_tensor_descriptor(
-            base_ptr=V,
-            global_shape=[KV_LEN*ZKV*HQ, V_HEAD_DIM],
-            strides=[V_HEAD_DIM, 1],
-            block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
+        triton.language.extra.cuda.experimental_device_tensormap_create2d(
             desc_ptr=desc_v,
+            global_address=V,
+            load_size=[BLOCK_N, V_HEAD_DIM_ROUNDED],
+            global_size=[KV_LEN*ZKV*HQ, V_HEAD_DIM],
             element_ty=K.dtype.element_ty,
         )
 
-        triton_helpers.make_tensor_descriptor(
-            base_ptr=K,
-            global_shape=[KV_LEN*ZKV*HQ, QK_HEAD_DIM],
-            strides=[QK_HEAD_DIM, 1],
-            block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
+        triton.language.extra.cuda.experimental_device_tensormap_create2d(
             desc_ptr=desc_k,
+            global_address=K,
+            load_size=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
+            global_size=[KV_LEN*ZKV*HQ, QK_HEAD_DIM],
             element_ty=K.dtype.element_ty,
         )
 
 
-        triton_helpers.tensormap_fenceproxy_acquire(desc_q)
-        triton_helpers.tensormap_fenceproxy_acquire(desc_k)
+        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(desc_q)
+        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(desc_k)
 
 
     # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
@@ -487,7 +484,7 @@ compute_flex_attention = r"""
         )
 
     if USE_TMA:
-        q = triton_helpers.load_tensor_descriptor(  # load in row major
+        q = tl._experimental_descriptor_load(  # load in row major
             desc_q,
             [(q_start * BLOCK_M).to(tl.int32), 0],
             [BLOCK_M, QK_HEAD_DIM_ROUNDED],
@@ -713,7 +710,7 @@ def forward_block_mn(
     # -- load k --
     # NB reversed order to since K is transposed
     if USE_TMA:
-       k = triton_helpers.load_tensor_descriptor(  # load in row major
+       k = tl._experimental_descriptor_load(  # load in row major
                 desc_k,
                 [start_n.to(tl.int32) , kv_start],
                 [BLOCK_N, QK_HEAD_DIM_ROUNDED],
@@ -788,7 +785,7 @@ def forward_block_mn(
     # # -- scale and update acc --
     acc = acc * alpha[:, None]
     if USE_TMA:
-        v = triton_helpers.load_tensor_descriptor(  # load in row major
+        v = tl._experimental_descriptor_load(  # load in row major
                     desc_v,
                     [kv_start.to(tl.int32) + start_n.to(tl.int32),0],
                     [BLOCK_N, V_HEAD_DIM_ROUNDED],

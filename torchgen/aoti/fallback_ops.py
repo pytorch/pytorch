@@ -1,4 +1,4 @@
-# Be extra careful when you edit this file, because it affects AOTInductor ABI compatbility. See
+# Be extra careful when you edit this file, because it affects AOTInductor ABI compatibility. See
 # https://github.com/pytorch/pytorch/blob/7e86a7c0155295539996e0cf422883571126073e/torchgen/gen.py#L2424-L2436
 # for details.
 #
@@ -126,6 +126,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.nonzero.default": {},
     "aten.normal_functional.default": {},
     "aten.ormqr.default": {},
+    "aten.pad.default": {},
     "aten.permute.default": {},
     "aten.polar.default": {},
     "aten.pow.Scalar": {},

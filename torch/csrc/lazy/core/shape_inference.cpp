@@ -354,7 +354,7 @@ static std::vector<Shape> compute_shape_nonzero(
   for (auto dim_size : t.sizes()) {
     max_elements *= dim_size;
   }
-  return {Shape(at::kLong, {max_elements, (int64_t)t.sizes().size()})};
+  return {Shape(at::kLong, {max_elements, t.dim()})};
 }
 
 std::vector<Shape> compute_shape_nonzero(const at::Tensor& self) {
@@ -527,7 +527,7 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
 
   // A separate mean and var needs to be kept for each channel.
   TORCH_CHECK(
-      input.sizes().size() >= 2,
+      input.dim() >= 2,
       "Input tensor must have at least batch and channel dimensions!");
   int64_t num_features = input.size(1);
 
@@ -568,7 +568,7 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
 
   // A separate mean and var needs to be kept for each channel.
   TORCH_CHECK(
-      input.sizes().size() >= 2,
+      input.dim() >= 2,
       "Input tensor must have at least batch and channel dimensions!");
   int64_t num_features = input.size(1);
 
