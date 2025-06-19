@@ -2732,8 +2732,45 @@ def clone_preserve_strides(x: torch.Tensor) -> torch.Tensor:
         needed_size = (
             sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
         )
-    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
-    return torch.as_strided(buffer, x.size(), x.stride())
+
+    # Get original storage offset
+    original_offset = x.storage_offset()
+
+    if original_offset == 0:
+        # Simple case: no storage offset, use original logic
+        buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
+        return torch.as_strided(buffer, x.size(), x.stride())
+    else:
+        # Complex case: preserve storage offset
+        # We need to create a buffer that can accommodate the offset
+        total_needed_size = needed_size + original_offset
+
+        # Create a larger buffer to accommodate the offset
+        full_buffer = torch.empty(
+            total_needed_size,
+            dtype=x.dtype,
+            device=x.device,
+            memory_format=torch.contiguous_format
+        )
+
+        # Copy the original data to the correct position in the buffer
+        # We need to copy from the original tensor's view
+        original_view = torch.as_strided(x, (needed_size,), (1,))
+        target_view = torch.as_strided(
+            full_buffer,
+            (needed_size,),
+            (1,),
+            storage_offset=original_offset
+        )
+        target_view.copy_(original_view)
+
+        # Create the final view with preserved storage offset
+        return torch.as_strided(
+            full_buffer,
+            x.size(),
+            x.stride(),
+            storage_offset=original_offset
+        )
 
 
 def copy_misaligned_inputs(
