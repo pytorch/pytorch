@@ -249,8 +249,9 @@ class Venv:
         self._bindir: Path | None = None
         self._env = {
             "PIP_EXTRA_INDEX_URL": self.pip_source.index_url,
-            "UV_EXTRA_INDEX_URL": self.pip_source.index_url,
+            "UV_INDEX": self.pip_source.index_url,
             "FORCE_COLOR": "1",
+            "CLICOLOR_FORCE": "1",
         }
 
     def is_venv(self) -> bool:
