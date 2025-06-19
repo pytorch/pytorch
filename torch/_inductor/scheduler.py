@@ -2972,7 +2972,20 @@ class Scheduler:
                 log_fusion(min_ms_fused, ms1, ms2)
 
                 if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
-                    multi_node.finalize_as_triton_caller(ms_fused_choice)
+                    # For multi-kernel dispatch, we need to finalize multiple callers
+                    # one for each hint in multi_kernel_hints plus the default
+                    from torch._inductor import config
+                    multi_kernel_hints = getattr(config, 'multi_kernel_hints', [64, 256, 4096])
+
+                    # Create choices for each hint plus the default (None)
+                    ms_fused_choices = {}
+                    for hint in [None] + multi_kernel_hints:
+                        # For now, use the same best choice for all hints
+                        # In a more sophisticated implementation, we could benchmark
+                        # different choices for different hints
+                        ms_fused_choices[hint] = ms_fused_choice
+
+                    multi_node.finalize_as_triton_callers(ms_fused_choices)
                     multi_node._choice_timings = new_timings
                     return True
                 else:
