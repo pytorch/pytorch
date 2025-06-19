@@ -13,13 +13,13 @@ import dataclasses
 import functools
 import hashlib
 import importlib
+import inspect
 import logging
 import os
 import pickle
 import platform
 import sys
 import types
-import inspect
 from collections.abc import Generator
 from typing import Any, NewType, Optional
 
@@ -158,7 +158,7 @@ def _hash_source(source: str):
 
 
 def _get_sourcelines(m: types.ModuleType, firstlineno: int, lastlineno: int):
-    return inspect.getsourcelines(m)[0][firstlineno-1:lastlineno-1]
+    return inspect.getsourcelines(m)[0][firstlineno - 1 : lastlineno - 1]
 
 
 def _hash_sourcelines(m: types.ModuleType, firstlineno: int, lastlineno: int):
@@ -297,13 +297,17 @@ class CompilePackage:
                 continue
             source = inspect.getsource(code)
             lastlineno = code.co_firstlineno + len(inspect.getsourcelines(code)[0])
-            assert source == "".join(_get_sourcelines(module, code.co_firstlineno, lastlineno))
-            self._inlined_sources.add(InlinedSource(
-                module=module.__name__,
-                firstlineno=code.co_firstlineno,
-                lastlineno=lastlineno,
-                checksum=_hash_source(source),
-            ))
+            assert source == "".join(
+                _get_sourcelines(module, code.co_firstlineno, lastlineno)
+            )
+            self._inlined_sources.add(
+                InlinedSource(
+                    module=module.__name__,
+                    firstlineno=code.co_firstlineno,
+                    lastlineno=lastlineno,
+                    checksum=_hash_source(source),
+                )
+            )
 
     def add_resume_function(
         self,
@@ -399,7 +403,9 @@ class CompilePackage:
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
-        return _DynamoCacheEntry(codes=list(self._codes.values()), inlined_sources=self._inlined_sources)
+        return _DynamoCacheEntry(
+            codes=list(self._codes.values()), inlined_sources=self._inlined_sources
+        )
 
 
 @CacheArtifactFactory.register
