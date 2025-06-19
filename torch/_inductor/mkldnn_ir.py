@@ -176,6 +176,14 @@ def _prepare_convolution_fusion_create(
         dynamic_shapes or get_device_type(x) == "xpu"
     ) and is_contiguous_storage_and_layout(x):
         output_stride = FlexibleLayout.contiguous_strides(output_size)
+    # Currently we don't support channel last for the situation that stride of input's batch dim is 0,
+    # eg. input_size = (1, 1280, 64, 64), but input_stride=(0, 1, 81920, 1280).
+    # So we use NCHW hear instead.
+    # Different with cpu, cpu conv alway use channels_last for convolution,
+    # but xpu does not use mkldnn tensor, so the problem exposed here is only for xpu.
+    # TODO support channels_last for such zero stride input.
+    elif get_device_type(x) == "xpu" and x.get_stride()[0] == 0:
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
