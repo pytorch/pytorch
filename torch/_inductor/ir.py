@@ -4805,11 +4805,11 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
 
         self._make_kernel_renders: dict[Optional[int], Any] = {}
 
-        for hint_override, caller in caller.items():
+        for hint_override, caller in callers.items():
             self._make_kernel_renders[hint_override] = caller.get_make_kernel_render()
 
         # Set the default to be the one without hint override
-        self.make_kernel_render = self._make_kernel_renders(None)
+        self.make_kernel_render = self._make_kernel_renders[None]
 
 
 class CUDATemplateBuffer(TemplateBuffer):
