@@ -2139,30 +2139,25 @@ class AlgorithmSelectorCache(PersistentCache):
         if input_gen_fns is not None or layout.device.type == "cpu":
             return_multi_template = False
 
-        # Filter choices based on regex patterns if configured
         choices = self._filter_choices_by_regex(choices)
 
-        # Log matrix multiplication dimensions if configured
         self._log_mm_dimensions(name, input_nodes)
 
-        # Handle case with no valid choices
         if len(choices) == 0:
             self._raise_no_valid_choices_error(name)
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
-        # Fast path for single choice (except for CUDATemplateCaller)
         if len(choices) == 1 and not isinstance(choices[0], CUDATemplateCaller):
             return choices[0].output_node()
 
-        # Create benchmark function and inputs key
-        benchmark_fn = self._create_benchmark_function(choices, input_nodes, layout, input_gen_fns)
+        benchmark_fn = self._create_benchmark_function(
+            choices, input_nodes, layout, input_gen_fns
+        )
         inputs_key = create_inputs_key(input_nodes)
 
-        # Initialize subprocess pool if needed
         if config.autotune_in_subproc:
             torch._inductor.autotune_process.get_tuning_process_pool()
 
-        # Create precompile function
         precompile_fn = self.make_precompile_fn(
             choices,
             name,
@@ -2170,20 +2165,18 @@ class AlgorithmSelectorCache(PersistentCache):
             precompilation_timeout_seconds=precompilation_timeout_seconds,
         )
 
-        # Handle multi-template case
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
             return self._create_multi_template_output(
                 choices, input_nodes, layout, precompile_fn, benchmark_fn
             )
 
-        # Standard autotuning path
-        timings = self._perform_autotuning(choices, name, inputs_key, precompile_fn, benchmark_fn, input_nodes)
+        timings = self._perform_autotuning(
+            choices, name, inputs_key, precompile_fn, benchmark_fn, input_nodes
+        )
 
-        # Handle empty timings or missing first choice
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
 
-        # Select best choice
         selected_key = builtins.min(timings, key=timings.__getitem__)
         selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
@@ -2191,6 +2184,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
     def _filter_choices_by_regex(self, choices):
         """Filter choices based on configured regex patterns."""
+        # TODO - assert that we have not mutating kernels here
         if config.test_configs.autotune_choice_name_regex is not None:
             choices = [
                 c
@@ -2212,14 +2206,12 @@ class AlgorithmSelectorCache(PersistentCache):
         return choices
 
     def _log_mm_dimensions(self, name, input_nodes):
-        """Log matrix multiplication dimensions if configured."""
         if mm_file_name := get_mm_log_filename():
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
             append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
     def _raise_no_valid_choices_error(self, name):
-        """Raise error when no valid choices are available."""
         backend_config = (
             "max_autotune_gemm_backends"
             if name != "convolution"
@@ -2231,17 +2223,26 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
     def _create_benchmark_function(self, choices, input_nodes, layout, input_gen_fns):
-        """Create cached benchmark function."""
         @functools.lru_cache(None)
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
+
         return make_benchmark_fn
 
-    def _create_multi_template_output(self, choices, input_nodes, layout, precompile_fn, benchmark_fn):
+    def _create_multi_template_output(
+        self, choices, input_nodes, layout, precompile_fn, benchmark_fn
+    ):
         """Create multi-template output for deferred selection."""
+
         def get_timings():
-            timings = self._perform_autotuning(choices, "multi_template", create_inputs_key(input_nodes),
-                                              precompile_fn, benchmark_fn, input_nodes)
+            timings = self._perform_autotuning(
+                choices,
+                "multi_template",
+                create_inputs_key(input_nodes),
+                precompile_fn,
+                benchmark_fn,
+                input_nodes,
+            )
             min_extern_choice = float("inf")
             for choice, timing in timings.items():
                 if isinstance(choice, ExternKernelCaller):
@@ -2275,9 +2276,9 @@ class AlgorithmSelectorCache(PersistentCache):
             )
         )
 
-    def _perform_autotuning(self, choices, name, inputs_key, precompile_fn, benchmark_fn, input_nodes):
-        """Perform autotuning with precompilation, prescreening, and benchmarking."""
-        # Precompilation phase
+    def _perform_autotuning(
+        self, choices, name, inputs_key, precompile_fn, benchmark_fn, input_nodes
+    ):
         precompile_start_ts = time.time()
         with dynamo_timed(
             f"{name}_template_precompiling",
@@ -2302,7 +2303,6 @@ class AlgorithmSelectorCache(PersistentCache):
             prescreening_elapse = time.time() - prescreening_start_ts
             log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
 
-        # Main autotuning phase
         autotune_start_ts = time.time()
         timings = self.lookup(
             choices,
@@ -2313,11 +2313,9 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_elapse = time.time() - autotune_start_ts
         log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
 
-        # Handle case where all timings are invalid
         if timings and all(not math.isfinite(timing) for timing in timings.values()):
             raise NoValidChoicesError
 
-        # Update counters and log results if needed
         if benchmark_fn().cache_info().currsize:
             counters["inductor"]["select_algorithm_autotune"] += 1
 
@@ -2330,13 +2328,11 @@ class AlgorithmSelectorCache(PersistentCache):
                 name, input_nodes, timings, autotune_elapse, precompile_elapse
             )
 
-        # Run feedback functions
         self._run_feedback_functions(timings, name, input_nodes, choices, benchmark_fn)
 
         return timings
 
     def _run_autotune(self, choices, name, benchmark_fn):
-        """Run autotuning with timing."""
         log.debug("Starting autotuning")
         with dynamo_timed(
             f"{name}_template_autotuning",
@@ -2345,8 +2341,9 @@ class AlgorithmSelectorCache(PersistentCache):
         ):
             return benchmark_fn()(choices)
 
-    def _run_feedback_functions(self, timings, name, input_nodes, choices, benchmark_fn):
-        """Run feedback functions with profiler data."""
+    def _run_feedback_functions(
+        self, timings, name, input_nodes, choices, benchmark_fn
+    ):
         def profiler_bench_function():
             # we're not running through the normal caching autotuner method here because we want to avoid returning
             # the cached value.
