@@ -1044,13 +1044,8 @@ elseif(USE_CUDA)
         FLASH_NAMESPACE=pytorch_flash
         UNFUSE_FMA                      # Addressing issue #121558
       )
-    target_sources(torch_cuda PRIVATE $<TARGET_OBJECTS:flash_attention>)
-    target_include_directories(torch_cuda PUBLIC
-      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc>
-      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/include>
-      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/cutlass/include>
-      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src>
-      $<INSTALL_INTERFACE:include>
+    target_include_directories(torch_cuda PRIVATE
+        ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/
     )
   endif()
   if(USE_MEM_EFF_ATTENTION)
