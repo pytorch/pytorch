@@ -27,17 +27,20 @@ _QUANTIZE_OPS = [
     torch.ops.quantized_decomposed.quantize_per_tensor.default,
     torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
     torch.ops.quantized_decomposed.quantize_per_channel.default,
+    torch.ops.pt2e_quant.quantize_affine,
 ]
 
 _DEQUANTIZE_OPS = [
     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
     torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
     torch.ops.quantized_decomposed.dequantize_per_channel.default,
+    torch.ops.pt2e_quant.dequantize_affine,
 ]
 
 _CHOOSE_QPARAMS_OPS = [
     torch.ops.quantized_decomposed.choose_qparams.tensor,
     torch.ops.quantized_decomposed.choose_qparams_symmetric.tensor,
+    torch.ops.pt2e_quant.choose_qparams_affine,
 ]
 
 

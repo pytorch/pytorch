@@ -1,5 +1,6 @@
 #include <c10/util/error.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/cuda/GdsFile.h>
 #include <torch/csrc/utils/pybind.h>
 
 #if defined(USE_CUFILE)

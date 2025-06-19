@@ -592,7 +592,7 @@ def _distribute_tensors(
         ]
         if local_state.is_meta:
             # Use .clone() here rather than view to clone and return only the sliced portion, minimizing memory access and cost.
-            local_tensor = full_tensor[slices].detach().clone()
+            local_tensor = full_tensor[tuple(slices)].detach().clone()
             # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
             # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
             ret = DTensor.from_local(
@@ -605,7 +605,7 @@ def _distribute_tensors(
         else:
             ret = local_state
             # Copy full_tensor[slices] into local_state.to_local() to reduce memory footprint.
-            ret.to_local().copy_(full_tensor[slices])
+            ret.to_local().copy_(full_tensor[tuple(slices)])
         local_state_dict[key] = ret
 
 

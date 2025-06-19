@@ -104,9 +104,9 @@ def _assign_attr(
             assert isinstance(from_obj, torch.Tensor)
             to_module.register_buffer(field, from_obj, persistent=persistent)
         elif attr_kind == _AttrKind.CONSTANT:
-            assert not isinstance(
-                from_obj, FakeScriptObject
-            ), "FakeScriptObject should only exist during tracing."
+            assert not isinstance(from_obj, FakeScriptObject), (
+                "FakeScriptObject should only exist during tracing."
+            )
             assert isinstance(
                 from_obj,
                 (
@@ -143,7 +143,7 @@ class InterpreterModule(_SubmoduleBase, torch.nn.Module):
         super().__init__()
         self.graph = graph
         self._ty = ty
-        self.graph.owning_module = self
+        self.graph.owning_module = self  # type: ignore[assignment]
         self._run_with_interpreter = RUN_WITH_INTERPRETER
 
     def forward(self, *args, **kwargs):
@@ -275,6 +275,7 @@ class FlatArgsAdapter(abc.ABC):
         input_spec: pytree.TreeSpec,
         input_args: list[Any],
         metadata: Optional[dict[str, Any]] = None,
+        obj: Optional[Any] = None,
     ) -> list[Any]:
         """NOTE: This adapter may mutate given ``input_args_with_path``."""
         ...
@@ -295,7 +296,7 @@ class UnflattenedModule(torch.nn.Module):
         export_graph = deepcopy(export_module.graph)
         self.graph_signature = deepcopy(export_module.graph_signature)
         self.graph = torch.fx.Graph()
-        self.graph.owning_module = self
+        self.graph.owning_module = self  # type: ignore[assignment]
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         self.flat_args_adapter = flat_args_adapter
 
@@ -460,9 +461,9 @@ class UnflattenedModule(torch.nn.Module):
         # add constants that are aliased and don't appear in graph signature
         for const_name, const in export_module.constants.items():
             if const_name not in consts_targets:
-                assert (
-                    id(const) in consts_map
-                ), "Constants should be either aliased or appear in graph signature"
+                assert id(const) in consts_map, (
+                    "Constants should be either aliased or appear in graph signature"
+                )
                 ph_name, _ = consts_map[id(const)][0]
                 add_to_consts_map(id(const), ph_name, const_name)
                 added_params_buffers.add(s.target)
@@ -508,6 +509,7 @@ class UnflattenedModule(torch.nn.Module):
                 fqn_order[name] = len(fqn_order)
         _reorder_submodules(self, fqn_order)
         self.graph.lint()
+        self.finalize()
 
     def _print_graph(self):
         for fqn, mod in self.named_modules():
@@ -515,7 +517,7 @@ class UnflattenedModule(torch.nn.Module):
             if hasattr(mod, "graph") and isinstance(mod.graph, torch.fx.Graph):
                 print(mod.graph)
 
-    def _adapt_flat_args(self, flat_args, in_spec):
+    def _adapt_flat_args(self, flat_args, in_spec, input):
         signature = self.module_call_graph[0].signature
         if in_spec == signature.in_spec:
             return flat_args
@@ -531,6 +533,7 @@ class UnflattenedModule(torch.nn.Module):
                 input_spec=in_spec,
                 input_args=flat_args,
                 metadata=self.meta,
+                obj=input,
             )
 
             if len(flat_args) != signature.in_spec.num_leaves:
@@ -544,7 +547,9 @@ class UnflattenedModule(torch.nn.Module):
     def process_forward_inputs(self, *args, **kwargs):
         signature = self.module_call_graph[0].signature
 
-        reordered_kwargs = reorder_kwargs(kwargs, signature.in_spec)
+        reordered_kwargs = kwargs
+        if kwargs:
+            reordered_kwargs = reorder_kwargs(kwargs, signature.in_spec)
 
         flat_args_with_path, in_spec = pytree.tree_flatten_with_path(
             (args, reordered_kwargs)
@@ -562,7 +567,7 @@ class UnflattenedModule(torch.nn.Module):
                     f"Exported module treespec: {signature.in_spec}",
                 )
                 print("Adapting flat arg to match exported module's treespec")
-            flat_args = self._adapt_flat_args(flat_args, in_spec)
+            flat_args = self._adapt_flat_args(flat_args, in_spec, args)
             self.adapted = True
 
         if self.check_input_constraints:
@@ -588,7 +593,10 @@ class UnflattenedModule(torch.nn.Module):
         return flat_args
 
     def forward(self, *args, **kwargs):
-        flat_args = torch._dynamo.disable(self.process_forward_inputs)(*args, **kwargs)
+        flat_args = torch._dynamo.disable(
+            self.process_forward_inputs,
+            reason="do not trace into preprocessing the inputs",
+        )(*args, **kwargs)
         signature = self.module_call_graph[0].signature
 
         if is_fx_tracing():
@@ -600,13 +608,17 @@ class UnflattenedModule(torch.nn.Module):
                 return return_val[0]
             return return_val
 
-        if torch.compiler.is_dynamo_compiling() and not self._run_with_interpreter:
-            tree_out = torch.fx.GraphModule(self, self.graph)(*flat_args)
+        if torch.compiler.is_dynamo_compiling() or not self._run_with_interpreter:
+            tree_out = type(self.graph_module).forward(self, *flat_args)  # type: ignore[union-attr]
         else:
             tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
                 *flat_args, enable_io_processing=False
             )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
+
+    def finalize(self):
+        self.__dict__["graph_module"] = torch.fx.GraphModule(self, self.graph)
+        self.graph.lint()
 
     def _dispatch_modules(self, redirected_call_indices, consts_targets):
         """For a module whose call signatures are preserved, replace
@@ -1029,9 +1041,9 @@ class _ModuleFrame:
 
                     if arg.name in self.seen_nodes:
                         flat_arg_node.meta = copy.copy(self.seen_nodes[arg.name].meta)
-                        self.node_to_placeholder[
-                            self.seen_nodes[arg.name]
-                        ] = flat_arg_node
+                        self.node_to_placeholder[self.seen_nodes[arg.name]] = (
+                            flat_arg_node
+                        )
 
             with self.parent.graph.inserting_before(self.parent_call_module):
                 input_nodes: list[Optional[torch.fx.Node]] = []
@@ -1113,8 +1125,7 @@ class _ModuleFrame:
         if x in self.node_to_placeholder:
             return self.node_to_placeholder[x]
         elif (
-            x.op == "placeholder"
-            or self.module_call_graph.get(self.fqn) is None
+            x.op == "placeholder" or self.module_call_graph.get(self.fqn) is None
             # allow placeholder creation if we are not preserving module call signature
         ):
             self.add_placeholder(x)
@@ -1159,7 +1170,13 @@ class _ModuleFrame:
             for output in signature.outputs:
                 if isinstance(
                     output,
-                    (TensorArgument, SymIntArgument, SymBoolArgument, SymFloatArgument),
+                    (
+                        TensorArgument,
+                        SymIntArgument,
+                        SymBoolArgument,
+                        SymFloatArgument,
+                        ConstantArgument,
+                    ),
                 ):
                     if output.name in self.seen_nodes:
                         orig_outputs.append(self.seen_nodes[output.name])
@@ -1565,7 +1582,7 @@ def _sink_params(
     # explicitly want duplicate modules to show up in the traversal.
     for name, submodule in module._modules.items():
         submod_id_to_inputs_removed = _sink_params(
-            cast(torch.nn.Module, submodule),
+            cast("torch.nn.Module", submodule),
             inputs_to_state,
             scope + [name],
             module_id_to_inputs_removed,
@@ -1581,7 +1598,7 @@ def _sink_params(
     assert isinstance(graph, torch.fx.Graph)
 
     inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))
-    the_last_input = inputs[-1]
+    the_last_input = None if len(inputs) == 0 else inputs[-1]
 
     # Also remove from call_module nodes
     call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)

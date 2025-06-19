@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Optional, Union
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -10,7 +12,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch.types import _Number
+from torch.types import _Number, Number
 
 
 __all__ = ["Geometric"]
@@ -45,7 +47,12 @@ class Geometric(Distribution):
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.nonnegative_integer
 
-    def __init__(self, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        probs: Optional[Union[Tensor, Number]] = None,
+        logits: Optional[Union[Tensor, Number]] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
@@ -53,11 +60,13 @@ class Geometric(Distribution):
         if probs is not None:
             (self.probs,) = broadcast_all(probs)
         else:
+            assert logits is not None  # helps mypy
             (self.logits,) = broadcast_all(logits)
         probs_or_logits = probs if probs is not None else logits
         if isinstance(probs_or_logits, _Number):
             batch_shape = torch.Size()
         else:
+            assert probs_or_logits is not None  # helps mypy
             batch_shape = probs_or_logits.size()
         super().__init__(batch_shape, validate_args=validate_args)
         if self._validate_args and probs is not None:

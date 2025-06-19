@@ -16,6 +16,7 @@ from torch._export.utils import _check_input_constraints_for_graph
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.traceback import NodeSource, NodeSourceAction
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
 from ._tree_utils import reorder_kwargs
@@ -105,11 +106,23 @@ def _unlift_inputs_as_getattr(
 
         else:
             with gm.graph.inserting_after(input_node):
-                getattr_node = gm.graph.get_attr(lifted_node)
+                # It is fine to ignore this warning because
+                # it is guaranteed that we will populate this
+                # attr later.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    getattr_node = gm.graph.get_attr(lifted_node)
                 input_node.replace_all_uses_with(getattr_node)
                 metadata = input_node.meta
                 gm.graph.erase_node(input_node)
                 getattr_node.meta = metadata
+                getattr_node.meta["from_node"] = [
+                    NodeSource(
+                        input_node,
+                        "ExportedProgram.module().unlift()",
+                        [NodeSourceAction.CREATE, NodeSourceAction.REPLACE],
+                    )
+                ]
                 unlifted_name_to_node[lifted_node] = getattr_node
 
     return unlifted_name_to_node, input_name_to_node
@@ -167,6 +180,13 @@ def _insert_copy_for_mutations(
         gm.graph.erase_node(output_node)
         new_output.name = output_node.name
         new_output.meta.update(output_node.meta)
+        new_output.meta["from_node"] = [
+            NodeSource(
+                output_node,
+                "ExportedProgram.module().unlift()",
+                [NodeSourceAction.CREATE, NodeSourceAction.REPLACE],
+            )
+        ]
 
 
 def _get_codegen(
@@ -440,6 +460,11 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         )
         for out_spec in ep.graph_signature.output_specs
     ]
+
+    for node in new_gm.graph.nodes:
+        node.meta["from_node"] = [
+            NodeSource(node, "ExportedProgram.module()", NodeSourceAction.CREATE)
+        ]
 
     new_gm = _unlift(
         new_gm,

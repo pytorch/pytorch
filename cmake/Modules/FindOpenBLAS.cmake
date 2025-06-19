@@ -59,6 +59,32 @@ ELSE (OpenBLAS_FOUND)
   ENDIF (OpenBLAS_FIND_REQUIRED)
 ENDIF (OpenBLAS_FOUND)
 
+IF(OpenBLAS_LIB)
+ # Run ldd on the OpenBLAS library
+execute_process(
+  COMMAND ldd "${OpenBLAS_LIB}"
+  OUTPUT_VARIABLE LDD_OUTPUT
+  ERROR_VARIABLE LDD_ERROR
+  RESULT_VARIABLE LDD_RESULT
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+if(NOT LDD_RESULT EQUAL 0)
+  message(WARNING "ldd failed on ${OpenBLAS_LIB}: ${LDD_ERROR}")
+endif()
+
+# Check if the output contains "libgomp"
+string(FIND "${LDD_OUTPUT}" "libgomp" LIBGOMP_FOUND_INDEX)
+if(LIBGOMP_FOUND_INDEX GREATER -1)
+  message(STATUS "OpenBLAS is directly linked against libgomp")
+  set(OPENBLAS_USES_LIBGOMP TRUE CACHE BOOL "OpenBLAS uses libgomp")
+else()
+  message(STATUS "OpenBLAS is not directly linked against libgomp")
+  set(OPENBLAS_USES_LIBGOMP FALSE CACHE BOOL "OpenBLAS uses libgomp")
+endif()
+
+ENDIF(OpenBLAS_LIB)
+
 MARK_AS_ADVANCED(
     OpenBLAS_INCLUDE_DIR
     OpenBLAS_LIB

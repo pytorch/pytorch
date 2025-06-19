@@ -1,0 +1,32 @@
+def a_very_very_long():
+    # Lots of lines!
+    # Lots of lines!
+    # Lots of lines!
+    # Lots of lines!
+    pass
+
+
+
+class LintInit:
+    def __init__(self) -> None:
+        # Lots of lines!
+        # Lots of lines!
+        pass
+
+
+class LintInitClass:
+    """This is a very long comment, a very long comment"""
+
+    def __init__(self) -> None:
+        # Lots of lines!
+        # Lots of lines!
+        pass
+
+
+class LintInitInit:
+    def __init__(self) -> None:
+        """This is a very long comment, a very long comment"""
+
+        # Lots of lines!
+        # Lots of lines!
+        pass

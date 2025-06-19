@@ -41,8 +41,11 @@ from ..source import AttrSource, GlobalStateSource
 from .base import VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
+    SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrappedNestedUserFunctionVariable,
+    WrappedSkipFunctionVariable,
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
@@ -50,6 +53,7 @@ from .user_defined import UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -85,12 +89,12 @@ class ContextWrappingVariable(VariableTracker):
         self.cleanup_assert()
         return variables.ConstantVariable.create(None)
 
-    def reconstruct_type(self, codegen):
+    def reconstruct_type(self, codegen: "PyCodegen"):
         codegen(
             AttrSource(codegen.tx.import_source(self.module_name()), self.fn_name())
         )
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(lambda: self.reconstruct_type(codegen))
         target_values = self.target_values
         if not target_values:
@@ -111,9 +115,21 @@ class ContextWrappingVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert len(args) == 1
+        assert isinstance(
+            args[0],
+            (
+                NestedUserFunctionVariable,
+                SkipFunctionVariable,
+                UserMethodVariable,
+                UserFunctionVariable,
+            ),
+        )
+
         if isinstance(args[0], NestedUserFunctionVariable):
-            args[0] = UserFunctionVariable(args[0].get_function())
-        assert isinstance(args[0], (UserMethodVariable, UserFunctionVariable))
+            return WrappedNestedUserFunctionVariable(args[0], self)
+
+        if isinstance(args[0], SkipFunctionVariable):
+            return WrappedSkipFunctionVariable(args[0], self)
 
         if isinstance(args[0], UserMethodVariable):
             return WrappedUserMethodVariable(args[0], self)
@@ -722,7 +738,6 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         tx.symbolic_torch_function_state.torch_function_subclass_enabled = False
         if not self.only_subclass:
             tx.symbolic_torch_function_state.torch_function_mode_enabled = False
-        tx.output.set_torch_function_state(False)
 
     def module_name(self):
         return "torch._C"
@@ -873,6 +888,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         tx.output.create_node(
             "call_function", torch.amp._exit_autocast, (self.proxy,), {}
         )
+        return variables.ConstantVariable.create(None)
 
     def enter(self, tx):
         ctx = torch.amp._enter_autocast(*self.target_values)
@@ -1057,7 +1073,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
             _unsafe_set_version_counter
         ).call_function(tx, [self.tensors, self.prev_versions], {})
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         unimplemented_v2(
             gb_type="torch.autograd._unsafe_preserve_version_counter escaped from compiled region",
             context=str(self),
@@ -1278,7 +1294,7 @@ class StreamVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         # If we got here, this stream is fully subsumed by the graph - this means it is
         # not an input or global
         assert not self.source
@@ -1325,13 +1341,14 @@ class EventVariable(VariableTracker):
                 ),
             )
         else:
+            method_name = (
+                f"{type(self.value).__module__}.{type(self.value).__qualname__}.{name}"
+            )
             unimplemented_v2(
-                gb_type="Unsupported torch.cuda.Event method",
+                gb_type="Unsupported event method",
                 context=str(name),
-                explanation=(
-                    f"Dynamo doesn't support tracing the torch.cuda.Event.{name} method. "
-                    f"We currently support wait, record, synchronize, and query.",
-                ),
+                explanation=f"Dynamo doesn't support tracing the {method_name} method. "
+                f"We currently support wait, record, synchronize, and query.",
                 hints=[
                     *graph_break_hints.SUPPORTABLE,
                 ],
@@ -1340,7 +1357,7 @@ class EventVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         # If we got here, this event is fully subsumed by the graph - this means it is
         # not an input or global
         assert not self.source
@@ -1348,6 +1365,47 @@ class EventVariable(VariableTracker):
         prefix = "_event"
         name = codegen.tx.output.install_global_by_id(prefix, self.value)
         codegen.append_output(codegen.create_load_global(name, add=True))
+
+
+class DynamoConfigPatchVariable(ContextWrappingVariable):
+    """represents torch._dynamo.patch_dynamo_config"""
+
+    # NOTE: no need to guard on dynamo config because dynamo config should not affect soundness
+    # (though it may affect tracing behavior)
+    def __init__(self, target_values, **kwargs) -> None:
+        target_values = tuple(target_values.items())
+        super().__init__(target_values=(target_values,), initial_values=None, **kwargs)
+        self.initial_values = {}
+        for key, _ in target_values:
+            self.initial_values[key] = torch._dynamo.config.__getattr__(key)
+        self.initial_values = (tuple(self.initial_values.items()),)
+
+    def enter(self, tx):
+        # resets all config patches at the end of tracing
+        self.set_cleanup_hook(tx)
+        self._call_func(tx, self.target_values)
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self._call_func(tx, self.initial_values)
+        return variables.ConstantVariable.create(None)
+
+    def _call_func(self, tx: "InstructionTranslator", values):
+        assert len(values) == 1
+        value = values[0]
+        # manually patch dynamo config
+        for key, val in value:
+            torch._dynamo.config.__setattr__(key, val)
+        # No need to keep track of global side effects because
+        # dynamo will properly restore this context manager for
+        # unsupported instructions and continuation functions.
+        # Dynamo config also should not affect the semantics of the compiled graph.
+
+    def module_name(self):
+        return "torch._dynamo"
+
+    def fn_name(self):
+        return "patch_dynamo_config"
 
 
 class WithExitFunctionVariable(VariableTracker):
@@ -1378,7 +1436,7 @@ class WithExitFunctionVariable(VariableTracker):
         assert not kwargs
         return self.ctx.exit(tx, *args)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         # Note here we reconstruct the context manager rather than the
         # exit function.  The handler generated by BlockStackEntry
         # will re-enter the context in the resume function.

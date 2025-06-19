@@ -160,16 +160,16 @@ class profile:
         acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
 
 
-    .. warning:
+    .. warning::
         Enabling memory profiling or source attribution incurs additional profiler
         overhead
 
-    .. warning:
+    .. warning::
         This context managers should not be called recursively, i.e. no nested
         instances are allowed
 
-    .. warning:
-        Due to some CUDA multiprocessing limitations (multiprocessing-cuda-note_),
+    .. warning::
+        Due to some CUDA multiprocessing limitations (see :ref:`multiprocessing-cuda-note`),
         one cannot use the profiler with ``use_device = 'cuda'`` to benchmark
         DataLoaders with ``num_workers > 0``. If you wish to benchmark data loading,
         please use ``use_device = None`` or ``num_workers = 0``.
@@ -563,7 +563,12 @@ class profile:
             return (
                 mem_record.nbytes()
                 if mem_record.device_type()
-                in [DeviceType.CUDA, DeviceType.PrivateUse1, DeviceType.HIP]
+                in [
+                    DeviceType.CUDA,
+                    DeviceType.PrivateUse1,
+                    DeviceType.HIP,
+                    DeviceType.XPU,
+                ]
                 else 0
             )
 
@@ -629,7 +634,7 @@ class profile:
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:
-                if self.use_device == "privateuseone":
+                if self.use_device == _get_privateuse1_backend_name():
                     privateuse1_time = kineto_event.privateuse1_elapsed_us()
                     if privateuse1_time > 0:
                         fe.append_kernel(fe.name, fe.device_index, privateuse1_time)

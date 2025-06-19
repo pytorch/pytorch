@@ -146,6 +146,20 @@ torch.ao.quantization.pt2e.export_utils
 
 .. currentmodule:: torch.ao.quantization
 
+torch.ao.quantization.pt2e.lowering
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.ao.quantization.pt2e.lowering
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    lower_pt2e_quantized_to_x86
+
+.. currentmodule:: torch.ao.quantization
+
 PT2 Export (pt2e) Numeric Debugger
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autosummary::
@@ -461,7 +475,7 @@ torch.ao.nn.quantized
 .. automodule:: torch.ao.nn.quantized.modules
 
 This module implements the quantized versions of the nn layers such as
-~`torch.nn.Conv2d` and `torch.nn.ReLU`.
+`~torch.nn.Conv2d` and `torch.nn.ReLU`.
 
 .. currentmodule:: torch.ao.nn.quantized
 
@@ -500,7 +514,7 @@ torch.ao.nn.quantized.functional
 .. automodule:: torch.ao.nn.quantized.functional
 
 This module implements the quantized versions of the functional layers such as
-~`torch.nn.functional.conv2d` and `torch.nn.functional.relu`. Note:
+`~torch.nn.functional.conv2d` and `torch.nn.functional.relu`. Note:
 :meth:`~torch.nn.functional.relu` supports quantized inputs.
 
 .. currentmodule:: torch.ao.nn.quantized.functional

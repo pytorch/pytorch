@@ -2,7 +2,7 @@
 # mypy: disable-error-code="type-arg"
 from datetime import timedelta
 from enum import Enum
-from typing import Any, overload
+from typing import Any, Optional, overload, Union
 
 import torch
 from torch import Tensor
@@ -50,6 +50,8 @@ class Reducer:
         gradient_as_bucket_view: bool = ...,
         param_to_name_mapping: dict[int, str] = ...,
         first_bucket_types_cap: int = ...,  # kDefaultFirstBucketBytes in reducer.hpp
+        skip_all_reduce_unused_params: bool = ...,
+        use_python_reducer: bool = ...,
     ) -> None: ...
     def prepare_for_forward(self) -> None: ...
     def prepare_for_backward(self, output: list[Tensor]) -> None: ...
@@ -139,6 +141,8 @@ class BroadcastOptions:
 class AllreduceOptions:
     reduceOp: ReduceOp
     timeout: timedelta
+    asyncOp: bool
+    sparseIndices: Optional[Tensor]
 
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
@@ -147,6 +151,7 @@ class ReduceOptions:
     rootRank: int
     rootTensor: int
     timeout: timedelta
+    asyncOp: bool
 
 class AllgatherOptions:
     timeout: timedelta
@@ -155,6 +160,7 @@ class AllgatherOptions:
 class GatherOptions:
     rootRank: int
     timeout: timedelta
+    asyncOp: bool
 
 class ScatterOptions:
     rootRank: int
@@ -170,14 +176,17 @@ class BarrierOptions:
     device_ids: list[int]
     device: torch.device
     timeout: timedelta
+    asyncOp: bool
 
 class AllToAllOptions:
     timeout: timedelta
+    asyncOp: bool
 
 class Store:
     def set(self, key: str, value: str): ...
     def get(self, key: str) -> bytes: ...
     def add(self, key: str, value: int) -> int: ...
+    def check(self, keys: list[str]) -> bool: ...
     def compare_set(
         self,
         key: str,
@@ -191,6 +200,9 @@ class Store:
     def wait(self, keys: list[str]): ...
     @overload
     def wait(self, keys: list[str], timeout: timedelta): ...
+    def queue_pop(self, key: str, block: bool = True) -> bytes: ...
+    def queue_push(self, key: str, value: Union[bytes, str]) -> None: ...
+    def queue_len(self, key: str) -> int: ...
 
 class FileStore(Store):
     def __init__(self, path: str, numWorkers: int = ...) -> None: ...
@@ -307,6 +319,14 @@ class Backend:
     def _set_sequence_number_for_group(self) -> None: ...
     def _set_default_timeout(self, timeout: timedelta) -> None: ...
     def get_error(self) -> ErrorType: ...
+    def supports_tensor_alloc(self, device: torch.device) -> bool: ...
+    def allocate_tensor(
+        self,
+        size: int,
+        *,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> Tensor: ...
     @property
     def mem_allocator(self) -> Any: ...
 
@@ -553,6 +573,8 @@ class ProcessGroupGloo(Backend):
     class Options(Backend.Options):
         devices: list[ProcessGroupGloo.Device]
         threads: int
+        global_ranks_in_group: list[int]
+        group_name: str
 
         def __init__(self): ...
 
@@ -564,10 +586,12 @@ class ProcessGroupGloo(Backend):
         timeout: timedelta,
     ) -> None: ...
     @staticmethod
-    def create_device(hostname="", interface="") -> Device: ...
+    def create_device(hostname="", interface="", lazy_init=None) -> Device: ...
     @staticmethod
-    def create_default_device() -> Device: ...
+    def create_default_device(lazy_init=None) -> Device: ...
     def _set_default_timeout(self, timeout) -> None: ...
+    @property
+    def options(self) -> Options: ...  # type: ignore[override]
 
 class _ProcessGroupWrapper(Backend):
     def __init__(self, pg: Backend, gloo_pg: ProcessGroupGloo) -> None: ...
@@ -671,6 +695,11 @@ def _set_allow_inflight_collective_as_graph_input(
 def _allow_inflight_collective_as_graph_input() -> bool: ...
 def _unregister_all_process_groups() -> None: ...
 def _unregister_process_group(group_name: str) -> None: ...
+
+# Intializes the device state in CUmodule so that it’s able to perform NVSHMEM
+# operations.  CUmodule is a pointer to a CUDA module, carried by a int64 in
+# Python. At C++ interface, it is converted to a uintptr_t.
+def _nvshmemx_cumodule_init(module: int) -> None: ...
 
 class _SymmetricMemory:
     @staticmethod

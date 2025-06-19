@@ -21,7 +21,12 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
 )
 from torch.export import export_for_training
 from torch.testing._internal.common_quantization import TestHelperModules
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfCrossRef, TestCase
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    raise_on_run_directly,
+    skipIfCrossRef,
+    TestCase,
+)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
@@ -81,7 +86,7 @@ class TestNumericDebugger(TestCase):
     def test_simple(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        ep = export_for_training(m, example_inputs)
+        ep = export_for_training(m, example_inputs, strict=True)
         generate_numeric_debug_handle(ep)
         self._assert_each_node_has_debug_handle(ep)
         debug_handle_map = self._extract_debug_handles(ep)
@@ -91,7 +96,7 @@ class TestNumericDebugger(TestCase):
     def test_control_flow(self):
         m = TestHelperModules.ControlFlow()
         example_inputs = m.example_inputs()
-        ep = export_for_training(m, example_inputs)
+        ep = export_for_training(m, example_inputs, strict=True)
         generate_numeric_debug_handle(ep)
 
         self._assert_each_node_has_debug_handle(ep)
@@ -102,7 +107,7 @@ class TestNumericDebugger(TestCase):
     def test_quantize_pt2e_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        ep = export_for_training(m, example_inputs)
+        ep = export_for_training(m, example_inputs, strict=True)
         generate_numeric_debug_handle(ep)
         m = ep.module()
 
@@ -162,14 +167,14 @@ class TestNumericDebugger(TestCase):
     def test_re_export_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        ep = export_for_training(m, example_inputs)
+        ep = export_for_training(m, example_inputs, strict=True)
         generate_numeric_debug_handle(ep)
         m = ep.module()
 
         self._assert_each_node_has_debug_handle(ep)
         debug_handle_map_ref = self._extract_debug_handles(ep)
 
-        ep_reexport = export_for_training(m, example_inputs)
+        ep_reexport = export_for_training(m, example_inputs, strict=True)
 
         self._assert_each_node_has_debug_handle(ep_reexport)
         debug_handle_map = self._extract_debug_handles(ep_reexport)
@@ -179,7 +184,7 @@ class TestNumericDebugger(TestCase):
     def test_run_decompositions_same_handle_id(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        ep = export_for_training(m, example_inputs)
+        ep = export_for_training(m, example_inputs, strict=True)
         generate_numeric_debug_handle(ep)
 
         self._assert_each_node_has_debug_handle(ep)
@@ -204,7 +209,7 @@ class TestNumericDebugger(TestCase):
 
         for m in test_models:
             example_inputs = m.example_inputs()
-            ep = export_for_training(m, example_inputs)
+            ep = export_for_training(m, example_inputs, strict=True)
             generate_numeric_debug_handle(ep)
 
             self._assert_each_node_has_debug_handle(ep)
@@ -227,7 +232,7 @@ class TestNumericDebugger(TestCase):
     def test_prepare_for_propagation_comparison(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        ep = export_for_training(m, example_inputs)
+        ep = export_for_training(m, example_inputs, strict=True)
         generate_numeric_debug_handle(ep)
         m = ep.module()
         m_logger = prepare_for_propagation_comparison(m)
@@ -244,7 +249,7 @@ class TestNumericDebugger(TestCase):
     def test_extract_results_from_loggers(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        ep = export_for_training(m, example_inputs)
+        ep = export_for_training(m, example_inputs, strict=True)
         generate_numeric_debug_handle(ep)
         m = ep.module()
         m_ref_logger = prepare_for_propagation_comparison(m)
@@ -269,7 +274,7 @@ class TestNumericDebugger(TestCase):
     def test_extract_results_from_loggers_list_output(self):
         m = TestHelperModules.Conv2dWithSplit()
         example_inputs = m.example_inputs()
-        ep = export_for_training(m, example_inputs)
+        ep = export_for_training(m, example_inputs, strict=True)
         generate_numeric_debug_handle(ep)
         m = ep.module()
         m_ref_logger = prepare_for_propagation_comparison(m)
@@ -299,7 +304,7 @@ class TestNumericDebugger(TestCase):
     def test_added_node_gets_unique_id(self) -> None:
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        ep = export_for_training(m, example_inputs)
+        ep = export_for_training(m, example_inputs, strict=True)
         generate_numeric_debug_handle(ep)
         ref_handles = self._extract_debug_handles(ep)
         ref_counter = Counter(ref_handles.values())
@@ -346,3 +351,7 @@ class TestNumericDebugger(TestCase):
         # may change with future node ordering changes.
         self.assertNotEqual(handles_after_modification["relu_default"], 0)
         self.assertEqual(handles_counter[handles_after_modification["relu_default"]], 1)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

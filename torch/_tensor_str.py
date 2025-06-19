@@ -120,6 +120,7 @@ def tensor_totype(t):
         if (
             t.is_mps
             or (t.is_xpu and not torch.xpu.get_device_properties(t.device).has_fp64)
+            or t.is_maia
         )
         else torch.double
     )
@@ -142,6 +143,14 @@ class _Formatter:
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
+            if tensor.dtype == torch.float4_e2m1fn_x2:  # type: ignore[attr-defined]
+                # torch.float4_e2m1fn_x2 is special and does not support the casts necessary
+                # to print it, we choose to display the uint8 representation here for
+                # convenience of being able to print a tensor.
+                # TODO(#146647): extend this to other dtypes without casts defined, such
+                # as the bits, uint1..7 and int1..7 dtypes.
+                tensor_view = tensor_view.view(torch.uint8)
+
             nonzero_finite_vals = torch.masked_select(
                 tensor_view, torch.isfinite(tensor_view) & tensor_view.ne(0)
             )
@@ -159,8 +168,7 @@ class _Formatter:
                 # support for them is removed
                 nonzero_finite_vals = nonzero_finite_vals.float()
 
-            # Convert to double for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
-
+            # Convert to double (or float) for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
             nonzero_finite_abs = tensor_totype(nonzero_finite_vals.abs())
             nonzero_finite_min = tensor_totype(nonzero_finite_abs.min())
             nonzero_finite_max = tensor_totype(nonzero_finite_abs.max())
@@ -257,6 +265,14 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
                 return real_str + "+" + imag_str
         else:
             return formatter1.format(val)
+
+    if self.dtype == torch.float4_e2m1fn_x2:  # type: ignore[attr-defined]
+        # torch.float4_e2m1fn_x2 is special and does not support the casts necessary
+        # to print it, we choose to display the uint8 representation here for
+        # convenience of being able to print a tensor.
+        # TODO(#146647): extend this to other dtypes without casts defined, such
+        # as the bits, uint1..7 and int1..7 dtypes.
+        self = self.view(torch.uint8)
 
     if summarize and not PRINT_OPTS.edgeitems:
         # Deal with edge case that negative zero is zero

@@ -3,7 +3,7 @@
 import copy
 import unittest
 from re import escape
-from typing import Any, List
+from typing import Any, List, Optional
 
 import torch
 import torch._dynamo as torchdynamo
@@ -245,6 +245,7 @@ class TestUnflatten(TestCase):
                     input_spec: TreeSpec,
                     input_args: List[Any],
                     metadata: dict[str, Any],
+                    obj: Optional[Any] = None,
                 ) -> List[Any]:
                     while len(input_args) > 2:
                         input_args.pop(-1)
@@ -878,7 +879,7 @@ class TestUnflatten(TestCase):
         fn_count_sym_size = lambda graph: [node.target for node in graph.nodes].count(
             torch.ops.aten.sym_size.int
         )
-        self.assertEqual(fn_count_sym_size(unflat.graph), 1)
+        self.assertEqual(fn_count_sym_size(unflat.graph), 3)
         self.assertEqual(fn_count_sym_size(unflat.m1.graph), 1)
         self.assertEqual(fn_count_sym_size(unflat.m2.graph), 0)
 
@@ -952,6 +953,57 @@ class TestUnflatten(TestCase):
         # torch.compile submodule
         unflattened.foo = torch.compile(unflattened.foo, fullgraph=True)
         self.compare_outputs(orig_eager, unflattened, inputs)
+
+    def test_unflatten_none(self):
+        class M2(torch.nn.Module):
+            def forward(self, x, y):
+                return x + x, None
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m2 = M2()
+
+            def forward(self, x, y):
+                x = x + x
+                return self.m2(x, y)
+
+        ep = export(
+            M(), (torch.rand(2, 3), None), preserve_module_call_signature=("m2",)
+        )
+        unflattened = unflatten(ep)
+        inp = (torch.randn(2, 3), None)
+        self.assertTrue(torch.allclose(M()(*inp)[0], unflattened(*inp)[0]))
+
+    def test_unflatten_empty_branch(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                if x is None:
+                    return torch.ones(3), torch.ones(3)
+                else:
+                    return x + x, x * x
+
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = M()
+
+            def forward(self, x, y):
+                a, b = self.m(x)
+                c, d = self.m(y)
+                return a + b + c + d
+
+        ep = torch.export.export(M1(), (torch.randn(3), None))
+        unf = torch.export.unflatten(ep)
+        inp = (torch.randn(3), None)
+        self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
+
+        ep = torch.export.export(
+            M1(), (torch.randn(3), None), preserve_module_call_signature="m"
+        )
+        unf = torch.export.unflatten(ep)
+        inp = (torch.randn(3), None)
+        self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
 
 
 if __name__ == "__main__":

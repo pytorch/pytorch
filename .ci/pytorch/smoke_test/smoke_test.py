@@ -227,7 +227,10 @@ def compare_pypi_to_torch_versions(
 
 
 def smoke_test_cuda(
-    package: str, runtime_error_check: str, torch_compile_check: str
+    package: str,
+    runtime_error_check: str,
+    torch_compile_check: str,
+    pypi_pkg_check: str,
 ) -> None:
     if not torch.cuda.is_available() and is_cuda_system:
         raise RuntimeError(f"Expected CUDA {gpu_arch_ver}. However CUDA is not loaded.")
@@ -259,21 +262,25 @@ def smoke_test_cuda(
             )
 
         print(f"torch cuda: {torch.version.cuda}")
-        print(f"cuDNN enabled? {torch.backends.cudnn.enabled}")
-        torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
-        compare_pypi_to_torch_versions(
-            "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
-        )
-
         torch.cuda.init()
         print("CUDA initialized successfully")
         print(f"Number of CUDA devices: {torch.cuda.device_count()}")
         for i in range(torch.cuda.device_count()):
             print(f"Device {i}: {torch.cuda.get_device_name(i)}")
 
-        # nccl is availbale only on Linux
+        print(f"cuDNN enabled? {torch.backends.cudnn.enabled}")
+        torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
+        print(f"Torch cuDNN version: {torch_cudnn_version}")
+
         if sys.platform in ["linux", "linux2"]:
             torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
+            print(f"Torch nccl; version: {torch_nccl_version}")
+
+        # Pypi dependencies are installed on linux only and nccl is available only on Linux.
+        if pypi_pkg_check == "enabled" and sys.platform in ["linux", "linux2"]:
+            compare_pypi_to_torch_versions(
+                "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
+            )
             compare_pypi_to_torch_versions(
                 "nccl", find_pypi_package_version("nvidia-nccl"), torch_nccl_version
             )
@@ -435,6 +442,13 @@ def parse_args():
         choices=["enabled", "disabled"],
         default="enabled",
     )
+    parser.add_argument(
+        "--pypi-pkg-check",
+        help="Check pypi package versions cudnn and nccl",
+        type=str,
+        choices=["enabled", "disabled"],
+        default="enabled",
+    )
     return parser.parse_args()
 
 
@@ -459,7 +473,10 @@ def main() -> None:
         smoke_test_modules()
 
     smoke_test_cuda(
-        options.package, options.runtime_error_check, options.torch_compile_check
+        options.package,
+        options.runtime_error_check,
+        options.torch_compile_check,
+        options.pypi_pkg_check,
     )
 
 

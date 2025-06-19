@@ -116,8 +116,8 @@ class C10_API Error : public std::exception {
 
 class C10_API Warning {
  public:
-  class C10_API UserWarning {};
-  class C10_API DeprecationWarning {};
+  class C10_API UserWarning{};
+  class C10_API DeprecationWarning{};
 
   using warning_variant_t = std::variant<UserWarning, DeprecationWarning>;
 
@@ -289,10 +289,23 @@ class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
-// Used for handling syntacitc erros in input arguments.
-// They shuld turn into SytnaxError when the cross into Python
+// Used for handling syntactic errors in input arguments.
+// These turn into SyntaxError when the cross into Python.
 class C10_API SyntaxError : public Error {
   using Error::Error;
+};
+
+// Raised when accelerator API call hits an error.
+// These turn into AcceleratorError when the cross into Python
+class C10_API AcceleratorError : public Error {
+  int32_t error_code;
+
+ public:
+  AcceleratorError(SourceLocation loc, int32_t code, const std::string& msg)
+      : Error(loc, msg), error_code(code) {}
+  int32_t get_error_code() const {
+    return error_code;
+  }
 };
 
 // Base error type for all distributed errors.
@@ -317,6 +330,12 @@ class C10_API DistStoreError : public DistError {
 // libraries. These turn into DistNetworkError when they cross into Python.
 class C10_API DistNetworkError : public DistError {
   using DistError::DistError;
+};
+
+// Raised when a queue is empty and a non-blocking pop is called.
+// Translated to torch.distributed.QueueEmptyError in Python
+class C10_API DistQueueEmptyError : public DistStoreError {
+  using DistStoreError::DistStoreError;
 };
 
 // A utility function to return an exception std::string by prepending its
@@ -699,28 +718,28 @@ namespace c10::detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg)
-instead.")
+[[deprecated("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg)
+instead.")]]
 */
 inline void deprecated_AT_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an
+[[deprecated("AT_ASSERT is deprecated, if you mean to indicate an
 internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user
 error checking, use " \ "TORCH_CHECK.  See
-https://github.com/pytorch/pytorch/issues/20287 for more details.")
+https://github.com/pytorch/pytorch/issues/20287 for more details.")]]
 */
 inline void deprecated_AT_ASSERT() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an
+[[deprecated("AT_ASSERTM is deprecated, if you mean to indicate an
 internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user
 error checking, use " \ "TORCH_CHECK.  See
-https://github.com/pytorch/pytorch/issues/20287 for more details.")
+https://github.com/pytorch/pytorch/issues/20287 for more details.")]]
 */
 inline void deprecated_AT_ASSERTM() {}
 

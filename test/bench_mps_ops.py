@@ -3,6 +3,7 @@
 # Useful as reference tool when migrating ops from MPS to Metal
 import itertools
 import timeit
+import warnings
 from typing import Optional
 
 import torch
@@ -70,12 +71,48 @@ def bench_binary(
     return rc
 
 
+def bench_reduction(
+    reduction_func, device: str = "mps", dtype: torch.dtype = torch.float32
+) -> list[Measurement]:
+    rc = []
+
+    # Bench 2D with reduction over dim=0
+    def f(t):
+        return reduction_func(t, dim=0)
+
+    f.__name__ = reduction_func.__name__
+    f_c = torch.compile(f, dynamic=False)
+
+    for size in (512, 1024, 2048, 4096):
+        x = torch.testing.make_tensor(size, size, device=device, dtype=dtype)
+        rc_c, rc_e = f(x), f_c(x)
+        rc_c, rc_e = (rc_c[0], rc_e[0]) if isinstance(rc_c, tuple) else (rc_c, rc_e)
+        if not torch.allclose(rc_c, rc_e):
+            mdiff = (rc_c - rc_e).abs().max()
+            warnings.warn(
+                f"Eager and compile reduction do not match for {reduction_func.__name__} and {dtype} max_diff={mdiff}",
+                stacklevel=2,
+            )
+        rc.append(bench_unary_op(f, x, f"eager-{size}x{size}"))
+        rc.append(bench_unary_op(f_c, x, f"compile-{size}x{size}"))
+    return rc
+
+
 def main() -> None:
     dtypes = [torch.float16, torch.float32]
+    if torch.backends.mps.is_macos_or_newer(14, 0):
+        dtypes.append(torch.bfloat16)
+
     # Profile unary ops
     rc = []
     for op, dtype in itertools.product([torch.sqrt, torch.sin], dtypes):
         rc.extend(bench_unary(op, dtype=dtype))
+    Compare(rc).print()
+
+    # Profile reduction ops
+    rc = []
+    for op in [torch.sum, torch.max]:
+        rc.extend(bench_reduction(op))
     Compare(rc).print()
 
     # Profile binary ops
@@ -83,8 +120,8 @@ def main() -> None:
     ops = [torch.fmax, torch.add]
     for op, dtype in itertools.product(ops, dtypes):
         rc.extend(bench_binary(op, dt_a=dtype))
-    for op in ops:
-        rc.extend(bench_binary(op, dt_b=torch.float16))
+        if dtype == torch.float32:
+            rc.extend(bench_binary(op, dt_b=torch.float16))
     Compare(rc).print()
 
 

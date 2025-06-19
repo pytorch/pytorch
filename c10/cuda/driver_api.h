@@ -3,6 +3,14 @@
 #define NVML_NO_UNVERSIONED_FUNC_DEFS
 #include <nvml.h>
 
+#include <c10/util/Exception.h>
+
+#if defined(CUDA_VERSION)
+#define DEFAULT_CUDA_VERSION CUDA_VERSION
+#else
+#define DEFAULT_CUDA_VERSION 11080
+#endif
+
 #define C10_CUDA_DRIVER_CHECK(EXPR)                                        \
   do {                                                                     \
     CUresult __err = EXPR;                                                 \
@@ -43,12 +51,13 @@
 #define C10_LIBCUDA_DRIVER_API_12030(_)
 #endif
 
-#define C10_NVML_DRIVER_API(_)           \
-  _(nvmlInit_v2)                         \
-  _(nvmlDeviceGetHandleByPciBusId_v2)    \
-  _(nvmlDeviceGetNvLinkRemoteDeviceType) \
-  _(nvmlDeviceGetNvLinkRemotePciInfo_v2) \
-  _(nvmlDeviceGetComputeRunningProcesses)
+#define C10_NVML_DRIVER_API(_)            \
+  _(nvmlInit_v2)                          \
+  _(nvmlDeviceGetHandleByPciBusId_v2)     \
+  _(nvmlDeviceGetNvLinkRemoteDeviceType)  \
+  _(nvmlDeviceGetNvLinkRemotePciInfo_v2)  \
+  _(nvmlDeviceGetComputeRunningProcesses) \
+  _(nvmlSystemGetCudaDriverVersion_v2)
 
 namespace c10::cuda {
 
@@ -61,5 +70,8 @@ struct DriverAPI {
   static DriverAPI* get();
   static void* get_nvml_handle();
 };
+
+/*! \brief Get pointer corresponding to symbol in CUDA driver library */
+void* get_symbol(const char* symbol, int cuda_version = DEFAULT_CUDA_VERSION);
 
 } // namespace c10::cuda

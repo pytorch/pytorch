@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 from abc import ABC, abstractmethod
+from functools import cached_property
 from typing import Any
 
 import torch
@@ -79,6 +80,11 @@ class FuncTorchInterpreter(ABC):
     def check_state(self, state):
         return state == self.get_state()
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_cptr", None)
+        return state
+
 
 @contextlib.contextmanager
 def temporarily_pop_interpreter_stack():
@@ -123,7 +129,10 @@ class VmapInterpreter(FuncTorchInterpreter):
         # cdata is a generic CInterpreter. We wrap it in a CVmapInterpreterPtr
         # so that we can access methods specific to the vmap interpreter
         self._cdata = cdata
-        self._cptr = CVmapInterpreterPtr(cdata)
+
+    @cached_property
+    def _cptr(self):
+        return CVmapInterpreterPtr(self._cdata)
 
     def process(self, op, args, kwargs):
         kernel = op.functorch_table[TransformType.Vmap]
@@ -159,7 +168,10 @@ class GradInterpreter(FuncTorchInterpreter):
         assert cdata.key() == TransformType.Grad
         # See NOTE: [Interpreter cdata vs cptr]
         self._cdata = cdata
-        self._cptr = CGradInterpreterPtr(cdata)
+
+    @cached_property
+    def _cptr(self):
+        return CGradInterpreterPtr(self._cdata)
 
     def lift(self, args, kwargs):
         args, kwargs = pytree.tree_map_only(
@@ -193,7 +205,10 @@ class JvpInterpreter(FuncTorchInterpreter):
         assert cdata.key() == TransformType.Jvp
         # See NOTE: [Interpreter cdata vs cptr]
         self._cdata = cdata
-        self._cptr = CJvpInterpreterPtr(cdata)
+
+    @cached_property
+    def _cptr(self):
+        return CJvpInterpreterPtr(self._cdata)
 
     def lift(self, args, kwargs):
         args, kwargs = pytree.tree_map_only(
@@ -226,7 +241,10 @@ class FunctionalizeInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter):
         assert cdata.key() == TransformType.Functionalize
         self._cdata = cdata
-        self._cptr = CFunctionalizeInterpreterPtr(cdata)
+
+    @cached_property
+    def _cptr(self):
+        return CFunctionalizeInterpreterPtr(self._cdata)
 
     def process(self, op, args, kwargs):
         kernel = op.functorch_table[TransformType.Functionalize]

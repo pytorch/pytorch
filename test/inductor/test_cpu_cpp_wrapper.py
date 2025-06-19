@@ -189,7 +189,7 @@ if RUN_CPU:
         BaseTest(
             "test_conv2d_unary",
             "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcherGenericCPU(),
             condition=torch.backends.mkldnn.is_available(),
             slow=True,
         ),
@@ -220,9 +220,9 @@ if RUN_CPU:
         ],
         BaseTest("test_polar"),
         BaseTest(
-            "test_linear_binary",
+            "test_linear_binary_cpu",
             "",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcherGenericCPU(),
             torch.backends.mkldnn.is_available()
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
@@ -297,7 +297,7 @@ if RUN_CPU:
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
                 [
-                    "aoti_torch_cpu__qconv2d_pointwise_tensor",
+                    "aoti_torch_cpu__qconv_pointwise_tensor",
                     "torch.ops.quantized.max_pool2d",
                     "aoti_torch_cpu__qlinear_pointwise_tensor",
                 ]
@@ -359,7 +359,9 @@ if RUN_CPU:
         BaseTest("test_view_as_complex"),
         BaseTest("test_view_as_real"),
         BaseTest(
-            "test_woq_int4", "cpu", test_mkldnn_pattern_matcher.TestPatternMatcher()
+            "test_woq_int4",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
         ),
     ]:
         make_test_case(

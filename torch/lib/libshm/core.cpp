@@ -8,10 +8,10 @@
 #include <libshm/libshm.h>
 #include <libshm/socket.h>
 
-std::unordered_map<std::string, ClientSocket> managers;
-std::string manager_executable_path;
+static std::unordered_map<std::string, ClientSocket> managers;
+static std::string manager_executable_path;
 
-AllocInfo get_alloc_info(const char* filename) {
+static AllocInfo get_alloc_info(const char* filename) {
   AllocInfo info = {};
   info.pid = getpid();
   info.free = false;
@@ -23,7 +23,7 @@ AllocInfo get_alloc_info(const char* filename) {
   return info;
 }
 
-void start_manager() {
+static void start_manager() {
   std::array<int, 2> pipe_ends;
   SYSCHECK_ERR_RETURN_NEG1(pipe(pipe_ends.data()));
 
@@ -78,7 +78,7 @@ void start_manager() {
   managers.emplace(std::move(handle), std::move(manager));
 }
 
-ClientSocket& get_manager_socket(const std::string& manager_handle) {
+static ClientSocket& get_manager_socket(const std::string& manager_handle) {
   auto it = managers.find(manager_handle);
   if (it == managers.end()) {
     auto socket = ClientSocket(manager_handle);

@@ -501,3 +501,25 @@ def mutated_args_kwargs(schema: _C.FunctionSchema) -> tuple[list[int], list[str]
             else:
                 idxs.append(i)
     return idxs, keys
+
+
+tags_by_priority = [
+    _C.Tag.needs_exact_strides,
+    _C.Tag.needs_contiguous_strides,
+    _C.Tag.needs_fixed_stride_order,
+    _C.Tag.flexible_layout,
+]
+
+
+def get_layout_constraint_tag(fn, *, with_default=True):
+    for tag in tags_by_priority:
+        if tag in fn.tags:
+            return tag
+    if with_default:
+        if is_builtin(fn):
+            return _C.Tag.flexible_layout
+        import torch._functorch
+        from torch._functorch import config
+
+        return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
+    return None
