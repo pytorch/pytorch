@@ -2899,7 +2899,7 @@ class Scheduler:
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
 
             # Eagerly compile and benchmark non-template nodes
-            choice_timings = multi_node.choice_timings
+            choice_timings = multi_node.choice_timings()
             _, ms1 = multi_node.get_min_choice()
             ms2, path2 = (
                 self.benchmark_fused_nodes(node_list_2)
@@ -2974,8 +2974,22 @@ class Scheduler:
                 log_fusion(min_ms_fused, ms1, ms2)
 
                 if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
-                    multi_node.finalize_as_triton_caller(ms_fused_choice)
-                    multi_node._choice_timings = new_timings
+                    if config.multi_kernel_hints:
+                        # Generate callers for each hint override
+                        hint_override_best_choices = {}
+                        for hint_override in [None] + config.multi_kernel_hints:
+                            choice_timings = multi_node.choice_timings(hint_override)
+                            min_choice, _ = min(
+                                choice_timings.items(), key=lambda x: x[1]
+                            )
+                            hint_override_best_choices[hint_override] = min_choice
+                        multi_node.finalize_as_triton_callers(
+                            hint_override_best_choices
+                        )
+                    else:
+                        multi_node.finalize_as_triton_caller(ms_fused_choice)
+
+                    multi_node._choice_timings[None] = new_timings
                     return True
                 else:
                     return False
