@@ -120,11 +120,11 @@ def load_package(
             log.debug("Writing buffer to tmp file located at %s.", f.name)
             loader = torch._C._aoti.AOTIModelPackageLoader(
                 f.name, model_name, run_single_threaded, num_runners, device_index
-            )  # type: ignore[call-arg]
+            )
             return AOTICompiledModel(loader)
 
     path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
     loader = torch._C._aoti.AOTIModelPackageLoader(
         path, model_name, run_single_threaded, num_runners, device_index
-    )  # type: ignore[call-arg]
+    )
     return AOTICompiledModel(loader)
