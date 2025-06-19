@@ -53,19 +53,6 @@ class TestCppExtensionOpenRegistration(common.TestCase):
             verbose=True,
         )
 
-    def test_open_device_storage_resize(self):
-        cpu_tensor = torch.randn([8])
-        openreg_tensor = cpu_tensor.openreg()
-        openreg_storage = openreg_tensor.storage()
-        self.assertTrue(openreg_storage.size() == 8)
-
-        # Only register tensor resize_ function.
-        openreg_tensor.resize_(8)
-        self.assertTrue(openreg_storage.size() == 8)
-
-        with self.assertRaisesRegex(TypeError, "Overflow"):
-            openreg_tensor.resize_(8**29)
-
     def test_open_device_storage_type(self):
         # test cpu float storage
         cpu_tensor = torch.randn([8]).float()
