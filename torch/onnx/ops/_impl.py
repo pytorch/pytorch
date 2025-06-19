@@ -3,7 +3,6 @@ import typing
 from typing import Callable, Optional
 
 import torch
-from torch.nn.attention import flex_attention
 from torch.onnx.ops import _dtype_mappings
 
 
@@ -133,7 +132,7 @@ def _reshape_3d_to_4d(
     )
 
 
-def _get_qk_output(
+def _get_qk_output_for_aten_spda(
     Q: torch.Tensor,
     K: torch.Tensor,
     current_q_num_heads: int,
@@ -222,10 +221,10 @@ def attention_23(
 
     # Handle past key/value caches
     present_key = (
-        torch.cat([past_key, K], dim=sequence_dim) if past_key is not None else K
+        torch.cat([past_key, K], dim=sequence_dim) if past_key is not None else K.clone()
     )
     present_value = (
-        torch.cat([past_value, V], dim=sequence_dim) if past_value is not None else V
+        torch.cat([past_value, V], dim=sequence_dim) if past_value is not None else V.clone()
     )
 
     # Update K and V to include past states
@@ -267,7 +266,7 @@ def attention_23(
             enable_gqa=current_q_num_heads != current_kv_num_heads,
         )
 
-        qk_output = _get_qk_output(
+        qk_output = _get_qk_output_for_aten_spda(
             Q,
             K,
             current_q_num_heads,
