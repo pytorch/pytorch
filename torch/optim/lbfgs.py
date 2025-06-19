@@ -299,7 +299,7 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.no_grad()
-    def step(self, closure):
+    def step(self, closure):  # type: ignore[override]
         """Perform a single optimization step.
 
         Args:
