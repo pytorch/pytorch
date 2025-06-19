@@ -3478,7 +3478,7 @@ def _register_qlinear_binary_fusion():
             )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _register_quantization_weight_pack_pass():
     # Step 1: Dequant promotion for int8-mixed-fp32/bf16
     _register_dequant_promotion()

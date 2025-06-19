@@ -28,7 +28,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
-from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
@@ -494,7 +494,10 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta: dict[str, Any] = {
             "signature": signature_to_meta(
-                signature, size_dtype=self.index_dtype, argdefs=argdefs
+                signature,
+                size_dtype=self.index_dtype,
+                argdefs=argdefs,
+                is_template=True,
             ),
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
@@ -1121,7 +1124,7 @@ class TritonTemplateKernel(TritonKernel):
         ]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _jinja2_env():
     try:
         import jinja2
@@ -1288,7 +1291,7 @@ class TritonTemplate(KernelTemplate):
         self.debug = debug
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
-        clear_on_fresh_inductor_cache(self._generated_code_cache)
+        clear_on_fresh_cache(self._generated_code_cache)
         # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
         # by adding all inputs.
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
@@ -1723,7 +1726,7 @@ class ExternKernelChoice:
     def call_name(self):
         return f"extern_kernels.{self.name}"
 
-    @functools.lru_cache(None)  # noqa: B019
+    @functools.cache  # noqa: B019
     def hash_key(self):
         fn = self.to_callable()
         parts = [
@@ -1930,7 +1933,7 @@ class ExternKernelCaller(ChoiceCaller):
         return f"extern_{self.choice.name}"
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_mm_log_filename() -> Optional[str]:
     mm_file_name = os.environ.get("TORCHINDUCTOR_MM_LOGGING_FILE", None)
     if not mm_file_name:
@@ -2049,7 +2052,7 @@ class NoValidChoicesError(RuntimeError):
     pass
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_num_workers() -> int:
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
@@ -2060,6 +2063,15 @@ def get_num_workers() -> int:
         else os.cpu_count()
     )
     assert cpu_count
+
+    # Divide the number of CPUs by the number of GPUs for distributed workloads
+    if (
+        config.is_fbcode()
+        and torch.cuda.is_available()
+        and torch.cuda.device_count() > 0
+    ):
+        cpu_count = cpu_count // torch.cuda.device_count()
+
     return cpu_count
 
 
@@ -2119,11 +2131,14 @@ class AlgorithmSelectorCache(PersistentCache):
         self.precompile_cache: dict[str, Callable[[], None]] = {}
         # list of callbacks that are called after benchmarking
         self.feedback_saver_fns: list[FeedbackFunction] = []
+        # cache for prescreening results to ensure deterministic candidate selection
+        self.prescreening_cache: dict[str, OrderedSet[str]] = {}
 
-        clear_on_fresh_inductor_cache(self)
+        clear_on_fresh_cache(self)
 
     def cache_clear(self) -> None:
         self.precompile_cache.clear()
+        self.prescreening_cache.clear()
 
     def __call__(
         self,
@@ -2191,7 +2206,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
-        @functools.lru_cache(None)
+        @functools.cache
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
@@ -2200,20 +2215,24 @@ class AlgorithmSelectorCache(PersistentCache):
         def autotune(choices):
             log.debug("Starting autotuning")
 
-            autotune_data = {
-                "shape": ", ".join(
-                    ["x".join(map(str, n.get_size())) for n in input_nodes]
-                ),
-                "strides": ", ".join([str(n.get_stride()) for n in input_nodes]),
-                "dtypes": ", ".join([str(n.get_dtype()) for n in input_nodes]),
-                "offset": ", ".join([str(n.get_layout().offset) for n in input_nodes]),
-            }
-
             with dynamo_timed(
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
-                metadata={"autotune_data": autotune_data},
+                metadata={
+                    "autotune_strides": ", ".join(
+                        [str(n.get_stride()) for n in input_nodes]
+                    ),
+                    "autotune_dtypes": ", ".join(
+                        [str(n.get_dtype()) for n in input_nodes]
+                    ),
+                    "autotune_shape": ", ".join(
+                        ["x".join(map(str, n.get_size())) for n in input_nodes]
+                    ),
+                    "autotune_offset": ", ".join(
+                        [str(n.get_layout().offset) for n in input_nodes]
+                    ),
+                },
             ):
                 return make_benchmark_fn()(choices)
 
@@ -2232,7 +2251,10 @@ class AlgorithmSelectorCache(PersistentCache):
             precompile_elapse = time.time() - precompile_start_ts
             log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
 
-            candidates = self.prescreen_choices(choices)
+            candidates = self.prescreen_choices(
+                choices, name, inputs_key, self.prescreening_cache
+            )
+            prescreening_elapse: Optional[float] = None
             if candidates:
                 prescreening_start_ts = time.time()
                 timings = self.lookup(
@@ -2241,7 +2263,9 @@ class AlgorithmSelectorCache(PersistentCache):
                     inputs_key,
                     autotune,
                 )
-                choices = self.prune_choices_postscreen(choices, timings)
+                choices = self.prune_choices_postscreen(
+                    choices, timings, name, inputs_key, self.prescreening_cache
+                )
                 prescreening_elapse = time.time() - prescreening_start_ts
                 log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
 
@@ -2270,7 +2294,12 @@ class AlgorithmSelectorCache(PersistentCache):
                 or config.trace.log_autotuning_results
             ):
                 self.log_results(
-                    name, input_nodes, timings, autotune_elapse, precompile_elapse
+                    name,
+                    input_nodes,
+                    timings,
+                    autotune_elapse,
+                    precompile_elapse,
+                    prescreening_elapse,
                 )
 
             def profiler_bench_function():
@@ -2499,7 +2528,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 future.add_done_callback(on_complete)
                 futures[future] = c
 
-        @functools.lru_cache(None)
+        @functools.cache
         @restore_stdout_stderr()
         def wait_on_futures():
             log.debug("Waiting on futures")
@@ -2745,11 +2774,39 @@ class AlgorithmSelectorCache(PersistentCache):
     @staticmethod
     def prescreen_choices(
         choices: list[ChoiceCaller],
+        name: str,
+        inputs_key: str,
+        prescreen_cache: dict[str, OrderedSet[str]],
     ) -> list[ChoiceCaller]:
         """
-        Add prescreening phase. Motivation is to reduce the number of autotuning needed,
-        for example, when there are runtime params.
+        Figure out what choices need to be prescreened before autotuning with runtime
+        params.
+
+        Prescreening is a process of reducing the number of autotuning for choices with
+        runtime params via a two stage autotuning process. First, we fix a set of runtime
+        params (here we use swizzle=2) and run autotuning to get a set of candidates.
+        Then, we run autotuning again with the candidates and the full set of runtime
+        params.
+
+        Since have the concept of runtime params, we need to differentiate between
+        choice's hash_key and choice's kernel_hash_key. The former includes information
+        like runtime params, while the latter does not. prescreen_cache, if exists, stores
+        the set of hash_key that should win the prescreening.
+
+        Right now, only CUTLASS choices have runtime params.
         """
+        # Create a cache key for prescreening results
+        prescreen_key = f"{name}:{inputs_key}"
+
+        # Check if we have cached prescreening results (prescreen_winners)
+        if prescreen_key in prescreen_cache:
+            prescreen_winners = [
+                choice
+                for choice in choices
+                if choice.hash_key() in prescreen_cache[prescreen_key]
+            ]
+            return prescreen_winners
+
         # prescreen cutlass
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -2778,40 +2835,89 @@ class AlgorithmSelectorCache(PersistentCache):
     def prune_choices_postscreen(
         choices: list[ChoiceCaller],
         candidate_timings: dict[ChoiceCaller, float],
+        name: str,
+        inputs_key: str,
+        prescreen_cache: dict[str, OrderedSet[str]],
     ) -> list[ChoiceCaller]:
         """
         Prune the choices after prescreening.
         """
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
-        if len(candidate_timings) < 10:
-            return []
+        prescreen_key = f"{name}:{inputs_key}"
+
+        # Check if we have cached postscreen results
+        if prescreen_key in prescreen_cache:
+            # candidate_timings are from choices that have won prescreening already
+            winner_kernel_hashes = [
+                candidate.kernel_hash_key() for candidate in candidate_timings
+            ]
+
+            pruned_choices = [
+                choice
+                for choice in choices
+                if not isinstance(choice, CUDATemplateCaller)
+                or choice.kernel_hash_key() in winner_kernel_hashes
+            ]
+            return pruned_choices
 
         log.debug("Before pruning using prescreening timings, %d choices", len(choices))
         sorted_candidates = sorted(
             candidate_timings.keys(), key=lambda choice: candidate_timings[choice]
         )
+
+        # Print prescreening timings
+        if (
+            candidate_timings
+            and PRINT_AUTOTUNE
+            and config.autotune_num_choices_displayed != 0
+        ):
+            n = config.autotune_num_choices_displayed
+            top_k = sorted_candidates[:n]
+            best = top_k[0]
+            best_time = candidate_timings[best]
+
+            lines = ["PRESCREENING CANDIDATE TIMINGS"]
+            for choice in top_k:
+                result = candidate_timings[choice]
+                if result:
+                    lines.append(
+                        f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {choice.description}"
+                    )
+                else:
+                    lines.append(
+                        f"  {choice.name} {result:.4f} ms <DIVIDED BY ZERO ERROR>"
+                    )
+
+            log.info("\n".join(lines))
         num_to_keep = max(int(math.sqrt(len(choices)) / 4), 8)
 
         # prune choices based on prescreening timings
         candidates_to_prune = OrderedSet(
             candidate.kernel_hash_key() for candidate in sorted_candidates[num_to_keep:]
         )
+        winner_hashes: OrderedSet[str] = OrderedSet()
         for candidate in sorted_candidates[:num_to_keep]:
             if candidate_timings[candidate] == float("inf"):
                 candidates_to_prune.add(candidate.kernel_hash_key())
             else:
+                winner_hashes.add(candidate.hash_key())
                 if isinstance(candidate, CUDATemplateCaller):
                     candidate.bmreq.ensure_dll_loaded()
 
-        choices = [
+        pruned_choices = [
             choice
             for choice in choices
             if choice.kernel_hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
         ]
 
-        log.debug("After pruning using prescreening timings, %d choices", len(choices))
-        return choices
+        # Cache the hash_key of winners of prescreening
+        prescreen_cache[prescreen_key] = winner_hashes
+
+        log.debug(
+            "After pruning using prescreening timings, %d choices", len(pruned_choices)
+        )
+        return pruned_choices
 
     @staticmethod
     def log_results(
@@ -2820,6 +2926,7 @@ class AlgorithmSelectorCache(PersistentCache):
         timings: dict[ChoiceCaller, float],
         elapse: float,
         precompile_elapse: float,
+        prescreening_elapse: Optional[float] = None,
     ):
         V.debug.log_autotuning_results(
             name, input_nodes, timings, elapse, precompile_elapse
@@ -2908,9 +3015,16 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
+        prescreening_msg = (
+            f" and {prescreening_elapse:.4f} seconds prescreening"
+            if prescreening_elapse is not None
+            else ""
+        )
         sys.stderr.write(
             f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f}"
-            f" seconds precompiling for {len(timings)} choices\n"
+            f" seconds precompiling for {len(timings)} choices"
+            + prescreening_msg
+            + "\n"
         )
 
     @staticmethod

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._logging import trace_structured
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
@@ -112,42 +113,52 @@ def reorder_communication_preserving_peak_memory(
     improvement = {snode: node_stats[snode].improvement for snode in node_stats}
     total_improvement = sum([improvement[snode] for snode in improvement])
     total_moves = sum([node_stats[snode].moves for snode in node_stats])
-    overlap_log.info(
-        "reorder_communication_preserving_peak_memory improved overlap by %f ns after %d reorders",
-        total_improvement,
-        total_moves,
-    )
 
+    reorder_log_str = (
+        f"reorder_communication_preserving_peak_memory improved overlap by {total_improvement} ns"
+        f" after {total_moves} reorders.\n"
+    )
+    headers = [
+        "Collective node",
+        "initial exposed",
+        "final exposed",
+        "improvement",
+        "limiting factor",
+        "moves",
+    ]
+    rows = [
+        [
+            node_summary(snode),
+            node_reorder_info.initial_exposed,
+            node_reorder_info.final_exposed,
+            node_reorder_info.improvement,
+            node_reorder_info.limiting_factor,
+            node_reorder_info.moves,
+        ]
+        for snode, node_reorder_info in node_stats.items()
+    ]
     if importlib.util.find_spec("tabulate"):
         from tabulate import tabulate
 
-        overlap_log.info(
-            tabulate(
-                [
-                    [
-                        node_summary(snode),
-                        node_reorder_info.initial_exposed,
-                        node_reorder_info.final_exposed,
-                        node_reorder_info.improvement,
-                        node_reorder_info.limiting_factor,
-                        node_reorder_info.moves,
-                    ]
-                    for snode, node_reorder_info in node_stats.items()
-                ],
-                headers=[
-                    "Collective node",
-                    "initial exposed",
-                    "final exposed",
-                    "improvement",
-                    "limiting factor",
-                    "moves",
-                ],
-            )
+        reorder_log_str += tabulate(
+            rows,
+            headers=headers,
         )
     else:
-        overlap_log.info(
-            "Please `pip install tabulate` to nicely render overlap stats."
+        reorder_log_str += (
+            "Please `pip install tabulate` to nicely render overlap stats.\n"
         )
+        reorder_log_str += str(headers) + "\n"
+        reorder_log_str += "\n".join(map(str, rows))
+    overlap_log.info(reorder_log_str)
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "reorder_communication_preserving_peak_memory",
+            "encoding": "string",
+        },
+        payload_fn=lambda: reorder_log_str,
+    )
 
     return reordered_snodes
 
@@ -813,6 +824,8 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
                     KeywordArg("rank"),
                     KeywordArg("dtype"),
                     KeywordArg("device"),
+                    KeywordArg("group_name_inner"),
+                    KeywordArg("allocate_memory_from_process_group"),
                 ),
                 KeywordArg("item_idx"),
             ),
@@ -851,6 +864,8 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
                 kwargs["rank"],
                 kwargs["dtype"],
                 kwargs["device"],
+                kwargs["group_name_inner"],
+                kwargs["allocate_memory_from_process_group"],
                 kwargs["group_size"],
                 kwargs["group_name"],
             ],

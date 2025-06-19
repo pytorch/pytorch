@@ -621,19 +621,18 @@ class Tensor(torch._C.TensorBase):
         Args:
             gradient (Tensor, optional): The gradient of the function
                 being differentiated w.r.t. ``self``.
-                This argument can be omitted if ``self`` is a scalar.
-            retain_graph (bool, optional): If ``False``, the graph used to compute
-                the grads will be freed. Note that in nearly all cases setting
-                this option to True is not needed and often can be worked around
-                in a much more efficient way. Defaults to the value of
-                ``create_graph``.
+                This argument can be omitted if ``self`` is a scalar. Defaults to ``None``.
+            retain_graph (bool, optional): If ``False``, the graph used to compute the grads will be freed;
+                If ``True``, it will be retained. The default is ``None``, in which case the value is inferred from ``create_graph``
+                (i.e., the graph is retained only when higher-order derivative tracking is requested). Note that in nearly all cases
+                setting this option to True is not needed and often can be worked around in a much more efficient way.
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
-            inputs (sequence of Tensor, optional): Inputs w.r.t. which the gradient will be
+            inputs (Sequence[Tensor], optional): Inputs w.r.t. which the gradient will be
                 accumulated into ``.grad``. All other tensors will be ignored. If not
                 provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the :attr:`tensors`.
+                used to compute the :attr:`tensors`. Defaults to ``None``.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(
