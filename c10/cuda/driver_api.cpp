@@ -1,4 +1,5 @@
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/driver_api.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
@@ -41,45 +42,11 @@ C10_EXPORT DriverAPI* DriverAPI::get() {
   return &singleton;
 }
 
-typedef cudaError_t (*VersionedGetEntryPoint)(
-    const char*,
-    void**,
-    unsigned int,
-    unsigned long long, // NOLINT(*)
-    cudaDriverEntryPointQueryResult*);
-typedef cudaError_t (*GetEntryPoint)(
-    const char*,
-    void**,
-    unsigned long long, // NOLINT(*)
-    cudaDriverEntryPointQueryResult*);
-
-void* get_symbol(const char* symbol, int cuda_version) {
-  // We link to the libcudart.so already, so can search for it in the current
-  // context
-  static GetEntryPoint driver_entrypoint_fun = reinterpret_cast<GetEntryPoint>(
-      dlsym(RTLD_DEFAULT, "cudaGetDriverEntryPoint"));
-  static VersionedGetEntryPoint driver_entrypoint_versioned_fun =
-      reinterpret_cast<VersionedGetEntryPoint>(
-          dlsym(RTLD_DEFAULT, "cudaGetDriverEntryPointByVersion"));
-
+void* get_symbol(const char* symbol) {
   cudaDriverEntryPointQueryResult driver_result{};
   void* entry_point = nullptr;
-  if (driver_entrypoint_versioned_fun != nullptr) {
-    // Found versioned entrypoint function
-    cudaError_t result = driver_entrypoint_versioned_fun(
-        symbol, &entry_point, cuda_version, cudaEnableDefault, &driver_result);
-    TORCH_CHECK(
-        result == cudaSuccess,
-        "Error calling cudaGetDriverEntryPointByVersion");
-  } else {
-    TORCH_CHECK(
-        driver_entrypoint_fun != nullptr,
-        "Error finding the CUDA Runtime-Driver interop.");
-    // Versioned entrypoint function not found
-    cudaError_t result = driver_entrypoint_fun(
-        symbol, &entry_point, cudaEnableDefault, &driver_result);
-    TORCH_CHECK(result == cudaSuccess, "Error calling cudaGetDriverEntryPoint");
-  }
+  C10_CUDA_CHECK(cudaGetDriverEntryPoint(
+      symbol, &entry_point, cudaEnableDefault, &driver_result));
   TORCH_CHECK(
       driver_result == cudaDriverEntryPointSuccess,
       "Could not find CUDA driver entry point for ",
