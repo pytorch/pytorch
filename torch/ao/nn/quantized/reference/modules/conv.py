@@ -110,7 +110,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         return "QuantizedConv1d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
         return _ConvNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -173,7 +173,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         return "QuantizedConv2d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
         return _ConvNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -236,7 +236,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         return "QuantizedConv3d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
         return _ConvNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -346,7 +346,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         return "QuantizedConvTranspose1d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
         return _ConvTransposeNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -427,7 +427,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         return "QuantizedConvTranspose2d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
         return _ConvTransposeNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -507,5 +507,5 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         return "QuantizedConvTranspose3d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
         return _ConvTransposeNd.from_float(cls, float_conv, weight_qparams)
