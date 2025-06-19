@@ -1,7 +1,7 @@
 # TorchScript-based ONNX Exporter
 
 ```{note}
-    To export an ONNX model using TorchDynamo instead of TorchScript, please see :doc:`Learn more about the TorchDynamo-based ONNX Exporter <onnx_dynamo>`
+    To export an ONNX model using TorchDynamo instead of TorchScript, please see {doc}`Learn more about the TorchDynamo-based ONNX Exporter <onnx_dynamo>`
 ```
 
 ```{contents}
