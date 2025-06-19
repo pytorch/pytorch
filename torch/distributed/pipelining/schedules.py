@@ -603,21 +603,6 @@ class ScheduleGPipe(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
         )
         
-        # Compatibility property for single-stage interface
-        self._stage = stage
-        self._stage_initialized = False
-        
-        # Set attributes for pipeline runtime compatibility
-        self.pp_group_size = stage.group_size
-        self.rank = stage.group_rank
-        self._num_stages = stage.num_stages
-        
-        # Set stage mapping for consistency with multi-stage schedules
-        self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
-            self.pp_group_size, self._num_stages
-        )
-        stage.stage_index_to_group_rank = self.stage_index_to_group_rank
-        
         # Generate pipeline_order for GPipe schedule (after parent init)
         self.pipeline_order = self._generate_gpipe_schedule()
         # Load the actions into the runtime
@@ -646,43 +631,6 @@ class ScheduleGPipe(_PipelineScheduleRuntime):
         
         return pipeline_order
 
-    def step(self, *args, target=None, losses: Optional[list] = None, **kwargs):
-        """
-        Run one iteration of the pipeline schedule with *whole-batch* input.
-        Will chunk the input into microbatches automatically, and go through the
-        microbatches according to the schedule implementation.
-
-        args: positional arguments to the model (as in non-pipeline case).
-        kwargs: keyword arguments to the model (as in non-pipeline case).
-        target: target for the loss function.
-        losses: a list to store the losses for each microbatch.
-        """
-
-        # Clean per iteration
-        self._stage.clear_runtime_states()
-
-        # Split inputs into microbatches
-        args_split, kwargs_split = self._split_inputs(args, kwargs)
-
-        # Split target into microbatches
-        if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
-        else:
-            targets_split = None
-
-        # Run microbatches
-        self._step_microbatches(args_split, kwargs_split, targets_split, losses)
-
-        # Return merged results per original format
-        if self._stage.is_last:
-            return self._merge_outputs(self._stage.output_chunks)
-
-    def _initialize_stage(self, args, kwargs):
-        self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
-        if self._has_backward:
-            self._stage._prepare_backward_infra(self._n_microbatches)
-        self._stage_initialized = True
-
     def _step_microbatches(
         self,
         arg_mbs: Optional[list] = None,
@@ -693,9 +641,6 @@ class ScheduleGPipe(_PipelineScheduleRuntime):
         """
         Run one iteration of the pipeline schedule with list of microbatches.
         Will go through all the microbatches according to the GPipe schedule.
-
-        Args:
-            microbatches: list of microbatch args.
         """
         # Call the parent _PipelineScheduleRuntime._step_microbatches method
         super()._step_microbatches(arg_mbs, kwarg_mbs, target_mbs, losses)
@@ -728,21 +673,6 @@ class Schedule1F1B(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
         )
         
-        # Compatibility property for single-stage interface
-        self._stage = stage
-        self._stage_initialized = False
-        
-        # Set attributes for pipeline runtime compatibility
-        self.pp_group_size = stage.group_size
-        self.rank = stage.group_rank
-        self._num_stages = stage.num_stages
-        
-        # Set stage mapping for consistency with multi-stage schedules
-        self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
-            self.pp_group_size, self._num_stages
-        )
-        stage.stage_index_to_group_rank = self.stage_index_to_group_rank
-        
         # Generate pipeline_order for 1F1B schedule (after parent init)
         self.pipeline_order = self._generate_1f1b_schedule()
         # Load the actions into the runtime
@@ -758,71 +688,21 @@ class Schedule1F1B(_PipelineScheduleRuntime):
         
         rank_ops: list[Optional[_Action]] = []
         
-        # Warmup: forward passes
-        warmup_chunks = min(self._n_microbatches, self.pp_group_size - current_rank)
-        for mb_idx in range(warmup_chunks):
+        # For single-stage 1F1B, this degenerates to: forwards then backwards
+        # In multi-stage pipelines, 1F1B has warmup/steady-state/cooldown phases
+        
+        # Forward passes
+        for mb_idx in range(self._n_microbatches):
             rank_ops.append(_Action(stage_idx, FORWARD, mb_idx))
         
-        # 1B1F phase: interleaved backward and forward
-        fwd_mb_index = warmup_chunks
-        bwd_mb_index = 0
-        
-        while fwd_mb_index < self._n_microbatches and bwd_mb_index < warmup_chunks:
-            # Backward first
-            if self._has_backward:
-                rank_ops.append(_Action(stage_idx, FULL_BACKWARD, bwd_mb_index))
-            bwd_mb_index += 1
-            
-            # Then forward
-            rank_ops.append(_Action(stage_idx, FORWARD, fwd_mb_index))
-            fwd_mb_index += 1
-        
-        # Cooldown: remaining backward passes
+        # Backward passes
         if self._has_backward:
-            while bwd_mb_index < self._n_microbatches:
-                rank_ops.append(_Action(stage_idx, FULL_BACKWARD, bwd_mb_index))
-                bwd_mb_index += 1
+            for mb_idx in range(self._n_microbatches):
+                rank_ops.append(_Action(stage_idx, FULL_BACKWARD, mb_idx))
         
         pipeline_order[current_rank] = rank_ops
         
         return pipeline_order
-
-    def step(self, *args, target=None, losses: Optional[list] = None, **kwargs):
-        """
-        Run one iteration of the pipeline schedule with *whole-batch* input.
-        Will chunk the input into microbatches automatically, and go through the
-        microbatches according to the schedule implementation.
-
-        args: positional arguments to the model (as in non-pipeline case).
-        kwargs: keyword arguments to the model (as in non-pipeline case).
-        target: target for the loss function.
-        losses: a list to store the losses for each microbatch.
-        """
-
-        # Clean per iteration
-        self._stage.clear_runtime_states()
-
-        # Split inputs into microbatches
-        args_split, kwargs_split = self._split_inputs(args, kwargs)
-
-        # Split target into microbatches
-        if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
-        else:
-            targets_split = None
-
-        # Run microbatches
-        self._step_microbatches(args_split, kwargs_split, targets_split, losses)
-
-        # Return merged results per original format
-        if self._stage.is_last:
-            return self._merge_outputs(self._stage.output_chunks)
-
-    def _initialize_stage(self, args, kwargs):
-        self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
-        if self._has_backward:
-            self._stage._prepare_backward_infra(self._n_microbatches)
-        self._stage_initialized = True
 
     def _step_microbatches(
         self,
@@ -834,9 +714,6 @@ class Schedule1F1B(_PipelineScheduleRuntime):
         """
         Run one iteration of the pipeline schedule with list of microbatches.
         Will go through all the microbatches according to the 1F1B schedule.
-
-        Args:
-            microbatches: list of microbatch args.
         """
         # Call the parent _PipelineScheduleRuntime._step_microbatches method
         super()._step_microbatches(arg_mbs, kwarg_mbs, target_mbs, losses)
