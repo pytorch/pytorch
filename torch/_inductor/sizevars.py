@@ -422,7 +422,7 @@ class SizeVarAllocator:
             assert bool(static_expr)
             return left
 
-        assert self.shape_env.defer_runtime_assert(expr, "guard_equals")
+        assert self.shape_env.guard_or_defer_runtime_assert(expr, "guard_equals")
         return left
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
@@ -436,7 +436,7 @@ class SizeVarAllocator:
             assert bool(static_expr)
             return
 
-        assert self.shape_env.defer_runtime_assert(expr, "guard_lt")
+        assert self.shape_env.guard_or_defer_runtime_assert(expr, "guard_lt")
 
     def guarded_order(self, seq):
         """
