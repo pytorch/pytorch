@@ -393,8 +393,7 @@ class MultiKernelCall:
         if self.picked_kernel is None:
 
             cache_key = self._get_shape_cache_key(*args, **kwargs)
-            cached_choice = self._get_cached_shape_choice(shape_key)
-
+            cached_choice = self._get_cached_shape_choice(cache_key)
 
             if cached_choice is not None:
                 self.picked_kernel = cached_choice

@@ -1615,7 +1615,7 @@ class SIMDScheduling(BaseScheduling):
                 else:
                     kernel = self._codegen_single_template(
                         kernel, render, template_node, epilogue_nodes, prologue_nodes,
-                        only_gen_src_code=True
+                        only_gen_src_code=False
                     )
                     kernels.append(kernel)
 
@@ -1627,7 +1627,7 @@ class SIMDScheduling(BaseScheduling):
             node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
             self.codegen_comment(node_schedule)
 
-            multi_kernel.call_kernel(multi_kernel.kernel_name, template_node.node)
+            multi_kernel.call_kernel(multi_kernel.kernel_name)
         else:
             kernel, render = template_node.node.make_kernel_render(template_node.node)
 

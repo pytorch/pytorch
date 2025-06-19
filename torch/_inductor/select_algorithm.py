@@ -2165,7 +2165,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
-        @functools.lru_cache(None)
+        @functools.cache
         def make_benchmark_fn(hint_override: Optional[int] = None):
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns, hint_override=hint_override)
 
