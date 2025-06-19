@@ -88,6 +88,28 @@ def accumulate_grad(x, new_grad):
         x.grad.add_(new_grad_strided)
 
 
+class _IterSentinel:
+    def __init__(self, fn, sentinel):
+        self.fn = fn
+        self.sentinel = sentinel
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        r = self.fn()
+        if r == self.sentinel:
+            raise StopIteration
+        return r
+
+
+def iter_sentinel(fn, sentinel):
+    if not isinstance(fn, Callable):
+        raise TypeError("iter(v, w): v must be a callable")
+
+    return _IterSentinel(fn, sentinel)
+
+
 def iter_protocol(iterable):
     if hasattr(iterable, "__iter__"):
         return iterable.__iter__()
