@@ -3526,9 +3526,16 @@ def _is_valid_concat_linear_woq_int4_fusion(computation_nodes):
 def concat_linear_woq_int4(gm: torch.fx.GraphModule):
     """
     Concat Linear optimization pass for WOQ int4
+    This pass fuses the original pattern:
+    def ...
+        return (woq_int4(x, w1, group_size, scale_zp1), woq_int4(x, w2, group_size, scale_zp1) ...)
+    into a single operation:
+    def ...
+        concat_res = woq_int4(x, concat_w, group_size, concat_scale_zp)
+        return split(concat_res, split_size_list)
     """
 
-    def concat_wgt(packed_wgts, scale_zps, group_size):
+    def concat_wgt(packed_wgts, scale_zps, group_size, act_dtype):
         # Concat the wgts and scale_zps, and repack the wgt
         unpacked_wgts = []
         for packed_wgt in packed_wgts:
@@ -3536,10 +3543,10 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
             # Same as https://github.com/pytorch/pytorch/pull/156174
             K = packed_wgt.size(1) * 2
             N = packed_wgt.size(0)
-            x = torch.eye(K).bfloat16()
+            x = torch.eye(K).to(dtype=act_dtype)
             qscales_and_zeros = (
                 torch.tensor([1.0, 8.0])
-                .bfloat16()
+                .to(dtype=act_dtype)
                 .expand(K // group_size, N, 2)
                 .contiguous()
             )
@@ -3582,7 +3589,7 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
                         packed_wgt.size(0) for packed_wgt in packed_wgts
                     ]
                     repack_w, concat_scale_zp = concat_wgt(
-                        packed_wgts, scale_zps, group_size
+                        packed_wgts, scale_zps, group_size, act.meta.get("val").dtype
                     )
                     repack_w_node_name = computation_node_0.args[1].target + "_concat"
                     concat_scale_zp_node_name = (
