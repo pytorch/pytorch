@@ -630,31 +630,16 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   for (size_t step = 0; step < k_world_size; ++step) {
     size_t remote_rank = (rank + step) % k_world_size;
     size_t remote_start = numel_per_rank * remote_rank;
-    if (remote_start + offset >= numel) {
-      continue;
-    }
     ptr_vec[step] = input_ptrs[remote_rank];
   }
   for (size_t i = offset; i < numel_per_rank; i += stride) {
     Vec<alignment> tmp[k_world_size];
-    if ( (k_world_size-1) * numel_per_rank + 1 < numel)
 #pragma unroll k_world_size
     for (size_t step = 0; step < k_world_size; ++step) {
       size_t remote_rank = (rank + step) % k_world_size;
       size_t remote_start = numel_per_rank * remote_rank;
       tmp[step] = at::native::memory::ld_vec<alignment>(
-          ptr_vec[step] + input_offset + remote_start + i);
-    }
-    else
-#pragma unroll k_world_size
-    for (size_t step = 0; step < k_world_size; ++step) {
-      size_t remote_rank = (rank + step) % k_world_size;
-      size_t remote_start = numel_per_rank * remote_rank;
-      if (remote_start + i >= numel) {
-        continue;
-      }
-      tmp[step] = at::native::memory::ld_vec<alignment>(
-          ptr_vec[step] + input_offset + remote_start + i);
+          ptr_vec[step] + input_offset + max(remote_start + i, numel-1));
     }
 #else
   for (size_t i = offset; i < numel_per_rank; i += stride) {
