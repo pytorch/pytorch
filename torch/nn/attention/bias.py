@@ -36,14 +36,14 @@ class CausalVariant(IntEnum):
 
     Defines two types of causal biases:
 
-    `UPPER_LEFT`: Represents upper-left triangular bias for standard causal attention.
+    ``UPPER_LEFT``: Represents upper-left triangular bias for standard causal attention.
     The equivalent pytorch code for constructing this bias is:
 
     .. code-block:: python
 
         torch.tril(torch.ones(size, dtype=torch.bool))
 
-    For instance, with `shape=(3,4)`, the materialized bias tensor will be:
+    For instance, with ``shape=(3,4)``, the materialized bias tensor will be:
 
     .. code-block:: text
 
@@ -52,7 +52,7 @@ class CausalVariant(IntEnum):
          [1, 1, 1, 0]]
 
 
-    `LOWER_RIGHT`: Represents lower-right triangular bias, the include values are aligned to the lower
+    ``LOWER_RIGHT``: Represents lower-right triangular bias, the include values are aligned to the lower
     right corner of the matrix.
 
     The equivalent pytorch code for constructing this bias is:
@@ -65,7 +65,7 @@ class CausalVariant(IntEnum):
             diagonal=diagonal_offset,
         )
 
-    For instance, with `shape=(3,4)`, the materialized bias tensor will be:
+    For instance, with ``shape=(3,4)``, the materialized bias tensor will be:
 
     .. code-block:: text
 

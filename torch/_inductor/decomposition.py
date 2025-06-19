@@ -856,7 +856,7 @@ def miopen_batch_norm(
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
     return {**decompositions, **extra_random_decomps}
 

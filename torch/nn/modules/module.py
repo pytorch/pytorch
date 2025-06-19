@@ -954,9 +954,13 @@ class Module:
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
+            from torch._subclasses.fake_tensor import FakeTensor
+
             # subclasses may have multiple child tensors so we need to use swap_tensors
             p_should_use_swap_tensors = (
-                should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
+                should_use_swap_tensors
+                or is_traceable_wrapper_subclass(param_applied)
+                or isinstance(param, FakeTensor)
             )
 
             param_grad = param.grad

@@ -199,7 +199,7 @@ banned_attrs = [
 ]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_prev_stack_var_name():
     from ..bytecode_transformation import unique_id
 

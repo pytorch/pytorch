@@ -99,7 +99,7 @@ on:
           commit with no cpp changes from this commit
         required: false
         type: boolean
-        default: false
+        default: true
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:

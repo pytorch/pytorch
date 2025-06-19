@@ -1552,7 +1552,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 return y.reshape(*x_shape[:-1], out_features)
 
         counters.clear()
-        seq_len = 8
+        seq_len = 4
         x = torch.rand((batch_size, seq_len, in_features), dtype=dtype)
         mod = M(in_features, out_features, group_size).eval()
         self.common(mod, (x,), reference_in_float=False)
@@ -1570,7 +1570,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
-    @parametrize("batch_size", (4, 6))
+    @parametrize("batch_size", (1, 4, 6))
     @parametrize("in_features", (128, 1024))
     @parametrize("out_features", (128, 1024))
     @parametrize("group_size", (32, 64, 128))
@@ -2674,16 +2674,22 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     def test_bmm_with_pointwise_with_reshape_dynamic_shapes(
         self, bs, Mdim, Kdim, Ndim, dtype
     ):
+        from torch.fx.experimental.symbolic_shapes import guard_scalar
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.epilogue = torch.nn.ReLU()
 
             def forward(self, x, other, noise):
-                result = x.reshape(-1, Mdim, Kdim) @ other.reshape(-1, Kdim, Ndim)
+                # we do not want to to have Mdim, Kdim and Ndim dynamic so we force specialize them.
+                result = x.reshape(
+                    -1, guard_scalar(Mdim), guard_scalar(Kdim)
+                ) @ other.reshape(-1, guard_scalar(Kdim), guard_scalar(Ndim))
                 return self.epilogue(result) + noise
 
         counters.clear()
+
         u = torch.randn(bs, 8, Mdim, Kdim).to(dtype=dtype)
         v = torch.randn(bs, 8, Kdim, Ndim).to(dtype=dtype)
         noise = torch.randn(bs * 8, Mdim, Ndim).to(dtype=dtype)

@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
-from torch._C import _set_backcompat_broadcast_warn
-from torch._C import _get_backcompat_broadcast_warn
-from torch._C import _set_backcompat_keepdim_warn
-from torch._C import _get_backcompat_keepdim_warn
+from torch._C import (
+    _get_backcompat_broadcast_warn,
+    _get_backcompat_keepdim_warn,
+    _set_backcompat_broadcast_warn,
+    _set_backcompat_keepdim_warn,
+)
 
 
 class Warning:
@@ -18,5 +20,8 @@ class Warning:
 
     enabled = property(get_enabled, set_enabled)
 
-broadcast_warning = Warning(_set_backcompat_broadcast_warn, _get_backcompat_broadcast_warn)
+
+broadcast_warning = Warning(
+    _set_backcompat_broadcast_warn, _get_backcompat_broadcast_warn
+)
 keepdim_warning = Warning(_set_backcompat_keepdim_warn, _get_backcompat_keepdim_warn)

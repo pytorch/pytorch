@@ -31,7 +31,11 @@ from torch.testing._internal.logging_utils import log_settings, logs_to_string
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
-from torch.utils._triton import has_triton_package, has_triton_tma
+from torch.utils._triton import (
+    has_triton_experimental_host_tma,
+    has_triton_package,
+    has_triton_tensor_descriptor_host_tma,
+)
 
 
 if HAS_GPU:
@@ -1683,12 +1687,22 @@ def forward(self, x_1, output_1):
         self.assertEqual(out3, z**2)
 
     @requires_gpu
-    @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
     @common_utils.parametrize("dynamic", [False, True])
-    def test_tma_capture_and_functionalize(self, dynamic):
+    @common_utils.parametrize("tma_version", ["new", "old"])
+    def test_tma_capture_and_functionalize(self, dynamic, tma_version):
+        if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+        if tma_version == "old" and not has_triton_experimental_host_tma():
+            self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
         kernel_side_table.reset_table()
+        kernel = (
+            add_kernel_with_tma_1d_new_api
+            if tma_version == "new"
+            else add_kernel_with_tma_1d_old_api
+        )
 
         def f(a, b):
             BLOCK_SIZE = 256
@@ -1696,17 +1710,14 @@ def forward(self, x_1, output_1):
             n_elements = out.numel()
 
             desc_a, desc_b, desc_out = (
-                triton.tools.experimental_descriptor.create_1d_tma_descriptor(
-                    t.data_ptr(),
-                    n_elements,
-                    BLOCK_SIZE,
-                    t.element_size(),
+                create_tensor_descriptor_shim(
+                    t, [BLOCK_SIZE], new_api=(tma_version == "new")
                 )
                 for t in (a, b, out)
             )
 
             grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel_with_tma_1d[grid](
+            kernel[grid](
                 desc_a,
                 desc_b,
                 desc_out,
@@ -1719,6 +1730,7 @@ def forward(self, x_1, output_1):
         b = torch.randn(301, device=GPU_TYPE)
 
         backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        _ = f(a, b)
         torch.compile(
             f,
             fullgraph=True,
@@ -1751,10 +1763,21 @@ def forward(self, arg0_1, arg1_1):
             )
 
     @requires_gpu
-    @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
     @common_utils.parametrize("after_data_ptr", [False, True])
     @common_utils.parametrize("after_create_desc", [False, True])
-    def test_tma_graph_breaks(self, after_data_ptr, after_create_desc):
+    @common_utils.parametrize("tma_version", ["new", "old"])
+    def test_tma_graph_breaks(self, after_data_ptr, after_create_desc, tma_version):
+        if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+        if tma_version == "old" and not has_triton_experimental_host_tma():
+            self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+
+        kernel = (
+            add_kernel_with_tma_1d_new_api
+            if tma_version == "new"
+            else add_kernel_with_tma_1d_old_api
+        )
+
         def f(a, b):
             BLOCK_SIZE = 256
             out = torch.zeros_like(a)
@@ -1764,11 +1787,8 @@ def forward(self, arg0_1, arg1_1):
                 torch._dynamo.graph_break()
 
             descs = [
-                triton.tools.experimental_descriptor.create_1d_tma_descriptor(
-                    t.data_ptr(),
-                    n_elements,
-                    BLOCK_SIZE,
-                    t.element_size(),
+                create_tensor_descriptor_shim(
+                    t, [BLOCK_SIZE], new_api=(tma_version == "new")
                 )
                 for t in (a, b, out)
             ]
@@ -1777,7 +1797,7 @@ def forward(self, arg0_1, arg1_1):
                 torch._dynamo.graph_break()
 
             grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel_with_tma_1d[grid](
+            kernel[grid](
                 *descs,
                 BLOCK_SIZE=BLOCK_SIZE,
             )
@@ -1800,27 +1820,35 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(compiled_out, expected_out)
 
     @requires_gpu
-    @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
-    def test_tma_descriptor_1d(self, dynamic, backend):
+    @common_utils.parametrize("tma_version", ["new", "old"])
+    def test_tma_descriptor_1d(self, dynamic, backend, tma_version):
+        if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+        if tma_version == "old" and not has_triton_experimental_host_tma():
+            self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+
+        kernel = (
+            add_kernel_with_tma_1d_new_api
+            if tma_version == "new"
+            else add_kernel_with_tma_1d_old_api
+        )
+
         def f(a, b):
             BLOCK_SIZE = 256
             out = torch.zeros_like(a)
             n_elements = out.numel()
 
             desc_a, desc_b, desc_out = (
-                triton.tools.experimental_descriptor.create_1d_tma_descriptor(
-                    t.data_ptr(),
-                    n_elements,
-                    BLOCK_SIZE,
-                    t.element_size(),
+                create_tensor_descriptor_shim(
+                    t, [BLOCK_SIZE], new_api=(tma_version == "new")
                 )
                 for t in (a, b, out)
             )
 
             grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel_with_tma_1d[grid](
+            kernel[grid](
                 desc_a,
                 desc_b,
                 desc_out,
@@ -1845,25 +1873,33 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(compiled_out, expected_out)
 
     @requires_gpu
-    @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
-    def test_tma_descriptor_dedup(self):
+    @common_utils.parametrize("tma_version", ["new", "old"])
+    def test_tma_descriptor_dedup(self, tma_version):
+        if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+        if tma_version == "old" and not has_triton_experimental_host_tma():
+            self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+
+        kernel = (
+            add_kernel_with_tma_1d_new_api
+            if tma_version == "new"
+            else add_kernel_with_tma_1d_old_api
+        )
+
         def f(a):
             BLOCK_SIZE = 256
             out = torch.zeros_like(a)
             n_elements = out.numel()
 
             desc_a, desc_out = (
-                triton.tools.experimental_descriptor.create_1d_tma_descriptor(
-                    t.data_ptr(),
-                    n_elements,
-                    BLOCK_SIZE,
-                    t.element_size(),
+                create_tensor_descriptor_shim(
+                    t, [BLOCK_SIZE], new_api=(tma_version == "new")
                 )
                 for t in (a, out)
             )
 
             grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel_with_tma_1d[grid](
+            kernel[grid](
                 desc_a,
                 desc_a,
                 desc_out,
@@ -1893,10 +1929,21 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(code.count("create_1d_tma_descriptor("), 2)
 
     @requires_gpu
-    @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager"])
-    def test_tma_descriptor_2d(self, dynamic, backend):
+    @common_utils.parametrize("tma_version", ["new", "old"])
+    def test_tma_descriptor_2d(self, dynamic, backend, tma_version):
+        if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+        if tma_version == "old" and not has_triton_experimental_host_tma():
+            self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+
+        kernel = (
+            add_kernel_with_tma_2d_new_api
+            if tma_version == "new"
+            else add_kernel_with_tma_2d_old_api
+        )
+
         def f(a, b):
             BLOCK_SIZE_X = 16
             BLOCK_SIZE_Y = 32
@@ -1904,13 +1951,8 @@ def forward(self, arg0_1, arg1_1):
             x_size, y_size = out.size()
 
             desc_a, desc_b, desc_out = (
-                triton.tools.experimental_descriptor.create_2d_tma_descriptor(
-                    t.data_ptr(),
-                    x_size,
-                    y_size,
-                    BLOCK_SIZE_X,
-                    BLOCK_SIZE_Y,
-                    t.element_size(),
+                create_tensor_descriptor_shim(
+                    t, [BLOCK_SIZE_X, BLOCK_SIZE_Y], new_api=(tma_version == "new")
                 )
                 for t in (a, b, out)
             )
@@ -3067,6 +3109,109 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "BLOCK_SIZE": 16,
             },
             ["out_ptr"],
+        )
+
+    def test_get_tma_stores(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            get_tma_stores,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        functions = {
+            "helper": {
+                Intermediate(idx=0): [
+                    Op(
+                        "tt.reinterpret_tensor_descriptor",
+                        None,
+                        [Param(idx=0)],
+                        Intermediate(idx=0),
+                    )
+                ],
+            },
+            "main": {
+                Intermediate(idx=-1): [
+                    Op(
+                        "tt.call",
+                        "helper",
+                        [Param(idx=0), Param(idx=1)],
+                        Intermediate(idx=-1),
+                    )
+                ],
+            },
+        }
+
+        self.assertEqual(get_tma_stores(functions, "helper"), set())
+        self.assertEqual(get_tma_stores(functions, "main"), set())
+
+        functions["helper"][Intermediate(idx=-1)] = [
+            Op(
+                "tt.experimental_descriptor_store",
+                None,
+                [Intermediate(idx=0), Param(idx=1)],
+                Intermediate(idx=-1),
+            )
+        ]
+        get_tma_stores.reset()
+
+        self.assertEqual(
+            get_tma_stores(functions, "helper"), {Param(idx=0), Intermediate(idx=0)}
+        )
+        self.assertEqual(get_tma_stores(functions, "main"), {Param(idx=0)})
+
+    @make_mutation_test
+    def test_on_device_tma_store_old_api():
+        @triton.jit
+        def on_device_tma_kernel(A, B, workspace_ptr, m, n, BLOCK_SIZE: tl.constexpr):
+            workspace_ptr_A = workspace_ptr
+            workspace_ptr_B = workspace_ptr + 128
+            tl.extra.cuda.experimental_device_tensormap_create2d(
+                desc_ptr=workspace_ptr_A,
+                global_address=A,
+                load_size=[BLOCK_SIZE, BLOCK_SIZE],
+                global_size=[m, n],
+                element_ty=A.dtype.element_ty,
+            )
+            tl.extra.cuda.experimental_device_tensormap_create2d(
+                desc_ptr=workspace_ptr_B,
+                global_address=B,
+                load_size=[BLOCK_SIZE, BLOCK_SIZE],
+                global_size=[m, n],
+                element_ty=A.dtype.element_ty,
+            )
+
+            pid = tl.program_id(0)
+            n_blocks = tl.cdiv(n, BLOCK_SIZE)
+            m_block_id = pid // n_blocks
+            n_block_id = pid % n_blocks
+
+            data = tl._experimental_descriptor_load(
+                workspace_ptr_A,
+                [m_block_id * BLOCK_SIZE, n_block_id * BLOCK_SIZE],
+                [BLOCK_SIZE, BLOCK_SIZE],
+                A.dtype.element_ty,
+            )
+            tl._experimental_descriptor_store(
+                workspace_ptr_B,
+                data,
+                [m_block_id * BLOCK_SIZE, n_block_id * BLOCK_SIZE],
+            )
+
+        B = torch.randn(1024, 1024)
+        A = torch.empty(1024, 1024)
+        workspace = torch.empty(256, dtype=torch.int8)
+        return (
+            on_device_tma_kernel,
+            {
+                "A": A,
+                "B": B,
+                "workspace_ptr": workspace,
+                "m": 1024,
+                "n": 1024,
+                "BLOCK_SIZE": 32,
+            },
+            ["B", "workspace_ptr"],
         )
 
 
