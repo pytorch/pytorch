@@ -104,6 +104,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
+from torch.export.pt2_archive._package_weights import TensorProperties, Weights
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._filelock import FileLock
@@ -1686,12 +1687,12 @@ class AotCodeCompiler:
         *,
         device_type: str,
         additional_files: list[str],
-    ) -> Union[list[str], str]:
+    ) -> Union[list[Union[str, Weights]], str]:
         """
         Returns the .so path, or returns a list of files that were generated if
         config.aot_inductor.package=True.
         """
-        generated_files = additional_files
+        generated_files: list[Union[str, Weights]] = additional_files  # type: ignore[assignment]
 
         if sys.platform == "win32":
             raise RuntimeError("AotCodeCompiler not yet supported for inductor")
@@ -1966,6 +1967,20 @@ class AotCodeCompiler:
                 )
             else:
                 serialized_weights = b""
+
+            if config.aot_inductor.package_constants_on_disk:
+                # We need to return a storage key here because the original value tensor might be a clone
+                weights_dict = Weights(
+                    {
+                        graph.allocated_constant_name[name]: (
+                            graph.get_original_value_of_constant(name),
+                            TensorProperties(graph.constants[name]),
+                        )
+                        for name in graph.constants.keys()
+                        if name not in graph.folded_constants
+                    }
+                )
+                generated_files.append(weights_dict)
 
             consts_size = len(serialized_weights)
 
@@ -3670,6 +3685,11 @@ class CUDACodeCache:
     _SOURCE_CODE_SUFFIX = "cu"
 
     @staticmethod
+    def cache_clear() -> None:
+        CUDACodeCache.cache.clear()
+        CUDACodeCache.aot_kernels_o.clear()
+
+    @staticmethod
     @lru_cache(maxsize=4)
     def get_kernel_binary_remote_cache(
         caching_enabled: bool, caching_available: bool
@@ -3701,11 +3721,6 @@ class CUDACodeCache:
                 "CUTLASSKernelBinaryRemoteCache not available, remote caching disabled"
             )
             return None
-
-    @staticmethod
-    def cache_clear() -> None:
-        CUDACodeCache.cache.clear()
-        CUDACodeCache.aot_kernels_o.clear()
 
     @classmethod
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
