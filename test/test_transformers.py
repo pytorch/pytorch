@@ -3705,10 +3705,10 @@ class TestSDPACudaOnly(NNTestCase):
         grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
 
         fudge_factors = {
-            'out': 4, # NEW CK MIN
+            'out': 4,
             'grad_query': 180.0,
             'grad_key': 16,
-            'grad_value': 4, # NEW CK MIN
+            'grad_value': 4,
         }
         if TEST_WITH_ROCM:
             if TEST_WITH_CK:
