@@ -19,7 +19,7 @@ git config --global --add safe.directory /var/lib/jenkins/workspace
 
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # TODO: This can be removed later once vision is also part of the Docker image
-  pip install -q --user --no-use-pep517 "git+https://github.com/pytorch/vision.git@$(cat .github/ci_commit_pins/vision.txt)"
+  pip install -q --no-use-pep517 "git+https://github.com/pytorch/vision.git@$(cat .github/ci_commit_pins/vision.txt)"
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
   # NB: ONNX test is fast (~15m) so it's ok to retry it few more times to avoid any flaky issue, we
