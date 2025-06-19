@@ -390,8 +390,26 @@ class MultiKernelCall:
 
     def run(self, *args, **kwargs):
         if self.picked_kernel is None:
-            timings = self.benchmark_sub_kernels(*args, **kwargs)
-            self.picked_kernel = timings.index(min(timings))
+            # Check if we have shape-specialized dispatch enabled
+            from torch._inductor import config
+            if hasattr(config, 'multi_kernel_hints') and config.multi_kernel_hints:
+                # For shape-specialized dispatch, we need to determine which kernel to use
+                # based on the current shape hints
+                shape_key = self._get_shape_key(*args, **kwargs)
+                cached_choice = self._get_cached_choice_for_shape(shape_key)
+
+                if cached_choice is not None:
+                    self.picked_kernel = cached_choice
+                else:
+                    # Benchmark and cache the choice for this shape
+                    timings = self.benchmark_sub_kernels(*args, **kwargs)
+                    self.picked_kernel = timings.index(min(timings))
+                    self._cache_choice_for_shape(shape_key, self.picked_kernel)
+            else:
+                # Original behavior - benchmark once and cache globally
+                timings = self.benchmark_sub_kernels(*args, **kwargs)
+                self.picked_kernel = timings.index(min(timings))
+
             k0 = self.kernels[0]
             log.debug(
                 "pick %dth sub-kernel in %s. Size hints %s. Reduction hint %s. Timings %s",
@@ -399,11 +417,12 @@ class MultiKernelCall:
                 [k.inductor_meta.get("kernel_name") for k in self.kernels],
                 k0.size_hints,
                 k0.inductor_meta.get("reduction_hint"),
-                timings,
+                getattr(locals(), 'timings', 'cached'),
             )
-            get_metric_table("persistent_red_perf").add_row(
-                functools.partial(self._metrics_table_row, timings)
-            )
+            if 'timings' in locals():
+                get_metric_table("persistent_red_perf").add_row(
+                    functools.partial(self._metrics_table_row, timings)
+                )
             if not self.disable_cache:
                 self.store_cache()
 
@@ -416,6 +435,34 @@ class MultiKernelCall:
             self.record_choice(self.multi_kernel_name, picked_kernel_name)
         self.run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
         self.run(*args, **kwargs)
+
+    def _get_shape_key(self, *args, **kwargs):
+        """
+        Extract a shape key from the arguments to use for caching kernel choices.
+        For now, we use a simple heuristic based on the first few tensor shapes.
+        """
+        import torch
+        shapes = []
+        for arg in args[:5]:  # Only look at first 5 args to avoid too much overhead
+            if isinstance(arg, torch.Tensor):
+                shapes.append(tuple(arg.shape))
+        return tuple(shapes)
+
+    def _get_cached_choice_for_shape(self, shape_key):
+        """
+        Get the cached kernel choice for a given shape key.
+        """
+        if not hasattr(self, '_shape_cache'):
+            self._shape_cache = {}
+        return self._shape_cache.get(shape_key)
+
+    def _cache_choice_for_shape(self, shape_key, choice):
+        """
+        Cache the kernel choice for a given shape key.
+        """
+        if not hasattr(self, '_shape_cache'):
+            self._shape_cache = {}
+        self._shape_cache[shape_key] = choice
 
     def _metrics_table_row(self, timings):
         def get_kernel_path(k):
