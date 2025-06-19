@@ -2228,7 +2228,7 @@ class FakeTensorDispatchCache(TestCase):
             )
 
     @skipIfWindows(
-        msg="weird bug - cache doesn't get cleared after https://github.com/pytorch/pytorch/pull/154782"
+        msg="weird bug - cache may not be cleared after https://github.com/pytorch/pytorch/pull/154283"
     )
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
     def test_invoke_subgraph(self):

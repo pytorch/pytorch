@@ -3263,7 +3263,7 @@ class InstructionTranslatorBase(
         # Flag to indicate whether tracing is used for export.
         self.export = export
         # NOTE: one_graph is used for export/debugging to always force errors on graph breaks.
-        # For allow for fullgraph toggle during normal compile, self.error_on_graph_break
+        # To toggle fullgraph during normal compile, self.error_on_graph_break
         # is used instead. Every step(), its value is updated to config.error_on_graph_break.
         # We mirror this value since cleanup may (correctly) inadvertently change config.error_on_graph_break.
         # This assumes that we cannot both trace a change to config.error_on_graph_break and graph break on
