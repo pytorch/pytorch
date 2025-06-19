@@ -20,7 +20,6 @@ from torch._dynamo.testing import (
     InductorAndRecordGraphs,
     normalize_gm,
 )
-from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 from torch._higher_order_ops.schema import find_hop_schema
 from torch._inductor.pattern_matcher import (
     CallFunctionVarArgs,
@@ -36,6 +35,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 
+mark_compile_region = torch.compiler.mark_compile_region
 
 if HAS_GPU:
     import triton
