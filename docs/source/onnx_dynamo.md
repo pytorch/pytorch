@@ -154,28 +154,28 @@ The following metadata fields are added to each ONNX node:
   A string representing the hierarchical namespace of the node, consisting of a stack trace of modules/methods.
 
   *Example:*
-  `_empty_nn_module_stack_from_metadata_hook: _empty_nn_module_stack_from_metadata_hook/sym_size_int_720: aten.sym_size.int`
+  `__main__.SimpleAddModel/add: aten.add.Tensor`
 
 - **pkg.torch.onnx.class_hierarchy**
 
   A list of class names representing the hierarchy of modules leading to this node.
   
   *Example:*
-  `['_empty_nn_module_stack_from_metadata_hook', 'aten.sym_size.int']`
+  `['__main__.SimpleAddModel', 'aten.add.Tensor']`
 
 - **pkg.torch.onnx.fx_node**
 
   The string representation of the original FX node, including its name, number of consumers, the targeted torch op, arguments, and keyword arguments.
   
   *Example:*
-  `%sym_size_int_720 : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%img, 2), kwargs = {})`
+  `%cat : [num_users=1] = call_function[target=torch.ops.aten.cat.default](args = ([%tensor_x, %input_dict_tensor_x, %input_list_0], 1), kwargs = {})`
 
 - **pkg.torch.onnx.name_scopes**
 
   A list of name scopes (methods) representing the path to this node in the PyTorch model.
 
   *Example:*
-  `['_empty_nn_module_stack_from_metadata_hook', 'sym_size_int_720']`
+  `['', 'add']`
 
 - **pkg.torch.onnx.stack_trace**
 
@@ -183,13 +183,6 @@ The following metadata fields are added to each ONNX node:
 
   *Example:*
   `File "torch/fx/passes/runtime_assert.py", line 24, in insert_deferred_runtime_asserts`
-
-- **pkg.torch.onnx.input_names**
-
-  The inputs for a node:
-
-  *Example:*
-  `[2]`
 
 These metadata fields are stored in the metadata_props attribute of each ONNX node and can be inspected using Netron or programmatically.
 
