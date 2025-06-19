@@ -106,7 +106,7 @@ def make_test_case(
     func = getattr(tests, test_name)
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
-    new_test_name = f"{test_name}_{test_build_separate}"
+    new_test_name = f"{test_name}_separate" if test_build_separate else test_name
 
     @config.patch(
         cpp_wrapper=True,
