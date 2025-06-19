@@ -34,5 +34,5 @@ def get_ck_dependency_string() -> str:
     commit_pin = "@" + read_ck_pin()
     # The dependency doesn't get resolved without version number in the end
     # Since we use commit hash for versioning it will always be 1.0.0
-    egg_name = "#egg=rocm-composable-kernel-1.0.0"
+    egg_name = "#egg=rocm-composable-kernel"
     return prefix + repo_address + commit_pin + egg_name
