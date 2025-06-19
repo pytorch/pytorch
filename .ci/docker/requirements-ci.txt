@@ -90,10 +90,10 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.15.0
+mypy==1.16.0
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
-#Pinned versions: 1.14.0
+#Pinned versions: 1.16.0
 #test that import: test_typing.py, test_type_hints.py
 
 networkx==2.8.8
@@ -382,3 +382,7 @@ cmake==4.0.0
 
 tlparse==0.3.30
 #Description: required for log parsing
+
+cuda-bindings>=12.0,<13.0
+#Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. Note "Any fix in the latest bindings would be backported to the prior major version" means that only the newest version of cuda-bindings will get fixes. Depending on the latest version of 12.x is okay because all 12.y versions will be supported via "CUDA minor version compatibility". Pytorch builds against 13.z versions of cuda toolkit work with 12.x versions of cuda-bindings as well because newer drivers work with old toolkits.
+#test that import: test_cuda.py

@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Any, IO, Optional, Union
 
 import torch
-import torch._inductor
 import torch.utils._pytree as pytree
 from torch._export.serde.serialize import deserialize, serialize, SerializedArtifact
 from torch.export._tree_utils import reorder_kwargs
@@ -156,9 +155,9 @@ class PT2ArchiveReader:
 
     def __init__(self, archive_path_or_buffer: FileLike):
         self.archive_file = torch._C.PyTorchFileReader(archive_path_or_buffer)  # type: ignore[arg-type]
-        assert (
-            self.read_string(ARCHIVE_FORMAT_PATH) == ARCHIVE_FORMAT_VALUE
-        ), "Invalid archive format"
+        assert self.read_string(ARCHIVE_FORMAT_PATH) == ARCHIVE_FORMAT_VALUE, (
+            "Invalid archive format"
+        )
 
     def __enter__(self) -> "PT2ArchiveReader":
         return self
@@ -216,7 +215,6 @@ def _package_aoti_files(
 
     for model_name, files in aoti_files.items():
         num_so_files = 0
-        num_cpp_files = 0
 
         for file in files:
             if file == "":
@@ -227,14 +225,6 @@ def _package_aoti_files(
                 if num_so_files > 1:
                     raise RuntimeError(
                         f"Multiple .so files found in {files}. "
-                        "You might need to clear your cache "
-                        "directory before calling aoti_compile again."
-                    )
-            if file.endswith(".cpp"):
-                num_cpp_files += 1
-                if num_so_files > 1:
-                    raise RuntimeError(
-                        f"Multiple .cpp files found in {files}. "
                         "You might need to clear your cache "
                         "directory before calling aoti_compile again."
                     )
@@ -375,16 +365,16 @@ class AOTICompiledModel:
         self.loader = loader
 
     def __call__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-        call_spec = self.loader.get_call_spec()  # type: ignore[attr-defined]
+        call_spec = self.loader.get_call_spec()
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
         flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
-        flat_outputs = self.loader.boxed_run(flat_inputs)  # type: ignore[attr-defined]
+        flat_outputs = self.loader.boxed_run(flat_inputs)
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
     def get_metadata(self) -> dict[str, str]:
-        return self.loader.get_metadata()  # type: ignore[attr-defined]
+        return self.loader.get_metadata()
 
     def load_constants(
         self,
@@ -403,18 +393,18 @@ class AOTICompiledModel:
             check_full_update: Whether to add check to see if all the constants
             are updated and have values.
         """
-        self.loader.load_constants(  # type: ignore[attr-defined]
+        self.loader.load_constants(
             constants_map, False, check_full_update, user_managed
         )
 
     def get_constant_fqns(self) -> list[str]:
-        return self.loader.get_constant_fqns()  # type: ignore[attr-defined]
+        return self.loader.get_constant_fqns()
 
     def __deepcopy__(self, memo: Optional[dict[Any, Any]]) -> "AOTICompiledModel":
         logger.warning(
             "AOTICompiledModel deepcopy warning: AOTICompiledModel.loader is not deepcopied."
         )
-        return AOTICompiledModel(self.loader)  # type: ignore[attr-defined]
+        return AOTICompiledModel(self.loader)
 
 
 @dataclass
@@ -540,7 +530,7 @@ def load_pt2(
         extra_files = _load_extra_files(archive_reader, file_names)
 
         # Get a list of AOTI model names
-        aoti_model_names = set()
+        aoti_model_names: set[str] = set()
         for file in file_names:
             if file.startswith(AOTINDUCTOR_DIR):
                 file = file[len(AOTINDUCTOR_DIR) :]  # remove data/aotinductor/ prefix
@@ -549,33 +539,35 @@ def load_pt2(
                 ]  # split "model_name/...cpp" into "model_name"
                 aoti_model_names.add(model_name)
 
-    if isinstance(f, (io.IOBase, IO)) and len(aoti_model_names) > 0:
-        # Workaround for AOTIModelPackageLoader not reading buffers
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as tf:
-            f.seek(0)
-            tf.write(f.read())
-            f.seek(0)
-            logger.debug("Writing buffer to tmp file located at %s.", tf.name)
+    if isinstance(f, (io.IOBase, IO)):
+        if len(aoti_model_names) > 0:
+            # Workaround for AOTIModelPackageLoader not reading buffers
+            with tempfile.NamedTemporaryFile(suffix=".pt2") as tf:
+                f.seek(0)
+                tf.write(f.read())
+                f.seek(0)
+                logger.debug("Writing buffer to tmp file located at %s.", tf.name)
 
-            aoti_runners = {
-                model_name: AOTICompiledModel(
-                    torch._C._aoti.AOTIModelPackageLoader(
-                        tf.name,
-                        model_name,
-                        run_single_threaded,
-                        num_runners,
-                        device_index,
-                    )  # type: ignore[call-arg]
-                )
-                for model_name in aoti_model_names
-            }
-
+                aoti_runners = {
+                    model_name: AOTICompiledModel(
+                        torch._C._aoti.AOTIModelPackageLoader(
+                            tf.name,
+                            model_name,
+                            run_single_threaded,
+                            num_runners,
+                            device_index,
+                        )
+                    )
+                    for model_name in aoti_model_names
+                }
+        else:
+            aoti_runners = {}
     else:
         aoti_runners = {
             model_name: AOTICompiledModel(
                 torch._C._aoti.AOTIModelPackageLoader(
                     f, model_name, run_single_threaded, num_runners, device_index
-                )  # type: ignore[call-arg]
+                )
             )
             for model_name in aoti_model_names
         }
