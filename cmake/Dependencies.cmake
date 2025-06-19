@@ -1022,6 +1022,9 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
     list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
     list(APPEND HIP_CXX_FLAGS -DHIP_ENABLE_WARP_SYNC_BUILTINS)
+    if(HIPBLASLT_OUTER_VEC)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_OUTER_VEC)
+    endif()
     if(HIPBLASLT_VEC_EXT)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
@@ -1151,7 +1154,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     endif()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-    # Suppress warning to unblock libnop comiplation by clang-17
+    # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
     if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
@@ -1203,7 +1206,7 @@ if(USE_GLOO)
       endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
 
-      # Disable NCCL/RCCL since we don't use Gloo+NCCL, make sure to reenable it!
+      # Disable NCCL/RCCL since we don't use Gloo+NCCL, make sure to re-enable it!
       set(USE_NCCL_SAVED ${USE_NCCL})
       set(USE_RCCL_SAVED ${USE_RCCL})
       set(USE_NCCL OFF)
@@ -1214,7 +1217,7 @@ if(USE_GLOO)
 
       # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
       # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
-      # gloo generates a new config.h in the binary diretory.
+      # gloo generates a new config.h in the binary directory.
       include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
       include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
     else()
