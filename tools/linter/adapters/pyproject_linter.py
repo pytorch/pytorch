@@ -4,14 +4,13 @@ import argparse
 import concurrent.futures
 import json
 import logging
-import operator
 import os
-import re
 import sys
 from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
+from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
 
@@ -19,30 +18,6 @@ if sys.version_info >= (3, 11):
     import tomllib
 else:
     import tomli as tomllib  # type: ignore[import-not-found]
-
-
-REQUIRES_PYTHON_PATTERN = re.compile(
-    r"""
-    ^\s*
-    (?P<min_ver_op>>=)
-    \s*
-    (?P<min_ver>\d+\.\d+(?:\.\d+)?)
-    \s*,\s*
-    (?P<max_ver_op><(=?))
-    \s*
-    (?P<max_ver>\d+\.\d+(?:\.\d+)?)
-    \s*$
-    """,
-    flags=re.VERBOSE,
-)
-COMPARE_OPS = {
-    "<": operator.lt,
-    "<=": operator.le,
-    ">": operator.gt,
-    ">=": operator.ge,
-    "==": operator.eq,
-    "!=": operator.ne,
-}
 
 
 class LintSeverity(str, Enum):
@@ -113,58 +88,56 @@ def check_file(filename: str) -> list[LintMessage]:
                 )
             ]
 
-        match = REQUIRES_PYTHON_PATTERN.match(requires_python)
-        if not match:
-            return [
-                format_error_message(
-                    filename,
-                    message=(
-                        "'project.requires-python' must be "
-                        r"in the format '>={X}.{Y},<{U}.{V}'."
-                    ),
-                )
-            ]
-        min_ver_op = COMPARE_OPS[match.group("min_ver_op")]
-        python_min_ver = Version(match.group("min_ver"))
-        max_ver_op = COMPARE_OPS[match.group("max_ver_op")]
-        python_max_ver = Version(match.group("max_ver"))
         python_major = 3
-        if python_min_ver >= python_max_ver:
-            return [
-                format_error_message(
-                    filename,
-                    message=(
-                        "'project.requires-python' minimum version "
-                        "must be less than the maximum version."
-                    ),
-                )
-            ]
-        if python_min_ver.major != python_major:
-            return [
-                format_error_message(
-                    filename,
-                    message=(
-                        f"'project.requires-python' minimum version "
-                        f"must be {python_major}.x."
-                    ),
-                )
-            ]
-        if python_max_ver.major != python_major:
-            return [
-                format_error_message(
-                    filename,
-                    message=(
-                        f"'project.requires-python' maximum version "
-                        f"must be {python_major}.x."
-                    ),
-                )
-            ]
+        specifier_set = SpecifierSet(requires_python)
+        for specifier in specifier_set:
+            if Version(specifier.version).major != python_major:
+                return [
+                    format_error_message(
+                        filename,
+                        message=(
+                            "'project.requires-python' must only specify "
+                            f"Python {python_major} versions, but found {specifier.version}."
+                        ),
+                    )
+                ]
 
-        supported_python_versions = []
-        for minor in range(python_min_ver.minor, python_max_ver.minor + 1):
-            ver = Version(f"{python_major}.{minor}")
-            if min_ver_op(ver, python_min_ver) and max_ver_op(ver, python_max_ver):
-                supported_python_versions.append(f"{python_major}.{minor}")
+        large_minor = 1000
+        supported_python_versions = list(
+            specifier_set.filter(
+                f"{python_major}.{minor}" for minor in range(large_minor + 1)
+            )
+        )
+        if not supported_python_versions:
+            return [
+                format_error_message(
+                    filename,
+                    message=(
+                        "'project.requires-python' must specify at least one "
+                        f"Python {python_major} version, but found {requires_python!r}."
+                    ),
+                )
+            ]
+        if f"{python_major}.0" in supported_python_versions:
+            return [
+                format_error_message(
+                    filename,
+                    message=(
+                        "'project.requires-python' must specify a minimum version, "
+                        f"but found {requires_python!r}."
+                    ),
+                )
+            ]
+        if f"{python_major}.{large_minor}" in supported_python_versions:
+            return [
+                format_error_message(
+                    filename,
+                    message=(
+                        "'project.requires-python' must specify a maximum version, "
+                        f"but found {requires_python!r}."
+                    ),
+                )
+            ]
 
         classifiers = project.get("classifiers")
         if not (
