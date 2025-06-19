@@ -97,6 +97,7 @@ DEFAULT_VENV_DIR = REPO_ROOT / "venv"
 
 
 LOGGER: logging.Logger | None = None
+VERBOSE: bool = True
 DATETIME_FORMAT = "%Y-%m-%d_%Hh%Mm%Ss"
 SHA1_RE = re.compile(r"(?P<sha1>[0-9a-fA-F]{40})")
 USERNAME_PASSWORD_RE = re.compile(r":\/\/(.*?)\@")
@@ -225,7 +226,14 @@ def timed(prefix: str) -> Callable[[F], F]:
 class Venv:
     """Virtual environment manager"""
 
-    AGGRESSIVE_UPDATE_PACKAGES = ("pip", "setuptools", "packaging", "wheel")
+    AGGRESSIVE_UPDATE_PACKAGES = (
+        "uv",
+        "pip",
+        "setuptools",
+        "packaging",
+        "wheel",
+        "build[uv]",
+    )
 
     def __init__(
         self,
@@ -238,21 +246,35 @@ class Venv:
         self.pip_source = pip_source
         self.base_executable = Path(base_executable or sys.executable).absolute()
         self._executable: Path | None = None
-        self._env = {"PIP_EXTRA_INDEX_URL": self.pip_source.index_url}
+        self._bindir: Path | None = None
+        self._env = {
+            "PIP_EXTRA_INDEX_URL": self.pip_source.index_url,
+            "UV_EXTRA_INDEX_URL": self.pip_source.index_url,
+            "UV_TORCH_BACKEND": os.path.basename(self.pip_source.index_url),
+            "FORCE_COLOR": "1",
+        }
 
     def is_venv(self) -> bool:
         """Check if the prefix is a virtual environment."""
         return self.prefix.is_dir() and (self.prefix / "pyvenv.cfg").is_file()
 
     @property
+    def bindir(self) -> Path:
+        """Get the bin directory for the virtual environment."""
+        assert self.is_venv()
+        if self._bindir is None:
+            if WINDOWS:
+                self._bindir = self.prefix / "Scripts"
+            else:
+                self._bindir = self.prefix / "bin"
+        return self._bindir
+
+    @property
     def executable(self) -> Path:
         """Get the Python executable for the virtual environment."""
         assert self.is_venv()
         if self._executable is None:
-            if WINDOWS:
-                executable = self.prefix / "Scripts" / "python.exe"
-            else:
-                executable = self.prefix / "bin" / "python"
+            executable = self.bindir / ("python.exe" if WINDOWS else "python")
             assert executable.is_file() or executable.is_symlink()
             assert os.access(executable, os.X_OK), f"{executable} is not executable"
             self._executable = executable
@@ -407,9 +429,10 @@ class Venv:
             python = self.executable
         cmd = [str(python), *args]
         env = popen_kwargs.pop("env", None) or {}
+        check = popen_kwargs.pop("check", True)
         return subprocess.run(
             cmd,
-            check=True,
+            check=check,
             text=True,
             encoding="utf-8",
             env={**self._env, **env},
@@ -440,6 +463,56 @@ class Venv:
         """Get the Python version for the base environment."""
         return self.python_version(python=self.base_executable)
 
+    def uv(
+        self,
+        *args: str,
+        python: Path | str | None = None,
+        **popen_kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a uv command in the virtual environment."""
+        if python is None:
+            python = self.executable
+        cmd = [str(self.bindir / "uv"), *args]
+        env = popen_kwargs.pop("env", None) or {}
+        check = popen_kwargs.pop("check", True)
+        env["UV_PYTHON"] = str(python)
+        return subprocess.run(
+            cmd,
+            check=check,
+            text=True,
+            encoding="utf-8",
+            env={**self._env, **env},
+            **popen_kwargs,
+        )
+
+    @timed("Installing packages")
+    def uv_pip_install(
+        self,
+        *packages: str,
+        prerelease: bool = False,
+        upgrade: bool = False,
+        no_deps: bool = False,
+        **popen_kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a pip install command in the virtual environment."""
+        if upgrade:
+            args = ["--upgrade", *packages]
+            verb = "Upgrading"
+        else:
+            args = list(packages)
+            verb = "Installing"
+        if prerelease:
+            args = ["--prerelease", *args]
+        if no_deps:
+            args = ["--no-deps", *args]
+        if VERBOSE:
+            args = ["-v", *args]
+        print(
+            f"{verb} package(s) ({self.pip_source.index_url}): "
+            f"{', '.join(map(os.path.basename, packages))}"
+        )
+        return self.uv("pip", "install", *args, **popen_kwargs)
+
     def pip(self, *args: str, **popen_kwargs: Any) -> subprocess.CompletedProcess[str]:
         """Run a pip command in the virtual environment."""
         return self.python("-m", "pip", *args, **popen_kwargs)
@@ -450,6 +523,7 @@ class Venv:
         *packages: str,
         prerelease: bool = False,
         upgrade: bool = False,
+        no_deps: bool = False,
         **popen_kwargs: Any,
     ) -> subprocess.CompletedProcess[str]:
         """Run a pip install command in the virtual environment."""
@@ -461,6 +535,10 @@ class Venv:
             verb = "Installing"
         if prerelease:
             args = ["--pre", *args]
+        if no_deps:
+            args = ["--no-deps", *args]
+        if VERBOSE:
+            args = ["-v", *args]
         print(
             f"{verb} package(s) ({self.pip_source.index_url}): "
             f"{', '.join(map(os.path.basename, packages))}"
@@ -472,6 +550,7 @@ class Venv:
         self,
         *packages: str,
         prerelease: bool = False,
+        no_deps: bool = False,
         **popen_kwargs: Any,
     ) -> list[Path]:
         """Download a package in the virtual environment."""
@@ -486,6 +565,10 @@ class Venv:
             args = ["--pre", *packages]
         else:
             args = list(packages)
+        if no_deps:
+            args = ["--no-deps", *args]
+        if VERBOSE:
+            args = ["-v", *args]
         self.pip("download", "--dest", str(tempdir), *args, **popen_kwargs)
         files = list(tempdir.iterdir())
         print(f"Downloaded {len(files)} file(s) to {tempdir}:")
@@ -640,7 +723,7 @@ def install_packages(venv: Venv, packages: Iterable[str]) -> None:
     # install packages
     packages = list(dict.fromkeys(packages))
     if packages:
-        venv.pip_install(*packages)
+        venv.uv_pip_install(*packages)
 
 
 def _ensure_commit(git_sha1: str) -> None:
@@ -790,12 +873,14 @@ def _move_single(
                 relname = relroot / name
                 s = src / relname
                 t = trg / relname
-                print(f"{verb} {s} -> {t}")
+                if VERBOSE:
+                    print(f"{verb} {s} -> {t}")
                 mover(s, t)
             for name in dirs:
                 (trg / relroot / name).mkdir(parents=True, exist_ok=True)
     else:
-        print(f"{verb} {src} -> {trg}")
+        if VERBOSE:
+            print(f"{verb} {src} -> {trg}")
         mover(src, trg)
 
 
@@ -844,7 +929,6 @@ def install(
     packages: Iterable[str],
     subcommand: str = "checkout",
     branch: str | None = None,
-    logger: logging.Logger,
 ) -> None:
     """Development install of PyTorch"""
     use_existing = subcommand == "checkout"
@@ -878,11 +962,11 @@ def install(
         move_nightly_files(wheel_site_dir)
 
     write_pth(venv)
-    logger.info(
+    cast(logging.Logger, LOGGER).info(
         "-------\n"
         "PyTorch Development Environment set up!\n"
         "Please activate to enable this environment:\n\n"
-        "  $ %s",
+        "  $ %s\n",
         venv.activate_command,
     )
 
@@ -979,14 +1063,15 @@ def parse_arguments() -> argparse.Namespace:
 
 def main() -> None:
     """Main entry point"""
-    global LOGGER
+    global LOGGER, VERBOSE
     args = parse_arguments()
+    VERBOSE = args.verbose
+
     status = check_branch(args.subcmd, args.branch)
     if status:
         sys.exit(status)
 
     pip_source = None
-
     for toolkit in ("CUDA", "ROCm"):
         accel = toolkit.lower()
         if hasattr(args, accel):
@@ -1026,7 +1111,6 @@ def main() -> None:
             packages=PACKAGES_TO_INSTALL,
             subcommand=args.subcmd,
             branch=args.branch,
-            logger=logger,
         )
 
 
