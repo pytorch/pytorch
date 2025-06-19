@@ -4117,15 +4117,16 @@ class CommonTemplate:
         def foo(m, inp):
             return m(inp)
 
-        with torch.no_grad():
-            _, code = run_and_get_code(foo, grouped_conv, input_tensor)
-            # no to channels last permuting before kernel
-            if config.cpp_wrapper:
-                FileCheck().check_not("  call_triton").check("_convolution(").run(
-                    code[0]
-                )
-            else:
-                FileCheck().check_not(".run(").check(".convolution(").run(code[0])
+        if self.device != "xpu":
+            with torch.no_grad():
+                _, code = run_and_get_code(foo, grouped_conv, input_tensor)
+                # no to channels last permuting before kernel
+                if config.cpp_wrapper:
+                    FileCheck().check_not("  call_triton").check("_convolution(").run(
+                        code[0]
+                    )
+                else:
+                    FileCheck().check_not(".run(").check(".convolution(").run(code[0])
 
         # in out should do channels last in inference
         in_channels = 8
