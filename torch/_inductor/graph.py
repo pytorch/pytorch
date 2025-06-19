@@ -106,6 +106,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
+    SUPPORTED_MKLDNN_DEVICES,
     ValueWithLineMap,
 )
 from .virtualized import NullHandler, V
@@ -614,7 +615,7 @@ class GraphLowering(torch.fx.Interpreter):
             torch.backends.mkldnn.enabled
             and torch.backends.mkldnn.is_available()
             and all(
-                n.args[idx].meta["val"].device == torch.device("cpu")
+                n.args[idx].meta["val"].device.type in SUPPORTED_MKLDNN_DEVICES
                 for n in conv_nodes
                 for idx in [0, 1]
             )
@@ -1473,6 +1474,7 @@ class GraphLowering(torch.fx.Interpreter):
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
+                old_kwargs["tma_descriptor_metadata"],
             )
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
@@ -2048,6 +2050,7 @@ class GraphLowering(torch.fx.Interpreter):
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
+                node.kwargs["tma_descriptor_metadata"],
             )
 
             new_kwargs: dict[str, int] = {}

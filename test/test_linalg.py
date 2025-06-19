@@ -24,7 +24,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
      setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest,
-     runOnRocmArch, MI300_ARCH)
+     runOnRocmArch, MI300_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -2818,6 +2818,9 @@ class TestLinalg(TestCase):
             Q = torch.linalg.eigh(A).eigenvectors
             Q.sum().abs().backward()
 
+    # I don't know how much memory this test uses but on complex64 it needs at least 4GB
+    @largeTensorTest("4GB", device="cuda")
+    @serialTest(TEST_CUDA)
     @skipCUDAIfNoCusolver  # MAGMA backend doesn't work in this case
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     @skipCPUIfNoLapack
@@ -9162,7 +9165,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             r1 = fntorch(t0_full, t1, t2)
             self.assertEqual(r0, r1)
 
-    @tf32_on_and_off(0.001)
+    # ROCm 6.4 passes with tf32=on, but 6.4.1 needed tolerance reduced slightly
+    @tf32_on_and_off(0.002 if torch.version.hip else 0.001)
     @bf32_on_and_off(0.001)
     def test_broadcast_batched_matmul(self, device):
         n_dim = random.randint(1, 8)
