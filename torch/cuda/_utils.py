@@ -53,51 +53,13 @@ def _check_cuda(result: int) -> None:
 
 
 def _get_nvrtc_library() -> ctypes.CDLL:
-    # Get NVRTC version based on CUDA runtime version
-    # Use an alternative approach to get the CUDA version
-    # since cudart().getVersion() is failing
-    import torch
-
-    try:
-        import torch.cuda
-
-        cuda_runtime_version = torch.cuda.cudart().getVersion()
-    except (ImportError, AttributeError):
-        # Fallback: if we have CUDA available, get version from device properties
-        if hasattr(torch, "cuda") and torch.cuda.is_available():
-            # Import locally to avoid circular imports
-            import torch.cuda
-
-            props = torch.cuda.get_device_properties(torch.cuda.current_device())
-            cuda_runtime_version = props.major * 1000 + props.minor * 10
-        else:
-            # Hardcode a default CUDA version if all else fails
-            cuda_runtime_version = 12000  # Assume CUDA 12.0 as default
-
-    version = _get_nvrtc_version(cuda_runtime_version)
-
+    # PyTorch packages NVRTC, so we can use it directly
+    # Since PyTorch already loads NVRTC, we can use the system library
+    # which should be compatible with PyTorch's version
     if sys.platform == "win32":
-        # Windows handling remains the same
-        lib_name = f"nvrtc64_{version}_0.dll"
-        return ctypes.CDLL(lib_name)
+        return ctypes.CDLL("nvrtc64_120_0.dll")
     else:
-        lib_paths = [
-            f"libnvrtc.so.{version}",
-            os.path.join(
-                os.environ.get("CUDA_HOME", ""), f"lib64/libnvrtc.so.{version}"
-            ),
-            "/usr/local/cuda/lib64/libnvrtc.so",
-        ]
-
-        for path in lib_paths:
-            try:
-                return ctypes.CDLL(path)
-            except OSError:
-                continue
-
-        raise RuntimeError(
-            "Could not find libnvrtc.so. Please make sure CUDA is installed."
-        )
+        return ctypes.CDLL("libnvrtc.so")
 
 
 def _nvrtc_compile(
