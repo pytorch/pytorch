@@ -497,6 +497,8 @@ def get_verbose_code_parts(
 
 
 def convert_int_to_concrete_values(dim) -> Optional[int]:
+    if dim is None:
+        return None
     if not is_symbolic(dim):
         return dim
     else:
@@ -1457,7 +1459,11 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         value = self.get(guard.name)
-        t = type(value)
+        if isinstance(value, torch._subclasses.FakeTensor) and value.pytype:
+            t = value.pytype
+        else:
+            t = type(value)
+
         if self.serialization_mode == "save":
             if t.__qualname__ != t.__name__:
                 raise_local_type_error(value)
@@ -2190,6 +2196,7 @@ class GuardBuilder(GuardBuilderBase):
 
                 func_str = textwrap.dedent(
                     f"""
+                #include <algorithm>
                 #include <cstdint>
                 #include <cmath>
                 #include <c10/util/generic_math.h>

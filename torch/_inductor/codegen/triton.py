@@ -2742,13 +2742,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 assert reduction_type == "welford_reduce"
                 result_mean, result_m2, result_weight = result_var
                 peer_mean = self.codegen_cooperative_reduction_peer_combine(
-                    result_mean, upcast_acc_dtype(src_dtype), default[0]
+                    result_mean,
+                    upcast_acc_dtype(src_dtype),
+                    default[0],  # type: ignore[index]
                 )
                 peer_m2 = self.codegen_cooperative_reduction_peer_combine(
-                    result_m2, upcast_acc_dtype(src_dtype), default[1]
+                    result_m2,
+                    upcast_acc_dtype(src_dtype),
+                    default[1],  # type: ignore[index]
                 )
                 peer_weight = self.codegen_cooperative_reduction_peer_combine(
-                    result_weight, upcast_acc_dtype(src_dtype), default[2]
+                    result_weight,
+                    upcast_acc_dtype(src_dtype),
+                    default[2],  # type: ignore[index]
                 )
                 self.welford_reduce_final_reduction(
                     self.post_loop_store,

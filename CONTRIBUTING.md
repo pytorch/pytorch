@@ -343,13 +343,7 @@ command runs tests such as `TestNN.test_BCELoss` and
 
 ### Local linting
 
-Install all prerequisites by running
-
-```bash
-make setup-lint
-```
-
-You can now run the same linting steps that are used in CI locally via `make`:
+You can run the same linting steps that are used in CI locally via `make`:
 
 ```bash
 make lint
