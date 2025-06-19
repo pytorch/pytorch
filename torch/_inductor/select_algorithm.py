@@ -2202,12 +2202,17 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
         has_autotuned = False
+        
         def benchmark(choices):
+            global has_autotuned
+            # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
             has_autotuned = True
             counters["inductor"]["select_algorithm_autotune"] += 1
             # TODO(nmacchioni): remove this layer of abstraction
             # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
-            benchmark_fn = self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
+            benchmark_fn = self.make_benchmark_fn(
+                choices, input_nodes, layout, input_gen_fns
+            )
             # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
             # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
             return benchmark_fn(choices)
@@ -2240,7 +2245,7 @@ class AlgorithmSelectorCache(PersistentCache):
             # Initialize the suprocess pool so it will warmup early.
             torch._inductor.autotune_process.get_tuning_process_pool()
 
-        def do_autotuning(choices, precompile_fn):            
+        def do_autotuning(choices, precompile_fn):
             precompile_start_ts = time.time()
             with dynamo_timed(
                 f"{name}_template_precompiling",
