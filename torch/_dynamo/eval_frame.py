@@ -227,6 +227,7 @@ def _create_wrapped_callback(compiler_fn):
         convert_frame.convert_frame(  # type: ignore[arg-type]
             compiler_fn,
             hooks,
+            False,
         ),
         hooks,
     )
@@ -1080,15 +1081,6 @@ def _optimize(
     ):
         return _NullDecorator()
 
-    if nopython:
-        return optimize_assert(
-            backend,
-            dynamic=dynamic,
-            hooks=hooks,
-            rebuild_ctx=rebuild_ctx,
-            package=package,
-        )
-
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -1098,7 +1090,7 @@ def _optimize(
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks=hooks, package=package),
+        convert_frame.convert_frame(backend, hooks, nopython, package=package),
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
@@ -2002,7 +1994,11 @@ def _optimize_assert(
     package=None,
 ):
     """
-    The same as `torch._dynamo.optimize(backend, nopython=True)`
+    The same as `torch._dynamo.optimize(backend, nopython=True)`,
+    but ignores config.error_on_graph_break setting.
+
+    Used for export, since we must always error on graph breaks and ignore
+    config.error_on_graph_break.
     """
     backend = get_compiler_fn(backend)
 
