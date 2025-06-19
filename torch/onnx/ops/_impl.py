@@ -1,3 +1,4 @@
+import math
 import typing
 from typing import Callable, Optional
 
@@ -116,7 +117,7 @@ def rotary_embedding_23(
 
 def _get_scale_factor(scale: Optional[float], head_size: int) -> float:
     """Get the scale factor for attention computation."""
-    return scale if scale is not None else (1.0 / (head_size**0.5))
+    return scale if scale is not None else (1.0 / math.sqrt(head_size))
 
 
 def _reshape_3d_to_4d(
