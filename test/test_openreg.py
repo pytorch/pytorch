@@ -159,9 +159,6 @@ class TestPrivateUse1(TestCase):
         z_openreg = z_cpu.openreg()  # type: ignore[misc]
         self.assertTrue(z_openreg.is_openreg)  # type: ignore[misc]
 
-    def test_backend_fallback(self):
-        pass
-
 
 class TestOpenReg(TestCase):
     """Tests of mimick accelerator named OpenReg based on PrivateUse1"""
@@ -366,6 +363,22 @@ class TestOpenReg(TestCase):
         self.assertEqual(y.to(device="cpu"), torch.tensor([[1, 1], [2, 2], [3, 3]]))
         self.assertEqual(x.data_ptr(), y.data_ptr())
 
+    def test_resize(self):
+        tensor_cpu = torch.randn([4, 4])
+
+        tensor_openreg = tensor_cpu.openreg()
+        self.assertTrue(tensor_openreg.size() == torch.Size([4, 4]))
+
+        storage_openreg = tensor_openreg.storage()
+        self.assertTrue(storage_openreg.size() == 16)
+
+        tensor_openreg.resize_(2, 2, 2, 2)
+        self.assertTrue(tensor_openreg.size() == torch.Size([2, 2, 2, 2]))
+
+        storage_openreg = tensor_openreg.storage()
+        self.assertTrue(storage_openreg.size() == 16)
+
+    # Quantize
     @skipIfXpu(msg="missing kernel for openreg")
     def test_quantize(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32, device="openreg")

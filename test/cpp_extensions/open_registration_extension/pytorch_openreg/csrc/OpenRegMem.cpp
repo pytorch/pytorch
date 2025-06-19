@@ -5,6 +5,7 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/ops/as_strided_cpu_dispatch.h>
 #include <ATen/ops/quantize_per_tensor_native.h>
+#include <ATen/ops/resize_native.h>
 #include <ATen/ops/set_cpu_dispatch.h>
 #include <ATen/ops/set_native.h>
 #include <ATen/native/DispatchStub.h>
@@ -106,6 +107,14 @@ at::Tensor as_strided_openreg(
     std::optional<int64_t> storage_offset_) {
   // Metadata-only change so we re-use the cpu impl
   return at::cpu::as_strided(self, size, stride, storage_offset_);
+}
+
+const at::Tensor& resize__openreg(
+    const at::Tensor& self,
+    c10::SymIntArrayRef size,
+    ::std::optional<at::MemoryFormat> memory_format) {
+  return at::native::resize_(
+      self, C10_AS_INTARRAYREF_SLOW(size), memory_format);
 }
 
 at::Tensor& set_source_Storage_storage_offsetset_openreg(
@@ -266,10 +275,25 @@ void quantize_tensor_per_tensor_affine_privateuse1(
     // Just test the process, so do nothing
 }
 
+/* Notes:
+ *
+ * OpenReg is currently designed to simulate device memory through multiple
+ * subprocesses. The data_ptr address of the Tensor in the main process is
+ * invalid in the main process address space. All Tensor memory access related
+ * operations must be performed in the subprocess after passing the Tensor
+ * Metadata to the subprocess.
+
+ * Therefore, some related operators that only involve Metadata modification can
+ * be directly implemented at the C++ level and registered to PrivateUse1, but
+ * if memory access is involved, the related operators must be implemented at
+ * the Python level, otherwise will cause invalid memory access.
+ */
+
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("empty.memory_format", empty_openreg);
   m.impl("empty_strided", empty_strided_openreg);
   m.impl("as_strided", as_strided_openreg);
+  m.impl("resize_", resize__openreg);
   m.impl("set_.source_Storage", at::native::set_);
   m.impl("set_.source_Storage_storage_offset", set_source_Storage_storage_offsetset_openreg);
   m.impl("quantize_per_tensor", at::native::quantize_per_tensor);
