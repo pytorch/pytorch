@@ -48,11 +48,11 @@ def rotary_embedding_23(
     sequence_length = x.shape[1]
     if len(x.shape) == 3:
         hidden_size = x.shape[2]
-        assert num_heads != 0
+        torch._check(num_heads != 0, lambda: "num_heads must be provided for 3D inputs")
         head_size = hidden_size // num_heads
         new_shape = [batch_size, sequence_length, num_heads, head_size]
         x = torch.reshape(x, new_shape)
-    assert len(x.shape) == 4
+    torch._check(len(x.shape) == 4, lambda: "x should be a 4D tensor by now")
     head_size = x.shape[3]
 
     # Fully or partially perform rotation on x based on rotary_embedding_dim attribute
@@ -156,7 +156,7 @@ def _validate_gqa_configuration(
     """Validate Group Query Attention configuration."""
     torch._check(
         current_q_num_heads % current_kv_num_heads == 0,
-        f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA",
+        lambda: f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA",
     )
 
 
@@ -205,15 +205,19 @@ def attention_23(
 
     # Reshape 3D inputs to 4D format
     if len(Q.shape) == 3:
-        assert q_num_heads != 0 and kv_num_heads != 0, (
-            "q_num_heads and kv_num_heads must be provided for 3D inputs"
+        torch._check(
+            q_num_heads != 0 and kv_num_heads != 0,
+            lambda: "q_num_heads and kv_num_heads must be provided for 3D inputs",
         )
         q_sequence_length = Q.shape[1]
         Q = _reshape_3d_to_4d(Q, batch_size, q_num_heads)
         K = _reshape_3d_to_4d(K, batch_size, kv_num_heads)
         V = _reshape_3d_to_4d(V, batch_size, kv_num_heads)
 
-    assert len(Q.shape) == 4 and len(K.shape) == 4 and len(V.shape) == 4
+    torch._check(
+        len(Q.shape) == 4 and len(K.shape) == 4 and len(V.shape) == 4,
+        lambda: "Q, K, and V should be 4D tensors by now",
+    )
 
     # Calculate scale factor if not provided
     q_head_size = Q.shape[head_dim]
@@ -221,10 +225,14 @@ def attention_23(
 
     # Handle past key/value caches
     present_key = (
-        torch.cat([past_key, K], dim=sequence_dim) if past_key is not None else K.clone()
+        torch.cat([past_key, K], dim=sequence_dim)
+        if past_key is not None
+        else K.clone()
     )
     present_value = (
-        torch.cat([past_value, V], dim=sequence_dim) if past_value is not None else V.clone()
+        torch.cat([past_value, V], dim=sequence_dim)
+        if past_value is not None
+        else V.clone()
     )
 
     # Update K and V to include past states
@@ -263,7 +271,9 @@ def attention_23(
             dropout_p=0.0,
             is_causal=is_causal,
             scale=scale,
-            enable_gqa=current_q_num_heads != current_kv_num_heads,
+            enable_gqa=bool(
+                current_q_num_heads != current_kv_num_heads
+            ),  # Ensure enable_gqa is not SymBool
         )
 
         qk_output = _get_qk_output_for_aten_spda(
@@ -290,7 +300,9 @@ def attention_23(
 
         # Apply causal masking
         if is_causal:
-            assert attn_mask is None, "Cannot use both is_causal and attn_mask"
+            torch._check(
+                attn_mask is None, lambda: "Cannot use both is_causal and attn_mask"
+            )
             causal_mask = torch.tril(
                 torch.ones(
                     q_sequence_length,
