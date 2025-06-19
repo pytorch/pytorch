@@ -960,7 +960,7 @@ print(t.is_pinned())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
 
-    def test_stream_event_repr(self):
+    def test_stream_event_repr1(self):
         s = torch.cuda.current_stream()
         self.assertTrue("torch.cuda.Stream" in s.__repr__())
         e = torch.cuda.Event()
