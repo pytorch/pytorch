@@ -1,7 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
-import os
 import importlib
+import os
 import sys
 
 import torch
@@ -149,7 +149,6 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 compiled_fn(*args2)
 
     def test_file_change(self):
-
         ctx = DynamoStore()
 
         def import_from_path(module_name, file_path):
@@ -159,7 +158,10 @@ class TestPackage(torch._inductor.test_case.TestCase):
             spec.loader.exec_module(module)
             return module
 
-        module = import_from_path("torch.test_package_helper", "test/dynamo/test_package_helper/module_original.py")
+        module = import_from_path(
+            "torch.test_package_helper",
+            "test/dynamo/test_package_helper/module_original.py",
+        )
 
         def fn(x):
             return module.add(x, 1)
@@ -171,19 +173,28 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 guard.guard_type not in ("CLOSURE_MATCH", "FUNCTION_MATCH")
                 for guard in guards
             ]
+
         # Saving
         package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(backend="eager", package=package, guard_filter_fn=guard_filter_fn)(fn)
+        compiled_fn = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=guard_filter_fn
+        )(fn)
         compiled_fn(*args)
         for backend_id, backend in package.cached_backends.items():
             ctx.record_eager_backend(backend_id, backend)
         ctx.save_package(package, self.path())
 
-        module = import_from_path("torch.test_package_helper", "test/dynamo/test_package_helper/module_modified.py")
+        module = import_from_path(
+            "torch.test_package_helper",
+            "test/dynamo/test_package_helper/module_modified.py",
+        )
         with self.assertRaisesRegex(RuntimeError, "Source code changes detected"):
             ctx.load_package(fn, self.path())
 
-        module = import_from_path("torch.test_package_helper", "test/dynamo/test_package_helper/module_original.py")
+        module = import_from_path(
+            "torch.test_package_helper",
+            "test/dynamo/test_package_helper/module_original.py",
+        )
         ctx.load_package(fn, self.path())
 
 
