@@ -177,7 +177,7 @@ cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
 # compile entry and kernel separately
 cpp_wrapper_build_separate: bool = (
-    os.environ.get("TORCHINDUCTOR_CPP_WRAPPER_BUILD_SEPARATE", "0") == "1"
+    os.environ.get("TORCHINDUCTOR_CPP_WRAPPER_BUILD_SEPARATE", "1") == "1"
 )
 
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
