@@ -48,7 +48,6 @@ import contextlib
 import functools
 import itertools
 import logging
-from math import e
 import os
 import re
 import shlex
@@ -942,24 +941,24 @@ def install(
     if len(dists) != 1:
         raise RuntimeError(f"Expected exactly one torch wheel, got {dists}")
     torch_wheel = dists[0]
-    if not (torch_wheel.name.startswith("torch-") and torch_wheel.name.endswith(".whl")):
+    if not (
+        torch_wheel.name.startswith("torch-") and torch_wheel.name.endswith(".whl")
+    ):
         raise RuntimeError(f"Expected exactly one torch wheel, got {torch_wheel}")
+
     with venv.extracted_wheel(torch_wheel) as wheel_site_dir:
         dist_info_dir = next(wheel_site_dir.glob("torch-*.dist-info"))
         dependencies = set()
-        with (dist_info_dir / "METADATA").open(encoding="utf-8") as f:
-            requires_dist_start = False
-            for line in f:
-                if requires_dist_start:
-                    if line.startswith("Requires-Dist:"):
-                        dep = line.partition(":")[2].strip()
-                        dependencies.add(dep)
-                    else:
-                        break
-                elif line.startswith("Requires-Dist:"):
-                    requires_dist_start = True
+        with (dist_info_dir / "METADATA").open(encoding="utf-8") as metadata:
+            requires_dist_found = False
+            for line in metadata:
+                if line.startswith("Requires-Dist:"):
+                    requires_dist_found = True
                     dep = line.partition(":")[2].strip()
                     dependencies.add(dep)
+                elif requires_dist_found or line.startswith("Provides-Extra:"):
+                    # Only reading the first continuation block prefixed with 'Requires-Dist:'
+                    break
 
         install_packages(venv, [*sorted(dependencies), *packages])
 
