@@ -69,7 +69,7 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None, recursive=True, *, reason=None):
+def disable(fn=None, recursive=True, *, reason=None, wrapping=True):
     """
     Decorator to disable TorchDynamo
 
@@ -85,8 +85,8 @@ def disable(fn=None, recursive=True, *, reason=None):
         if fn is not None:
             fn = innermost_fn(fn)
             assert callable(fn)
-            return DisableContext(msg=reason)(fn)
-        return DisableContext(msg=reason)
+            return DisableContext(msg=reason, wrapping=wrapping)(fn)
+        return DisableContext(msg=reason, wrapping=wrapping)
     else:
 
         def wrap(fn):
@@ -553,7 +553,11 @@ def mark_unbacked(t, index, strict=False, specialize_on=None):
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
 
-        t._specialize_on[index] = specialize_on if specialize_on is not None else []
+        # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
+        # TypeError: 'Attribute' object does not support item assignment
+        if isinstance(t._specialize_on, dict):
+            t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
         t._dynamo_unbacked_indices.add(index)
         return
 
@@ -619,7 +623,12 @@ def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None):
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
-        t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
+        # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
+        # TypeError: 'Attribute' object does not support item assignment
+        if isinstance(t._specialize_on, dict):
+            t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
         return
 
     assert isinstance(index, (list, tuple))

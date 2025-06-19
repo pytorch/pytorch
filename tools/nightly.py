@@ -14,7 +14,7 @@ Or if you would like to check out the nightly commit in detached HEAD mode::
     $ ./tools/nightly.py checkout
     $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
-Or if you would like to re-use an existing virtual environment, you can pass in
+Or if you would like to reuse an existing virtual environment, you can pass in
 the prefix argument (--prefix)::
 
     $ ./tools/nightly.py checkout -b my-nightly-branch -p my-env
@@ -128,23 +128,25 @@ PIP_SOURCES = {
         supported_platforms={"Linux", "macOS", "Windows"},
         accelerator="cpu",
     ),
-    "cuda-11.8": PipSource(
-        name="cuda-11.8",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu118",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
-    "cuda-12.4": PipSource(
-        name="cuda-12.4",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu124",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
+    # NOTE: Sync with CUDA_ARCHES in .github/scripts/generate_binary_build_matrix.py
     "cuda-12.6": PipSource(
         name="cuda-12.6",
         index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu126",
         supported_platforms={"Linux", "Windows"},
         accelerator="cuda",
+    ),
+    "cuda-12.8": PipSource(
+        name="cuda-12.8",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu128",
+        supported_platforms={"Linux", "Windows"},
+        accelerator="cuda",
+    ),
+    # NOTE: Sync with ROCM_ARCHES in .github/scripts/generate_binary_build_matrix.py
+    "rocm-6.3": PipSource(
+        name="rocm-6.3",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.3",
+        supported_platforms={"Linux"},
+        accelerator="rocm",
     ),
     "rocm-6.4": PipSource(
         name="rocm-6.4",
@@ -684,7 +686,7 @@ def _nightly_version(site_dir: Path) -> str:
 
 @timed("Checking out nightly PyTorch")
 def checkout_nightly_version(branch: str | None, site_dir: Path) -> None:
-    """Get's the nightly version and then checks it out."""
+    """Gets the nightly version and then checks it out."""
     nightly_version = _nightly_version(site_dir)
     if branch is None:
         # Detached mode - explicitly use --detach flag
