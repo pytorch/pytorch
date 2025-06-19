@@ -261,7 +261,7 @@ tb-nightly==2.13.0a20230426
 #Pinned versions:
 #test that import:
 
-tlparse==0.3.7
+tlparse==0.3.25
 #Description: parse logs produced by torch.compile
 #Pinned versions:
 #test that import: dynamo/test_structured_trace.py
