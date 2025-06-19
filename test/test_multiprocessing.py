@@ -98,6 +98,44 @@ def send_and_delete_tensors(queue, event, device, dtype, count, size=5):
     event.wait()
 
 
+def send_tensor_with_untyped_storage(queue, event):
+    tensors = torch.ones(2, device="cuda").chunk(2, dim=0)
+    specs = []
+    for tensor in tensors:
+        storage = tensor.untyped_storage()
+        (
+            storage_device,
+            storage_handle,
+            storage_size_bytes,
+            storage_offset_bytes,
+            ref_counter_handle,
+            ref_counter_offset,
+            event_handle,
+            event_sync_required,
+        ) = storage._share_cuda_()
+        specs.append(
+            {
+                "tensor_cls": type(tensor),
+                "tensor_size": tensor.shape,
+                "tensor_stride": tensor.stride(),
+                "tensor_offset": tensor.storage_offset(),
+                "dtype": tensor.dtype,
+                "requires_grad": tensor.requires_grad,
+                "storage_cls": type(storage),
+                "storage_device": storage_device,
+                "storage_handle": storage_handle,
+                "storage_size_bytes": storage_size_bytes,
+                "storage_offset_bytes": storage_offset_bytes,
+                "ref_counter_handle": ref_counter_handle,
+                "ref_counter_offset": ref_counter_offset,
+                "event_handle": event_handle,
+                "event_sync_required": event_sync_required,
+            }
+        )
+    queue.put(specs)
+    event.wait()
+
+
 def receive_and_send_sum(queue, out_queue, event, device, dtype, count, size=5):
     s = torch.full([size], 0, device=device, dtype=dtype)
     for i in range(count):
@@ -629,6 +667,27 @@ if __name__ == "__main__":
 """
         )
         self.assertRegex(stderr, "Cannot re-initialize CUDA in forked subprocess.")
+
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_rebuild_cuda_tensor(self):
+        ctx = mp.get_context("spawn")
+        queue = ctx.Queue()
+        event = ctx.Event()
+
+        proc = ctx.Process(
+            target=send_tensor_with_untyped_storage,
+            args=(queue, event),
+        )
+        proc.start()
+
+        specs = queue.get()
+        tensors = []
+        for spec in specs:
+            tensors.append(mp.reductions.rebuild_cuda_tensor(**spec))
+        self.assertEqual(tensors, [1, 1])
+
+        del tensors, spec
+        event.set()
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_event(self):

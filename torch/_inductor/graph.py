@@ -218,7 +218,6 @@ def mark_nodes_dislike_padding(
             aten.convolution,
             aten.convolution_backward,
             aten._scaled_mm,
-            aten._scaled_grouped_mm,
         ]
     )
     # what's a better way to collect the reduction ops?
@@ -1475,6 +1474,7 @@ class GraphLowering(torch.fx.Interpreter):
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
+                old_kwargs["tma_descriptor_metadata"],
             )
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
@@ -1542,7 +1542,8 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             if (
                 n.op == "call_function"
-                and n.target is not operator.getitem
+                and n.target
+                not in (operator.getitem, torch._higher_order_ops.invoke_subgraph)
                 and (
                     fallback_node_due_to_unsupported_type(n)
                     or CompilerBisector.disable_subsystem(
@@ -2049,6 +2050,7 @@ class GraphLowering(torch.fx.Interpreter):
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
+                node.kwargs["tma_descriptor_metadata"],
             )
 
             new_kwargs: dict[str, int] = {}

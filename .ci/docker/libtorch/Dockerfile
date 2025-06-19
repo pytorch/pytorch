@@ -64,6 +64,11 @@ RUN bash ./install_cuda.sh 12.8
 RUN bash ./install_magma.sh 12.8
 RUN ln -sf /usr/local/cuda-12.8 /usr/local/cuda
 
+FROM cuda as cuda12.9
+RUN bash ./install_cuda.sh 12.9
+RUN bash ./install_magma.sh 12.9
+RUN ln -sf /usr/local/cuda-12.9 /usr/local/cuda
+
 FROM cpu as rocm
 ARG ROCM_VERSION
 ARG PYTORCH_ROCM_ARCH
