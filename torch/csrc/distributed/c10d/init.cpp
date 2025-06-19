@@ -3213,7 +3213,15 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                 self->setEnableNanCheck(enable_nan_check);
               },
               py::arg("enable_nan_check"),
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def_static(
+              "get_build_nccl_version",
+              [] {
+                return std::make_tuple(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH);
+              })
+          .def_static("get_runtime_nccl_version", [] {
+            return ::c10d::getNcclVersionTuple();
+          });
 
   module.def(
       "_get_intra_node_comm_usage_counter",
