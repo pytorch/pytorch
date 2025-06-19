@@ -123,7 +123,7 @@ def make_test_case(
                 # happen for tests validating build-dependent features (e.g. datatypes
                 # that are available on some platforms and not others).
                 if code:
-                    self.assertIn("CppWrapperCodeCache", code)
+                    self.assertIn("async_compile.cpp_wrapper", code)
                     self.assertTrue(
                         all(
                             code.count(string) == code_string_count[string]

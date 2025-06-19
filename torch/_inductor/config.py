@@ -1009,16 +1009,11 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_FALLBACK_SCATTER_REDUCE_SUM", "1") == "1"
     )
 
-    # Use funsafe-math-optimizations when compiling
-    enable_unsafe_math_opt_flag = (
-        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_UNSAFE_MATH_OPT_FLAG", "0") == "1"
-    )
-
     # Use ffp-contract when compiling
     # Options: "off" (default), "on", "fast"
     # Per https://godbolt.org/z/bf4bvfc9r , clang/gcc has different behavior for "fast"
     enable_floating_point_contract_flag = os.environ.get(
-        "TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "off"
+        "TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "fast"
     )
 
     # Disable the tiling select heuristic
@@ -1276,9 +1271,9 @@ class aot_inductor:
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
-    # to use which cpp compiler optimization level, default to O1
-    compile_wrapper_opt_level = os.environ.get(
-        "AOT_INDUCTOR_COMPILE_WRAPPER_OPT_LEVEL", "O1"
+    # to use which cpp compiler optimization level, default to O2.
+    compile_wrapper_opt_level: str = os.environ.get(
+        "AOT_INDUCTOR_COMPILE_WRAPPER_OPT_LEVEL", "O2"
     )
 
     # option for debug printing/saving for intermediate tensor values for aot inductor
