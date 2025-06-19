@@ -16,7 +16,7 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
       m_garbage_collection_threshold(0),
       m_pinned_num_register_threads(1),
       m_expandable_segments(false),
-#if CUDA_VERSION >= 12040
+#if CUDA_VERSION >= 12030
       m_expandable_segments_handle_type(
           Expandable_Segments_Handle_Type::UNSPECIFIED),
 #else
