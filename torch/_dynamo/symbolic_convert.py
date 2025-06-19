@@ -95,7 +95,11 @@ from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph
 from .replay_record import DummyModule, ExecutionRecorder
-from .resume_execution import ContinueExecutionCache, ReenterWith
+from .resume_execution import (
+    ContinueExecutionCache,
+    IS_TRACING_RESUME_PROLOGUE_VARNAME,
+    ReenterWith,
+)
 from .source import (
     AttrSource,
     DictGetItemSource,
@@ -1473,6 +1477,10 @@ class InstructionTranslatorBase(
         loaded_vt = self.pop()
         loaded_vt.set_name_hint(name)
         self.symbolic_locals[name] = loaded_vt
+        if name == IS_TRACING_RESUME_PROLOGUE_VARNAME:
+            val = loaded_vt.as_python_constant()
+            assert type(val) is bool
+            self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
@@ -3262,6 +3270,8 @@ class InstructionTranslatorBase(
         # the same instruction.
         self.one_graph = False
         self.error_on_graph_break = False
+        # Also do not graph break when tracing resume function prologues
+        self.is_tracing_resume_prologue = False
 
         self.current_speculation = None
 
@@ -3526,6 +3536,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             all(b.can_restore() for b in self.block_stack)
             and not self.one_graph
             and not self.error_on_graph_break
+            and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
         )
 
@@ -3661,6 +3672,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.export
             and not self.one_graph
             and not self.error_on_graph_break
+            and not self.is_tracing_resume_prologue
         ):
             raise exc.SkipFrame("because no content in function call")
 
