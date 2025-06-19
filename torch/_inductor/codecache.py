@@ -295,6 +295,7 @@ class PersistentCache(CacheBase):
         op: str,
         inputs: str,
         benchmark: Optional[Callable[[Any], dict[ChoiceCaller, float]]],
+        hint_override: Optional[int] = None,
     ) -> dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each

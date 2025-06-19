@@ -1484,118 +1484,142 @@ class SIMDScheduling(BaseScheduling):
         self, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
     ) -> Optional[str]:
         """
-        Codegen a triton template
+        Codegen a triton template with multiple kernel dispatch support
 
         If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
         """
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
-        kernel, render = template_node.node.make_kernel_render(template_node.node)
 
-        buf_name_to_prologue_group = {}
-        template_reads = template_node.used_buffer_names()
-        prologue_group = []
-        for prologue in prologue_nodes:
-            names = prologue.get_buffer_names()
-            prologue_group.append(prologue)
-            # this must be the end of a prologue group
-            if names & template_reads:
-                assert len(names) == 1
-                buf_name_to_prologue_group[next(iter(names))] = prologue_group
-                kernel.prologue_fused_inputs.add(next(iter(names)))
-                prologue_group = []
+        # Support multiple kernel dispatch similar to codegen_node_schedule
+        kernels = []
 
-        # all prologue groups should have finalized with use in template
-        assert len(prologue_group) == 0
+        # Create kernels for each hint in multi_kernel_hints plus the default (None)
+        hints_to_process = [None]  # Default hint
+        if hasattr(config, 'multi_kernel_hints') and config.multi_kernel_hints:
+            hints_to_process.extend(config.multi_kernel_hints)
 
-        with kernel:
-            if not only_gen_src_code:
-                # prologue nodes can only be fused if their only use is in the template,
-                # so they are necessarily not allocated
-                for node in [template_node, *epilogue_nodes]:
-                    node.mark_run()
+        for hint_override in hints_to_process:
+            kernel, render = template_node.node.make_kernel_render(template_node.node)
 
-            partial_code = render()
+            # Store hint_override in kernel for later use
+            kernel.hint_override = hint_override
 
-            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                for node in epilogue_nodes:
-                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
-                kernel.cse.invalidate(OrderedSet())
+            buf_name_to_prologue_group = {}
+            template_reads = template_node.used_buffer_names()
+            prologue_group = []
+            for prologue in prologue_nodes:
+                names = prologue.get_buffer_names()
+                prologue_group.append(prologue)
+                # this must be the end of a prologue group
+                if names & template_reads:
+                    assert len(names) == 1
+                    buf_name_to_prologue_group[next(iter(names))] = prologue_group
+                    kernel.prologue_fused_inputs.add(next(iter(names)))
+                    prologue_group = []
 
-            for input_name, buffer in kernel.named_input_nodes.items():
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                if prologue_group := buf_name_to_prologue_group.get(
-                    buffer.get_name(), []
-                ):
-                    can_codegen_without_upcast = all(
-                        p_n.can_codegen_without_upcasts() for p_n in prologue_group
+            # all prologue groups should have finalized with use in template
+            assert len(prologue_group) == 0
+
+            with kernel:
+                if not only_gen_src_code:
+                    # prologue nodes can only be fused if their only use is in the template,
+                    # so they are necessarily not allocated
+                    for node in [template_node, *epilogue_nodes]:
+                        node.mark_run()
+
+                partial_code = render()
+
+                with kernel.set_subgraph_body("<STORE_OUTPUT>"):
+                    for node in epilogue_nodes:
+                        node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+                    kernel.cse.invalidate(OrderedSet())
+
+                for input_name, buffer in kernel.named_input_nodes.items():
+                    subgraph_name = f"<LOAD_INPUT_{input_name}>"
+                    if prologue_group := buf_name_to_prologue_group.get(
+                        buffer.get_name(), []
+                    ):
+                        can_codegen_without_upcast = all(
+                            p_n.can_codegen_without_upcasts() for p_n in prologue_group
+                        )
+
+                        # TODO - this doesnt work with libdevice calls, potentially other bugs
+                        # upcasting to fp32 and downcasting gives large slowdown
+                        with config.patch(
+                            "triton.codegen_upcast_to_fp32", not can_codegen_without_upcast
+                        ):
+                            with kernel.set_subgraph_body(subgraph_name):
+                                for prologue_node in prologue_group:
+                                    if (
+                                        len(prologue_node.get_buffer_names()) == 1
+                                        and len(prologue_group) == 1
+                                    ):
+                                        if prologue_preserves_zero_mask(prologue_node):
+                                            kernel.prologue_fused_inputs_preserve_zero |= (
+                                                prologue_node.get_buffer_names()
+                                            )
+
+                                    prologue_node.codegen(
+                                        kernel.split_and_set_ranges(
+                                            prologue_node.get_ranges()
+                                        )
+                                    )
+                                kernel.cse.invalidate(OrderedSet())
+
+            if not isinstance(partial_code, str):
+                partial_code.finalize_hook("<DEF_KERNEL>")
+                partial_code.finalize_hook("<ARGDEFS>", strict=False)
+            # finalize must be called after adding epilogue above
+
+            with V.set_kernel_handler(kernel):
+                # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
+
+                for input_name in kernel.named_input_nodes.keys():
+                    subgraph_name = f"<LOAD_INPUT_{input_name}>"
+                    partial_code.finalize_hook(subgraph_name, strict=False)
+
+                with kernel.set_subgraph_body("<STORE_OUTPUT>"):
+                    if isinstance(partial_code, str):
+                        src_code = partial_code
+                    else:
+                        partial_code.finalize_hook("<STORE_OUTPUT>")
+                        src_code = partial_code.code
+                node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
+
+                if config.benchmark_kernel:
+                    num_gb = kernel.estimate_kernel_num_bytes() / 1e9
+                    src_code = (
+                        f"{kernel.imports_for_benchmark_kernel()}\n"
+                        f"{src_code}\n"
+                        f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
                     )
 
-                    # TODO - this doesnt work with libdevice calls, potentially other bugs
-                    # upcasting to fp32 and downcasting gives large slowdown
-                    with config.patch(
-                        "triton.codegen_upcast_to_fp32", not can_codegen_without_upcast
-                    ):
-                        with kernel.set_subgraph_body(subgraph_name):
-                            for prologue_node in prologue_group:
-                                if (
-                                    len(prologue_node.get_buffer_names()) == 1
-                                    and len(prologue_group) == 1
-                                ):
-                                    if prologue_preserves_zero_mask(prologue_node):
-                                        kernel.prologue_fused_inputs_preserve_zero |= (
-                                            prologue_node.get_buffer_names()
-                                        )
+                if only_gen_src_code:
+                    return src_code
 
-                                prologue_node.codegen(
-                                    kernel.split_and_set_ranges(
-                                        prologue_node.get_ranges()
-                                    )
-                                )
-                            kernel.cse.invalidate(OrderedSet())
+                kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+                kernel.kernel_name = kernel_name
 
-        if not isinstance(partial_code, str):
-            partial_code.finalize_hook("<DEF_KERNEL>")
-            partial_code.finalize_hook("<ARGDEFS>", strict=False)
-        # finalize must be called after adding epilogue above
+                if config.trace.enabled:
+                    set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
 
-        with V.set_kernel_handler(kernel):
-            # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
+            kernels.append(kernel)
 
-            for input_name in kernel.named_input_nodes.keys():
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                partial_code.finalize_hook(subgraph_name, strict=False)
+        # If we have multiple kernels, use MultiKernel for dispatch
+        if len(kernels) > 1:
+            MultiKernel.merge_workspaces_inplace(kernels)
+            final_kernel = MultiKernel(kernels)
+        else:
+            final_kernel = kernels[0]
 
-            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                if isinstance(partial_code, str):
-                    src_code = partial_code
-                else:
-                    partial_code.finalize_hook("<STORE_OUTPUT>")
-                    src_code = partial_code.code
-            node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
+        with V.set_kernel_handler(final_kernel):
+            self.codegen_comment([*prologue_nodes, template_node, *epilogue_nodes])
+            final_kernel.call_kernel(final_kernel.kernel_name, template_node.node)
 
-            if config.benchmark_kernel:
-                num_gb = kernel.estimate_kernel_num_bytes() / 1e9
-                src_code = (
-                    f"{kernel.imports_for_benchmark_kernel()}\n"
-                    f"{src_code}\n"
-                    f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
-                )
-
-            if only_gen_src_code:
-                return src_code
-
-            kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-
-            if config.trace.enabled:
-                set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
-
-        self.codegen_comment(node_schedule)
-        kernel.call_kernel(kernel_name, template_node.node)
-
-        V.graph.removed_buffers |= kernel.removed_buffers
-        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
-        self.free_buffers_in_scheduler()
+            V.graph.removed_buffers |= final_kernel.removed_buffers
+            V.graph.inplaced_to_remove |= final_kernel.inplaced_to_remove
+            self.free_buffers_in_scheduler()
         return None
 
     def codegen_sync(self):

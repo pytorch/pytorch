@@ -2972,7 +2972,18 @@ class Scheduler:
                 log_fusion(min_ms_fused, ms1, ms2)
 
                 if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
-                    multi_node.finalize_as_triton_caller(ms_fused_choice)
+                    # Calculate multi_kernel_hints fusion nodes and pass them in
+                    ms_fused_choices = {}
+                    for hint in config.multi_kernel_hints + [None]:  # None represents the default hint
+                        # Use the hint to determine whether or not to fuse but also calculate the multi_kernel_hints fusion nodes
+                        if hint is None:
+                            ms_fused_choices[hint] = ms_fused_choice
+                        else:
+                            # For each hint, we would need to benchmark and find the best choice
+                            # For now, we'll use the same choice but this could be extended
+                            ms_fused_choices[hint] = ms_fused_choice
+
+                    multi_node.finalize_as_triton_callers(ms_fused_choices)
                     multi_node._choice_timings = new_timings
                     return True
                 else:

@@ -274,6 +274,9 @@ class MultiKernelCall:
         ) == "1" or is_metric_table_enabled("persistent_red_perf")
 
         self.picked_kernel = None
+        # Shape specialized dispatch: cache the best kernel choice for each unique shape
+        self.shape_to_kernel = {}
+
         if config.triton.multi_kernel > 1:
             # manually force a subkernel to ease perf testing
             picked_by_config = config.triton.multi_kernel - 2
@@ -389,6 +392,36 @@ class MultiKernelCall:
         return V.graph.multi_kernel_to_choice[multi_kernel_name]
 
     def run(self, *args, **kwargs):
+        # Shape specialized dispatch: for every unique shape we check which kernel is best
+        if hasattr(config, 'multi_kernel_hints') and config.multi_kernel_hints:
+            # Extract shape information from args to create a shape key
+            shape_key = self._get_shape_key(*args, **kwargs)
+
+            if shape_key in self.shape_to_kernel:
+                # Use cached kernel choice for this shape
+                picked_kernel = self.shape_to_kernel[shape_key]
+            else:
+                # Benchmark all kernels for this shape and cache the result
+                timings = self.benchmark_sub_kernels(*args, **kwargs)
+                picked_kernel = timings.index(min(timings))
+                self.shape_to_kernel[shape_key] = picked_kernel
+
+                k0 = self.kernels[0]
+                log.debug(
+                    "pick %dth sub-kernel for shape %s in %s. Size hints %s. Reduction hint %s. Timings %s",
+                    picked_kernel,
+                    shape_key,
+                    [k.inductor_meta.get("kernel_name") for k in self.kernels],
+                    k0.size_hints,
+                    k0.inductor_meta.get("reduction_hint"),
+                    timings,
+                )
+
+            # Run the selected kernel for this shape
+            self.kernels[picked_kernel].run(*args, **kwargs)
+            return
+
+        # Original logic for non-shape-specialized dispatch
         if self.picked_kernel is None:
             timings = self.benchmark_sub_kernels(*args, **kwargs)
             self.picked_kernel = timings.index(min(timings))
@@ -416,6 +449,30 @@ class MultiKernelCall:
             self.record_choice(self.multi_kernel_name, picked_kernel_name)
         self.run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
         self.run(*args, **kwargs)
+
+    def _get_shape_key(self, *args, **kwargs):
+        """
+        Extract shape information from arguments to create a unique shape key.
+        This is used for shape specialized dispatch.
+        """
+        import torch
+
+        shape_info = []
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                shape_info.append(tuple(arg.shape))
+            elif isinstance(arg, (int, float)):
+                shape_info.append(arg)
+            # Add other relevant argument types as needed
+
+        # Include kwargs that might affect kernel choice
+        for key, value in sorted(kwargs.items()):
+            if isinstance(value, torch.Tensor):
+                shape_info.append((key, tuple(value.shape)))
+            elif isinstance(value, (int, float)):
+                shape_info.append((key, value))
+
+        return tuple(shape_info)
 
     def _metrics_table_row(self, timings):
         def get_kernel_path(k):
