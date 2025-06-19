@@ -760,7 +760,19 @@ class CPUReproTests(TestCase):
             else "aten.set_.source_Tensor",
             code,
         )
-        self.assertEqual(model(inp), result)
+        expected = model(inp)
+        self.assertEqual(expected, result)
+
+        # test cpp_wrapper_build_separate
+        with config.patch(cpp_wrapper=True, cpp_wrapper_build_separate=True):
+            result, code = run_and_get_cpp_code(fn_opt, inp)
+            self.assertIn("kernel_src", code)
+            self.assertEqual(expected, result)
+
+        with config.patch(cpp_wrapper=True, cpp_wrapper_build_separate=False):
+            result, code = run_and_get_cpp_code(fn_opt, inp)
+            self.assertNotIn("kernel_src", code)
+            self.assertEqual(expected, result)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
