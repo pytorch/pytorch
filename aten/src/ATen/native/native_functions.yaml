@@ -1323,7 +1323,7 @@
 - func: logical_and.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: logical_and_out
+    CPU, CUDA, MTIA: logical_and_out
     MPS: logical_and_out_mps
   tags: pointwise
 
@@ -1344,7 +1344,7 @@
 - func: logical_or.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: logical_or_out
+    CPU, CUDA, MTIA: logical_or_out
     MPS: logical_or_out_mps
   tags: pointwise
 
@@ -3332,7 +3332,7 @@
 
 - func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: nan_to_num_out
+    CPU, CUDA, MTIA: nan_to_num_out
     MPS: nan_to_num_out_mps
     SparseCPU, SparseCUDA: nan_to_num_sparse_out
   tags: pointwise
@@ -3505,7 +3505,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: log_out
+    CPU, CUDA, MPS, MTIA: log_out
   tags: pointwise
 
 - func: log10(Tensor self) -> Tensor
@@ -3573,7 +3573,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: log2_out
+    CPU, CUDA, MPS, MTIA: log2_out
   tags: pointwise
 
 - func: logaddexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -4891,7 +4891,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: reciprocal_out
+    CPU, CUDA, MTIA: reciprocal_out
     MPS: reciprocal_out_mps
   tags: pointwise
 
@@ -4920,7 +4920,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: neg_out
+    CPU, CUDA, MPS, MTIA: neg_out
     SparseCPU, SparseCUDA: neg_out_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: neg_sparse_csr_out
   tags: pointwise
@@ -5345,7 +5345,7 @@
 - func: logit(Tensor self, float? eps=None) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: logit
+    CPU, CUDA, MTIA: logit
     MPS: logit_mps
   tags: pointwise
 
@@ -9181,7 +9181,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: lt_Scalar_out
+    CPU, CUDA, MTIA: lt_Scalar_out
     MPS: lt_scalar_out_mps
     QuantizedCPU: lt_out_quantized_cpu
   tags: pointwise
@@ -9199,7 +9199,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: lt_Tensor_out
+    CPU, CUDA, MTIA: lt_Tensor_out
     MPS: lt_tensor_out_mps
     QuantizedCPU: lt_out_quantized_cpu
   tags: pointwise
@@ -9967,7 +9967,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: remainder_out
+    CPU, CUDA, MPS, MTIA: remainder_out
   tags: pointwise
 
 - func: remainder.Tensor(Tensor self, Tensor other) -> Tensor
