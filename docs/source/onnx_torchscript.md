@@ -404,18 +404,14 @@ Since we see ``aten::elu`` in the graph, we know this is an ATen operator.
 We check the [ONNX operator list](https://github.com/onnx/onnx/blob/master/docs/Operators.md),
 and confirm that ``Elu`` is standardized in ONNX.
 
-We find a signature for ``elu`` in ``torch/nn/functional.pyi``:
+We find a signature for ``elu`` in ``torch/nn/functional.pyi``::
 
-```{code-block} python
-def elu(input: Tensor, alpha: float = ..., inplace: bool = ...) -> Tensor: ...
-```
+    def elu(input: Tensor, alpha: float = ..., inplace: bool = ...) -> Tensor: ...
 
-We add the following lines to ``symbolic_opset9.py``:
+We add the following lines to ``symbolic_opset9.py``::
 
-```{code-block} python
-def elu(g, input: torch.Value, alpha: torch.Value, inplace: bool = False):
-    return g.op("Elu", input, alpha_f=alpha)
-```
+    def elu(g, input: torch.Value, alpha: torch.Value, inplace: bool = False):
+        return g.op("Elu", input, alpha_f=alpha)
 
 Now PyTorch is able to export models containing the ``aten::elu`` operator!
 
@@ -512,7 +508,7 @@ class MyRelu(torch.autograd.Function):
 
 In cases where a static symbolic method is not provided for its subsequent {class}`torch.autograd.Function` or
 where a function to register ``prim::PythonOp`` as custom symbolic functions is not provided,
-{func}`torch.onnx.export` tries to inline the graph that corresponds to that {class}`torch.autograd.Function` such that
+:func:`torch.onnx.export` tries to inline the graph that corresponds to that {class}`torch.autograd.Function` such that
 this function is broken down into individual operators that were used within the function.
 The export should be successful as long as these individual operators are supported. For example:
 
