@@ -1238,6 +1238,8 @@ class InstructionTranslatorBase(
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
+        self.error_on_graph_break = config.error_on_graph_break
+
         ip = self.instruction_pointer
         if ip is None:
             return False
@@ -3244,9 +3246,13 @@ class InstructionTranslatorBase(
         # Flag to indicate whether tracing is used for export.
         self.export = export
         # NOTE: one_graph is used for export/debugging to always force errors on graph breaks.
-        # For allow for fullgraph toggle during normal compile, config.error_on_graph_break
-        # is used instead.
+        # To toggle fullgraph during normal compile, self.error_on_graph_break
+        # is used instead. Every step(), its value is updated to config.error_on_graph_break.
+        # We mirror this value since cleanup may (correctly) inadvertently change config.error_on_graph_break.
+        # This assumes that we cannot both trace a change to config.error_on_graph_break and graph break on
+        # the same instruction.
         self.one_graph = False
+        self.error_on_graph_break = False
 
         self.current_speculation = None
 
@@ -3510,7 +3516,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return (
             all(b.can_restore() for b in self.block_stack)
             and not self.one_graph
-            and not config.error_on_graph_break
+            and not self.error_on_graph_break
             and not self.active_generic_context_managers
         )
 
@@ -3645,7 +3651,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.symbolic_locals_contain_module_class()
             and not self.export
             and not self.one_graph
-            and not config.error_on_graph_break
+            and not self.error_on_graph_break
         ):
             raise exc.SkipFrame("because no content in function call")
 
