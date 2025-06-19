@@ -2,11 +2,7 @@
 
 # To run:
 # TORCH_SYMMMEM=NVSHMEM python test/distributed/test_nvshmem.py
-# OR
-# TORCH_SYMMMEM=NVSHMEM torchrun --nproc-per-node 4 test/distributed/test_nvshmem.py
 
-import os
-import sys
 
 import torch
 import torch.distributed as dist
@@ -24,21 +20,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import requires_triton
 
 
-symm_mem_backend = os.getenv("TORCH_SYMMMEM")
-
-if symm_mem_backend != "NVSHMEM":
-    print(
-        "test_nvshmem requires setting `TORCH_SYMMMEM=NVSHMEM`, skipping tests",
-        file=sys.stderr,
-    )
-    sys.exit(0)
-
-
 # Decorator
 def requires_nvshmem():
     return skip_but_pass_in_sandcastle_if(
-        symm_mem_backend != "NVSHMEM",
-        "test_nvshmem requires setting `TORCH_SYMMMEM=NVSHMEM`",
+        not symm_mem.is_nvshmem_available(),
+        "test_nvshmem requires NVSHMEM, skipping tests",
     )
 
 

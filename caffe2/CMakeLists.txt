@@ -1027,6 +1027,7 @@ elseif(USE_CUDA)
         nvshmem_device
     )
     target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
+    target_compile_definitions(nvshmem_extension PUBLIC USE_NVSHMEM)
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
   endif()
