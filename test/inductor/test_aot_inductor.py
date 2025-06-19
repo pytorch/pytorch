@@ -30,6 +30,7 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     SM90OrLater,
 )
@@ -929,7 +930,10 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support SDPA"
+        # for archs where this isn't lowered to flash attention, the math
+        # backend will be used and it doesn't work for bfloat16
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Some archs don't support SDPA with bfloat16",
     )
     def test_sdpa_2(self):
         class Model(torch.nn.Module):
@@ -1039,7 +1043,7 @@ class AOTInductorTestsTemplate:
 
     @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support SDPA"
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support flash SDPA"
     )
     def test_fallback_kernel_with_symexpr_output(self):
         if self.device != GPU_TYPE:
@@ -3036,7 +3040,7 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support SDPA"
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Some archs don't support mem eff SDPA"
     )
     def test_scaled_dot_product_efficient_attention(self):
         if self.device != GPU_TYPE:
