@@ -22,6 +22,7 @@ from typing import Union
 
 import torch
 import torch.testing
+from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
@@ -137,7 +138,7 @@ class CPythonTestCase(TestCase):
     assertNotRegex = unittest.TestCase.assertNotRegex
     assertCountEqual = unittest.TestCase.assertCountEqual
     assertMultiLineEqual = unittest.TestCase.assertMultiLineEqual
-    assertSequenceEqual = unittest.TestCase.assertSequenceEqual
+    assertSequenceEqual = polyfills.assert_sequence_equal
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
