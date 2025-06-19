@@ -2469,6 +2469,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        hint_override: Optional[int] = None,
     ) -> AutotuneArgs:
         """
         Factory method to create AutotuneArgs from a list of ChoiceCallers.
@@ -2491,14 +2492,17 @@ class AlgorithmSelectorCache(PersistentCache):
                     V.graph.sizevars.size_hints(
                         input_node.get_size(),
                         fallback=config.unbacked_symint_fallback,
+                        hint_override=hint_override
                     ),
                     V.graph.sizevars.size_hints(
                         input_node.get_stride(),
                         fallback=config.unbacked_symint_fallback,
+                        hint_override=hint_override
                     ),
                     V.graph.sizevars.size_hint(
                         input_node.get_layout().offset,
                         fallback=config.unbacked_symint_fallback,
+                        hint_override=hint_override
                     ),
                 )
             )
@@ -2613,8 +2617,9 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        hint_override: Optional[int] = None,
     ) -> dict[ChoiceCaller, float]:
-        inputs = cls.get_inputs(choices, input_nodes, layout, input_gen_fns)
+        inputs = cls.get_inputs(choices, input_nodes, layout, input_gen_fns, hint_override=hint_override)
         return cls.benchmark_choices(choices, inputs)
 
     @classmethod
@@ -2624,6 +2629,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        hint_override: Optional[int] = None,
     ):
         from . import autotune_process
 
@@ -2633,7 +2639,7 @@ class AlgorithmSelectorCache(PersistentCache):
         triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
 
         timings = cls.benchmark_in_current_process(
-            extern, input_nodes, layout, input_gen_fns
+            extern, input_nodes, layout, input_gen_fns, hint_override=hint_override
         )
         timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
         return timings
@@ -2645,6 +2651,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        hint_override: Optional[int] = None,
     ):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
@@ -2655,6 +2662,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_nodes=input_nodes,
                 layout=layout,
                 input_gen_fns=input_gen_fns,
+                hint_override=hint_override
             )
         else:
             return functools.partial(
@@ -2662,6 +2670,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_nodes=input_nodes,
                 layout=layout,
                 input_gen_fns=input_gen_fns,
+                hint_override=hint_override
             )
 
     @staticmethod
