@@ -942,15 +942,15 @@ def parse_dependencies(
             "-c",
             textwrap.dedent(
                 """
-            from pathlib import Path
+                from pathlib import Path
 
-            from packaging.metadata import Metadata
+                from packaging.metadata import Metadata
 
-            metadata = Metadata.from_email(Path('METADATA').read_text(encoding='utf-8'))
-            for req in metadata.requires_dist:
-                if req.marker is None or req.marker.evaluate():
-                    print(req)
-            """
+                metadata = Metadata.from_email(Path('METADATA').read_text(encoding='utf-8'))
+                for req in metadata.requires_dist:
+                    if req.marker is None or req.marker.evaluate():
+                        print(req)
+                """
             ).strip(),
             cwd=dist_info_dir,
             capture_output=True,
