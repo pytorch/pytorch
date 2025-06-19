@@ -88,22 +88,23 @@ def accumulate_grad(x, new_grad):
         x.grad.add_(new_grad_strided)
 
 
-def iter_protocol(obj):
-    if hasattr(obj, "__iter__"):
-        return obj.__iter__()
-    if hasattr(obj, "__getitem__"):
+def iter_protocol(iterable):
+    if hasattr(iterable, "__iter__"):
+        return iterable.__iter__()
+    if hasattr(iterable, "__getitem__"):
 
-        def sequence_protocol(obj):
+        # Needs to be a new function to avoid iter_protocol becoming a generator
+        def sequence_protocol(iterable):
             i = 0
             while True:
                 try:
                     # Can this execute user code?
-                    yield obj.__getitem__(i)
+                    yield iterable.__getitem__(i)
                     i += 1
                 except IndexError:
                     break
 
-        return sequence_protocol(obj)
+        return sequence_protocol(iterable)
 
 
 # This mirrors
