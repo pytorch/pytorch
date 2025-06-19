@@ -243,7 +243,7 @@ Each output value in the ONNX graph may have the following metadata property:
   - "USER_INPUT_MUTATION": Indicates a user input was mutated.
   - "TOKEN": A token output.
 
-Each initializer, input, output has the following metadata:
+Each initialized value, input, output has the following metadata:
 
 - **pkg.torch.onnx.original_node_name**
   
