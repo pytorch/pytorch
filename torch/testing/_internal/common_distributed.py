@@ -58,6 +58,7 @@ logger.setLevel(logging.INFO)
 
 ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
 DDP_RANK_DEVICES = ["cuda", "xpu"]
+HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU
 
 
 class TestSkip(NamedTuple):

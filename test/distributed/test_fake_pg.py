@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -16,7 +17,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import HAS_ACCELERATOR
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import run_tests, skipIfHpu, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
@@ -66,14 +67,14 @@ class TestFakePG(TestCase):
         dist.reduce_scatter(output_tensor, to_reduce_scatter)
         self.assertEqual(tuple(output_tensor.shape), (3, 3))
 
-    @skip_if_lt_x_gpu(1)
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_construct_fsdp(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
         FSDP(nn.Linear(2, 3, device=device_type))
 
     @skipIfHpu
-    @skip_if_lt_x_gpu(1)
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_fsdp_fake_e2e(self):
         store = dist.HashStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -91,7 +92,7 @@ class TestFakePG(TestCase):
         optim.step()
 
     @skipIfHpu
-    @skip_if_lt_x_gpu(1)
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_fake_pg_tracing(self):
         store = dist.HashStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -172,7 +173,7 @@ class TestFakePG(TestCase):
         self.assertEqual(tuple(output.shape), (3, 3))
 
     @skipIfHpu
-    @skip_if_lt_x_gpu(1)
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_fsdp_tp_fake_e2e(self):
         world_size = 4
         tp_size = 2
