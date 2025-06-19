@@ -279,14 +279,17 @@ void quantize_tensor_per_tensor_affine_privateuse1(
  *
  * OpenReg is currently designed to simulate device memory through multiple
  * subprocesses. The data_ptr address of the Tensor in the main process is
- * invalid in the main process address space. All Tensor memory access related
- * operations must be performed in the subprocess after passing the Tensor
- * Metadata to the subprocess.
-
- * Therefore, some related operators that only involve Metadata modification can
- * be directly implemented at the C++ level and registered to PrivateUse1, but
- * if memory access is involved, the related operators must be implemented at
- * the Python level, otherwise will cause invalid memory access.
+ * invalid in the main process address space. All operations related to Tensor
+ * memory access must be performed in the subprocess.
+ *
+ * Currently, for the efficiency of IPC, most operations are to pass the Tensor
+ * metadata, and only a small number of operations involving copy will serialize
+ * and pass the Tensor body by custom pickler provided by torch.multiprocess.
+ *
+ * Therefore, in principle, only operations related to Metadata modification can
+ * be directly implemented at the C++ level and registered in PrivateUse1; but
+ * if memory access is involved, the relevant operations must be implemented at
+ * the Python level, otherwise invalid memory access will result.
  */
 
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
