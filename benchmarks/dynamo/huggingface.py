@@ -519,7 +519,8 @@ class HuggingfaceRunner(BenchmarkRunner):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
         with self.autocast(**self.autocast_arg):
-            loss, *_ = mod(**cloned_inputs)
+            pred = mod(**cloned_inputs)
+            loss = pred[0]
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()
         if collect_outputs:

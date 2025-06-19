@@ -1348,6 +1348,9 @@ class aot_inductor:
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
 
+    # Experimental. Flag to control whether to package weight separately on disk
+    package_constants_on_disk: bool = False
+
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = not is_fbcode()
 
@@ -1698,6 +1701,11 @@ _cache_config_ignore_prefix: list[str] = [
     "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
+    # cache related options are not relevant to cache results
+    "fx_graph_cache",
+    "fx_graph_remote_cache",
+    "autotune_local_cache",
+    "autotune_remote_cache",
 ]
 
 # External callable for matmul tuning candidates

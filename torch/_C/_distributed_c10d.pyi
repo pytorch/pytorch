@@ -643,6 +643,10 @@ class ProcessGroupNCCL(Backend):
     def uid(self) -> int: ...
     @property
     def options(self) -> Options: ...  # type: ignore[override]
+    @staticmethod
+    def get_build_nccl_version(self) -> tuple[int, int, int]: ...
+    @staticmethod
+    def get_runtime_nccl_version(self) -> tuple[int, int, int]: ...
 
 class ProcessGroupUCC(Backend):
     def __init__(
@@ -700,6 +704,9 @@ def _unregister_process_group(group_name: str) -> None: ...
 # operations.  CUmodule is a pointer to a CUDA module, carried by a int64 in
 # Python. At C++ interface, it is converted to a uintptr_t.
 def _nvshmemx_cumodule_init(module: int) -> None: ...
+
+# Check if NVSHMEM is available on current system.
+def _is_nvshmem_available() -> bool: ...
 
 class _SymmetricMemory:
     @staticmethod
