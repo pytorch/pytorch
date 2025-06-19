@@ -33,7 +33,7 @@ from typing_extensions import (
     ParamSpec,
     Self,
     TypeAlias,
-    TypeGuard,
+    TypeIs,
 )
 from unittest.mock import patch
 
@@ -4971,7 +4971,7 @@ class CppTemplateBuffer(TemplateBuffer):
 
 def is_node_sequence(
     nodes: Sequence[Union[IRNode, Sequence[IRNode]]],
-) -> TypeGuard[Sequence[IRNode]]:
+) -> TypeIs[Sequence[IRNode]]:
     return all(isinstance(n, IRNode) for n in nodes)
 
 
@@ -5838,7 +5838,7 @@ class ExternKernel(InputsKernel):
             except (AttributeError, NotImplementedError):
                 return False
 
-            return (i := V.graph_inputs.get(name)) is not None and i.is_mkldnn_tensor
+            return name in V.graph.constants and V.graph.constants[name].is_mkldnn
 
         # TODO move this to the more proper places
         if is_mkldnn_tensor(x):
@@ -6751,7 +6751,9 @@ class ScatterFallback(ExternKernel):
         return False
 
     def get_mutation_names(self) -> list[str]:
-        return [self.get_input_name(0)]
+        inp = self.inputs[0]
+        assert isinstance(inp, IRNode)
+        return [inp.get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
@@ -7863,7 +7865,7 @@ class InvokeSubgraph(ExternKernel):
     @classmethod
     def create(
         cls, subgraph: Subgraph, *operands: IRNode
-    ) -> Union[IRNode, Sequence[Union[IRNode, Sequence[IRNode]]]]:
+    ) -> list[Union[ShapeAsConstantBuffer, NoneAsConstantBuffer, MultiOutput]]:
         """For each operand, get a realized input, force it to have the same
         strides as the subgraph inputs, then use an InvokeSubgraph"""
         from .lowering import constrain_to_fake_tensor
@@ -7925,7 +7927,7 @@ class InvokeSubgraph(ExternKernel):
 
         def create_output(
             output: IRNode, ind: int
-        ) -> Union[IRNode, Sequence[Union[IRNode, Sequence[IRNode]]]]:
+        ) -> Union[ShapeAsConstantBuffer, NoneAsConstantBuffer, MultiOutput]:
             if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
                 return output
             else:
