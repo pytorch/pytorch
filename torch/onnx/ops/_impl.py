@@ -155,10 +155,10 @@ def _validate_gqa_configuration(
     current_q_num_heads: int, current_kv_num_heads: int
 ) -> None:
     """Validate Group Query Attention configuration."""
-    if current_q_num_heads != current_kv_num_heads:
-        assert current_q_num_heads % current_kv_num_heads == 0, (
-            f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA"
-        )
+    torch._check(
+        current_q_num_heads % current_kv_num_heads == 0,
+        f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA"
+    )
 
 
 def _compute_qk_output_for_mode_0(
@@ -170,8 +170,6 @@ def _compute_qk_output_for_mode_0(
 ) -> torch.Tensor:
     """Helper function to compute QK output for qk_matmul_output_mode == 0."""
     # Handle GQA manually for QK output
-    _validate_gqa_configuration(current_q_num_heads, current_kv_num_heads)
-
     K_for_qk = K
     if current_q_num_heads != current_kv_num_heads:
         repeat_factor = current_q_num_heads // current_kv_num_heads
@@ -245,17 +243,11 @@ def attention_23(
         )  # Boolean mask or zero float mask only
     )
 
-    # Check if we can use flex_attention (flexible and optimized)
-    can_use_flex_attention = (
-        not can_use_sdpa  # Use flex_attention only if SDPA is not available
-        and qk_matmul_output_mode == 0  # Default QK output mode
-        and softmax_precision is None  # No custom softmax precision
-    )
+    enable_gqa = current_q_num_heads != current_kv_num_heads
+    _validate_gqa_configuration(current_q_num_heads, current_kv_num_heads)
 
     if can_use_sdpa:
         # Use PyTorch's optimized scaled_dot_product_attention
-        enable_gqa = current_q_num_heads != current_kv_num_heads
-        _validate_gqa_configuration(current_q_num_heads, current_kv_num_heads)
 
         # Prepare attention mask for SDPA
         sdpa_attn_mask = None
@@ -282,65 +274,8 @@ def attention_23(
             scale,
             qk_matmul_output_mode,
         )
-    elif can_use_flex_attention:
-        # Use PyTorch's flexible flex_attention for complex cases
-        enable_gqa = current_q_num_heads != current_kv_num_heads
-        _validate_gqa_configuration(current_q_num_heads, current_kv_num_heads)
-
-        # Create score modification function for flex_attention
-        def score_mod(score, b, h, q_idx, kv_idx):
-            # Apply causal masking
-            if is_causal:
-                score = torch.where(q_idx >= kv_idx, score, float("-inf"))
-
-            # Apply attention mask
-            if attn_mask is not None:
-                # Get mask value based on dimensions
-                if attn_mask.ndim == 4:  # (batch, heads, q_seq, kv_seq)
-                    mask_value = attn_mask[b, h, q_idx, kv_idx]
-                elif attn_mask.ndim == 3:  # (batch, q_seq, kv_seq)
-                    mask_value = attn_mask[b, q_idx, kv_idx]
-                else:  # (q_seq, kv_seq)
-                    mask_value = attn_mask[q_idx, kv_idx]
-
-                if attn_mask.dtype == torch.bool:
-                    # Boolean mask: True means participate in attention
-                    score = torch.where(mask_value, score, float("-inf"))
-                else:
-                    # Float mask: added to attention scores
-                    score = score + mask_value
-
-            # Apply softcap if provided
-            if softcap > 0.0:
-                score = softcap * torch.tanh(score / softcap)
-
-            return score
-
-        # FlexAttention returns a single tensor of shape (B, Hq, L, Ev)
-        flex_output = flex_attention.flex_attention(
-            Q,
-            K,
-            V,
-            score_mod=score_mod
-            if (is_causal or attn_mask is not None or softcap > 0.0)
-            else None,
-            scale=scale,
-            enable_gqa=enable_gqa,
-        )
-        # Ensure we have a single tensor (flex_attention may return tuple in some cases)
-        output = flex_output[0] if isinstance(flex_output, tuple) else flex_output
-
-        qk_output = _get_qk_output(
-            Q,
-            K,
-            current_q_num_heads,
-            current_kv_num_heads,
-            scale,
-            qk_matmul_output_mode,
-        )
     else:
         # Fallback to manual implementation for complex cases
-        _validate_gqa_configuration(current_q_num_heads, current_kv_num_heads)
 
         # Handle Group Query Attention (GQA) and Multi-Query Attention (MQA)
         if current_q_num_heads != current_kv_num_heads:
