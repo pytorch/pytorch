@@ -2942,11 +2942,14 @@ class Scheduler:
                 return False
 
             def benchmark_when_ready() -> bool:
+                from torch._inductor import config
+                
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
+                ms_fused_choices: dict[Optional[int], Any] = {}
 
                 new_timings = {}
-                # Benchmark each choice after compilation completes
+                # Benchmark each choice after compilation completes  
                 for choice, future, mod_fused in future_choices:
                     try:
                         if future is not None:
@@ -2971,11 +2974,22 @@ class Scheduler:
                             min_ms_fused = ms_fused
                             ms_fused_choice = choice
 
+                # Build multi-kernel choices by evaluating each hint
+                if ms_fused_choice is not None:
+                    ms_fused_choices[None] = ms_fused_choice  # Default choice
+                    
+                    # Evaluate each hint to find best choice
+                    for hint in config.multi_kernel_hints:
+                        hint_choice, _ = multi_node.get_min_choice(hint_override=hint)
+                        ms_fused_choices[hint] = hint_choice
+
                 log_fusion(min_ms_fused, ms1, ms2)
 
-                if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
-                    multi_node.finalize_as_triton_caller(ms_fused_choice)
-                    multi_node._choice_timings = new_timings
+                if min_ms_fused < (ms1 + ms2) and ms_fused_choices:
+                    multi_node.finalize_as_triton_callers(ms_fused_choices)
+                    # Update choice timings for all hints
+                    for hint in [None] + config.multi_kernel_hints:
+                        multi_node._choice_timings_cache[hint if hint is not None else "default"] = new_timings
                     return True
                 else:
                     return False
