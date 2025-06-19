@@ -921,6 +921,46 @@ def write_pth(venv: Venv) -> None:
     )
 
 
+def parse_dependencies(
+    venv: Venv,
+    wheel_site_dir: Path,
+) -> list[str]:
+    """Parse dependencies from the torch wheel's metadata."""
+    dist_info_dirs = list(wheel_site_dir.glob("*.dist-info"))
+    if len(dist_info_dirs) != 1:
+        raise RuntimeError(
+            f"Expected exactly one .dist-info directory in {wheel_site_dir}, "
+            f"got {dist_info_dirs}"
+        )
+    dist_info_dir = dist_info_dirs[0]
+    if not (dist_info_dir / "METADATA").is_file():
+        raise RuntimeError(
+            f"Expected METADATA file in {dist_info_dir}, but it does not exist."
+        )
+    dependencies = (
+        venv.python(
+            "-c",
+            textwrap.dedent(
+                """
+            from pathlib import Path
+
+            from packaging.metadata import Metadata
+
+            metadata = Metadata.from_email(Path('METADATA').read_text(encoding='utf-8'))
+            for req in metadata.requires_dist:
+                if req.marker is None or req.marker.evaluate():
+                    print(req)
+            """
+            ).strip(),
+            cwd=dist_info_dir,
+            capture_output=True,
+        )
+        .stdout.strip()
+        .splitlines()
+    )
+    return [dep.strip() for dep in dependencies]
+
+
 def install(
     *,
     venv: Venv,
@@ -937,30 +977,18 @@ def install(
 
     packages = [p for p in packages if p != "torch"]
 
-    dists = venv.pip_download("torch", prerelease=True, no_deps=True)
-    if len(dists) != 1:
-        raise RuntimeError(f"Expected exactly one torch wheel, got {dists}")
-    torch_wheel = dists[0]
+    downloaded_files = venv.pip_download("torch", prerelease=True, no_deps=True)
+    if len(downloaded_files) != 1:
+        raise RuntimeError(f"Expected exactly one torch wheel, got {downloaded_files}")
+    torch_wheel = downloaded_files[0]
     if not (
         torch_wheel.name.startswith("torch-") and torch_wheel.name.endswith(".whl")
     ):
         raise RuntimeError(f"Expected exactly one torch wheel, got {torch_wheel}")
 
     with venv.extracted_wheel(torch_wheel) as wheel_site_dir:
-        dist_info_dir = next(wheel_site_dir.glob("torch-*.dist-info"))
-        dependencies = set()
-        with (dist_info_dir / "METADATA").open(encoding="utf-8") as metadata:
-            requires_dist_found = False
-            for line in metadata:
-                if line.startswith("Requires-Dist:"):
-                    requires_dist_found = True
-                    dep = line.partition(":")[2].strip()
-                    dependencies.add(dep)
-                elif requires_dist_found or line.startswith("Provides-Extra:"):
-                    # Only reading the first continuation block prefixed with 'Requires-Dist:'
-                    break
-
-        install_packages(venv, [*sorted(dependencies), *packages])
+        dependencies = parse_dependencies(venv, wheel_site_dir)
+        install_packages(venv, [*dependencies, *packages])
 
         if subcommand == "checkout":
             checkout_nightly_version(branch, wheel_site_dir)
