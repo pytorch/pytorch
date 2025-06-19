@@ -755,7 +755,7 @@ jobs:
   wheel-py3_9-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.memory"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1940,7 +1940,7 @@ jobs:
   wheel-py3_10-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.memory"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2052,7 +2052,7 @@ jobs:
     needs:
       - wheel-py3_10-cuda12_9-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.memory"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3125,7 +3125,7 @@ jobs:
   wheel-py3_11-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.memory"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4310,7 +4310,7 @@ jobs:
   wheel-py3_12-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.memory"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -5495,7 +5495,7 @@ jobs:
   wheel-py3_13-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.memory"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -6680,7 +6680,7 @@ jobs:
   wheel-py3_13t-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.memory"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
