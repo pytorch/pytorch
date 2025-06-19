@@ -373,20 +373,20 @@ def attention(
         qk_matmul_output = torch.matmul(Q, K.transpose(-2, -1)) * scale_factor
 
         # Initialize QK output based on mode
-        qk_output = qk_matmul_output.clone()  # Default case for mode 0
+        qk_output = qk_matmul_output  # Default case for mode 0
 
         # Add attention bias
         qk_with_bias = qk_matmul_output + attn_bias
 
         if qk_matmul_output_mode == 1:
-            qk_output = qk_with_bias.clone()
+            qk_output = qk_with_bias
 
         # Apply softcap if provided
         if softcap > 0.0:
             qk_with_bias = softcap * torch.tanh(qk_with_bias / softcap)
 
         if qk_matmul_output_mode == 2:
-            qk_output = qk_with_bias.clone()
+            qk_output = qk_with_bias
 
         # Apply softmax with optional precision casting
         if softmax_precision is not None:
