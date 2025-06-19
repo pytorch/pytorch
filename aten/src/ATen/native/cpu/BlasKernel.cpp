@@ -100,6 +100,7 @@ auto sum(int64_t N, Func f) {
 }
 
 template <typename scalar_t, typename opmath_t, typename out_t>
+__ubsan_ignore_signed_int_overflow__
 std::enable_if_t<std::is_same_v<scalar_t, opmath_t>, void>
 gemm_notrans_(
     int64_t m,

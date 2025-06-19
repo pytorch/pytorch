@@ -169,7 +169,7 @@ class VecNEON(VecISA):
             return "neon"
         return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 @dataclasses.dataclass
@@ -191,7 +191,7 @@ class VecSVE256(VecISA):
             return "neon"
         return "asimd"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 @dataclasses.dataclass
@@ -208,7 +208,7 @@ class VecAVX512(VecISA):
     def __str__(self) -> str:
         return "avx512"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 @dataclasses.dataclass
@@ -263,7 +263,7 @@ class VecAVX2(VecISA):
     def __str__(self) -> str:
         return "avx2"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 @dataclasses.dataclass
@@ -280,7 +280,7 @@ class VecZVECTOR(VecISA):
     def __str__(self) -> str:
         return "zvector"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 @dataclasses.dataclass
@@ -293,7 +293,7 @@ class VecVSX(VecISA):
     def __str__(self) -> str:
         return "vsx"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 class InvalidVecISA(VecISA):
@@ -308,7 +308,7 @@ class InvalidVecISA(VecISA):
     def __bool__(self) -> bool:  # type: ignore[override]
         return False
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 def x86_isa_checker() -> list[str]:
