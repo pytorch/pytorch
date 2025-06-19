@@ -7,7 +7,11 @@ from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
 
-from onnxscript.onnx_opset import opset20 as op20, opset21 as op21, opset23 as op23
+from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
+    opset20 as op20,
+    opset21 as op21,
+    opset23 as op23,
+)
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
@@ -97,6 +101,9 @@ def aten_scaled_dot_product_attention_23(
     assert (not is_causal) or (is_causal and attn_mask is None), (
         "is_causal and attn_mask cannot be set at the same time"
     )
+    assert len(query.shape) == 4 and len(key.shape) == 4 and len(value.shape) == 4, (
+        "only 4D query, key, and value are supported"
+    )
 
     # Attention onnx op can only handle non-training scenarios where dropout is disabled.
     if dropout_p == 0:
@@ -117,8 +124,8 @@ def aten_scaled_dot_product_attention_23(
             value,
             attn_mask=attn_mask,
             scale=scale,
-            q_num_heads=query.shape[3],
-            kv_num_heads=key.shape[3],
+            q_num_heads=query.shape[-3],
+            kv_num_heads=key.shape[-3],
             is_causal=is_causal,
         )
         return Y
