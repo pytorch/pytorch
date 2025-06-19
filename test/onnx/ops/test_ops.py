@@ -556,7 +556,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
     def test_attention_gqa(self):
         """Test Group Query Attention (GQA)."""
         batch_size, q_seq_len, kv_seq_len = 2, 4, 6
-        q_num_heads, kv_num_heads = 8, 4  # GQA: q_num_heads > kv_num_heads
+        q_num_heads, kv_num_heads = 8, 4  # GQA: q_num_heads % kv_num_heads = 0
         head_size = 64
 
         Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
