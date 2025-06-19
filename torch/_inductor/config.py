@@ -412,6 +412,9 @@ disable_decompose_k = os.environ.get("TORCHINDUCTOR_DISABLE_DECOMPOSE_K") == "1"
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
 
+# Size hints for multi-kernel dispatch optimization
+multi_kernel_hints: list[int] = [64, 256, 4096]
+
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
 graph_partition = False
 

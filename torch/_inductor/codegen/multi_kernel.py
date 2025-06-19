@@ -3,6 +3,7 @@ import functools
 import logging
 import os
 import pathlib
+from typing import Optional
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
@@ -274,6 +275,9 @@ class MultiKernelCall:
         ) == "1" or is_metric_table_enabled("persistent_red_perf")
 
         self.picked_kernel = None
+        # Shape-specialized kernel choices: maps shape hint category to picked kernel index
+        self.shape_specialized_kernels: dict[int, int] = {}
+
         if config.triton.multi_kernel > 1:
             # manually force a subkernel to ease perf testing
             picked_by_config = config.triton.multi_kernel - 2
@@ -281,18 +285,17 @@ class MultiKernelCall:
             self.picked_kernel = picked_by_config
         elif not self.disable_cache:
             self.load_cache()
+            self.load_shape_specialized_cache()
 
         self._recorded = False
 
-    def cache_file_path(self):
-        key = code_hash(
-            ",".join(
-                [
-                    f"{k.fn.cache_key}{k.size_hints!r}{k.triton_meta!r}"
-                    for k in self.kernels
-                ]
-            )
-        )
+    def cache_file_path(self, shape_hint_category: Optional[int] = None):
+        key_parts = [
+            f"{k.fn.cache_key}{k.size_hints!r}{k.triton_meta!r}" for k in self.kernels
+        ]
+        if shape_hint_category is not None:
+            key_parts.append(f"shape_hint_{shape_hint_category}")
+        key = code_hash(",".join(key_parts))
         _, _, path = get_path(key, "picked_kernel")
         return pathlib.Path(path)
 
@@ -309,13 +312,59 @@ class MultiKernelCall:
                     "Load picked kernel %d from cache file %s", self.picked_kernel, path
                 )
 
-    def store_cache(self):
-        assert self.picked_kernel is not None
-        path = self.cache_file_path()
+    def load_shape_specialized_cache(self):
+        """Load shape-specialized kernel choices from cache"""
+        for hint in config.multi_kernel_hints:
+            path = self.cache_file_path(hint)
+            if path.exists():
+                with path.open() as fd:
+                    picked_kernel = int(fd.read())
+                    assert picked_kernel >= 0 and picked_kernel < len(self._kernels)
+                    self.shape_specialized_kernels[hint] = picked_kernel
+                    log.debug(
+                        "Load shape-specialized kernel %d for hint %d from cache file %s",
+                        picked_kernel,
+                        hint,
+                        path,
+                    )
+
+    def store_cache(self, shape_hint_category: Optional[int] = None):
+        if shape_hint_category is not None:
+            assert shape_hint_category in self.shape_specialized_kernels
+            picked_kernel = self.shape_specialized_kernels[shape_hint_category]
+        else:
+            assert self.picked_kernel is not None
+            picked_kernel = self.picked_kernel
+
+        path = self.cache_file_path(shape_hint_category)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        write_atomic(path, str(self.picked_kernel))
-        log.debug("Store picked kernel %d to cache file %s", self.picked_kernel, path)
+        write_atomic(path, str(picked_kernel))
+        log.debug("Store picked kernel %d to cache file %s", picked_kernel, path)
+
+    def get_shape_hint_category(self, *args, **kwargs) -> Optional[int]:
+        """
+        Determine the shape hint category based on input tensor shapes.
+        Returns the largest hint that is <= the maximum tensor size.
+        """
+
+        max_size = 0
+        for arg in args:
+            if hasattr(arg, "numel"):
+                max_size = max(max_size, arg.numel())
+            elif hasattr(arg, "shape"):
+                import math
+
+                max_size = max(max_size, math.prod(arg.shape))
+
+        # Find the largest hint that is <= max_size
+        sorted_hints = sorted(config.multi_kernel_hints)
+        for hint in reversed(sorted_hints):
+            if max_size >= hint:
+                return hint
+
+        # If max_size is smaller than all hints, use the smallest hint
+        return sorted_hints[0] if sorted_hints else None
 
     @property
     def kernels(self):
@@ -389,33 +438,59 @@ class MultiKernelCall:
         return V.graph.multi_kernel_to_choice[multi_kernel_name]
 
     def run(self, *args, **kwargs):
-        if self.picked_kernel is None:
+        # Use shape-specialized dispatch
+        shape_hint_category = self.get_shape_hint_category(*args, **kwargs)
+
+        # Check if we have a cached choice for this shape category
+        if (
+            shape_hint_category is not None
+            and shape_hint_category in self.shape_specialized_kernels
+        ):
+            picked_kernel_idx = self.shape_specialized_kernels[shape_hint_category]
+        elif self.picked_kernel is not None:
+            # Fall back to the general cached choice
+            picked_kernel_idx = self.picked_kernel
+        else:
+            # No cached choice, benchmark all kernels for this shape
             timings = self.benchmark_sub_kernels(*args, **kwargs)
-            self.picked_kernel = timings.index(min(timings))
+            picked_kernel_idx = timings.index(min(timings))
+
             k0 = self.kernels[0]
             log.debug(
-                "pick %dth sub-kernel in %s. Size hints %s. Reduction hint %s. Timings %s",
-                self.picked_kernel,
+                "pick %dth sub-kernel in %s. Size hints %s. Reduction hint %s. Shape hint %s. Timings %s",
+                picked_kernel_idx,
                 [k.inductor_meta.get("kernel_name") for k in self.kernels],
                 k0.size_hints,
                 k0.inductor_meta.get("reduction_hint"),
+                shape_hint_category,
                 timings,
             )
             get_metric_table("persistent_red_perf").add_row(
                 functools.partial(self._metrics_table_row, timings)
             )
+
             if not self.disable_cache:
-                self.store_cache()
+                if shape_hint_category is not None:
+                    # Cache the choice for this shape category
+                    self.shape_specialized_kernels[shape_hint_category] = (
+                        picked_kernel_idx
+                    )
+                    self.store_cache(shape_hint_category)
+                else:
+                    # Cache the general choice
+                    self.picked_kernel = picked_kernel_idx
+                    self.store_cache()
 
         if not self._recorded:
             self._recorded = True
-            picked_kernel_name = self.kernels[self.picked_kernel].inductor_meta.get(
+            picked_kernel_name = self.kernels[picked_kernel_idx].inductor_meta.get(
                 "kernel_name"
             )
             assert picked_kernel_name is not None
             self.record_choice(self.multi_kernel_name, picked_kernel_name)
-        self.run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
-        self.run(*args, **kwargs)
+
+        # Run the selected kernel
+        self.kernels[picked_kernel_idx].run(*args, **kwargs)
 
     def _metrics_table_row(self, timings):
         def get_kernel_path(k):

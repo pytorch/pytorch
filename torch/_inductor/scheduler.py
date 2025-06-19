@@ -2944,6 +2944,7 @@ class Scheduler:
             def benchmark_when_ready() -> bool:
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
+                ms_fused_choices = []
 
                 new_timings = {}
                 # Benchmark each choice after compilation completes
@@ -2967,14 +2968,15 @@ class Scheduler:
                             mod_fused, device
                         )
                         new_timings[choice] = ms_fused
+                        ms_fused_choices.append(choice)
                         if ms_fused < min_ms_fused:
                             min_ms_fused = ms_fused
                             ms_fused_choice = choice
 
                 log_fusion(min_ms_fused, ms1, ms2)
 
-                if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
-                    multi_node.finalize_as_triton_caller(ms_fused_choice)
+                if min_ms_fused < (ms1 + ms2) and ms_fused_choices:
+                    multi_node.finalize_as_triton_callers(ms_fused_choices)
                     multi_node._choice_timings = new_timings
                     return True
                 else:
