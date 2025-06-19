@@ -7,6 +7,11 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.inductor_utils import requires_triton
+from torch.utils._triton import (
+    has_triton_experimental_host_tma,
+    has_triton_tensor_descriptor_host_tma,
+)
 
 
 def _filter_instructions(instructions, opname):
@@ -396,6 +401,52 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(3)
         self.assertEqual(gn(inp), inp + 3)
+
+    @requires_triton()
+    @unittest.skipIf(
+        not has_triton_experimental_host_tma(),
+        "Test requires triton.tools.experimental_descriptor API",
+    )
+    def test_tma_experimental_reconstruct(self):
+        import triton
+
+        def create_tma(tensor):
+            tma = triton.tools.experimental_descriptor.create_2d_tma_descriptor(
+                tensor.data_ptr(),
+                tensor.size(0),
+                tensor.size(1),
+                32,
+                32,
+                tensor.element_size(),
+            )
+            return tensor + 1, tma
+
+        x = torch.randn(128, 128, device="cuda")
+
+        ref = create_tma(x)
+        res = torch.compile(create_tma, backend="eager")(x)
+        self.assertEqual(ref[1].desc, res[1].desc)
+
+    @requires_triton()
+    @unittest.skipIf(
+        not has_triton_tensor_descriptor_host_tma(),
+        "Test requires triton.tools.tensor_descriptor API",
+    )
+    def test_tma_stable_reconstruct(self):
+        import triton
+
+        def create_tma(tensor):
+            tma = triton.tools.tensor_descriptor.TensorDescriptor.from_tensor(
+                tensor,
+                [32, 32],
+            )
+            return tensor + 1, tma
+
+        x = torch.randn(128, 128, device="cuda")
+
+        ref = create_tma(x)
+        res = torch.compile(create_tma, backend="eager")(x)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":

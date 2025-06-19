@@ -95,7 +95,7 @@ class CKTileGemmOperation:
         return asdict(self).items()
 
 
-@functools.lru_cache(None)
+@functools.cache
 def ops():
     """
     Generate the supported instance dataclasses

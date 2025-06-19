@@ -106,6 +106,7 @@ from .source import (
     ConstDictKeySource,
     DefaultsSource,
     DictGetItemSource,
+    DictSubclassGetItemSource,
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
@@ -418,7 +419,7 @@ def from_numpy(a):
 
 
 # For user stack printing
-@functools.lru_cache(None)
+@functools.cache
 def uninteresting_files():
     import torch._dynamo.external_utils
     import torch._dynamo.polyfills
@@ -496,6 +497,8 @@ def get_verbose_code_parts(
 
 
 def convert_int_to_concrete_values(dim) -> Optional[int]:
+    if dim is None:
+        return None
     if not is_symbolic(dim):
         return dim
     else:
@@ -623,7 +626,7 @@ class GuardManagerType(enum.Enum):
     DICT_GUARD_MANAGER = 2
 
 
-@functools.lru_cache(None)
+@functools.cache
 def code_framelocals_names_reversed_cached(code: types.CodeType):
     return list(reversed(code_framelocals_names(code)))
 
@@ -1095,7 +1098,7 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
-        elif istype(source, DictGetItemSource):
+        elif istype(source, (DictGetItemSource, DictSubclassGetItemSource)):
             assert base_guard_manager  # to make mypy happy
             assert isinstance(base_example_value, (dict, collections.OrderedDict))
             if isinstance(base_guard_manager, DictGuardManager):
@@ -1456,7 +1459,11 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         value = self.get(guard.name)
-        t = type(value)
+        if isinstance(value, torch._subclasses.FakeTensor) and value.pytype:
+            t = value.pytype
+        else:
+            t = type(value)
+
         if self.serialization_mode == "save":
             if t.__qualname__ != t.__name__:
                 raise_local_type_error(value)
@@ -2189,6 +2196,7 @@ class GuardBuilder(GuardBuilderBase):
 
                 func_str = textwrap.dedent(
                     f"""
+                #include <algorithm>
                 #include <cstdint>
                 #include <cmath>
                 #include <c10/util/generic_math.h>
