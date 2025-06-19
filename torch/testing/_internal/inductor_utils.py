@@ -73,7 +73,16 @@ HAS_MULTIGPU = any(
     for gpu in GPU_TYPES
 )
 
-<<<<<<< HEAD
+def get_device_from_test_args_kwargs(self, *args, **kwargs):
+    if hasattr(self, "device_type"):
+        return self.device_type
+    elif hasattr(self, "device"):
+        return self.device
+    elif "device" in kwargs:
+        return kwargs["device"]
+    raise RuntimeError("Unable to obtain device")
+
+
 _desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
 RUN_GPU = (
     HAS_GPU
@@ -84,8 +93,6 @@ RUN_CPU = (
     HAS_CPU
     and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
 )
-=======
->>>>>>> 99f3666670c (Allow generation of inductor backend specific tests using instantiate_device_type_tests)
 
 def _check_has_dynamic_shape(
     self: TestCase,
@@ -172,7 +179,13 @@ IS_H100 = LazyVal(lambda: HAS_CUDA and get_gpu_shared_memory() == 232448)
 
 IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())
 
-<<<<<<< HEAD
+try:
+    import halide  # @manual
+
+    HAS_HALIDE = halide is not None
+except ImportError:
+    HAS_HALIDE = False
+
 def dummy_graph() -> GraphLowering:
     """
     Create a graph. This is useful for unit testing code which accesses
@@ -236,11 +249,3 @@ def clone_preserve_strides_offset(x, device=None):
         buffer = buffer.to(device, copy=True)
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
-=======
-try:
-    import halide  # @manual
-
-    HAS_HALIDE = halide is not None
-except ImportError:
-    HAS_HALIDE = False
->>>>>>> 99f3666670c (Allow generation of inductor backend specific tests using instantiate_device_type_tests)

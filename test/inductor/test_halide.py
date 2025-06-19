@@ -271,7 +271,6 @@ class HalideTests(TestCase):
 
 if test_torchinductor.HAS_CPU and HAS_HALIDE:
     make_halide(test_torchinductor.SweepInputsCpuTest)
-    make_halide(test_torchinductor.CpuTests)
 
 if (
     test_torchinductor.HAS_GPU
@@ -279,7 +278,6 @@ if (
     and os.environ.get("TEST_HALIDE_GPU") == "1"
 ):
     make_halide(test_torchinductor.SweepInputsGPUTest)
-    make_halide(test_torchinductor.GPUTests)
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS and HAS_HALIDE:
