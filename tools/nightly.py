@@ -429,10 +429,9 @@ class Venv:
             python = self.executable
         cmd = [str(python), *args]
         env = popen_kwargs.pop("env", None) or {}
-        check = popen_kwargs.pop("check", True)
         return subprocess.run(
             cmd,
-            check=check,
+            check=True,
             text=True,
             encoding="utf-8",
             env={**self._env, **env},
@@ -474,11 +473,10 @@ class Venv:
             python = self.executable
         cmd = [str(self.bindir / "uv"), *args]
         env = popen_kwargs.pop("env", None) or {}
-        check = popen_kwargs.pop("check", True)
         env["UV_PYTHON"] = str(python)
         return subprocess.run(
             cmd,
-            check=check,
+            check=True,
             text=True,
             encoding="utf-8",
             env={**self._env, **env},
@@ -491,7 +489,6 @@ class Venv:
         *packages: str,
         prerelease: bool = False,
         upgrade: bool = False,
-        no_deps: bool = False,
         **popen_kwargs: Any,
     ) -> subprocess.CompletedProcess[str]:
         """Run a pip install command in the virtual environment."""
@@ -503,8 +500,6 @@ class Venv:
             verb = "Installing"
         if prerelease:
             args = ["--prerelease", *args]
-        if no_deps:
-            args = ["--no-deps", *args]
         if VERBOSE:
             args = ["-v", *args]
         print(
@@ -523,7 +518,6 @@ class Venv:
         *packages: str,
         prerelease: bool = False,
         upgrade: bool = False,
-        no_deps: bool = False,
         **popen_kwargs: Any,
     ) -> subprocess.CompletedProcess[str]:
         """Run a pip install command in the virtual environment."""
@@ -535,8 +529,6 @@ class Venv:
             verb = "Installing"
         if prerelease:
             args = ["--pre", *args]
-        if no_deps:
-            args = ["--no-deps", *args]
         if VERBOSE:
             args = ["-v", *args]
         print(
@@ -550,7 +542,6 @@ class Venv:
         self,
         *packages: str,
         prerelease: bool = False,
-        no_deps: bool = False,
         **popen_kwargs: Any,
     ) -> list[Path]:
         """Download a package in the virtual environment."""
@@ -565,8 +556,6 @@ class Venv:
             args = ["--pre", *packages]
         else:
             args = list(packages)
-        if no_deps:
-            args = ["--no-deps", *args]
         if VERBOSE:
             args = ["-v", *args]
         self.pip("download", "--dest", str(tempdir), *args, **popen_kwargs)
