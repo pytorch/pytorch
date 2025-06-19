@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 
+
 mark_compile_region = torch.compiler.mark_compile_region
 
 if HAS_GPU:
@@ -1062,6 +1063,23 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(
             "Encountered input mutation during higher order op tracing" in str(cause)
         )
+
+    @torch._dynamo.config.patch(does_invoke_subgraph_support_input_mutation=True)
+    def test_input_mutation_with_config_flag(self):
+        @mark_compile_region
+        def gn(x, y):
+            x.add_(1)
+            return torch.mul(x, y)
+
+        def fn(x, y):
+            return gn(x, y)
+
+        x1 = torch.ones(8, requires_grad=False)
+        x2 = torch.ones(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(fn(x1, y), opt_fn(x2, y))
 
     def test_input_mutation_inference_mode(self):
         @mark_compile_region
