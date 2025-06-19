@@ -258,7 +258,7 @@ class VmapInfo(NamedTuple):
     randomness: str
 
 
-def has_overriden_vmap_rule(autograd_function):
+def has_overridden_vmap_rule(autograd_function):
     return autograd_function.vmap is not torch.autograd.Function.vmap
 
 
@@ -286,14 +286,14 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands, **kwarg
         )
 
     if autograd_function.generate_vmap_rule:
-        if has_overriden_vmap_rule(autograd_function):
+        if has_overridden_vmap_rule(autograd_function):
             # TODO: Update link to stable once that's out
             # https://github.com/pytorch/pytorch/issues/92029
             raise RuntimeError(
                 f"You tried to vmap over {autograd_function.__name__}, but "
-                f"it has both generate_vmap_rule=True and an overriden vmap "
+                f"it has both generate_vmap_rule=True and an overridden vmap "
                 f"staticmethod. Please set generate_vmap_rule=False or delete "
-                f"the overriden vmap staticmethod to avoid ambiguity. "
+                f"the overridden vmap staticmethod to avoid ambiguity. "
                 f"For more details, please see "
                 f"https://pytorch.org/docs/main/notes/extending.func.html"
             )
@@ -301,7 +301,7 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands, **kwarg
             interpreter, autograd_function, *operands
         )
 
-    if not has_overriden_vmap_rule(autograd_function):
+    if not has_overridden_vmap_rule(autograd_function):
         # TODO: Update link to stable once that's out
         # https://github.com/pytorch/pytorch/issues/92029
         raise RuntimeError(

@@ -409,7 +409,7 @@ def forward(self, x):
     sym_size_int_2 = torch.ops.aten.sym_size.int(x, 1)
     linear = torch.ops.aten.linear.default(x, linear_weight, linear_bias);  x = linear_weight = linear_bias = None
     eq = sym_size_int_2 == 4;  sym_size_int_2 = None
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s16, 4) on node 'eq'");  eq = _assert_scalar_default = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s27, 4) on node 'eq'");  eq = _assert_scalar_default = None
     return pytree.tree_unflatten((linear,), self._out_spec)""",
         )
 
