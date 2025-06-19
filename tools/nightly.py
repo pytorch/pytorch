@@ -97,7 +97,7 @@ DEFAULT_VENV_DIR = REPO_ROOT / "venv"
 
 
 LOGGER: logging.Logger | None = None
-VERBOSE: bool = True
+VERBOSE: bool = False
 DATETIME_FORMAT = "%Y-%m-%d_%Hh%Mm%Ss"
 SHA1_RE = re.compile(r"(?P<sha1>[0-9a-fA-F]{40})")
 USERNAME_PASSWORD_RE = re.compile(r":\/\/(.*?)\@")
