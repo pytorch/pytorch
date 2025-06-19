@@ -2896,7 +2896,6 @@ class Scheduler:
             )
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
 
-
             hint_override_best_fusion_choice = {}
             for hint_override in config.multi_node_hints:
                 choice_timings = multi_node.choice_timings(hint_override)
@@ -2904,7 +2903,9 @@ class Scheduler:
                     choice_timings.items(), key=lambda x: x[1]
                 ):
                     with multi_node.swap_as_triton_caller(choice):
-                        future_choices.append((choice, *compile_kernel(node_list_fused)))
+                        future_choices.append(
+                            (choice, *compile_kernel(node_list_fused))
+                        )
 
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
@@ -3010,7 +3011,9 @@ class Scheduler:
                 if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
                     if config.multi_kernel_hints:
                         hint_override_best_fusion_choice[None] = ms_fused_choice
-                        multi_node.finalize_as_triton_callers(hint_override_best_fusion_choice)
+                        multi_node.finalize_as_triton_callers(
+                            hint_override_best_fusion_choice
+                        )
                     else:
                         multi_node.finalize_as_triton_caller(ms_fused_choice)
 

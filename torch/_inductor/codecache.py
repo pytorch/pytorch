@@ -311,7 +311,9 @@ class PersistentCache(CacheBase):
         precision = torch.get_float32_matmul_precision()
         cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
-        log_stats = partial(log_global_cache_stats, self.system, op, cache_key, precision)
+        log_stats = partial(
+            log_global_cache_stats, self.system, op, cache_key, precision
+        )
         log_vals = partial(log_global_cache_vals, self.system, op, cache_key, precision)
         log_errors = partial(
             log_global_cache_errors, self.system, op, cache_key, precision
@@ -323,7 +325,9 @@ class PersistentCache(CacheBase):
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()
-                if choice_hash in cache.get(op, {}).get(cache_key, {}).get(precision, {}):
+                if choice_hash in cache.get(op, {}).get(cache_key, {}).get(
+                    precision, {}
+                ):
                     # cache hit
                     timings[choice] = cache[op][cache_key][precision][choice_hash]
                 else:
@@ -352,7 +356,9 @@ class PersistentCache(CacheBase):
                     local_cache.setdefault(op, {})
                     local_cache[op].setdefault(cache_key, {}).setdefault(precision, {})
                     for choice, timing in timings.items():
-                        local_cache[op][cache_key][precision][choice.hash_key()] = timing
+                        local_cache[op][cache_key][precision][choice.hash_key()] = (
+                            timing
+                        )
                 except RuntimeError as e:
                     # catch and log autotuning failures
                     log_errors(e)

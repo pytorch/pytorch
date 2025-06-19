@@ -541,7 +541,11 @@ class SizeVarAllocator:
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(
-        self, expr: Union[Expr, int], *, fallback: Optional[int] = None, hint_override: Optional[int] = None
+        self,
+        expr: Union[Expr, int],
+        *,
+        fallback: Optional[int] = None,
+        hint_override: Optional[int] = None,
     ) -> int:
         if hint_override:
             return hint_override
@@ -573,7 +577,10 @@ class SizeVarAllocator:
         fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
     ) -> tuple[int, ...]:
-        return tuple(self.size_hint(x, fallback=fallback, hint_override=hint_override) for x in exprs)
+        return tuple(
+            self.size_hint(x, fallback=fallback, hint_override=hint_override)
+            for x in exprs
+        )
 
     def _lru_cache(self, fn, maxsize=None):
         """

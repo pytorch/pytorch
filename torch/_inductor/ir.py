@@ -4766,11 +4766,12 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         """
         return self._output_plannable
 
-    def choice_timings(self, hint_override: Optional[int] = None) -> dict[ChoiceCaller, float]:
+    def choice_timings(
+        self, hint_override: Optional[int] = None
+    ) -> dict[ChoiceCaller, float]:
         if hint_override not in self._choice_timings:
             self._choice_timings[hint_override] = self._choice_timings_fn(hint_override)
         return self._choice_timings[hint_override]
-
 
     @contextlib.contextmanager
     def swap_as_triton_caller(self, caller: TritonTemplateCallerBase):  # type: ignore[no-untyped-def]
@@ -4790,8 +4791,10 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         assert self.get_stride() == caller.layout.stride
         self.make_kernel_render = caller.get_make_kernel_render()
 
-    def get_min_choice(self, hint_override: Optional[int] = None) -> tuple[ChoiceCaller, float]:
-        timings = self.choice_timings(hint_override)
+    def get_min_choice(
+        self, hint_override: Optional[int] = None
+    ) -> tuple[ChoiceCaller, float]:
+        timings = self.choice_timings(hint_override=hint_override)
         min_choice = min(timings, key=timings.get)  # type: ignore[arg-type]
         return (min_choice, timings[min_choice])
 
@@ -4807,6 +4810,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
 
         # Set the default to be the one without hint override
         self.make_kernel_render = self._make_kernel_renders(None)
+
 
 class CUDATemplateBuffer(TemplateBuffer):
     def __init__(  # type: ignore[no-untyped-def]

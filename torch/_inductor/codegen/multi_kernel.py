@@ -452,7 +452,7 @@ class MultiKernelCall:
         """
         shapes = []
         for arg in args:
-            if hasattr(arg, 'shape')
+            if hasattr(arg, 'shape'):
                 shapes.append(tuple(arg.shape))
         return tuple(shapes)
 
