@@ -823,6 +823,7 @@ def speculate_subgraph(
                             context=context,
                             explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
                             hints=[
+                                "Set experimental flag `torch._dynamo.config.does_invoke_subgraph_support_input_mutation=True`.",
                                 "Consider using the debug context to change user code to avoid mutation.",
                                 "Please open an issue.",
                             ],
@@ -3405,6 +3406,10 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        self.supports_input_mutation = (
+            torch._dynamo.config.does_invoke_subgraph_support_input_mutation
+        )
+
         # This flattens the kwargs into lifted args
         (
             p_args,
