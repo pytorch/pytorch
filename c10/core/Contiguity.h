@@ -32,40 +32,6 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   return true;
 }
 
-// This function will return True if the tensor is contiguous, and False if the
-// its not or if we can't determine if it is contiguous due to unbacked symbols
-// (it could be either in that case based on the actual runtime data).
-template <typename T>
-bool _compute_contiguous_or_false(
-    ArrayRef<T> sizes,
-    ArrayRef<T> strides,
-    T numel) {
-  if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
-    return true;
-  }
-
-  c10::SymInt one(1);
-  // This is an interesting case. When computing the expected stride, we can put
-  // a max(1, size) or not put it. Either way, if this function returns true, it
-  // is correct, since if size is 0, then the tensor is empty and it is
-  // contiguous. The reason we do this is to maximize when we can return true.
-  T expected_stride = 1;
-  T expected_stride2 = 1;
-  // NB: make sure we do signed arithmetic
-  for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
-    if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
-      continue;
-    }
-
-    if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride)) &&
-        TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride2))) {
-      return false;
-    }
-    expected_stride *= sizes[d].max(one);
-    expected_stride2 *= sizes[d];
-  }
-  return true;
-}
 
 // Return a SymBool with underlying symbolic expression that represents
 // contiguity.
@@ -73,6 +39,44 @@ inline static c10::SymBool _compute_contiguous_sym(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides,
     const c10::SymInt& numel) {
+    
+    // This lambda will return true iff contiguity is known to be true. if it returns false,
+    // contiguity can be true or false.
+    auto is_contiguous_or_false = [&](){
+        if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
+          return true;
+        }
+      
+        c10::SymInt one(1);
+        // When calculating the expected stride, we can choose to use a max(1, size) check or not.
+        // Regardless, if this function returns true, it's correct. If the size is 0, the tensor is
+        // empty and therefore contiguous. We symbolically check both paths to maximize the cases
+        // where this function returns true. This is because make_contiguous_strides_for adds the 
+        // max symbolically, and we want to ensure we return true for tensors built with it.
+        c10::SymInt expected_stride = 1;
+        c10::SymInt expected_stride_max = 1;
+        // NB: make sure we do signed arithmetic
+        for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
+          if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
+            continue;
+          }
+      
+          if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride)) &&
+              TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride_max))) {
+            return false;
+          }
+          expected_stride_max *= sizes[d].max(1);
+          expected_stride *= sizes[d];
+        }
+        return true;
+      };
+
+    
+  if (is_contiguous_or_false()){
+    return c10::SymBool(true);
+  }
+
+  // Build a single sympy expression that represents contiguity and return it. 
   c10::SymBool is_empty = sym_eq(numel, 0);
   c10::SymBool is_contiguous_cond = true;
 

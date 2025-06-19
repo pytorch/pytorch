@@ -79,16 +79,6 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   }
   c10::SymIntArrayRef sizes(sizes_);
   c10::SymIntArrayRef strides(strides_);
-  // In the case that sizes and strides are hinted, we could call
-  // _compute_contiguous and store the resuls, but we do not want to do that, in
-  // order not to specialize when backed_size_oblivious is on.
-  auto def_contig = _compute_contiguous_or_false(sizes, strides, numel());
-  if (def_contig) {
-    return true;
-  }
-
-  // Otherwise, store the symbolic expression for contiguity, allowing users to
-  // guard on it and handle data-dependent errors
   return _compute_contiguous_sym(sizes, strides, numel());
 }
 
