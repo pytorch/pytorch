@@ -15,7 +15,6 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 """
 
 import abc
-import atexit
 import collections
 import dis
 import functools
@@ -69,6 +68,12 @@ from torch.fx.experimental.recording import (
     ShapeEnvEvent,
 )
 from torch.fx.experimental.sym_node import SymNode, SymTypes
+from torch.fx.experimental.symbolic_shapes_utils import (
+    _nested_int_aware_sort,
+    has_hint,
+    lru_cache,
+    uninteresting_files,
+)
 from torch.types import py_sym_types
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -180,12 +185,6 @@ SHAPEENV_EVENT_KEY = "shapeenv_event"
 CURRENT_NODE_KEY = "current_node"
 
 
-def log_lru_cache_stats(wrapped_f: functools._lru_cache_wrapper[object]) -> None:
-    log.debug(
-        "lru_cache_stats %s: %s", wrapped_f.__name__, wrapped_f.cumulative_cache_info()  # type: ignore[attr-defined]
-    )
-
-
 # Note about Sympy Expr/SympyBoolean/Basic typing: the Sympy hierarchy is
 #
 #   Basic
@@ -246,95 +245,6 @@ class SymIntEqByExpr:
         return hash(self._extract())
 
 
-def _nested_int_aware_sort(
-    tup: tuple[IntLikeType, int],
-) -> tuple[int, IntLikeType, int]:
-    return (
-        # Order nested ints by their coefficients.
-        # 1 here to order nested ints after non-nested-ints.
-        (1, tup[0].node.nested_int_coeff(), tup[1])
-        if is_nested_int(tup[0])
-        else (0, *tup)
-    )
-
-
-# Wrapper on lru_cache that reports statistics at process end
-def lru_cache(
-    maxsize: Optional[int],
-) -> Callable[[Callable[..., _T]], functools._lru_cache_wrapper[_T]]:
-    def inner(f: Callable[..., _T]) -> functools._lru_cache_wrapper[_T]:
-        wrapped_f = functools.lru_cache(maxsize)(f)
-        old_cache_clear = wrapped_f.cache_clear
-        prev_hits = 0
-        prev_misses = 0
-
-        # TODO: There's a ref-cycle here (wrapped_f -> cumulative_cache_info
-        # -> wrapped_f) but cannot be solved with weakref as wrapped_f is not
-        # weakref'able on some versions of Python
-
-        def cumulative_cache_info() -> functools._CacheInfo:
-            cur = wrapped_f.cache_info()
-            return functools._CacheInfo(
-                prev_hits + cur.hits,
-                prev_misses + cur.misses,
-                cur.maxsize,
-                cur.currsize,
-            )
-
-        def new_cache_clear() -> None:
-            nonlocal prev_hits, prev_misses
-            cur = wrapped_f.cache_info()
-            prev_hits += cur.hits
-            prev_misses += cur.misses
-            old_cache_clear()
-
-        wrapped_f.cache_clear = new_cache_clear  # type: ignore[attr-defined, method-assign]
-        wrapped_f.cumulative_cache_info = cumulative_cache_info  # type: ignore[attr-defined, method-assign]
-        if log.isEnabledFor(logging.DEBUG):
-            atexit.register(log_lru_cache_stats, wrapped_f)  # type: ignore[arg-type]
-        return wrapped_f
-
-    return inner
-
-
-# These are modules that contain generic code for interacting with ShapeEnv
-# which are unlikely to identify a particular interesting guard statement
-@lru_cache(None)
-def uninteresting_files() -> set[str]:
-    import torch._compile
-    import torch._dynamo.eval_frame
-    import torch._inductor.sizevars
-    import torch._library.custom_ops
-    import torch._library.fake_impl
-    import torch._logging
-    import torch._subclasses.fake_tensor
-    import torch._subclasses.meta_utils
-
-    mods = [
-        sys.modules[__name__],
-        torch.fx.experimental.recording,
-        torch.fx.experimental.sym_node,
-        torch.fx.interpreter,
-        torch,
-        torch._compile,
-        torch._dynamo.eval_frame,
-        torch._inductor.sizevars,
-        torch._library.custom_ops,
-        torch._library.fake_impl,
-        torch._subclasses.meta_utils,
-        torch._subclasses.fake_tensor,
-        torch._logging._internal,
-        torch._logging.structured,
-    ]
-    import torch._dynamo.guards
-
-    return (
-        {inspect.getfile(m) for m in mods}
-        | torch._dynamo.guards.uninteresting_files()
-        | {"<string>"}
-    )
-
-
 class ConstraintViolationError(RuntimeError):
     pass
 
@@ -366,12 +276,6 @@ def hint_int(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int
 
 
 Scalar: TypeAlias = Union[torch.SymInt, torch.SymFloat, torch.SymBool, int, float, bool]
-
-
-def has_hint(a: Scalar) -> bool:
-    if isinstance(a, SymTypes):
-        return a.node.has_hint()
-    return True
 
 
 def is_concrete_int(a: IntLikeType) -> bool:
