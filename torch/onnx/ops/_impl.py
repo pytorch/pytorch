@@ -114,6 +114,11 @@ def rotary_embedding_23(
     return output
 
 
+def _get_scale_factor(scale: Optional[float], head_size: int) -> float:
+    """Get the scale factor for attention computation."""
+    return scale if scale is not None else (1.0 / (head_size ** 0.5))
+
+
 def _reshape_3d_to_4d(
     tensor: torch.Tensor, batch_size: int, num_heads: int
 ) -> torch.Tensor:
@@ -171,7 +176,7 @@ def _compute_qk_output_for_mode_0(
         repeat_factor = current_q_num_heads // current_kv_num_heads
         K_for_qk = K.repeat_interleave(repeat_factor, dim=1)
 
-    scale_factor = scale if scale is not None else (1.0 / (Q.shape[3] ** 0.5))
+    scale_factor = _get_scale_factor(scale, Q.shape[3])
     return torch.matmul(Q, K_for_qk.transpose(-2, -1)) * scale_factor
 
 
@@ -211,9 +216,8 @@ def attention_23(
     assert len(Q.shape) == 4 and len(K.shape) == 4 and len(V.shape) == 4
 
     # Calculate scale factor if not provided
-    if scale is None:
-        q_head_size = Q.shape[3]
-        scale = 1.0 / (q_head_size**0.5)
+    q_head_size = Q.shape[3]
+    scale = _get_scale_factor(scale, q_head_size)
 
     # Handle past key/value caches
     present_key = torch.cat([past_key, K], dim=2) if past_key is not None else K
@@ -371,7 +375,7 @@ def attention_23(
                 attn_bias = attn_bias + attn_mask
 
         # Apply scaling factor
-        scale_factor = scale if scale is not None else (1.0 / (Q.shape[3] ** 0.5))
+        scale_factor = _get_scale_factor(scale, Q.shape[3])
 
         # Compute Q @ K^T
         qk_matmul_output = torch.matmul(Q, K.transpose(-2, -1)) * scale_factor
