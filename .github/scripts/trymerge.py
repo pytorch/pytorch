@@ -634,7 +634,7 @@ def _revlist_to_prs(
             raise RuntimeError(
                 f"Found an unexpected number of PRs mentioned in commit {rev}: "
                 f"{len(all_matches)}.  This is probably because you are using an "
-                "old verion of ghstack.  Please update ghstack and resubmit "
+                "old version of ghstack.  Please update ghstack and resubmit "
                 "your PRs"
             )
 
