@@ -30,6 +30,25 @@ def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
     return decorator
 
 
+def _compute_qk_output_for_mode_0(
+    Q: torch.Tensor,
+    K: torch.Tensor,
+    current_q_num_heads: int,
+    current_kv_num_heads: int,
+    scale: Optional[float],
+) -> torch.Tensor:
+    """Helper function to compute QK output for qk_matmul_output_mode == 0."""
+    # Handle GQA manually for QK output
+    K_for_qk = K
+    enable_gqa = current_q_num_heads != current_kv_num_heads
+    if enable_gqa:
+        repeat_factor = current_q_num_heads // current_kv_num_heads
+        K_for_qk = K.repeat_interleave(repeat_factor, dim=1)
+
+    scale_factor = scale if scale is not None else (1.0 / (Q.shape[3] ** 0.5))
+    return torch.matmul(Q, K_for_qk.transpose(-2, -1)) * scale_factor
+
+
 @_onnx_op("RotaryEmbedding", 23)
 def rotary_embedding(
     x: torch.Tensor,
@@ -243,14 +262,9 @@ def attention(
 
         # For QK output mode 0, we need to compute QK manually since SDPA doesn't return it
         if qk_matmul_output_mode == 0:
-            # Handle GQA manually for QK output
-            K_for_qk = K
-            if enable_gqa:
-                repeat_factor = current_q_num_heads // current_kv_num_heads
-                K_for_qk = K.repeat_interleave(repeat_factor, dim=1)
-
-            scale_factor = scale if scale is not None else (1.0 / (Q.shape[3] ** 0.5))
-            qk_output = torch.matmul(Q, K_for_qk.transpose(-2, -1)) * scale_factor
+            qk_output = _compute_qk_output_for_mode_0(
+                Q, K, current_q_num_heads, current_kv_num_heads, scale
+            )
         else:
             # For other modes, we need fallback implementation
             qk_output = torch.zeros_like(torch.matmul(Q, K.transpose(-2, -1)))
@@ -308,14 +322,9 @@ def attention(
 
         # For QK output mode 0, we need to compute QK manually since flex_attention doesn't return it
         if qk_matmul_output_mode == 0:
-            # Handle GQA manually for QK output
-            K_for_qk = K
-            if enable_gqa:
-                repeat_factor = current_q_num_heads // current_kv_num_heads
-                K_for_qk = K.repeat_interleave(repeat_factor, dim=1)
-
-            scale_factor = scale if scale is not None else (1.0 / (Q.shape[3] ** 0.5))
-            qk_output = torch.matmul(Q, K_for_qk.transpose(-2, -1)) * scale_factor
+            qk_output = _compute_qk_output_for_mode_0(
+                Q, K, current_q_num_heads, current_kv_num_heads, scale
+            )
         else:
             # For other modes, we need fallback implementation
             qk_output = torch.zeros_like(torch.matmul(Q, K.transpose(-2, -1)))
@@ -399,7 +408,7 @@ def attention(
             qk_softmax = torch.softmax(qk_with_bias, dim=-1)
 
         if qk_matmul_output_mode == 3:
-            qk_output = qk_softmax.clone()
+            qk_output = qk_softmax
 
         # Compute attention output
         output = torch.matmul(qk_softmax, V)
