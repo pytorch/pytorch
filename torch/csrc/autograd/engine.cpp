@@ -75,17 +75,17 @@ inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
 std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd = nullptr;
 #define COMPILED_AUTOGRAD_POISON \
   reinterpret_cast<Engine::compiled_autograd_fn>(1)
-std::atomic<int32_t> num_threads_in_backwards;
+std::atomic<int32_t> num_threads_in_compiled_autograd;
 struct CompiledAutogradThreadingDebugCheck {
   CompiledAutogradThreadingDebugCheck() {
-    num_threads_in_backwards++;
+    num_threads_in_compiled_autograd++;
   }
   ~CompiledAutogradThreadingDebugCheck() {
     release();
   }
   void release() {
     if (std::exchange(incremented, false)) {
-      num_threads_in_backwards--;
+      num_threads_in_compiled_autograd--;
     }
   }
 
@@ -1299,8 +1299,6 @@ auto Engine::execute(
         "your parameters to None after use to break the cycle and avoid the leak.");
   }
 
-  // Allows us to assert no other threads are in backwards
-  CompiledAutogradThreadingDebugCheck _thread_check;
   auto compiled_autograd = the_compiled_autograd.load();
   TORCH_INTERNAL_ASSERT(compiled_autograd != COMPILED_AUTOGRAD_POISON);
 
@@ -1347,6 +1345,11 @@ auto Engine::execute(
   }
 
   if (compiled_autograd != nullptr) {
+    TORCH_CHECK(
+        num_threads_in_compiled_autograd.load() == 0,
+        "Re-entrant into Compiled Autograd from a parent Compiled Autograd call is not yet supported. Consider disabling Compiled Autograd on the re-entrant call.");
+    // Allows us to assert no other threads are in backwards
+    CompiledAutogradThreadingDebugCheck _thread_check;
     // see [Note: Compiled Autograd]
     _thread_check.release();
     GraphTaskGuard guard(graph_task);
@@ -1471,7 +1474,7 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
   return graph_task->future_result_;
 }
 
-// note that when python is present, this base engine will be overriden
+// note that when python is present, this base engine will be overridden
 // with a PythonEngine. Because this typically happens before get_default_engine
 // is called, this base engine will never be created.
 Engine& Engine::get_base_engine() {
@@ -1495,8 +1498,8 @@ void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
   }
   auto prior = the_compiled_autograd.exchange(COMPILED_AUTOGRAD_POISON);
   TORCH_CHECK(
-      num_threads_in_backwards.load() == 0 && prior != COMPILED_AUTOGRAD_POISON,
-      "compiled_autograd._enable() requires no threads in backwards()");
+      prior != COMPILED_AUTOGRAD_POISON,
+      "compiled_autograd._enable() does not support multiple Python threads");
   the_compiled_autograd.store(fn);
 }
 

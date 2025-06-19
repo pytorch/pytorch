@@ -1293,11 +1293,12 @@ class TestConvolutionNNDeviceType(NNTestCase):
             torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []
         )
     )
-    def test_Conv2d_deterministic_cudnn(self, device, dtype):
-        inputs = torch.randn(2, 3, 5, 5, device=device, dtype=dtype, requires_grad=True)
+    @parametrize_test("dilation", [1, 2, 3])
+    def test_Conv2d_deterministic_cudnn(self, device, dtype, dilation):
+        inputs = torch.randn(2, 3, 7, 7, device=device, dtype=dtype, requires_grad=True)
         with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
-            conv1 = torch.nn.Conv2d(3, 3, 3).to(device, dtype)
-            conv2 = torch.nn.Conv2d(3, 3, 3).to(device, dtype)
+            conv1 = torch.nn.Conv2d(3, 3, 3, dilation=dilation).to(device, dtype)
+            conv2 = torch.nn.Conv2d(3, 3, 3, dilation=dilation).to(device, dtype)
             conv2.bias.data.copy_(conv1.bias.data)
             conv2.weight.data.copy_(conv1.weight.data)
             out1 = conv1(inputs)
@@ -4056,11 +4057,22 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @largeTensorTest("20GB")
     @largeTensorTest("80GB", "cpu")
     def test_depthwise_conv_64bit_indexing(self, device):
-        x = torch.randn(1, 2, 32800, 32800)
-        c = nn.Conv2d(2, 2, kernel_size=3, stride=1, padding=1, groups=2)
+        x = torch.randn(1, 2, 32800, 32800, dtype=torch.bfloat16).to(
+            memory_format=torch.channels_last
+        )
+        c = nn.Conv2d(
+            2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=torch.bfloat16
+        ).to(memory_format=torch.channels_last)
         yref = c(x)
         y = c.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y)
+        self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
+        del y, yref
+
+        # try a batch-splittable case
+        x = x.reshape(100, 2, 3280, 3280).contiguous(memory_format=torch.channels_last)
+        yref = c(x)
+        y = c.to(device=device)(x.to(device=device))
+        self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
 
 
 instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)

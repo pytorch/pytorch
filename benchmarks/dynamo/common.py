@@ -51,7 +51,7 @@ from torch._logging.scribe import open_source_signpost
 
 try:
     from torch._dynamo.utils import clone_inputs, graph_break_reasons
-    from torch._inductor.utils import fresh_inductor_cache
+    from torch._inductor.utils import fresh_cache
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
 
@@ -67,7 +67,7 @@ try:
     import torch_xla
     import torch_xla.core.xla_model as xm
 
-    # This is to woraround the backward issue https://github.com/pytorch/xla/issues/4174
+    # This is to workaround the backward issue https://github.com/pytorch/xla/issues/4174
     torch_xla._XLAC._init_computation_client()
 except ImportError:
     # ignore the error if torch_xla is not installed
@@ -270,7 +270,7 @@ DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 
 
 # Maps a benchmark model name to a list of status codes. For any listed entry, we'll
-# capture TORCH_COMPILE_DEBUG logs in CI runs and preseve them (i.e., for upload) if
+# capture TORCH_COMPILE_DEBUG logs in CI runs and preserve them (i.e., for upload) if
 # the result status matches one listed.
 CI_PRESERVE_COMPILE_DEBUG = {
     # For example:
@@ -560,7 +560,7 @@ def nothing(f):
     return f
 
 
-@functools.lru_cache(None)
+@functools.cache
 def patch_torch_manual_seed():
     """Make torch manual seed deterministic. Helps with accuracy testing."""
 
@@ -1074,7 +1074,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     times = args.iterations_per_run
 
-    # Use higher tolerance for XLA since XLA cause numerical unstability when
+    # Use higher tolerance for XLA since XLA cause numerical instability when
     # graph size changes
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
@@ -1680,7 +1680,7 @@ class BenchmarkRunner:
 
         devices = [current_device] if current_device else self.args.devices
         if self.args.amp:
-            # AMP training can lead to small loss values which can undeflow
+            # AMP training can lead to small loss values which can underflow
             # gradient values returning in zero gradients. To solve this
             # problem, PyTorch introduces GradScaler. GradScaler is a stateful
             # structure, that scales the loss values to prevent underflow. Loss
@@ -1718,7 +1718,7 @@ class BenchmarkRunner:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
                 # Disable multi_tensor_sgd for benchmarking, there isn't a large performance benefit (~1%) to compiling
                 # this optimizer because it is a single foreach add, and increases compile time.
-                # After autotuning and fake tensor caching lands, we can enable, becuase the compile time impact will be lower.
+                # After autotuning and fake tensor caching lands, we can enable, because the compile time impact will be lower.
                 # Fake Tensor caching: https://github.com/pytorch/pytorch/pull/113873
                 # Autotuning: https://github.com/pytorch/pytorch/issues/117447
                 self.optimizer.step = torch._dynamo.disable(self.optimizer.step)
@@ -2037,7 +2037,8 @@ class BenchmarkRunner:
     ):
         """
         Checks accuracy.
-        1) Collect the outputs with fp64 datatype. This is useful for error checking.
+        1) Collect the outputs with reference datatype. This is useful for error checking.
+           (reference datatype is fp64 if supported otherwise fp32"
         2) Checks if eager itself has variations.
         """
         start_stats = get_dynamo_stats()
@@ -2091,35 +2092,38 @@ class BenchmarkRunner:
         if self.args.backend == "torchao":
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
+        ref_dtype = torch.float64 if current_device != "mps" else torch.float32
         with self.pick_grad(name, self.args.training):
             # Collect the fp64 reference outputs to be used later for accuracy checking.
-            fp64_outputs = None
-            model_fp64 = None
-            inputs_fp64 = None
+            ref_outputs = None
+            model_ref = None
+            inputs_ref = None
             try:
-                model_fp64, inputs_fp64 = cast_to_fp64(
+                model_ref, inputs_ref = cast_to(
+                    ref_dtype,
                     self.deepcopy_and_maybe_parallelize(model),
                     clone_inputs(example_inputs),
                 )
-                self.init_optimizer(name, current_device, model_fp64.parameters())
-                fp64_outputs = self.run_n_iterations(
-                    model_fp64, inputs_fp64, self.model_iter_fn
+                self.init_optimizer(name, current_device, model_ref.parameters())
+                ref_outputs = self.run_n_iterations(
+                    model_ref, inputs_ref, self.model_iter_fn
                 )
-                fp64_outputs = tree_map(
-                    lambda x: x.to(torch.float64)
+                ref_outputs = tree_map(
+                    lambda x: x.to(ref_dtype)
                     if isinstance(x, torch.Tensor) and x.is_floating_point()
                     else x,
-                    fp64_outputs,
+                    ref_outputs,
                 )
             except Exception:
                 log.warning(
-                    "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
+                    "%s golden ref were not generated for %s. Setting accuracy check to cosine",
+                    ref_dtype.__name__,
                     name,
                 )
                 self.args.cosine = True
-                fp64_outputs = None
+                ref_outputs = None
             finally:
-                del model_fp64, inputs_fp64
+                del model_ref, inputs_ref
                 empty_gpu_cache(current_device)
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
@@ -2254,12 +2258,12 @@ class BenchmarkRunner:
                     ):
                         correct_result = process_fn(correct_result)
                         new_result = process_fn(new_result)
-                        fp64_outputs = process_fn(fp64_outputs)
+                        ref_outputs = process_fn(ref_outputs)
 
                 if not same(
                     correct_result,
                     new_result,
-                    fp64_outputs,
+                    ref_outputs,
                     equal_nan=self.equal_nan,
                     use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
                         name
@@ -2823,7 +2827,7 @@ class BenchmarkRunner:
                 )
 
                 # NB: Don't upload them to the benchmark database as they are debugging
-                # infomation. There are also around a million records a day which is
+                # information. There are also around a million records a day which is
                 # wasteful to store
                 write_outputs(
                     filename,
@@ -2881,7 +2885,7 @@ def parse_args(args=None):
     iterations_per_run_help = """
         Run this may iterations for each time measurement. This is mainly used for
         XLA training. We want to run multiple iterations per measurement so the
-        tracing and computation for different iteartions can overlap with each
+        tracing and computation for different iterations can overlap with each
         other. This makes sure we have an accurate xla baseline.
     """
     parser.add_argument(
@@ -3040,7 +3044,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--generate-aot-autograd-stats",
         action="store_true",
-        help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
+        help="Generates AOT Autograd stats like how many graphs are sent to AOT",
     )
     parser.add_argument(
         "--inductor-settings",
@@ -3261,7 +3265,7 @@ def parse_args(args=None):
         "--warm-start-latency",
         "--warm_start_latency",
         action="store_true",
-        help="Run model(s) twice and preseve caches in between to enable a 'warm start' on the 2nd run",
+        help="Run model(s) twice and preserve caches in between to enable a 'warm start' on the 2nd run",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -3416,7 +3420,7 @@ def maybe_fresh_cache(args):
     if not cache_dir_assigned and (
         args.cold_start_latency or args.warm_start_latency or args.ci
     ):
-        return fresh_inductor_cache()
+        return fresh_cache()
     else:
         return contextlib.nullcontext()
 
@@ -3610,7 +3614,7 @@ def run(runner, args, original_dir=None):
 
         torch.backends.mkldnn.deterministic = True
 
-        # Remove randomeness when torch manual seed is called
+        # Remove randomness when torch manual seed is called
         patch_torch_manual_seed()
 
         # Some models e.g. yolov3 assert batch size on n_gpus

@@ -4094,6 +4094,24 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(same(res, torch.ones(1)))
         self.assertTrue(f is f())
 
+    def test_functools_partial_binding(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+            @functools.lru_cache  # noqa: B019
+            def incr(self, val):
+                self.x += val
+
+        def fn(x):
+            f = Foo(4)
+            f.incr(3)
+            return x + f.x
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 def udf_mul(x, y):
     return x * y
