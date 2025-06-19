@@ -154,7 +154,13 @@ def mark_compile_region(fn=None):
 
     def wrap(func):
         def inner(*args, **kwargs):
-            return invoke_subgraph_placeholder(func, *args, **kwargs)
+            # Get the innermost function to avoid nested compile regions
+            inner_func = func
+            while hasattr(inner_func, "__marked_compile_region_fn__"):
+                inner_func = inner_func.__marked_compile_region_fn__
+            return invoke_subgraph_placeholder(inner_func, *args, **kwargs)
+
+        inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
 
         return inner
 
