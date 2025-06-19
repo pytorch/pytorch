@@ -1519,18 +1519,12 @@ class SIMDScheduling(BaseScheduling):
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 
-    def codegen_template(
-        self, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
+    def _codegen_single_template(
+        self, kernel, render, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
     ) -> Optional[str]:
         """
-        Codegen a triton template
-
-        If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
+        Helper method to codegen a single template kernel variant
         """
-        _, (_numel, rnumel) = template_node.group
-        assert rnumel == 1
-        kernel, render = template_node.node.make_kernel_render(template_node.node)
-
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
         prologue_group = []
@@ -1629,13 +1623,85 @@ class SIMDScheduling(BaseScheduling):
             if config.trace.enabled:
                 set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
 
-        self.codegen_comment(node_schedule)
-        kernel.call_kernel(kernel_name, template_node.node)
+            return kernel
 
-        V.graph.removed_buffers |= kernel.removed_buffers
-        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
-        self.free_buffers_in_scheduler()
-        return None
+    def codegen_template(
+        self, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
+    ) -> Optional[str]:
+        """
+        Codegen a triton template with multi-kernel dispatch support
+
+        If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
+        """
+        from torch._inductor import config
+        from .multi_kernel import MultiKernel
+        
+        _, (_numel, rnumel) = template_node.group
+        assert rnumel == 1
+        
+        # For multi-kernel dispatch, create multiple kernel variants
+        if hasattr(template_node.node, '_multi_kernel_renders') and template_node.node._multi_kernel_renders:
+            kernels = []
+            src_codes = []
+            
+            # Create kernel for each hint and default
+            for hint_override, make_kernel_render in template_node.node._multi_kernel_renders.items():
+                kernel, render = make_kernel_render(template_node.node)
+                src_code = self._codegen_single_template(
+                    kernel, render, template_node, epilogue_nodes, prologue_nodes, 
+                    only_gen_src_code=only_gen_src_code
+                )
+                
+                if only_gen_src_code:
+                    src_codes.append(src_code)
+                else:
+                    kernels.append(kernel)
+            
+            if only_gen_src_code:
+                # Return combined source codes for multi-kernel
+                return "\n\n".join(src_codes)
+            else:
+                # Create MultiKernel wrapper for runtime dispatch
+                if len(kernels) > 1:
+                    MultiKernel.merge_workspaces_inplace(kernels)
+                    multi_kernel = MultiKernel(kernels)
+                    node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
+                    self.codegen_comment(node_schedule)
+                    multi_kernel.call_kernel(multi_kernel.kernel_name, template_node.node)
+                else:
+                    # Single kernel fallback
+                    kernel = kernels[0]
+                    node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]  
+                    self.codegen_comment(node_schedule)
+                    kernel.call_kernel(kernel.kernel_name, template_node.node)
+                    
+                V.graph.removed_buffers |= kernel.removed_buffers
+                V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+                self.free_buffers_in_scheduler()
+                return None
+        else:
+            # Fallback to single kernel
+            kernel, render = template_node.node.make_kernel_render(template_node.node)
+            
+            if only_gen_src_code:
+                return self._codegen_single_template(
+                    kernel, render, template_node, epilogue_nodes, prologue_nodes,
+                    only_gen_src_code=True
+                )
+            else:
+                kernel = self._codegen_single_template(
+                    kernel, render, template_node, epilogue_nodes, prologue_nodes,
+                    only_gen_src_code=False
+                )
+                
+                node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
+                self.codegen_comment(node_schedule)
+                kernel.call_kernel(kernel.kernel_name, template_node.node)
+                
+                V.graph.removed_buffers |= kernel.removed_buffers
+                V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+                self.free_buffers_in_scheduler()
+                return None
 
     def codegen_sync(self):
         V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())

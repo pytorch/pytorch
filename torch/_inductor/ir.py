@@ -4759,7 +4759,6 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
             allowed_prologue_inps=allowed_prologue_inps,
         )
         self._choice_timings_fn = choice_timings
-        self._choice_timings: Optional[dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs
         self._output_plannable = all(
             isinstance(choice, TritonTemplateCallerBase)
@@ -4777,11 +4776,14 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         """
         return self._output_plannable
 
-    @property
-    def choice_timings(self) -> dict[ChoiceCaller, float]:
-        if self._choice_timings is None:
-            self._choice_timings = self._choice_timings_fn()
-        return self._choice_timings
+    def choice_timings(self, hint_override: Optional[int] = None) -> dict[ChoiceCaller, float]:
+        cache_key = hint_override if hint_override is not None else "default"
+        if not hasattr(self, "_choice_timings_cache"):
+            self._choice_timings_cache: dict[Union[str, int], dict[ChoiceCaller, float]] = {}
+        
+        if cache_key not in self._choice_timings_cache:
+            self._choice_timings_cache[cache_key] = self._choice_timings_fn(hint_override)
+        return self._choice_timings_cache[cache_key]
 
     @contextlib.contextmanager
     def swap_as_triton_caller(self, caller: TritonTemplateCallerBase):  # type: ignore[no-untyped-def]
@@ -4801,9 +4803,33 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         assert self.get_stride() == caller.layout.stride
         self.make_kernel_render = caller.get_make_kernel_render()
 
-    def get_min_choice(self) -> tuple[ChoiceCaller, float]:
-        min_choice = min(self.choice_timings, key=self.choice_timings.get)  # type: ignore[arg-type]
-        return (min_choice, self.choice_timings[min_choice])
+    def finalize_as_triton_callers(self, callers: dict[Optional[int], TritonTemplateCallerBase]) -> None:
+        """
+        Finalize multiple triton callers for different kernel hints.
+        callers: dict mapping hint_override to TritonTemplateCallerBase
+        """
+        from torch._inductor import config
+        if not hasattr(self, "_multi_kernel_renders"):
+            self._multi_kernel_renders: dict[Optional[int], Any] = {}
+        
+        for hint, caller in callers.items():
+            assert isinstance(caller, torch._inductor.select_algorithm.TritonTemplateCaller)
+            assert self.get_size() == caller.layout.size
+            assert self.get_stride() == caller.layout.stride
+            self._multi_kernel_renders[hint] = caller.get_make_kernel_render()
+        
+        # Set default render (without hint)
+        if None in callers:
+            self.make_kernel_render = self._multi_kernel_renders[None]
+        else:
+            # Use first available hint as default
+            first_hint = next(iter(callers.keys()))
+            self.make_kernel_render = self._multi_kernel_renders[first_hint]
+
+    def get_min_choice(self, hint_override: Optional[int] = None) -> tuple[ChoiceCaller, float]:
+        timings = self.choice_timings(hint_override)
+        min_choice = min(timings, key=timings.get)  # type: ignore[arg-type]
+        return (min_choice, timings[min_choice])
 
 
 class CUDATemplateBuffer(TemplateBuffer):
