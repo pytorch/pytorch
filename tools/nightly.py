@@ -48,6 +48,7 @@ import contextlib
 import functools
 import itertools
 import logging
+from math import e
 import os
 import re
 import shlex
@@ -507,10 +508,9 @@ class Venv:
             args = ["--no-deps", *args]
         if VERBOSE:
             args = ["-v", *args]
-        print(
-            f"{verb} package(s) ({self.pip_source.index_url}): "
-            f"{', '.join(map(os.path.basename, packages))}"
-        )
+        print(f"{verb} package(s) ({self.pip_source.index_url}):")
+        for package in packages:
+            print(f"  - {os.path.basename(package)}")
         return self.uv("pip", "install", *args, **popen_kwargs)
 
     def pip(self, *args: str, **popen_kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -539,10 +539,9 @@ class Venv:
             args = ["--no-deps", *args]
         if VERBOSE:
             args = ["-v", *args]
-        print(
-            f"{verb} package(s) ({self.pip_source.index_url}): "
-            f"{', '.join(map(os.path.basename, packages))}"
-        )
+        print(f"{verb} package(s) ({self.pip_source.index_url}):")
+        for package in packages:
+            print(f"  - {os.path.basename(package)}")
         return self.pip("install", *args, **popen_kwargs)
 
     @timed("Downloading packages")
@@ -939,20 +938,31 @@ def install(
 
     packages = [p for p in packages if p != "torch"]
 
-    dependencies = venv.pip_download("torch", prerelease=True)
-    torch_wheel = [
-        dep
-        for dep in dependencies
-        if dep.name.startswith("torch-") and dep.name.endswith(".whl")
-    ]
-    if len(torch_wheel) != 1:
+    dists = venv.pip_download("torch", prerelease=True, no_deps=True)
+    if len(dists) != 1:
+        raise RuntimeError(f"Expected exactly one torch wheel, got {dists}")
+    torch_wheel = dists[0]
+    if not (torch_wheel.name.startswith("torch-") and torch_wheel.name.endswith(".whl")):
         raise RuntimeError(f"Expected exactly one torch wheel, got {torch_wheel}")
-    torch_wheel = torch_wheel[0]
-    dependencies = [deps for deps in dependencies if deps != torch_wheel]
-
-    install_packages(venv, [*packages, *map(str, dependencies)])
-
     with venv.extracted_wheel(torch_wheel) as wheel_site_dir:
+        dist_info_dir = next(wheel_site_dir.glob("torch-*.dist-info"))
+        dependencies = set()
+        with (dist_info_dir / "METADATA").open(encoding="utf-8") as f:
+            requires_dist_start = False
+            for line in f:
+                if requires_dist_start:
+                    if line.startswith("Requires-Dist:"):
+                        dep = line.partition(":")[2].strip()
+                        dependencies.add(dep)
+                    else:
+                        break
+                elif line.startswith("Requires-Dist:"):
+                    requires_dist_start = True
+                    dep = line.partition(":")[2].strip()
+                    dependencies.add(dep)
+
+        install_packages(venv, [*sorted(dependencies), *packages])
+
         if subcommand == "checkout":
             checkout_nightly_version(branch, wheel_site_dir)
         elif subcommand == "pull":
