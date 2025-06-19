@@ -2200,6 +2200,18 @@ class AlgorithmSelectorCache(PersistentCache):
 
         inputs_key = create_inputs_key(input_nodes)
 
+        # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
+        has_autotuned = False
+        def benchmark(choices):
+            has_autotuned = True
+            counters["inductor"]["select_algorithm_autotune"] += 1
+            # TODO(nmacchioni): remove this layer of abstraction
+            # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
+            benchmark_fn = self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
+            # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
+            # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
+            return benchmark_fn(choices)
+
         def autotune(choices):
             log.debug("Starting autotuning")
 
@@ -2222,19 +2234,13 @@ class AlgorithmSelectorCache(PersistentCache):
                     ),
                 },
             ):
-                return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)(choices)
+                return benchmark(choices)
 
         if config.autotune_in_subproc:
             # Initialize the suprocess pool so it will warmup early.
             torch._inductor.autotune_process.get_tuning_process_pool()
 
-        def do_autotuning(choices, precompile_fn):
-            # `self.make_benchmark_fn` is cached, and we use the size of the cache to
-            # determine if autotuning has occured (as opposed to a local/global/etc. cache
-            # hit, in which case we do not autotune). save the current size of the function
-            # cache here, so that we can know if it has incremented
-            has_autotuned_prior_count = self.make_benchmark_fn.cache_info().currsize
-            
+        def do_autotuning(choices, precompile_fn):            
             precompile_start_ts = time.time()
             with dynamo_timed(
                 f"{name}_template_precompiling",
@@ -2279,13 +2285,6 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 raise NoValidChoicesError
 
-            # here we are again checking the cache size of `self.make_benchmark_fn` to make the final
-            # determination of whether autotuning has occured or if the autotuning results were cached
-            has_autotuned = (self.make_benchmark_fn.cache_info().currsize > has_autotune_prior_count)
-
-            if has_autotuned:
-                counters["inductor"]["select_algorithm_autotune"] += 1
-
             if (
                 has_autotuned
                 or log.getEffectiveLevel() == logging.DEBUG
@@ -2309,9 +2308,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     profile_bandwidth_with_do_bench_using_profiling=True,
                     autotune_in_subproc=False,
                 ):
-                    return self.make_benchmark_fn(
-                        choices, input_nodes, layout, input_gen_fns
-                    )(choices)
+                    return benchmark(choices)
 
             for feedback_fn in self.feedback_saver_fns:
                 # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
@@ -2744,7 +2741,6 @@ class AlgorithmSelectorCache(PersistentCache):
         return timings
 
     @classmethod
-    @functools.lru_cache(None)
     def make_benchmark_fn(
         cls,
         choices: Sequence[ChoiceCaller],
