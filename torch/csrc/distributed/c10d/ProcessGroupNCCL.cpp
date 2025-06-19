@@ -997,6 +997,23 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 
+  // If deterministic mode is enabled, we need to disable the NVLS algorithm in
+  // NCCL.
+  // TODO: remove this once NVLS supports deterministic mode.
+  if (at::globalContext().deterministicAlgorithms()) {
+    // Check if user have already set NCCL_ALGO. If already set, leave it.
+    auto nccl_algo = c10::utils::get_env("NCCL_ALGO");
+    if (!nccl_algo.has_value()) {
+      LOG(INFO)
+          << "torch deterministic mode is enabled, "
+          << "disabling NVLS algorithm in NCCL which can lead to non-deterministic reduction.";
+      // Sorry we have to disable NVLS for all collectives, be it all-reduce
+      // or all-gather, because NCCL does not support per-collective
+      // algorithm selection today.
+      c10::utils::set_env("NCCL_ALGO", "^NVLS");
+    }
+  }
+
   // Initialize the heartbeat monitor/watchdog instance. This has to be done
   // before the corresponding thread is launched to avoid the error.
   heartbeatMonitor_ = std::make_unique<HeartbeatMonitor>(this);
