@@ -32,7 +32,6 @@ from torch.utils._sympy.symbol import (
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
-from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash
 from ..dependencies import MemoryDep, StarDep, WeakDep
 
@@ -1519,18 +1518,63 @@ class SIMDScheduling(BaseScheduling):
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 
-    def codegen_template(
+    def codegen_multi_template(
         self, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
     ) -> Optional[str]:
         """
-        Codegen a triton template
-
-        If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
+        Codegen a multi-template with kernel dispatch
         """
-        _, (_numel, rnumel) = template_node.group
-        assert rnumel == 1
-        kernel, render = template_node.node.make_kernel_render(template_node.node)
+        from .. import ir
 
+        multi_node = template_node.node
+        assert isinstance(multi_node, ir.MultiTemplateBuffer)
+
+        # Generate all kernel variants
+        kernel_choices = []
+        for (
+            hint_override,
+            make_kernel_render,
+        ) in multi_node._make_kernel_renders.items():
+            kernel, render = make_kernel_render(multi_node)
+            kernel_choices.append((hint_override, kernel, render))
+
+        # For now, just use the default kernel (None hint)
+        # TODO: Implement shape-based dispatch in codegen
+        default_kernel = None
+        for hint_override, kernel, render in kernel_choices:
+            if hint_override is None:
+                default_kernel = (kernel, render)
+                break
+
+        if default_kernel is None:
+            # Fallback to first available kernel
+            _, kernel, render = kernel_choices[0]
+        else:
+            kernel, render = default_kernel
+
+        # Continue with normal template codegen using the selected kernel
+        return self._codegen_template_impl(
+            template_node,
+            epilogue_nodes,
+            prologue_nodes,
+            kernel,
+            render,
+            only_gen_src_code=only_gen_src_code,
+        )
+
+    def _codegen_template_impl(
+        self,
+        template_node,
+        epilogue_nodes,
+        prologue_nodes,
+        kernel,
+        render,
+        *,
+        only_gen_src_code=False,
+    ) -> Optional[str]:
+        """
+        Shared implementation for template codegen
+        """
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
         prologue_group = []
@@ -1572,6 +1616,8 @@ class SIMDScheduling(BaseScheduling):
 
                     # TODO - this doesnt work with libdevice calls, potentially other bugs
                     # upcasting to fp32 and downcasting gives large slowdown
+                    from .. import config
+
                     with config.patch(
                         "triton.codegen_upcast_to_fp32", not can_codegen_without_upcast
                     ):
@@ -1581,6 +1627,8 @@ class SIMDScheduling(BaseScheduling):
                                     len(prologue_node.get_buffer_names()) == 1
                                     and len(prologue_group) == 1
                                 ):
+                                    from ..utils import prologue_preserves_zero_mask
+
                                     if prologue_preserves_zero_mask(prologue_node):
                                         kernel.prologue_fused_inputs_preserve_zero |= (
                                             prologue_node.get_buffer_names()
@@ -1592,42 +1640,53 @@ class SIMDScheduling(BaseScheduling):
                                     )
                                 )
                             kernel.cse.invalidate(OrderedSet())
+                else:
+                    with kernel.set_subgraph_body(subgraph_name):
+                        kernel.set_current_node(buffer)
+                        kernel.load_buffer(input_name)
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
             partial_code.finalize_hook("<ARGDEFS>", strict=False)
-        # finalize must be called after adding epilogue above
+            # finalize must be called after adding epilogue above
 
-        with V.set_kernel_handler(kernel):
-            # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
+            with V.set_kernel_handler(kernel):
+                # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
 
-            for input_name in kernel.named_input_nodes.keys():
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                partial_code.finalize_hook(subgraph_name, strict=False)
+                for input_name in kernel.named_input_nodes.keys():
+                    subgraph_name = f"<LOAD_INPUT_{input_name}>"
+                    partial_code.finalize_hook(subgraph_name, strict=False)
 
-            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                if isinstance(partial_code, str):
-                    src_code = partial_code
-                else:
-                    partial_code.finalize_hook("<STORE_OUTPUT>")
-                    src_code = partial_code.code
-            node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
+                with kernel.set_subgraph_body("<STORE_OUTPUT>"):
+                    if isinstance(partial_code, str):
+                        src_code = partial_code
+                    else:
+                        partial_code.finalize_hook("<STORE_OUTPUT>")
+                        src_code = partial_code.code
+        else:
+            src_code = partial_code
 
-            if config.benchmark_kernel:
-                num_gb = kernel.estimate_kernel_num_bytes() / 1e9
-                src_code = (
-                    f"{kernel.imports_for_benchmark_kernel()}\n"
-                    f"{src_code}\n"
-                    f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
-                )
+        node_schedule = [template_node, *epilogue_nodes]
 
-            if only_gen_src_code:
-                return src_code
+        from .. import config
 
-            kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+        if config.benchmark_kernel:
+            num_gb = kernel.estimate_kernel_num_bytes() / 1e9
+            src_code = (
+                f"{kernel.imports_for_benchmark_kernel()}\n"
+                f"{src_code}\n"
+                f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
+            )
 
-            if config.trace.enabled:
-                set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
+        if only_gen_src_code:
+            return src_code
+
+        kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+
+        if config.trace.enabled:
+            from ..debug import set_kernel_post_grad_provenance_tracing
+
+            set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
 
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name, template_node.node)
@@ -1636,6 +1695,43 @@ class SIMDScheduling(BaseScheduling):
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
         self.free_buffers_in_scheduler()
         return None
+
+    def codegen_template(
+        self, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
+    ) -> Optional[str]:
+        """
+        Codegen a triton template
+
+        If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
+        """
+        _, (_numel, rnumel) = template_node.group
+        assert rnumel == 1
+
+        # Check if this is a MultiTemplateBuffer with multiple kernel renders
+        from . import ir
+
+        if isinstance(template_node.node, ir.MultiTemplateBuffer) and hasattr(
+            template_node.node, "_make_kernel_renders"
+        ):
+            # Multi-kernel dispatch case
+            return self.codegen_multi_template(
+                template_node,
+                epilogue_nodes,
+                prologue_nodes,
+                only_gen_src_code=only_gen_src_code,
+            )
+
+        kernel, render = template_node.node.make_kernel_render(template_node.node)
+
+        # Use shared implementation
+        return self._codegen_template_impl(
+            template_node,
+            epilogue_nodes,
+            prologue_nodes,
+            kernel,
+            render,
+            only_gen_src_code=only_gen_src_code,
+        )
 
     def codegen_sync(self):
         V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())

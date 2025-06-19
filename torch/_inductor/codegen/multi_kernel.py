@@ -283,6 +283,7 @@ class MultiKernelCall:
             self.load_cache()
 
         self._recorded = False
+        self._shape_cache = {}
 
     def cache_file_path(self):
         key = code_hash(
@@ -343,7 +344,30 @@ class MultiKernelCall:
 
         def wrap_fn(kernel):
             def inner():
+                # Clone args but ensure proper grid size handling
                 args_clone, kwargs_clone = kernel.clone_args(*args, **kwargs)
+
+                # If kernel has a grid_fn, we need to extend args with grid size
+                if hasattr(kernel, "grid_fn") and hasattr(kernel, "call_sizes"):
+                    import sympy
+
+                    from ..select_algorithm import SymbolicGridFn
+
+                    grid_args = ()
+                    if isinstance(kernel.grid_fn, SymbolicGridFn):
+                        grid_args = kernel.grid_fn.sympy_call(
+                            *kernel.call_sizes, kernel.meta
+                        )
+                    elif all(
+                        isinstance(x, (int, sympy.Integer)) for x in kernel.call_sizes
+                    ):
+                        grid_args = kernel.grid_fn(
+                            *map(int, kernel.call_sizes), kernel.meta
+                        )
+
+                    if len(grid_args) == 3:  # Valid grid arguments
+                        args_clone = list(args_clone) + list(grid_args)
+
                 return kernel.run(*args_clone, **kwargs_clone)
 
             return inner
@@ -390,20 +414,45 @@ class MultiKernelCall:
 
     def run(self, *args, **kwargs):
         if self.picked_kernel is None:
-            timings = self.benchmark_sub_kernels(*args, **kwargs)
-            self.picked_kernel = timings.index(min(timings))
-            k0 = self.kernels[0]
-            log.debug(
-                "pick %dth sub-kernel in %s. Size hints %s. Reduction hint %s. Timings %s",
-                self.picked_kernel,
-                [k.inductor_meta.get("kernel_name") for k in self.kernels],
-                k0.size_hints,
-                k0.inductor_meta.get("reduction_hint"),
-                timings,
-            )
-            get_metric_table("persistent_red_perf").add_row(
-                functools.partial(self._metrics_table_row, timings)
-            )
+            cache_key = self._get_multi_kernel_shape_cache_key(*args, **kwargs)
+            cached_choice = self._get_cached_shape_choice(cache_key)
+
+            if cached_choice is not None:
+                self.picked_kernel = cached_choice
+                log.debug(
+                    "using cached shape-specialized choice %dth sub-kernel in %s. Cache key: %s",
+                    self.picked_kernel,
+                    [k.inductor_meta.get("kernel_name") for k in self.kernels],
+                    cache_key,
+                )
+            else:
+                shape_choice = self._select_kernel_by_shape(*args, **kwargs)
+                if shape_choice is not None:
+                    self.picked_kernel = shape_choice
+                    log.debug(
+                        "using shape-based heuristic %dth sub-kernel in %s. Shape choice: %s",
+                        self.picked_kernel,
+                        [k.inductor_meta.get("kernel_name") for k in self.kernels],
+                        shape_choice,
+                    )
+                else:
+                    timings = self.benchmark_sub_kernels(*args, **kwargs)
+                    self.picked_kernel = timings.index(min(timings))
+                    k0 = self.kernels[0]
+                    log.debug(
+                        "pick %dth sub-kernel in %s. Size hints %s. Reduction hint %s. Timings %s",
+                        self.picked_kernel,
+                        [k.inductor_meta.get("kernel_name") for k in self.kernels],
+                        k0.size_hints,
+                        k0.inductor_meta.get("reduction_hint"),
+                        timings,
+                    )
+                    get_metric_table("persistent_red_perf").add_row(
+                        functools.partial(self._metrics_table_row, timings)
+                    )
+
+                self._cache_shape_choice(cache_key, self.picked_kernel)
+
             if not self.disable_cache:
                 self.store_cache()
 
@@ -416,6 +465,70 @@ class MultiKernelCall:
             self.record_choice(self.multi_kernel_name, picked_kernel_name)
         self.run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
         self.run(*args, **kwargs)
+
+    def _get_shape_cache_key(self, *args, **kwargs):
+        """
+        Generate a cache key based on tensor shapes for shape-specialized dispatch.
+        """
+        shapes = []
+        for arg in args:
+            if hasattr(arg, "shape"):
+                shapes.append(tuple(arg.shape))
+        return tuple(shapes)
+
+    def _get_multi_kernel_shape_cache_key(self, *args, **kwargs):
+        """
+        Generate a cache key for multi-kernel hint specialized dispatch.
+        Includes both shape information and hint override values.
+        """
+        base_key = self._get_shape_cache_key(*args, **kwargs)
+
+        # Extract hint information from the first kernel's size_hints
+        # We'll use the shape to determine which hint override to use
+        if hasattr(self, "kernels") and self.kernels:
+            k0 = self.kernels[0]
+            if hasattr(k0, "size_hints") and k0.size_hints:
+                # Use the largest tensor dimension to pick the appropriate hint
+                max_dim = 0
+                for arg in args:
+                    if hasattr(arg, "numel"):
+                        max_dim = max(max_dim, arg.numel())
+
+                # Find the best matching hint from config.multi_kernel_hints
+                best_hint = None
+                min_diff = float("inf")
+                for hint in config.multi_kernel_hints:
+                    diff = abs(max_dim - hint)
+                    if diff < min_diff:
+                        min_diff = diff
+                        best_hint = hint
+
+                return (base_key, best_hint)
+
+        return (base_key, None)
+
+    def _get_cached_shape_choice(self, cache_key):
+        """
+        Get cached kernel choice for a specific shape.
+        """
+        return self._shape_cache.get(cache_key)
+
+    def _cache_shape_choice(self, cache_key, kernel_idx):
+        """
+        Cache kernel choice for a specific shape
+        """
+        self._shape_cache[cache_key] = kernel_idx
+
+    def _select_kernel_by_shape(self, *args, **kwargs):
+        """
+        Benchmark kernels for a particular shape and return the
+        best kernel for this shape.
+        """
+        shape_key = self._get_multi_kernel_shape_cache_key(*args, **kwargs)
+        timings = self.benchmark_sub_kernels(*args, **kwargs)
+        best_kernel_idx = timings.index(min(timings))
+        self._cache_shape_choice(shape_key, best_kernel_idx)
+        return best_kernel_idx
 
     def _metrics_table_row(self, timings):
         def get_kernel_path(k):
