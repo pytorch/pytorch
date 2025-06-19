@@ -124,6 +124,15 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
   return input;
 }
 
+void nvshmem_put(at::Tensor& inp, c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory> dest, const int peer) {
+  void* buffer_ptr = dest->get_buffer_ptrs()[peer];
+
+  auto stream = at::cuda::getCurrentCUDAStream();
+  // TODO: If the size of the tensor is one of 8, 16, 32, 64, 128
+  // use nvshmemx_putSIZE_on_stream
+  nvshmemx_getmem_on_stream(buffer_ptr, inp.data_ptr(), inp.numel(), 0, stream);
+}
+
 at::Tensor nvshmem_all_to_all(
     at::Tensor& input,
     at::Tensor& out,
@@ -606,6 +615,7 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
+  m.impl("nvshmem_put", c10d::nvshmem_extension::nvshmem_put);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
   m.impl("nvshmem_all_to_all_vdev", c10d::nvshmem_extension::nvshmem_all_to_all_vdev);
   m.impl("nvshmem_all_to_all_vdev_2d", c10d::nvshmem_extension::nvshmem_all_to_all_vdev_2d);
