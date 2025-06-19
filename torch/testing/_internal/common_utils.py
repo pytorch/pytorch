@@ -1505,6 +1505,26 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
 
 TEST_CUDA_CUDSS = TEST_CUDA and (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12)
 
+TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and (
+    torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12
+)
+
+if TEST_CUDA_PYTHON_BINDINGS:
+    def cuda_python_error_check(function_call_output):
+        """Makes calls to cuda-python's cuda runtime functions more
+        pythonic by throwing an exception if they return a status
+        which is not cudaSuccess
+        """
+        import cuda.bindings  # type: ignore[import]
+
+        error, *others = function_call_output
+        if error != cuda.bindings.runtime.cudaError_t.cudaSuccess:
+            raise ValueError(f"CUDA failure! {error}")
+        else:
+            return tuple(others)
+else:
+    cuda_python_error_check = None  # type: ignore[assignment]
+
 def allocator_option_enabled_fn(allocator_config, _, option):
     if allocator_config is None:
         return False
@@ -1572,6 +1592,9 @@ if TEST_WITH_TORCHDYNAMO:
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
+    else:
+        # only dynamo for now
+        torch._dynamo.config.compiled_autograd = True
 
 
 # seems like this is only used in test/torch_np
@@ -1644,6 +1667,24 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
             fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
 
         return fn
+
+    return decorator
+
+def runWithoutCompiledAutograd(msg="test doesn't currently work with compiled autograd"):
+    """
+    Usage:
+    @runWithoutCompiledAutograd(msg)
+    def test_blah(self):
+        ...
+    """
+    assert isinstance(msg, str)
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            with torch._dynamo.compiled_autograd._disable():
+                func(*args, **kwargs)
+        return wrapper
 
     return decorator
 
@@ -3290,6 +3331,11 @@ class TestCase(expecttest.TestCase):
                     file_name = os.path.join(subdir, key)
                     setattr(self, self._testMethodName, ignore_failure(method, file_name))
 
+                from .dynamo_test_failures import compiled_autograd_skips
+                if torch._dynamo.config.compiled_autograd and key in compiled_autograd_skips:
+                    # Still run the test, but with compiled autograd disabled
+                    super_run = runWithoutCompiledAutograd()(super_run)
+
             super_run(result=result)
 
         if strict_mode or should_reset_dynamo:
@@ -3900,7 +3946,7 @@ class TestCase(expecttest.TestCase):
                     ((0, 0), [(1, 2)], [()]),
             ]:
                 for blocksize in blocksizes:
-                    for densesize in densesizes:
+                    for densesize in densesizes:  # type: ignore[attr-defined]
                         if layout == torch.strided:
                             indices = ()  # type: ignore[assignment]
                             values = torch.empty((basesize + densesize), device=device, dtype=dtype)
