@@ -621,6 +621,10 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
     return;
   }
   __syncthreads();
+#if defined (USE_ROCM)
+  //Reducing serialization of ld_vec
+  //Check if numel is met (which it is not most of the time),
+  //this is then not checked inside the loop.
   T* ptr_vec[k_world_size] = {NULL};
 #pragma unroll k_world_size
   for (size_t step = 0; step < k_world_size; ++step) {
@@ -652,6 +656,20 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
       tmp[step] = at::native::memory::ld_vec<alignment>(
           ptr_vec[step] + input_offset + remote_start + i);
     }
+#else
+  for (size_t i = offset; i < numel_per_rank; i += stride) {
+    Vec<alignment> tmp[k_world_size];
+#pragma unroll k_world_size
+    for (size_t step = 0; step < k_world_size; ++step) {
+      size_t remote_rank = (rank + step) % k_world_size;
+      size_t remote_start = numel_per_rank * remote_rank;
+      if (remote_start + i >= numel) {
+        continue;
+      }
+      tmp[step] = at::native::memory::ld_vec<alignment>(
+          input_ptrs[remote_rank] + input_offset + remote_start + i);
+    }
+#endif
 #pragma unroll k_world_size
     for (size_t step = 0; step < k_world_size; ++step) {
       size_t remote_rank = (rank + step) % k_world_size;
