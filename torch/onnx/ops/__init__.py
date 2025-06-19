@@ -191,7 +191,7 @@ def symbolic_multi_out(
     *,
     dtypes: Sequence[torch.dtype | int],
     shapes: Sequence[Sequence[int | torch.SymInt]],
-    version: int | None,
+    version: int | None = None,
     metadata_props: dict[str, str] | None = None,
 ) -> Sequence[torch.Tensor]:
     """Create a symbolic FX operator to represent an arbitrary ONNX operator with multiple outputs.
