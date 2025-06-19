@@ -2110,6 +2110,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
         precompilation_timeout_seconds: int = 60 * 60,
         return_multi_template=False,
+        hint_override: Optional[int] = None,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -2184,7 +2185,7 @@ class AlgorithmSelectorCache(PersistentCache):
             # Initialize the suprocess pool so it will warmup early.
             torch._inductor.autotune_process.get_tuning_process_pool()
 
-        def do_autotuning(choices, precompile_fn):
+        def do_autotuning(choices, precompile_fn, hint_override: Optional[int] = None):
             precompile_start_ts = time.time()
             with dynamo_timed(
                 f"{name}_template_precompiling",
@@ -2203,6 +2204,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     name,
                     inputs_key,
                     autotune,
+                    hint_override,
                 )
                 choices = self.prune_choices_postscreen(choices, timings)
                 prescreening_elapse = time.time() - prescreening_start_ts
@@ -2214,6 +2216,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 name,
                 inputs_key,
                 autotune,
+                hint_override,
             )
 
             autotune_elapse = time.time() - autotune_start_ts
@@ -2250,8 +2253,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
-            def get_timings():
-                timings = do_autotuning(choices, precompile_fn)
+            def get_timings(hint_override: Optional[int] = None):
+                timings = do_autotuning(choices, precompile_fn, hint_override)
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
                     if isinstance(choice, ExternKernelCaller):
@@ -2286,7 +2289,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
             )
 
-        timings = do_autotuning(choices, precompile_fn)
+        timings = do_autotuning(choices, precompile_fn, hint_override)
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
 
@@ -2469,6 +2472,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        hint_override: Optional[int] = None,
     ) -> AutotuneArgs:
         """
         Factory method to create AutotuneArgs from a list of ChoiceCallers.
@@ -2613,6 +2617,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        hint_override: Optional[int] = None,
     ) -> dict[ChoiceCaller, float]:
         inputs = cls.get_inputs(choices, input_nodes, layout, input_gen_fns)
         return cls.benchmark_choices(choices, inputs)
@@ -2645,6 +2650,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        hint_override: Optional[int] = None,
     ):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
