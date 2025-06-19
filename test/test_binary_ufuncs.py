@@ -1447,7 +1447,7 @@ class TestBinaryUfuncs(TestCase):
         try:
             np_res = np.power(to_np(base), to_np(np_exponent))
             expected = (
-                torch.from_numpy(np_res)
+                torch.from_numpy(np_res).to(dtype=base.dtype)
                 if isinstance(np_res, np.ndarray)
                 else torch.tensor(np_res, dtype=base.dtype)
             )
