@@ -429,9 +429,10 @@ class Venv:
             python = self.executable
         cmd = [str(python), *args]
         env = popen_kwargs.pop("env", None) or {}
+        check = popen_kwargs.pop("check", True)
         return subprocess.run(
             cmd,
-            check=True,
+            check=check,
             text=True,
             encoding="utf-8",
             env={**self._env, **env},
@@ -473,10 +474,11 @@ class Venv:
             python = self.executable
         cmd = [str(self.bindir / "uv"), *args]
         env = popen_kwargs.pop("env", None) or {}
+        check = popen_kwargs.pop("check", True)
         env["UV_PYTHON"] = str(python)
         return subprocess.run(
             cmd,
-            check=True,
+            check=check,
             text=True,
             encoding="utf-8",
             env={**self._env, **env},
@@ -489,6 +491,7 @@ class Venv:
         *packages: str,
         prerelease: bool = False,
         upgrade: bool = False,
+        no_deps: bool = False,
         **popen_kwargs: Any,
     ) -> subprocess.CompletedProcess[str]:
         """Run a pip install command in the virtual environment."""
@@ -502,10 +505,11 @@ class Venv:
             verb = "Upgrading"
         else:
             verb = "Installing"
-        print(
-            f"{verb} package(s) ({self.pip_source.index_url}): "
-            f"{', '.join(map(os.path.basename, packages))}"
-        )
+        if no_deps:
+            uv_pip_args.append("--no-deps")
+        print(f"{verb} package(s) ({self.pip_source.index_url}):")
+        for package in packages:
+            print(f"  - {os.path.basename(package)}")
         return self.uv("pip", "install", *uv_pip_args, *packages, **popen_kwargs)
 
     def pip(self, *args: str, **popen_kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -518,6 +522,7 @@ class Venv:
         *packages: str,
         prerelease: bool = False,
         upgrade: bool = False,
+        no_deps: bool = False,
         **popen_kwargs: Any,
     ) -> subprocess.CompletedProcess[str]:
         """Run a pip install command in the virtual environment."""
@@ -531,10 +536,11 @@ class Venv:
             verb = "Upgrading"
         else:
             verb = "Installing"
-        print(
-            f"{verb} package(s) ({self.pip_source.index_url}): "
-            f"{', '.join(map(os.path.basename, packages))}"
-        )
+        if no_deps:
+            pip_args.append("--no-deps")
+        print(f"{verb} package(s) ({self.pip_source.index_url}):")
+        for package in packages:
+            print(f"  - {os.path.basename(package)}")
         return self.pip("install", *pip_args, *packages, **popen_kwargs)
 
     @timed("Downloading packages")
@@ -542,6 +548,7 @@ class Venv:
         self,
         *packages: str,
         prerelease: bool = False,
+        no_deps: bool = False,
         **popen_kwargs: Any,
     ) -> list[Path]:
         """Download a package in the virtual environment."""
@@ -557,6 +564,8 @@ class Venv:
             pip_args.append("-v")
         if prerelease:
             pip_args.append("--pre")
+        if no_deps:
+            pip_args.append("--no-deps")
         self.pip("download", f"--dest={tempdir}", *pip_args, *packages, **popen_kwargs)
         files = list(tempdir.iterdir())
         print(f"Downloaded {len(files)} file(s) to {tempdir}:")
@@ -911,6 +920,48 @@ def write_pth(venv: Venv) -> None:
     )
 
 
+def parse_dependencies(
+    venv: Venv,
+    wheel_site_dir: Path,
+) -> list[str]:
+    """Parse dependencies from the torch wheel's metadata."""
+    dist_info_dirs = list(wheel_site_dir.glob("*.dist-info"))
+    if len(dist_info_dirs) != 1:
+        raise RuntimeError(
+            f"Expected exactly one .dist-info directory in {wheel_site_dir}, "
+            f"got {dist_info_dirs}"
+        )
+    dist_info_dir = dist_info_dirs[0]
+    if not (dist_info_dir / "METADATA").is_file():
+        raise RuntimeError(
+            f"Expected METADATA file in {dist_info_dir}, but it does not exist."
+        )
+
+    # Use the Python interpreter in the virtual environment instead of the interpreter
+    # running this script, so that we can evaluate markers correctly.
+    dependencies = (
+        venv.python(
+            "-c",
+            textwrap.dedent(
+                """
+                from packaging.metadata import Metadata
+
+                with open("METADATA", encoding="utf-8") as f:
+                    metadata = Metadata.from_email(f.read())
+                for req in metadata.requires_dist:
+                    if req.marker is None or req.marker.evaluate():
+                        print(req)
+                """
+            ).strip(),
+            cwd=dist_info_dir,
+            capture_output=True,
+        )
+        .stdout.strip()
+        .splitlines()
+    )
+    return [dep.strip() for dep in dependencies]
+
+
 def install(
     *,
     venv: Venv,
@@ -927,20 +978,19 @@ def install(
 
     packages = [p for p in packages if p != "torch"]
 
-    dependencies = venv.pip_download("torch", prerelease=True)
-    torch_wheel = [
-        dep
-        for dep in dependencies
-        if dep.name.startswith("torch-") and dep.name.endswith(".whl")
-    ]
-    if len(torch_wheel) != 1:
+    downloaded_files = venv.pip_download("torch", prerelease=True, no_deps=True)
+    if len(downloaded_files) != 1:
+        raise RuntimeError(f"Expected exactly one torch wheel, got {downloaded_files}")
+    torch_wheel = downloaded_files[0]
+    if not (
+        torch_wheel.name.startswith("torch-") and torch_wheel.name.endswith(".whl")
+    ):
         raise RuntimeError(f"Expected exactly one torch wheel, got {torch_wheel}")
-    torch_wheel = torch_wheel[0]
-    dependencies = [deps for deps in dependencies if deps != torch_wheel]
-
-    install_packages(venv, [*packages, *map(str, dependencies)])
 
     with venv.extracted_wheel(torch_wheel) as wheel_site_dir:
+        dependencies = parse_dependencies(venv, wheel_site_dir)
+        install_packages(venv, [*dependencies, *packages])
+
         if subcommand == "checkout":
             checkout_nightly_version(branch, wheel_site_dir)
         elif subcommand == "pull":
