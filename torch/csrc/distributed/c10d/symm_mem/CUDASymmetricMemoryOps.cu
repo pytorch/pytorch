@@ -621,42 +621,45 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
     return;
   }
   __syncthreads();
+  T* ptr_vec[k_world_size] = {NULL};
+#pragma unroll k_world_size
+  for (size_t step = 0; step < k_world_size; ++step) {
+    size_t remote_rank = (rank + step) % k_world_size;
+    size_t remote_start = numel_per_rank * remote_rank;
+    if (remote_start + offset >= numel) {
+      continue;
+    }
+    ptr_vec[step] = input_ptrs[remote_rank];
+  }
   for (size_t i = offset; i < numel_per_rank; i += stride) {
     Vec<alignment> tmp[k_world_size];
-    T* ptrs_vec[k_world_size];
-    bool actv_vec[k_world_size];
-    size_t remote_start[k_world_size];
+    if ( (k_world_size-1) * numel_per_rank + 1 < numel)
 #pragma unroll k_world_size
     for (size_t step = 0; step < k_world_size; ++step) {
       size_t remote_rank = (rank + step) % k_world_size;
-//      size_t remote_start = numel_per_rank * remote_rank;
-//      if (remote_start + i >= numel) {
-      remote_start[step] = numel_per_rank * remote_rank;
-      if (remote_start[step] + i >= numel) {
-        actv_vec[step] = false;
+      size_t remote_start = numel_per_rank * remote_rank;
+      tmp[step] = at::native::memory::ld_vec<alignment>(
+          ptr_vec[step] + input_offset + remote_start + i);
+    }
+    else
+#pragma unroll k_world_size
+    for (size_t step = 0; step < k_world_size; ++step) {
+      size_t remote_rank = (rank + step) % k_world_size;
+      size_t remote_start = numel_per_rank * remote_rank;
+      if (remote_start + i >= numel) {
         continue;
       }
-//      tmp[step] = at::native::memory::ld_vec<alignment>(
-//          input_ptrs[remote_rank] + input_offset + remote_start + i);
-      actv_vec[step] = true;
-      ptrs_vec[step] = input_ptrs[remote_rank];
+      tmp[step] = at::native::memory::ld_vec<alignment>(
+          ptr_vec[step] + input_offset + remote_start + i);
     }
 #pragma unroll k_world_size
     for (size_t step = 0; step < k_world_size; ++step) {
-      if (actv_vec[step])
-        tmp[step] = at::native::memory::ld_vec<alignment>(
-          ptrs_vec[step] + input_offset + remote_start[step] + i);
-     }
-#pragma unroll k_world_size
-    for (size_t step = 0; step < k_world_size; ++step) {
-//      size_t remote_rank = (rank + step) % k_world_size;
-//      size_t remote_start = numel_per_rank * remote_rank;
-//      if (remote_start + i >= numel) {
-//        continue;
-//      }
-//      at::native::memory::st_vec<alignment>(output_ptr + remote_start + i, tmp[step]);
-      if (actv_vec[step])
-        at::native::memory::st_vec<alignment>(output_ptr + remote_start[step] + i, tmp[step]);
+      size_t remote_rank = (rank + step) % k_world_size;
+      size_t remote_start = numel_per_rank * remote_rank;
+      if (remote_start + i >= numel) {
+        continue;
+      }
+      at::native::memory::st_vec<alignment>(output_ptr + remote_start + i, tmp[step]);
     }
   }
   // need to make sure all blocks exit simultaneously so that the data
