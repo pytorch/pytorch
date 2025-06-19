@@ -306,6 +306,7 @@ class PersistentCache(CacheBase):
         op: str,
         inputs: str,
         benchmark: Optional[Callable[[Any], dict[ChoiceCaller, float]]],
+        hint_override: Optional[int] = None,
     ) -> dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -330,11 +331,12 @@ class PersistentCache(CacheBase):
         def check_cache(cache: dict[str, Any], callback: Any = None) -> bool:
             """Check if `cache` contains data for all the choices"""
             hit = True
+            hint_key = "default" if hint_override is None else str(hint_override)
             for choice in choices:
                 choice_hash = choice.hash_key()
-                if choice_hash in cache.get(op, {}).get(inputs, {}).get(precision, {}):
+                if choice_hash in cache.get(op, {}).get(inputs, {}).get(precision, {}).get(hint_key, {}):
                     # cache hit
-                    timings[choice] = cache[op][inputs][precision][choice_hash]
+                    timings[choice] = cache[op][inputs][precision][hint_key][choice_hash]
                 else:
                     # cache miss
                     hit = False
@@ -358,10 +360,11 @@ class PersistentCache(CacheBase):
                     # re-benchmark everything to try to get consistent numbers from the same machine
                     timings = benchmark(choices)
                     assert all(choice in timings for choice in choices)
+                    hint_key = "default" if hint_override is None else str(hint_override)
                     local_cache.setdefault(op, {})
-                    local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
+                    local_cache[op].setdefault(inputs, {}).setdefault(precision, {}).setdefault(hint_key, {})
                     for choice, timing in timings.items():
-                        local_cache[op][inputs][precision][choice.hash_key()] = timing
+                        local_cache[op][inputs][precision][hint_key][choice.hash_key()] = timing
                 except RuntimeError as e:
                     # catch and log autotuning failures
                     log_errors(e)

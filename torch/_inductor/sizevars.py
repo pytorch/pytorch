@@ -546,8 +546,18 @@ class SizeVarAllocator:
         exprs: Iterable[Union[Expr, int]],
         *,
         fallback: Optional[int] = None,
+        hint_override: Optional[dict[Union[Expr, int], int]] = None,
     ) -> tuple[int, ...]:
-        return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
+        if hint_override is None:
+            return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
+        
+        result = []
+        for x in exprs:
+            if x in hint_override:
+                result.append(hint_override[x])
+            else:
+                result.append(self.size_hint(x, fallback=fallback))
+        return tuple(result)
 
     def _lru_cache(self, fn, maxsize=None):
         """
