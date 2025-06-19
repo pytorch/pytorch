@@ -578,6 +578,10 @@ def gen_2d_view_of_epilogue_buf(
 
 
 class CppGemmTemplate(CppTemplate):
+    """
+    GEMM Template for Inductor CPP Backend.
+    """
+
     def __init__(
         self,
         input_nodes,
@@ -744,12 +748,13 @@ class CppGemmTemplate(CppTemplate):
             if config.cpp.gemm_cache_blocking is not None:
                 blockings = [int(i) for i in config.cpp.gemm_cache_blocking.split(",")]
                 assert len(blockings) == 3
-                Mc_blocks, Nc_blocks, Kc_blocks = blockings
-                return (
-                    min(Mc_blocks, Mt_blocks),
-                    min(Nc_blocks, Nt_blocks),
-                    min(Kc_blocks, Kt_blocks),
-                )
+                if all(blocking != 0 for blocking in blockings):
+                    Mc_blocks, Nc_blocks, Kc_blocks = blockings
+                    return (
+                        min(Mc_blocks, Mt_blocks),
+                        min(Nc_blocks, Nt_blocks),
+                        min(Kc_blocks, Kt_blocks),
+                    )
 
             # The ratios below are empirically determined to decide
             # the effective sizes of L1 and L2.
@@ -796,11 +801,18 @@ class CppGemmTemplate(CppTemplate):
             #    along N, where we have two sub-strategies (see notes below) to decide Mc and Nc.
 
             # Step 1: Decide Kc assuming B block is L1-reside.
-            size_cache_B = Kr * Kt_blocks * Nr * num_byte_B
+            Kc_blocks = 0
+            if config.cpp.gemm_cache_blocking is not None:
+                blockings = [int(i) for i in config.cpp.gemm_cache_blocking.split(",")]
+                assert len(blockings) == 3
+                if blockings[2] != 0:
+                    Kc_blocks = blockings[2]
 
-            Kc_blocks = Kt_blocks
-            if size_cache_B > L1:
-                Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
+            if not Kc_blocks:
+                size_cache_B = Kr * Kt_blocks * Nr * num_byte_B
+                Kc_blocks = Kt_blocks
+                if size_cache_B > L1:
+                    Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
 
             # Step 2: Decide Mc assuming A block is L2-reside.
             min_Mc_ratio = 2  # TODO(jgong5): something to tune?
