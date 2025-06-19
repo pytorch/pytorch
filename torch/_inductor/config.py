@@ -434,6 +434,7 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
+
 # As above, specify candidate backends for conv autotune.
 # NB: in some cases for 1x1 convs we emit as matmul,
 # which will use the backends of `max_autotune_gemm_backends`
@@ -1487,6 +1488,23 @@ class cuda:
         os.environ.get("TORCHINDUCTOR_CUTLASS_PRESCREENING", "1") == "1"
     )
 
+    # Specify which operations should use CUTLASS backend
+    # Comma-separated list like "mm,addmm,bmm", "all" for all operations, and "" for none.
+    # Acceptable operations: mm, int_mm, addmm, sparse_semi_structured_mm, bmm, scaled_mm
+    cutlass_enabled_ops: str = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_ENABLED_OPS", "all"
+    )
+
+    # Whether to consult the binary remote cache
+    use_binary_remote_cache: bool = True
+
+    # Whether to upload compiled kernels to remote cache
+    upload_to_binary_remote_cache: bool = False
+
+    # Whether to force upload if the key already exists
+    # Use this to overwrite and handle cache pollution
+    binary_remote_cache_force_write: bool = False
+
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
@@ -1647,7 +1665,7 @@ class trace:
     compile_profile = False
 
     # Upload the .tar.gz file
-    # Needs to be overriden based on specific environment needs
+    # Needs to be overridden based on specific environment needs
     upload_tar: Optional[Callable[[str], None]] = None
 
     log_autotuning_results: bool = False
@@ -1685,6 +1703,11 @@ _cache_config_ignore_prefix: list[str] = [
     "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
+    # cache related options are not relevant to cache results
+    "fx_graph_cache",
+    "fx_graph_remote_cache",
+    "autotune_local_cache",
+    "autotune_remote_cache",
 ]
 
 # External callable for matmul tuning candidates
