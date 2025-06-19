@@ -514,6 +514,305 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
         print(onnx_program)
 
+    def test_attention_basic(self):
+        """Test basic attention functionality."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+        q_num_heads, kv_num_heads = 8, 8
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
+        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+
+        # Test eager mode
+        output, present_key, present_value, qk_output = torch.onnx.ops.attention(
+            Q, K, V
+        )
+
+        self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
+        self.assertEqual(present_key.shape, K.shape)
+        self.assertEqual(present_value.shape, V.shape)
+        self.assertEqual(qk_output.shape, (batch_size, q_num_heads, q_seq_len, kv_seq_len))
+
+    def test_attention_3d_inputs(self):
+        """Test attention with 3D inputs (requires num_heads parameters)."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+        q_num_heads, kv_num_heads = 8, 8
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_seq_len, q_num_heads * head_size)
+        K = torch.rand(batch_size, kv_seq_len, kv_num_heads * head_size)
+        V = torch.rand(batch_size, kv_seq_len, kv_num_heads * head_size)
+
+        output, present_key, present_value, qk_output = torch.onnx.ops.attention(
+            Q, K, V, q_num_heads=q_num_heads, kv_num_heads=kv_num_heads
+        )
+
+        # Output should be reshaped back to 3D
+        self.assertEqual(output.shape, (batch_size, q_seq_len, q_num_heads * head_size))
+        self.assertEqual(present_key.shape, (batch_size, kv_num_heads, kv_seq_len, head_size))
+        self.assertEqual(present_value.shape, (batch_size, kv_num_heads, kv_seq_len, head_size))
+
+    def test_attention_gqa(self):
+        """Test Group Query Attention (GQA)."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+        q_num_heads, kv_num_heads = 8, 4  # GQA: q_num_heads > kv_num_heads
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
+        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+
+        output, present_key, present_value, qk_output = torch.onnx.ops.attention(
+            Q, K, V
+        )
+
+        self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
+        self.assertEqual(present_key.shape, K.shape)
+        self.assertEqual(present_value.shape, V.shape)
+
+    def test_attention_mqa(self):
+        """Test Multi-Query Attention (MQA)."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+        q_num_heads, kv_num_heads = 8, 1  # MQA: kv_num_heads = 1
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
+        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+
+        output, present_key, present_value, qk_output = torch.onnx.ops.attention(
+            Q, K, V
+        )
+
+        self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
+
+    def test_attention_with_mask(self):
+        """Test attention with attention mask."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+        q_num_heads, kv_num_heads = 8, 8
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
+        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+
+        # Test with boolean mask
+        bool_mask = torch.randint(0, 2, (q_seq_len, kv_seq_len), dtype=torch.bool)
+        output_bool, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=bool_mask)
+
+        # Test with float mask
+        float_mask = torch.randn(q_seq_len, kv_seq_len)
+        output_float, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
+
+        self.assertEqual(output_bool.shape, (batch_size, q_num_heads, q_seq_len, head_size))
+        self.assertEqual(output_float.shape, (batch_size, q_num_heads, q_seq_len, head_size))
+
+    def test_attention_causal(self):
+        """Test causal attention."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 4  # Square for causal
+        q_num_heads, kv_num_heads = 8, 8
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
+        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+
+        output, _, _, _ = torch.onnx.ops.attention(Q, K, V, is_causal=True)
+
+        self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
+
+    def test_attention_with_past_kv(self):
+        """Test attention with past key/value caches."""
+        batch_size, q_seq_len, kv_seq_len, past_seq_len = 2, 4, 6, 3
+        q_num_heads, kv_num_heads = 8, 8
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
+        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        past_key = torch.rand(batch_size, kv_num_heads, past_seq_len, head_size)
+        past_value = torch.rand(batch_size, kv_num_heads, past_seq_len, head_size)
+
+        output, present_key, present_value, _ = torch.onnx.ops.attention(
+            Q, K, V, past_key=past_key, past_value=past_value
+        )
+
+        # Present key/value should include past + current
+        expected_total_seq_len = past_seq_len + kv_seq_len
+        self.assertEqual(present_key.shape, (batch_size, kv_num_heads, expected_total_seq_len, head_size))
+        self.assertEqual(present_value.shape, (batch_size, kv_num_heads, expected_total_seq_len, head_size))
+
+    def test_attention_with_softcap(self):
+        """Test attention with softcap."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+        q_num_heads, kv_num_heads = 8, 8
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
+        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+
+        output, _, _, _ = torch.onnx.ops.attention(Q, K, V, softcap=30.0)
+
+        self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
+
+    def test_attention_qk_output_modes(self):
+        """Test different QK matmul output modes."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+        q_num_heads, kv_num_heads = 8, 8
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
+        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+
+        for mode in [0, 1, 2, 3]:
+            output, _, _, qk_output = torch.onnx.ops.attention(
+                Q, K, V, qk_matmul_output_mode=mode
+            )
+
+            self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
+            self.assertEqual(qk_output.shape, (batch_size, q_num_heads, q_seq_len, kv_seq_len))
+
+    def test_attention_custom_scale(self):
+        """Test attention with custom scale factor."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+        q_num_heads, kv_num_heads = 8, 8
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
+        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+
+        custom_scale = 0.25
+        output, _, _, _ = torch.onnx.ops.attention(Q, K, V, scale=custom_scale)
+
+        self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
+
+    def test_attention_export(self):
+        """Test that attention can be exported to ONNX."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+        q_num_heads, kv_num_heads = 8, 8
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
+        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+
+        class AttentionModel(torch.nn.Module):
+            def forward(self, Q, K, V):
+                output, present_key, present_value, qk_output = torch.onnx.ops.attention(Q, K, V)
+                return output
+
+        model = AttentionModel()
+
+        onnx_program = self.export(
+            model,
+            (Q, K, V),
+            opset_version=23,
+        )
+
+        self.assertEqual(onnx_program.model.opset_imports[""], 23)
+        self.assertEqual("Attention", onnx_program.model.graph.node(0).op_type)
+
+    def test_attention_export_with_dynamic_shapes(self):
+        """Test attention export with dynamic shapes."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+        q_num_heads, kv_num_heads = 8, 8
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
+        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+
+        class AttentionModel(torch.nn.Module):
+            def forward(self, Q, K, V):
+                output, present_key, present_value, qk_output = torch.onnx.ops.attention(Q, K, V)
+                return output
+
+        model = AttentionModel()
+
+        dynamic_shapes = {
+            "Q": {0: torch.export.Dim.DYNAMIC, 2: torch.export.Dim.DYNAMIC},
+            "K": {0: torch.export.Dim.DYNAMIC, 2: torch.export.Dim.DYNAMIC},
+            "V": {0: torch.export.Dim.DYNAMIC, 2: torch.export.Dim.DYNAMIC},
+        }
+
+        onnx_program = self.export(
+            model,
+            (Q, K, V),
+            dynamic_shapes=dynamic_shapes,
+            opset_version=23,
+        )
+
+        self.assertEqual(onnx_program.model.opset_imports[""], 23)
+        self.assertEqual("Attention", onnx_program.model.graph.node(0).op_type)
+
+    def test_attention_3d_export(self):
+        """Test attention export with 3D inputs."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+        q_num_heads, kv_num_heads = 8, 8
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_seq_len, q_num_heads * head_size)
+        K = torch.rand(batch_size, kv_seq_len, kv_num_heads * head_size)
+        V = torch.rand(batch_size, kv_seq_len, kv_num_heads * head_size)
+
+        class AttentionModel(torch.nn.Module):
+            def forward(self, Q, K, V):
+                output, _, _, _ = torch.onnx.ops.attention(
+                    Q, K, V, q_num_heads=q_num_heads, kv_num_heads=kv_num_heads
+                )
+                return output
+
+        model = AttentionModel()
+
+        onnx_program = self.export(
+            model,
+            (Q, K, V),
+            opset_version=23,
+        )
+
+        self.assertEqual(onnx_program.model.opset_imports[""], 23)
+        self.assertEqual("Attention", onnx_program.model.graph.node(0).op_type)
+
+    def test_attention_decomposition(self):
+        """Test that attention can be decomposed to aten ops."""
+        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+        q_num_heads, kv_num_heads = 8, 8
+        head_size = 64
+
+        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
+        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+
+        class AttentionModel(torch.nn.Module):
+            def forward(self, Q, K, V):
+                output, present_key, present_value, qk_output = torch.onnx.ops.attention(Q, K, V)
+                return output
+
+        model = AttentionModel()
+
+        ep = torch.export.export(model, (Q, K, V))
+        self.assertIn(
+            "onnx.Attention.opset23",
+            [str(node.target) for node in ep.graph.nodes],
+        )
+
+        # The program can be decomposed into aten ops
+        aten_decomped = ep.run_decompositions(torch.onnx.ops.aten_decompositions())
+        self.assertNotIn(
+            "onnx.Attention.opset23",
+            [str(node.target) for node in aten_decomped.graph.nodes],
+        )
+
+        # Results should match
+        torch.testing.assert_close(
+            aten_decomped.module()(Q, K, V),
+            model(Q, K, V),
+        )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
