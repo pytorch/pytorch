@@ -945,11 +945,10 @@ def parse_dependencies(
             "-c",
             textwrap.dedent(
                 """
-                from pathlib import Path
-
                 from packaging.metadata import Metadata
 
-                metadata = Metadata.from_email(Path('METADATA').read_text(encoding='utf-8'))
+                with open("METADATA", encoding="utf-8") as f:
+                    metadata = Metadata.from_email(f.read())
                 for req in metadata.requires_dist:
                     if req.marker is None or req.marker.evaluate():
                         print(req)
