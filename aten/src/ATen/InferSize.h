@@ -20,7 +20,7 @@ namespace at {
 template <typename InputArrayRef, typename NumelType, typename ResultVec>
 inline void infer_size_impl(
     InputArrayRef shape,
-    const NumelType& numel,
+    NumelType numel,
     ResultVec& res) {
   NumelType newsize = 1;
   // N.B. this is an index, not a sym dim!
