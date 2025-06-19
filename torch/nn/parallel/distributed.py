@@ -759,7 +759,7 @@ class DistributedDataParallel(Module, Joinable):
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
                     f"but got device_ids {device_ids}, output_device {output_device}, "
-                    f"and module parameters {({p.device for p in self._module_parameters})}.",
+                    f"and module parameters { ({p.device for p in self._module_parameters}) }.",  # noqa: E201,E202
                 )
 
             self.device_ids = None
