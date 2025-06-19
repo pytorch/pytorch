@@ -1492,10 +1492,12 @@ if(USE_DISTRIBUTED)
   if(USE_TENSORPIPE)
     target_compile_definitions(torch_cpu PUBLIC USE_TENSORPIPE)
   endif()
-  # Pass USE_NVSHMEM to torch_cpu because availability determination needs to be
-  # generically callable from torch_cpu side
+  # Pass USE_NVSHMEM to SymmetricMemory because availability determination needs
+  # to be generically callable from torch_cpu side
   if(USE_NVSHMEM)
-    target_compile_definitions(torch_cpu PUBLIC USE_NVSHMEM)
+    set_source_files_properties(
+      "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/SymmetricMemory.cpp"
+      PROPERTIES COMPILE_FLAGS "-DUSE_NVSHMEM")
   endif()
 endif()
 
