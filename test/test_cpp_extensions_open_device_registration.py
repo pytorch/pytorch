@@ -53,38 +53,6 @@ class TestCppExtensionOpenRegistration(common.TestCase):
             verbose=True,
         )
 
-    def test_open_device_storage_type(self):
-        # test cpu float storage
-        cpu_tensor = torch.randn([8]).float()
-        cpu_storage = cpu_tensor.storage()
-        self.assertEqual(cpu_storage.type(), "torch.FloatStorage")
-
-        # test custom float storage before defining FloatStorage
-        openreg_tensor = cpu_tensor.openreg()
-        openreg_storage = openreg_tensor.storage()
-        self.assertEqual(openreg_storage.type(), "torch.storage.TypedStorage")
-
-        class CustomFloatStorage:
-            @property
-            def __module__(self):
-                return "torch." + torch._C._get_privateuse1_backend_name()
-
-            @property
-            def __name__(self):
-                return "FloatStorage"
-
-        # test custom float storage after defining FloatStorage
-        try:
-            torch.openreg.FloatStorage = CustomFloatStorage()
-            self.assertEqual(openreg_storage.type(), "torch.openreg.FloatStorage")
-
-            # test custom int storage after defining FloatStorage
-            openreg_tensor2 = torch.randn([8]).int().openreg()
-            openreg_storage2 = openreg_tensor2.storage()
-            self.assertEqual(openreg_storage2.type(), "torch.storage.TypedStorage")
-        finally:
-            torch.openreg.FloatStorage = None
-
     def test_open_device_faketensor(self):
         with torch._subclasses.fake_tensor.FakeTensorMode.push():
             a = torch.empty(1, device="openreg")
