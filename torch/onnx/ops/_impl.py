@@ -157,7 +157,7 @@ def _validate_gqa_configuration(
     """Validate Group Query Attention configuration."""
     torch._check(
         current_q_num_heads % current_kv_num_heads == 0,
-        f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA"
+        f"q_num_heads ({current_q_num_heads}) must be divisible by kv_num_heads ({current_kv_num_heads}) for GQA",
     )
 
 
@@ -198,6 +198,8 @@ def attention_23(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Attention-23 https://onnx.ai/onnx/operators/onnx__Attention.html#attention-23"""
 
+    num_head_dim, sequence_dim, head_dim = 1, 2, 3
+
     # Store original input shape to determine output shape
     input_shape_len = len(Q.shape)
     batch_size = Q.shape[0]
@@ -215,35 +217,34 @@ def attention_23(
     assert len(Q.shape) == 4 and len(K.shape) == 4 and len(V.shape) == 4
 
     # Calculate scale factor if not provided
-    q_head_size = Q.shape[3]
+    q_head_size = Q.shape[head_dim]
     scale = _get_scale_factor(scale, q_head_size)
 
     # Handle past key/value caches
-    present_key = torch.cat([past_key, K], dim=2) if past_key is not None else K
-    present_value = torch.cat([past_value, V], dim=2) if past_value is not None else V
+    present_key = (
+        torch.cat([past_key, K], dim=sequence_dim) if past_key is not None else K
+    )
+    present_value = (
+        torch.cat([past_value, V], dim=sequence_dim) if past_value is not None else V
+    )
 
     # Update K and V to include past states
     K, V = present_key, present_value
 
     # Get current dimensions
-    current_q_num_heads = Q.shape[1]
-    current_kv_num_heads = K.shape[1]
-    q_sequence_length = Q.shape[2]
-    kv_sequence_length = K.shape[2]
+    current_q_num_heads = Q.shape[num_head_dim]
+    current_kv_num_heads = K.shape[num_head_dim]
+    q_sequence_length = Q.shape[sequence_dim]
+    kv_sequence_length = K.shape[sequence_dim]
 
     # Check if we can use the optimized scaled_dot_product_attention (most optimized)
     can_use_sdpa = (
         softcap == 0.0  # No softcap
         and qk_matmul_output_mode == 0  # Default QK output mode
         and softmax_precision is None  # No custom softmax precision
-        and (
-            attn_mask is None
-            or attn_mask.dtype == torch.bool
-            or not torch.any(attn_mask != 0)
-        )  # Boolean mask or zero float mask only
+        and (attn_mask is None or attn_mask.dtype == torch.bool)
     )
 
-    enable_gqa = current_q_num_heads != current_kv_num_heads
     _validate_gqa_configuration(current_q_num_heads, current_kv_num_heads)
 
     if can_use_sdpa:
@@ -263,7 +264,7 @@ def attention_23(
             dropout_p=0.0,
             is_causal=is_causal,
             scale=scale,
-            enable_gqa=enable_gqa,
+            enable_gqa=current_q_num_heads != current_kv_num_heads,
         )
 
         qk_output = _get_qk_output(
@@ -280,8 +281,8 @@ def attention_23(
         # Handle Group Query Attention (GQA) and Multi-Query Attention (MQA)
         if current_q_num_heads != current_kv_num_heads:
             repeat_factor = current_q_num_heads // current_kv_num_heads
-            K = K.repeat_interleave(repeat_factor, dim=1)
-            V = V.repeat_interleave(repeat_factor, dim=1)
+            K = K.repeat_interleave(repeat_factor, dim=num_head_dim)
+            V = V.repeat_interleave(repeat_factor, dim=num_head_dim)
 
         # Create attention bias
         attn_bias = torch.zeros(
