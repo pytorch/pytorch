@@ -7645,7 +7645,8 @@ class ShapeEnv:
         self, orig_expr: SympyBoolean, msg: str, fx_node: Optional[torch.fx.Node] = None
     ) -> bool:
         """
-        Adds a guard if we can or fall back to adding an assert that is checked at runtime
+        Adds a guard that orig_expr is True if we can or fall back to adding an assert
+        that is checked at runtime.
 
         Args:
             orig_expr (sympy.Expr): Boolean expression to assert is true
