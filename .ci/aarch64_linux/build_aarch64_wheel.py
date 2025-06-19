@@ -444,7 +444,7 @@ def build_torchvision(
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
-    host.run_cmd(f"cd vision && {build_vars} python3 setup.py bdist_wheel")
+    host.run_cmd(f"cd vision && {build_vars} python3 -m build --wheel --no-isolation")
     vision_wheel_name = host.list_dir("vision/dist")[0]
     embed_libgomp(host, use_conda, os.path.join("vision", "dist", vision_wheel_name))
 
@@ -501,7 +501,7 @@ def build_torchdata(
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
-    host.run_cmd(f"cd data && {build_vars} python3 setup.py bdist_wheel")
+    host.run_cmd(f"cd data && {build_vars} python3 -m build --wheel --no-isolation")
     wheel_name = host.list_dir("data/dist")[0]
     embed_libgomp(host, use_conda, os.path.join("data", "dist", wheel_name))
 
@@ -559,7 +559,7 @@ def build_torchtext(
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
-    host.run_cmd(f"cd text && {build_vars} python3 setup.py bdist_wheel")
+    host.run_cmd(f"cd text && {build_vars} python3 -m build --wheel --no-isolation")
     wheel_name = host.list_dir("text/dist")[0]
     embed_libgomp(host, use_conda, os.path.join("text", "dist", wheel_name))
 
@@ -622,7 +622,7 @@ def build_torchaudio(
     host.run_cmd(
         f"cd audio && export FFMPEG_ROOT=$(pwd)/third_party/ffmpeg && export USE_FFMPEG=1 \
         && ./packaging/ffmpeg/build.sh \
-        && {build_vars} python3 setup.py bdist_wheel"
+        && {build_vars} python3 -m build --wheel --no-isolation"
     )
 
     wheel_name = host.list_dir("audio/dist")[0]
@@ -734,7 +734,7 @@ def start_build(
     print("Building PyTorch wheel")
     build_opts = ""
     if pytorch_build_number is not None:
-        build_opts += f" --build-number {pytorch_build_number}"
+        build_opts += f" -C--build-option=--build-number={pytorch_build_number}"
     # Breakpad build fails on aarch64
     build_vars = "USE_BREAKPAD=0 "
     if branch == "nightly":
@@ -755,7 +755,7 @@ def start_build(
         print("build pytorch with mkldnn+acl backend")
         build_vars += " USE_MKLDNN=ON USE_MKLDNN_ACL=ON"
         host.run_cmd(
-            f"cd $HOME/pytorch && export ACL_ROOT_DIR=$HOME/ComputeLibrary && {build_vars} python3 setup.py bdist_wheel{build_opts}"
+            f"cd $HOME/pytorch && export ACL_ROOT_DIR=$HOME/ComputeLibrary && {build_vars} python3 -m build --wheel --no-isolation{build_opts}"
         )
         print("Repair the wheel")
         pytorch_wheel_name = host.list_dir("pytorch/dist")[0]
@@ -771,7 +771,7 @@ def start_build(
     else:
         print("build pytorch without mkldnn backend")
         host.run_cmd(
-            f"cd pytorch && {build_vars} python3 setup.py bdist_wheel{build_opts}"
+            f"cd pytorch && {build_vars} python3 -m build --wheel --no-isolation{build_opts}"
         )
 
     print("Deleting build folder")

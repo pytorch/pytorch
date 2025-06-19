@@ -96,7 +96,7 @@ def main(args: Any) -> None:
     if not args.skip_build:
         print("Building PyTorch...")
         subprocess.check_call(
-            ("python", "setup.py", "develop"),
+            ("python", "-m", "pip", "install", "-e", ".", "-v", "--no-build-isolation"),
         )
     print("Updating operator .expect files")
     subprocess.check_call(

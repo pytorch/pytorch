@@ -289,9 +289,9 @@ else
       WERROR=1 python setup.py clean
 
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        python3 tools/packaging/split_wheel.py bdist_wheel
+        python3 tools/packaging/split_wheel.py build_wheel
       else
-        WERROR=1 python setup.py bdist_wheel
+        WERROR=1 python -m build --wheel --no-isolation
       fi
     else
       python setup.py clean
@@ -302,7 +302,7 @@ else
         echo "USE_SPLIT_BUILD cannot be used with xla or rocm"
         exit 1
       else
-        python setup.py bdist_wheel
+        python -m build --wheel --no-isolation
       fi
     fi
     pip_install_whl "$(echo dist/*.whl)"
