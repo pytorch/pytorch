@@ -173,7 +173,4 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
 TORCH_API bool has_multicast_support(
     c10::DeviceType device_type,
     int device_idx);
-
-TORCH_API bool is_nvshmem_available();
-
 } // namespace c10d::symmetric_memory

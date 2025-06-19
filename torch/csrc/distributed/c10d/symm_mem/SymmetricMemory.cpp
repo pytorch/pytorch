@@ -1,4 +1,3 @@
-#include <dlfcn.h>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 namespace {
@@ -209,34 +208,6 @@ TORCH_API bool has_multicast_support(
     return allocator->has_multicast_support(device_idx);
   }
 }
-
-// Check if NVSHMEM is available
-TORCH_API bool is_nvshmem_available() {
-#ifndef USE_NVSHMEM
-  // Compile-time check
-  return false;
-#else
-  // Runtime check
-  static std::mutex mutex;
-  static int is_available = -2;
-  std::lock_guard<std::mutex> lock(mutex);
-  if (is_available == -2) {
-    void* handle{};
-    // Open the shared library, RTLD_LAZY defers symbol resolution until needed
-    handle = dlopen("libnvshmem_host.so.3", RTLD_LAZY);
-    if (!handle) {
-      std::cerr << dlerror() << "\n";
-      is_available = 0;
-    } else {
-      is_available = 1;
-      // Close the shared library
-      dlclose(handle);
-    }
-  }
-  return is_available == 1;
-#endif
-}
-
 } // namespace c10d::symmetric_memory
 
 namespace {

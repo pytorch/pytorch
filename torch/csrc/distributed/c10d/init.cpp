@@ -1005,17 +1005,18 @@ This class does not support ``__members__`` property.)");
     return ::c10d::unregister_all_process_groups();
   });
 
+#ifdef USE_NVSHMEM
   // Intializes the device state in CUmodule so that it’s able to perform
   // NVSHMEM operations.
-#ifdef USE_NVSHMEM
   module.def(
       "_nvshmemx_cumodule_init",
       ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
       py::arg("module"));
-#endif
 
+  // Check if NVSHMEM is available on current system.
   module.def(
-      "_is_nvshmem_available", &::c10d::symmetric_memory::is_nvshmem_available);
+      "_is_nvshmem_available", ::c10d::nvshmem_extension::is_nvshmem_available);
+#endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
