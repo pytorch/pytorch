@@ -495,22 +495,22 @@ class Venv:
         **popen_kwargs: Any,
     ) -> subprocess.CompletedProcess[str]:
         """Run a pip install command in the virtual environment."""
+        uv_pip_args = []
+        if VERBOSE:
+            uv_pip_args.append("-v")
+        if prerelease:
+            uv_pip_args.append("--prerelease")
         if upgrade:
-            args = ["--upgrade", *packages]
+            uv_pip_args.append("--upgrade")
             verb = "Upgrading"
         else:
-            args = list(packages)
             verb = "Installing"
-        if prerelease:
-            args = ["--prerelease", *args]
         if no_deps:
-            args = ["--no-deps", *args]
-        if VERBOSE:
-            args = ["-v", *args]
+            uv_pip_args.append("--no-deps")
         print(f"{verb} package(s) ({self.pip_source.index_url}):")
         for package in packages:
             print(f"  - {os.path.basename(package)}")
-        return self.uv("pip", "install", *args, **popen_kwargs)
+        return self.uv("pip", "install", *uv_pip_args, *packages, **popen_kwargs)
 
     def pip(self, *args: str, **popen_kwargs: Any) -> subprocess.CompletedProcess[str]:
         """Run a pip command in the virtual environment."""
@@ -526,22 +526,22 @@ class Venv:
         **popen_kwargs: Any,
     ) -> subprocess.CompletedProcess[str]:
         """Run a pip install command in the virtual environment."""
+        pip_args = []
+        if VERBOSE:
+            pip_args.append("-v")
+        if prerelease:
+            pip_args.append("--pre")
         if upgrade:
-            args = ["--upgrade", *packages]
+            pip_args.append("--upgrade")
             verb = "Upgrading"
         else:
-            args = list(packages)
             verb = "Installing"
-        if prerelease:
-            args = ["--pre", *args]
         if no_deps:
-            args = ["--no-deps", *args]
-        if VERBOSE:
-            args = ["-v", *args]
+            pip_args.append("--no-deps")
         print(f"{verb} package(s) ({self.pip_source.index_url}):")
         for package in packages:
             print(f"  - {os.path.basename(package)}")
-        return self.pip("install", *args, **popen_kwargs)
+        return self.pip("install", *pip_args, *packages, **popen_kwargs)
 
     @timed("Downloading packages")
     def pip_download(
@@ -559,15 +559,14 @@ class Venv:
             f"Downloading package(s) ({self.pip_source.index_url}): "
             f"{', '.join(packages)}"
         )
-        if prerelease:
-            args = ["--pre", *packages]
-        else:
-            args = list(packages)
-        if no_deps:
-            args = ["--no-deps", *args]
+        pip_args = []
         if VERBOSE:
-            args = ["-v", *args]
-        self.pip("download", "--dest", str(tempdir), *args, **popen_kwargs)
+            pip_args.append("-v")
+        if prerelease:
+            pip_args.append("--pre")
+        if no_deps:
+            pip_args.append("--no-deps")
+        self.pip("download", f"--dest={tempdir}", *pip_args, *packages, **popen_kwargs)
         files = list(tempdir.iterdir())
         print(f"Downloaded {len(files)} file(s) to {tempdir}:")
         for file in files:
@@ -593,7 +592,7 @@ class Venv:
         wheel = Path(wheel).absolute()
         dest = Path(dest).absolute()
         assert wheel.is_file() and wheel.suffix.lower() == ".whl"
-        return self.wheel("unpack", "--dest", str(dest), str(wheel), **popen_kwargs)
+        return self.wheel("unpack", f"--dest={dest}", str(wheel), **popen_kwargs)
 
     @contextlib.contextmanager
     def extracted_wheel(self, wheel: Path | str) -> Generator[Path]:
