@@ -511,7 +511,6 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     bool isP2P,
     const char* profilingTitle,
     const std::optional<std::vector<at::Tensor>>& inputs,
-    bool desyncDebug,
     bool enableTiming,
     bool cudaEventCacheEnabled,
     DebugLevel distDebugLevel)
@@ -701,7 +700,7 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 }
 
 // Print the traceback of the collective at call time
-void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
+std::string ProcessGroupNCCL::WorkNCCL::getTraceback() const {
   // First step we get the corresponding record entry from FR, based on work's
   // trace_id_
   std::optional<FlightRecorderCUDA::Entry> entry =
@@ -717,10 +716,19 @@ void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
     // Wait for the future to complete or timeout
     auto status = future.wait_for(std::chrono::seconds(8));
     if (status == std::future_status::ready) {
-      std::string tracebackStr = future.get();
-      LOG(ERROR) << "Stack trace of the failed collective: \n" << tracebackStr;
-    } // else, symbolizer probably timed out, we skip logging the stack trace.
-  } else {
+      return future.get();
+    }
+  }
+  return "";
+}
+
+// Print the traceback of the collective at call time
+void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
+  std::string tracebackStr = getTraceback();
+  if (!tracebackStr.empty()) {
+    LOG(ERROR) << "Stack trace of the failed collective: \n" << tracebackStr;
+  } // else, symbolizer probably timed out, we skip logging the stack trace.
+  else {
     LOG(ERROR)
         << "Stack trace of the failed collective not found, "
         << "potentially because FlightRecorder is disabled. "
@@ -952,15 +960,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
-  desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
-      (dist_debug_level_ >= DebugLevel::Detail);
-  rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
-  propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
-  heartbeat_ = 1ULL;
   cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, true));
-  waitTimeoutDumpInMilSec_ =
-      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000 /*15 Sec*/);
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
   enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -970,9 +971,11 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
   globalStore_ =
       prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
+  auto desyncDebug = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
+      (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
+      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug);
 #endif // ENABLE_NCCL_ERROR_CHECKING
   if (getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false)) {
     TORCH_WARN_ONCE(
@@ -984,7 +987,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         << logPrefix()
         << "TORCH_NCCL_BLOCKING_WAIT is enabled, NO watchdog thread is created.";
   } else {
-    if (desyncDebug_ && asyncErrorHandling_ == NoHandling) {
+    if (desyncDebug && asyncErrorHandling_ == NoHandling) {
       LOG(INFO)
           << logPrefix()
           << "TORCH_NCCL_DESYNC_DEBUG and TORCH_NCCL_ASYNC_ERROR_HANDLING "
@@ -994,17 +997,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 
-  // Initialize the heartbeat monitor instance. This has to be done before
-  // the watchdog thread is launched to avoid the error.
+  // Initialize the heartbeat monitor/watchdog instance. This has to be done
+  // before the corresponding thread is launched to avoid the error.
   heartbeatMonitor_ = std::make_unique<HeartbeatMonitor>(this);
+  watchdog_ = std::make_unique<Watchdog>(this);
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   // in blockingWait mode, we don't need to enable the watchdog thread to check
   // the timeout or nccl error because the main thread would throw an exception
   // and it is the user's responsibility to handle the exception.
   if (!blockingWait_) {
-    ncclCommWatchdogThread_ =
-        std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
+    watchdog_->start();
   }
 #endif // ENABLE_NCCL_ERROR_CHECKING
 
@@ -1024,8 +1027,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
             << "NCCL version: " << ncclVersion
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
-            << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
             << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
@@ -1049,11 +1050,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   if (shouldAllCommunicatorsRegisterAllTensors()) {
     // This call is idempotent.
     attachAllocatorHooks();
-  }
-
-  // Enable Desync Debugger per user setting
-  if (desyncDebug_) {
-    desyncDebugger_.init(rank, size, globalRank(), getUid(), store_);
   }
 }
 
@@ -1271,7 +1267,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   //    completedWorkList_ before it finishes.
   // 3. We have three threads and two locks.
   //      a. main thread (this function) grabs two locks atomically
-  //      b. watchdog thread (watchdogHandler function) always grabs
+  //      b. watchdog thread (runLoop function) always grabs
   //      workMetaListMutex_
   //         first and then grabs completedWorkListMutex_.
   //      c. hook thread (runHookLoop function) only grabs
@@ -1425,7 +1421,7 @@ void ProcessGroupNCCL::abort() {
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
-  workMetaListCV_.notify_one();
+  watchdog_->notify();
 
   // lauch abort asynchrounously and wait for it to complete or timeout
   LOG(INFO) << logPrefix()
@@ -1480,10 +1476,8 @@ void ProcessGroupNCCL::shutdown() {
   // anymore because I am going to destroy them now
   LOG(INFO) << logPrefix() << "Operations flushed, joining watchdog thread.";
   terminateProcessGroup_.store(true);
-  workMetaListCV_.notify_one();
-  if (ncclCommWatchdogThread_.joinable()) {
-    ncclCommWatchdogThread_.join();
-  }
+  watchdog_->notify();
+  watchdog_->join();
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
   }
@@ -1542,15 +1536,12 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   // Make sure we've told threads to stop; doesn't hurt if we'd done so before.
   // Tell watchdog and onCompletionHook:
   terminateProcessGroup_.store(true);
-  workMetaListCV_.notify_one();
+  watchdog_->notify();
   // Tell heartbeat thread:
   heartbeatMonitor_->stop();
 
   // Wait for all threads to finish before returning
-  if (ncclCommWatchdogThread_.joinable()) {
-    ncclCommWatchdogThread_.join();
-    LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
-  }
+  watchdog_->join();
   heartbeatMonitor_->join();
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
@@ -1567,7 +1558,6 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
   // multiple calls in one runtime. User is responsible for preserving the
   // output file from an earlier call before a later call overwrites it.
   static std::mutex writeDebugInfoMutex;
-  std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
   LOG(ERROR)
       << logPrefix()
       << "ProcessGroupNCCL preparing to dump debug info. Include stack trace: "
@@ -1577,6 +1567,9 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
     auto ncclTrace = dump_nccl_trace(true, includeStackTrace, false);
+    // dump_nccl_trace will hang so we don't grab the global lock until we get
+    // the trace.
+    std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
@@ -1637,6 +1630,10 @@ void ProcessGroupNCCL::HeartbeatMonitor::setLastWorkListUpdateTime(
   // We intentially let the race condition to happen but this is ok
   // as long as we update the time, we know we are making progress.
   lastWorkListUpdateTime_ = time;
+}
+
+int ProcessGroupNCCL::HeartbeatMonitor::getDumpTimeout() const {
+  return waitTimeoutDumpInMilSec_;
 }
 
 ProcessGroupNCCL::HeartbeatMonitor::HeartbeatMonitor(ProcessGroupNCCL* pg) {
@@ -1832,6 +1829,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // recorder and dump. After dump, the training should continue.
     if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
       // best effort dump, not waiting for the dump here
+      LOG(INFO) << pg_->logPrefix()
+                << "Dump signal received through pipe, triggering FR dump.";
       std::future<bool> fut = std::async(std::launch::async, [this]() {
         return this->pg_->dumpDebuggingInfo();
       });
@@ -1969,27 +1968,69 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   }
 }
 
-void ProcessGroupNCCL::ncclCommWatchdog() {
+ProcessGroupNCCL::Watchdog::Watchdog(ProcessGroupNCCL* pg) {
+  pg_ = pg;
+  heartbeat_ = 1ULL;
+  rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
+  propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
+  desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
+      (pg_->dist_debug_level_ >= DebugLevel::Detail);
+
+  // print out ENV settings for the watchdog thread.
+  LOG(INFO) << pg_->logPrefix() << "PGNCCL Watchdog environments: "
+            << "TORCH_NCCL_RETHROW_CUDA_ERRORS: " << rethrowCUDAErrors_
+            << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
+            << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_;
+
+  // Enable Desync Debugger per user setting
+  if (desyncDebug_) {
+    desyncDebugger_.init(
+        pg_->getRank(),
+        pg_->getSize(),
+        pg_->globalRank(),
+        pg_->getUid(),
+        pg_->store_);
+  }
+}
+
+void ProcessGroupNCCL::Watchdog::notify() {
+  workMetaListCV_.notify_one();
+}
+
+void ProcessGroupNCCL::Watchdog::start() {
+  TORCH_CHECK(
+      !ncclCommWatchdogThread_.joinable(), "Watchdog thread already started");
+  ncclCommWatchdogThread_ = std::thread(&ProcessGroupNCCL::Watchdog::run, this);
+}
+
+void ProcessGroupNCCL::Watchdog::join() {
+  if (ncclCommWatchdogThread_.joinable()) {
+    ncclCommWatchdogThread_.join();
+    LOG(INFO) << pg_->logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
+  }
+}
+
+void ProcessGroupNCCL::Watchdog::run() {
   c10::setThreadName("pt_nccl_watchdg");
 
   try {
-    VLOG(2) << logPrefix() << "Process group watchdog thread started!";
-    heartbeatMonitor_->start();
-    watchdogHandler();
-    VLOG(2) << logPrefix()
+    VLOG(2) << pg_->logPrefix() << "Process group watchdog thread started!";
+    pg_->heartbeatMonitor_->start();
+    runLoop();
+    VLOG(2) << pg_->logPrefix()
             << "Process group watchdog thread terminated normally";
   } catch (std::exception& e) {
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
       VLOG(2)
-          << logPrefix()
+          << pg_->logPrefix()
           << "main process destroyed cuda before watchdog loop exited, terminating watchdog."
           << " (Watchdog caught exception: " << e.what();
 
     } else {
-      // Append error message reported from watchdogHandler
+      // Append error message reported from runLoop
       const auto exitMsg = c10::str(
-          logPrefix(),
+          pg_->logPrefix(),
           "Process group watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
@@ -2004,13 +2045,333 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     }
   } catch (...) {
     const auto exitMsg = c10::str(
-        logPrefix(),
+        pg_->logPrefix(),
         "Process group watchdog thread terminated with exception: unknown");
     LOG(ERROR) << exitMsg;
     watchDogException_ =
         std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
     std::rethrow_exception(watchDogException_);
   }
+}
+
+int ProcessGroupNCCL::Watchdog::getSignalSrcRank(
+    c10::intrusive_ptr<Store>& store,
+    const std::string& signal) {
+  // This function is 'non blocking'. We first 'check' if the key exists in the
+  // store, then read/get the value only if the key exists.
+  int srcRank = -1;
+  bool signalExists = false;
+  try {
+    signalExists = store->check({signal});
+  } catch (const std::exception& e) {
+    LOG(WARNING) << pg_->logPrefix() << "Failed to check the signal " << signal
+                 << " on TCPStore, " << e.what();
+  }
+  if (!signalExists) {
+    return srcRank;
+  }
+
+  // key exists, now read and parse the value (source rank)
+  std::vector<uint8_t> vec;
+  try {
+    vec = store->get(std::string(signal));
+  } catch (const std::exception& e) {
+    LOG(ERROR) << pg_->logPrefix() << "Failed to get source rank of the signal "
+               << signal << " from TCPStore." << e.what();
+  }
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      vec.size() == sizeof(int),
+      "Invalid size for the timeout rank ID");
+  std::memcpy(&srcRank, vec.data(), vec.size());
+  return srcRank;
+}
+
+void ProcessGroupNCCL::Watchdog::checkAndSetRemoteError() {
+  // if the error is already set, no need to check again
+  if (pg_->getError() != ErrorType::SUCCESS) {
+    return;
+  }
+  // key/signal to read from the tcpstore is a string and pg specific:
+  // format is: remote_error:pg_uid
+  int remoteErrorRank = getSignalSrcRank(
+      pg_->store_, std::string(kStoreErrorSignalKey) + ':' + pg_->pg_uid_);
+  if (remoteErrorRank != -1) {
+    std::lock_guard<std::mutex> lock(pg_->errorMutex_);
+    pg_->error_ = ErrorType::REMOTE_ERROR;
+    LOG(ERROR) << c10::str(
+        pg_->logPrefix(),
+        " remote error detected from rank: ",
+        remoteErrorRank);
+  }
+}
+
+void ProcessGroupNCCL::Watchdog::runLoop() {
+  bool done = false;
+  pg_->heartbeatMonitor_->setLastWorkListUpdateTime(
+      std::chrono::steady_clock::now());
+  auto lastStatusUpdateTime = std::chrono::steady_clock::now();
+  std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
+
+  while (!done || !pg_->terminateProcessGroup_.load()) {
+    std::unique_lock<std::mutex> lock(pg_->workMetaListMutex_);
+    // We busy-poll the work vector every kWatchdogThreadSleepMillis
+    // milliseconds as long as the atomic is True.
+    workMetaListCV_.wait_for(
+        lock,
+        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
+        [&]() -> bool { return pg_->terminateProcessGroup_.load(); });
+    // Bump up heart beat by one.
+    heartbeat_++;
+
+// Some versions of GLOG support less-spammy version of LOG_EVERY_MS
+// in which case we don't want to spam the logs.
+#ifdef LOG_EVERY_MS
+    // Log the progress of this PG periodically
+    C10_LOG_EVERY_MS(INFO, kWorkStatusUpdatePeriodMs) << c10::str(
+        logPrefix(),
+        "NCCL Work update periodically: ",
+        "last enqueued NCCL work: ",
+        pg_->pgStatus_->lastEnqueuedSeq,
+        ", last completed NCCL work: ",
+        pg_->pgStatus_->lastCompletedSeq,
+        ".");
+#endif // LOG_EVERY_MS
+    auto logger = ::c10d::C10dLogger::getLogger();
+    if (logger &&
+        computeDeltaMS(
+            lastStatusUpdateTime, std::chrono::steady_clock::now()) >=
+            kWorkStatusUpdatePeriodMs) {
+      ::c10d::C10dLoggingData data;
+      // logging integers
+      data.integers["pg_id"] = static_cast<int64_t>(pg_->local_id_);
+      data.integers["rank"] = pg_->rank_;
+      data.integers["global_rank"] = pg_->globalRank();
+      data.integers["last_enqueued_work"] = pg_->pgStatus_->lastEnqueuedSeq;
+      data.integers["last_started_work"] = pg_->pgStatus_->lastStartedSeq;
+      data.integers["last_completed_work"] = pg_->pgStatus_->lastCompletedSeq;
+      data.integers["last_enqueued_numel_in"] =
+          static_cast<int64_t>(pg_->pgStatus_->lastEnqueuedNumelIn);
+      data.integers["last_enqueued_numel_out"] =
+          static_cast<int64_t>(pg_->pgStatus_->lastEnqueuedNumelOut);
+      data.integers["last_completed_numel_in"] =
+          static_cast<int64_t>(pg_->pgStatus_->lastCompletedNumelIn);
+      data.integers["last_completed_numel_out"] =
+          static_cast<int64_t>(pg_->pgStatus_->lastCompletedNumelOut);
+      data.integers["last_started_numel_in"] =
+          static_cast<int64_t>(pg_->pgStatus_->lastStartedNumelIn);
+      data.integers["last_started_numel_out"] =
+          static_cast<int64_t>(pg_->pgStatus_->lastStartedNumelOut);
+      // logging strings
+      data.strings["last_enqueued_work_name"] =
+          pg_->pgStatus_->lastEnqueuedWorkName;
+      data.strings["last_started_work_name"] =
+          pg_->pgStatus_->lastStartedWorkName;
+      data.strings["last_completed_work_name"] =
+          pg_->pgStatus_->lastCompletedWorkName;
+      data.strings["pg_name"] = pg_->pg_uid_;
+      data.strings["pg_desc"] = pg_->pg_desc_;
+      logger->log(data);
+      lastStatusUpdateTime = std::chrono::steady_clock::now();
+    }
+
+    if (propagatePgError_) {
+      // Check and set remote error if it has not been set before
+      checkAndSetRemoteError();
+    }
+
+    for (auto it = pg_->workMetaList_.begin(); it != pg_->workMetaList_.end();
+         /* no increment */) {
+      auto& work = *it;
+      // When terminateProcessGroup_ is true, communicators have already been
+      // aborted, So cannot check exception based on them. But watchdog needs to
+      // finish the check for the works that have already been enqueued to
+      // workMetaList_
+
+      // check NCCL errors first
+      if (!pg_->terminateProcessGroup_.load()) {
+        work.checkAndSetException();
+      }
+
+      if (work.exception()) {
+        // set the error to the first error found
+        std::lock_guard<std::mutex> lock(pg_->errorMutex_);
+        if (pg_->error_ == ErrorType::SUCCESS) {
+          pg_->error_ = ErrorType::COMM_ERROR;
+        }
+      }
+
+      // Then check if work has timed out
+      // Skip if work has encountered an error
+      bool timedout = !work.exception() && work.checkTimeout();
+
+      // Report desync state in case of timeout (if TORCH_NCCL_DESYNC_DEBUG is
+      // turned on; otherwise, run() is no-op)
+      if (timedout) {
+        std::lock_guard<std::mutex> lock(pg_->errorMutex_);
+        if (pg_->error_ == ErrorType::SUCCESS) {
+          pg_->error_ = ErrorType::TIMEOUT;
+        }
+        desyncDebugger_.run();
+      }
+
+      // If work hits an exception (either an error or timeout)
+      if (work.exception()) {
+        LOG(ERROR) << c10::str(
+            pg_->logPrefix(),
+            " failure detected by watchdog at work sequence id: ",
+            work.seq_,
+            " PG status: last enqueued work: ",
+            pg_->pgStatus_->lastEnqueuedSeq,
+            ", last completed work: ",
+            pg_->pgStatus_->lastCompletedSeq);
+
+        // Print the traceback of the collective at call time
+        work.printTraceback();
+
+        // broadcast remote error signal to all other ranks in this specific PG.
+        // key/signal to write in the tcpstore is a string and pg specific:
+        // format is: remote_error:pg_uid
+        if (propagatePgError_) {
+          pg_->broadcastSignal(
+              pg_->store_,
+              std::string(kStoreErrorSignalKey) + ':' + pg_->pg_uid_,
+              pg_->rank_);
+        }
+
+        // try to notify other ranks via global TCPStore to dump the flight
+        // recorder when a collective timeout or exception happens. Flight
+        // recorder behavior is independent of desync Debug.
+        pg_->broadcastDumpSignal();
+        // Give time for dumping before throwing exception for all ranks.
+        // It is hard to presume or control what the pattern of watchdog might
+        // look like, so it is better to let all ranks universally sleep for a
+        // short period of time, in this case, 60 seconds, which is also the
+        // maximum time we leave for FR dump.
+        std::this_thread::sleep_for(std::chrono::milliseconds(
+            pg_->heartbeatMonitor_->getDumpTimeout() * 4));
+
+        if (SHOULD_CLEAN_UP(pg_->asyncErrorHandling_)) {
+          // Abort work and corresponding communicators
+          work.abort();
+          // PG level abort, which would abort all other communicators on this
+          // rank
+          pg_->abortComms();
+        }
+        // Throw exception
+        work.handleException(pg_->asyncErrorHandling_);
+      }
+
+      // Work status logging for desync debug
+      desyncDebugger_.logWorkStart(work);
+
+      // a work could be started but not completed, so we should not update
+      // lastStartedSeq and lastStartedOpName if the work state is checked
+      // multiple times after the start
+      if (pg_->pgStatus_->lastStartedSeq < static_cast<int64_t>(work.seq_) &&
+          work.isStarted()) {
+        pg_->pgStatus_->lastStartedSeq = static_cast<int64_t>(work.seq_);
+        pg_->pgStatus_->lastStartedWorkName = opTypeToString(work.opType_);
+        pg_->pgStatus_->lastStartedNumelIn = work.numelIn_;
+        pg_->pgStatus_->lastStartedNumelOut = work.numelOut_;
+      }
+
+      // allow watchdog to do an event query on a side thread
+      at::cuda::CUDAGuard device_guard(work.ncclEndEvent_->device_index());
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
+
+      // Clean up completed work
+      if (work.isCompleted()) {
+        // In case user didn't call `work.wait()` with async collectives,
+        // watchdog would unstage the stashed tensors when detecting completion
+        // of the collective, to prevent ProcessGroupNCCL from holding reference
+        // to those tensors forever.
+        // work.stashed_for_allocator_safety_->unstash();
+        // Update: it seems directly unstashing from watchdog thread would cause
+        // some rare problems. We thus move the unstashing to main thread,
+        // triggered by a next user call, see `workEnqueue`. But `work` is going
+        // to be destructed, so we transfer the work's shelf to a shelves
+        // structure owned by the PG.
+        if (!work.stashed_for_allocator_safety_->empty()) {
+          std::lock_guard<std::mutex> lock(pg_->shelvesMutex_);
+          // We are just pushing back a shared_ptr here, so the cost should be
+          // minimal
+          pg_->shelvesToUnstash_.push_back(work.stashed_for_allocator_safety_);
+        }
+
+        if (pg_->enableTiming_ && logger) {
+          ::c10d::C10dLoggingData data;
+          // logging integers
+          data.strings["collective_duration"] =
+              std::to_string(work.getDuration());
+          data.integers["global_rank"] = pg_->globalRank();
+          data.integers["pg_id"] = static_cast<int64_t>(pg_->local_id_);
+          data.strings["pg_name"] = pg_->pg_uid_;
+          data.strings["pg_desc"] = pg_->pg_desc_;
+          data.integers["pg_rank"] = pg_->rank_;
+          data.integers["world_size"] = pg_->size_;
+          data.strings["comm_backend"] = "nccl";
+          data.strings["comm_backend_version"] = getNcclVersion();
+          data.strings["collective_stack"] = work.getTraceback();
+          data.strings["collective_name"] = opTypeToString(work.opType_);
+          logger->log(data);
+        }
+
+        // Work status logging for desync debug
+        desyncDebugger_.logWorkEnd(work);
+
+        if (work.futureWorkResult_ && work.finishedGPUExecutionInternal() &&
+            !work.futureWorkResult_->completed()) {
+          work.futureWorkResult_->markCompleted(
+              at::IValue(static_cast<uint8_t>(WorkResult::SUCCESS)));
+        }
+        {
+          // Reset the timeout and first work if the work is completed.
+          std::lock_guard<std::mutex> timeoutLock(pg_->mtxTimeoutExtension_);
+          if (work.ownedEphermeralTimeout_.count() > 0) {
+            pg_->ephemeralTimeoutActive_ -= work.ownedEphermeralTimeout_;
+            pg_->ephemeralTimeoutInflight_ -= work.ownedEphermeralTimeout_;
+          }
+        }
+        pg_->pgStatus_->lastCompletedSeq = static_cast<int64_t>(work.seq_);
+        pg_->pgStatus_->lastCompletedWorkName = opTypeToString(work.opType_);
+        pg_->pgStatus_->lastCompletedNumelIn = work.numelIn_;
+        pg_->pgStatus_->lastCompletedNumelOut = work.numelOut_;
+        FlightRecorderCUDA::get()->retire_id(work.trace_id_, true);
+        if (pg_->onCompletionHook_) {
+          // Move Work object to completedWorkList_ to be consumed by the hook
+          // thread
+          {
+            const std::lock_guard<std::mutex> lock(
+                pg_->completedWorkListMutex_);
+            pg_->completedWorkList_.splice(
+                pg_->completedWorkList_.end(), pg_->workMetaList_, it++);
+          }
+          pg_->completedWorkListCV_.notify_one();
+        } else {
+          it = pg_->workMetaList_.erase(it);
+          pg_->heartbeatMonitor_->setLastWorkListUpdateTime(
+              std::chrono::steady_clock::now());
+        }
+      } else {
+        // Increment the iterator if the current WorkNCCL object is not
+        // completed.
+        ++it;
+      }
+      // Increment heartbeat after each work processed,
+      // in case processing is slowed down (but not hung) by cuda api contention
+      heartbeat_++;
+    }
+    done = pg_->workMetaList_.empty();
+  }
+}
+
+uint64_t ProcessGroupNCCL::Watchdog::getHeartbt() const {
+  return heartbeat_.load();
+}
+
+void ProcessGroupNCCL::Watchdog::setDesyncDebug(bool desyncDebug) {
+  desyncDebug_ = desyncDebug;
 }
 
 // Initialize and enable DesyncDebugger
@@ -2182,39 +2543,6 @@ void ProcessGroupNCCL::broadcastSignal(
   }
 }
 
-int ProcessGroupNCCL::getSignalSrcRank(
-    c10::intrusive_ptr<Store>& store,
-    const std::string& signal) {
-  // This function is 'non blocking'. We first 'check' if the key exists in the
-  // store, then read/get the value only if the key exists.
-  int srcRank = -1;
-  bool signalExists = false;
-  try {
-    signalExists = store->check({signal});
-  } catch (const std::exception& e) {
-    LOG(WARNING) << logPrefix() << "Failed to check the signal " << signal
-                 << " on TCPStore, " << e.what();
-  }
-  if (!signalExists) {
-    return srcRank;
-  }
-
-  // key exists, now read and parse the value (source rank)
-  std::vector<uint8_t> vec;
-  try {
-    vec = store->get(std::string(signal));
-  } catch (const std::exception& e) {
-    LOG(ERROR) << logPrefix() << "Failed to get source rank of the signal "
-               << signal << " from TCPStore." << e.what();
-  }
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      vec.size() == sizeof(int),
-      "Invalid size for the timeout rank ID");
-  std::memcpy(&srcRank, vec.data(), vec.size());
-  return srcRank;
-}
-
 void ProcessGroupNCCL::broadcastDumpSignal() {
   // broadcast dump signal to all other global ranks.
   broadcastSignal(globalStore_, std::string(kStoreDumpKey), globalRank());
@@ -2223,23 +2551,6 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
     LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
     // signal the monitor thread on PG0 to start dumping
     shouldDump_.store(true);
-  }
-}
-
-void ProcessGroupNCCL::checkAndSetRemoteError() {
-  // if the error is already set, no need to check again
-  if (getError() != ErrorType::SUCCESS) {
-    return;
-  }
-  // key/signal to read from the tcpstore is a string and pg specific:
-  // format is: remote_error:pg_uid
-  int remoteErrorRank = getSignalSrcRank(
-      store_, std::string(kStoreErrorSignalKey) + ':' + pg_uid_);
-  if (remoteErrorRank != -1) {
-    std::lock_guard<std::mutex> lock(errorMutex_);
-    error_ = ErrorType::REMOTE_ERROR;
-    LOG(ERROR) << c10::str(
-        logPrefix(), " remote error detected from rank: ", remoteErrorRank);
   }
 }
 
@@ -2266,243 +2577,6 @@ static int getRootIndex(const int rank, const int nRanks, const int nIds) {
   } else {
     // Root with `rpr` ranks, (rmr, rmr + 1, ..., nIds - 1).
     return (rank - rlim) % rpr ? -1 : ((rank - rlim) / rpr) + rmr;
-  }
-}
-
-void ProcessGroupNCCL::watchdogHandler() {
-  bool done = false;
-  heartbeatMonitor_->setLastWorkListUpdateTime(
-      std::chrono::steady_clock::now());
-  auto lastStatusUpdateTime = std::chrono::steady_clock::now();
-  std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
-
-  while (!done || !terminateProcessGroup_.load()) {
-    std::unique_lock<std::mutex> lock(workMetaListMutex_);
-    // We busy-poll the work vector every kWatchdogThreadSleepMillis
-    // milliseconds as long as the atomic is True.
-    workMetaListCV_.wait_for(
-        lock,
-        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
-        [&]() -> bool { return terminateProcessGroup_.load(); });
-    // Bump up heart beat by one.
-    heartbeat_++;
-
-// Some versions of GLOG support less-spammy version of LOG_EVERY_MS
-// in which case we don't want to spam the logs.
-#ifdef LOG_EVERY_MS
-    // Log the progress of this PG periodically
-    C10_LOG_EVERY_MS(INFO, kWorkStatusUpdatePeriodMs) << c10::str(
-        logPrefix(),
-        "NCCL Work update periodically: ",
-        "last enqueued NCCL work: ",
-        pgStatus_->lastEnqueuedSeq,
-        ", last completed NCCL work: ",
-        pgStatus_->lastCompletedSeq,
-        ".");
-#endif // LOG_EVERY_MS
-    auto logger = ::c10d::C10dLogger::getLogger();
-    if (logger &&
-        computeDeltaMS(
-            lastStatusUpdateTime, std::chrono::steady_clock::now()) >=
-            kWorkStatusUpdatePeriodMs) {
-      ::c10d::C10dLoggingData data;
-      // logging integers
-      data.integers["pg_id"] = static_cast<int64_t>(local_id_);
-      data.integers["rank"] = rank_;
-      data.integers["global_rank"] = globalRank();
-      data.integers["last_enqueued_work"] = pgStatus_->lastEnqueuedSeq;
-      data.integers["last_started_work"] = pgStatus_->lastStartedSeq;
-      data.integers["last_completed_work"] = pgStatus_->lastCompletedSeq;
-      data.integers["last_enqueued_numel_in"] =
-          static_cast<int64_t>(pgStatus_->lastEnqueuedNumelIn);
-      data.integers["last_enqueued_numel_out"] =
-          static_cast<int64_t>(pgStatus_->lastEnqueuedNumelOut);
-      data.integers["last_completed_numel_in"] =
-          static_cast<int64_t>(pgStatus_->lastCompletedNumelIn);
-      data.integers["last_completed_numel_out"] =
-          static_cast<int64_t>(pgStatus_->lastCompletedNumelOut);
-      data.integers["last_started_numel_in"] =
-          static_cast<int64_t>(pgStatus_->lastStartedNumelIn);
-      data.integers["last_started_numel_out"] =
-          static_cast<int64_t>(pgStatus_->lastStartedNumelOut);
-      // logging strings
-      data.strings["last_enqueued_work_name"] = pgStatus_->lastEnqueuedWorkName;
-      data.strings["last_started_work_name"] = pgStatus_->lastStartedWorkName;
-      data.strings["last_completed_work_name"] =
-          pgStatus_->lastCompletedWorkName;
-      data.strings["pg_name"] = pg_uid_;
-      data.strings["pg_desc"] = pg_desc_;
-      logger->log(data);
-      lastStatusUpdateTime = std::chrono::steady_clock::now();
-    }
-
-    if (propagatePgError_) {
-      // Check and set remote error if it has not been set before
-      checkAndSetRemoteError();
-    }
-
-    for (auto it = workMetaList_.begin(); it != workMetaList_.end();
-         /* no increment */) {
-      auto& work = *it;
-      // When terminateProcessGroup_ is true, communicators have already been
-      // aborted, So cannot check exception based on them. But watchdog needs to
-      // finish the check for the works that have already been enqueued to
-      // workMetaList_
-
-      // check NCCL errors first
-      if (!terminateProcessGroup_.load()) {
-        work.checkAndSetException();
-      }
-
-      if (work.exception()) {
-        // set the error to the first error found
-        std::lock_guard<std::mutex> lock(errorMutex_);
-        if (error_ == ErrorType::SUCCESS) {
-          error_ = ErrorType::COMM_ERROR;
-        }
-      }
-
-      // Then check if work has timed out
-      // Skip if work has encountered an error
-      bool timedout = !work.exception() && work.checkTimeout();
-
-      // Report desync state in case of timeout (if TORCH_NCCL_DESYNC_DEBUG is
-      // turned on; otherwise, run() is no-op)
-      if (timedout) {
-        std::lock_guard<std::mutex> lock(errorMutex_);
-        if (error_ == ErrorType::SUCCESS) {
-          error_ = ErrorType::TIMEOUT;
-        }
-        desyncDebugger_.run();
-      }
-
-      // If work hits an exception (either an error or timeout)
-      if (work.exception()) {
-        LOG(ERROR) << c10::str(
-            logPrefix(),
-            " failure detected by watchdog at work sequence id: ",
-            work.seq_,
-            " PG status: last enqueued work: ",
-            pgStatus_->lastEnqueuedSeq,
-            ", last completed work: ",
-            pgStatus_->lastCompletedSeq);
-
-        // Print the traceback of the collective at call time
-        work.printTraceback();
-
-        // broadcast remote error signal to all other ranks in this specific PG.
-        // key/signal to write in the tcpstore is a string and pg specific:
-        // format is: remote_error:pg_uid
-        if (propagatePgError_) {
-          broadcastSignal(
-              store_, std::string(kStoreErrorSignalKey) + ':' + pg_uid_, rank_);
-        }
-
-        // try to notify other ranks via global TCPStore to dump the flight
-        // recorder when a collective timeout or exception happens. Flight
-        // recorder behavior is independent of desync Debug.
-        broadcastDumpSignal();
-        // Give time for dumping before throwing exception for all ranks.
-        // It is hard to presume or control what the pattern of watchdog might
-        // look like, so it is better to let all ranks universally sleep for a
-        // short period of time, in this case, 60 seconds, which is also the
-        // maximum time we leave for FR dump.
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(waitTimeoutDumpInMilSec_ * 4));
-
-        if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
-          // Abort work and corresponding communicators
-          work.abort();
-          // PG level abort, which would abort all other communicators on this
-          // rank
-          abortComms();
-        }
-        // Throw exception
-        work.handleException(asyncErrorHandling_);
-      }
-
-      // Work status logging for desync debug
-      desyncDebugger_.logWorkStart(work);
-
-      // a work could be started but not completed, so we should not update
-      // lastStartedSeq and lastStartedOpName if the work state is checked
-      // multiple times after the start
-      if (pgStatus_->lastStartedSeq < static_cast<int64_t>(work.seq_) &&
-          work.isStarted()) {
-        pgStatus_->lastStartedSeq = static_cast<int64_t>(work.seq_);
-        pgStatus_->lastStartedWorkName = opTypeToString(work.opType_);
-        pgStatus_->lastStartedNumelIn = work.numelIn_;
-        pgStatus_->lastStartedNumelOut = work.numelOut_;
-      }
-
-      // allow watchdog to do an event query on a side thread
-      at::cuda::CUDAGuard device_guard(work.ncclEndEvent_->device_index());
-      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
-
-      // Clean up completed work
-      if (work.isCompleted()) {
-        // In case user didn't call `work.wait()` with async collectives,
-        // watchdog would unstage the stashed tensors when detecting completion
-        // of the collective, to prevent ProcessGroupNCCL from holding reference
-        // to those tensors forever.
-        // work.stashed_for_allocator_safety_->unstash();
-        // Update: it seems directly unstashing from watchdog thread would cause
-        // some rare problems. We thus move the unstashing to main thread,
-        // triggered by a next user call, see `workEnqueue`. But `work` is going
-        // to be destructed, so we transfer the work's shelf to a shelves
-        // structure owned by the PG.
-        if (!work.stashed_for_allocator_safety_->empty()) {
-          std::lock_guard<std::mutex> lock(shelvesMutex_);
-          // We are just pushing back a shared_ptr here, so the cost should be
-          // minimal
-          shelvesToUnstash_.push_back(work.stashed_for_allocator_safety_);
-        }
-
-        // Work status logging for desync debug
-        desyncDebugger_.logWorkEnd(work);
-
-        if (work.futureWorkResult_ && work.finishedGPUExecutionInternal() &&
-            !work.futureWorkResult_->completed()) {
-          work.futureWorkResult_->markCompleted(
-              at::IValue(static_cast<uint8_t>(WorkResult::SUCCESS)));
-        }
-        {
-          // Reset the timeout and first work if the work is completed.
-          std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
-          if (work.ownedEphermeralTimeout_.count() > 0) {
-            ephemeralTimeoutActive_ -= work.ownedEphermeralTimeout_;
-            ephemeralTimeoutInflight_ -= work.ownedEphermeralTimeout_;
-          }
-        }
-        pgStatus_->lastCompletedSeq = static_cast<int64_t>(work.seq_);
-        pgStatus_->lastCompletedWorkName = opTypeToString(work.opType_);
-        pgStatus_->lastCompletedNumelIn = work.numelIn_;
-        pgStatus_->lastCompletedNumelOut = work.numelOut_;
-        FlightRecorderCUDA::get()->retire_id(work.trace_id_, true);
-        if (onCompletionHook_) {
-          // Move Work object to completedWorkList_ to be consumed by the hook
-          // thread
-          {
-            const std::lock_guard<std::mutex> lock(completedWorkListMutex_);
-            completedWorkList_.splice(
-                completedWorkList_.end(), workMetaList_, it++);
-          }
-          completedWorkListCV_.notify_one();
-        } else {
-          it = workMetaList_.erase(it);
-          heartbeatMonitor_->setLastWorkListUpdateTime(
-              std::chrono::steady_clock::now());
-        }
-      } else {
-        // Increment the iterator if the current WorkNCCL object is not
-        // completed.
-        ++it;
-      }
-      // Increment heartbeat after each work processed,
-      // in case processing is slowed down (but not hung) by cuda api contention
-      heartbeat_++;
-    }
-    done = workMetaList_.empty();
   }
 }
 
@@ -3208,7 +3282,6 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       profilingTitle,
       profilingTitle != nullptr ? std::optional<std::vector<at::Tensor>>(inputs)
                                 : std::nullopt,
-      desyncDebug_,
       enableTiming_.load(),
       cudaEventCacheEnabled_.load(),
       dist_debug_level_);
@@ -3329,7 +3402,7 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
 
 uint64_t ProcessGroupNCCL::getWatchdogHeartbt() const {
-  return heartbeat_.load();
+  return watchdog_->getHeartbt();
 }
 
 void ProcessGroupNCCL::startCoalescing() {

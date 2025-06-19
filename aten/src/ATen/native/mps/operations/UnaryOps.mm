@@ -22,11 +22,8 @@
 #include <ATen/ops/conj_physical_native.h>
 #include <ATen/ops/cos_native.h>
 #include <ATen/ops/cosh_native.h>
-#include <ATen/ops/cumprod_native.h>
-#include <ATen/ops/cumsum_native.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/exp2_native.h>
-#include <ATen/ops/expm1_native.h>
 #include <ATen/ops/frac_native.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/logical_not_native.h>
@@ -50,11 +47,6 @@
 #endif
 
 namespace at::native {
-
-enum class MPSCumulativeOpType : uint8_t {
-  CUMSUM = 0,
-  CUMPROD = 1,
-};
 
 namespace mps {
 
@@ -254,14 +246,6 @@ TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
   });
 }
 
-TORCH_IMPL_FUNC(expm1_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "expm1_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:inputTensor.dataType];
-    MPSGraphTensor* ePowTensor = [mpsGraph exponentWithTensor:inputTensor name:nil];
-    return [mpsGraph subtractionWithPrimaryTensor:ePowTensor secondaryTensor:oneTensor name:nil];
-  });
-}
-
 static void logit_mps_impl(const Tensor& self, std::optional<double> eps, Tensor& output, const std::string& op_name) {
   std::string key = op_name + ":[" + (eps.has_value() ? std::to_string(eps.value()) : "NULL") + "]";
 
@@ -363,64 +347,6 @@ TORCH_IMPL_FUNC(logit_backward_out_mps)
     auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, inputPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
   }
-}
-
-static void cumulative_op_impl(const Tensor& self,
-                               int64_t dim,
-                               std::optional<ScalarType> dtype,
-                               const Tensor& result,
-                               MPSCumulativeOpType cumulativeOpType,
-                               const std::string& op_name) {
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  auto nDims = self.dim();
-  auto wrapped_dim = maybe_wrap_dim(dim, nDims);
-  TORCH_CHECK(wrapped_dim >= 0 && wrapped_dim < std::max(1LL, self.ndimension()),
-              "Expected wrapped dim to be between 0 and ",
-              self.ndimension(),
-              " but got ",
-              wrapped_dim,
-              "(original dim is ",
-              dim,
-              ")");
-  TORCH_CHECK(!self.is_complex(), "cumulative ops are not yet supported for complex");
-  auto input = dtype.has_value() ? self.to(dtype.value()) : self;
-
-  // issue #103810551: cumsum / cumprod are broken for int8, int16 and as chances for overflow are pretty high, cast to
-  // int32 fixed in macOS 13.3
-  bool castInputData = (isIntegralType(input.scalar_type(), true) && input.scalar_type() != ScalarType::Int &&
-                        input.scalar_type() != ScalarType::Long);
-
-  TORCH_CHECK(macOS13_3_plus || input.scalar_type() != ScalarType::Long,
-              "MPS does not support ",
-              op_name,
-              " op with int64 input. Support has been added in macOS 13.3");
-
-  mps::unary_op(
-      input, result, op_name + std::to_string(dim), ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-        if (castInputData) {
-          inputTensor = mps::castMPSTensor(mpsGraph, inputTensor, ScalarType::Int);
-        }
-        MPSGraphTensor* rc;
-        if (cumulativeOpType == MPSCumulativeOpType::CUMSUM) {
-          rc = [mpsGraph cumulativeSumWithTensor:inputTensor axis:dim name:nil];
-        } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
-          rc = [mpsGraph cumulativeProductWithTensor:inputTensor axis:dim name:nil];
-        }
-        if ((mps::getMPSDataType(result) != [rc dataType]) || castInputData) {
-          return mps::castMPSTensor(mpsGraph, rc, result.scalar_type());
-        }
-        return rc;
-      });
-}
-
-TORCH_IMPL_FUNC(cumsum_out_mps)
-(const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, const Tensor& result) {
-  return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMSUM, "cumsum_out_mps");
-}
-
-TORCH_IMPL_FUNC(cumprod_out_mps)
-(const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, const Tensor& result) {
-  return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMPROD, "cumprod_out_mps");
 }
 
 TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
