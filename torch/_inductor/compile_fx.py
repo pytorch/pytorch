@@ -75,7 +75,8 @@ from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
-    fresh_inductor_cache,
+    fresh_cache,
+    get_all_devices,
     InputType,
     is_gpu,
     should_assume_input_aligned,
@@ -674,7 +675,7 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
         # Don't delete the cache dir because it has to survive beyond the
         # compile_fx call. Let's put the temp dirs under the default cache
         # dir so they're easier to locate.
-        with fresh_inductor_cache(dir=cache_dir(), delete=False):
+        with fresh_cache(dir=cache_dir(), delete=False):
             yield
     else:
         yield
@@ -1649,8 +1650,8 @@ def cudagraphify(
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
-                compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
-        return compiled_fn(new_inputs)
+                compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)  # type: ignore[arg-type]
+        return compiled_fn(new_inputs)  # type: ignore[arg-type]
 
     return run
 
@@ -1952,22 +1953,6 @@ def get_cpp_wrapper_config() -> dict[str, object]:
         "triton.cudagraphs": False,  # TODO: to be removed
         "triton.store_cubin": True,
     }
-
-
-def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
-    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
-    input_devices: OrderedSet[torch.device] = OrderedSet(
-        node.meta["val"].device
-        for node in placeholder_nodes
-        if isinstance(node.meta.get("val"), torch.Tensor)
-    )
-
-    out_devices: OrderedSet[torch.device] = OrderedSet(
-        arg.meta["val"].device
-        for arg in output_node(gm).args[0]  # type: ignore[union-attr]
-        if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
-    )
-    return input_devices | out_devices
 
 
 def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
