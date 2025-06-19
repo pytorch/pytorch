@@ -3414,6 +3414,21 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(pg_opts.config.net_name, net_name.decode())
         self.assertEqual(pg_opts.config.split_share, int(split_share))
 
+        # Tests that config is inited correctly
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        self.assertEqual(pg_opts.config.min_ctas, -2147483648)
+        self.assertEqual(nccl_cfg.min_ctas, -2147483648)
+
+        # Tests that opts and config can be copied
+        pg_opts_2 = copy.deepcopy(pg_opts)
+        nccl_cfg_2 = copy.copy(pg_opts_2.config)
+        pg_opts_2.config.min_ctas = 2
+        nccl_cfg_2.min_ctas = 4
+        self.assertEqual(pg_opts.config.min_ctas, -2147483648)
+        self.assertEqual(pg_opts_2.config.min_ctas, 2)
+        self.assertEqual(nccl_cfg_2.min_ctas, 4)
+
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier(self):
