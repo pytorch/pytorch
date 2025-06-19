@@ -607,8 +607,16 @@ class ScheduleGPipe(_PipelineScheduleRuntime):
         self._stage = stage
         self._stage_initialized = False
         
-        # Set pp_group_size for schedule generation
+        # Set attributes for pipeline runtime compatibility
         self.pp_group_size = stage.group_size
+        self.rank = stage.group_rank
+        self._num_stages = stage.num_stages
+        
+        # Set stage mapping for consistency with multi-stage schedules
+        self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
+            self.pp_group_size, self._num_stages
+        )
+        stage.stage_index_to_group_rank = self.stage_index_to_group_rank
         
         # Generate pipeline_order for GPipe schedule (after parent init)
         self.pipeline_order = self._generate_gpipe_schedule()
@@ -724,8 +732,16 @@ class Schedule1F1B(_PipelineScheduleRuntime):
         self._stage = stage
         self._stage_initialized = False
         
-        # Set pp_group_size for schedule generation
+        # Set attributes for pipeline runtime compatibility
         self.pp_group_size = stage.group_size
+        self.rank = stage.group_rank
+        self._num_stages = stage.num_stages
+        
+        # Set stage mapping for consistency with multi-stage schedules
+        self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
+            self.pp_group_size, self._num_stages
+        )
+        stage.stage_index_to_group_rank = self.stage_index_to_group_rank
         
         # Generate pipeline_order for 1F1B schedule (after parent init)
         self.pipeline_order = self._generate_1f1b_schedule()
