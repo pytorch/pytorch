@@ -150,6 +150,7 @@ def export(
     custom_opsets: Mapping[str, int] | None = None,
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
     autograd_inlining: bool = True,
+    onnx_shape_inference: bool = True,
 ) -> ONNXProgram | None:
     r"""Exports a model into ONNX format.
 
@@ -428,6 +429,7 @@ def export(
             custom_opsets=custom_opsets,
             export_modules_as_functions=export_modules_as_functions,
             autograd_inlining=autograd_inlining,
+            onnx_shape_inference=onnx_shape_inference,
         )
         return None
 
