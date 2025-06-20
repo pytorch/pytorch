@@ -118,6 +118,12 @@ def aten_scaled_dot_product_attention_23(
             assert query.shape[1] == key.shape[1] == value.shape[1], (
                 "SDPA (MHA) requires q_num_heads = kv_num_heads"
             )
+
+        # NOTE: There was extended discussion on whether the num_heads attributes (q_num_heads/kv_num_heads)
+        # should be set as ONNX attributes or inferred from the tensor shape. In ONNX, num_heads is needed
+        # for 3D attention inputs (shape: [B, S, N*H]), but not for 4D ([B, N, S, H]), which is the only
+        # input accepted by this exporter. Thus, the attribute is not strictly necessary here, but adding it
+        # may ease future optimization or conversion to 3D formats (e.g., GQA ops)
         Y, _, _, _ = op23.Attention(
             query,
             key,
