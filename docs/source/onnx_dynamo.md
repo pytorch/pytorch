@@ -240,7 +240,7 @@ Each initialized value, input, output has the following metadata:
 
 - **pkg.torch.onnx.original_node_name**
   
-  The original name of the node in the PyTorch FX graph that produced this value. This helps trace initializers back to their source in the original model.
+  The original name of the node in the PyTorch FX graph that produced this value In the case where the value was renamed. This helps trace initializers back to their source in the original model.
 
   *Example:*
   `fc1.weight`
