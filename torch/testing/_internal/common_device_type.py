@@ -1320,7 +1320,7 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
     size may be a number of bytes, a string of the form "N GB", or a callable
 
     If the test is a device generic test, available memory on the primary device will be checked.
-    It can also be overriden by the optional `device=` argument.
+    It can also be overridden by the optional `device=` argument.
     In other tests, the `device=` argument needs to be specified.
     """
     if isinstance(size, str):

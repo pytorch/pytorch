@@ -785,6 +785,88 @@ main()
         self.assertEqual(expected, actual)
         self.assertEqual(counters["compiled_autograd"]["captures"], 0)
 
+    @config.patch(compiled_autograd=True)
+    def test_nested_context_manager(self):
+        def ctx():
+            return compiled_autograd._enable(torch.compile)
+
+        # ok
+        outer = ctx()
+        inner = ctx()
+        outer.__enter__()
+        inner.__enter__()
+        inner.__exit__(None, None, None)
+        outer.__exit__(None, None, None)
+
+        # not ok
+        outer = ctx()
+        inner = ctx()
+        outer.__enter__()
+        inner.__enter__()
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Nested Compiled Autograd Contexts must return before their parent context",
+        ):
+            outer.__exit__(None, None, None)
+
+    @config.patch(compiled_autograd=True)
+    def test_nested_compile(self):
+        with torch.library._scoped_library("testlib", "FRAGMENT") as lib:
+            lib.define("square(Tensor x) -> Tensor")
+
+            @torch.library.impl("testlib::square", "CPU")
+            def square_impl(x: torch.Tensor) -> torch.Tensor:
+                # nested inference graph compile
+                @torch.compile(backend="eager")
+                def fn(x):
+                    return x**2
+
+                return fn(x)
+
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, x):
+                    return torch.ops.testlib.square(x)
+
+            x = torch.tensor([2.0, 3.0], requires_grad=True)
+
+            @torch.compile
+            def fn(x):
+                return MyFn.apply(x)
+
+            fn(x).sum().backward()
+
+    @config.patch(compiled_autograd=True)
+    def test_no_nested_compiled_autograd(self):
+        # We disable CA before entering the CA graph
+        # So re-entrants should be running with the eager autograd engine
+
+        def unrelated_autograd_call():
+            x = torch.randn(20, 20, requires_grad=True)
+            y = torch.randn(20, 20, requires_grad=True)
+            loss = torch.matmul(x, y).sum()
+            loss.backward()
+
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                unrelated_autograd_call()
+                return gO
+
+        x = torch.randn(10, 10, requires_grad=True)
+        loss = MyFn.apply(x).sum()
+
+        torch.compile(lambda: loss.backward(create_graph=True))()
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
     def test_multiple_torch_compile(self):
         model = torch.nn.Sequential(
             torch.nn.Linear(4, 4),
@@ -3488,11 +3570,11 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_36, getitem_37], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_16, unwrap_maybe_dynamic_int_17], False), ((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_18, unwrap_maybe_dynamic_int_19], False)]);  getitem_36 = getitem_37 = unwrap_maybe_dynamic_int_16 = unwrap_maybe_dynamic_int_17 = unwrap_maybe_dynamic_int_18 = unwrap_maybe_dynamic_int_19 = None
         getitem_39 = validate_outputs_2[0]
 
-        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_39);  getitem_4 = getitem_39 = accumulate_grad__default_1 = None
+        call_accumulate_grad_1 = torch__dynamo_external_utils_call_accumulate_grad(getitem_4, getitem_39, False);  getitem_4 = getitem_39 = call_accumulate_grad_1 = None
 
         getitem_40 = validate_outputs_2[1];  validate_outputs_2 = None
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_3, getitem_40);  getitem_3 = getitem_40 = accumulate_grad__default = None
+        call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_3, getitem_40, False);  getitem_3 = getitem_40 = call_accumulate_grad = None
 
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
@@ -3757,7 +3839,7 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_10, unwrap_maybe_dynamic_int_11], False)]);  getitem_31 = unwrap_maybe_dynamic_int_10 = unwrap_maybe_dynamic_int_11 = None
         getitem_32 = validate_outputs_4[0];  validate_outputs_4 = None
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_32);  getitem_1 = getitem_32 = accumulate_grad__default = None
+        call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_1, getitem_32, False);  getitem_1 = getitem_32 = call_accumulate_grad = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,  # noqa: B950
@@ -4320,6 +4402,7 @@ class CompiledAutograd1(torch.nn.Module):
     #            new_grad._indices().use_count() <= 1 &&
     #            new_grad._values().use_count() <= 1 &&
     #            new_grad.use_count() <= num_expected_refs) {
+    @unittest.expectedFailure
     def test_accumulate_grad_polyfill_case_1_2(self):
         def fn():
             class StealableSparseOp(BaseCustomOp):
@@ -5060,6 +5143,7 @@ xfail_divergence_from_eager = {
     "test_grad_call_compiled_backward_fn",  # different functorch error
     "test_vjp_call_compiled_backward_fn",  # different functorch error
     "test_vmap_call_compiled_backward_fn",  # different functorch error
+    "test_accumulate_grad",  # always out of place add for compiled autograd
 }
 
 skipped_tests = set()

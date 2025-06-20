@@ -54,6 +54,8 @@ torch.manual_seed(0)
 
 
 class ScheduleTest(MultiProcContinousTest):
+    world_size = 2
+
     @classmethod
     def backend_str(cls) -> str:
         return backend

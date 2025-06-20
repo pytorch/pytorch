@@ -368,6 +368,7 @@ class OutputGraph(OutputGraphGuardsState):
         global_scope: Scope,
         f_code,
         torch_function_mode_stack,
+        package,
     ):
         super().__init__(
             local_scope,
@@ -471,6 +472,7 @@ class OutputGraph(OutputGraphGuardsState):
         self.compiler_fn: Optional[CompilerFn] = compiler_fn
         self.root_tx = root_tx
 
+        self.package = package
         # Given a source, what are the user stacks of all locations that
         # accessed it?
         #
@@ -1111,7 +1113,7 @@ class OutputGraph(OutputGraphGuardsState):
 
                 # A small codegen optimization because we might have different
                 # VariableTrackers that share the same source.
-                list_idx = x.source.index
+                list_idx = x.source.index  # type: ignore[attr-defined]
                 if list_idx not in visited:
                     alias_name = self.new_var(
                         f"{list_name}_ref"
@@ -1655,6 +1657,7 @@ class OutputGraph(OutputGraphGuardsState):
             for register_finalizer in self.register_finalizer_fns:
                 register_finalizer(gm)
 
+            gm._backend_id = name
             gm.compile_subgraph_reason = self.compile_subgraph_reason
             gm.meta["dynamo_flat_name_to_original_fqn"] = (
                 self.dynamo_flat_name_to_original_fqn.copy()
@@ -1714,6 +1717,9 @@ class OutputGraph(OutputGraphGuardsState):
                 if not isinstance(compiled_fn, _LazyGraphModule):
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
+
+            if self.package is not None:
+                self.package.add_backend_id(name, compiled_fn)
 
             compiled_fn = disable(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"
