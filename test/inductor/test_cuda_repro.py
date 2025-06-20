@@ -1814,9 +1814,9 @@ class CudaReproTests(TestCase):
 
         m = ToyModel().to(device="cuda:0")
         input_tensor = torch.randn(32, 3, 64, 64).to(device="cuda:0")
-        from torch._inductor.utils import fresh_inductor_cache
+        from torch._inductor.utils import fresh_cache
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             cm = torch.compile(m, mode="max-autotune")
             out = cm(input_tensor)
             out2 = m(input_tensor)
@@ -2123,6 +2123,49 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         out_eager = interpolate_chunked(x)
         out_compiled = torch.compile(interpolate_chunked)(x)
         self.assertEqual(out_eager, out_compiled)
+
+    def test_max_autotune_nograd(self):
+        """
+        https://github.com/pytorch/pytorch/issues/155688
+        Smallest repro for max-autotune not working with no_grad
+        Before adding __int__ function to torch.utils._sympy.functions.Identity,
+        running the max_autotune mode would raise an error:
+        TypeError: Expected a number but got Identity
+        """
+
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.linear_layers = nn.ModuleList(
+                    [
+                        nn.Linear(4, 1, bias=True),
+                        nn.Linear(5, 1, bias=True),
+                        nn.Linear(6, 1, bias=True),
+                        nn.Linear(7, 1, bias=True),
+                        nn.Linear(8, 1, bias=True),
+                    ]
+                )
+
+            def forward(self, x):
+                for layer in self.linear_layers:
+                    x2 = layer(x)
+                    x2 = F.relu(x2)
+                    x = torch.cat((x, x2), dim=1)
+
+                return x
+
+        model = ToyModel().to("cuda")
+        input_tensor = torch.randn((2, 4)).to("cuda")
+
+        compile_default = torch.compile(model, mode="default")
+        compile_max_autotune = torch.compile(model, mode="max-autotune")
+
+        with torch.no_grad():
+            default_output = compile_default(input_tensor)
+            max_autotune_output = compile_max_autotune(input_tensor)
+
+        self.assertEqual(default_output, max_autotune_output)
 
 
 if __name__ == "__main__":
