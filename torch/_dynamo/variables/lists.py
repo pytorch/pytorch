@@ -131,6 +131,10 @@ class BaseListVariable(VariableTracker):
         if name == "__getitem__":
             from .tensor import TensorVariable
 
+            if len(args) != 1:
+                msg = f"{name} takes exactly one argument ({len(args)} given)"
+                raise_observed_exception(TypeError, tx, [ConstantVariable(msg)])
+
             assert not kwargs and len(args) == 1
             if isinstance(args[0], TensorVariable):
                 value = get_fake_value(args[0].as_proxy().node, tx)
@@ -147,6 +151,11 @@ class BaseListVariable(VariableTracker):
                     )
             else:
                 value = args[0]
+
+            if value.python_type() not in (int, slice):
+                msg = f"indices must be integers or slices, not {value.python_type()}"
+                raise_observed_exception(TypeError, tx, [ConstantVariable(msg)])
+
             return self.getitem_const(tx, value)
         elif name == "__contains__":
             assert len(args) == 1
@@ -156,6 +165,15 @@ class BaseListVariable(VariableTracker):
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
+                kwargs,
+            )
+        elif name == "count":
+            if len(args) != 1:
+                msg = f"{name} takes exactly one argument ({len(args)} given)"
+                raise_observed_exception(TypeError, tx, [ConstantVariable(msg)])
+            return VariableTracker.build(tx, operator.countOf).call_function(
+                tx,
+                [self, args[0]],
                 kwargs,
             )
         elif name in cmp_name_to_op_mapping:
