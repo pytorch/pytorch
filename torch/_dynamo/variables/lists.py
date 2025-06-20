@@ -119,16 +119,7 @@ class BaseListVariable(VariableTracker):
             try:
                 return self.items[index]
             except IndexError as e:
-                unimplemented_v2(
-                    gb_type="Bad_list_access",
-                    context=f"list = f{self.items}, index = f{index}",
-                    from_exc=e,
-                    explanation="Attempted to trace an invalid list access.",
-                    hints=[
-                        *graph_break_hints.SUPPORTABLE,
-                        "Please ensure your list access is correct without compile.",
-                    ],
-                )
+                raise_observed_exception(IndexError, tx, args=["list index out of range"])
 
     def unpack_var_sequence(self, tx):
         return list(self.items)
