@@ -183,11 +183,10 @@ class BaseListVariable(VariableTracker):
             )
         elif name == "count":
             if len(args) != 1:
-                msg = f"{name} takes exactly one argument ({len(args)} given)"
-                raise_observed_exception(TypeError, tx, args=[ConstantVariable(msg)])
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.count),
-                [self] + list(args),
+                raise_args_mismatch(tx, name)
+            return VariableTracker.build(tx, operator.countOf).call_function(
+                tx,
+                [self, args[0]],
                 kwargs,
             )
         elif name in ("__add__", "__iadd__"):
@@ -518,10 +517,6 @@ class CommonListMethodsVariable(BaseListVariable):
                 args[0].as_python_constant(), (int, slice)
             ):
                 idx = args[0].as_python_constant()
-                if isinstance(idx, slice):
-                    if idx.step == 0:
-                        msg = ConstantVariable.create("slice step cannot be zero")
-                        raise_observed_exception(ValueError, tx, args=[msg])
                 try:
                     self.items.__delitem__(idx)
                 except Exception as exc:
