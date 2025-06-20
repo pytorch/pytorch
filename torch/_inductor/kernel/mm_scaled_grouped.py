@@ -120,6 +120,7 @@ def early_config_prune(g, m, configs, named_args):
     return pruned_configs
 
 
+# Copied from fbgemm grouped_gemm.py
 triton_grouped_mm_source = r"""
 {%- if SCALED %}
 {%- if A_IS_2D or B_IS_2D %}
@@ -670,7 +671,7 @@ def _tuned_grouped_mm_common(
     )
 
 
-@register_lowering(aten._grouped_mm.default, type_promotion_kind=None)
+@register_lowering(aten._grouped_mm, type_promotion_kind=None)
 def tuned_grouped_mm(
     mat_a: TensorBox,
     mat_b: TensorBox,
@@ -682,7 +683,7 @@ def tuned_grouped_mm(
     """Auto-tuning for _grouped_mm() operator."""
 
     return _tuned_grouped_mm_common(
-        "aten._grouped_mm.default",
+        "aten._grouped_mm",
         "grouped_mm",
         aten__grouped_mm,
         triton_grouped_mm_template,
