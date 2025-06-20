@@ -2573,7 +2573,6 @@ class CommonTemplate:
         self.common(fn, (torch.ones(32, 32) * 70,))
 
     @skip_if_halide
-    @xfail_if_mps_unimplemented  # aten::_cummin_helper is not implemented for MPS
     def test_cummin(self):
         def fn(x):
             return x.cummin(0)
@@ -4118,15 +4117,16 @@ class CommonTemplate:
         def foo(m, inp):
             return m(inp)
 
-        with torch.no_grad():
-            _, code = run_and_get_code(foo, grouped_conv, input_tensor)
-            # no to channels last permuting before kernel
-            if config.cpp_wrapper:
-                FileCheck().check_not("  call_triton").check("_convolution(").run(
-                    code[0]
-                )
-            else:
-                FileCheck().check_not(".run(").check(".convolution(").run(code[0])
+        if self.device != "xpu":
+            with torch.no_grad():
+                _, code = run_and_get_code(foo, grouped_conv, input_tensor)
+                # no to channels last permuting before kernel
+                if config.cpp_wrapper:
+                    FileCheck().check_not("  call_triton").check("_convolution(").run(
+                        code[0]
+                    )
+                else:
+                    FileCheck().check_not(".run(").check(".convolution(").run(code[0])
 
         # in out should do channels last in inference
         in_channels = 8
@@ -7205,7 +7205,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
 
-    @xfail_if_mps_unimplemented
     def test_upsample_nearest3d(self):
         def fn(a):
             return (
@@ -10723,7 +10722,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @skip_if_halide  # log2 not yet implemented
     @skip_if_triton_cpu  # log2 implemented only in Dec 2024
-    @expectedFailureXPU  # Remmove this after the known issue of Intel Triton #3871 resolved.
     def test_pow_by_natural_log2_dynamic_shapes(self):
         @torch.compile(dynamic=True)
         def fn(x):
