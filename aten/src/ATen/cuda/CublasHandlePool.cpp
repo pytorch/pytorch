@@ -23,6 +23,9 @@
  * To work around this difference in behavior, a separate handle pool is available for ROCm builds.
  * For CUDA builds, getCurrentCUDABlasLtHandle will alias for getCurrentCUDABlasHandle,
  * whereas for ROCm builds, it is a distinct function.
+ *
+ * The workspace pools are separate for ROCm. On CUDA, the env var
+ * TORCH_CUBLASLT_UNIFIED_WORKSPACE can be used to opt-in to unifying the workspace pools.
  */
 
 namespace at::cuda {
@@ -109,8 +112,14 @@ std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_works
   return instance;
 }
 
+std::map<std::tuple<void *, void *>, at::DataPtr>& cublaslt_handle_stream_to_workspace() {
+  static auto& instance = *new std::map<std::tuple<void *, void *>, at::DataPtr>;
+  return instance;
+}
+
 void clearCublasWorkspaces() {
   cublas_handle_stream_to_workspace().clear();
+  cublaslt_handle_stream_to_workspace().clear();
 }
 
 size_t parseChosenWorkspaceSize() {
@@ -157,13 +166,95 @@ size_t parseChosenWorkspaceSize() {
   }
 }
 
+size_t parseCUDABlasLtWorkspaceSize() {
+  auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
+#ifdef USE_ROCM
+  if (!val.has_value()) {
+    // accept either env var
+    val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
+  }
+  size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
+#else
+  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+#endif
+
+  if (val.has_value()) {
+    try {
+      workspace_size = std::stoi(val.value());
+    } catch (std::invalid_argument const&) {
+      TORCH_WARN(
+          "invalid CUBLASLT_WORKSPACE_SIZE,",
+          " using default workspace size of ",
+          workspace_size,
+          " KiB.");
+    } catch (std::out_of_range const&) {
+      TORCH_WARN(
+          "CUBLASLT_WORKSPACE_SIZE out of range,",
+          " using default workspace size of ",
+          workspace_size,
+          " KiB.");
+    }
+  }
+  return workspace_size * 1024;
+}
+
 size_t getChosenWorkspaceSize() {
   size_t pool_size = parseChosenWorkspaceSize();
   return pool_size;
 }
 
+#define TORCH_CUBLASLT_UNIFIED_WORKSPACE "TORCH_CUBLASLT_UNIFIED_WORKSPACE"
+
+size_t getCUDABlasLtWorkspaceSize() {
+  size_t pool_size = parseCUDABlasLtWorkspaceSize();
+#ifndef USE_ROCM
+  static bool unified = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE) == true;
+  if (unified) {
+    auto cublasWorkspaceSize = getChosenWorkspaceSize();
+    if (cublasWorkspaceSize < pool_size) {
+      TORCH_WARN_ONCE("Requested unified CUBLASLT workspace size of ", pool_size,
+                      " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
+                      " bytes. Please increase CUBLAS workspace size",
+                      " via CUBLAS_WORKSPACE_CONFIG or decrease requested"
+                      " CUBLASLT_WORKSPACE_SIZE. Otherwise CUBLASLT workspace"
+                      " size will be limited to the CUBLAS workspace size.");
+      pool_size = cublasWorkspaceSize;
+    }
+  }
+#endif
+  return pool_size;
+}
+
 at::DataPtr getNewWorkspace() {
   return c10::cuda::CUDACachingAllocator::get()->allocate(getChosenWorkspaceSize());
+}
+
+at::DataPtr getNewCUDABlasLtWorkspace() {
+  return c10::cuda::CUDACachingAllocator::get()->allocate(getCUDABlasLtWorkspaceSize());
+}
+
+void* getCUDABlasLtWorkspace() {
+#ifndef USE_ROCM
+  static bool unified = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE) == true;
+  if (unified) {
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+    auto stream = c10::cuda::getCurrentCUDAStream();
+    cudaStream_t _stream = stream;
+    auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
+    auto workspace_it = at::cuda::cublas_handle_stream_to_workspace().find(key);
+    TORCH_INTERNAL_ASSERT(workspace_it != at::cuda::cublas_handle_stream_to_workspace().end());
+    return workspace_it->second.mutable_get();
+  }
+#endif
+  cublasLtHandle_t handle = getCurrentCUDABlasLtHandle();
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  cudaStream_t _stream = stream;
+  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
+  auto workspace_it = cublaslt_handle_stream_to_workspace().find(key);
+  if (workspace_it == cublaslt_handle_stream_to_workspace().end()) {
+    workspace_it = cublaslt_handle_stream_to_workspace().insert(workspace_it, {key, getNewCUDABlasLtWorkspace()});
+  }
+  return workspace_it->second.mutable_get();
 }
 
 cublasHandle_t getCurrentCUDABlasHandle() {
