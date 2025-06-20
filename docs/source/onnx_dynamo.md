@@ -188,7 +188,7 @@ The following metadata fields are added to each ONNX node:
 
 These metadata fields are stored in the metadata_props attribute of each ONNX node and can be inspected using Netron or programmatically.
 
-The overall ONNX IR graph has the following metadata props:
+The overall ONNX graph has the following `metadata_props`:
 
 - **pkg.torch.export.ExportedProgram.graph_signature**
 
