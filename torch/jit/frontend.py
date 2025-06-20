@@ -7,10 +7,12 @@ import re
 import string
 from collections import namedtuple
 from textwrap import dedent
+from typing import Any, Optional, Union
 
 import torch
 import torch.jit.annotations
 from torch import _jit_internal
+# from torch._C import Decl
 from torch._C._jit_tree_views import (
     Apply,
     Assert,
@@ -434,7 +436,7 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=No
     if getattr(py_def, "returns", None) is not None:
         return_type = build_expr(ctx, py_def.returns)
 
-    decl = Decl(r, param_list, return_type)
+    decl: Any = Decl(r, param_list, return_type)
     is_method = self_name is not None
     if type_line is not None:
         type_comment_decl = torch._C.parse_type_comment(type_line)
@@ -1039,7 +1041,7 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_Compare(ctx, expr):
         operands = [build_expr(ctx, e) for e in [expr.left] + list(expr.comparators)]
-        result = None
+        result: Optional[Union[BinOp, UnaryOp]] = None
         for lhs, op_, rhs in zip(operands, expr.ops, operands[1:]):
             op = type(op_)
             op_token = ExprBuilder.cmpop_map.get(op)
@@ -1053,7 +1055,7 @@ class ExprBuilder(Builder):
                 # NB: `not in` is just `not( in )`, so we don't introduce new tree view
                 # but just make it a nested call in our tree view structure
                 in_expr = BinOp("in", lhs, rhs)
-                cmp_expr = UnaryOp(r, "not", in_expr)
+                cmp_expr: Union[BinOp, UnaryOp] = UnaryOp(r, "not", in_expr)
             else:
                 cmp_expr = BinOp(op_token, lhs, rhs)
 
