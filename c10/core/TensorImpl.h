@@ -968,6 +968,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for a tensor to have rank, but not well defined sizes.
    */
   // sizes_strides_policy_ >= CustomStrides
+  using IS_CONT_CUSTOM_RET_T = bool;
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
   virtual bool is_strides_like_custom(at::MemoryFormat memory_format) const;
   virtual bool is_non_overlapping_and_dense_custom() const;
