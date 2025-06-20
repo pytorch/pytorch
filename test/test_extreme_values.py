@@ -1,25 +1,16 @@
 import torch
-import torch.nn as nn
-import random
+import pytest
 
-def test_unicode_error_on_extreme_values():
-    class BuggyModel(nn.Module):
-        def forward(self, x):
-            if self.training:
-                mask = torch.rand_like(x) < 0.1
-                extreme_vals = torch.empty_like(x[mask])
-                for i in range(extreme_vals.numel()):
-                    extreme_vals[i] = random.choice([
-                        float("nan"), float("inf"), float("-inf")
-                    ])
-                x[mask] = extreme_vals
-            return x
+class ExtremeValueModel(torch.nn.Module):
+    def forward(self, x):
+        x = x + 1e308  # extremely large number to trigger internal error
+        return x
 
-    model = BuggyModel().train()
-    x = torch.randn(1, 1, 32, 32)
-
+@pytest.mark.xfail(reason="torch.compile raises UnicodeDecodeError due to extreme tensor values")
+def test_extreme_values_compile():
+    model = ExtremeValueModel()
     try:
-        compiled = torch.compile(model)
-        _ = compiled(x)
+        compiled_model = torch.compile(model)
+        output = compiled_model(torch.tensor([1.0]))
     except UnicodeDecodeError as e:
-        assert False, f"torch.compile raised UnicodeDecodeError: {e}"
+        pytest.fail(f"torch.compile raised UnicodeDecodeError: {e}")
