@@ -64,7 +64,7 @@ void init_elementwise_launch_config(
     num_blocks = 1;
     num_threads = at::round_up(
         at::ceil_div(numel_per_split, numel_per_thread),
-        static_cast<size_t>(C10_WARP_SIZE));
+        static_cast<size_t>(at::cuda::warp_size()));
   } else {
     num_blocks = std::min(
         at::ceil_div(

@@ -439,8 +439,12 @@ __global__ void computeBlockwiseWithinKCounts(
     warp_counts[warp] = count;
   }
   __syncthreads();
+#ifdef USE_ROCM
+  CUDA_KERNEL_ASSERT(RADIX_DIGITS < C10_WARP_SIZE * C10_WARP_SIZE);
+#else
   static_assert(RADIX_DIGITS < C10_WARP_SIZE * C10_WARP_SIZE,
     "Assuming only 1 warp is needed for final reduction");
+#endif
   if (warp != 0) {
     return;
   }

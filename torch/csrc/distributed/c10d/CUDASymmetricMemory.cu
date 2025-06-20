@@ -436,7 +436,7 @@ static __global__ void barrier_kernel(
 void CUDASymmetricMemory::barrier(int channel) {
   check_channel(channel, world_size_);
   c10::cuda::CUDAGuard guard(local_device_idx_);
-  barrier_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
+  barrier_kernel<<<1, at::cuda::warp_size(), 0, at::cuda::getCurrentCUDAStream()>>>(
       reinterpret_cast<uint32_t**>(signal_pads_dev_),
       channel,
       rank_,
@@ -458,7 +458,7 @@ static __global__ void put_signal_kernel(
 void CUDASymmetricMemory::put_signal(int dst_rank, int channel) {
   check_channel(channel, world_size_);
   c10::cuda::CUDAGuard guard(local_device_idx_);
-  put_signal_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
+  put_signal_kernel<<<1, at::cuda::warp_size(), 0, at::cuda::getCurrentCUDAStream()>>>(
       reinterpret_cast<uint32_t**>(signal_pads_dev_),
       dst_rank,
       channel,
@@ -482,7 +482,7 @@ static __global__ void wait_signal_kernel(
 void CUDASymmetricMemory::wait_signal(int src_rank, int channel) {
   check_channel(channel, world_size_);
   c10::cuda::CUDAGuard guard(local_device_idx_);
-  wait_signal_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
+  wait_signal_kernel<<<1, at::cuda::warp_size(), 0, at::cuda::getCurrentCUDAStream()>>>(
       reinterpret_cast<uint32_t**>(signal_pads_dev_),
       src_rank,
       channel,
