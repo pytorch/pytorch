@@ -1470,7 +1470,7 @@ class VariableBuilder:
             )
             result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif isinstance(value, set):
+        elif isinstance(value, (set, frozenset)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -1482,7 +1482,8 @@ class VariableBuilder:
                 )
                 for i in range(list.__len__(L))
             ]
-            set_vt = SetVariable(
+            set_vt_cls = SetVariable if isinstance(value, set) else FrozensetVariable
+            set_vt = set_vt_cls(
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
             result = UserDefinedSetVariable(value, set_vt=set_vt, source=self.source)
