@@ -777,11 +777,10 @@ class VariableBuilder:
                     context="Python set containing torch.Tensor elements",
                     explanation=(
                         "Dynamo cannot trace sets of tensors. To get a stable ordering, "
-                        "Dynamo needs to sort the set using the hash of each element. "
-                        "However, for tensors, the hash is their object ID, which "
-                        "is not stable during symbolic execution."
+                        "Dynamo needs to convert the set into a list and the order might not be "
+                        "stable if the set contains tensors."
                     ),
-                    hints=[*graph_break_hints.SUPPORTABLE],
+                    hints=["Use a dictionary instead", *graph_break_hints.SUPPORTABLE],
                 )
 
             self.install_guards(GuardBuilder.TYPE_MATCH)
