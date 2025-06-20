@@ -4,7 +4,9 @@
 include CMakeLists.txt
 include *.bzl
 include *.bazel
+include .bazel*
 include WORKSPACE
+include BUCK.*
 include requirements.txt
 include version.txt
 include .gitmodules
@@ -23,6 +25,7 @@ graft torchgen
 exclude torchgen/BUILD.bazel
 
 # Misc files and directories in SDist
+include *.md
 include CITATION.cff
 include LICENSE
 include NOTICE
@@ -34,8 +37,10 @@ graft scripts
 
 # Include test suites in SDist
 graft test
+include pytest.ini
 
-# Prune compiled files
+# Prune generated/compiled files
+prune torchgen/packaged
 prune */__pycache__
 global-exclude *.o *.obj *.so *.a *.dylib *.pxd *.dll *.lib *.py[cod]
 
