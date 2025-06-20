@@ -702,7 +702,6 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             else:
                 default_config = FlexConfig(64, 32, 3, 4)
 
-
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
@@ -744,7 +743,9 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         return flex_attn_bwd_configs
 
-    def get_flex_decode_configs(self, head_dim: int, dtype: Any) -> list[FlexDecodeConfig]:
+    def get_flex_decode_configs(
+        self, head_dim: int, dtype: Any
+    ) -> list[FlexDecodeConfig]:
         capability = torch.cuda.get_device_capability()
 
         default_config = FlexDecodeConfig(64, 1, 2)
