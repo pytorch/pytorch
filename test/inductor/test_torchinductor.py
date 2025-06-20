@@ -25,6 +25,7 @@ from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -79,7 +80,10 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
+    instantiate_device_type_tests,
     largeTensorTest,
+    skipCPUIf,
+    skipCUDAIf,
 )
 from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_quantization import (
@@ -125,6 +129,7 @@ from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     clone_preserve_strides_offset,
+    get_device_from_test_args_kwargs,
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
@@ -134,8 +139,6 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
     RUN_CPU,
     RUN_GPU,
-    skipCPUIf,
-    skipCUDAIf,
 )
 from torch.testing._internal.triton_utils import requires_cuda
 
@@ -382,7 +385,9 @@ class InputGen:
     def double(self):
         if self.device == "mps":
             raise unittest.SkipTest("MPS does not support torch.float64")
-        return torch.randn((self.n, self.n), device=self.device, dtype=torch.double)
+        return torch.randn(
+            (self.n, self.n), device=self.device, dtype=torch.double
+        )
 
     def int(self):
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
@@ -426,7 +431,7 @@ def check_model(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
-    copy_to_gpu=True,
+    copy_to_device=True,
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
@@ -626,10 +631,11 @@ def check_model(
 
 
 @torch._inductor.config.patch("triton.cudagraphs", False)
-def check_model_gpu(
+def check_model_device(
     self: TestCase,
     model,
     example_inputs,
+    device,
     kwargs=None,
     *,
     atol=None,
@@ -639,7 +645,7 @@ def check_model_gpu(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
-    copy_to_gpu=True,
+    copy_to_device=True,
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
@@ -648,11 +654,11 @@ def check_model_gpu(
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
-        model = model.to(device=GPU_TYPE)
+        model = model.to(device=device)
 
-    if copy_to_gpu:
+    if copy_to_device:
         example_inputs = tuple(
-            clone_preserve_strides_offset(x, device=GPU_TYPE) for x in example_inputs
+            clone_preserve_strides_offset(x, device=device) for x in example_inputs
         )
 
     check_model(
@@ -679,7 +685,7 @@ def check_model_gpu(
             if not isinstance(x, torch.Tensor) or not x.dtype == torch.float:
                 return x
             return torch.empty_strided(
-                x.size(), x.stride(), device=GPU_TYPE, dtype=torch.half
+                x.size(), x.stride(), device=device, dtype=torch.half
             ).copy_(x)
 
         example_inputs = list(map(downcast_fn, example_inputs))
@@ -706,6 +712,7 @@ def check_model_gpu(
         )
 
 
+check_model_gpu = functools.partial(check_model_device, device=GPU_TYPE)
 check_model_cuda = check_model_gpu
 
 
@@ -808,7 +815,8 @@ def is_cpp_backend(device):
 def skip_if_cpu(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if self.device == "cpu":
+        device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+        if device == "cpu":
             raise unittest.SkipTest("cpu not supported")
         return fn(self, *args, **kwargs)
 
@@ -818,7 +826,8 @@ def skip_if_cpu(fn):
 def skip_if_halide(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if is_halide_backend(self.device):
+        device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+        if is_halide_backend(device):
             raise unittest.SkipTest("halide not supported")
         return fn(self, *args, **kwargs)
 
@@ -828,7 +837,8 @@ def skip_if_halide(fn):
 def xfail_if_mps(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if not is_mps_backend(self.device):
+        device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+        if not is_mps_backend(device):
             return fn(self, *args, **kwargs)
         with self.assertRaises(Exception):
             return fn(self, *args, **kwargs)
@@ -843,7 +853,8 @@ xfail_if_mps_unimplemented = xfail_if_mps
 def skip_if_triton(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if is_triton_backend(self.device):
+        device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+        if is_triton_backend(device):
             raise unittest.SkipTest("triton not supported")
         return fn(self, *args, **kwargs)
 
@@ -853,8 +864,9 @@ def skip_if_triton(fn):
 def skip_if_not_triton(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if not is_triton_backend(self.device):
-            raise unittest.SkipTest(f"triton backend is required for {self.device}")
+        device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+        if not is_triton_backend(device):
+            raise unittest.SkipTest(f"triton backend is required for {device}")
         return fn(self, *args, **kwargs)
 
     return wrapper
@@ -901,7 +913,8 @@ def skip_if_triton_cpu(fn):
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(self, *args, **kwargs):
-            if is_triton_cpu_backend(self.device):
+            device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+            if is_triton_cpu_backend(device):
                 raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
 
@@ -914,6 +927,43 @@ def skip_if_triton_cpu(fn):
         return decorator
 
 
+# This is a decorator for xfailing tests with a predicate that is evaluated
+# when the test is run.
+# An example use case if xfailing tests that will fail for the inductor backend
+# that is currently enabled
+def xfail_during_test_if(predicate_fn: Callable, reason: str):
+    def wrapper(fn):
+        fn.marked = True
+
+        @functools.wraps(fn)
+        def new_test(self, *args, **kwargs):
+            if predicate_fn(self, *args, **kwargs):
+                try:
+                    fn(self, *args, **kwargs)
+                except Exception:
+                    # Emit an xfail if using pytest. Unittest has no
+                    # equivalent when the test is being executed
+                    if os.environ.get("PYTEST_CURRENT_TEST") is not None:
+                        pytest.xfail(reason)
+                    return
+                else:
+                    self.fail(f"Expected test to fail due to {reason}, but it passed!")
+            return fn(self, *args, **kwargs)
+
+        return new_test
+
+    return wrapper
+
+
+xfail_during_test_if_triton_cpu = xfail_during_test_if(
+    predicate_fn=lambda self, *args, **kwargs: is_triton_cpu_backend(
+        get_device_from_test_args_kwargs(self, *args, **kwargs)
+    ),
+    reason="Triton CPU not supported",
+)
+
+
+# TODO: remove
 def xfail_if_triton_cpu(fn):
     fn._expected_failure_triton_cpu = True
     return fn
@@ -922,10 +972,8 @@ def xfail_if_triton_cpu(fn):
 def skip_if_gpu_halide(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if (
-            is_halide_backend(self.device)
-            and getattr(self.device, "type", self.device) == "cuda"
-        ):
+        device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+        if is_halide_backend(device) and getattr(device, "type", device) == "cuda":
             raise unittest.SkipTest("halide not supported")
         return fn(self, *args, **kwargs)
 
@@ -951,10 +999,9 @@ def is_dynamic_shape_enabled():
     return not torch._dynamo.config.assume_static_by_default
 
 
-@instantiate_parametrized_tests
 class CommonTemplate:
     def is_dtype_supported(self, dtype: torch.dtype) -> bool:
-        device_interface = get_interface_for_device(self.device)
+        device_interface = get_interface_for_device(get_device_from_test_args_kwargs(self))
         return device_interface.is_dtype_supported(dtype)
 
     def test_bool(self):
@@ -988,7 +1035,7 @@ class CommonTemplate:
         op_name = "tril_indices"
         dispatch_key = "CPU"
         device = "cpu"
-        if self.device.lower() == "cuda":
+        if get_device_from_test_args_kwargs(self).lower() == "cuda":
             dispatch_key = "CUDA"
             device = "cuda"
 
@@ -1031,7 +1078,7 @@ class CommonTemplate:
         op_name = "clamp"
         dispatch_key = "CPU"
         device = "cpu"
-        if self.device.lower() == "cuda":
+        if get_device_from_test_args_kwargs(self).lower() == "cuda":
             dispatch_key = "CUDA"
             device = "cuda"
 
@@ -1086,7 +1133,7 @@ class CommonTemplate:
         op_name = "div"
         dispatch_key = "CPU"
         device = "cpu"
-        if self.device.lower() == "cuda":
+        if get_device_from_test_args_kwargs(self).lower() == "cuda":
             dispatch_key = "CUDA"
             device = "cuda"
 
@@ -1126,7 +1173,7 @@ class CommonTemplate:
         op_name = "abs"
         dispatch_key = "CPU"
         device = "cpu"
-        if self.device.lower() == "cuda":
+        if get_device_from_test_args_kwargs(self).lower() == "cuda":
             dispatch_key = "CUDA"
             device = "cuda"
 
@@ -1173,7 +1220,7 @@ class CommonTemplate:
         op_name = "abs"
 
         device = "cpu"
-        if self.device.lower() == "cuda":
+        if get_device_from_test_args_kwargs(self).lower() == "cuda":
             device = "cuda"
 
         input_tensor = torch.randn(128, dtype=torch.float, device=device)
@@ -1220,7 +1267,7 @@ class CommonTemplate:
 
         dispatch_key = "CPU"
         device = torch.device("cpu")
-        if self.device.lower() == "cuda":
+        if get_device_from_test_args_kwargs(self).lower() == "cuda":
             dispatch_key = "CUDA"
             device = torch.device("cuda")
 
@@ -1289,7 +1336,7 @@ class CommonTemplate:
         namespace_name = "aten"
         dispatch_key = "CPU"
         device = torch.device("cpu")
-        if self.device.lower() == "cuda":
+        if get_device_from_test_args_kwargs(self).lower() == "cuda":
             dispatch_key = "CUDA"
             device = torch.device("cuda")
 
@@ -1380,10 +1427,10 @@ class CommonTemplate:
             return (a, b)
 
         # Complex are not supported on MacOS-13
-        if self.device == "mps" and MACOS_VERSION < 14.0:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 14.0:
             raise unittest.SkipTest("No complex on MacOS13")
 
-        x = torch.randn(41, dtype=torch.complex64, device=self.device)
+        x = torch.randn(41, dtype=torch.complex64, device=get_device_from_test_args_kwargs(self))
         y = x.clone()
         # should not inplace write to the input
         fn(x)
@@ -1402,12 +1449,12 @@ class CommonTemplate:
             x = torch.tensor(
                 [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1],
                 dtype=dtype,
-                device=self.device,
+                device=get_device_from_test_args_kwargs(self),
             )
             y = torch.tensor(
                 [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1],
                 dtype=dtype,
-                device=self.device,
+                device=get_device_from_test_args_kwargs(self),
             )
             _, code = run_and_get_code(fn, x, y)
             code = " ".join(code)
@@ -1458,7 +1505,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(17),))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_angle(self):
         def fn(a, b, c):
             return torch.angle(a), torch.angle(b), torch.angle(c)
@@ -1469,7 +1516,7 @@ class CommonTemplate:
         real_input = torch.tensor([-1.0, 0.0, 1.0, float("nan")])
         interger_real_input = torch.tensor([-1, 0, 1])
         # Complex are not supported on MacOS-13
-        if self.device == "mps" and MACOS_VERSION < 14.0:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 14.0:
             self.common(fn, (complex_input.real, real_input, interger_real_input))
             return
         self.common(fn, (complex_input, real_input, interger_real_input))
@@ -1505,7 +1552,9 @@ class CommonTemplate:
 
         # generator not yet supported in dynamo
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
-            self.common(fn, (torch.linspace(-10, 10, 41), torch.Generator(self.device)))
+            self.common(
+                fn, (torch.linspace(-10, 10, 41), torch.Generator(get_device_from_test_args_kwargs(self)))
+            )
 
     def test_sgn_extremal(self):
         def fn(a):
@@ -1616,7 +1665,7 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
         assertGeneratedKernelCountEqual(
-            self, 1 if not is_cpp_backend(self.device) else 2
+            self, 1 if not is_cpp_backend(get_device_from_test_args_kwargs(self)) else 2
         )
 
     def test_index_propagation(self):
@@ -1624,10 +1673,10 @@ class CommonTemplate:
             i = torch.arange(x.size(0), device=x.device)
             return x[i]
 
-        if self.device == "mps" and MACOS_VERSION < 13.3:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("Inaccurate on MacOS-13")
 
-        x = torch.randn(8, device=self.device)
+        x = torch.randn(8, device=get_device_from_test_args_kwargs(self))
         copy_opt = torch.compile(copy, backend="inductor")
 
         expect = copy(x)
@@ -1646,8 +1695,8 @@ class CommonTemplate:
             return torch.index_select(x, index=index, dim=0)
 
         example_inputs = (
-            torch.randn((32, 64), device=self.device),
-            repeats := torch.tensor([5, 10, 15], device=self.device),
+            torch.randn((32, 64), device=get_device_from_test_args_kwargs(self)),
+            repeats := torch.tensor([5, 10, 15], device=get_device_from_test_args_kwargs(self)),
         )
         torch._dynamo.mark_dynamic(repeats, 0)  # create backed symint
 
@@ -1662,7 +1711,7 @@ class CommonTemplate:
             i = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
             return x[i]
 
-        x = torch.randn(8, device=self.device)
+        x = torch.randn(8, device=get_device_from_test_args_kwargs(self))
         flip_opt = torch.compile(flip, backend="inductor")
 
         expect = flip(x)
@@ -1675,7 +1724,7 @@ class CommonTemplate:
             i = torch.arange(x.shape[0] * n, device=x.device)
             return x[i // n]
 
-        x = torch.randn(8, 16, device=self.device)
+        x = torch.randn(8, 16, device=get_device_from_test_args_kwargs(self))
         repeat_interleave_opt = torch.compile(repeat_interleave, backend="inductor")
         # With static shapes we can prove the bound, our dynamic shapes reasoning is not good enough
         has_assert = ifdynstaticdefault(False, True)
@@ -1693,7 +1742,7 @@ class CommonTemplate:
             i = torch.arange(x.shape[0] * n, device=x.device)
             return x[i % x.shape[0]]
 
-        x = torch.randn(8, 16, device=self.device)
+        x = torch.randn(8, 16, device=get_device_from_test_args_kwargs(self))
         repeat_opt = torch.compile(repeat, backend="inductor")
 
         # With static shapes we can prove the bound, our dynamic shapes reasoning is not good enough
@@ -1712,7 +1761,7 @@ class CommonTemplate:
             i = torch.arange(x.shape[0] + n, device=x.device)
             return x[(i - n).abs()]
 
-        x = torch.randn(8, device=self.device)
+        x = torch.randn(8, device=get_device_from_test_args_kwargs(self))
         opt_fn = torch.compile(reflection_pad_left, backend="inductor")
 
         # With static shapes we can prove the bound, our dynamic shapes reasoning is not good enough
@@ -1747,13 +1796,15 @@ class CommonTemplate:
             fn, inps, has_assert: bool, has_wrapping: bool, vectorize: bool = True
         ):
             fn_opt = torch.compile(fn)
-            if is_halide_backend(self.device):
+            if is_halide_backend(get_device_from_test_args_kwargs(self)):
                 pass  # no device asserts in halide
             # TODO: remove once https://github.com/pytorch/pytorch/issues/144634
             # is fixed.
-            elif is_mps_backend(self.device):
+            elif is_mps_backend(get_device_from_test_args_kwargs(self)):
                 pass  # no device asserts in MPS
-            elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
+            elif get_device_from_test_args_kwargs(self) == "cpu" and not is_triton_cpu_backend(
+                get_device_from_test_args_kwargs(self)
+            ):
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
                 self.assertTrue(("TORCH_CHECK" in code) is has_assert)
                 if (
@@ -1773,22 +1824,22 @@ class CommonTemplate:
         def indirect(a, b):
             return a[b - 1]
 
-        a = torch.rand(1024, device=self.device)
-        b = torch.zeros(256, dtype=torch.long, device=self.device)
+        a = torch.rand(1024, device=get_device_from_test_args_kwargs(self))
+        b = torch.zeros(256, dtype=torch.long, device=get_device_from_test_args_kwargs(self))
         test(indirect, (a, b), has_assert=True, has_wrapping=True)
 
         def direct(x):
             return x[:, -1]
 
-        a = torch.rand(1, 64, 32, device=self.device)
+        a = torch.rand(1, 64, 32, device=get_device_from_test_args_kwargs(self))
         # Does not even generate a kernel as it's a view
         test(direct, (a,), has_assert=False, has_wrapping=False, vectorize=False)
 
         def flip(a, b):
             return a[b]
 
-        a = torch.rand(1024, device=self.device)
-        b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device=self.device)
+        a = torch.rand(1024, device=get_device_from_test_args_kwargs(self))
+        b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device=get_device_from_test_args_kwargs(self))
         test(flip, (a, b), has_assert=True, has_wrapping=True)
 
         # Constant propagate a constant that's negative
@@ -1861,7 +1912,7 @@ class CommonTemplate:
             return x[idx], idx
 
         flip_opt = torch.compile(flip, backend="inductor")
-        x = torch.randn(8, device=self.device)
+        x = torch.randn(8, device=get_device_from_test_args_kwargs(self))
 
         expect = flip(x)
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
@@ -1874,9 +1925,9 @@ class CommonTemplate:
         self.common(
             fn,
             (
-                torch.randn(8, device=self.device),
-                torch.tensor([True, False, True], device=self.device),
-                [torch.tensor([3, 9, 2], device=self.device)],
+                torch.randn(8, device=get_device_from_test_args_kwargs(self)),
+                torch.tensor([True, False, True], device=get_device_from_test_args_kwargs(self)),
+                [torch.tensor([3, 9, 2], device=get_device_from_test_args_kwargs(self))],
             ),
         )
 
@@ -1887,10 +1938,10 @@ class CommonTemplate:
         self.common(
             fn,
             (
-                torch.randn(8, device=self.device),
-                torch.tensor([True, False, True], device=self.device),
-                [torch.tensor([3, 9, 2], device=self.device)],
-                torch.randn(3, device=self.device),
+                torch.randn(8, device=get_device_from_test_args_kwargs(self)),
+                torch.tensor([True, False, True], device=get_device_from_test_args_kwargs(self)),
+                [torch.tensor([3, 9, 2], device=get_device_from_test_args_kwargs(self))],
+                torch.randn(3, device=get_device_from_test_args_kwargs(self)),
             ),
         )
 
@@ -1963,7 +2014,7 @@ class CommonTemplate:
         self.common(fn, (torch.full((4,), float("-inf")),))
 
     def test_reduction4(self):
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             raise unittest.SkipTest("Non-deterministic CPU results")
 
         def fn(a):
@@ -1971,11 +2022,11 @@ class CommonTemplate:
 
         inputs = (torch.ones(128), torch.ones(4, 4, 1))
         for i in inputs:
-            self.common(fn, (i,), check_lowp=not is_halide_backend(self.device))
+            self.common(fn, (i,), check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self)))
 
     @config.patch(unroll_reductions_threshold=1)
     def test_reduction5(self):
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             raise unittest.SkipTest("Non-deterministic CPU results")
 
         def fn(a):
@@ -2034,7 +2085,7 @@ class CommonTemplate:
 
     def test_multilayer_sum_low_prec(self):
         # fp16 nyi for cpu
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn(a):
@@ -2047,7 +2098,7 @@ class CommonTemplate:
             return torch.max(a), torch.sum(a)
 
         # Requires masked loading for the intermediate reduction
-        if self.device == "mps" and MACOS_VERSION < 13.3:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
         sample = torch.full((3999971,), 0, dtype=torch.int64)
         sample[-1] = 1
@@ -2081,7 +2132,7 @@ class CommonTemplate:
 
         atol = None
         rtol = None
-        if self.device == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
+        if get_device_from_test_args_kwargs(self) == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
             atol = 1e-3
             rtol = 1e-3
         self.common(
@@ -2108,21 +2159,23 @@ class CommonTemplate:
                 continue
             # cumsum not implemented for integers on MacOS-13
             if (
-                self.device == "mps"
+                get_device_from_test_args_kwargs(self) == "mps"
                 and not dtype.is_floating_point
                 and MACOS_VERSION < 13.3
             ):
                 continue
             # Use low=0 since when the mean value is 0, cumsum at all points
             # tends towards zero which makes the relative error term blow up
-            inp = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
+            inp = make_tensor(
+                10, 3, 352, 352, low=0, dtype=dtype, device=get_device_from_test_args_kwargs(self)
+            )
             self.common(fn, (inp.view(-1),), rtol=1e-4, atol=1e-5, check_lowp=False)
             self.common(fn, (inp.view(10, -1),), rtol=1e-4, atol=1e-5, check_lowp=False)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_gpu_halide  # accuracy issue
     def test_split_cumsum_low_prec(self):
-        if is_cpp_backend(self.device):
+        if is_cpp_backend(get_device_from_test_args_kwargs(self)):
             raise unittest.SkipTest("ir.Scan nyi on CPU")
 
         def fn(a):
@@ -2151,8 +2204,12 @@ class CommonTemplate:
         )
 
         with ctx:
-            a = make_tensor(10, 3, 352, 352, low=0, dtype=dtype_a, device=self.device)
-            b = make_tensor(10, 3, 352, 352, low=0, dtype=dtype_b, device=self.device)
+            a = make_tensor(
+                10, 3, 352, 352, low=0, dtype=dtype_a, device=get_device_from_test_args_kwargs(self)
+            )
+            b = make_tensor(
+                10, 3, 352, 352, low=0, dtype=dtype_b, device=get_device_from_test_args_kwargs(self)
+            )
 
             self.common(fn, (a, b), rtol=1e-4, atol=1e-5, check_lowp=False)
 
@@ -2165,13 +2222,15 @@ class CommonTemplate:
             offsets = torch.cumsum(lengths, 0)
             return data[offsets]
 
-        if self.device == "mps" and MACOS_VERSION < 13.3:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("CumSum for int64 needs MacOS-13.3+")
 
-        lengths = torch.full((2**14,), 2**2, dtype=torch.int64, device=self.device)
+        lengths = torch.full(
+            (2**14,), 2**2, dtype=torch.int64, device=get_device_from_test_args_kwargs(self)
+        )
         lengths[-2] = 3
         lengths[-1] = 3
-        data = make_tensor((2**16,), dtype=torch.float32, device=self.device)
+        data = make_tensor((2**16,), dtype=torch.float32, device=get_device_from_test_args_kwargs(self))
         self.common(fn, (lengths, data))
 
     def test_split_cumprod(self):
@@ -2183,20 +2242,20 @@ class CommonTemplate:
                 continue
             # cumsum not implemented on MacOS-13
             if (
-                self.device == "mps"
+                get_device_from_test_args_kwargs(self) == "mps"
                 and not dtype.is_floating_point
                 and MACOS_VERSION < 13.3
             ):
                 continue
             inp = _large_cumprod_input(
-                (10, 10000), dim=1, dtype=dtype, device=self.device
+                (10, 10000), dim=1, dtype=dtype, device=get_device_from_test_args_kwargs(self)
             )
             self.common(fn, (inp,), atol=1e-5, rtol=1e-4, check_lowp=False)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_gpu_halide  # accuracy issue
     def test_split_cumprod_low_prec(self):
-        if is_cpp_backend(self.device):
+        if is_cpp_backend(get_device_from_test_args_kwargs(self)):
             raise unittest.SkipTest("ir.Scan nyi on CPU")
 
         def fn(a):
@@ -2206,7 +2265,7 @@ class CommonTemplate:
             if not self.is_dtype_supported(dtype):
                 continue
             inp = _large_cumprod_input(
-                (10, 10000), dim=1, dtype=dtype, device=self.device
+                (10, 10000), dim=1, dtype=dtype, device=get_device_from_test_args_kwargs(self)
             )
             self.common(
                 fn,
@@ -2229,8 +2288,12 @@ class CommonTemplate:
         )
 
         with ctx:
-            a = _large_cumprod_input((10000,), dim=0, dtype=dtype_a, device=self.device)
-            b = _large_cumprod_input((10000,), dim=0, dtype=dtype_b, device=self.device)
+            a = _large_cumprod_input(
+                (10000,), dim=0, dtype=dtype_a, device=get_device_from_test_args_kwargs(self)
+            )
+            b = _large_cumprod_input(
+                (10000,), dim=0, dtype=dtype_b, device=get_device_from_test_args_kwargs(self)
+            )
 
             self.common(fn, (a, b), atol=1e-5, rtol=1e-5, check_lowp=False)
 
@@ -2240,7 +2303,7 @@ class CommonTemplate:
         {"dynamic_shapes": False, "assume_static_by_default": True}
     )
     def test_custom_scan_op(self):
-        if self.device != "cuda":
+        if get_device_from_test_args_kwargs(self) != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
 
         def sum_combine(a, b):
@@ -2248,7 +2311,7 @@ class CommonTemplate:
 
         from torch._higher_order_ops.associative_scan import associative_scan
 
-        a = torch.randn(100, 100, device=self.device)
+        a = torch.randn(100, 100, device=get_device_from_test_args_kwargs(self))
         expect = torch.cumsum(a, 0)
         actual = associative_scan(sum_combine, a, 0)
         self.assertEqual(expect, actual)
@@ -2269,7 +2332,7 @@ class CommonTemplate:
         {"dynamic_shapes": False, "assume_static_by_default": True}
     )
     def test_custom_scan_op_compiled(self):
-        if self.device != "cuda":
+        if get_device_from_test_args_kwargs(self) != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
 
         from torch._higher_order_ops.associative_scan import associative_scan
@@ -2282,8 +2345,8 @@ class CommonTemplate:
             sad = associative_scan(sum_combine, diff, dim)
             return sad.sum(dim)
 
-        a = torch.randn(100, 100, device=self.device)
-        b = torch.randn(100, 100, device=self.device)
+        a = torch.randn(100, 100, device=get_device_from_test_args_kwargs(self))
+        b = torch.randn(100, 100, device=get_device_from_test_args_kwargs(self))
         self.common(fn, (a, b, 0))
         cfn = torch.compile(fn)
         _, code = run_and_get_code(cfn, a, b, 0)
@@ -2299,7 +2362,7 @@ class CommonTemplate:
         {"dynamic_shapes": False, "assume_static_by_default": True}
     )
     def test_custom_scan_op_multi_input(self):
-        if self.device != "cuda":
+        if get_device_from_test_args_kwargs(self) != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
 
         def argmax_combine(a, b):
@@ -2313,10 +2376,10 @@ class CommonTemplate:
 
         from torch._higher_order_ops.associative_scan import associative_scan
 
-        a = torch.randn(100, 100, device=self.device)
+        a = torch.randn(100, 100, device=get_device_from_test_args_kwargs(self))
         expect = torch.cummax(a, 0)
 
-        idx = torch.arange(100, device=self.device).view(100, 1).expand(100, 100)
+        idx = torch.arange(100, device=get_device_from_test_args_kwargs(self)).view(100, 1).expand(100, 100)
         actual = associative_scan(argmax_combine, (a, idx), 0)
         self.assertEqual(expect, actual)
 
@@ -2326,7 +2389,7 @@ class CommonTemplate:
         {"dynamic_shapes": False, "assume_static_by_default": True}
     )
     def test_custom_scan_would_split(self):
-        if self.device != "cuda":
+        if get_device_from_test_args_kwargs(self) != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
 
         def combine_linear_recurrence(left, right):
@@ -2356,14 +2419,14 @@ class CommonTemplate:
             x, f = associative_scan(combine_linear_recurrence, (x, f), dim=1)
             return x, f
 
-        x = torch.randn(1, 129, 2, device=self.device)
-        f = torch.randn(1, 129, 2, device=self.device)
+        x = torch.randn(1, 129, 2, device=get_device_from_test_args_kwargs(self))
+        f = torch.randn(1, 129, 2, device=get_device_from_test_args_kwargs(self))
         expect = eager_scan(x, f)
         actual = compiled_scan(x, f)
         self.assertEqual(expect, actual)
 
     def test_embedding_bag_byte_unpack(self):
-        if self.device != "cpu":
+        if get_device_from_test_args_kwargs(self) != "cpu":
             raise unittest.SkipTest(f"No {GPU_TYPE} implementation (it returns empty)")
 
         def fn(a):
@@ -2401,7 +2464,7 @@ class CommonTemplate:
         self.common(fn, (a, b_int8pack, b_scales, c))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
@@ -2437,7 +2500,7 @@ class CommonTemplate:
         self.common(fn, (b, in_features, out_features))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
@@ -2552,7 +2615,7 @@ class CommonTemplate:
             return 2 * x.sum(-1) + x.sum()
 
         # Requires masked loading for the intermediate reduction
-        if self.device == "mps" and MACOS_VERSION < 13.3:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
 
         dtypes = torch.bool, torch.uint8, torch.int
@@ -2562,10 +2625,10 @@ class CommonTemplate:
             self.common(fn, (i,), check_lowp=False)
 
     def test_sum_dtype(self):
-        if self.device == "mps" and MACOS_VERSION < 14.0:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 14.0:
             raise unittest.SkipTest("bfloat unsupported on MacOS-13")
 
-        sum_dtype = torch.double if self.device != "mps" else torch.bfloat16
+        sum_dtype = torch.double if get_device_from_test_args_kwargs(self) != "mps" else torch.bfloat16
 
         def fn(x):
             return x * x.sum(-1, dtype=sum_dtype) + x.sum(dtype=sum_dtype)
@@ -2578,10 +2641,16 @@ class CommonTemplate:
             return x.cummin(0)
 
         self.common(
-            fn, (torch.rand(16, 32),), check_lowp=not is_halide_backend(self.device)
+            fn,
+            (torch.rand(16, 32),),
+            check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self)),
         )
-        self.common(fn, (torch.rand(1),), check_lowp=not is_halide_backend(self.device))
-        self.common(fn, (torch.rand(0),), check_lowp=not is_halide_backend(self.device))
+        self.common(
+            fn, (torch.rand(1),), check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self))
+        )
+        self.common(
+            fn, (torch.rand(0),), check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self))
+        )
 
     def test_cumsum(self):
         def fn(x):
@@ -2589,17 +2658,21 @@ class CommonTemplate:
 
         # Persistent reductions
         self.common(
-            fn, (torch.rand(16, 32),), check_lowp=not is_halide_backend(self.device)
+            fn,
+            (torch.rand(16, 32),),
+            check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self)),
         )
         self.common(
-            fn, (torch.rand(20, 30),), check_lowp=not is_halide_backend(self.device)
+            fn,
+            (torch.rand(20, 30),),
+            check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self)),
         )
 
         # Non-persistent reduction
         self.common(
             fn,
             (torch.rand(100, 4000),),
-            check_lowp=not is_halide_backend(self.device),
+            check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self)),
             atol=1e-5,
             rtol=1e-5,
         )
@@ -2618,7 +2691,9 @@ class CommonTemplate:
         # Persistent reduction
         a = torch.rand((1, 1024))
         self.common(
-            fn, (a,), check_lowp=not (TEST_WITH_ROCM or is_halide_backend(self.device))
+            fn,
+            (a,),
+            check_lowp=not (TEST_WITH_ROCM or is_halide_backend(get_device_from_test_args_kwargs(self))),
         )
 
         # Non-persistent reduction
@@ -2626,7 +2701,7 @@ class CommonTemplate:
         self.common(
             fn,
             (b,),
-            check_lowp=not (TEST_WITH_ROCM or is_halide_backend(self.device)),
+            check_lowp=not (TEST_WITH_ROCM or is_halide_backend(get_device_from_test_args_kwargs(self))),
             atol=1e-5,
             rtol=1e-5,
         )
@@ -2645,7 +2720,9 @@ class CommonTemplate:
         _dtype = torch.float64
 
         def make_tensor(shape):
-            return torch.full(shape, float("inf"), device=self.device, dtype=_dtype)
+            return torch.full(
+                shape, float("inf"), device=get_device_from_test_args_kwargs(self), dtype=_dtype
+            )
 
         ctx = (
             contextlib.nullcontext()
@@ -2656,11 +2733,13 @@ class CommonTemplate:
             cfn = torch.compile(fn)
 
             for n in [100, 10, 100]:
-                inp = torch.full((2, n), float("inf"), device=self.device, dtype=_dtype)
+                inp = torch.full(
+                    (2, n), float("inf"), device=get_device_from_test_args_kwargs(self), dtype=_dtype
+                )
                 self.assertEqual(cfn(inp), fn(inp))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_logcumsumexp(self):
         def fn(x):
             return x.logcumsumexp(0), x.logcumsumexp(1)
@@ -2669,19 +2748,19 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.rand(16, 32),),
-            check_lowp=not (TEST_WITH_ROCM or is_halide_backend(self.device)),
+            check_lowp=not (TEST_WITH_ROCM or is_halide_backend(get_device_from_test_args_kwargs(self))),
         )
         self.common(
             fn,
             (torch.rand(20, 30),),
-            check_lowp=not (TEST_WITH_ROCM or is_halide_backend(self.device)),
+            check_lowp=not (TEST_WITH_ROCM or is_halide_backend(get_device_from_test_args_kwargs(self))),
         )
 
         # Non-persistent reduction
         self.common(
             fn,
             (torch.rand(100, 4000),),
-            check_lowp=not (TEST_WITH_ROCM or is_halide_backend(self.device)),
+            check_lowp=not (TEST_WITH_ROCM or is_halide_backend(get_device_from_test_args_kwargs(self))),
             atol=1e-5,
             rtol=1e-5,
         )
@@ -2701,11 +2780,11 @@ class CommonTemplate:
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
     def test_clamp_type_promotion(self):
-        tgt_dtype = torch.double if self.device != "mps" else torch.half
+        tgt_dtype = torch.double if get_device_from_test_args_kwargs(self) != "mps" else torch.half
 
         def fn(a):
-            b = torch.tensor(1.0, dtype=tgt_dtype, device=self.device)
-            c = torch.full((4,), 2, device=self.device)
+            b = torch.tensor(1.0, dtype=tgt_dtype, device=get_device_from_test_args_kwargs(self))
+            c = torch.full((4,), 2, device=get_device_from_test_args_kwargs(self))
             return a.clamp(min=b, max=c)
 
         self.common(fn, (torch.randint(4, (4,)),))
@@ -2717,7 +2796,7 @@ class CommonTemplate:
         self.common(fn, (torch.randint(4, (4,)),))
 
     @skip_if_gpu_halide
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_dist(self):
         def fn(a, b):
             return (
@@ -2747,7 +2826,7 @@ class CommonTemplate:
 
         if not self.is_dtype_supported(torch.bfloat16):
             raise unittest.SkipTest(
-                f"torch.bfloat16 not supported for device {self.device}"
+                f"torch.bfloat16 not supported for device {get_device_from_test_args_kwargs(self)}"
             )
         self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
 
@@ -2789,8 +2868,8 @@ class CommonTemplate:
 
         # NOTE: use assertEqual to check dtypes which self.common doesn't do
         for step in (-1, -1.0):
-            expect = fn(step, self.device)
-            actual = compiled_fn(step, self.device)
+            expect = fn(step, get_device_from_test_args_kwargs(self))
+            actual = compiled_fn(step, get_device_from_test_args_kwargs(self))
             self.assertEqual(expect, actual)
         self.assertEqual(expect, actual)
 
@@ -2800,7 +2879,7 @@ class CommonTemplate:
 
         # Test that float arguments are truncated to int when dtype is set explicitly
         make_arg = functools.partial(
-            make_tensor, device=self.device, requires_grad=False
+            make_tensor, device=get_device_from_test_args_kwargs(self), requires_grad=False
         )
         self.common(fn, (make_arg(1, dtype=torch.float32),))
         self.common(fn, (make_arg(1, dtype=torch.int64),))
@@ -2987,7 +3066,7 @@ class CommonTemplate:
     @skipIfXpu(msg="logaddexp_xpu not implemented for ComplexFloat")
     @skipCUDAIf(True, "Not implemented for CUDA")
     def test_logaddexp(self):
-        if self.device == "mps" and MACOS_VERSION < 14.0:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 14.0:
             raise unittest.SkipTest("Complex needs MacOS-14+")
         self.common(
             torch.logaddexp,
@@ -3003,7 +3082,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_round(self):
         def fn(a, b):
             return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
@@ -3015,67 +3094,67 @@ class CommonTemplate:
         # with *100 we are always getting a number exactly at .5 which we don't do right in half
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_round_correctness(self):
-        if self.device == "cuda":
+        if get_device_from_test_args_kwargs(self) == "cuda":
             raise unittest.SkipTest("need to debug tl.libdevice on A100/V100")
 
         def fn(a):
             return torch.round(a)
 
-        dtype = torch.float64 if self.device != "mps" else torch.float32
+        dtype = torch.float64 if get_device_from_test_args_kwargs(self) != "mps" else torch.float32
         self.common(
             fn,
             [torch.arange(-10, 10, 0.1, dtype=dtype)],
             check_lowp=False,
         )
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_builtins_round(self):
         def fn(x, i):
             return x[: round(i / 2 + 1)] + round(i / 2)
 
         cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
 
-        x = torch.zeros(5, dtype=torch.int, device=self.device)
+        x = torch.zeros(5, dtype=torch.int, device=get_device_from_test_args_kwargs(self))
         with torch.no_grad():
             for i in range(1, 6):
                 self.assertEqual(cfn(x, i), fn(x, i))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_builtins_round_float_ndigits_pos(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, 1)
 
         cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
 
-        x = torch.zeros(2, device=self.device)
+        x = torch.zeros(2, device=get_device_from_test_args_kwargs(self))
         i = 2
 
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_builtins_round_float_ndigits_zero(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, 0)
 
         cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
 
-        x = torch.zeros(2, device=self.device)
+        x = torch.zeros(2, device=get_device_from_test_args_kwargs(self))
         i = 2
 
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_builtins_round_float_ndigits_neg(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, -1)
 
         cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
 
-        x = torch.zeros(2, device=self.device)
+        x = torch.zeros(2, device=get_device_from_test_args_kwargs(self))
         i = 2
 
         with torch.no_grad():
@@ -3087,7 +3166,7 @@ class CommonTemplate:
 
         cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
 
-        x = torch.zeros(2, device=self.device)
+        x = torch.zeros(2, device=get_device_from_test_args_kwargs(self))
         i = 123
 
         with torch.no_grad():
@@ -3099,7 +3178,7 @@ class CommonTemplate:
 
         cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
 
-        x = torch.zeros(2, device=self.device)
+        x = torch.zeros(2, device=get_device_from_test_args_kwargs(self))
         i = 123
 
         with torch.no_grad():
@@ -3186,7 +3265,7 @@ class CommonTemplate:
                 a // b,
             )
 
-        if self.device == "mps" and MACOS_VERSION < 13.3:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("Inaccurate for MPS no MacOS-13")
 
         self.common(
@@ -3277,15 +3356,19 @@ class CommonTemplate:
             self.common(
                 fn,
                 (
-                    make_tensor(10, device=self.device, dtype=dtype),
-                    make_tensor((), device=self.device, dtype=dtype, exclude_zero=True),
+                    make_tensor(10, device=get_device_from_test_args_kwargs(self), dtype=dtype),
+                    make_tensor(
+                        (), device=get_device_from_test_args_kwargs(self), dtype=dtype, exclude_zero=True
+                    ),
                 ),
             )
             self.common(
                 fn,
                 (
-                    make_tensor((), device=self.device, dtype=dtype),
-                    make_tensor(10, device=self.device, dtype=dtype, exclude_zero=True),
+                    make_tensor((), device=get_device_from_test_args_kwargs(self), dtype=dtype),
+                    make_tensor(
+                        10, device=get_device_from_test_args_kwargs(self), dtype=dtype, exclude_zero=True
+                    ),
                 ),
             )
 
@@ -3298,9 +3381,9 @@ class CommonTemplate:
             self.common(
                 fn,
                 (
-                    make_tensor(100, device=self.device, dtype=dtype),
+                    make_tensor(100, device=get_device_from_test_args_kwargs(self), dtype=dtype),
                     make_tensor(
-                        100, device=self.device, dtype=dtype, exclude_zero=True
+                        100, device=get_device_from_test_args_kwargs(self), dtype=dtype, exclude_zero=True
                     ),
                 ),
             )
@@ -3312,7 +3395,7 @@ class CommonTemplate:
 
         self.common(
             fn_floor_input,
-            (make_tensor(10, device=self.device, dtype=torch.float32), 33),
+            (make_tensor(10, device=get_device_from_test_args_kwargs(self), dtype=torch.float32), 33),
         )
 
         def fn_int_input(a, i):
@@ -3320,7 +3403,8 @@ class CommonTemplate:
             return a + n
 
         self.common(
-            fn_int_input, (make_tensor(10, device=self.device, dtype=torch.float32), 33)
+            fn_int_input,
+            (make_tensor(10, device=get_device_from_test_args_kwargs(self), dtype=torch.float32), 33),
         )
 
     def test_div_precision(self):
@@ -3469,13 +3553,13 @@ class CommonTemplate:
         def fn(a):
             return torch.max(a)
 
-        t = torch.ones(2**32, dtype=torch.int8, device=self.device)
+        t = torch.ones(2**32, dtype=torch.int8, device=get_device_from_test_args_kwargs(self))
         t[-1] = 2
 
         # self.common OOMs here because it copies inputs to check for mutations
         compiled_fn = torch.compile(fn)
         actual = compiled_fn(t)
-        expect = torch.tensor(2, dtype=torch.int8, device=self.device)
+        expect = torch.tensor(2, dtype=torch.int8, device=get_device_from_test_args_kwargs(self))
         self.assertEqual(actual, expect)
 
     @skip_if_cpu
@@ -3486,8 +3570,8 @@ class CommonTemplate:
         def fn(a, b):
             return torch.max(a + b)
 
-        t1 = torch.ones(1, 2**16, dtype=torch.int8, device=self.device)
-        t2 = torch.ones(2**16, 1, dtype=torch.int8, device=self.device)
+        t1 = torch.ones(1, 2**16, dtype=torch.int8, device=get_device_from_test_args_kwargs(self))
+        t2 = torch.ones(2**16, 1, dtype=torch.int8, device=get_device_from_test_args_kwargs(self))
 
         t1[-1, -1] = 2
         t2[-1, -1] = 2
@@ -3495,7 +3579,7 @@ class CommonTemplate:
         # self.common OOMs here because it copies inputs to check for mutations
         compiled_fn = torch.compile(fn)
         actual = compiled_fn(t1, t2)
-        expect = torch.tensor(4, dtype=torch.int8, device=self.device)
+        expect = torch.tensor(4, dtype=torch.int8, device=get_device_from_test_args_kwargs(self))
         self.assertEqual(actual, expect)
 
     @skip_if_halide  # only 32-bit indexing
@@ -3504,13 +3588,13 @@ class CommonTemplate:
         def fn(a):
             return a + 1
 
-        t = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
+        t = torch.ones(2**31 + 1, dtype=torch.int8, device=get_device_from_test_args_kwargs(self))
         compiled_fn = torch.compile(fn)
         actual = compiled_fn(t)
 
         # Can't use assertEqual as it expands broadcasted inputs
         del t
-        if torch.device(self.device).type == GPU_TYPE:
+        if torch.device(get_device_from_test_args_kwargs(self)).type == GPU_TYPE:
             getattr(torch, GPU_TYPE).empty_cache()
 
         self.assertTrue((actual == 2).all())
@@ -3524,7 +3608,7 @@ class CommonTemplate:
         def fn(a):
             return a + 4
 
-        t = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
+        t = torch.ones(2**31 + 1, dtype=torch.int8, device=get_device_from_test_args_kwargs(self))
         t[2**30 :] = 0
         compiled_fn = torch.compile(fn)
         actual = compiled_fn(t[2**30 :])
@@ -3538,13 +3622,13 @@ class CommonTemplate:
         def fn(a):
             return torch.max(a)
 
-        storage = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
+        storage = torch.ones(2**31 + 1, dtype=torch.int8, device=get_device_from_test_args_kwargs(self))
         view = storage[::32]
         view[-1] = 2
 
         compiled_fn = torch.compile(fn)
         actual = compiled_fn(view)
-        expect = torch.tensor(2, dtype=torch.int8, device=self.device)
+        expect = torch.tensor(2, dtype=torch.int8, device=get_device_from_test_args_kwargs(self))
         self.assertEqual(actual, expect)
 
     def test_softmax(self):
@@ -3814,7 +3898,7 @@ class CommonTemplate:
                 torch.randint(-128, 127, (256, 256), dtype=torch.int8),
             ),
             # MacOS-13 MM ops have precision issues
-            check_lowp=self.device != "mps" or MACOS_VERSION > 14.0,
+            check_lowp=get_device_from_test_args_kwargs(self) != "mps" or MACOS_VERSION > 14.0,
             rtol=0.01,
             atol=0.1,
         )
@@ -3844,8 +3928,8 @@ class CommonTemplate:
         def fn(a, b):
             return torch.mm(a, b)
 
-        t1 = torch.arange(6, dtype=torch.float, device=self.device).view(2, 3)
-        t2 = torch.arange(9, dtype=torch.int64, device=self.device).view(3, 3)
+        t1 = torch.arange(6, dtype=torch.float, device=get_device_from_test_args_kwargs(self)).view(2, 3)
+        t2 = torch.arange(9, dtype=torch.int64, device=get_device_from_test_args_kwargs(self)).view(3, 3)
 
         msg = "expected .* and .* to have the same dtype, but got: .* != .*"
         with self.assertRaisesRegex(RuntimeError, msg):
@@ -3867,8 +3951,8 @@ class CommonTemplate:
                 x = self.fc1(x.permute(1, 2, 0))
                 return x
 
-        fn = Net().to(self.device)
-        t = torch.arange(27, device=self.device).view(3, 3, 3)
+        fn = Net().to(get_device_from_test_args_kwargs(self))
+        t = torch.arange(27, device=get_device_from_test_args_kwargs(self)).view(3, 3, 3)
 
         msg = "expected .* and .* to have the same dtype, but got: .* != .*"
         with self.assertRaisesRegex(RuntimeError, msg):
@@ -3891,7 +3975,7 @@ class CommonTemplate:
         }
     )
     def test_linear_dynamic_maxautotune(self):
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
 
         @torch.compile(dynamic=True)
@@ -3950,7 +4034,7 @@ class CommonTemplate:
     @config.patch({"freezing": True})
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
-        if self.device == GPU_TYPE:
+        if get_device_from_test_args_kwargs(self) == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv bn test")
 
         # fails dynamic check which bn is fused, and there will not have loops vars.
@@ -4009,7 +4093,7 @@ class CommonTemplate:
 
     def test_conv_functional_bn_fuse(self):
         # For gpu path, there is an accuracy issue
-        if self.device == GPU_TYPE:
+        if get_device_from_test_args_kwargs(self) == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv bn test")
 
         # Define a BatchNorm using functional BN.
@@ -4098,7 +4182,7 @@ class CommonTemplate:
     @skipIfRocm
     @xfail_if_mps  # Expected to find .run(
     def test_conv_inference_heuristics(self):
-        if self.device != GPU_TYPE:
+        if get_device_from_test_args_kwargs(self) != GPU_TYPE:
             raise unittest.SkipTest(f"{GPU_TYPE} only test")
 
         in_channels = 6
@@ -4108,9 +4192,9 @@ class CommonTemplate:
 
         grouped_conv = nn.Conv2d(
             in_channels, out_channels, kernel_size, groups=groups
-        ).to(self.device)
+        ).to(get_device_from_test_args_kwargs(self))
 
-        input_tensor = torch.randn(1, in_channels, 10, 10).to(self.device)
+        input_tensor = torch.randn(1, in_channels, 10, 10).to(get_device_from_test_args_kwargs(self))
 
         # Perform the forward pass
         @torch.compile()
@@ -4134,14 +4218,16 @@ class CommonTemplate:
         kernel_size = 3
 
         # Create the convolution layer
-        conv_layer = nn.Conv2d(in_channels, out_channels, kernel_size).to(self.device)
+        conv_layer = nn.Conv2d(in_channels, out_channels, kernel_size).to(
+            get_device_from_test_args_kwargs(self)
+        )
 
-        input_tensor = torch.randn(1, in_channels, 10, 10).to(self.device)
+        input_tensor = torch.randn(1, in_channels, 10, 10).to(get_device_from_test_args_kwargs(self))
 
         with torch.no_grad():
             _, code = run_and_get_code(foo, conv_layer, input_tensor)
             # should be channels last permuting before kernel
-            if is_halide_backend(self.device):
+            if is_halide_backend(get_device_from_test_args_kwargs(self)):
                 FileCheck().check("halide_kernel_0(").check(".convolution(").run(
                     code[0]
                 )
@@ -4149,7 +4235,7 @@ class CommonTemplate:
                 FileCheck().check(".run(").check("convolution(").run(code[0])
 
     def test_upsample_cat_conv(self):
-        if self.device == GPU_TYPE:
+        if get_device_from_test_args_kwargs(self) == GPU_TYPE:
             raise unittest.SkipTest("only support cpu upsample_cat_conv test")
 
         class M(torch.nn.Module):
@@ -4197,7 +4283,7 @@ class CommonTemplate:
 
     def test_slice_view_with_graph_break(self):
         def fn():
-            a = torch.tensor([1], device=self.device)
+            a = torch.tensor([1], device=get_device_from_test_args_kwargs(self))
             a = a[0:1]
             b = a.squeeze()
             a[0] = 0
@@ -4262,10 +4348,10 @@ class CommonTemplate:
             x = torch.sum(x.view(int(x.shape[0] / 6), 6), dim=1)
             return torch.gather(x, 0, torch.trunc(y).to(torch.int64))
 
-        x1 = torch.randn(30, device=self.device)
-        x2 = torch.randn(36, device=self.device)
-        dtype = torch.float64 if self.device != "mps" else torch.float32
-        y = torch.ones(1, dtype=dtype, device=self.device)
+        x1 = torch.randn(30, device=get_device_from_test_args_kwargs(self))
+        x2 = torch.randn(36, device=get_device_from_test_args_kwargs(self))
+        dtype = torch.float64 if get_device_from_test_args_kwargs(self) != "mps" else torch.float32
+        y = torch.ones(1, dtype=dtype, device=get_device_from_test_args_kwargs(self))
 
         self.assertEqual(torch.compile(fn)(x1, y), fn(x1, y))
         self.assertEqual(torch.compile(fn)(x2, y), fn(x2, y))
@@ -4422,10 +4508,10 @@ class CommonTemplate:
         self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
     def test_to_dtype(self):
-        if self.device == "mps" and MACOS_VERSION < 14.0:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 14.0:
             raise unittest.SkipTest("bfloat unsupported on MacOS-13")
 
-        new_dtype = torch.float64 if self.device != "mps" else torch.bfloat16
+        new_dtype = torch.float64 if get_device_from_test_args_kwargs(self) != "mps" else torch.bfloat16
 
         def fn(a, b):
             return (
@@ -4496,7 +4582,7 @@ class CommonTemplate:
         )
 
     @requires_gpu()
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_multi_device(self):
         def fn(x):
             x = x + 1
@@ -4654,7 +4740,7 @@ class CommonTemplate:
 
         atol = None
         rtol = None
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             # set to float32 default tolerance,
             # check_model_gpu with update rotl to 2e-3 for fp16.
             # fix issue #129974
@@ -4680,7 +4766,7 @@ class CommonTemplate:
         )
 
     def test_conv2d_channels_last(self):
-        if self.device == GPU_TYPE:
+        if get_device_from_test_args_kwargs(self) == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv2d channels_last")
 
         m = torch.nn.Sequential(
@@ -4739,7 +4825,7 @@ class CommonTemplate:
         [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
     )
     def test_conv3d_channels_last(self, use_block_ptr: bool):
-        if self.device == GPU_TYPE:
+        if get_device_from_test_args_kwargs(self) == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv3d channels_last")
 
         m = torch.nn.Sequential(
@@ -4958,12 +5044,12 @@ class CommonTemplate:
                 x = self.avgpool(x)
                 return x
 
-        mod = Model().to(self.device)
+        mod = Model().to(get_device_from_test_args_kwargs(self))
         for dtype in [torch.half, torch.bfloat16]:
             # Skip bfloat16 on MacOS-13 for MPS tests
             if not self.is_dtype_supported(dtype):
                 continue
-            x = torch.randn(4, 3, 7, 7, device=self.device).to(dtype=dtype)
+            x = torch.randn(4, 3, 7, 7, device=get_device_from_test_args_kwargs(self)).to(dtype=dtype)
             opt_mod = torch.compile(mod)
             res = opt_mod(x)
             expected = mod(x)
@@ -4981,7 +5067,7 @@ class CommonTemplate:
                 self.buf.add_(1)
                 return (self.w1 * x * self.w2).sum() + self.buf.sum()
 
-        model_for_eager = MyModel().to(self.device)
+        model_for_eager = MyModel().to(get_device_from_test_args_kwargs(self))
         model_for_compile = copy.deepcopy(model_for_eager)
 
         eager_version_counters = [
@@ -4993,8 +5079,8 @@ class CommonTemplate:
 
         compiled_f = torch.compile(model_for_compile, backend="inductor")
 
-        inp_ref = torch.ones(1, requires_grad=True, device=self.device)
-        inp_test = torch.ones(1, requires_grad=True, device=self.device)
+        inp_ref = torch.ones(1, requires_grad=True, device=get_device_from_test_args_kwargs(self))
+        inp_test = torch.ones(1, requires_grad=True, device=get_device_from_test_args_kwargs(self))
 
         out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
@@ -5029,7 +5115,7 @@ class CommonTemplate:
                 self.buf.add_(1)
                 return (self.w @ x).sum() + self.buf.sum()
 
-        model_for_eager = MyModel().to(self.device)
+        model_for_eager = MyModel().to(get_device_from_test_args_kwargs(self))
         model_for_compile = copy.deepcopy(model_for_eager)
 
         eager_version_counters = [
@@ -5041,8 +5127,8 @@ class CommonTemplate:
 
         compiled_f = torch.compile(model_for_compile, backend="inductor")
 
-        inp_ref = torch.ones(2, 4, requires_grad=True, device=self.device)
-        inp_test = torch.ones(2, 4, requires_grad=True, device=self.device)
+        inp_ref = torch.ones(2, 4, requires_grad=True, device=get_device_from_test_args_kwargs(self))
+        inp_test = torch.ones(2, 4, requires_grad=True, device=get_device_from_test_args_kwargs(self))
 
         out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
@@ -5072,7 +5158,7 @@ class CommonTemplate:
             def forward(self, x):
                 return self.m(x)
 
-        model_for_eager = MyModel().to(self.device)
+        model_for_eager = MyModel().to(get_device_from_test_args_kwargs(self))
         model_for_compile = copy.deepcopy(model_for_eager)
 
         eager_version_counters = [
@@ -5084,8 +5170,8 @@ class CommonTemplate:
 
         compiled_f = torch.compile(model_for_compile, backend="inductor")
 
-        inp_ref = torch.ones(20, 100, requires_grad=True, device=self.device)
-        inp_test = torch.ones(20, 100, requires_grad=True, device=self.device)
+        inp_ref = torch.ones(20, 100, requires_grad=True, device=get_device_from_test_args_kwargs(self))
+        inp_test = torch.ones(20, 100, requires_grad=True, device=get_device_from_test_args_kwargs(self))
 
         out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
@@ -5262,7 +5348,7 @@ class CommonTemplate:
         self.common(
             fn,
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
-            check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
+            check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self)),  # misaligned addr fp16
         )
 
     def test_avg_pool2d4(self):
@@ -5281,7 +5367,7 @@ class CommonTemplate:
         self.common(
             fn,
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
-            check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
+            check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self)),  # misaligned addr fp16
         )
 
     def test_avg_pool2d6(self):
@@ -5291,7 +5377,7 @@ class CommonTemplate:
         self.common(
             fn,
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
-            check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
+            check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self)),  # misaligned addr fp16
         )
 
     def test_avg_pool2d7(self):
@@ -5316,7 +5402,7 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn(1, 3, 6, 6),),
-            check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
+            check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self)),  # misaligned addr fp16
         )
 
     @tf32_on_and_off(0.006)
@@ -5367,7 +5453,7 @@ class CommonTemplate:
             return aten.tan(x) + 2, aten.tan(x + 1)
 
         # tan is broken in MPSGraph for MacOS before version 13.3
-        if self.device == "mps" and MACOS_VERSION < 13.3:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("tan is inaccurate for MPS no MacOS-13")
 
         self.common(
@@ -5385,7 +5471,7 @@ class CommonTemplate:
         )
 
     @skip_if_halide  # lgamma not implemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_lgamma(self):
         def fn(x):
             return aten.lgamma(x) + 2, aten.cos(x + 1)
@@ -5465,7 +5551,7 @@ class CommonTemplate:
 
     @config.patch(fallback_random=True)
     def test_randn_with_dtype_and_device(self):
-        if self.device == GPU_TYPE:
+        if get_device_from_test_args_kwargs(self) == GPU_TYPE:
             raise unittest.SkipTest("only support cpu randn_with_dtype_and_device test")
 
         def fn(vectors):
@@ -5558,8 +5644,8 @@ class CommonTemplate:
         def fn(x, y):
             return x + y
 
-        a = torch.randn(1, 4, 4, 4, device=self.device).permute(0, 2, 3, 1)
-        b = torch.randn(4, 4, 4, device=self.device).permute(1, 2, 0)
+        a = torch.randn(1, 4, 4, 4, device=get_device_from_test_args_kwargs(self)).permute(0, 2, 3, 1)
+        b = torch.randn(4, 4, 4, device=get_device_from_test_args_kwargs(self)).permute(1, 2, 0)
         c = fn(a, b)
         self.assertEqual(a.stride(), c.stride())
         self.assertEqual(c.stride()[2], 1)
@@ -5609,7 +5695,7 @@ class CommonTemplate:
     # From yolov3
     @with_tf32_off
     def test_batch_norm_2d_2(self):
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         class Repro(torch.nn.Module):
@@ -5653,7 +5739,7 @@ class CommonTemplate:
         m.eval()
         with torch.no_grad():
             self.common(m, (torch.randn([16, 32]),), check_lowp=False)
-        if self.device != "cpu":
+        if get_device_from_test_args_kwargs(self) != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
     @torch._functorch.config.patch("donated_buffer", True)
@@ -5667,13 +5753,13 @@ class CommonTemplate:
             seq_length,
             hidden_size,
             requires_grad=True,
-            device=self.device,
+            device=get_device_from_test_args_kwargs(self),
         )
         weight = torch.randn(
-            hidden_size, hidden_size, requires_grad=True, device=self.device
+            hidden_size, hidden_size, requires_grad=True, device=get_device_from_test_args_kwargs(self)
         )
 
-        layer_norm = torch.nn.LayerNorm(hidden_size, device=self.device)
+        layer_norm = torch.nn.LayerNorm(hidden_size, device=get_device_from_test_args_kwargs(self))
 
         def foo(inp, weight):
             matmul_output = inp @ weight
@@ -5689,7 +5775,7 @@ class CommonTemplate:
         self.common(
             fn, (torch.randn([16, 32]), torch.randn([32, 16])), check_lowp=False
         )
-        if self.device != "cpu":
+        if get_device_from_test_args_kwargs(self) != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
     @patch.object(config.triton, "persistent_reductions", True)
@@ -5702,7 +5788,7 @@ class CommonTemplate:
             return result
 
         self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
-        if self.device != "cpu":
+        if get_device_from_test_args_kwargs(self) != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
     @patch.object(config.triton, "persistent_reductions", False)
@@ -5714,7 +5800,7 @@ class CommonTemplate:
             return result
 
         self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
-        if self.device != "cpu":
+        if get_device_from_test_args_kwargs(self) != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
     def test_complex_fallback(self):
@@ -5733,7 +5819,7 @@ class CommonTemplate:
 
         self.common(ToComplex(), (torch.rand([1, 2, 4, 8]),), check_lowp=False)
 
-        if self.device != "cpu":
+        if get_device_from_test_args_kwargs(self) != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
     def test_view_as_complex(self):
@@ -5751,7 +5837,7 @@ class CommonTemplate:
                 return (view_as_complex,)
 
         inp = torch.empty_strided((128, 64, 12, 32, 2), (1, 98304, 8192, 256, 128)).to(
-            self.device
+            get_device_from_test_args_kwargs(self)
         )
         mod = Repro()
 
@@ -5773,12 +5859,12 @@ class CommonTemplate:
         def fn(dist, angle):
             return torch.polar(dist, angle)
 
-        dtype = torch.float64 if self.device != "mps" else torch.float32
+        dtype = torch.float64 if get_device_from_test_args_kwargs(self) != "mps" else torch.float32
         inp = (
             torch.tensor([1, 2], dtype=dtype),
             torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=dtype),
         )
-        self.common(fn, (*inp,), reference_in_float=self.device != "mps")
+        self.common(fn, (*inp,), reference_in_float=get_device_from_test_args_kwargs(self) != "mps")
 
     @skip_if_gpu_halide  # incorrect result on CUDA
     def test_cauchy(self):
@@ -5797,7 +5883,7 @@ class CommonTemplate:
             rtol=5 * 1e-5,
             check_lowp=False,
         )
-        if self.device != "cpu":
+        if get_device_from_test_args_kwargs(self) != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
     @skip_if_gpu_halide  # misaligned address error
@@ -5810,13 +5896,13 @@ class CommonTemplate:
         assertGeneratedKernelCountEqual(self, 2)
 
         # issue only manifests on cuda with large tensors
-        if self.device != "cpu":
+        if get_device_from_test_args_kwargs(self) != "cpu":
 
             def f(a):
                 a[:, 20:40] = a[:, 20:40] + 1
                 a[:, 2:900025] = a[:, 1:900024] + 2
 
-            a = torch.rand((1, 1000000), device=self.device)
+            a = torch.rand((1, 1000000), device=get_device_from_test_args_kwargs(self))
             self.common(f, (a,))
 
     def test_gather_scatter(self):
@@ -5842,7 +5928,7 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
-        if self.device != "cpu":
+        if get_device_from_test_args_kwargs(self) != "cpu":
             assertGeneratedKernelCountEqual(self, 2)
 
     @config.patch(max_fusion_size=1)
@@ -5861,7 +5947,7 @@ class CommonTemplate:
             check_lowp=False,
         )
         print("-->", torch._inductor.metrics.generated_kernel_count)
-        if self.device != "cpu":
+        if get_device_from_test_args_kwargs(self) != "cpu":
             self.assertTrue(torch._inductor.metrics.generated_kernel_count > 1)
 
     def test_move_arange(self):
@@ -5921,13 +6007,13 @@ class CommonTemplate:
         for inp in (
             torch.randn(
                 [16, 16],
-                dtype=torch.float16 if self.device == GPU_TYPE else torch.float32,
-                device=self.device,
+                dtype=torch.float16 if get_device_from_test_args_kwargs(self) == GPU_TYPE else torch.float32,
+                device=get_device_from_test_args_kwargs(self),
             ),
-            torch.randint(16, (16, 16), device=self.device),
+            torch.randint(16, (16, 16), device=get_device_from_test_args_kwargs(self)),
         ):
             inputs = (
-                torch.randint(0, 1, [1, 16], dtype=torch.bool, device=self.device),
+                torch.randint(0, 1, [1, 16], dtype=torch.bool, device=get_device_from_test_args_kwargs(self)),
                 inp,
             )
             self.assertEqual(fn(*inputs), opt_fn(*inputs))
@@ -5937,10 +6023,10 @@ class CommonTemplate:
         def fn(value, mask, source):
             return torch.masked_scatter(value, mask, source)
 
-        value = make_tensor(10, 10, dtype=torch.float32, device=self.device)
-        mask = make_tensor(10, 10, dtype=torch.bool, device=self.device)
+        value = make_tensor(10, 10, dtype=torch.float32, device=get_device_from_test_args_kwargs(self))
+        mask = make_tensor(10, 10, dtype=torch.bool, device=get_device_from_test_args_kwargs(self))
         source = make_tensor(
-            mask.count_nonzero(), dtype=torch.float32, device=self.device
+            mask.count_nonzero(), dtype=torch.float32, device=get_device_from_test_args_kwargs(self)
         )
 
         self.common(fn, (value, mask, source))
@@ -5970,7 +6056,7 @@ class CommonTemplate:
             return [aten.pow(x, e) for e in range(-8, 9)]
 
         # pow is broken in MPSGraph for MacOS before version 13.3
-        if self.device == "mps" and MACOS_VERSION < 13.3:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("pow is inaccurate for MPS no MacOS-13")
 
         self.common(
@@ -5978,13 +6064,13 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_pow2(self):
         def fn(x):
             return aten.pow(1000, x), aten.pow(x, 1000)
 
         # pow is broken in MPSGraph for MacOS before version 13.3
-        if self.device == "mps" and MACOS_VERSION < 13.3:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("pow is inaccurate for MPS no MacOS-13")
 
         self.common(
@@ -6007,12 +6093,12 @@ class CommonTemplate:
     def test_pow3(self):
         # power of 0.5 is special-cased, arbitrary power would still produce triton codegen error
         def fn(x):
-            z = torch.tensor(0.123, device=self.device)
+            z = torch.tensor(0.123, device=get_device_from_test_args_kwargs(self))
             w = z + x
             return torch.pow(w, 0.5)
 
         opt = torch.compile(fn, backend="inductor")
-        input = torch.rand((), device=self.device)
+        input = torch.rand((), device=get_device_from_test_args_kwargs(self))
         self.assertTrue(same(opt(input), fn(input)))
 
     def test_pow_int(self):
@@ -6022,7 +6108,7 @@ class CommonTemplate:
         for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
             intmax = torch.iinfo(dtype).max
             make_arg = functools.partial(
-                make_tensor, dtype=dtype, device=self.device, requires_grad=False
+                make_tensor, dtype=dtype, device=get_device_from_test_args_kwargs(self), requires_grad=False
             )
             self.common(
                 fn,
@@ -6032,7 +6118,7 @@ class CommonTemplate:
                 ),
             )
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_pow_symfloat(self):
         def fn(x):
             r = math.sqrt(x.size(0))
@@ -6040,7 +6126,7 @@ class CommonTemplate:
             return x * r
 
         cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
-        x = torch.randn([16, 16], device=self.device)
+        x = torch.randn([16, 16], device=get_device_from_test_args_kwargs(self))
         self.assertEqual(cfn(x), fn(x))
 
     def test_glu(self):
@@ -6105,7 +6191,7 @@ class CommonTemplate:
             torch.compile(fn)(torch.randn(8), torch.tensor(8))
 
     def test_cat(self):
-        tgt_dtype = torch.double if self.device != "mps" else torch.half
+        tgt_dtype = torch.double if get_device_from_test_args_kwargs(self) != "mps" else torch.half
 
         def fn(a):
             tmp = a * 2
@@ -6292,7 +6378,7 @@ class CommonTemplate:
             c = torch.cat((x, x1), 1)
             return (c,)
 
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             atol = 3e-4
             rtol = 1e-4
         else:
@@ -6302,7 +6388,7 @@ class CommonTemplate:
         # MPS has correctness problem before MacOS15
         with (
             contextlib.nullcontext()
-            if self.device != "mps" or MACOS_VERSION >= 15.0
+            if get_device_from_test_args_kwargs(self) != "mps" or MACOS_VERSION >= 15.0
             else self.assertRaises(AssertionError)
         ):
             self.common(
@@ -6348,13 +6434,13 @@ class CommonTemplate:
             ),  # noqa: E731
         )
 
-        inps = [torch.rand([256, 256], device=self.device) for _ in range(2)]
+        inps = [torch.rand([256, 256], device=get_device_from_test_args_kwargs(self)) for _ in range(2)]
 
         for fn in fns:
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
             self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
-            if self.device == "cpu":
+            if get_device_from_test_args_kwargs(self) == "cpu":
                 FileCheck().check_not("cpp_fused").run(source_codes[0])
             else:
                 FileCheck().check_not("triton.jit").run(source_codes[0])
@@ -6364,7 +6450,7 @@ class CommonTemplate:
             if not self.is_dtype_supported(lowp_dtype):
                 continue
             inps = [
-                torch.rand([256, 256], device=self.device, dtype=lowp_dtype)
+                torch.rand([256, 256], device=get_device_from_test_args_kwargs(self), dtype=lowp_dtype)
                 for _ in range(2)
             ]
             for fn in fns:
@@ -6373,7 +6459,7 @@ class CommonTemplate:
 
             # test broadcasted shape bail
             fn = lambda x: x + torch.zeros(  # noqa: E731
-                [256, 256, 256], dtype=lowp_dtype, device=self.device
+                [256, 256, 256], dtype=lowp_dtype, device=get_device_from_test_args_kwargs(self)
             )
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
             self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
@@ -6416,7 +6502,7 @@ class CommonTemplate:
 
         f = torch.compile(f)
 
-        x = torch.ones((2, 3, 2), device=self.device)
+        x = torch.ones((2, 3, 2), device=get_device_from_test_args_kwargs(self))
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(x, 1)
         torch._dynamo.mark_dynamic(x, 2)
@@ -6441,7 +6527,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return y + 1
 
         f = torch.compile(f)
-        x = torch.ones((2, 3, 2), device=self.device)
+        x = torch.ones((2, 3, 2), device=get_device_from_test_args_kwargs(self))
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(x, 1)
         post_grad_graph = get_post_grad_graph(f, (x,))
@@ -6468,7 +6554,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
 
         f = torch.compile(f)
 
-        x = torch.ones((2, 3, 2), device=self.device)
+        x = torch.ones((2, 3, 2), device=get_device_from_test_args_kwargs(self))
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(x, 1)
         torch._dynamo.mark_dynamic(x, 2)
@@ -6612,8 +6698,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         for dim in (1, 2, 3):
             op_inst = eval(f"torch.nn.AdaptiveMaxPool{dim}d(5)")
-            model = Model(op_inst).to(self.device)
-            x = torch.randn([1] * (dim + 2)).to(self.device)
+            model = Model(op_inst).to(get_device_from_test_args_kwargs(self))
+            x = torch.randn([1] * (dim + 2)).to(get_device_from_test_args_kwargs(self))
             model = torch.compile(model, fullgraph=True)
             with self.assertRaisesRegex(
                 RuntimeError, r".*(not implemented|aoti_torch_).*"
@@ -6634,8 +6720,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         for dim in (1, 2, 3):
             op_inst = eval(f"torch.nn.AdaptiveAvgPool{dim}d(5)")
-            model = Model(op_inst).to(self.device)
-            x = torch.randn([1] * (dim + 2)).to(self.device)
+            model = Model(op_inst).to(get_device_from_test_args_kwargs(self))
+            x = torch.randn([1] * (dim + 2)).to(get_device_from_test_args_kwargs(self))
             model = torch.compile(model, fullgraph=True)
             with self.assertRaisesRegex(
                 RuntimeError, r".*(not implemented|aoti_torch_).*"
@@ -6689,7 +6775,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen(self):
-        if "cpu" in str(self.device) and config.is_fbcode():
+        if "cpu" in str(get_device_from_test_args_kwargs(self)) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
 
         @torch.compile(fullgraph=True)
@@ -6704,7 +6790,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def c(x):
             return x.cos().sin().softmax(-1)
 
-        x = torch.randn(16, 256, device=self.device)
+        x = torch.randn(16, 256, device=get_device_from_test_args_kwargs(self))
         _, (coda_a0,) = _run_and_get_stripped_kernels(a, x)
         _, (coda_b0,) = _run_and_get_stripped_kernels(b, x)
         _, (coda_c0,) = _run_and_get_stripped_kernels(c, x)
@@ -6737,7 +6823,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen_on_graph_break(self):
-        if "cpu" in str(self.device) and config.is_fbcode():
+        if "cpu" in str(get_device_from_test_args_kwargs(self)) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
 
         def a(x):
@@ -6750,14 +6836,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             x = a(x)
             return x
 
-        x = torch.randn(16, 256, device=self.device)
+        x = torch.randn(16, 256, device=get_device_from_test_args_kwargs(self))
         _, (code0, code1) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(code0, code1)
 
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen_with_suffix(self):
-        if "cpu" in str(self.device) and config.is_fbcode():
+        if "cpu" in str(get_device_from_test_args_kwargs(self)) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
 
         @torch.compile(fullgraph=True)
@@ -6770,8 +6856,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             x = torch.matmul(x, y)
             return x
 
-        x = torch.randn(16, 256, device=self.device)
-        y = torch.randn(256, 256, device=self.device)
+        x = torch.randn(16, 256, device=get_device_from_test_args_kwargs(self))
+        y = torch.randn(256, 256, device=get_device_from_test_args_kwargs(self))
         _, (code0,) = _run_and_get_stripped_kernels(a, x)
         _, (code1,) = _run_and_get_stripped_kernels(b, x, y)
         self.assertEqual(code0, code1)
@@ -6801,7 +6887,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 2, 6, 6]),))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_fmod(self):
         def fn(a, b):
             return torch.fmod(a, b), torch.fmod(3.0 * a, b) - 2.0
@@ -6809,7 +6895,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         shape = [1, 2, 6, 6]
         self.common(fn, (torch.randn(shape), torch.randn(shape)))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_fmod_zero_dim(self):
         def fn(a, b):
             return (torch.fmod(a, b),)
@@ -6817,15 +6903,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(
             fn,
             (
-                make_tensor(10, device=self.device, dtype=torch.float32),
-                make_tensor((), device=self.device, dtype=torch.float32),
+                make_tensor(10, device=get_device_from_test_args_kwargs(self), dtype=torch.float32),
+                make_tensor((), device=get_device_from_test_args_kwargs(self), dtype=torch.float32),
             ),
         )
         self.common(
             fn,
             (
-                make_tensor((), device=self.device, dtype=torch.float32),
-                make_tensor(10, device=self.device, dtype=torch.float32),
+                make_tensor((), device=get_device_from_test_args_kwargs(self), dtype=torch.float32),
+                make_tensor(10, device=get_device_from_test_args_kwargs(self), dtype=torch.float32),
             ),
         )
 
@@ -6989,13 +7075,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             with ctx:
                 self.common(
                     fn,
-                    (make_tensor(8, dtype=dtype, device=self.device),),
+                    (make_tensor(8, dtype=dtype, device=get_device_from_test_args_kwargs(self)),),
                     check_lowp=False,
                 )
 
     def test_full_boolean(self):
         def fn(n):
-            x = torch.full((1,), n >= 1024, device=self.device)
+            x = torch.full((1,), n >= 1024, device=get_device_from_test_args_kwargs(self))
             return x, x + 1
 
         self.common(fn, (1024,))
@@ -7056,7 +7142,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch._dynamo.graph_break()
             return y.view(-1, 4)
 
-        inp = torch.rand([4, 4, 4, 4], device=self.device)
+        inp = torch.rand([4, 4, 4, 4], device=get_device_from_test_args_kwargs(self))
         fn_opt = torch.compile(fn, backend="inductor")
 
         self.assertEqual(fn(inp), fn_opt(inp))
@@ -7092,7 +7178,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @skipIfXpu
     @skipIfRocm
     def test_cudnn_rnn(self):
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn(
@@ -7281,7 +7367,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             grad_output = torch.randn_like(result)
 
             self.common(
-                fn, (grad_output, x), check_lowp=not is_halide_backend(self.device)
+                fn, (grad_output, x), check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self))
             )
 
         template([1, 1, 8, 8], [0, 0, 0, 0])
@@ -7337,7 +7423,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(x):
             return aten.upsample_bicubic2d(x, (256, 256), False)
 
-        x = torch.randn(1, 1, 128, 128, dtype=torch.float32, device=self.device)
+        x = torch.randn(1, 1, 128, 128, dtype=torch.float32, device=get_device_from_test_args_kwargs(self))
         _, source_codes = run_and_get_code(fn, x)
 
         pattern = r"0\.50*\*[ix][\d]"
@@ -7394,7 +7480,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # MPS has correctness problem for transposed sort before MacOS15
         ctx = (
             contextlib.nullcontext()
-            if self.device != "mps" or MACOS_VERSION >= 15.0
+            if get_device_from_test_args_kwargs(self) != "mps" or MACOS_VERSION >= 15.0
             else self.assertRaises(AssertionError)
         )
         inp = torch.randn(128, 10).transpose(0, 1)
@@ -7486,7 +7572,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a):
             return aten.constant_pad_nd(a, [0, 0])
 
-        x = torch.randn([2], device=self.device)
+        x = torch.randn([2], device=get_device_from_test_args_kwargs(self))
         fn_compiled = torch.compile(fn)
         y = fn_compiled(x)
         self.assertTrue(y is not x)
@@ -7522,8 +7608,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return x.add_(y)
 
         inputs = (
-            rand_strided((4, 4), (4, 1), device=self.device),
-            rand_strided((4, 4), (4, 1), device=self.device),
+            rand_strided((4, 4), (4, 1), device=get_device_from_test_args_kwargs(self)),
+            rand_strided((4, 4), (4, 1), device=get_device_from_test_args_kwargs(self)),
         )
         inp_clone = inputs[0].clone()
         out = fn(*inputs)
@@ -7572,10 +7658,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             w = z.add_(y)
             return w.mul_(y)
 
-        tgt_dtype = torch.double if self.device != "mps" else torch.half
+        tgt_dtype = torch.double if get_device_from_test_args_kwargs(self) != "mps" else torch.half
         inputs = (
-            rand_strided((4, 4), (4, 1), device=self.device, dtype=torch.float),
-            rand_strided((4, 4), (4, 1), device=self.device, dtype=tgt_dtype),
+            rand_strided((4, 4), (4, 1), device=get_device_from_test_args_kwargs(self), dtype=torch.float),
+            rand_strided((4, 4), (4, 1), device=get_device_from_test_args_kwargs(self), dtype=tgt_dtype),
         )
         out = fn(*inputs)
         out_eager = (inputs[0] + inputs[1].float()).add_(inputs[1]).mul_(inputs[1])
@@ -7589,7 +7675,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(x):
             return 2 * x
 
-        inputs = (rand_strided((8,), (1,), device=self.device),)
+        inputs = (rand_strided((8,), (1,), device=get_device_from_test_args_kwargs(self)),)
         self.assertTrue(same(fn(*inputs), 2 * inputs[0]))
 
     @config.patch({"triton.cudagraphs": True})
@@ -7600,8 +7686,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return x + y
 
         inputs = (
-            rand_strided((8, 16), (32, 2), device=self.device),
-            rand_strided((8, 16), (16, 1), device=self.device),
+            rand_strided((8, 16), (32, 2), device=get_device_from_test_args_kwargs(self)),
+            rand_strided((8, 16), (16, 1), device=get_device_from_test_args_kwargs(self)),
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
@@ -7614,9 +7700,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             c = a + 2
             return a * b / c
 
-        arg1 = torch.randn(64, device=self.device)
+        arg1 = torch.randn(64, device=get_device_from_test_args_kwargs(self))
         arg2 = arg1.clone()
-        arg3 = torch.randn(64, device=self.device)
+        arg3 = torch.randn(64, device=get_device_from_test_args_kwargs(self))
         arg4 = arg3.clone()
         correct1 = fn(arg1)
         correct2 = fn(arg3)
@@ -7638,7 +7724,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         # NOTE: this test fails when none of the inputs require grad.
         # That seems like an inductor bug.
-        arg1 = torch.randn([1, 64], device=self.device).requires_grad_(True).add(1)
+        arg1 = torch.randn([1, 64], device=get_device_from_test_args_kwargs(self)).requires_grad_(True).add(1)
         arg2 = arg1.clone()
         correct1 = fn(arg1)
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
@@ -7658,7 +7744,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             aten.relu_(a)
             return a
 
-        arg1 = torch.randn([1, 64], device=self.device)
+        arg1 = torch.randn([1, 64], device=get_device_from_test_args_kwargs(self))
         arg2 = arg1.clone()
         correct1 = fn(arg1)
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
@@ -7672,7 +7758,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch.relu_(a)
             return a
 
-        arg1 = torch.randn([1, 64], device=self.device)
+        arg1 = torch.randn([1, 64], device=get_device_from_test_args_kwargs(self))
         arg2 = arg1.clone()
         correct1 = fn(arg1)
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
@@ -7689,7 +7775,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         opt_fn = torch.compile(fn)
 
-        a = torch.zeros((), dtype=torch.int64, device=self.device)
+        a = torch.zeros((), dtype=torch.int64, device=get_device_from_test_args_kwargs(self))
         a_expect = a.clone()
         expect = fn(a_expect)
 
@@ -7717,7 +7803,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             a[:, 20:40] = a[:, 20:40] + 1
             a[:, 2:11] = a[:, 1:10] + 2
 
-        arg1 = torch.randn([1, 64], device=self.device)
+        arg1 = torch.randn([1, 64], device=get_device_from_test_args_kwargs(self))
         arg2 = arg1.clone()
         fn(arg1)
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
@@ -7730,7 +7816,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
 
-        x1 = torch.randn(8, 8, device=self.device)
+        x1 = torch.randn(8, 8, device=get_device_from_test_args_kwargs(self))
         x2 = x1.clone()
         fn(x1)
         opt_fn(x2)
@@ -7738,10 +7824,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     def test_tensor_index_slice(self):
         def fn(a):
-            x = torch.tensor([1, 2], device=self.device)
-            y = torch.tensor([2, 3], device=self.device)
-            xx = torch.tensor([1, 2], device=self.device).view(1, 2)
-            yy = torch.tensor([1, 2, 3], device=self.device).view(3, 1)
+            x = torch.tensor([1, 2], device=get_device_from_test_args_kwargs(self))
+            y = torch.tensor([2, 3], device=get_device_from_test_args_kwargs(self))
+            xx = torch.tensor([1, 2], device=get_device_from_test_args_kwargs(self)).view(1, 2)
+            yy = torch.tensor([1, 2, 3], device=get_device_from_test_args_kwargs(self)).view(3, 1)
             return [
                 a[x, y],
                 a[:, x, y],
@@ -7755,7 +7841,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 a[:, xx, :, yy],
             ]
 
-        a = torch.arange(3 * 4 * 5 * 6 * 7, device=self.device).view(3, 4, 5, 6, 7)
+        a = torch.arange(3 * 4 * 5 * 6 * 7, device=get_device_from_test_args_kwargs(self)).view(3, 4, 5, 6, 7)
         refs = fn(a)
         tests = torch.compile(fn)(a)
         for ref, test in zip(refs, tests):
@@ -7764,11 +7850,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @torch._dynamo.config.patch(recompile_limit=10)
     def test_tensor_index_put_slice(self):
         def fn(a, version):
-            x = torch.tensor([1, 2], device=self.device, dtype=torch.int32)
-            y = torch.tensor([2, 3], device=self.device, dtype=torch.int32)
+            x = torch.tensor([1, 2], device=get_device_from_test_args_kwargs(self), dtype=torch.int32)
+            y = torch.tensor([2, 3], device=get_device_from_test_args_kwargs(self), dtype=torch.int32)
 
-            xx = torch.tensor([1, 2], device=self.device).view(1, 2)
-            yy = torch.tensor([1, 2, 3], device=self.device).view(3, 1)
+            xx = torch.tensor([1, 2], device=get_device_from_test_args_kwargs(self)).view(1, 2)
+            yy = torch.tensor([1, 2, 3], device=get_device_from_test_args_kwargs(self)).view(3, 1)
 
             if version == 0:
                 a[x, y] = torch.zeros_like(a[x, y])
@@ -7793,9 +7879,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
             return a
 
-        a = torch.arange(3 * 4 * 5 * 6 * 7, device=self.device, dtype=torch.int32).view(
-            3, 4, 5, 6, 7
-        )
+        a = torch.arange(
+            3 * 4 * 5 * 6 * 7, device=get_device_from_test_args_kwargs(self), dtype=torch.int32
+        ).view(3, 4, 5, 6, 7)
         for i in range(10):
             ref = fn(torch.clone(a), i)
             test = torch.compile(fn)(torch.clone(a), i)
@@ -7805,10 +7891,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(in_ptr0, in_ptr1, in_ptr2):
             return torch.gather(in_ptr1, 0, in_ptr2) + in_ptr0
 
-        arg190 = rand_strided((32, 21), (1, 32), device=self.device, dtype=torch.int64)
+        arg190 = rand_strided(
+            (32, 21), (1, 32), device=get_device_from_test_args_kwargs(self), dtype=torch.int64
+        )
         arg190.fill_(0)
         arg111 = rand_strided(
-            (9521, 512), (512, 1), device=self.device, dtype=torch.float32
+            (9521, 512), (512, 1), device=get_device_from_test_args_kwargs(self), dtype=torch.float32
         )
         self.common(
             fn,
@@ -7849,7 +7937,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_nll_loss_backward(self):
         def fn(a, b, c):
             return aten.nll_loss_backward(
-                a, b, c, None, 1, -100, torch.tensor(1.0, device=self.device)
+                a, b, c, None, 1, -100, torch.tensor(1.0, device=get_device_from_test_args_kwargs(self))
             )
 
         labels = (
@@ -7882,7 +7970,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_isinf2(self):
         def fn(x):
             y = torch.tensor(
-                [1, float("inf"), 2, float("-inf"), float("nan")], device=self.device
+                [1, float("inf"), 2, float("-inf"), float("nan")],
+                device=get_device_from_test_args_kwargs(self),
             )
             return x == y
 
@@ -7948,7 +8037,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 atol=0.002,
                 rtol=0.001,
                 # MacOS-13 MM ops have precision issues
-                check_lowp=self.device != "mps" or MACOS_VERSION > 14.0,
+                check_lowp=get_device_from_test_args_kwargs(self) != "mps" or MACOS_VERSION > 14.0,
             )
 
     @config.patch({"triton.max_tiles": 2})
@@ -8171,7 +8260,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return x[16:32]
 
         with torch.no_grad():
-            x = torch.randn(1024, device=self.device)
+            x = torch.randn(1024, device=get_device_from_test_args_kwargs(self))
             self.assertEqual(fn(x[0:]), x[16:][:16])
             self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
 
@@ -8193,7 +8282,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return torch.ops.aten.index.Tensor(y, [iota, sub])
 
         # Requires masked loading for the intermediate reduction
-        if self.device == "mps" and MACOS_VERSION < 13.3:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
 
         self.common(fn, [torch.randn(1, 1024), torch.randn(1, 1024, 2)])
@@ -8263,13 +8352,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     def test_exact_stride(self):
-        full = torch.randn((16, 16), device=self.device)
+        full = torch.randn((16, 16), device=get_device_from_test_args_kwargs(self))
         view = torch.as_strided(full, (16, 8), full.stride())
 
         def fn(x):
             result = x + x
             result_strided = torch.empty_strided(
-                x.size(), x.stride(), device=self.device
+                x.size(), x.stride(), device=get_device_from_test_args_kwargs(self)
             )
             result_strided[:] = result
             return result_strided
@@ -8282,7 +8371,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     def test_like_channels_last(self):
         def foo():
-            randn = torch.randn((4, 3, 8, 8), device=self.device, dtype=torch.float32)
+            randn = torch.randn(
+                (4, 3, 8, 8), device=get_device_from_test_args_kwargs(self), dtype=torch.float32
+            )
             xc = randn.contiguous(memory_format=torch.channels_last)
             clone = torch.zeros_like(xc, memory_format=torch.preserve_format)
             rand_like = torch.rand_like(randn)
@@ -8407,7 +8498,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 )
                 return scores
 
-        kv_cache_module = M(self.device)
+        kv_cache_module = M(get_device_from_test_args_kwargs(self))
         inp = torch.randn(1, 32, 8, 64)
 
         # Test that the cache update is reinplaced such that the cache is updated inplace
@@ -8434,11 +8525,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     def test_scatter2(self):
-        if self.device == "cuda":
+        if get_device_from_test_args_kwargs(self) == "cuda":
             raise unittest.SkipTest("unstable on sm86")
 
         check_lowp = True
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             check_lowp = False
 
         def fn(a, dim, index, b):
@@ -8460,7 +8551,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return aten.scatter(a, dim, index, b, reduce="add")
 
         check_lowp = True
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             check_lowp = False
 
         self.common(
@@ -8484,7 +8575,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return torch.scatter(x, 0, ind, src)
 
         check_lowp = True
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             check_lowp = False
 
         for deterministic in [False, True]:
@@ -8507,11 +8598,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             a1.scatter_(dim, index, b, reduce=reduce)
             return (a, a1)
 
-        if self.device == "mps" and MACOS_VERSION < 14.0:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 14.0:
             raise unittest.SkipTest("Crashes on MacOS-13")
 
         check_lowp = True
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             check_lowp = False
 
         for reduce in ["add", "multiply"]:
@@ -8532,7 +8623,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return aten.scatter(a, dim, index, b)
 
         check_lowp = True
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             check_lowp = False
 
         for deterministic in [False, True]:
@@ -8554,7 +8645,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return aten.scatter_add(a, dim, index, b)
 
         check_lowp = True
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             check_lowp = False
 
         self.common(
@@ -8573,7 +8664,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return aten.scatter_add(a, dim, index, b)
 
         check_lowp = True
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             check_lowp = False
 
         self.common(
@@ -8592,11 +8683,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return aten.scatter_add(a, dim, index, b)
 
         check_lowp = True
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             check_lowp = False
 
         for deterministic in [False, True]:
-            if deterministic and self.device == "xpu":
+            if deterministic and get_device_from_test_args_kwargs(self) == "xpu":
                 # There is no deterministic implementation for scatter_add on Intel GPU.
                 continue
             with DeterministicGuard(deterministic):
@@ -8616,7 +8707,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return aten.scatter_reduce(a, dim, index, b, "sum")
 
         check_lowp = True
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             check_lowp = False
 
         self.common(
@@ -8635,7 +8726,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return aten.scatter_reduce(a, dim, index, b, reduce, include_self=False)
 
         check_lowp = True
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             check_lowp = False
 
         for reduce in ["sum", "amax"]:
@@ -8659,11 +8750,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             a1.scatter_reduce_(dim, index, b, reduce=reduce)
             return (a, a1)
 
-        if self.device == "mps" and MACOS_VERSION < 14.0:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 14.0:
             raise unittest.SkipTest("Crashes on MacOS-13")
 
         check_lowp = True
-        if self.device == "xpu":
+        if get_device_from_test_args_kwargs(self) == "xpu":
             check_lowp = False
 
         for reduce in ["sum", "prod"]:
@@ -8688,7 +8779,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         Relative difference: 3.1747371732500974e-06 (up to 1.3e-06 allowed)
         """
         kwargs = {}
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             kwargs["atol"] = 1e-4
             kwargs["rtol"] = 1.3e-5
 
@@ -8751,7 +8842,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn1(a):
             return torch.nn.functional.dropout(a)
 
-        x = torch.ones(1000, device=self.device, dtype=torch.float32)
+        x = torch.ones(1000, device=get_device_from_test_args_kwargs(self), dtype=torch.float32)
         result1 = fn1(x)
         self.assertTrue(400 < result1.nonzero().shape[0] < 600)
         self.assertTrue(0.9 < result1.mean().item() < 1.1)
@@ -8777,7 +8868,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             with patch.object(config.triton, "cudagraphs", cg):
                 torch._dynamo.reset()
 
-                x = torch.ones(1024, device=self.device, dtype=torch.float32)
+                x = torch.ones(1024, device=get_device_from_test_args_kwargs(self), dtype=torch.float32)
 
                 torch.manual_seed(1234)
                 a0 = fn(x).clone()
@@ -8803,7 +8894,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a):
             return torch.rand_like(a), torch.rand_like(a)
 
-        x = torch.ones(1024, device=self.device, dtype=torch.float32)
+        x = torch.ones(1024, device=get_device_from_test_args_kwargs(self), dtype=torch.float32)
 
         torch.manual_seed(1234)
         a0 = fn(x)[0].clone()
@@ -9067,13 +9158,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.ops.aten.rand.default,
                 [4, 4],
                 dtype=torch.float32,
-                device=self.device,
+                device=get_device_from_test_args_kwargs(self),
             )
             rng_state2, a2 = torch._prims.rng_prims.run_and_save_rng_state(
                 torch.ops.aten.rand.default,
                 [4, 4],
                 dtype=torch.float32,
-                device=self.device,
+                device=get_device_from_test_args_kwargs(self),
             )
 
             b1 = torch._prims.rng_prims.run_with_rng_state(
@@ -9081,14 +9172,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.ops.aten.rand.default,
                 [4, 4],
                 dtype=torch.float32,
-                device=self.device,
+                device=get_device_from_test_args_kwargs(self),
             )
             b2 = torch._prims.rng_prims.run_with_rng_state(
                 rng_state2,
                 torch.ops.aten.rand.default,
                 [4, 4],
                 dtype=torch.float32,
-                device=self.device,
+                device=get_device_from_test_args_kwargs(self),
             )
 
             return (a1, a2, b1, b2)
@@ -9104,7 +9195,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @skip_if_gpu_halide  # rand
     @xfail_if_mps
     def test_philox_rand(self):
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             raise unittest.SkipTest(
                 f"functionalization of rng ops supported only on {GPU_TYPE}"
             )
@@ -9131,12 +9222,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # different calls, different values
             self.assertFalse(torch.allclose(a, b))
 
-        check(torch.ones(1024, device=self.device, dtype=torch.float32))
+        check(torch.ones(1024, device=get_device_from_test_args_kwargs(self), dtype=torch.float32))
         # Need comment: should we add "_get_rng_state_offset" to common device interface?
-        self.assertEqual(getattr(torch, self.device)._get_rng_state_offset(), 2048)
+        self.assertEqual(getattr(torch, get_device_from_test_args_kwargs(self))._get_rng_state_offset(), 2048)
         # Check non-multiple of 4 numel
-        check(torch.ones(3, device=self.device, dtype=torch.float32))
-        self.assertEqual(getattr(torch, self.device)._get_rng_state_offset(), 8)
+        check(torch.ones(3, device=get_device_from_test_args_kwargs(self), dtype=torch.float32))
+        self.assertEqual(getattr(torch, get_device_from_test_args_kwargs(self))._get_rng_state_offset(), 8)
 
     # Already on by default, just want to make sure
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
@@ -9167,7 +9258,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(f, (torch.zeros((4, 2)),))
 
-    @xfail_if_triton_cpu  # libdevice.fma
+    @xfail_during_test_if_triton_cpu  # libdevice.fma
     def test_softmax_backward_data(self):
         def fn(a, b):
             return aten._softmax_backward_data(a, b, dim=1, input_dtype=torch.float32)
@@ -9207,12 +9298,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
         torch.manual_seed(12345)
-        a0, b0, c0 = fn(torch.zeros([40, 40], device=self.device))
+        a0, b0, c0 = fn(torch.zeros([40, 40], device=get_device_from_test_args_kwargs(self)))
         self.assertEqual(a0.shape, [1024])
         self.assertEqual(b0.shape, [1024])
         self.assertEqual(c0.shape, [40, 40])
         torch.manual_seed(12345)
-        a1, b1, c1 = fn(torch.zeros([40, 40], device=self.device))
+        a1, b1, c1 = fn(torch.zeros([40, 40], device=get_device_from_test_args_kwargs(self)))
         self.assertEqual(a0, a1)
         self.assertEqual(b0, b1)
         self.assertEqual(c0, c1)
@@ -9230,7 +9321,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_randint_distribution(self):
         @torch.compile(fullgraph=True)
         def fn(n_argsmax, size):
-            return torch.randint(n_max, (size,), device=self.device)
+            return torch.randint(n_max, (size,), device=get_device_from_test_args_kwargs(self))
 
         def bin(index, max_size):
             return index // (max_size // n_bins)
@@ -9257,7 +9348,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(check_stack_no_cycles_TESTING_ONLY=True)
     def test_check_stack_no_cycles(self):
-        if config.cpp_wrapper and self.device != "cpu":
+        if config.cpp_wrapper and get_device_from_test_args_kwargs(self) != "cpu":
             raise unittest.SkipTest(
                 "codegen() gets called twice in cpp_wrapper GPU compilation, which "
                 "causes this test to fail.  This can be removed if GPU compilation is "
@@ -9268,21 +9359,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(x):
             return x * 3
 
-        r = fn(torch.randn(2, device=self.device, requires_grad=True))
+        r = fn(torch.randn(2, device=get_device_from_test_args_kwargs(self), requires_grad=True))
         # Backward compilation isn't hooked into cprofile, it probably
         # should...
         # r.sum().backward()
 
     def test_like_rands2(self):
         # rand_like with kwargs `device` of str type
-        d = self.device
+        d = get_device_from_test_args_kwargs(self)
         assert isinstance(d, str)
 
         @torch.compile
         def fn(x):
             return torch.rand_like(x, device=d)
 
-        x = torch.ones(10, device=self.device, dtype=torch.float32)
+        x = torch.ones(10, device=get_device_from_test_args_kwargs(self), dtype=torch.float32)
         a0 = fn(x).clone()
         a1 = fn(x).clone()
         self.assertFalse(torch.allclose(a0, a1))
@@ -9689,9 +9780,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_dropout2(self):
         n = 100000
         weight = torch.ones(
-            n, device=self.device, dtype=torch.float32, requires_grad=True
+            n, device=get_device_from_test_args_kwargs(self), dtype=torch.float32, requires_grad=True
         )
-        ones = torch.ones(n, device=self.device, dtype=torch.float32)
+        ones = torch.ones(n, device=get_device_from_test_args_kwargs(self), dtype=torch.float32)
 
         @torch._dynamo.optimize_assert("inductor")
         def run(x, train=True):
@@ -9724,10 +9815,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch.manual_seed(1234)
         weight.grad.zero_()
         r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
-        if is_halide_backend(self.device):
+        if is_halide_backend(get_device_from_test_args_kwargs(self)):
             self.assertEqual(fw_code.count("halide_helpers.rand"), 1)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
-        elif self.device == GPU_TYPE:
+        elif get_device_from_test_args_kwargs(self) == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
@@ -9752,7 +9843,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch.nn.Dropout(),
             torch.nn.Linear(32, 32, bias=False),
             torch.nn.Dropout(),
-        ).to(self.device)
+        ).to(get_device_from_test_args_kwargs(self))
 
         @torch._dynamo.optimize_assert("inductor")
         def run(x):
@@ -9761,13 +9852,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch._inductor.metrics.generated_kernel_count = 0
 
         result, (fw_code, bw_code) = run_fw_bw_and_get_code(
-            lambda: run(torch.randn([8, 32], device=self.device))
+            lambda: run(torch.randn([8, 32], device=get_device_from_test_args_kwargs(self)))
         )
 
-        if is_halide_backend(self.device):
+        if is_halide_backend(get_device_from_test_args_kwargs(self)):
             self.assertEqual(fw_code.count("halide_helpers.rand"), 2)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
-        elif self.device == GPU_TYPE:
+        elif get_device_from_test_args_kwargs(self) == GPU_TYPE:
             # the load_seed_offset arg can be 1 or non-1; depending on whether
             # the triton signature specializes on 1 vs non-1, you might get 1
             # or 2 kernels. In newer versions of triton, there's no specialization
@@ -9778,14 +9869,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_mps  # Only works for triton
     def test_randint_kernel_count(self):
-        if self.device != GPU_TYPE:
+        if get_device_from_test_args_kwargs(self) != GPU_TYPE:
             raise unittest.SkipTest("Only valid for GPU!")
 
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
-            random_tensor1 = torch.randint(10, [32], device=self.device)
-            random_tensor2 = torch.randint(10, [32], device=self.device)
-            random_tensor3 = torch.randint(10, [32], device=self.device)
+            random_tensor1 = torch.randint(10, [32], device=get_device_from_test_args_kwargs(self))
+            random_tensor2 = torch.randint(10, [32], device=get_device_from_test_args_kwargs(self))
+            random_tensor3 = torch.randint(10, [32], device=get_device_from_test_args_kwargs(self))
             return random_tensor1, random_tensor2, random_tensor3
 
         _, source_codes = run_and_get_code(fn1)
@@ -10065,10 +10156,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @requires_gpu()
     @skip_if_halide  # cascading accuracy issues due rsqrt fallback
     def test_tmp_not_defined_issue3(self):
-        test_device = torch.device(type=self.device)
+        test_device = torch.device(type=get_device_from_test_args_kwargs(self))
         test_device_0 = (
-            torch.device(type=self.device, index=0)
-            if self.device != "cpu"
+            torch.device(type=get_device_from_test_args_kwargs(self), index=0)
+            if get_device_from_test_args_kwargs(self) != "cpu"
             else test_device
         )
 
@@ -10180,7 +10271,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 permute_1,
             ]
 
-        kwargs = aot_graph_input_parser(forward, device=self.device)
+        kwargs = aot_graph_input_parser(forward, device=get_device_from_test_args_kwargs(self))
         self.common(forward, [], kwargs=kwargs)
 
     @skip_if_gpu_halide
@@ -10245,7 +10336,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     def test_zero_dim_reductions(self):
         for kd in [True, False]:
-            inps0 = (torch.zeros(2, 0, device=self.device, dtype=torch.float16), 1, kd)
+            inps0 = (
+                torch.zeros(2, 0, device=get_device_from_test_args_kwargs(self), dtype=torch.float16),
+                1,
+                kd,
+            )
             failed_ops = [aten.argmin, aten.argmax, aten.max, aten.min]
             for fo in failed_ops:
                 with self.assertRaisesRegex(
@@ -10308,19 +10403,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         test_dtypes,
     )
     def test_unspec_inputs(self, dtype):
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             raise unittest.SkipTest("Testing mixed devices")
 
         if (
-            is_halide_backend(self.device)
-            and getattr(self.device, "type", self.device) == "cuda"
+            is_halide_backend(get_device_from_test_args_kwargs(self))
+            and getattr(get_device_from_test_args_kwargs(self), "type", get_device_from_test_args_kwargs(self)) == "cuda"
         ):
             # https://github.com/halide/Halide/issues/8318
             raise unittest.SkipTest("halide not supported")
 
         if not self.is_dtype_supported(dtype):
             raise unittest.SkipTest(
-                f"dtype {dtype} not supported for device {self.device}"
+                f"dtype {dtype} not supported for device {get_device_from_test_args_kwargs(self)}"
             )
 
         def fn(x, y):
@@ -10337,7 +10432,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_list_clearing(self):
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             contexts = [contextlib.nullcontext]
         else:
             contexts = [
@@ -10348,8 +10443,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for context in contexts:
             with context():
                 inps = [
-                    torch.rand([5, 5]).to(self.device),
-                    torch.rand([5, 5]).to(self.device),
+                    torch.rand([5, 5]).to(get_device_from_test_args_kwargs(self)),
+                    torch.rand([5, 5]).to(get_device_from_test_args_kwargs(self)),
                 ]
                 inp_refs = [weakref.ref(inp) for inp in inps]
 
@@ -10387,11 +10482,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     fn_compiled(inps)
 
                 # do an extra run to make sure we are deallocating on warmup and record
-                if self.device == GPU_TYPE:
+                if get_device_from_test_args_kwargs(self) == GPU_TYPE:
                     inps.extend(
                         [
-                            torch.rand([5, 5]).to(self.device),
-                            torch.rand([5, 5]).to(self.device),
+                            torch.rand([5, 5]).to(get_device_from_test_args_kwargs(self)),
+                            torch.rand([5, 5]).to(get_device_from_test_args_kwargs(self)),
                         ]
                     )
                     inp_refs.extend([weakref.ref(inp) for inp in inps])
@@ -10402,7 +10497,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
                 # for some reason, TorchDispatch doesnt capture the
                 # cuda mm call (even without cudagraphs)
-                if self.device == "cpu":
+                if get_device_from_test_args_kwargs(self) == "cpu":
                     self.assertTrue(matmul_seen)
                 else:
                     self.assertEqual(len(inps), 0)
@@ -10444,7 +10539,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.common(fn, (x,))
 
     def test_kwargs(self):
-        if self.device == GPU_TYPE:
+        if get_device_from_test_args_kwargs(self) == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")
 
         def fn(x, y):
@@ -10496,7 +10591,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @tf32_on_and_off(0.005)
     def test_inductor_layout_optimization_input_mutations(self):
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
-        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(self.device)
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(get_device_from_test_args_kwargs(self))
 
         def f(x):
             x.mul_(2)
@@ -10504,7 +10599,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return out
 
         f_compiled = torch.compile(f)
-        x_ref = torch.rand(2, 3, 128, 128, device=self.device)
+        x_ref = torch.rand(2, 3, 128, 128, device=get_device_from_test_args_kwargs(self))
         x_test = x_ref.detach().clone()
         with torch.no_grad():
             out_ref = f(x_ref)
@@ -10619,7 +10714,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
         # TODO: support cuda path.
-        if self.device == GPU_TYPE:
+        if get_device_from_test_args_kwargs(self) == GPU_TYPE:
             raise unittest.SkipTest("sqrt dynamic shapes only supports cpu")
 
         class Model(torch.nn.Module):
@@ -10657,7 +10752,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_index_dynamic_shapes(self):
         # Repro from vision_maskrcnn
         def fn(arg0_1):
@@ -10730,7 +10825,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, [torch.randn(5)])
 
     def test_setitem_with_int_parameter(self):
-        x = torch.zeros(7, device=self.device)
+        x = torch.zeros(7, device=get_device_from_test_args_kwargs(self))
 
         def fn(n, a):
             a[n] = -1
@@ -10765,8 +10860,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a, b):
             return a + b
 
-        a = torch.rand((100,), device=self.device)
-        b = torch.rand((100,), device=self.device)
+        a = torch.rand((100,), device=get_device_from_test_args_kwargs(self))
+        b = torch.rand((100,), device=get_device_from_test_args_kwargs(self))
         with profile() as prof:
             fn(a, b)
         assert any(
@@ -10778,7 +10873,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             tmp = x + 1
             return tmp.view(-1, 1, 2)
 
-        x = torch.arange(8, device=self.device, dtype=torch.float32)
+        x = torch.arange(8, device=get_device_from_test_args_kwargs(self), dtype=torch.float32)
         out = f(x)
         compiled_out = torch.compile(f)(x)
 
@@ -10854,13 +10949,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     (64, 3, 11, 11),
                     (363, 121, 11, 1),
                     torch.float32,
-                    device=self.device,
+                    device=get_device_from_test_args_kwargs(self),
                 ).to(memory_format=torch.channels_last),
                 rand_strided(
                     (1, 3, 224, 224),
                     (150528, 50176, 224, 1),
                     torch.float32,
-                    device=self.device,
+                    device=get_device_from_test_args_kwargs(self),
                 )
                 .to(memory_format=torch.channels_last)
                 .squeeze(0),
@@ -10911,7 +11006,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             _scaled_dot_product_efficient_attention = None
             return (getitem,)
 
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         DEVICE = torch.device(f"{GPU_TYPE}:0")
@@ -10949,7 +11044,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             foo_opt = torch.compile(foo, backend="inductor")
             code = run_and_get_triton_code(foo_opt, *inps)
             have_block_ptr = code.count("tl.make_block_ptr") > 0
-            if not is_halide_backend(self.device):
+            if not is_halide_backend(get_device_from_test_args_kwargs(self)):
                 self.assertEqual(have_block_ptr, use_block_ptr)
 
     @requires_gpu()
@@ -11096,7 +11191,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(
             Model(),
             (torch.randn(8, 256, 16, 16),),
-            check_lowp=not is_halide_backend(self.device),
+            check_lowp=not is_halide_backend(get_device_from_test_args_kwargs(self)),
         )
 
     def test_inplace_where_pointwise(self):
@@ -11107,7 +11202,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.rand(1), torch.rand(2)))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_view_on_aliased(self):
         # https://github.com/pytorch/pytorch/issues/96728
         def fn1(a, b):
@@ -11155,9 +11250,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return a[out_features.index(in_feature)]
 
         x = [
-            torch.rand([1, 256, 100, 152], device=self.device),
-            torch.rand([1, 256, 50, 76], device=self.device),
-            torch.rand([1, 256, 25, 38], device=self.device),
+            torch.rand([1, 256, 100, 152], device=get_device_from_test_args_kwargs(self)),
+            torch.rand([1, 256, 50, 76], device=get_device_from_test_args_kwargs(self)),
+            torch.rand([1, 256, 25, 38], device=get_device_from_test_args_kwargs(self)),
         ]
         opt_fn = torch.compile(fn, backend="inductor")
         same(fn(x), opt_fn(x))
@@ -11339,7 +11434,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         args = [rand_strided(sh, st) for (sh, st) in args]
         args.append(256)
 
-        if is_cpp_backend(self.device):
+        if is_cpp_backend(get_device_from_test_args_kwargs(self)):
             opt_fn = torch.compile(fn, backend="inductor")
             _, code = run_and_get_cpp_code(opt_fn, *args)
             num = (
@@ -11369,17 +11464,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             attention_mask = attention_mask.long()
             return torch.cumsum(attention_mask, dim=1)
 
-        if self.device == "mps" and MACOS_VERSION < 13.3:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("CumSum for int64 needs MacOS-13.3+")
 
         x = torch.randn(2, 2)
         self.common(fn, (x,), atol=0, rtol=0)
 
-    @staticmethod
     def _check_resize_common(
         self, fn, x, size_or_y, memory_format, inplace, deterministic
     ):
-        x = x.to(self.device)
+        x = x.to(get_device_from_test_args_kwargs(self))
         x_ref_arg = x.clone()
         x_opt_arg = x.clone()
         x_numel = x.numel()
@@ -11441,9 +11535,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             with DeterministicGuard(
                 deterministic, fill_uninitialized_memory=deterministic
             ):
-                for x, y_size, memory_format in CommonTemplate._cases_resize_common():
-                    CommonTemplate._check_resize_common(
-                        self,
+                for x, y_size, memory_format in self._cases_resize_common():
+                    self._check_resize_common(
                         fn,
                         x,
                         y_size,
@@ -11452,9 +11545,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                         deterministic=deterministic,
                     )
 
-    @staticmethod
-    def _cases_resize_as_common():
-        for x, y_size, memory_format in CommonTemplate._cases_resize_common():
+    @classmethod
+    def _cases_resize_as_common(cls):
+        for x, y_size, memory_format in cls._cases_resize_common():
             # each sizes /memory_format combintation tested in 2 ways:
             # 1. y is contiguous fn gets memory_format kwargs
             # 2. y has memory_format contiguity and fn gets preserve kwarg
@@ -11480,9 +11573,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             with DeterministicGuard(
                 deterministic, fill_uninitialized_memory=deterministic
             ):
-                for x, y, memory_format in CommonTemplate._cases_resize_as_common():
-                    CommonTemplate._check_resize_common(
-                        self,
+                for x, y, memory_format in self._cases_resize_as_common():
+                    self._check_resize_common(
                         fn,
                         x,
                         y,
@@ -11502,7 +11594,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         opt_fn = torch.compile(fn, backend="inductor")
         same(fn(x, y), opt_fn(x_clone, y))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_erfc(self):
         def fn(x):
             return torch.erfc(x)
@@ -11510,7 +11602,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (torch.randn(8, 8),))
 
     @skip_if_halide  # erfinv not implemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_erfinv(self):
         def fn(x):
             return torch.erfinv(x)
@@ -11528,7 +11620,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (torch.randn(26),))
 
     def test_scaled_dot_product_attention(self):
-        if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
+        if get_device_from_test_args_kwargs(self) == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
             raise unittest.SkipTest("Can't run flash attention on this platform")
 
         def fn(q, k, v):
@@ -11553,7 +11645,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @xfail_if_mps_unimplemented
     @expectedFailureXPU
     def test_scaled_dot_product_efficient_attention(self):
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         # The first two values should be the same, attention output
@@ -11579,7 +11671,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(x):
             return torch.fft.fftn(x)
 
-        if self.device == "mps" and MACOS_VERSION < 14.0:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 14.0:
             raise unittest.SkipTest("FFT needs MacOS-14+")
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
@@ -11588,7 +11680,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(x):
             return torch.fft.fftn(x).real
 
-        if self.device == "mps" and MACOS_VERSION < 14.0:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 14.0:
             raise unittest.SkipTest("FFT needs MacOS-14+")
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
@@ -11773,7 +11865,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Inductor specializes on the (unguarded) alignment of the initial input.
         # Make sure that for different configurations, nothing breaks.
         for offset in (0, 1, 2, 3, 4):
-            base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=self.device)
+            base = torch.randn(
+                64 * 64 + 64, dtype=torch.float32, device=get_device_from_test_args_kwargs(self)
+            )
             inp = torch.as_strided(base, (64, 64), (64, 1), offset)
             torch._dynamo.reset()
             fn_c = torch.compile(fn)
@@ -11784,7 +11878,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
             for offset2 in (0, 1, 2, 3, 4):
                 base2 = torch.randn(
-                    64 * 64 + 64, dtype=torch.float32, device=self.device
+                    64 * 64 + 64, dtype=torch.float32, device=get_device_from_test_args_kwargs(self)
                 )
                 inp2 = torch.as_strided(base2, (64, 64), (64, 1), offset2)
                 ref2 = fn(inp2)
@@ -11807,7 +11901,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(x: torch.Tensor) -> torch.Tensor:
             return x.sin() + x.cos()
 
-        base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=self.device)
+        base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=get_device_from_test_args_kwargs(self))
 
         inp1 = torch.as_strided(base, (32, 32), (32, 1), 4)
         inp2 = torch.as_strided(base, (64, 64), (64, 1), 4)
@@ -11852,10 +11946,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ((64, 64), (64, 1), 5),
         ):
             torch.manual_seed(42)
-            base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=self.device)
+            base = torch.randn(
+                64 * 64 + 64, dtype=torch.float32, device=get_device_from_test_args_kwargs(self)
+            )
             torch.manual_seed(42)
             base_ref = torch.randn(
-                64 * 64 + 64, dtype=torch.float32, device=self.device
+                64 * 64 + 64, dtype=torch.float32, device=get_device_from_test_args_kwargs(self)
             )
 
             inp = torch.as_strided(base, size, stride, offset)
@@ -11950,7 +12046,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             b = torch.ops.test.foo(a)
             return b
 
-        a = torch.randn((16, 32), device=self.device)
+        a = torch.randn((16, 32), device=get_device_from_test_args_kwargs(self))
 
         _, code = run_and_get_code(
             torch.compile(fn),
@@ -11987,7 +12083,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             b = torch.ops.test.foo(a)
             return b
 
-        a = torch.randn((16, 32), device=self.device)
+        a = torch.randn((16, 32), device=get_device_from_test_args_kwargs(self))
 
         _, code = run_and_get_code(
             torch.compile(fn),
@@ -12065,8 +12161,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_custom_op_fixed_layout_sequential(self):
         import torch.library
 
-        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(device=self.device)
-        inp = torch.rand(2, 3, 128, 128, device=self.device)
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(device=get_device_from_test_args_kwargs(self))
+        inp = torch.rand(2, 3, 128, 128, device=get_device_from_test_args_kwargs(self))
         expected_stride = mod(inp).stride()
 
         def bar(x):
@@ -12102,8 +12198,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @tf32_on_and_off(0.005)
     def test_mutable_custom_op_fixed_layout2(self):
         with torch.library._scoped_library("mylib", "DEF") as lib:
-            mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(device=self.device)
-            inp = torch.rand(2, 3, 128, 128, device=self.device)
+            mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(device=get_device_from_test_args_kwargs(self))
+            inp = torch.rand(2, 3, 128, 128, device=get_device_from_test_args_kwargs(self))
             expected_stride = mod(inp).clone().stride()
 
             lib.define(
@@ -12151,7 +12247,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 # to be channels-last. If this assertion ever fails then we need
                 # a new test case.
                 self.assertEqual(len(bar_strides), 1)
-                if self.device == "mps" and MACOS_VERSION < 15.0:
+                if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 15.0:
                     # Before MacOS15 contigous output were returned regardless of input
                     self.assertEqual(bar_strides[0], expected_stride)
                 else:
@@ -12263,13 +12359,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     dst.copy_(src)
 
             def f(x):
-                full_default_3 = torch.full([3, 3], 7.0, device=self.device)
+                full_default_3 = torch.full([3, 3], 7.0, device=get_device_from_test_args_kwargs(self))
                 chunk_cat_default_1 = torch.ops.mylib.copy_.default(full_default_3, x)
                 mul_out = torch.mul(full_default_3, full_default_3)
                 return mul_out
 
             x = (
-                torch.arange(9, dtype=torch.float, device=self.device)
+                torch.arange(9, dtype=torch.float, device=get_device_from_test_args_kwargs(self))
                 .view(3, 3)
                 .t()
                 .contiguous()
@@ -12330,9 +12426,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         foo_c = torch.compile(f, dynamic=True)
 
         def run(fn):
-            coord = torch.ones((2, 3), device=self.device)
-            rot = nn.Parameter(torch.ones((2, 3), device=self.device))
-            trans = nn.Parameter(torch.ones((2, 3), device=self.device))
+            coord = torch.ones((2, 3), device=get_device_from_test_args_kwargs(self))
+            rot = nn.Parameter(torch.ones((2, 3), device=get_device_from_test_args_kwargs(self)))
+            trans = nn.Parameter(torch.ones((2, 3), device=get_device_from_test_args_kwargs(self)))
 
             U = fn(coord, rot, trans)
             U.backward()
@@ -12357,7 +12453,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             x = test_operators.realize(x)
             return x
 
-        x = torch.rand(3, 2, device=self.device).t()
+        x = torch.rand(3, 2, device=get_device_from_test_args_kwargs(self)).t()
         ref = f(x)
         called = False
 
@@ -12365,7 +12461,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             nonlocal called
             called = True
 
-            if self.device != "cpu":
+            if get_device_from_test_args_kwargs(self) != "cpu":
                 self.assertEqual(len(nodes), 3)
                 _, mul_buf, _ = nodes
                 self.assertTrue(
@@ -12393,7 +12489,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return out
 
         device = "cpu"
-        dtype = torch.double if self.device != "mps" else torch.float32
+        dtype = torch.double if get_device_from_test_args_kwargs(self) != "mps" else torch.float32
         tensor = torch.rand((1,), dtype=dtype, device=device)
         index = torch.tensor([0], dtype=torch.long, device=device)
         source = torch.rand((1,), dtype=dtype, device=device)
@@ -12426,8 +12522,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         # Use shape (2**24, 65) rather than (2**24, 128) potentially avoid OOM in
         # CI while still keep the same up-rounded size-hints.
-        a = torch.randn(2**24, 65, device=self.device)
-        b = torch.randn(65, 2**24, device=self.device)
+        a = torch.randn(2**24, 65, device=get_device_from_test_args_kwargs(self))
+        b = torch.randn(65, 2**24, device=get_device_from_test_args_kwargs(self))
         fn(a, b)
 
     # Skipped on ROCm until https://github.com/ROCm/triton/issues/443 resolved
@@ -12441,7 +12537,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             f()
 
         params = [
-            torch.rand(10, 10, dtype=torch.float32, device=self.device)
+            torch.rand(10, 10, dtype=torch.float32, device=get_device_from_test_args_kwargs(self))
             for _ in range(194)
         ]
         for p in params:
@@ -12472,7 +12568,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if TEST_WITH_ASAN:
             return
 
-        if is_triton_cpu_backend(self.device):
+        if is_triton_cpu_backend(get_device_from_test_args_kwargs(self)):
             raise unittest.SkipTest("Compile time crash in Triton CPU CI")
 
         # https://github.com/pytorch/pytorch/issues/126338
@@ -12485,8 +12581,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # @ operation needs arguments to be the same dtype
         for view_dtype in test_dtypes:
             try:
-                x = rand_strided((2, 2), (2, 1), device=self.device, dtype=dtype_x)
-                y = rand_strided((2, 2), (2, 1), device=self.device, dtype=dtype_y)
+                x = rand_strided((2, 2), (2, 1), device=get_device_from_test_args_kwargs(self), dtype=dtype_x)
+                y = rand_strided((2, 2), (2, 1), device=get_device_from_test_args_kwargs(self), dtype=dtype_y)
                 x2 = x.clone()
                 fn(x, y, view_dtype, x2)
             except Exception as e:
@@ -12507,7 +12603,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return x
 
         torch._inductor.metrics.generated_kernel_count = 0
-        x = torch.randn([1024], dtype=torch.float16, device=self.device)
+        x = torch.randn([1024], dtype=torch.float16, device=get_device_from_test_args_kwargs(self))
         self.common(fn, (x,), reference_in_float=False)
         assertGeneratedKernelCountEqual(self, 1)
 
@@ -12519,19 +12615,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 [10, 10]
             )
 
-        x = torch.randn([100, 1], device=self.device)
+        x = torch.randn([100, 1], device=get_device_from_test_args_kwargs(self))
         x2 = x.clone()
         self.common(fn, (x, x2), reference_in_float=False, check_lowp=False)
 
         # The cpp_wrapper code is significantly more complex, so skip checking for exact
         # code lines.
         if not config.cpp_wrapper:
-            x = torch.randn([100, 1], device=self.device)
+            x = torch.randn([100, 1], device=get_device_from_test_args_kwargs(self))
             x2 = x.clone()
             _, code = run_and_get_code(fn, x, x2)
             FileCheck().check("aten.view.dtype(reinterpret_tensor").run(code[0])
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     @requires_gpu()
     def test_scalar_cpu_tensor_arg(self):
         def fn(x, y):
@@ -12546,7 +12642,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for cpu_dtype in test_dtypes:
             if not self.is_dtype_supported(cpu_dtype):
                 continue
-            x = torch.rand([20], device=self.device)
+            x = torch.rand([20], device=get_device_from_test_args_kwargs(self))
             y = torch.rand([4], device="cpu", dtype=cpu_dtype)
             self.common(
                 fn,
@@ -12561,7 +12657,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             x_view = x.view(dtype=torch.int16)
             return x_view.mul(2) + x_view.bitwise_and(2)
 
-        x = torch.ones(4, dtype=torch.float16, device=self.device)
+        x = torch.ones(4, dtype=torch.float16, device=get_device_from_test_args_kwargs(self))
         ref = fn(x)
         actual = torch.compile(fn)(x)
         self.assertEqual(ref, actual)
@@ -12575,9 +12671,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return x_view.mul(2) + x_view.bitwise_and(2)
 
         if not self.is_dtype_supported(torch.bfloat16):
-            raise unittest.SkipTest("bfloat16 is not supported on {self.device}")
-        a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
-        b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+            raise unittest.SkipTest("bfloat16 is not supported on {get_device_from_test_args_kwargs(self)}")
+        a = torch.ones(4, dtype=torch.bfloat16, device=get_device_from_test_args_kwargs(self))
+        b = torch.ones(4, dtype=torch.bfloat16, device=get_device_from_test_args_kwargs(self))
         ref = fn(a, b)
         actual = torch.compile(fn)(a, b)
         self.assertEqual(ref, actual)
@@ -12588,8 +12684,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             x_view = x.view(dtype=torch.int32)
             return x_view.mul(2) + x_view.bitwise_and(2)
 
-        a = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
-        b = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
+        a = 0.5 * torch.ones(4, dtype=torch.float32, device=get_device_from_test_args_kwargs(self))
+        b = 0.5 * torch.ones(4, dtype=torch.float32, device=get_device_from_test_args_kwargs(self))
         ref = fn(a, b)
         actual = torch.compile(fn)(a, b)
         self.assertEqual(ref, actual)
@@ -12600,7 +12696,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(n):
             return (
                 torch.randint(
-                    low=-5, high=5, size=(n,), dtype=torch.int64, device=self.device
+                    low=-5,
+                    high=5,
+                    size=(n,),
+                    dtype=torch.int64,
+                    device=get_device_from_test_args_kwargs(self),
                 )
                 % 10
             )
@@ -12616,8 +12716,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         N = 1024
         K = 1024 + 1  # a size that requires padding
 
-        mat1 = torch.rand(B, M, K, device=self.device)
-        mat2 = torch.rand(B, K, N, device=self.device)
+        mat1 = torch.rand(B, M, K, device=get_device_from_test_args_kwargs(self))
+        mat2 = torch.rand(B, K, N, device=get_device_from_test_args_kwargs(self))
 
         should_pad = pad_mm.should_pad_bench(None, mat1, mat2, torch.ops.aten.bmm)
 
@@ -12634,7 +12734,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_pointwise(self, name, op):
         dtype = torch.float32
         check_lowp = True
-        if self.device == GPU_TYPE and name in {
+        if get_device_from_test_args_kwargs(self) == GPU_TYPE and name in {
             "airy_ai",
             "bessel_i0",
             "bessel_i1",
@@ -12673,8 +12773,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp = False
 
         if (
-            is_halide_backend(self.device)
-            or is_triton_cpu_backend(self.device)
+            is_halide_backend(get_device_from_test_args_kwargs(self))
+            or is_triton_cpu_backend(get_device_from_test_args_kwargs(self))
             and name
             in (
                 "erfinv",
@@ -12719,7 +12819,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ):
             raise unittest.SkipTest(f"Halide & Triton CPU do not support {name}")
 
-        if is_triton_cpu_backend(self.device) and name in [
+        if is_triton_cpu_backend(get_device_from_test_args_kwargs(self)) and name in [
             "erfc",
             "erfcx",
             "round",
@@ -12729,8 +12829,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         if name in {"gammainc", "gammaincc"}:
             args = (
-                torch.randn(8, 8, dtype=dtype, device=self.device),
-                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(1, 2),
+                torch.randn(8, 8, dtype=dtype, device=get_device_from_test_args_kwargs(self)),
+                torch.empty(8, 8, dtype=dtype, device=get_device_from_test_args_kwargs(self)).uniform_(1, 2),
             )
 
             def fn(x, y):
@@ -12738,8 +12838,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         elif name in {"xlog1py", "xlogy", "zeta"}:
             args = (
-                torch.randn(8, 8, dtype=dtype, device=self.device),
-                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(1, 2),
+                torch.randn(8, 8, dtype=dtype, device=get_device_from_test_args_kwargs(self)),
+                torch.empty(8, 8, dtype=dtype, device=get_device_from_test_args_kwargs(self)).uniform_(1, 2),
             )
 
             def fn(x, y):
@@ -12747,7 +12847,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         elif name == "multigammaln":
             args = (
-                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(1, 2),
+                torch.empty(8, 8, dtype=dtype, device=get_device_from_test_args_kwargs(self)).uniform_(1, 2),
                 2,
             )
 
@@ -12757,7 +12857,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         elif name == "polygamma":
             args = (
                 1,
-                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(1, 10),
+                torch.empty(8, 8, dtype=dtype, device=get_device_from_test_args_kwargs(self)).uniform_(1, 10),
             )
 
             def fn(n, x):
@@ -12765,7 +12865,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         elif "_polynomial_" in name:
             args = (
-                torch.randn(8, 8, dtype=dtype, device=self.device),
+                torch.randn(8, 8, dtype=dtype, device=get_device_from_test_args_kwargs(self)),
                 2,
             )
 
@@ -12773,14 +12873,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 return op(x, n)
 
         else:
-            args = (torch.randn(8, 8, dtype=dtype, device=self.device),)
+            args = (torch.randn(8, 8, dtype=dtype, device=get_device_from_test_args_kwargs(self)),)
 
             def fn(x):
                 return op(x)
 
         ctx = (
             contextlib.nullcontext()
-            if self.device != "mps"
+            if get_device_from_test_args_kwargs(self) != "mps"
             or name
             not in [
                 "airy_ai",
@@ -12854,7 +12954,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(len(result) == 3)
 
     def test_complex_memory_overlap(self):
-        t = rand_strided((8, 1500, 1), (1504, 1, 1), device=self.device)
+        t = rand_strided((8, 1500, 1), (1504, 1, 1), device=get_device_from_test_args_kwargs(self))
         self.assertFalse(complex_memory_overlap(t))
 
     @xfail_if_mps
@@ -12866,7 +12966,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         We work around that in rand_strided by generating an fp16 tensor first and
         then do casting.
         """
-        t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
+        t = rand_strided(
+            (2, 3), (3, 1), device=get_device_from_test_args_kwargs(self), dtype=torch.float8_e4m3fn
+        )
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
     @largeTensorTest("1GB", inductor=True)
@@ -12884,7 +12986,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         s0 = 16777472
         s1 = 8
         compiled_fn = torch.compile(fn)
-        actual = compiled_fn(torch.ones(s0, s1, device=self.device))
+        actual = compiled_fn(torch.ones(s0, s1, device=get_device_from_test_args_kwargs(self)))
         self.assertTrue((actual == 1).all())
 
     @skip_if_gpu_halide
@@ -12900,13 +13002,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         a = torch.randn(512, 4096, requires_grad=True)
         b = torch.randint(size=(512,), low=0, high=4095)
 
-        if self.device == "mps" and MACOS_VERSION < 13.3:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
 
         self.common(forward, (a, b))
 
     def test_isin_tensor_scalar(self):
-        if self.device == "mps" and MACOS_VERSION < 14.0:
+        if get_device_from_test_args_kwargs(self) == "mps" and MACOS_VERSION < 14.0:
             raise unittest.SkipTest("isin is not implemented on MacOS-13")
 
         for invert in [True, False]:
@@ -12927,7 +13029,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 start=0,
                 step=1,
                 dtype=torch.int64,
-                device=self.device,
+                device=get_device_from_test_args_kwargs(self),
                 requires_grad=False,
             )
             unsqueeze = torch.ops.aten.unsqueeze.default(iota, -1)
@@ -12976,7 +13078,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 return self.linear(self.weight_normed_linear(x))
 
         def f(m, x):
-            with torch.amp.autocast(device_type=self.device, dtype=torch.half):
+            with torch.amp.autocast(device_type=get_device_from_test_args_kwargs(self), dtype=torch.half):
                 loss = m(x).sum()
                 loss.backward()
             return loss
@@ -12984,10 +13086,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # odd number on purpose to trigger comprehensive padding
         in_features = 1025
         x = torch.randn(2, in_features, dtype=torch.half, requires_grad=True).to(
-            device=self.device
+            device=get_device_from_test_args_kwargs(self)
         )
         m = Repro(in_features)
-        m = m.to(self.device)
+        m = m.to(get_device_from_test_args_kwargs(self))
 
         f(m, x)
 
@@ -13152,7 +13254,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def f(x):
             return x.sort()
 
-        x = torch.randn(16, 32, device=self.device)
+        x = torch.randn(16, 32, device=get_device_from_test_args_kwargs(self))
         code = run_and_get_triton_code(f, x)
 
         if is_dynamic_shape_enabled():
@@ -13224,14 +13326,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             diag = torch.diagonal(mul)
             diag.copy_(other)
             # force grah partition by device copy
-            u = diag.cpu().to(self.device)
+            u = diag.cpu().to(get_device_from_test_args_kwargs(self))
             return torch.mm(mul, z) + u + diag
 
         inps = (
-            torch.randn(3, 3, device=self.device),
-            torch.randn(3, 3, device=self.device),
-            torch.randn(3, 3, device=self.device),
-            torch.randn(3, device=self.device),
+            torch.randn(3, 3, device=get_device_from_test_args_kwargs(self)),
+            torch.randn(3, 3, device=get_device_from_test_args_kwargs(self)),
+            torch.randn(3, 3, device=get_device_from_test_args_kwargs(self)),
+            torch.randn(3, device=get_device_from_test_args_kwargs(self)),
         )
 
         eager_out = f(*inps)
@@ -13259,7 +13361,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return torch.arange(0.1, 8.0001, 1, dtype=x.dtype, device=x.device)
 
         make_arg = functools.partial(
-            make_tensor, device=self.device, requires_grad=False
+            make_tensor, device=get_device_from_test_args_kwargs(self), requires_grad=False
         )
 
         compiled_fn = torch.compile(fn)
@@ -13313,14 +13415,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             base = torch.randn(
                 64 * 64 + 64,
                 dtype=torch.float32,
-                device=self.device,
+                device=get_device_from_test_args_kwargs(self),
                 requires_grad=True,
             )
             torch.manual_seed(42)
             base_ref = torch.randn(
                 64 * 64 + 64,
                 dtype=torch.float32,
-                device=self.device,
+                device=get_device_from_test_args_kwargs(self),
                 requires_grad=True,
             )
 
@@ -13353,11 +13455,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_constant_tensor2(self):
         def fn(x):
-            return torch.tensor(list(range(2, 40, 2)), device=self.device) + x
+            return torch.tensor(list(range(2, 40, 2)), device=get_device_from_test_args_kwargs(self)) + x
 
         compiled_fn = torch.compile(fn)
 
-        x = torch.randn(1, device=self.device)
+        x = torch.randn(1, device=get_device_from_test_args_kwargs(self))
 
         self.assertEqual(fn(x), compiled_fn(x))
 
@@ -13385,8 +13487,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return torch.index_select(x, index=index, dim=0)
 
         example_inputs = (
-            torch.randn((32, 64), device=self.device),
-            repeats := torch.tensor([5, 10, 15], device=self.device),
+            torch.randn((32, 64), device=get_device_from_test_args_kwargs(self)),
+            repeats := torch.tensor([5, 10, 15], device=get_device_from_test_args_kwargs(self)),
         )
         torch._dynamo.mark_dynamic(repeats, 0)
 
@@ -13406,8 +13508,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for context in contexts:
             with context():
                 inps = [
-                    torch.rand([5, 5]).to(self.device),
-                    torch.rand([5, 5]).to(self.device),
+                    torch.rand([5, 5]).to(get_device_from_test_args_kwargs(self)),
+                    torch.rand([5, 5]).to(get_device_from_test_args_kwargs(self)),
                 ]
                 inp_refs = [weakref.ref(inp) for inp in inps]
 
@@ -13443,8 +13545,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 # do an extra run to make sure we are deallocating on warmup and record
                 inps.extend(
                     [
-                        torch.rand([5, 5]).to(self.device),
-                        torch.rand([5, 5]).to(self.device),
+                        torch.rand([5, 5]).to(get_device_from_test_args_kwargs(self)),
+                        torch.rand([5, 5]).to(get_device_from_test_args_kwargs(self)),
                     ]
                 )
                 inp_refs.extend([weakref.ref(inp) for inp in inps])
@@ -13473,7 +13575,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 )
             return x
 
-        x = torch.randn(2, 24, 110, 110, device=self.device)
+        x = torch.randn(2, 24, 110, 110, device=get_device_from_test_args_kwargs(self))
         opt = torch.compile(pad_same, dynamic=True)
         res = opt(x, (5, 5), (2, 2))
         ref = pad_same(x, (5, 5), (2, 2))
@@ -13487,7 +13589,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "Fail for triton cpu backend with error: https://gist.github.com/shunting314/a873fb32b6b7b5a437f44280ae86839f"
             )
 
-        if self.device == "cpu":
+        if get_device_from_test_args_kwargs(self) == "cpu":
             raise unittest.SkipTest(
                 "The test fails some times on CI: "
                 "https://github.com/pytorch/pytorch/actions/runs/15333913377/job/43153170162. "
@@ -13498,7 +13600,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         # rand rather than randn since the mean for the latter is close to 0
         # which happens to be close to the value generated by the bug.
-        t = torch.rand(size, dtype=torch.float, device=self.device)
+        t = torch.rand(size, dtype=torch.float, device=get_device_from_test_args_kwargs(self))
         op = torch.mean
         expected = op(t)
         actual = torch.compile(op)(t)
@@ -13517,7 +13619,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         f = torch.compile(f)
 
-        x = torch.randn((2, 3, 2), device=self.device)
+        x = torch.randn((2, 3, 2), device=get_device_from_test_args_kwargs(self))
         expected_graph1 = f"""\
 def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]{str(x.device)}"):
         permute: "f32[2, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg0_1, [0, 2, 1]);  arg0_1 = None
@@ -13533,7 +13635,7 @@ def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]{str(x.device)}"):
         )
 
         # dynamic shape
-        x = torch.randn((4, 3, 2), device=self.device)
+        x = torch.randn((4, 3, 2), device=get_device_from_test_args_kwargs(self))
         expected_graph2 = f"""\
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.device)}"):
         permute: "f32[s77, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg1_1, [0, 2, 1]);  arg1_1 = None
@@ -13554,7 +13656,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.dev
 
         f = torch.compile(f)
 
-        x = torch.ones((2, 3, 2), device=self.device, dtype=torch.uint8)
+        x = torch.ones((2, 3, 2), device=get_device_from_test_args_kwargs(self), dtype=torch.uint8)
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(x, 1)
         torch._dynamo.mark_dynamic(x, 2)
@@ -13616,13 +13718,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(refe_out, test_out)
 
 
-@dataclasses.dataclass
-class TestFailure:
-    suffixes: tuple[str, ...]
-    is_skip: bool = False
-    __test__: bool = False
-
-
 def copy_tests(
     my_cls, other_cls, suffix, test_failures=None, xfail_prop=None
 ):  # noqa: B902
@@ -13653,12 +13748,36 @@ def copy_tests(
                 )
                 new_test = skip_func(new_test)
 
-            setattr(other_cls, f"{name}_{suffix}", new_test)
+            setattr(other_cls, name if not suffix else f"{name}_{suffix}", new_test)
 
     # Special case convenience routine
     if hasattr(my_cls, "is_dtype_supported"):
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
 
+
+# @instantiate_parametrized_tests
+class TestTorchInductor(TestCase, CommonTemplate):
+    def common(self, *args, **kwargs):
+        if self.device_type == "cpu":
+            return check_model(self, *args, **kwargs)
+        return check_model_device(self, *args, device=self.device_type, **kwargs)
+
+
+# copy_tests(CommonTemplate, TestTorchInductor, "")
+@dataclasses.dataclass
+class TestFailure:
+    suffixes: tuple[str, ...]
+    is_skip: bool = False
+    __test__: bool = False
+
+
+instantiate_device_type_tests(
+    TestTorchInductor,
+    globals(),
+    allow_mps=True,
+    allow_xpu=True,
+    enable_inductor_backend_classes=True,
+)
 
 if RUN_CPU:
 
@@ -13667,11 +13786,11 @@ if RUN_CPU:
 
     SweepInputsCpuTest.populate()
 
-    class CpuTests(TestCase):
-        common = check_model
-        device = "cpu"
+    # class CpuTests(TestCase):
+    #     common = check_model
+    #     device = "cpu"
 
-    copy_tests(CommonTemplate, CpuTests, "cpu")
+    # copy_tests(CommonTemplate, CpuTests, "cpu")
 
 if RUN_GPU or HAS_MPS:
 
@@ -13680,11 +13799,11 @@ if RUN_GPU or HAS_MPS:
 
     SweepInputsGPUTest.populate()
 
-    class GPUTests(TestCase):
-        common = check_model_gpu
-        device = GPU_TYPE
+    # class GPUTests(TestCase):
+    #     common = check_model_gpu
+    #     device = GPU_TYPE
 
-    copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
+    # copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
 if RUN_GPU:
 
@@ -13693,7 +13812,6 @@ if RUN_GPU:
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
         device_type = GPU_TYPE
-        device = GPU_TYPE
 
         class NoOpCompilerBackend:
             def __init__(self) -> None:
@@ -14679,7 +14797,7 @@ if RUN_GPU:
             # Checks non_blocking arg is present in codegen
             # (see https://github.com/pytorch/pytorch/issues/136260)
             def fn(x):
-                return x.to(device=self.device, non_blocking=True)
+                return x.to(device=self.device_type, non_blocking=True)
 
             inp = torch.randn(3, 4)
             _, (code,) = run_and_get_code(torch.compile(fn), inp)
@@ -14724,13 +14842,13 @@ if RUN_GPU:
                 seq_length,
                 hidden_size,
                 requires_grad=True,
-                device=self.device,
+                device=self.device_type,
             )
             weight = torch.randn(
-                hidden_size, hidden_size, requires_grad=True, device=self.device
+                hidden_size, hidden_size, requires_grad=True, device=self.device_type
             )
 
-            layer_norm = torch.nn.LayerNorm(hidden_size, device=self.device)
+            layer_norm = torch.nn.LayerNorm(hidden_size, device=self.device_type)
 
             def fn(inp, weight):
                 matmul_output = inp @ weight
@@ -14956,7 +15074,7 @@ if RUN_GPU:
                 z = x @ y
                 return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
-            x, y = [torch.ones(2, 2, device=self.device) for _ in range(2)]
+            x, y = [torch.ones(2, 2, device=self.device_type) for _ in range(2)]
             x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
             eager_out = f(x, y)
 
@@ -14999,7 +15117,7 @@ if RUN_GPU:
             def g(x):
                 return x + 1
 
-            x, y = [torch.ones(2, 2, device=self.device) for _ in range(2)]
+            x, y = [torch.ones(2, 2, device=self.device_type) for _ in range(2)]
             x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
             eager_out = g(f(x, y))
 
@@ -15069,14 +15187,14 @@ if RUN_GPU:
                 return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             f_compiled = torch.compile(f)
-            x, y = torch.ones(3, 3, device=self.device), torch.randn(
-                3, 3, device=self.device
+            x, y = torch.ones(3, 3, device=self.device_type), torch.randn(
+                3, 3, device=self.device_type
             )
             compiled_out = f_compiled(x, y)
             self.assertEqual(compiled_out, f(x, y))
 
-            x, y = torch.ones(4, 4, device=self.device), torch.randn(
-                4, 4, device=self.device
+            x, y = torch.ones(4, 4, device=self.device_type), torch.randn(
+                4, 4, device=self.device_type
             )
             compiled_out = f_compiled(x, y)
             self.assertEqual(compiled_out, f(x, y))
@@ -15152,8 +15270,8 @@ if RUN_GPU:
                 return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             f_compiled = torch.compile(f)
-            x, y = torch.ones(3, 3, device=self.device), torch.randn(
-                3, 3, device=self.device
+            x, y = torch.ones(3, 3, device=self.device_type), torch.randn(
+                3, 3, device=self.device_type
             )
 
             torch._dynamo.decorators.mark_unbacked(x, 0)
