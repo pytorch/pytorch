@@ -616,30 +616,29 @@ PyObject* THPModule_toDLPackImpl(
   torch::ParsedArgs<3> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
 
-  if (r.idx == 0) {
-    auto data = r.tensor(0);
-    auto dl_device = r.intlist(1);
-    auto copy = r.toBoolOptional(2);
+  TORCH_INTERNAL_ASSERT(r.idx == 0);
 
-    // Parse the int list into a tuple.
-    std::optional<DLDevice> optional_dl_device;
+  auto data = r.tensor(0);
+  auto dl_device = r.intlist(1);
+  auto copy = r.toBoolOptional(2);
 
-    if (!dl_device.empty()) {
-      TORCH_CHECK(
-          dl_device.size() == 2,
-          "dl_device must be either None or a tuple of ints");
-      optional_dl_device = DLDevice{
-          static_cast<DLDeviceType>(dl_device[0]),
-          static_cast<int32_t>(dl_device[1])};
-    }
+  // Parse the int list into a tuple.
+  std::optional<DLDevice> optional_dl_device;
 
-    auto tensor = at::DLPackTraits<T>::toDLPack(
-        at::maybeCopyTensor(data, optional_dl_device, copy));
-    return PyCapsule_New(
-        tensor, at::DLPackTraits<T>::capsule, DLPack_Capsule_Destructor<T>);
+  if (!dl_device.empty()) {
+    TORCH_CHECK(
+        dl_device.size() == 2,
+        "dl_device must be either None or a tuple of ints");
+    optional_dl_device = DLDevice{
+        static_cast<DLDeviceType>(dl_device[0]),
+        static_cast<int32_t>(dl_device[1])};
   }
 
-  Py_RETURN_NONE;
+  auto tensor = at::DLPackTraits<T>::toDLPack(
+      at::maybeCopyTensor(data, optional_dl_device, copy));
+  return PyCapsule_New(
+      tensor, at::DLPackTraits<T>::capsule, DLPack_Capsule_Destructor<T>);
+
   END_HANDLE_TH_ERRORS
 }
 
@@ -676,9 +675,15 @@ static PyObject* THPModule_torchDeviceToDLDevice(
       "torchDeviceToDLDevice: expected torch.device argument.");
   auto device = reinterpret_cast<THPDevice*>(data)->device;
   auto dl_device = at::torchDeviceToDLDevice(device);
+
   auto tuple = PyTuple_New(2);
+  if (!tuple) {
+      throw python_error();
+  }
+
   PyTuple_SET_ITEM(tuple, 0, THPUtils_packInt64(dl_device.device_type));
   PyTuple_SET_ITEM(tuple, 1, THPUtils_packInt64(dl_device.device_id));
+
   return tuple;
   END_HANDLE_TH_ERRORS
 }
