@@ -5,7 +5,8 @@ requires = [
     # After 75.8.2 dropped dep disttools API. Please fix
     # API temporarily restored and shim used. Please fix
     # Setuptools will drop support for setup.py past 80
-    # min version for recursive glob package data support
+    # 62.3.0: min version for recursive glob package data support
+    # 77.0.0: min version for SPDX expression support for project.license
     "setuptools>=62.3.0,<80.0",
     "wheel",
     "astunparse",
@@ -23,7 +24,10 @@ name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
 requires-python = ">=3.9"  # also update classifiers when changing this
-# TODO: change to `license = "BSD-3-Clause"` after pinning setuptools>=77
+# TODO: change to `license = "BSD-3-Clause"` and enable PEP 639 after pinning setuptools>=77
+# FIXME: As of 2025.06.20, it is hard to ensure the minimum version of setuptools in our CI environment.
+# TOML-table-based license deprecated in setuptools>=77, and the deprecation warning will be changed
+# to an error on 2026.02.18. See also: https://github.com/pypa/setuptools/issues/4903
 license = { text = "BSD-3-Clause" }
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]

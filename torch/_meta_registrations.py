@@ -499,14 +499,15 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     if onesided:
         out_sizes[last_dim] = last_dim_halfsize
 
-    if device_hint(self) == "cuda":
+    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
         # _fft_r2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
+        # _fft_r2c_xpu in torch-xpu-ops/src/ATen/native/xpu/SpectralOps.cpp
         output = self.new_empty(
             out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
         )
 
         working_tensor = self
-        if use_optimized_cufft_path(dim):
+        if device_hint(self) == "cuda" and use_optimized_cufft_path(dim):
             _exec_fft(output, working_tensor, out_sizes, dim, forward=True)
         else:
             # First do the R2C transform on the last dimension
@@ -539,12 +540,6 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
         return output
 
-    elif device_hint(self) == "xpu":
-        sorted_dims = _sort_dims(self, dim, exclude_last=True)
-        out = self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
-        )
-        return _exec_fft(out, self, out_sizes, sorted_dims, forward=True)
     else:
         return self.new_empty(
             out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
