@@ -13,6 +13,7 @@ import gc
 import importlib
 import inspect
 import itertools
+import logging
 import os
 import random
 import sys
@@ -21,7 +22,6 @@ import typing
 import unittest
 import warnings
 import weakref
-import logging
 from abc import ABC
 from collections import defaultdict, namedtuple
 from collections.abc import Iterator
@@ -30,7 +30,6 @@ from enum import Enum, IntEnum
 from functools import wraps
 from typing import Any, Literal, TypedDict
 from unittest import mock
-from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 import numpy as np
 
@@ -61,6 +60,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -4776,11 +4776,9 @@ class ReproTests(LoggingTestCase, torch._dynamo.test_case.TestCase):
         self.assertEqual(counter, 1)
         self.assertEqual(result1, result2)
 
-
     @make_logging_test(dynamo=logging.DEBUG)
-    def test_lru_cache_warning_issued_during_tracing(self,records):
-
-        @torch.compile(backend='eager')
+    def test_lru_cache_warning_issued_during_tracing(self, records):
+        @torch.compile(backend="eager")
         def f(x):
             x = x.cos().sin()
             return x
@@ -4789,9 +4787,11 @@ class ReproTests(LoggingTestCase, torch._dynamo.test_case.TestCase):
         self.assertIsInstance(result, torch.Tensor)
 
         for record in records:
-            if "call to a lru_cache` wrapped function from user code at:" in record.getMessage():
+            if (
+                "call to a lru_cache` wrapped function from user code at:"
+                in record.getMessage()
+            ):
                 self.fail("lru_cache warning was incorrectly logged")
-
 
     def test_dont_aggressively_write_assert(self):
         record_graph = torch._dynamo.testing.EagerAndRecordGraphs()
@@ -6945,6 +6945,25 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             fn(torch.ones(3))
+
+    def test_nested_compile_with_guard(self):
+        @torch.compile(backend="eager", dynamic=True)
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        x = torch.randn(10, 1)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        @torch.compile(backend="eager")
+        def fn(mod, x):
+            return mod(x)
+
+        fn(Model(), x)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):

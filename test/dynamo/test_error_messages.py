@@ -1,10 +1,10 @@
 # Owner(s): ["module: dynamo"]
 
+import logging
 import re
 import traceback
 import unittest
 import warnings
-import logging
 
 import torch
 import torch._dynamo
@@ -1185,7 +1185,6 @@ User code traceback:
 
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_logs_user_stack_trace(self, records):
-        import warnings
         from functools import lru_cache
 
         @lru_cache
@@ -1195,8 +1194,12 @@ User code traceback:
         torch.compile(foo, backend="eager")(torch.randn(4))
 
         self.assertTrue(
-            any("call to a lru_cache` wrapped function from user code at:" in record.getMessage() for record in records),
-            "No lru_cache warning was logged"
+            any(
+                "call to a lru_cache` wrapped function from user code at:"
+                in record.getMessage()
+                for record in records
+            ),
+            "No lru_cache warning was logged",
         )
 
     def test_disable_message(self):

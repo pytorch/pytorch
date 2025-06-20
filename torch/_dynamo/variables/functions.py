@@ -27,19 +27,19 @@ import builtins
 import functools
 import inspect
 import itertools
-import sys
-import types
-import traceback
 import logging
+import sys
+import traceback
+import types
 from collections.abc import Sequence
 from types import FunctionType
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 from weakref import WeakKeyDictionary
-from torch._dynamo.exc import get_stack_above_dynamo
 
 import torch
+from torch._dynamo.exc import get_stack_above_dynamo
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -1549,7 +1549,6 @@ class WrapperUserFunctionVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if hasattr(self.wrapper_obj, "cache_info"):
-
             target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
             module_name = getattr(target_fn, "__module__", "") or ""
 
