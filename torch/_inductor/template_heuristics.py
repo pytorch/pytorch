@@ -744,9 +744,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         return flex_attn_bwd_configs
 
-    def get_flex_decode_configs(
-        self, head_dim: int, dtype: Any
-    ) -> list[FlexDecodeConfig]:
+    def get_flex_decode_configs(self, head_dim: int, dtype: Any) -> list[FlexDecodeConfig]:
         capability = torch.cuda.get_device_capability()
 
         default_config = FlexDecodeConfig(64, 1, 2)
@@ -1055,9 +1053,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         )
         return partial(self.preprocess_mm_configs, configs=filtered_configs)
 
-    def get_flex_attn_fwd_configs(
-        self, head_dim: int, dtype: Any
-    ) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
@@ -1084,9 +1080,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         return flex_attn_fwd_configs
 
-    def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
-    ) -> list[FlexConfig]:
+    def get_flex_attn_bwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_bwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
