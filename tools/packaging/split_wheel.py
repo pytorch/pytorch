@@ -42,10 +42,35 @@ ROOT_PATH = Path(__file__).absolute().parents[2]
 INTERPRETER = sys.executable
 
 COMMANDS = {
-    "install": [INTERPRETER, "-m", "pip", "install", str(ROOT_PATH), "-v", "--no-build-isolation"],
-    "build_wheel": [INTERPRETER, "-m", "build", "--wheel", "--no-isolation", str(ROOT_PATH)],
-    "develop": [INTERPRETER, "-m", "pip", "install", "-e", str(ROOT_PATH), "-v", "--no-build-isolation"],
+    "install": [
+        INTERPRETER,
+        "-m",
+        "pip",
+        "install",
+        str(ROOT_PATH),
+        "-v",
+        "--no-build-isolation",
+    ],
+    "build_wheel": [
+        INTERPRETER,
+        "-m",
+        "build",
+        "--wheel",
+        "--no-isolation",
+        str(ROOT_PATH),
+    ],
+    "develop": [
+        INTERPRETER,
+        "-m",
+        "pip",
+        "install",
+        "-e",
+        str(ROOT_PATH),
+        "-v",
+        "--no-build-isolation",
+    ],
 }
+
 
 def requirements_installed() -> bool:
     try:
@@ -57,7 +82,9 @@ def requirements_installed() -> bool:
             "Requirements not installed, run the following command to install:"
         )
         logger.error(
-            "    > %s -m pip install -r %s/requirements.txt", sys.executable, ROOT_PATH
+            "    > %s -m pip install -r %s/requirements.txt",
+            sys.executable,
+            str(ROOT_PATH),
         )
         return False
 

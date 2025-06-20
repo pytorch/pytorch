@@ -1,4 +1,5 @@
 boto3==1.35.42
+build==1.2.2.post1
 cmake==3.27.*
 expecttest==0.3.0
 fbscribelogger==0.1.7

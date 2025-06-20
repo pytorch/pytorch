@@ -69,15 +69,25 @@ class Builder:
 
     def build_wheel(self, destination: str) -> bool:
         logger.info("Running bdist_wheel -d %s", destination)
-        return run_cmd(
-            [self.interpreter, "-m", "build", "--wheel", "--no-isolation", "--outdir", destination, ROOT_PATH]
-        ).returncode == 0
+        return (
+            run_cmd(
+                [
+                    self.interpreter,
+                    "-m",
+                    "build",
+                    "--wheel",
+                    "--no-isolation",
+                    "--outdir",
+                    destination,
+                    str(ROOT_PATH),
+                ]
+            ).returncode
+            == 0
+        )
 
     def clean(self) -> bool:
         logger.info("Running clean")
-        return (
-            run_cmd([self.interpreter, "setup.py", "clean"]).returncode == 0
-        )
+        return run_cmd([self.interpreter, "setup.py", "clean"]).returncode == 0
 
     def install_requirements(self) -> None:
         logger.info("Installing requirements")
