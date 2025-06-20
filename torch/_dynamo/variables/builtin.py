@@ -547,8 +547,7 @@ class BuiltinVariable(VariableTracker):
                     items=lst.items * const.as_python_constant(),
                     mutation_type=ValueMutationNew(),
                 )
-            except Exception as exc:
-                # MemoryError
+            except MemoryError as exc:
                 raise_observed_exception(
                     type(exc),
                     tx,
