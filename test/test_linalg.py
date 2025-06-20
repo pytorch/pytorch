@@ -9165,7 +9165,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             r1 = fntorch(t0_full, t1, t2)
             self.assertEqual(r0, r1)
 
-    @tf32_on_and_off(0.001)
+    # ROCm 6.4 passes with tf32=on, but 6.4.1 needed tolerance reduced slightly
+    @tf32_on_and_off(0.002 if torch.version.hip else 0.001)
     @bf32_on_and_off(0.001)
     def test_broadcast_batched_matmul(self, device):
         n_dim = random.randint(1, 8)
