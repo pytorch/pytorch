@@ -185,10 +185,7 @@ def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
         parent = node.all_input_nodes[0]
         parent.append(node)
 
-    # This .recompile() is not strictly needed but it is a good idea to have it.
-    # Commenting it out for now to avoid regression in test `pr_time_benchmarks`
-    # https://github.com/pytorch/pytorch/actions/runs/15738862965/job/44492926058
-    # gm.recompile()
+    gm.recompile()
     return gm
 
 
