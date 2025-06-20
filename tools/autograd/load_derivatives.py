@@ -336,7 +336,7 @@ def postprocess_forward_derivatives(
             # This transformation is based on the observation that for element-wise functions, the Jacobian
             # matrix is diagonal and thus doing J * v is the same as (v^T J)^T (in practice, we ignore the transpositions)
             # For the complex case, we use hermitian transpose and get (v.conj() J).conj()
-            # So here we are going to re-use the backward formula and replace two things:
+            # So here we are going to reuse the backward formula and replace two things:
             # 1) all occurrences of "grad" with "foo_t.conj()", where foo is the name of the unique differentiable input.
             # 2) all usage of an original input "foo" with its primal value "foo_p".
             # 3) conjugate the final result

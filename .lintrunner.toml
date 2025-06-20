@@ -1159,15 +1159,11 @@ exclude_patterns = [
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     'aten/**',
-    'c10/**',
-    'cmake/**',
     'docs/**',
     'functorch/**',
     'scripts/**',
     'test/**',
-    'tools/**',
     'torch/**',
-    'torchgen/**',
 ]
 init_command = [
     'python3',
