@@ -34,6 +34,7 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             ":bit_cast",
+            "//:torch_standalone_headers",
             "//c10/macros",
             "@fmt",
             "@moodycamel//:moodycamel",
@@ -90,6 +91,9 @@ def define_targets(rules):
                 "ssize.h",
             ],
         ),
+        deps = [
+            "//:torch_standalone_headers",
+        ],
         visibility = ["//visibility:public"],
     )
 
