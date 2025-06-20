@@ -141,6 +141,25 @@ class KernelInputs:
         """
         return self._input_nodes[idx].get_dtype()
 
+    @property
+    def id(self) -> str:
+        """
+        Get a unique identifier for the kernel inputs based on dtype, size hints, and stride hints.
+
+        Returns:
+            A string representation of the input characteristics
+        """
+        node_info = []
+        dtypes = self.dtypes()
+        size_hinted = self.shapes_hinted()
+        stride_hinted = self.strides_hinted()
+
+        for i in range(len(self.nodes())):
+            node_tuple = (dtypes[i], list(size_hinted[i]), list(stride_hinted[i]))
+            node_info.append(node_tuple)
+
+        return str(tuple(node_info))
+
 
 class MMKernelInputs(KernelInputs):
     """

@@ -13,6 +13,7 @@ from .codecache import write_text
 from .codegen.triton_templates.persistent_tma_mm_template import (
     persistent_tma_mm_template,
 )
+from .kernel_choice import KernelChoice
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
@@ -41,8 +42,8 @@ if TYPE_CHECKING:
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
+    from .kernel_choice import KernelChoice
     from .kernel_inputs import MMKernelInputs
-    from .kernel_params.params import KernelTemplateParams
 
 
 class Sortable(typing.Protocol):
@@ -203,15 +204,29 @@ class InductorChoices:
         mm_heuristics = self.get_config_heuristics(device_type)
         return mm_heuristics.get_mm_plus_mm_configs()
 
-    # MM params configs
-    def get_mm_params(
+    # MM choices configs
+    def get_mm_choices(
         self, template: KernelTemplate, kernel_inputs: MMKernelInputs
-    ) -> partial[Generator[KernelTemplateParams, None, None]]:
+    ) -> Generator[KernelChoice, None, None]:
+        """
+        Get KernelChoice objects for matrix multiplication configurations.
+
+        Args:
+            template: The KernelTemplate to use
+            kernel_inputs: The MMKernelInputs containing input information
+
+        Yields:
+            KernelChoice: Objects containing template, params, and inputs
+        """
         mm_heuristics = self.get_mm_config_params_heuristics(template, kernel_inputs)
         if config.max_autotune_gemm_search_space != "EXHAUSTIVE":
-            return mm_heuristics.get_mm_params(kernel_inputs)  # type: ignore[return-value] # Generator invariance
+            params_generator = mm_heuristics.get_mm_params(kernel_inputs)
         else:
-            return mm_heuristics.get_exhaustive_mm_params(kernel_inputs)  # type: ignore[return-value] # Generator invariance
+            params_generator = mm_heuristics.get_exhaustive_mm_params(kernel_inputs)
+
+        # Generate KernelChoice objects from the params
+        for params in params_generator():
+            yield KernelChoice(template, params, kernel_inputs)
 
     # Conv configs
     def get_conv_configs(
