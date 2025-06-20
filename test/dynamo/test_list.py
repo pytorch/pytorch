@@ -9,6 +9,9 @@ import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
+lst = []
+
+
 class TupleTests(torch._dynamo.test_case.TestCase):
     # Tuple methods
     # + count
@@ -295,11 +298,30 @@ class ListTests(TupleTests):
         self.assertEqual(r, self.thetype([1, 2, 3, 1, 2, 3]))
         self.assertEqual(p, self.thetype([1, 2, 3, 1, 2, 3]))
 
+        p = self.thetype("ab")
+        p *= 2
+        self.assertEqual(p, self.thetype("abab"))
+
         # Wrong number of arguments
         self.assertRaises(TypeError, p.__imul__)
 
         # can only multiply list by an integer
         self.assertRaises(TypeError, p.__imul__, 2.2)
+
+    def test_binop_imul_global_list(self):
+        global lst
+        lst = self.thetype(["a", "b"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            global lst
+            lst *= 2
+            lst.__imul__(3)
+            return x.sin()
+
+        x = torch.tensor(1.0)
+        self.assertEqual(fn(x), x.sin())
+        self.assertEqual(lst, ["a", "b"] * 6)
 
     @make_dynamo_test
     def test_binop_iadd(self):
@@ -309,11 +331,30 @@ class ListTests(TupleTests):
         self.assertEqual(r, self.thetype("abcbcd"))
         self.assertEqual(p, self.thetype("abcbcd"))
 
+        p = self.thetype("ab")
+        p += "cd"
+        self.assertEqual(p, self.thetype("abcd"))
+
         # Wrong number of arguments
         self.assertRaises(TypeError, p.__iadd__)
 
         # can only concatenate items of the same type
         self.assertRaises(TypeError, p.__add__, dict.fromkeys(q))
+
+    def test_binop_iadd_global_list(self):
+        global lst
+        lst = self.thetype([])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            global lst
+            lst += ["a"]
+            lst.__iadd__(["b"])
+            return x.sin()
+
+        x = torch.tensor(1.0)
+        self.assertEqual(fn(x), x.sin())
+        self.assertEqual(lst, ["a", "b"])
 
     @make_dynamo_test
     def test___setitem__(self):
