@@ -393,7 +393,7 @@ class C10_API TypeMeta final {
     return data().placementNew_;
   }
   /**
-   * Returns the typed copy function pointer for individual iterms.
+   * Returns the typed copy function pointer for individual items.
    */
   Copy* copy() const noexcept {
     return data().copy_;
