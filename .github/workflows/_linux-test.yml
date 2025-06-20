@@ -131,7 +131,7 @@ jobs:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
         run: |
-          tag=${ECR_DOCKER_IMAGE##*/}
+          tag=${ECR_DOCKER_IMAGE##*:}
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
@@ -386,6 +386,7 @@ jobs:
 
       - name: Upload the benchmark results
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false
