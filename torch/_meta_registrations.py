@@ -276,9 +276,18 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
     return new_stride
 
 
-@register_meta(aten.view.default)
-def _view_meta(a, *shape, size_oblivious_enabled=True):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, has_hint, sym_eq
+def _view_has_unbacked_input(a, shape):
+    from torch.fx.experimental.symbolic_shapes import has_hint
+
+    return (
+        any(not has_hint(s) for s in a.size())
+        or any(not has_hint(s) for s in a.stride())
+        or any(not has_hint(s) for s in shape)
+    )
+
+
+def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
@@ -334,17 +343,25 @@ def _view_meta(a, *shape, size_oblivious_enabled=True):
     # then we redo everything by looking at hints and guarding instead of failing.
     # Also if the expression has unbacked symbols, then we run again with size_oblivious_enabled=False
     # to throw a data dependent error.
-    has_unbacked = any(not has_hint(s) for s in a.shape) or any(
-        not has_hint(s) for s in shape
-    )
 
     if size_oblivious_enabled and (
-        torch.fx.experimental._config.backed_size_oblivious or has_unbacked
+        torch.fx.experimental._config.backed_size_oblivious
+        or _view_has_unbacked_input(a, shape)
     ):
-        return _view_meta(a, shape, size_oblivious_enabled=False)
+        return _view_unbacked_meta(a, shape, size_oblivious_enabled=False)
 
     msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
     raise ValueError(msg)
+
+
+@register_meta(aten.view.default)
+def _view_meta(a, *shape):
+    if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
+        a, shape
+    ):
+        return _view_unbacked_meta(a, shape)
+    else:
+        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
 
 
 @register_meta(aten.linalg_matrix_exp)
@@ -482,14 +499,15 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     if onesided:
         out_sizes[last_dim] = last_dim_halfsize
 
-    if device_hint(self) == "cuda":
+    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
         # _fft_r2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
+        # _fft_r2c_xpu in torch-xpu-ops/src/ATen/native/xpu/SpectralOps.cpp
         output = self.new_empty(
             out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
         )
 
         working_tensor = self
-        if use_optimized_cufft_path(dim):
+        if device_hint(self) == "cuda" and use_optimized_cufft_path(dim):
             _exec_fft(output, working_tensor, out_sizes, dim, forward=True)
         else:
             # First do the R2C transform on the last dimension
@@ -522,12 +540,6 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
         return output
 
-    elif device_hint(self) == "xpu":
-        sorted_dims = _sort_dims(self, dim, exclude_last=True)
-        out = self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
-        )
-        return _exec_fft(out, self, out_sizes, sorted_dims, forward=True)
     else:
         return self.new_empty(
             out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
