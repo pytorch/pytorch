@@ -10,6 +10,8 @@ boto3==1.35.42
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
 
+build
+
 click
 #Description: Command Line Interface Creation Kit
 #Pinned versions:
