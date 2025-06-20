@@ -34,7 +34,7 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             ":bit_cast",
-            "//:torch_standalone_headers",
+            "//torch/standalone:torch_standalone_headers",
             "//c10/macros",
             "@fmt",
             "@moodycamel//:moodycamel",
