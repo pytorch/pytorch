@@ -1,3 +1,4 @@
+#include <dlfcn.h>
 #include <c10/cuda/CUDAGuard.h>
 
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
@@ -19,6 +20,28 @@ static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
 #define WARP_SIZE 32
 
 constexpr int MiB = 1024 * 1024;
+
+// Check if NVSHMEM is available
+bool is_nvshmem_available() {
+  // Runtime check
+  static std::mutex mutex;
+  static int is_available = -2;
+  std::lock_guard<std::mutex> lock(mutex);
+  if (is_available == -2) {
+    void* handle{};
+    // Open the shared library, RTLD_LAZY defers symbol resolution until needed
+    handle = dlopen("libnvshmem_host.so.3", RTLD_LAZY);
+    if (!handle) {
+      std::cerr << dlerror() << "\n";
+      is_available = 0;
+    } else {
+      is_available = 1;
+      // Close the shared library
+      dlclose(handle);
+    }
+  }
+  return is_available == 1;
+}
 
 // Bootstrap based on user's setting for NCCL
 // Long term, this may be a bit unclean; short term, it improves UX
@@ -71,6 +94,11 @@ void initialize_nvshmem_with_store(
       "nvshmemx_init_attr failed");
 
   is_initialized = true;
+
+  // Print version
+  int major, minor;
+  ::nvshmem_info_get_version(&major, &minor);
+  LOG(INFO) << "NVSHMEM is available, version: " << major << "." << minor;
 }
 
 // Intializes the device state in CUmodule so that it’s able to perform NVSHMEM

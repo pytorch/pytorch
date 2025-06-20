@@ -16,7 +16,12 @@ from torch._inductor.runtime.runtime_utils import dynamo_timed
 
 from .. import config
 from ..codecache import CudaKernelParamCache
-from ..ir import GraphPartitionSignature, TensorBox
+from ..ir import (
+    GraphPartitionSignature,
+    TensorBox,
+    TMADescriptorExperimental,
+    TMADescriptorStable,
+)
 from ..utils import cache_on_self, get_gpu_type, GPU_ALIGN_BYTES, IndentedBuffer
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -353,6 +358,13 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_tma_descriptor(self, desc):
         self.write_tma_descriptor_helpers_once()
 
+        if isinstance(desc, TMADescriptorExperimental):
+            self._generate_experimental_tma_descriptor(desc)
+        else:
+            assert isinstance(desc, TMADescriptorStable)
+            self._generate_stable_tma_descriptor(desc)
+
+    def _generate_experimental_tma_descriptor(self, desc):
         # generate data pointer for the source tensor
         source = self.generate_args_decl(
             code=self,
@@ -376,6 +388,48 @@ class CppWrapperGpu(CppWrapperCpu):
         element_size = self.val_to_arg_str(desc.element_size)
         fn = f"init{desc.rank}DTMADescriptor"
         args = f"&{desc_name}, {ptr}, {dims}, {block_dims}, {element_size}"
+        self.writeline(f"{fn}({args});")
+
+    def _generate_stable_tma_descriptor(self, desc):
+        source = self.generate_args_decl(
+            code=self,
+            call_args=[self.val_to_arg_str(desc.tensor)],
+            arg_types=[desc.tensor.get_dtype()],
+            arg_signatures=[None],
+            # these args are passed to initNDTMADescriptor, which is NOT a triton kernel
+            is_triton_kernel=False,
+        )
+
+        desc_name = desc.name
+        # Pack the relevant information into a StableTMADescriptor struct.
+        # See [Note: AOTI TMA Stable handling] for more details.
+        self.writeline(f"alignas(64) StableTMADescriptor {desc_name};")
+
+        def fill_array(name, values):
+            for i, val in enumerate(values):
+                self.writeline(f"{name}[{i}] = {val};")
+
+        ptr = f"reinterpret_cast<void*>(*({source}))"
+        rank = len(desc.tensor.get_size())
+
+        fill_array(f"{desc_name}.block_shape", desc.block_shape)
+        fill_array(f"{desc_name}.global_shape", desc.tensor.get_size())
+        fill_array(f"{desc_name}.strides", desc.tensor.get_stride())
+
+        element_size = self.val_to_arg_str(desc.tensor.get_dtype().itemsize)
+        fn = "initTMADescriptor"
+        args = ", ".join(
+            str(x)
+            for x in [
+                f"&{desc_name}.m",
+                ptr,
+                element_size,
+                rank,
+                f"{desc_name}.block_shape",
+                f"{desc_name}.global_shape",
+                f"{desc_name}.strides",
+            ]
+        )
         self.writeline(f"{fn}({args});")
 
     def generate_args_decl(
@@ -409,28 +463,74 @@ class CppWrapperGpu(CppWrapperCpu):
             "fp32": "float",
         }
 
+        def signature_is_tma_desc(sig):
+            if not sig:
+                return False
+            if sig == "nvTmaDesc":
+                return True
+            if sig.startswith("tensordesc<"):
+                return True
+            return False
+
+        def process_tma_stable_arg(arg, arg_type, arg_signature, var_name):
+            # [Note: AOTI TMA Stable handling]
+            # For most args, a single arg passed to the python triton interface
+            # maps to a single arg in the cubin interface. However, for host-side
+            # TMA descriptors, a single python arg turns into 1 + 2 * N args in the
+            # cubin interface (where N is the rank).
+            #
+            # To do this: at TMA codegen time (for aoti), we generate a struct
+            # (StableTMADescriptor) containing the necessary information; and then
+            # when we call the function (i.e. here), we unpack the struct members.
+            code.writeline(f"auto {var_name} = {cexpr(arg)};")
+
+            result = []
+            result.append(f"&{var_name}.m")
+
+            # from https://github.com/triton-lang/triton/blob/16961b79bdac1b774b42d44e52fd55a266ec2866/third_party/nvidia/backend/driver.py#L111  # noqa: B950
+            match = re.match("tensordesc<([^[>]*)\\[([^]]*)\\]", arg_signature)
+            assert match is not None
+            shape = match.group(2)
+            ndim = shape.count(",") + 1
+
+            for i in range(ndim):
+                result.append(f"&{var_name}.block_shape[{i}]")
+
+            for i in range(ndim):
+                result.append(f"&{var_name}.strides[{i}]")
+
+            return result
+
         def process_args(arg, arg_type, arg_signature=None):
             var_name = f"var_{next(self.arg_var_id)}"
-            # ignore nvTmaDesc, as host-side TMA descriptors need
+            # ignore tma descriptors, as host-side TMA descriptors need
             # to be passed to the compiled Triton kernel by value
-            if isinstance(arg_type, UnwrapUnspecArg) and arg_signature != "nvTmaDesc":
+            if isinstance(arg_type, UnwrapUnspecArg) and not signature_is_tma_desc(
+                arg_signature
+            ):
                 self.codegen_tensor_item(
                     arg_type.dtype,
                     arg,
                     var_name,
                     indented_buffer=code,
                 )
-            elif isinstance(arg_type, torch_dtype) and arg_signature != "nvTmaDesc":
+                new_args.append(f"&{var_name}")
+            elif isinstance(arg_type, torch_dtype) and not signature_is_tma_desc(
+                arg_signature
+            ):
                 device_ptr_type = self.device_codegen.cpp_device_ptr()
                 code.writeline(
                     maybe_hipify_code_wrapper(
                         f"{device_ptr_type} {var_name} = reinterpret_cast<{device_ptr_type}>({arg}.data_ptr());"
                     )
                 )
+                new_args.append(f"&{var_name}")
             elif arg_type in (sympy.Integer, int):
                 code.writeline(f"int {var_name} = {cexpr(arg)};")
+                new_args.append(f"&{var_name}")
             elif arg_type in (sympy.Float, float):
                 code.writeline(f"float {var_name} = {cexpr(arg)};")
+                new_args.append(f"&{var_name}")
             # For symbolic call arguments, examine the arg signatures from triton meta
             # to explicitly cast to the right type
             # Reason: `auto` can infer unexpected type against kernel input signature.
@@ -442,9 +542,14 @@ class CppWrapperGpu(CppWrapperCpu):
                 code.writeline(
                     f"{signature2dtype[arg_signature]} {var_name} = {cexpr(arg)};"
                 )
+                new_args.append(f"&{var_name}")
+            elif arg_signature and arg_signature.startswith("tensordesc<"):
+                new_args.extend(
+                    process_tma_stable_arg(arg, arg_type, arg_signature, var_name)
+                )
             else:
                 code.writeline(f"auto {var_name} = {cexpr(arg)};")
-            new_args.append(f"&{var_name}")
+                new_args.append(f"&{var_name}")
 
         for arg, arg_type, arg_signature in zip_longest(
             call_args, arg_types, arg_signatures
