@@ -159,14 +159,14 @@ The following metadata fields are added to each ONNX node:
 - **pkg.torch.onnx.class_hierarchy**
 
   A list of class names representing the hierarchy of modules leading to this node.
-  
+
   *Example:*
   `['__main__.SimpleAddModel', 'aten.add.Tensor']`
 
 - **pkg.torch.onnx.fx_node**
 
   The string representation of the original FX node, including its name, number of consumers, the targeted torch op, arguments, and keyword arguments.
-  
+
   *Example:*
   `%cat : [num_users=1] = call_function[target=torch.ops.aten.cat.default](args = ([%tensor_x, %input_dict_tensor_x, %input_list_0], 1), kwargs = {})`
 
@@ -223,7 +223,7 @@ Each input value in the ONNX graph may have the following metadata property:
 - **pkg.torch.export.graph_signature.InputSpec.persistent**
 
   Indicates whether the input is persistent (i.e., should be saved as part of the model's state).
-  
+
   *Example values:*
   - "True"
   - "False"
@@ -246,7 +246,7 @@ Each output value in the ONNX graph may have the following metadata property:
 Each initialized value, input, output has the following metadata:
 
 - **pkg.torch.onnx.original_node_name**
-  
+
   The original name of the node in the PyTorch FX graph that produced this value in the case where the value was renamed. This helps trace initializers back to their source in the original model.
 
   *Example:*
