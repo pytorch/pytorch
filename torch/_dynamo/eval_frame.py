@@ -549,6 +549,9 @@ def guard_collectives_hook(guard_eval_result):
     return guard_eval_result
 
 
+_not_set = object()
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -721,8 +724,10 @@ class _TorchDynamoContext:
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
-                prior_guard_complete_hook = set_guard_complete_hook(
-                    guard_collectives_hook if config.enable_guard_collectives else None
+                prior_guard_complete_hook = (
+                    set_guard_complete_hook(guard_collectives_hook)
+                    if config.enable_guard_collectives
+                    else _not_set
                 )
 
                 # Ensure that if an assertion occurs after graph pushes
@@ -759,7 +764,8 @@ class _TorchDynamoContext:
                     )
 
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
-                    set_guard_complete_hook(prior_guard_complete_hook)
+                    if prior_guard_complete_hook is not _not_set:
+                        set_guard_complete_hook(prior_guard_complete_hook)
                     for cleanup in cleanups:
                         cleanup()
             finally:
@@ -932,16 +938,12 @@ class DisableContext(_TorchDynamoContext):
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
-                prior_guard_complete_hook = set_guard_complete_hook(
-                    guard_collectives_hook if config.enable_guard_collectives else None
-                )
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
                 try:
                     return fn(*args, **kwargs)
                 finally:
                     set_eval_frame(None)
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
-                    set_guard_complete_hook(prior_guard_complete_hook)
             finally:
                 _maybe_set_eval_frame(prior)
 
