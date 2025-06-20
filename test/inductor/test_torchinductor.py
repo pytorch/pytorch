@@ -13985,7 +13985,7 @@ if RUN_GPU:
             device = "cuda"
             dtype = torch.bfloat16
 
-            m, n, k, n_groups = 3, 32, 16, 5
+            m, n, k, n_groups = 16, 32, 16, 4
             a_ref = torch.randn(m * n_groups, k, device=device, dtype=dtype)[:, :k]
 
             b_ref = torch.randn(
@@ -13996,7 +13996,9 @@ if RUN_GPU:
                 dtype=dtype,
             )[::1, :, :k]
 
-            offs = torch.tensor([1, 3, 6, 7, 15], device=device, dtype=torch.int32)
+            offs = torch.arange(
+                m, n_groups * m + 1, m, device=device, dtype=torch.int32
+            )
 
             a_ref.requires_grad_(True)
             b_ref.requires_grad_(True)
