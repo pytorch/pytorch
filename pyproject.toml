@@ -10,7 +10,7 @@ requires = [
     "numpy",
     "ninja",
     "pyyaml",
-    "cmake",
+    "cmake>=3.27",
     "typing-extensions>=4.10.0",
     "requests",
 ]
