@@ -225,7 +225,9 @@ def _get_subgraph_relationship_type(
         assert (
             subgraph_a.base_op_node == subgraph_a.start_node
             and subgraph_b.base_op_node == subgraph_b.start_node
-        ), "Matching call_module patterns where base_op_node != start_node is not supported yet"
+        ), (
+            "Matching call_module patterns where base_op_node != start_node is not supported yet"
+        )
         # for call_module, we need to look up the modules to do the type check
         assert isinstance(node_a.target, str)
         mod_a = getattr_from_fqn(gm_a, node_a.target)
@@ -444,9 +446,9 @@ of subgraphs, and each pair of subgraphs is related to each other."""
             key_name_b = _get_name_for_subgraph(
                 cur_subgraph_b, gm_b, base_name_to_sets_of_related_ops, existing_names_b
             )
-            assert (
-                key_name_a == key_name_b
-            ), f"Subgraph names {key_name_a} and {key_name_b} do not match"
+            assert key_name_a == key_name_b, (
+                f"Subgraph names {key_name_a} and {key_name_b} do not match"
+            )
             results[key_name_a] = (cur_subgraph_a, cur_subgraph_b)
             continue
         elif cur_subgraph_a is None and cur_subgraph_b is None:

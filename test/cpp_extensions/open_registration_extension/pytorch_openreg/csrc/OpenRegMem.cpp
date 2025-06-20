@@ -1,15 +1,21 @@
 #include "OpenReg.h"
 
 #include <ATen/EmptyTensor.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/native/UnaryOps.h>
 #include <ATen/ops/as_strided_cpu_dispatch.h>
+#include <ATen/ops/quantize_per_tensor_native.h>
 #include <ATen/ops/set_cpu_dispatch.h>
+#include <ATen/ops/set_native.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 
 #include <c10/core/Allocator.h>
 
 #include <torch/library.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 
 namespace openreg {
 namespace {
@@ -102,7 +108,7 @@ at::Tensor as_strided_openreg(
   return at::cpu::as_strided(self, size, stride, storage_offset_);
 }
 
-at::Tensor& set_openreg(
+at::Tensor& set_source_Storage_storage_offsetset_openreg(
     at::Tensor& result,
     at::Storage storage,
     int64_t storage_offset,
@@ -165,6 +171,80 @@ custom_scaled_dot_product_fused_attention_overrideable_backward(
 }
 }
 
+// Using the simplest way to obtain continuous Tensor data and process it.
+// This is a demo for using operand API, and you can add more complex logic
+// for input and output tensor based on your custom device kernel.
+void abs_kernel(at::TensorIteratorBase& iter) {
+  // Abs only have a input tensor and a output tensor.
+  auto& output_operand = iter.operand(0);
+  auto& input_operand = iter.operand(1);
+  auto& output_tensor_base = output_operand.tensor_base();
+  auto& input_tensor_base = input_operand.tensor_base();
+  TORCH_CHECK(!input_operand.original_tensor_base().defined(),
+    "input original tensor is defined.");
+  TORCH_CHECK(!output_operand.original_tensor_base().defined(),
+    "output original tensor is defined.");
+  // For easy test, only accept contiguous input tensor for calculate.
+  auto memory_format = input_tensor_base.suggest_memory_format();
+  TORCH_CHECK(input_tensor_base.is_contiguous(memory_format),
+    "Input tensor need be contiguous.");
+  // Add necessary restrictions to ensure the security of the demo.
+  TORCH_CHECK(input_tensor_base.sizes() == output_tensor_base.sizes(),
+    "Intput and output tensor size are not equal.");
+  // Common dtype is calculate in TensorIteratorBase.
+  TORCH_CHECK(iter.common_dtype() == at::ScalarType::Float,
+    "Only support float type.")
+  // Using for loop for abs calculate.
+  auto abs_function = [](float* output_ptr, const float* input_ptr,
+                         const int64_t NUM) {
+    for (int64_t i = 0; i < NUM; ++i) {
+      *(output_ptr + i) = std::abs(*(input_ptr + i));
+    }
+  };
+  // To simplify the logic of the test demo code,
+  // we only use contiguous tensor to calculate on device side.
+  // And using input tensor memory format.
+  if (iter.is_contiguous()) {
+    // Add for will_resize flag check. You can convert to differernt
+    // tensor memory format when will_resize is True.
+    // If TensorIteratorConfig resize_outputs_ flag is true, and there are two
+    // situations:
+    // 1) Out tensor is undefined, and TensorIterator set will_resize to true;
+    // 2) Out tensor is defined and tensor size is not equal to input tensor size;
+    //    TensorIterator set will_resize to true, and call set_output_raw_strided
+    //    to resize output tensor.
+    // When output operand will_resize flag is ture, dummy
+    // device can convert tensor to dummy device preferred memory format.
+    // Here we don't convert tensor memory format, because it will become complex
+    // when dummy device want keep same memory format for training network.
+    TORCH_CHECK(output_operand.will_resize,
+      "output operand will_resize flag need be True.");
+    abs_function((float*)iter.data_ptr(0), (float*)iter.data_ptr(1), iter.numel());
+  } else {
+    // Stride copy is not support for foo device, using cpu device instead.
+    // For abs op, the last situation is: output tensor is not contiguous with
+    // operand will_resize is False.
+    TORCH_CHECK(!output_operand.will_resize, "output operand will_resize is True.");
+    // Get a contiguous tensor with input memory format.
+    at::Tensor output = at::empty(output_tensor_base.sizes(),
+                                  input_tensor_base.options()
+                                                   .memory_format(memory_format));
+    // For structured op which inheried from TensorIteratorBase, maybe you need to
+    // call set_output_raw_strided function to update output stored in op sturctured.
+    // abs op is no need to do this.
+    output_operand.exchange_tensor(c10::MaybeOwned<at::TensorBase>::owned(std::in_place, output));
+    abs_function((float*)output_operand.tensor_base().mutable_data_ptr(),
+                 (float*)iter.data_ptr(1), iter.numel());
+    // Copy tensor base to original tensor base, and keep same scalar type and
+    // stride with cpu and gpu.
+    if (output_operand.original_tensor_base().defined() &&
+        !output_operand.original_tensor_base().is_same(output_operand.tensor_base())) {
+      output_operand.original_tensor().copy_(output_operand.tensor());
+      output_operand.restore_original_tensor();
+    }
+  }
+}
+
 int64_t _fused_sdp_choice_privateuse1(
     const at::Tensor& query,
     const at::Tensor& key,
@@ -178,18 +258,76 @@ int64_t _fused_sdp_choice_privateuse1(
   return static_cast<int64_t>(backend);
 }
 
+void quantize_tensor_per_tensor_affine_privateuse1(
+    const at::Tensor& rtensor,
+    at::Tensor& qtensor,
+    double scale,
+    int64_t zero_point) {
+    // Just test the process, so do nothing
+}
+
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("empty.memory_format", empty_openreg);
   m.impl("empty_strided", empty_strided_openreg);
   m.impl("as_strided", as_strided_openreg);
-  m.impl("set_.source_Storage_storage_offset", set_openreg);
+  m.impl("set_.source_Storage", at::native::set_);
+  m.impl("set_.source_Storage_storage_offset", set_source_Storage_storage_offsetset_openreg);
+  m.impl("quantize_per_tensor", at::native::quantize_per_tensor);
   m.impl("_fused_sdp_choice", &_fused_sdp_choice_privateuse1);
   m.impl("_scaled_dot_product_fused_attention_overrideable", &custom_scaled_dot_product_fused_attention_overrideable);
   m.impl("_scaled_dot_product_fused_attention_overrideable_backward", &custom_scaled_dot_product_fused_attention_overrideable_backward);
 }
+
+struct OpenRegBackendMeta : public c10::BackendMeta {
+  OpenRegBackendMeta(int version_number, int format_number)
+      : version_number_(version_number), format_number_(format_number) {}
+
+  int version_number_{-1};
+  int format_number_{-1};
+};
+
+void for_serialization(
+    const at::Tensor& t,
+    std::unordered_map<std::string, bool>& m) {
+  auto meta_ptr = t.unsafeGetTensorImpl()->get_backend_meta();
+
+  if (meta_ptr != nullptr) {
+    auto o_meta_ptr = dynamic_cast<OpenRegBackendMeta*>(meta_ptr);
+    if (o_meta_ptr->version_number_ == 1) {
+      m["version_number"] = true;
+    }
+    if (o_meta_ptr->format_number_ == 29) {
+      m["format_number"] = true;
+    }
+  }
+}
+
+void for_deserialization(
+    const at::Tensor& t,
+    std::unordered_map<std::string, bool>& m) {
+  int version_number{-1};
+  int format_number{-1};
+
+  if (m.find("version_number") != m.end()) {
+    version_number = 1;
+  }
+  if (m.find("format_number") != m.end()) {
+    format_number = 29;
+  }
+
+  c10::intrusive_ptr<c10::BackendMeta> meta{std::unique_ptr<c10::BackendMeta>(
+      new OpenRegBackendMeta(version_number, format_number))};
+  t.unsafeGetTensorImpl()->set_backend_meta(meta);
+}
+
+REGISTER_PRIVATEUSE1_SERIALIZATION(&for_serialization, &for_deserialization)
 } // namespace openreg
 
 namespace at::native {
+REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &openreg::abs_kernel);
+REGISTER_PRIVATEUSE1_DISPATCH(
+    quantize_tensor_per_tensor_affine_stub,
+    &openreg::quantize_tensor_per_tensor_affine_privateuse1);
 REGISTER_PRIVATEUSE1_DISPATCH(
     _fused_sdp_choice_stub,
     &openreg::_fused_sdp_choice_privateuse1);
