@@ -135,7 +135,7 @@ You can view the exported model using [Netron](https://netron.app/).
 
 ## When the conversion fails
 
-Function {func}`torch.onnx.export` should called a second time with
+Function {func}`torch.onnx.export` should be called a second time with
 parameter ``report=True``. A markdown report is generated to help the user
 to resolve the issue.
 
@@ -182,7 +182,14 @@ The following metadata fields are added to each ONNX node:
   The stack trace from the original code where this node was created, if available.
 
   *Example:*
-  `File "torch/fx/passes/runtime_assert.py", line 24, in insert_deferred_runtime_asserts`
+  ```
+  File "/opt/conda/envs/ptca/lib/python3.10/site-packages/transformers/models/electra/modeling_electra.py", line 1615, in forward
+    outputs = self.electra(
+  File "/opt/conda/envs/ptca/lib/python3.10/site-packages/transformers/models/electra/modeling_electra.py", line 908, in forward
+    hidden_states = self.embeddings_project(hidden_states)
+  File "/opt/conda/envs/ptca/lib/python3.10/site-packages/torch/nn/modules/linear.py", line 125, in forward
+    return F.linear(input, self.weight, self.bias)
+  ```
 
 These metadata fields are stored in the metadata_props attribute of each ONNX node and can be inspected using Netron or programmatically.
 
@@ -192,12 +199,16 @@ The overall ONNX IR graph has the following metadata props:
 
   This property contains a string representation of the graph_signature from the original PyTorch ExportedProgram. The graph signature describes the structure of the model's inputs and outputs and how they map to the ONNX graph. The inputs are defined as `InputSpec` objects, which include the kind of input (e.g., `InputKind.PARAMETER` for parameters, `InputKind.USER_INPUT` for user-defined inputs), the argument name, the target (which can be a specific node in the model), and whether the input is persistent. The outputs are defined as `OutputSpec` objects, which specify the kind of output (e.g., `OutputKind.USER_OUTPUT`) and the argument name.
 
+  To read more, please see the {doc}`torch.export <export>` for more information.
+
 - **pkg.torch.export.ExportedProgram.range_constraints**
 
   This property contains a string representation of any range constraints that were present in the original PyTorch ExportedProgram. Range constraints specify valid ranges for symbolic shapes or values in the model, which can be important for models that use dynamic shapes or symbolic dimensions.
 
   *Example:*
   `s0: VR[2, int_oo]`, which indicates that the size of the input tensor must be at least 2.
+
+  To read more, please see the {doc}`torch.export <export>` for more information.
 
 Each input value in the ONNX graph may have the following metadata property:
 
@@ -240,12 +251,10 @@ Each initialized value, input, output has the following metadata:
 
 - **pkg.torch.onnx.original_node_name**
   
-  The original name of the node in the PyTorch FX graph that produced this value In the case where the value was renamed. This helps trace initializers back to their source in the original model.
+  The original name of the node in the PyTorch FX graph that produced this value in the case where the value was renamed. This helps trace initializers back to their source in the original model.
 
   *Example:*
   `fc1.weight`
-
-
 
 ## API Reference
 
