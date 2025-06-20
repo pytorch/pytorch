@@ -2571,6 +2571,14 @@ def compile(
 
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
 
+        - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
+          This is an unsafe feature and there is no backward compatibility guarantee provided
+          for dynamo guards as data types.
+          For stable helper functions to use, see the documentations in `torch.compiler`, for example:
+          - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
+          - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
+          - `torch.compiler.keep_tensor_guards_unsafe`
+
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
@@ -2630,10 +2638,6 @@ def compile(
     if options and isinstance(options, dict):
         guard_filter_fn = options.pop("guard_filter_fn", None)
 
-    frame_traced_fn = None
-    if options and isinstance(options, dict):
-        frame_traced_fn = options.pop("frame_traced_fn", None)
-
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
@@ -2645,7 +2649,6 @@ def compile(
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,
-        frame_traced_fn=frame_traced_fn,
     )(model)  # type: ignore[return-value]
 
 

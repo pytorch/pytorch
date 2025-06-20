@@ -150,11 +150,21 @@ def scan(
         out (torch.Tensor or pytree with tensor leaves),
             each tensor leaf is a stacked output along first dim, where each slice is the output of a scan iteration.
 
+    Restrictions:
+        - The combine_fn shouldn't have any aliasing between input-input, input-output, and output-output. E.g. return a view
+            or the same tensor as input is not supported. As a workaround, can clone the output to avoid aliasing.
+
+        - The combine_fn shoudn't mutate any inputs. We'll remove the mutation restriction for inference soon. Please file an issue
+            if you input mutation support for training is needed.
+
+        - The combine_fn's init carry should match the next_carry in pytree structure and in tensor metadata.
+
     Example::
 
         def add(x: torch.Tensor, y: torch.Tensor):
             next_carry = y = x + y
-            return next_carry, y
+            # clone the output to avoid output-output aliasing
+            return next_carry, y.clone()
 
         i0 = torch.zeros(1)
         xs = torch.arange(5)

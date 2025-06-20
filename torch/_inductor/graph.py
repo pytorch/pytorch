@@ -106,6 +106,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
+    SUPPORTED_MKLDNN_DEVICES,
     ValueWithLineMap,
 )
 from .virtualized import NullHandler, V
@@ -614,7 +615,7 @@ class GraphLowering(torch.fx.Interpreter):
             torch.backends.mkldnn.enabled
             and torch.backends.mkldnn.is_available()
             and all(
-                n.args[idx].meta["val"].device == torch.device("cpu")
+                n.args[idx].meta["val"].device.type in SUPPORTED_MKLDNN_DEVICES
                 for n in conv_nodes
                 for idx in [0, 1]
             )
@@ -1066,7 +1067,12 @@ class GraphLowering(torch.fx.Interpreter):
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
-            expr = _get_placeholder_expr(example.node)
+            # TODO fix partitioning issue and re-enable for backward
+            # https://github.com/pytorch/pytorch/issues/155468.
+            if not V.graph.is_backward:
+                expr = _get_placeholder_expr(example.node)
+            else:
+                expr = example.node.expr
             self.graph_inputs[target] = expr
             self.graph_input_names.append(target)
             return expr
@@ -1468,6 +1474,7 @@ class GraphLowering(torch.fx.Interpreter):
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
+                old_kwargs["tma_descriptor_metadata"],
             )
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
@@ -1535,7 +1542,8 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             if (
                 n.op == "call_function"
-                and n.target is not operator.getitem
+                and n.target
+                not in (operator.getitem, torch._higher_order_ops.invoke_subgraph)
                 and (
                     fallback_node_due_to_unsupported_type(n)
                     or CompilerBisector.disable_subsystem(
@@ -2042,6 +2050,7 @@ class GraphLowering(torch.fx.Interpreter):
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
+                node.kwargs["tma_descriptor_metadata"],
             )
 
             new_kwargs: dict[str, int] = {}

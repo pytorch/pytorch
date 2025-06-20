@@ -11,7 +11,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfHpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
@@ -111,6 +111,7 @@ class TestCommModeFeatures(DTensorTestBase):
         )
         self.check_same_set_of_keys(module_sharding_dict, comm_mode.get_sharding_info())
 
+    @skipIfHpu
     @with_comms
     def test_MLPStacked_distributed_sharding_display(self):
         """
@@ -218,6 +219,7 @@ class TestCommModeFeatures(DTensorTestBase):
             1,
         )
 
+    @skipIfHpu
     @skip_unless_torch_gpu
     @with_comms
     def test_transformer_module_tracing(self, is_seq_parallel=False):

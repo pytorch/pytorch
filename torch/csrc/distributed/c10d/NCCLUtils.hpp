@@ -75,6 +75,18 @@ static_assert(
 #define NCCL_SUPPORTS_FP8
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COLLNET
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_CTA_POLICY
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_NVLS_CTAS
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \
@@ -217,6 +229,7 @@ static std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 TORCH_API std::string getNcclVersion();
+TORCH_API std::tuple<int, int, int> getNcclVersionTuple();
 TORCH_API int getNcclVersionNumber();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
 int nccl_nonblocking_timeout();
