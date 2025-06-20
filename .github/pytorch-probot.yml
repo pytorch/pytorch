@@ -11,6 +11,7 @@ ciflow_push_tags:
 - ciflow/inductor-perf-compare
 - ciflow/inductor-micro-benchmark
 - ciflow/inductor-micro-benchmark-cpu-x86
+- ciflow/inductor-perf-test-nightly-x86-zen
 - ciflow/inductor-cu126
 - ciflow/linux-aarch64
 - ciflow/mps
