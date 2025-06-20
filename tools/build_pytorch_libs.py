@@ -23,7 +23,7 @@ def _get_vc_env(vc_arch: str) -> dict[str, str]:
             _msvccompiler,  # type: ignore[import,attr-defined]
         )
 
-        return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
+        return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return,attr-defined]
 
 
 def _overlay_windows_vcvars(env: dict[str, str]) -> dict[str, str]:
