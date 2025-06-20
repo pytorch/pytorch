@@ -155,7 +155,12 @@ class CompiledArtifact:
                     )
 
                     entry = AOTAutogradCache._lookup(
-                        key, local=True, remote=False, args=[], cache_info={}
+                        key,
+                        local=True,
+                        remote=False,
+                        args=[],
+                        cache_info={},
+                        aot_config=None,
                     )
 
                 assert entry is not None
