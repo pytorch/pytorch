@@ -45,7 +45,6 @@ inline static c10::SymBool _compute_contiguous_sym(
       return true;
     }
 
-    c10::SymInt one(1);
     // When calculating the expected stride, we can choose to use a max(1, size)
     // check or not. Regardless, if this function returns true, it's correct. If
     // the size is 0, the tensor is empty and therefore contiguous. We
@@ -78,8 +77,6 @@ inline static c10::SymBool _compute_contiguous_sym(
   // Build a single sympy expression that represents contiguity and return it.
   c10::SymBool is_empty = sym_eq(numel, 0);
   c10::SymBool is_contiguous_cond = true;
-
-  c10::SymInt one(1);
 
   c10::SymInt expected_stride = 1;
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {

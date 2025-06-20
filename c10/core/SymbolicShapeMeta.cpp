@@ -79,13 +79,30 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   }
   c10::SymIntArrayRef sizes(sizes_);
   c10::SymIntArrayRef strides(strides_);
-  auto result = _compute_contiguous_sym(sizes, strides, numel());
-  if (result.has_hint()) {
-    // call this to add guards, we do not guard result directly due
-    // to perf reasons when evaluating complex sympy expressions.
+
+  auto all_hinted = true;
+  for (const auto& s : sizes) {
+    if (!s.has_hint()) {
+      all_hinted = false;
+      break;
+    }
+  }
+
+  for (const auto& s : strides) {
+    if (!s.has_hint()) {
+      all_hinted = false;
+      break;
+    }
+  }
+
+  if (all_hinted) {
+    // we avoid going through the slow path if everything is hinted,
+    // because evaluating a large sympy expression can be expensive.
+    // TODO exclude backed_size_oblivuous from this path. 
     return _compute_contiguous<SymInt>(sizes_, strides_, numel());
   }
-  return result;
+
+  return _compute_contiguous_sym(sizes, strides, numel());
 }
 
 // The rest of them
