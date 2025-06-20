@@ -49,7 +49,7 @@ from torch.utils._triton import has_triton_tma_device
 aten = torch.ops.aten
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
+from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -325,7 +325,7 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
-    @fresh_inductor_cache()
+    @fresh_cache()
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support persistent TMA")
     @unittest.skipIf(
@@ -470,7 +470,7 @@ class TestMaxAutotune(TestCase):
             FileCheck().check_not("extern_kernels.convolution").run(code[0])
             self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
 
-    @fresh_inductor_cache()
+    @fresh_cache()
     @config.patch(max_autotune=True, max_fusion_size=2)
     def test_jit_fusion_matches_aot_fusion(self):
         # In this example, AOTInductor's JIT-compile will fuse(buf1, buf2) due
@@ -563,7 +563,7 @@ class TestMaxAutotune(TestCase):
         def f(x, y):
             return x @ y
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             act = torch.compile(f)(x, y)
         ref = f(x, y)
         self.assertTrue(torch.allclose(act, ref, atol=4 * 1e-3, rtol=4 * 1e-3))
@@ -1146,7 +1146,7 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(generate_and_load_args - 1, make_key_args)
         self.assertEqual(generate_and_load_args, 16)
 
-    @fresh_inductor_cache()
+    @fresh_cache()
     @config.patch(
         {
             "max_autotune": True,
@@ -1213,7 +1213,7 @@ class TestMaxAutotune(TestCase):
         b = torch.rand(22, 30, device=GPU_TYPE)
 
         # Valid cache hit.
-        with fresh_inductor_cache():
+        with fresh_cache():
             reset_counters()
             compile_results = torch.compile(func_test1, dynamic=False)(a, b, a, b)
             eager_results = func_test1(a, b, a, b)
@@ -1246,7 +1246,7 @@ class TestMaxAutotune(TestCase):
                 )
 
         # Test symbolic shapes with different symbols. Will cache miss due to different symbols in inputs.
-        with fresh_inductor_cache():
+        with fresh_cache():
             a = torch.rand(10, 22, device=GPU_TYPE)
             b = torch.rand(22, 30, device=GPU_TYPE)
 
@@ -1297,7 +1297,7 @@ class TestMaxAutotune(TestCase):
                 )
 
         # Test duck typing.
-        with fresh_inductor_cache():
+        with fresh_cache():
             reset_counters()
 
             compile_results = torch.compile(func_test1, dynamic=True)(a, b, a, b)
@@ -1313,7 +1313,7 @@ class TestMaxAutotune(TestCase):
                 x = torch.matmul(x, x)
             return x
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             reset_counters()
             input = torch.rand(10, 10, device=GPU_TYPE)
 
@@ -1324,7 +1324,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(hits(), 36)
             self.assertEqual(misses(), 4)
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             reset_counters()
             input = torch.rand(10, 10, device=GPU_TYPE)
 
@@ -1343,7 +1343,7 @@ class TestMaxAutotune(TestCase):
             b = torch.matmul(torch.cat([x, z], 1), torch.cat([y, m, l], 0))
             return a, b
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             a = torch.rand(10, 22, device=GPU_TYPE)
             b = torch.rand(22, 30, device=GPU_TYPE)
             c = torch.rand(10, 11, device=GPU_TYPE)
@@ -1384,7 +1384,7 @@ class TestMaxAutotune(TestCase):
             ]
 
         # Valid cache hit.
-        with fresh_inductor_cache():
+        with fresh_cache():
             torch._dynamo.utils.counters.clear()
             compile_results = torch.compile(func_test1, dynamic=False)(a, b, a, b)
             eager_results = func_test1(a, b, a, b)
@@ -1424,7 +1424,7 @@ class TestMaxAutotune(TestCase):
             ]
 
         # Valid cache hit.
-        with fresh_inductor_cache():
+        with fresh_cache():
             torch._dynamo.utils.counters.clear()
             compile_results = torch.compile(func_test1, dynamic=False)(a, b, a, b)
             eager_results = func_test1(a, b, a, b)
@@ -1543,7 +1543,7 @@ class TestMaxAutotunePrecompile(TestCase):
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
-    @fresh_inductor_cache()
+    @fresh_cache()
     @config.patch(search_autotune_cache=True)
     def test_search_autotune_cache(self):
         def fn(a, b, c):
@@ -1811,12 +1811,12 @@ class TestMaxAutotuneRemoteCache(TestCase):
             os.environ.pop("TRITON_CACHE_MANAGER", None)
             with config.patch({"max_autotune": True}):
                 for _ in range(4):
-                    with fresh_inductor_cache():
+                    with fresh_cache():
                         torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
                 with torch.compiler.config.patch(
                     {"cache_key_tag": "test"}
-                ), fresh_inductor_cache():
+                ), fresh_cache():
                     torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
 
@@ -1825,12 +1825,10 @@ class TestMaxAutotuneRemoteCache(TestCase):
 
             global_stats.reset()
             for _ in range(4):
-                with fresh_inductor_cache():
+                with fresh_cache():
                     torch.compile(f, dynamic=dynamic)(x, y)
                 reset()
-            with torch.compiler.config.patch(
-                {"cache_key_tag": "test"}
-            ), fresh_inductor_cache():
+            with torch.compiler.config.patch({"cache_key_tag": "test"}), fresh_cache():
                 torch.compile(mm, dynamic=dynamic)(a, b)
                 reset()
             global_stats.report()
