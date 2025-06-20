@@ -1078,27 +1078,32 @@ class TritonTemplateKernel(TritonKernel):
     def codegen_range_tree(self):
         pass  # ignore default codegen
 
-    def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
-        wrapper = V.graph.wrapper_code
-        _, call_args, _, arg_types = self.args.python_argdefs()
-
-        grid_args = ()
+    def additional_call_args_and_types(self):
         if isinstance(self.grid_fn, SymbolicGridFn):
             grid_args = self.grid_fn.sympy_call(*self.call_sizes, self.meta)
+            assert len(grid_args) in (0, 3), "grid_fn should return 3 values"
+            return (grid_args, map(type, grid_args))
         elif all(isinstance(x, (int, sympy.Integer)) for x in self.call_sizes):
             grid_args = self.grid_fn(*map(int, self.call_sizes), self.meta)
+            assert len(grid_args) in (0, 3), "grid_fn should return 3 values"
+            return (grid_args, map(type, grid_args))
         else:
             assert not V.graph.cpp_wrapper, "cpp_wrapper requires SymbolicGridFn"
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
             fn_name = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}"
-            call_args.append(
-                f"*{fn_name}({', '.join(map(pexpr, self.call_sizes))}, {meta})"
+            return(
+                f"*{fn_name}({', '.join(map(pexpr, self.call_sizes))}, {meta})",
+                None
             )
-            arg_types.append(None)
-        assert len(grid_args) in (0, 3), "grid_fn should return 3 values"
-        call_args.extend(grid_args)
-        arg_types.extend(map(type, grid_args))
+
+    def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
+        wrapper = V.graph.wrapper_code
+        _, call_args, _, arg_types = self.args.python_argdefs()
+
+        additional_call_args, additional_arg_types = self.additional_call_args()
+        call_args.extend(additional_call_args)
+        arg_types.extend(additional_arg_types)
 
         if self.workspace_arg is not None:
             wrapper.generate_workspace_allocation(self.workspace_arg)

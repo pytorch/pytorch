@@ -207,8 +207,14 @@ class MultiKernel:
             # the fast kernel directly
             kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
-        # numels for all subkernels should be the same. Use kernels[0] here
-        self.kernels[0].add_numel_to_call_args(kernel_name, call_args, arg_types)
+        if hasattr(self.kernels[0], "additional_call_args_and_types"):
+            # TODO: This is broken we need to actually use different additional args for different kernels
+            additional_call_args, additional_arg_types = self.kernels[0].additional_call_args_and_types()
+            call_args.extend(additional_call_args)
+            arg_types.extend(additional_arg_types)
+        else:
+            # numels for all subkernels should be the same. Use kernels[0] here
+            self.kernels[0].add_numel_to_call_args(kernel_name, call_args, arg_types)
 
         for ws in self.kernels[0].args.workspace_args:
             V.graph.wrapper_code.generate_workspace_allocation(ws)
