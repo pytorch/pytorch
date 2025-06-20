@@ -8,6 +8,7 @@ from collections.abc import Iterable
 
 import torch
 import torch._dynamo.test_case
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import make_dynamo_test, munge_exc
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -88,10 +89,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
 
 class TestSetGuards(LoggingTestCase):
-    def test_set_with_tensor(self):
+    def test_set_with_function(self):
         s = {
             torch._C._set_grad_enabled,
-            torch.randn(2),
+            "hello",
             torch.amp._exit_autocast,
         }
         cnts = CompileCounter()
@@ -146,7 +147,7 @@ class TestSetGuards(LoggingTestCase):
             munge_exc(record.getMessage()),
         )
 
-    def test_set_with_tensors_2(self):
+    def test_set_with_tensors(self):
         s = {
             torch.ones(1),
             torch.tensor([1.0]),
@@ -162,20 +163,12 @@ class TestSetGuards(LoggingTestCase):
             return x + z
 
         x = torch.tensor([1.0])
-        y = fn(x, s)
-        self.assertEqual(y, x + 2)
-        self.assertEqual(cnts.frame_count, 1)
-
-        t = s.pop()
-        s.add(t + 1)
-        y = fn(x, s)
-        self.assertEqual(y, x + 3)
-        self.assertEqual(cnts.frame_count, 1)
+        with self.assertRaises(Unsupported):
+            fn(x, s)
 
     def test_set_multiple_types(self):
         s = {
             "PyTorch",
-            torch.tensor(1.0),
             3.3,
             1j,
             math.nan,

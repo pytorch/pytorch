@@ -21,10 +21,10 @@ class TensorParallelRandomStateTests(DTensorTestBase):
         assert shape[0] % n == 0
         local_shape = [shape[0] // n, shape[1]]
 
-        slice_idx = [
+        slice_idx = (
             slice(idx * local_shape[0], (idx + 1) * local_shape[0]),
             slice(local_shape[1]),
-        ]
+        )
         return large_tensor[slice_idx]
 
     def check_gathered_tensors(self, self_rank, size, gathered_tensors, assertFunc):
