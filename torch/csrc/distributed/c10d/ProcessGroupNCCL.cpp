@@ -700,7 +700,7 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 }
 
 // Print the traceback of the collective at call time
-void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
+std::string ProcessGroupNCCL::WorkNCCL::getTraceback() const {
   // First step we get the corresponding record entry from FR, based on work's
   // trace_id_
   std::optional<FlightRecorderCUDA::Entry> entry =
@@ -716,10 +716,19 @@ void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
     // Wait for the future to complete or timeout
     auto status = future.wait_for(std::chrono::seconds(8));
     if (status == std::future_status::ready) {
-      std::string tracebackStr = future.get();
-      LOG(ERROR) << "Stack trace of the failed collective: \n" << tracebackStr;
-    } // else, symbolizer probably timed out, we skip logging the stack trace.
-  } else {
+      return future.get();
+    }
+  }
+  return "";
+}
+
+// Print the traceback of the collective at call time
+void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
+  std::string tracebackStr = getTraceback();
+  if (!tracebackStr.empty()) {
+    LOG(ERROR) << "Stack trace of the failed collective: \n" << tracebackStr;
+  } // else, symbolizer probably timed out, we skip logging the stack trace.
+  else {
     LOG(ERROR)
         << "Stack trace of the failed collective not found, "
         << "potentially because FlightRecorder is disabled. "
@@ -985,6 +994,23 @@ ProcessGroupNCCL::ProcessGroupNCCL(
           << "must both be enabled. "
           << "Enabling TORCH_NCCL_ASYNC_ERROR_HANDLING.";
       asyncErrorHandling_ = SkipCleanUp;
+    }
+  }
+
+  // If deterministic mode is enabled, we need to disable the NVLS algorithm in
+  // NCCL.
+  // TODO: remove this once NVLS supports deterministic mode.
+  if (at::globalContext().deterministicAlgorithms()) {
+    // Check if user have already set NCCL_ALGO. If already set, leave it.
+    auto nccl_algo = c10::utils::get_env("NCCL_ALGO");
+    if (!nccl_algo.has_value()) {
+      LOG(INFO)
+          << "torch deterministic mode is enabled, "
+          << "disabling NVLS algorithm in NCCL which can lead to non-deterministic reduction.";
+      // Sorry we have to disable NVLS for all collectives, be it all-reduce
+      // or all-gather, because NCCL does not support per-collective
+      // algorithm selection today.
+      c10::utils::set_env("NCCL_ALGO", "^NVLS");
     }
   }
 
@@ -1549,7 +1575,6 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
   // multiple calls in one runtime. User is responsible for preserving the
   // output file from an earlier call before a later call overwrites it.
   static std::mutex writeDebugInfoMutex;
-  std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
   LOG(ERROR)
       << logPrefix()
       << "ProcessGroupNCCL preparing to dump debug info. Include stack trace: "
@@ -1559,6 +1584,9 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
     auto ncclTrace = dump_nccl_trace(true, includeStackTrace, false);
+    // dump_nccl_trace will hang so we don't grab the global lock until we get
+    // the trace.
+    std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
@@ -1818,6 +1846,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // recorder and dump. After dump, the training should continue.
     if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
       // best effort dump, not waiting for the dump here
+      LOG(INFO) << pg_->logPrefix()
+                << "Dump signal received through pipe, triggering FR dump.";
       std::future<bool> fut = std::async(std::launch::async, [this]() {
         return this->pg_->dumpDebuggingInfo();
       });
@@ -2284,6 +2314,25 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
           // We are just pushing back a shared_ptr here, so the cost should be
           // minimal
           pg_->shelvesToUnstash_.push_back(work.stashed_for_allocator_safety_);
+        }
+
+        if (pg_->enableTiming_ && logger) {
+          ::c10d::C10dLoggingData data;
+          // logging integers
+          data.strings["collective_duration"] =
+              std::to_string(work.getDuration());
+          data.integers["global_rank"] = pg_->globalRank();
+          data.integers["pg_id"] = static_cast<int64_t>(pg_->local_id_);
+          data.strings["pg_name"] = pg_->pg_uid_;
+          data.strings["pg_desc"] = pg_->pg_desc_;
+          data.integers["pg_rank"] = pg_->rank_;
+          data.integers["world_size"] = pg_->size_;
+          data.strings["comm_backend"] = "nccl";
+          data.strings["comm_backend_version"] = getNcclVersion();
+          // TODO: We see errors for this line, revert it for now.
+          data.strings["collective_stack"] = "";
+          data.strings["collective_name"] = opTypeToString(work.opType_);
+          logger->log(data);
         }
 
         // Work status logging for desync debug
