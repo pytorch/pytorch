@@ -177,15 +177,16 @@ inline dim3 SoftMaxForward_getBlockSize(uint64_t dim_size) {
   uint64_t block_size = 1;
   uint64_t max_block_size = std::min(dim_size, static_cast<uint64_t>(max_threads));
 
-  // We need a block size that is a multiple of C10_WARP_SIZE in order
+  // We need a block size that is a multiple of at::cuda::warp_size() in order
   // to perform block size reductions using warp shuffle instructions.
   // Since max_threads is also a multiple of C10_WARPS_SIZE we do not
   // risk creating a block size larger than the limit.
 
-  if (max_block_size % C10_WARP_SIZE == 0) {
+  int warp_size = at::cuda::warp_size();
+  if (max_block_size % warp_size == 0) {
     block_size = max_block_size;
   } else {
-    block_size = (max_block_size / C10_WARP_SIZE + 1) * C10_WARP_SIZE;
+    block_size = (max_block_size / warp_size + 1) * warp_size;
   }
 
   return dim3(block_size);
@@ -859,7 +860,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
-            size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
+            size_t smem_reduction_sz = block.x / at::cuda::warp_size() * sizeof(accscalar_t);
             auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
               smem_reduction_sz) / sizeof(scalar_t);
 
@@ -895,7 +896,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
-            size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
+            size_t smem_reduction_sz = block.x / at::cuda::warp_size() * sizeof(accscalar_t);
             auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
               smem_reduction_sz) / sizeof(scalar_t);
 
