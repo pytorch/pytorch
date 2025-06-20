@@ -3640,8 +3640,15 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
                                     gemm_idx,
                                 ),
                             )
-                            user.replace_all_uses_with(get_item)
-                            graph.erase_node(user)
+                            with graph.inserting_after(get_item):
+                                clone_node = graph.create_node(
+                                    "call_function",
+                                    torch.ops.aten.clone.default,
+                                    (get_item,),
+                                    {"memory_format": torch.contiguous_format},
+                                )
+                                user.replace_all_uses_with(clone_node)
+                                graph.erase_node(user)
 
 
 def quant_lift_up(graph_module: torch.fx.GraphModule):
