@@ -19,6 +19,16 @@ _ATTENTION_23_ALLOWED_INTERMEDIATE_PRECISIONS = frozenset(
     }
 )
 
+# Saturation ranges for different quantization types
+_QUANTIZATION_SATURATION_RANGES = {
+    torch.uint16: (0, 65535),
+    torch.int16: (-32768, 32767),
+    torch.uint8: (0, 255),
+    torch.int8: (-128, 127),
+    # Note: uint4 and int4 are not directly supported in PyTorch
+    # They would need special handling if encountered
+}
+
 
 def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
     """Decorator to register an ONNX operator with a custom implementation."""
@@ -393,3 +403,169 @@ def attention_23(
         )
 
     return output, present_key, present_value, qk_output
+
+
+def _get_quantization_dtype_from_zero_point(y_zero_point: Optional[torch.Tensor], output_dtype: int) -> torch.dtype:
+    """Get the quantization output data type from zero point or output_dtype attribute."""
+    if output_dtype != 0:
+        # Use the specified output_dtype
+        return _dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[output_dtype]
+    elif y_zero_point is not None:
+        # Infer from y_zero_point data type
+        return y_zero_point.dtype
+    else:
+        # Default to uint8
+        return torch.uint8
+
+
+def _apply_saturation(values: torch.Tensor, target_dtype: torch.dtype) -> torch.Tensor:
+    """Apply saturation to values based on target dtype ranges."""
+    if target_dtype in _QUANTIZATION_SATURATION_RANGES:
+        min_val, max_val = _QUANTIZATION_SATURATION_RANGES[target_dtype]
+        return torch.clamp(values, min_val, max_val)
+    # For float8 and other types, clamp based on dtype info
+    elif hasattr(torch, 'finfo') and target_dtype.is_floating_point:
+        try:
+            info = torch.finfo(target_dtype)
+            return torch.clamp(values, info.min, info.max)
+        except (TypeError, ValueError):
+            # If finfo is not available for the dtype, return as-is
+            return values
+    return values
+
+
+def _round_to_nearest_even(x: torch.Tensor) -> torch.Tensor:
+    """Round to nearest even (banker's rounding)."""
+    return torch.round(x)
+
+
+def _compute_blocked_quantization_scale(
+    x: torch.Tensor,
+    y_scale: torch.Tensor,
+    axis: int,
+    block_size: int
+) -> torch.Tensor:
+    """Expand scale tensor for blocked quantization."""
+    # For blocked quantization, we need to repeat each scale value block_size times
+    # along the specified axis
+    x_shape = list(x.shape)
+
+    # Calculate how many times to repeat each scale value
+    expanded_scale = y_scale.repeat_interleave(block_size, dim=axis)
+
+    # Trim to match input size if necessary
+    if expanded_scale.shape[axis] > x_shape[axis]:
+        slices = [slice(None)] * len(x_shape)
+        slices[axis] = slice(0, x_shape[axis])
+        expanded_scale = expanded_scale[tuple(slices)]
+
+    return expanded_scale
+
+
+@_onnx_op("QuantizeLinear", 23)
+def quantize_linear_23(
+    x: torch.Tensor,
+    y_scale: torch.Tensor,
+    y_zero_point: Optional[torch.Tensor] = None,
+    *,
+    axis: int = 1,
+    block_size: int = 0,
+    output_dtype: int = 0,
+    precision: int = 0,
+    saturate: int = 1,
+) -> torch.Tensor:
+    """QuantizeLinear-23 https://onnx.ai/onnx/operators/onnx__QuantizeLinear.html#quantizelinear-23"""
+
+    # Determine output dtype
+    target_dtype = _get_quantization_dtype_from_zero_point(y_zero_point, output_dtype)
+
+    # Validate that y_zero_point and target dtype match if both are specified
+    if y_zero_point is not None and output_dtype != 0:
+        expected_dtype = _dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[output_dtype]
+        torch._check(
+            y_zero_point.dtype == expected_dtype,
+            lambda: f"y_zero_point dtype ({y_zero_point.dtype}) must match output_dtype ({expected_dtype})"
+        )
+
+    # Handle axis normalization
+    if axis < 0:
+        axis = len(x.shape) + axis
+
+    torch._check(
+        0 <= axis < len(x.shape),
+        lambda: f"axis ({axis}) out of range for tensor with {len(x.shape)} dimensions"
+    )
+
+    # Determine quantization granularity and prepare scale
+    if y_scale.numel() == 1:
+        # Per-tensor quantization
+        effective_scale = y_scale
+    elif len(y_scale.shape) == 1:
+        # Per-axis quantization
+        torch._check(
+            y_scale.shape[0] == x.shape[axis],
+            lambda: f"y_scale length ({y_scale.shape[0]}) must match input dimension at axis {axis} ({x.shape[axis]})"
+        )
+        # Reshape scale to broadcast correctly
+        new_shape = [1] * len(x.shape)
+        new_shape[axis] = y_scale.shape[0]
+        effective_scale = y_scale.view(new_shape)
+    else:
+        # Blocked quantization
+        torch._check(
+            block_size > 0,
+            lambda: "block_size must be positive for blocked quantization"
+        )
+        effective_scale = _compute_blocked_quantization_scale(x, y_scale, axis, block_size)
+
+    # Handle zero point
+    if y_zero_point is None:
+        # Default zero point
+        effective_zero_point = torch.tensor(0, dtype=target_dtype, device=x.device)
+    else:
+        torch._check(
+            y_zero_point.shape == y_scale.shape,
+            lambda: f"y_zero_point shape ({y_zero_point.shape}) must match y_scale shape ({y_scale.shape})"
+        )
+
+        if y_scale.numel() == 1:
+            effective_zero_point = y_zero_point
+        elif len(y_scale.shape) == 1:
+            # Reshape zero point to broadcast correctly
+            new_shape = [1] * len(x.shape)
+            new_shape[axis] = y_zero_point.shape[0]
+            effective_zero_point = y_zero_point.view(new_shape)
+        else:
+            # Blocked quantization
+            effective_zero_point = _compute_blocked_quantization_scale(x, y_zero_point, axis, block_size)
+
+    # Handle precision casting for division
+    if precision != 0:
+        division_dtype = _dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[precision]
+        x_for_div = x.to(division_dtype)
+        scale_for_div = effective_scale.to(division_dtype)
+    else:
+        # Use y_scale precision
+        x_for_div = x.to(effective_scale.dtype)
+        scale_for_div = effective_scale
+
+    # Perform quantization: y = saturate((x / y_scale) + y_zero_point)
+    # Step 1: Divide x by scale
+    divided = x_for_div / scale_for_div
+
+    # Step 2: Round to nearest even
+    rounded = _round_to_nearest_even(divided)
+
+    # Step 3: Add zero point
+    with_zero_point = rounded + effective_zero_point.to(rounded.dtype)
+
+    # Step 4: Apply saturation if enabled
+    if saturate == 1:
+        saturated = _apply_saturation(with_zero_point, target_dtype)
+    else:
+        saturated = with_zero_point
+
+    # Step 5: Convert to target dtype
+    result = saturated.to(target_dtype)
+
+    return result
