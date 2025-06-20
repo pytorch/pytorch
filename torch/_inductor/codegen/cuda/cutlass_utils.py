@@ -13,7 +13,7 @@ from typing import Any, Optional
 import sympy
 
 import torch
-from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.utils import clear_on_fresh_cache
 
 from ... import config
 from ...ir import Layout
@@ -56,7 +56,7 @@ def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
     return content
 
 
-@functools.lru_cache(None)
+@functools.cache
 def try_import_cutlass() -> bool:
     """
     We want to support three ways of passing in CUTLASS:
@@ -250,8 +250,8 @@ class CUTLASSArgs:
         self.architectures = _normalize_cuda_arch(self.architectures)
 
 
-@clear_on_fresh_inductor_cache
-@functools.lru_cache(None)
+@clear_on_fresh_cache
+@functools.cache
 def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     # Note: Cache needs to be specific for cuda architecture and version
 
@@ -314,7 +314,7 @@ DTYPE_TO_CUTLASS_TYPE = {
     **DTYPE_TO_CPP,
     torch.float16: "__half",
     torch.bfloat16: "__nv_bfloat16",
-    torch.float8_e4m3fn: "cutlass::float_e4m3_t",
+    torch.float8_e4m3fn: "__nv_fp8_e4m3",
 }
 
 
