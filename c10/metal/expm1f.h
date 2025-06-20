@@ -44,7 +44,7 @@ namespace metal {
 
    NOTE: Scale factor b is only applied if i < 0 or i > 1 (should be power of 2)
 */
-float expm1f_scaled_unchecked(float a, float b) {
+inline float expm1f_scaled_unchecked(float a, float b) {
   float f, j, r, s, t, u, v, x, y;
   int i;
 
@@ -81,7 +81,7 @@ float expm1f_scaled_unchecked(float a, float b) {
 }
 
 /* Compute exponential base e minus 1. max ulp err = 0.99746 */
-float expm1f(float a) {
+inline float expm1f(float a) {
   float r;
 
   r = expm1f_scaled_unchecked(a, 1.0f);
