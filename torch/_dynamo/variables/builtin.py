@@ -1564,7 +1564,7 @@ class BuiltinVariable(VariableTracker):
                     if (
                         getattr(obj, "source", False)
                         and isinstance(obj, ConstDictVariable)
-                        and not istype(obj, SetVariable)
+                        and not istype(obj, (SetVariable, FrozensetVariable))
                     ):
                         tx.output.guard_on_key_order.add(obj.source)
 
@@ -1729,7 +1729,7 @@ class BuiltinVariable(VariableTracker):
                 ],
             )
         arg = args[0]
-        if isinstance(arg, variables.SetVariable):
+        if istype(arg, variables.SetVariable):
             return arg.clone(mutation_type=ValueMutationNew())
         elif arg.has_force_unpack_var_sequence(tx):
             items = arg.force_unpack_var_sequence(tx)
@@ -1764,10 +1764,10 @@ class BuiltinVariable(VariableTracker):
                 ],
             )
         arg = args[0]
-        if isinstance(arg, variables.FrozensetVariable):
+        if istype(arg, variables.FrozensetVariable):
             return FrozensetVariable([x.vt for x in arg.set_items])
-        elif arg.has_unpack_var_sequence(tx):
-            items = arg.unpack_var_sequence(tx)
+        elif arg.has_force_unpack_var_sequence(tx):
+            items = arg.force_unpack_var_sequence(tx)
             return FrozensetVariable(items)
         raise_observed_exception(
             TypeError,

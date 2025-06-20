@@ -955,12 +955,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
             a = {"one": torch.ones(1)}
             return a | b
 
-        from torch._dynamo.exc import InternalTorchDynamoError
+        from torch._dynamo.exc import Unsupported
 
         for arg in args:
-            with self.assertRaisesRegex(
-                InternalTorchDynamoError, "unsupported operand type"
-            ):
+            with self.assertRaises(Unsupported):
                 _ = fn(arg)
 
     def test_builtin_or_with_diff_keys(self):
