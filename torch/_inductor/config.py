@@ -406,9 +406,6 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
-# enable slow autotuning pass for flex attention/flex decode
-max_autotune_flex = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_FLEX") == "1"
-
 # disable decomposek autotune choice for gemm
 disable_decompose_k = os.environ.get("TORCHINDUCTOR_DISABLE_DECOMPOSE_K") == "1"
 

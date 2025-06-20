@@ -584,7 +584,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     def get_flex_attn_fwd_configs(self, head_dim, dtype) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
-        if config.max_autotune or config.max_autotune_flex:
+        if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
@@ -605,12 +605,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         return flex_attn_fwd_configs
 
-    def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
-    ) -> list[FlexConfig]:
+    def get_flex_attn_bwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_bwd_configs: list[FlexConfig] = []
 
-        if config.max_autotune or config.max_autotune_flex:
+        if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
@@ -627,7 +625,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     ) -> list[FlexDecodeConfig]:
         flex_decode_configs: list[FlexDecodeConfig] = []
 
-        if config.max_autotune or config.max_autotune_flex:
+        if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
@@ -645,6 +643,10 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
 
 
 class CUDAConfigHeuristic(BaseConfigHeuristic):
+    """
+    Child class for CUDA device specific gemm/flex attention/conv/ configs.
+    """
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -672,13 +674,11 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 256): FlexConfig(32, 64, 3, 4),
         }
 
-    def get_flex_attn_fwd_configs(
-        self, head_dim: int, dtype: Any
-    ) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         capability = torch.cuda.get_device_capability()
         flex_attn_fwd_configs: list[FlexConfig] = []
 
-        if config.max_autotune or config.max_autotune_flex:
+        if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
@@ -708,14 +708,12 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         return flex_attn_fwd_configs
 
-    def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
-    ) -> list[FlexConfig]:
+    def get_flex_attn_bwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         capability = torch.cuda.get_device_capability()
 
         flex_attn_bwd_configs: list[FlexConfig] = []
 
-        if config.max_autotune or config.max_autotune_flex:
+        if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
@@ -755,7 +753,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         flex_decode_configs: list[FlexDecodeConfig] = []
 
-        if config.max_autotune or config.max_autotune_flex:
+        if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
@@ -775,6 +773,10 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
 
 class ROCmConfigHeuristic(BaseConfigHeuristic):
+    """
+    Child class for ROCm specific gemm/flex attention/conv/ configs.
+    """
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -1058,7 +1060,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
     ) -> list[ROCmFlexConfig]:
         flex_attn_fwd_configs: list[ROCmFlexConfig] = []
 
-        if config.max_autotune or config.max_autotune_flex:
+        if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
@@ -1087,7 +1089,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
     ) -> list[ROCmFlexConfig]:
         flex_attn_bwd_configs: list[ROCmFlexConfig] = []
 
-        if config.max_autotune or config.max_autotune_flex:
+        if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
@@ -1114,7 +1116,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
     ) -> list[ROCmFlexDecodeConfig]:
         flex_decode_configs: list[ROCmFlexDecodeConfig] = []
 
-        if config.max_autotune or config.max_autotune_flex:
+        if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
@@ -1128,4 +1130,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
 
 class XPUConfigHeuristic(BaseConfigHeuristic):
-    pass
+    """
+    Placeholder child class for XPU specific overrides.
+    """
