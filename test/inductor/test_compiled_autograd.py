@@ -4868,7 +4868,7 @@ class CompiledAutograd1(torch.nn.Module):
 
         class LoggingTorchFunctionMode(BaseTorchFunctionMode):
             def __torch_function__(self, func, types, args=(), kwargs=None):
-                called_funcs.append(str(func))
+                called_funcs.append(str(func.__name__))
                 return super().__torch_function__(func, types, args, kwargs)
 
         class MyLoss(torch.autograd.Function):
@@ -4901,12 +4901,14 @@ class CompiledAutograd1(torch.nn.Module):
         self.assertExpectedInline(
             "\n".join(called_funcs),
             """\
-<method 'mul' of 'torch._C.TensorBase' objects>
-<method 'mul' of 'torch._C.TensorBase' objects>
-<method 'sum' of 'torch._C.TensorBase' objects>
-<built-in function _set_multithreading_enabled>
-<function Tensor.backward at 0x7f9382fee480>
-<built-in function _set_multithreading_enabled>""",
+Forward
+mul
+mul
+sum
+Backward
+_set_multithreading_enabled
+backward
+_set_multithreading_enabled""",
         )  # noqa: B950
 
     def test_torch_dispatch_mode(self):
@@ -4914,7 +4916,7 @@ class CompiledAutograd1(torch.nn.Module):
 
         class LoggingTorchDispatchMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                called_funcs.append(str(func))
+                called_funcs.append(str(func.__name__))
                 return func(*args, **kwargs)
 
         class MyLoss(torch.autograd.Function):
@@ -4948,23 +4950,23 @@ class CompiledAutograd1(torch.nn.Module):
             "\n".join(called_funcs),
             """\
 Forward
-aten.mul.Tensor
-aten.mul.Tensor
-aten.sum.default
+mul.Tensor
+mul.Tensor
+sum.default
 Backward
-aten.ones_like.default
-aten.empty.memory_format
-aten.empty.memory_format
-aten.empty.memory_format
-aten.empty.memory_format
-aten.empty.memory_format
-aten.empty.memory_format
-aten.ones_like.default
-aten.mul.Tensor
-aten.mul.Tensor
-aten.mul.Tensor
-aten.new_empty_strided.default
-aten.copy_.default""",
+ones_like.default
+empty.memory_format
+empty.memory_format
+empty.memory_format
+empty.memory_format
+empty.memory_format
+empty.memory_format
+ones_like.default
+mul.Tensor
+mul.Tensor
+mul.Tensor
+new_empty_strided.default
+copy_.default""",
         )  # noqa: B950
 
 
