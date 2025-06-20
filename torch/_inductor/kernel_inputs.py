@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any, Optional
 
 import torch
+import torch._inductor.config
 from torch._inductor import ir
+from torch._inductor.virtualized import V
 
 
 class KernelInputs:
@@ -22,6 +24,7 @@ class KernelInputs:
         """
         self._input_nodes = input_nodes
         self._device_name: Optional[str] = None
+        assert len(input_nodes) > 0, "Expected at least one input node"
 
     def nodes(self) -> tuple[Any, ...]:
         """
@@ -82,9 +85,6 @@ class KernelInputs:
         Returns:
             A tuple of shape tuples with integer hints for each input node
         """
-        import torch._inductor.config
-        from torch._inductor.virtualized import V
-
         return tuple(
             V.graph.sizevars.size_hints(
                 node.get_size(),
@@ -109,9 +109,6 @@ class KernelInputs:
         Returns:
             A tuple of stride tuples with integer hints for each input node
         """
-        import torch._inductor.config
-        from torch._inductor.virtualized import V
-
         return tuple(
             V.graph.sizevars.size_hints(
                 node.get_stride(),
@@ -184,11 +181,12 @@ class MMKernelInputs(KernelInputs):
         hinted_shapes = self.shapes_hinted()[-2:]
 
         # Extract M, N, K from the hinted shapes
-        m = hinted_shapes[0][0]  # M from first dimension of first operand (2nd to last)
-        k = hinted_shapes[0][
-            1
-        ]  # K from second dimension of first operand (2nd to last)
-        n = hinted_shapes[1][1]  # N from second dimension of second operand (last)
+        # M from first dimension of first operand (2nd to last)
+        m = hinted_shapes[0][0]
+        # K from second dimension of first operand (2nd to last)
+        k = hinted_shapes[0][1]
+        # N from second dimension of second operand (last)
+        n = hinted_shapes[1][1]
 
         # Ensure K dimensions match between operands
         k_check = hinted_shapes[1][0]
