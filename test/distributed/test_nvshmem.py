@@ -755,7 +755,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
     @requires_triton()
     def test_triton_fence(self) -> None:
         """
-        1. Rank 0 performs two put operations into Rank 1's buffers with a fence
+        Rank 0 performs two put operations into Rank 1's buffers with a fence
         between them, followed by another fence and a flag update. Rank 1 waits
         for the flag, then verifies that both destination buffers contain the
         expected values. The flag is transferred after the final fence, so
