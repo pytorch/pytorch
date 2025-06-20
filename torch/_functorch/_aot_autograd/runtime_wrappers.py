@@ -1501,6 +1501,14 @@ class AutogradLazyBackwardCompileInfo:
     saved_compile_context: Optional[CompileContext]
 
 
+# On an AOT Autograd cache hit, we already have a lowered backward, so there is usually
+# no need to keep information around for a new lazy compilation. Except for compiled autograd,
+# which wants to retrace this backward into a larger graph, and it needs the graph module to do so.
+@dataclass
+class CachedAutogradLazyBackwardCompileInfo:
+    bw_module_fn: Callable
+
+
 def _raise_if_functorch_active():
     # not ideal but prevent the user from seeing a nasty traceback - See #138422
     stack = torch._C._functorch.peek_interpreter_stack()
@@ -1949,7 +1957,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         backward_state_indices: list[int],
         disable_amp: bool,
         indices_of_inps_to_detach: list[int],
-        lazy_backward_info: Optional[AutogradLazyBackwardCompileInfo],
+        lazy_backward_info: Optional[
+            Union[
+                AutogradLazyBackwardCompileInfo,
+                CachedAutogradLazyBackwardCompileInfo,
+            ]
+        ],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
@@ -2257,6 +2270,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 if CompiledFunction.compiled_bw is None:
                     assert lazy_backward_info is not None
+                    assert isinstance(
+                        lazy_backward_info, AutogradLazyBackwardCompileInfo
+                    )
 
                     if not saved_tensors_use_once:
                         fw_metadata.bw_donated_idxs = []
@@ -2304,6 +2320,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         if try_save_cache_entry is not None:
                             try_save_cache_entry(
                                 CompiledFunction.compiled_bw,
+                                bw_module,
                                 fw_metadata,
                                 aot_config,
                             )
