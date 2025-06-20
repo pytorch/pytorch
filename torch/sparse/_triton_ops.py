@@ -124,7 +124,7 @@ def multidim_slicer(dims, slices, *tensors):
         for d, d_slice in zip(dims, slices):
             if d is not None:
                 s[d] = d_slice
-        yield t[s]
+        yield t[tuple(s)]
 
 
 def ptr_stride_extractor(*tensors):
