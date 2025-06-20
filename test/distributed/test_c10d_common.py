@@ -15,7 +15,6 @@ from datetime import timedelta
 from itertools import product
 from sys import platform
 from typing import Optional
-from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
