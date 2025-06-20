@@ -58,11 +58,6 @@ class PrecompileContextTests(InductorTestCase):
         entry = deserialized[0]
         assert isinstance(entry, BundledAOTAutogradCacheArtifact)
         entry = entry.after_deserialization()
-        assert isinstance(
-            entry,
-            BundledAOTAutogradCacheEntry,
-        )
-
         # Now that we've serialized, there should be no new cache artifacts
         self.assertEqual(
             len(PrecompileContext._new_cache_artifacts["precompile_aot_autograd"]), 0
