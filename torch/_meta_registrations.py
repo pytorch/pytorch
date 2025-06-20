@@ -5906,7 +5906,7 @@ def meta__scaled_dot_product_fused_attention_overrideable(
 
     res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype, device=query.device)
     logsum_exp = torch.empty(
-        (B, H, S_Q, 1),
+        (B, H, S_Q),
         dtype=torch.float,
         device=query.device,
     )
@@ -5951,7 +5951,11 @@ def meta__scaled_dot_product_fused_attention_overrideable_backward(
     grad_q = torch.empty_like(query)
     grad_k = torch.empty_like(key)
     grad_v = torch.empty_like(value)
-    return grad_q, grad_k, grad_v, None
+
+    grad_attn_bias = None
+    if attn_bias is not None:
+        grad_attn_bias = torch.empty_like(attn_bias)
+    return grad_q, grad_k, grad_v, grad_attn_bias
 
 
 @register_meta(
