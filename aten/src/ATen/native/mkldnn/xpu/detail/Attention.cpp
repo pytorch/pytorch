@@ -81,6 +81,7 @@ struct SDPALogicalParams {
     at::Tensor reshaped_key = key_;
     at::Tensor reshaped_value = value_;
     at::Tensor reshaped_attention = attention_;
+    at::Tensor reshaped_logsumexp = logsumexp_.unsqueeze(-1);
     at::Tensor reshaped_attn_mask = attn_mask_.value_or(at::Tensor());
     if (attn_mask_.has_value() &&
         at::native::onednn::is_broadcast(reshaped_attn_mask)) {
@@ -161,8 +162,8 @@ struct SDPALogicalParams {
       logsumexp = {
           static_cast<size_t>(TensorID::logsumexp),
           sdpa_intermedia_dtype,
-          logsumexp_.sizes().vec(),
-          logsumexp_.strides().vec()};
+          reshaped_logsumexp.sizes().vec(),
+          reshaped_logsumexp.strides().vec()};
     }
   }
   std::vector<logical_tensor> get_input() const {
@@ -456,7 +457,7 @@ struct SDPABackwardLogicalParams {
     at::Tensor reshaped_key = key_;
     at::Tensor reshaped_value = value_;
     at::Tensor reshaped_out = out_;
-    at::Tensor reshaped_logsumexp = logsumexp_;
+    at::Tensor reshaped_logsumexp = logsumexp_.unsqueeze(-1);
     at::Tensor reshaped_attn_mask = attn_mask_.value_or(at::Tensor());
     if (at::native::onednn::is_broadcast(reshaped_grad_out)) {
       at::native::onednn::undo_broadcast(reshaped_grad_out);
@@ -504,14 +505,14 @@ struct SDPABackwardLogicalParams {
         scalar_shape,
         logical_tensor::layout_type::strided,
         logical_tensor::property_type::constant};
-    if (is_causal) {
-      neg_inf = {
-          static_cast<size_t>(TensorID::neg_inf),
-          to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
-          scalar_shape,
-          logical_tensor::layout_type::strided,
-          logical_tensor::property_type::constant};
-    }
+    // if (is_causal) {
+    //   neg_inf = {
+    //       static_cast<size_t>(TensorID::neg_inf),
+    //       to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
+    //       scalar_shape,
+    //       logical_tensor::layout_type::strided,
+    //       logical_tensor::property_type::constant};
+    // }
     if (attn_mask_.has_value()) {
       const data_type mask_dtype =
           to_logical_tensor_data_type(attn_mask_->scalar_type());
@@ -543,9 +544,9 @@ struct SDPABackwardLogicalParams {
   std::vector<logical_tensor> get_input() const {
     std::vector<logical_tensor> input = {
         grad_out, query, key, value, out, logsumexp, scale};
-    if (neg_inf.has_value()) {
-      input.push_back(neg_inf.value());
-    }
+    // if (neg_inf.has_value()) {
+    //   input.push_back(neg_inf.value());
+    // }
     if (attn_mask.has_value()) {
       input.push_back(attn_mask.value());
     }
@@ -593,13 +594,13 @@ partition create_sdpa_backward_graph_partition(
   std::optional<op> mask_add;
 
   // For optional implicite causal mask
-  std::optional<op> mask_gen_idx_row;
-  std::optional<logical_tensor> mask_row_idx;
-  std::optional<op> mask_gen_idx_col;
-  std::optional<logical_tensor> mask_col_idx;
-  std::optional<op> mask_gt;
-  std::optional<logical_tensor> mask_gt_out;
-  std::optional<op> mask_select;
+  // std::optional<op> mask_gen_idx_row;
+  // std::optional<logical_tensor> mask_row_idx;
+  // std::optional<op> mask_gen_idx_col;
+  // std::optional<logical_tensor> mask_col_idx;
+  // std::optional<op> mask_gt;
+  // std::optional<logical_tensor> mask_gt_out;
+  // std::optional<op> mask_select;
 
   if (params.attn_mask.has_value()) {
     TORCH_INTERNAL_ASSERT(
@@ -611,41 +612,42 @@ partition create_sdpa_backward_graph_partition(
         {scaled_qk_out, params.attn_mask.value()},
         {masked_qk_out.value()},
         "mask_add"};
-  } else if (is_causal) {
-    mask_row_idx = {lt_id++, data_type::s32};
-    mask_gen_idx_row = {
-        op_id++,
-        op::kind::GenIndex,
-        {scaled_qk_out},
-        {mask_row_idx.value()},
-        "mask_gen_idx_row"};
-    mask_gen_idx_row->set_attr<int64_t>(op::attr::axis, -2);
+  } 
+  // else if (is_causal) {
+  //   mask_row_idx = {lt_id++, data_type::s32};
+  //   mask_gen_idx_row = {
+  //       op_id++,
+  //       op::kind::GenIndex,
+  //       {scaled_qk_out},
+  //       {mask_row_idx.value()},
+  //       "mask_gen_idx_row"};
+  //   mask_gen_idx_row->set_attr<int64_t>(op::attr::axis, -2);
 
-    mask_col_idx = {lt_id++, data_type::s32};
-    mask_gen_idx_col = {
-        op_id++,
-        op::kind::GenIndex,
-        {scaled_qk_out},
-        {mask_col_idx.value()},
-        "mask_gen_idx_col"};
-    mask_gen_idx_col->set_attr<int64_t>(op::attr::axis, -1);
+  //   mask_col_idx = {lt_id++, data_type::s32};
+  //   mask_gen_idx_col = {
+  //       op_id++,
+  //       op::kind::GenIndex,
+  //       {scaled_qk_out},
+  //       {mask_col_idx.value()},
+  //       "mask_gen_idx_col"};
+  //   mask_gen_idx_col->set_attr<int64_t>(op::attr::axis, -1);
 
-    mask_gt_out = {lt_id++, data_type::boolean};
-    mask_gt = {
-        op_id++,
-        op::kind::GreaterEqual,
-        {mask_row_idx.value(), mask_col_idx.value()},
-        {mask_gt_out.value()},
-        "mask_gt"};
+  //   mask_gt_out = {lt_id++, data_type::boolean};
+  //   mask_gt = {
+  //       op_id++,
+  //       op::kind::GreaterEqual,
+  //       {mask_row_idx.value(), mask_col_idx.value()},
+  //       {mask_gt_out.value()},
+  //       "mask_gt"};
 
-    masked_qk_out = {lt_id++, sdpa_intermedia_dtype};
-    mask_select = {
-        op_id++,
-        op::kind::Select,
-        {mask_gt_out.value(), scaled_qk_out, params.neg_inf.value()},
-        {masked_qk_out.value()},
-        "mask_select"};
-  }
+  //   masked_qk_out = {lt_id++, sdpa_intermedia_dtype};
+  //   mask_select = {
+  //       op_id++,
+  //       op::kind::Select,
+  //       {mask_gt_out.value(), scaled_qk_out, params.neg_inf.value()},
+  //       {masked_qk_out.value()},
+  //       "mask_select"};
+  // }
 
   // attention_probs = softmax(masked_score) = exp(masked_score - logsumexp)
   logical_tensor sub_out{lt_id++, sdpa_intermedia_dtype};
@@ -963,10 +965,10 @@ void gpu_float_sdpa_backward(
   // mask. Fall back to explict causal mask until OneDNN v3.9 which has fp32
   // ukernel for implicit causal mask.
   // TODO: support causal once OneDNN support causal in backward pass.
-  if (true) { // || (is_causal && query.dtype() == at::kFloat)) {
-    attn_mask = get_tril_mask();
-    is_causal = false;
-  }
+  // if (is_causal && query.dtype() == at::kFloat) {
+  //   attn_mask = get_tril_mask();
+  //   is_causal = false;
+  // }
 
   std::vector<dnnl::graph::logical_tensor> l_inputs, l_outputs;
   std::optional<dnnl::graph::compiled_partition> compiled_partition;
@@ -1006,12 +1008,12 @@ void gpu_float_sdpa_backward(
   Tensor softmax_scale = at::full(
       {}, scale, query.options().dtype(at::toOpMathType(query.scalar_type())));
   std::optional<at::Tensor> neg_inf;
-  if (is_causal) {
-    neg_inf = at::full(
-        {},
-        -INFINITY,
-        query.options().dtype(at::toOpMathType(query.scalar_type())));
-  }
+  // if (is_causal) {
+  //   neg_inf = at::full(
+  //       {},
+  //       -INFINITY,
+  //       query.options().dtype(at::toOpMathType(query.scalar_type())));
+  // }
 
   std::vector<dnnl::graph::tensor> outputs = {
       {l_outputs[0], eng, grad_query.data_ptr()},
@@ -1029,9 +1031,9 @@ void gpu_float_sdpa_backward(
   inputs.emplace_back(l_inputs[i++], eng, out.data_ptr());
   inputs.emplace_back(l_inputs[i++], eng, logsumexp.data_ptr());
   inputs.emplace_back(l_inputs[i++], eng, softmax_scale.data_ptr());
-  if (neg_inf.has_value()) {
-    inputs.emplace_back(l_inputs[i++], eng, neg_inf->data_ptr());
-  }
+  // if (neg_inf.has_value()) {
+  //   inputs.emplace_back(l_inputs[i++], eng, neg_inf->data_ptr());
+  // }
   if (attn_mask.has_value()) {
     inputs.emplace_back(l_inputs[i++], eng, attn_mask->data_ptr());
   }
