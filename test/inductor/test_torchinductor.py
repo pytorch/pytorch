@@ -14020,7 +14020,7 @@ if RUN_GPU:
             )[::1, :, :k]
 
             offs = torch.arange(
-                k, n_groups * k + 1, k, device=device, dtype=torch.int32
+                m, n_groups * m + 1, m, device=device, dtype=torch.int32
             )
 
             a_ref.requires_grad_(True)
