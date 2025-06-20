@@ -406,7 +406,9 @@ def attention_23(
     return output, present_key, present_value, qk_output
 
 
-def _get_quantization_dtype_from_zero_point(y_zero_point: Optional[torch.Tensor], output_dtype: int) -> torch.dtype:
+def _get_quantization_dtype_from_zero_point(
+    y_zero_point: Optional[torch.Tensor], output_dtype: int
+) -> torch.dtype:
     """Get the quantization output data type from zero point or output_dtype attribute."""
     if output_dtype != 0:
         # Use the specified output_dtype
@@ -425,7 +427,7 @@ def _apply_saturation(values: torch.Tensor, target_dtype: torch.dtype) -> torch.
         min_val, max_val = _QUANTIZATION_SATURATION_RANGES[target_dtype]
         return torch.clamp(values, min_val, max_val)
     # For float8 and other types, clamp based on dtype info
-    elif hasattr(torch, 'finfo') and target_dtype.is_floating_point:
+    elif hasattr(torch, "finfo") and target_dtype.is_floating_point:
         try:
             info = torch.finfo(target_dtype)
             return torch.clamp(values, info.min, info.max)
@@ -441,10 +443,7 @@ def _round_to_nearest_even(x: torch.Tensor) -> torch.Tensor:
 
 
 def _compute_blocked_quantization_scale(
-    x: torch.Tensor,
-    y_scale: torch.Tensor,
-    axis: int,
-    block_size: int
+    x: torch.Tensor, y_scale: torch.Tensor, axis: int, block_size: int
 ) -> torch.Tensor:
     """Expand scale tensor for blocked quantization."""
     # For blocked quantization, we need to repeat each scale value block_size times
@@ -485,7 +484,7 @@ def quantize_linear_23(
         expected_dtype = _dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[output_dtype]
         torch._check(
             y_zero_point.dtype == expected_dtype,
-            lambda: f"y_zero_point dtype ({y_zero_point.dtype}) must match output_dtype ({expected_dtype})"
+            lambda: f"y_zero_point dtype ({y_zero_point.dtype}) must match output_dtype ({expected_dtype})",
         )
 
     # Handle axis normalization
@@ -494,7 +493,7 @@ def quantize_linear_23(
 
     torch._check(
         0 <= axis < len(x.shape),
-        lambda: f"axis ({axis}) out of range for tensor with {len(x.shape)} dimensions"
+        lambda: f"axis ({axis}) out of range for tensor with {len(x.shape)} dimensions",
     )
 
     # Determine quantization granularity and prepare scale
@@ -505,7 +504,7 @@ def quantize_linear_23(
         # Per-axis quantization
         torch._check(
             y_scale.shape[0] == x.shape[axis],
-            lambda: f"y_scale length ({y_scale.shape[0]}) must match input dimension at axis {axis} ({x.shape[axis]})"
+            lambda: f"y_scale length ({y_scale.shape[0]}) must match input dimension at axis {axis} ({x.shape[axis]})",
         )
         # Reshape scale to broadcast correctly
         new_shape = [1] * len(x.shape)
@@ -515,9 +514,11 @@ def quantize_linear_23(
         # Blocked quantization
         torch._check(
             block_size > 0,
-            lambda: f"block_size must be positive for blocked quantization. block_size: {block_size}"
+            lambda: f"block_size must be positive for blocked quantization. block_size: {block_size}",
         )
-        effective_scale = _compute_blocked_quantization_scale(x, y_scale, axis, block_size)
+        effective_scale = _compute_blocked_quantization_scale(
+            x, y_scale, axis, block_size
+        )
 
     # Handle zero point
     if y_zero_point is None:
@@ -526,7 +527,7 @@ def quantize_linear_23(
     else:
         torch._check(
             y_zero_point.shape == y_scale.shape,
-            lambda: f"y_zero_point shape ({y_zero_point.shape}) must match y_scale shape ({y_scale.shape})"
+            lambda: f"y_zero_point shape ({y_zero_point.shape}) must match y_scale shape ({y_scale.shape})",
         )
 
         if y_scale.numel() == 1:
@@ -538,7 +539,9 @@ def quantize_linear_23(
             effective_zero_point = y_zero_point.view(new_shape)
         else:
             # Blocked quantization
-            effective_zero_point = _compute_blocked_quantization_scale(x, y_zero_point, axis, block_size)
+            effective_zero_point = _compute_blocked_quantization_scale(
+                x, y_zero_point, axis, block_size
+            )
 
     # Handle precision casting for division
     if precision != 0:
