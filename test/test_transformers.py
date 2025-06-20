@@ -3659,7 +3659,7 @@ class TestSDPACudaOnly(NNTestCase):
             # This is necessary because CK doesn't support passing in custom dropout masks
             # So we use this logic to ensure we are comparing apples to apples.
             if TEST_WITH_CK:
-                dropout_mask = (softmax_mask <=int((1.0 - dropout_p) * 255.0)).to(torch.float32)
+                dropout_mask = (softmax_mask <= int((1.0 - dropout_p) * 255.0)).to(torch.float32)
 
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
@@ -3667,7 +3667,8 @@ class TestSDPACudaOnly(NNTestCase):
                 scale=scale, dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query, key, value, dropout_mask=dropout_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)[0]
+                query, key, value, dropout_mask=dropout_mask, dropout_p=dropout_p,
+                is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
@@ -3690,13 +3691,13 @@ class TestSDPACudaOnly(NNTestCase):
             if TEST_WITH_CK:
                 fudge_factors['out'] = 5
                 fudge_factors['grad_key'] = 145.0
-                fudge_factors['grad_query'] = 855.0 # ck min = 855.0
+                fudge_factors['grad_query'] = 855.0  # ck min = 855.0
                 fudge_factors['grad_value'] = 6
                 if seq_len_k >= 1024:
                     fudge_factors['grad_key'] = 70.0
                 if seq_len_k >= 2048:
                     fudge_factors['grad_key'] = 190.0
-                    fudge_factors['grad_query'] = 1550.0 # NEW CK MIN
+                    fudge_factors['grad_query'] = 1550.0  # NEW CK MIN
                     if seq_len_q >= 2048:
                         fudge_factors['grad_query'] = 1100.0
                 if dtype == torch.float32:
@@ -3712,7 +3713,7 @@ class TestSDPACudaOnly(NNTestCase):
                     if seq_len_q >= 2048:
                         fudge_factors['grad_query'] = 1100.0
                 if dtype == torch.float32:
-                    fudge_factor['grad_key'] = 90.0
+                    fudge_factors['grad_key'] = 90.0
 
 
         check_out_and_grad(
