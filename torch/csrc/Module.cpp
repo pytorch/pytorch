@@ -678,7 +678,7 @@ static PyObject* THPModule_torchDeviceToDLDevice(
 
   auto tuple = PyTuple_New(2);
   if (!tuple) {
-      throw python_error();
+    throw python_error();
   }
 
   PyTuple_SET_ITEM(tuple, 0, THPUtils_packInt64(dl_device.device_type));
