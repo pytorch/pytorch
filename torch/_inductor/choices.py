@@ -34,9 +34,9 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
 
-    from triton import Config as TritonConfig
-
     from torch.utils._ordered_set import OrderedSet
+
+    from triton import Config as TritonConfig
 
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
@@ -126,9 +126,7 @@ class InductorChoices:
         """
         # Get template ID and device type
         template_id = template.id
-        device_type = kernel_inputs.device_type
-        if device_type is None:
-            device_type = "cuda"
+        device_type = kernel_inputs.device_type or "cuda"
 
         # Determine which heuristics dictionary to use
         if template_id in self._template_config_heuristics:
