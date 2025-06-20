@@ -96,9 +96,9 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   }
 
   if (all_hinted) {
-    // we avoid going through the slow path if everything is hinted,
-    // because evaluating a large sympy expression can be expensive.
-    // TODO exclude backed_size_oblivuous from this path. 
+    // We avoid going through the slow path if everything is hinted,
+    // because evaluating a large SymPy expression can be expensive.
+    // TODO exclude backed_size_oblivious from this path.
     return _compute_contiguous<SymInt>(sizes_, strides_, numel());
   }
 
