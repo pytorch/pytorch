@@ -3806,6 +3806,145 @@ class GraphModule(torch.nn.Module):
         )
 
     @supported_platform
+    def test_tensor_subclass_dispatch_order(self, device):
+        """Test that tensor subclasses get proper dispatch priority over modes.
+
+        This test verifies the fix that allows tensor subclasses' pyimpl to run before
+        FakeTensorMode/FunctionalTensorMode implementations, preventing issues
+        where subclasses that error on as_strided would fail in flex_attention.
+        """
+        import torch.utils._pytree as pytree
+        from torch.utils._python_dispatch import return_and_correct_aliasing
+
+        class AsStridedErrorTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                assert isinstance(elem, torch.Tensor)
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.shape,
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                )
+
+            def __init__(self, elem):
+                self.elem = elem
+
+            def __repr__(self):
+                return f"AsStridedErrorTensor({self.elem})"
+
+            def __tensor_flatten__(self):
+                return ["elem"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                assert meta is None
+                elem = inner_tensors["elem"]
+                return AsStridedErrorTensor(elem)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs=None):
+                # Error if as_strided is called
+                if func is torch.ops.aten.as_strided.default:
+                    raise RuntimeError("as_strided was called on AsStridedErrorTensor!")
+
+                if kwargs is None:
+                    kwargs = {}
+                args_elem = pytree.tree_map_only(
+                    AsStridedErrorTensor, lambda x: x.elem, args
+                )
+                kwargs_elem = pytree.tree_map_only(
+                    AsStridedErrorTensor, lambda x: x.elem, kwargs
+                )
+
+                out = func(*args_elem, **kwargs_elem)
+
+                def wrap_output(x):
+                    if isinstance(x, torch.Tensor):
+                        return AsStridedErrorTensor(x)
+                    return x
+
+                out_wrapped = pytree.tree_map(wrap_output, out)
+                return return_and_correct_aliasing(func, args, kwargs, out_wrapped)
+
+        from torch._higher_order_ops.flex_attention import (
+            flex_attention as flex_attention_hop,
+        )
+
+        @flex_attention_hop.py_impl(AsStridedErrorTensor)
+        def flex_attention_as_strided_error_tensor(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            score_mod,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers=(),
+            mask_mod_other_buffers=(),
+        ):
+            inner_q, inner_k, inner_v = query.elem, key.elem, value.elem
+            out, lse = flex_attention_hop(
+                inner_q,
+                inner_k,
+                inner_v,
+                score_mod,
+                block_mask,
+                scale,
+                kernel_options,
+                score_mod_other_buffers,
+                mask_mod_other_buffers,
+            )
+            return AsStridedErrorTensor(out), AsStridedErrorTensor(lse)
+
+        # Test setup
+        B, H, S, D = 2, 1, 128, 16
+        dtype = torch.float32
+
+        # Create regular tensors
+        query_elem = torch.randn(B, H, S, D, device=device, dtype=dtype)
+        key_elem = torch.randn(B, H, S, D, device=device, dtype=dtype)
+        value_elem = torch.randn(B, H, S, D, device=device, dtype=dtype)
+
+        # Test 1: Verify as_strided raises error when called directly on AsStridedErrorTensor
+        test_tensor = AsStridedErrorTensor(query_elem)
+        with self.assertRaisesRegex(
+            RuntimeError, "as_strided was called on AsStridedErrorTensor!"
+        ):
+            torch.as_strided(
+                test_tensor, size=(B, H, S, D), stride=test_tensor.stride()
+            )
+
+        # Test 2: Run flex_attention with normal tensors first
+        compiled_fn = torch.compile(flex_attention, backend="aot_eager", fullgraph=True)
+        normal_out, normal_lse = compiled_fn(
+            query_elem, key_elem, value_elem, return_lse=True
+        )
+
+        # Test 3: Wrap in our subclass
+        query = AsStridedErrorTensor(query_elem)
+        key = AsStridedErrorTensor(key_elem)
+        value = AsStridedErrorTensor(value_elem)
+
+        # This should NOT error with as_strided after the fix
+        # Before the fix, it would error because FakeTensorMode would directly
+        # call flex_attention_fake_impl which uses as_strided
+        out, lse = compiled_fn(query, key, value, return_lse=True)
+        # Verify we got valid output
+        self.assertIsInstance(out, AsStridedErrorTensor)
+        self.assertIsInstance(lse, AsStridedErrorTensor)
+        self.assertEqual(out.shape, (B, H, S, D))
+        self.assertEqual(lse.shape, (B, H, S))
+
+        # Test 4: Compare outputs between normal tensors and subclassed tensors
+        torch.testing.assert_close(out.elem, normal_out, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(lse.elem, normal_lse, rtol=1e-5, atol=1e-5)
+
+    @supported_platform
     @skip_on_cuda
     def test_cpu_error_message_return_lse(self, device):
         make_tensor = functools.partial(
