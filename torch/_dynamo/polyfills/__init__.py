@@ -97,36 +97,54 @@ class _IterSentinel:
         return self
 
     def __next__(self):
+        # The iterator created in this case will call object with no arguments
+        # for each call to its __next__() method;
         r = self.fn()
+
+        # If the value returned is equal to sentinel, StopIteration will be raised
         if r == self.sentinel:
             raise StopIteration
+
+        # otherwise the value will be returned.
         return r
 
 
-def iter_sentinel(fn, sentinel):
-    if not isinstance(fn, Callable):
-        raise TypeError("iter(v, w): v must be a callable")
-
-    return _IterSentinel(fn, sentinel)
+class _INITIAL_MISSING:
+    pass
 
 
-def iter_protocol(iterable):
-    if hasattr(iterable, "__iter__"):
-        return iterable.__iter__()
-    if hasattr(iterable, "__getitem__"):
+def iter_protocol(fn_or_iterable, sentinel=_INITIAL_MISSING):
+    # Without a second argument, object must be a collection object which supports
+    # the iterable (__iter__) or the sequence protocol (__getitem__ with an integer
+    # starting at 0)
+    if sentinel is _INITIAL_MISSING:
+        iterable = fn_or_iterable
+        if hasattr(iterable, "__iter__"):
+            return iterable.__iter__()
+        elif hasattr(iterable, "__getitem__"):
+            # Needs to be a new function to avoid iter_protocol becoming a generator
+            def sequence_protocol(iterable):
+                i = 0
+                while True:
+                    try:
+                        # Can this execute user code?
+                        yield iterable.__getitem__(i)
+                        i += 1
+                    except IndexError:
+                        break
 
-        # Needs to be a new function to avoid iter_protocol becoming a generator
-        def sequence_protocol(iterable):
-            i = 0
-            while True:
-                try:
-                    # Can this execute user code?
-                    yield iterable.__getitem__(i)
-                    i += 1
-                except IndexError:
-                    break
+            return sequence_protocol(iterable)
+        else:
+            raise TypeError(f"'{type(fn_or_iterable)}' object is not iterable")
+    else:
+        # If the second argument, sentinel, is given, then object must be a
+        # callable object.
+        fn = fn_or_iterable
 
-        return sequence_protocol(iterable)
+        if not isinstance(fn, Callable):  # type: ignore[arg-type]
+            raise TypeError("iter(v, w): v must be a callable")
+
+        return _IterSentinel(fn, sentinel)
 
 
 # This mirrors
