@@ -79,7 +79,13 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   }
   c10::SymIntArrayRef sizes(sizes_);
   c10::SymIntArrayRef strides(strides_);
-  return _compute_contiguous_sym(sizes, strides, numel());
+  auto result = _compute_contiguous_sym(sizes, strides, numel());
+  if (result.has_hint()) {
+    // call this to add guards, we do not guard result directly due
+    // to perf reasons when evaluating complex sympy expressions.
+    return _compute_contiguous<SymInt>(sizes_, strides_, numel());
+  }
+  return result;
 }
 
 // The rest of them
