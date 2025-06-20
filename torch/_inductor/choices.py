@@ -126,9 +126,7 @@ class InductorChoices:
     def get_base_mm_params(
         self, kernel_inputs: MMKernelInputs
     ) -> partial[Generator[KernelTemplateParams, None, None]]:
-        device_type = (
-            "cuda" if kernel_inputs.device_type is None else kernel_inputs.device_type
-        )
+        device_type = kernel_inputs.device_type or "cuda"
         mm_heuristics = self.get_config_heuristics(device_type)
         if config.max_autotune_gemm_search_space != "EXHAUSTIVE":
             return mm_heuristics.get_mm_params(kernel_inputs)  # type: ignore[return-value] # Generator invariance
