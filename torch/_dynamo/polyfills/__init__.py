@@ -88,6 +88,65 @@ def accumulate_grad(x, new_grad):
         x.grad.add_(new_grad_strided)
 
 
+class _IterSentinel:
+    def __init__(self, fn, sentinel):
+        self.fn = fn
+        self.sentinel = sentinel
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        # The iterator created in this case will call object with no arguments
+        # for each call to its __next__() method;
+        r = self.fn()
+
+        # If the value returned is equal to sentinel, StopIteration will be raised
+        if r == self.sentinel:
+            raise StopIteration
+
+        # otherwise the value will be returned.
+        return r
+
+
+class _INITIAL_MISSING:
+    pass
+
+
+def iter_protocol(fn_or_iterable, sentinel=_INITIAL_MISSING):
+    # Without a second argument, object must be a collection object which supports
+    # the iterable (__iter__) or the sequence protocol (__getitem__ with an integer
+    # starting at 0)
+    if sentinel is _INITIAL_MISSING:
+        iterable = fn_or_iterable
+        if hasattr(iterable, "__iter__"):
+            return iterable.__iter__()
+        elif hasattr(iterable, "__getitem__"):
+            # Needs to be a new function to avoid iter_protocol becoming a generator
+            def sequence_protocol(iterable):
+                i = 0
+                while True:
+                    try:
+                        # Can this execute user code?
+                        yield iterable.__getitem__(i)
+                        i += 1
+                    except IndexError:
+                        break
+
+            return sequence_protocol(iterable)
+        else:
+            raise TypeError(f"'{type(fn_or_iterable)}' object is not iterable")
+    else:
+        # If the second argument, sentinel, is given, then object must be a
+        # callable object.
+        fn = fn_or_iterable
+
+        if not isinstance(fn, Callable):  # type: ignore[arg-type]
+            raise TypeError("iter(v, w): v must be a callable")
+
+        return _IterSentinel(fn, sentinel)
+
+
 # This mirrors
 # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
@@ -198,6 +257,10 @@ def mapping_get(obj, key, value=None):
         return obj.__getitem__(key)
     except KeyError:
         return value
+
+
+def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
+    self_.assertTrue(seq1 == seq2, msg)
 
 
 def instantiate_user_defined_class_object(cls, /, *args, **kwargs):

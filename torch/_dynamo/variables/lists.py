@@ -1119,7 +1119,9 @@ class ListIteratorVariable(IteratorVariable):
         return iter([x.as_python_constant() for x in self.items])
 
     def unpack_var_sequence(self, tx):
-        return list(self.items[self.index :])
+        r = list(self.items[self.index :])
+        self.index = len(self.items)
+        return r
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         return self.unpack_var_sequence(tx)
