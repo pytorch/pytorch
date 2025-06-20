@@ -66,14 +66,12 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     return False
 
-
 def evaluate_platform_supports_ck_sdpa():
     if TEST_WITH_ROCM:
         arch_list = ["gfx90a", "gfx942", "gfx950"]
         return evaluate_gfx_arch_within(arch_list)
     else:
         return False
-
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:

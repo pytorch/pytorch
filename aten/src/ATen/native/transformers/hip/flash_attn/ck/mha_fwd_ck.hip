@@ -17,8 +17,6 @@ fmha_fwd_traits get_ck_fmha_fwd_traits(const mask_info &mask,
                                        bool has_lse,
                                        bool enable_bias)
 {
-    //std::cout << "HAS DROPOUT IN TRAITS?: " << has_dropout << std::endl;
-    //std::cout << "has LSE in TRAITS?: " << has_lse << std::endl;
     return fmha_fwd_traits{head_size,
                            head_size,
                            dtype,
@@ -62,9 +60,6 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
     // attn_bias: (batch_size, nheads, seqlen_q, seqlen_k)
     // lse: (batch_size, nheads, seqlen_q)
     // randval: (batch_size, nheads, seqlen_q, seqlen_k)
-    //std::cout << "MHA_FWD_CK GET ARGS DROPOUT STRIDES, SHAPE, ETC" << std::endl;
-    //std::cout << dropout_randval.strides() << std::endl;
-    //std::cout << "GET_ARGS: HAS_DROPOUT_RANDVAL: " << has_dropout_randval << std::endl;
 
     ck_tile::index_t stride_q = q.stride(1);
     ck_tile::index_t stride_k = k.stride(1);
@@ -182,7 +177,6 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
 
     const auto sizes = q.sizes();
-
     const int batch_size = sizes[0];
     int seqlen_q = sizes[1];
     int num_heads = sizes[2];
@@ -231,7 +225,6 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     CHECK_SHAPE(k, batch_size, seqlen_k, num_heads_k, head_size);
     CHECK_SHAPE(v, batch_size, seqlen_k, num_heads_k, head_size);
 
-
     at::Tensor q_padded, k_padded, v_padded;
     if (head_size % 8 != 0) {
         q_padded = at::pad(temp_q, {0, 8 - head_size % 8});
@@ -243,7 +236,6 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         k_padded = k;
         v_padded = v;
     }
-
 
     at::Tensor out;
     if (out_.has_value()) {
@@ -271,53 +263,28 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     auto opts = q.options();
     bool has_lse = true;
     bool has_dropout = p_dropout > 0.0f;
-    //std::cout << "MADE IT HERE" << std::endl;
     at::Tensor softmax_lse;
     // TODO - check gradient, only training require lse
     softmax_lse = at::empty({batch_size, num_heads, seqlen_q}, opts.dtype(at::kFloat));
-    //std::cout << "CHECKPOINT 1" << std::endl;
+
     at::Tensor p;
     if (return_dropout_randval) {
-        //std::cout << "CHECKPOINT 1.A" << std::endl;
         TORCH_CHECK(has_dropout, "return_dropout_randval require p_dropout > 0");
         p = at::empty({batch_size, num_heads, seqlen_q, seqlen_k}, opts.dtype(at::kByte));
-        //p = at::empty({batch_size, num_heads, seqlen_q, seqlen_k}, opts);
     }
     else {
-        //std::cout << "CHECKPOINT 1.B" << std::endl;
         p = at::empty({ 0 }, opts.dtype(at::kByte));
     }
 
 
-    // TROUBLE SPOT ===================================================
     uint64_t drop_seed = 1, drop_offset = 0;
     int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
 
     auto rng_state_options = at::TensorOptions().dtype(at::kUInt64).device(at::kCUDA);
     auto rng_state = at::zeros({2}, rng_state_options.dtype(at::kUInt64));
-/*
-    std::cout << "SOME INFO ABOUT RNG_STATE: " << std::endl;
-    std::cout << "numel?  : " << rng_state.numel() << std::endl;
-    std::cout << "defined?: " << rng_state.defined() << std::endl;
-    std::cout << "P_DROPOUT: " << p_dropout << std::endl;
-    bool has_nonzero = rng_state.ne(0).any().item<bool>();
-    std::cout << "has non_zero before?  : " << has_nonzero << std::endl;
-    */
     auto _unused = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA));
-    
-
-//    auto rng_state = at::empty({2}, opts.dtype(at::kLong));
-//    auto rng_state_ptr = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
-
-
-
-//    at::Tensor seed_t, offset_t;
-    //std::cout << "CHECKPOINT 2" << std::endl;
-
 
     if (p_dropout > 0.0)  {
-      //  std::cout << "CHECKPOINT 2.A.A" << std::endl;
-
 
         auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
             gen_, at::cuda::detail::getDefaultCUDAGenerator());
@@ -327,44 +294,18 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         auto philox_args = gen->philox_cuda_state(counter_offset);
 
         std::tie(drop_seed, drop_offset) = at::cuda::philox::unpack(philox_args);
-        //std::cout << "MHA_FWD_CK::DROP_SEED: " << drop_seed << std::endl;
-//        std::cout << "MHA_FWD_CK::DROP_OFST: " << drop_offset << std::endl;
 
-  //      std::cout << "CHECKPOINT 2.A.B" << std::endl;
     }
-/*    else
-    {
-        std::cout << "CHECKPOINT 2.B.A" << std::endl;
-        seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-        offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-        std::cout << "CHECKPOINT 2.B.B" << std::endl;
-    }
-    */
-    //these are actual values allegedly on the GPU
-    //rng_state[0] = drop_seed;
-    //rng_state[1] = drop_offset;
     rng_state[0] = *(reinterpret_cast<int64_t*>(&drop_seed));
     rng_state[1] = *(reinterpret_cast<int64_t*>(&drop_offset));
     auto drop_options = at::TensorOptions().dtype(at::kLong).device(at::kCUDA);
-//   bool has_nonzero_2 = rng_state.ne(0).any().item<bool>();
-//    std::cout << "has non zeros after?  : " << has_nonzero_2 << std::endl;
- //   auto seed_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(*rng_state[0].data_ptr<uint64_t>())), drop_options.dtype(at::kLong));
-//    auto offset_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(*rng_state[1].data_ptr<uint64_t>())), drop_options.dtype(at::kLong));
 
-//    std::cout << "RNG_STATE DEVICE: " << rng_state.device() << std::endl;
-//    std::cout << "RNG_STATE ADDR  : " << rng_state.data_ptr() << std::endl;
-// =============================================================================
     std::optional<at::Tensor> attn_bias;
-//    std::cout << "CHECKPOINT 3" << std::endl;
     if( attn_bias_.has_value())
     {
       attn_bias = attn_bias_;
     }
-//    std::cout << "CHECKPOINT 4" << std::endl;
     if (seqlen_k > 0) {
-        //auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
-        //auto drop_seed_offset = std::make_pair(rng_state[0].data_ptr<uint64_t>(),
-        //                                       rng_state[1].data_ptr<uint64_t>());
         auto drop_seed_offset = std::make_pair(rng_state[0].data_ptr<uint64_t>(),
                                                rng_state[1].data_ptr<uint64_t>());
         auto stream = at::cuda::getCurrentHIPStream().stream();
@@ -400,31 +341,19 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
-  //      std::cout << "CHECKPOINT 5" << std::endl;
         float t = fmha_fwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
- //       std::cout << "CHECKPOINT 5a" << std::endl;
     }
     else {
- //       std::cout << "CHECKPOINT BAD" << std::endl;
         // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
         out.zero_();
         softmax_lse.fill_(std::numeric_limits<float>::infinity());
     }
- //   std::cout << "CHECKPOINT 6" << std::endl;
     if (seqlenq_ngroups_swapped) {
-   //     std::cout << "SWAPPING" << std::endl;
         out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
         q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-    /*
-    std::cout << "CHECKPOINT OUT" << std::endl;
-    std::cout << "CK INTERNALS RETURNED RANDVAL" << std::endl;
-    std::cout << p << std::endl;
-    std::cout << "CK INTERNAL OUT" << std::endl;
-    std::cout << out << std::endl;
-    */
     return {out, q_padded, k_padded, v_padded, softmax_lse, rng_state, _unused, p};
 }
 } //namespace pytorch_flash

@@ -87,8 +87,6 @@ isSM120Device = torch.cuda.is_available() and torch.cuda.get_device_capability()
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
 isLessThanSM80Device = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8
 
-# this is probably not needed and will happen on a test by test bases
-#TEST_WITH_CK = TEST_WITH_ROCM and torch.backends.cuda.preferred_rocm_fa_library() == torch.backends.cuda._ROCmFABackends['ck']
 
 def _check_equal(
     golden: torch.Tensor,
@@ -131,8 +129,6 @@ def _check_equal(
     # Compute error between golden
     test_error = (golden - test).abs().max()
     ref_error = (golden - reference).abs().max()
-    #print("TEST_ERROR: " , test_error)
-    #print("REF_ERROR : " , ref_error)
 
     if torch.isnan(test_error).any() and not torch.isnan(ref_error).any():
         raise ValueError("Output/Grad with NaN")
@@ -143,7 +139,7 @@ def _check_equal(
     threshold = max(default_atol[torch.float32], ref_error * fudge_factor)
     if test_error > threshold:
         name = tensor_name or ""
-        msg = f"{name} Test error {test_error} is greater than threshold {threshold}! with fudge factor={fudge_factor}"
+        msg = f"{name} Test error {test_error} is greater than threshold {threshold}!"
         raise ValueError(msg)
 
 
@@ -224,26 +220,6 @@ PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
 # 1. sequence longher than 512
 # 2. head dimsion larger than 64
 MEM_EFF_CAPABILITY_MATCHES_SM80 = SM80OrLater or TEST_WITH_ROCM
-
-
-def _get_ck_dropout_mask(batch_size,nheads, q_len, kv_len, p, device) -> torch.Tensor:
-    """
-    TODO_ANDY: Write full doc
-    """
-    mask = torch.empty((batch_size, nheads, q_len, kv_len), device=device)
-#    blah = torch.ops.xformers._andy_lugo(p)
-    #rand_uniform is an int8 tensor
-    rand_uniform = torch.ops.ck._ck_rand_uniform(p, mask)
-    print("_GET_CK_DROPOUT_MASK rand_uniform")
-    print(rand_uniform)
-
-    #mask = rand_uniform > 0.0
-    mask = (rand_uniform <=int((1.0 -p) * 255.0)).to(torch.float32)
-    mask = mask.reshape(batch_size, q_len, kv_len)
-
-    return mask
-
-
 
 def rand_sdpa_tensor(shape: SdpaShape, device: str, dtype: torch.dtype, type: str,
                      requires_grad: bool = False, packed: bool = False) -> torch.Tensor:
@@ -3603,8 +3579,6 @@ class TestSDPACudaOnly(NNTestCase):
                                                head_dim: int, is_causal: bool, dropout_p: float,
                                                dtype: torch.dtype, scale: str, enable_gqa: bool,
                                                n_heads: list[int], sdpa_backend: str):
-
-
         if isSM8XDevice or isSM120Device and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
