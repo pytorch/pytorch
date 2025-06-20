@@ -147,7 +147,7 @@ class MultiKernel:
     )
     ```
 
-    Here is an concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
+    Here is a concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
     """
 
     def __init__(self, kernels):
@@ -230,7 +230,7 @@ class MultiKernel:
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        seen = OrderedSet[str]()
+        seen: OrderedSet[str] = OrderedSet()
         for k in self.kernels:
             _, call_args, precompile_args, _ = k.args.python_argdefs()
             for arg, precompile_arg in zip(call_args, precompile_args):

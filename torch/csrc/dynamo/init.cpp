@@ -257,6 +257,8 @@ void initDynamoBindings(PyObject* torch) {
       .def_readwrite("recursive_action", &FrameExecStrategy::recursive_action);
 
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
+  m.def("_reset_precompile_entries", &_reset_precompile_entries);
+  m.def("_load_precompile_entry", &_load_precompile_entry);
   py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
   m.def("code_framelocals_names", &code_framelocals_names);

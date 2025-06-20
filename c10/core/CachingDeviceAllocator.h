@@ -18,7 +18,7 @@ struct DeviceStats {
   // released via device memory deallocation)
   StatArray inactive_split;
 
-  // SUM: bytes allocated by this memory alocator
+  // SUM: bytes allocated by this memory allocator
   StatArray allocated_bytes;
   // SUM: bytes reserved by this memory allocator (both free and used)
   StatArray reserved_bytes;
