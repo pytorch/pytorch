@@ -60,7 +60,7 @@ def sum(iterable: Iterable[_T], /, start: _T = 0) -> _T:  # type: ignore[assignm
     return functools.reduce(operator.add, iterable, start)
 
 
-class _IterSentinel:
+class _CallableIterator:
     def __init__(self, fn, sentinel):  # type: ignore[no-untyped-def]
         self.fn = fn
         self.sentinel = sentinel
@@ -115,4 +115,4 @@ def iter(fn_or_iterable, sentinel=_INITIAL_MISSING):  # type: ignore[no-untyped-
         if not isinstance(fn, Callable):  # type: ignore[arg-type]
             raise TypeError("iter(v, w): v must be a callable")
 
-        return _IterSentinel(fn, sentinel)
+        return _CallableIterator(fn, sentinel)
