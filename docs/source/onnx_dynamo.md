@@ -183,7 +183,8 @@ The following metadata fields are added to each ONNX node:
 
   *Example:*
   ```
-  File "simpleadd.py", line 7, in forward\n    return torch.add(x, y)
+  File "simpleadd.py", line 7, in forward
+      return torch.add(x, y)
   ```
 
 These metadata fields are stored in the metadata_props attribute of each ONNX node and can be inspected using Netron or programmatically.
