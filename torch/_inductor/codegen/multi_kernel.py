@@ -207,8 +207,27 @@ class MultiKernel:
             # the fast kernel directly
             kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
-        # numels for all subkernels should be the same. Use kernels[0] here
-        self.kernels[0].add_numel_to_call_args(kernel_name, call_args, arg_types)
+        # Collect all additional args from all kernels for multi-kernel dispatch
+        all_additional_call_args = []
+        all_additional_arg_types = []
+
+        if hasattr(self.kernels[0], "additional_call_args_and_types"):
+            for kernel in self.kernels:
+                kernel_additional_call_args, kernel_additional_arg_types = (
+                    kernel.additional_call_args_and_types()
+                )
+                all_additional_call_args.append(kernel_additional_call_args)
+                all_additional_arg_types.append(kernel_additional_arg_types)
+
+            # Get union of all additional call args and types
+            combined_additional_call_args, combined_additional_arg_types = (
+                get_all_call_args(all_additional_call_args, all_additional_arg_types)
+            )
+            call_args.extend(combined_additional_call_args)
+            arg_types.extend(combined_additional_arg_types)
+        else:
+            # numels for all subkernels should be the same. Use kernels[0] here
+            self.kernels[0].add_numel_to_call_args(kernel_name, call_args, arg_types)
 
         for ws in self.kernels[0].args.workspace_args:
             V.graph.wrapper_code.generate_workspace_allocation(ws)
@@ -283,6 +302,7 @@ class MultiKernelCall:
             self.load_cache()
 
         self._recorded = False
+        self._shape_cache = {}
 
     def cache_file_path(self):
         key = code_hash(
@@ -339,18 +359,24 @@ class MultiKernelCall:
 
         Unit test may mock this method to force a specific kernel to
         be picked.
+
+        Each kernel may have different additional arguments (like grid size)
+        so we need to handle them separately.
         """
 
-        def wrap_fn(kernel):
+        def wrap_fn(kernel, kernel_args):
             def inner():
-                args_clone, kwargs_clone = kernel.clone_args(*args, **kwargs)
+                args_clone, kwargs_clone = kernel.clone_args(*kernel_args, **kwargs)
                 return kernel.run(*args_clone, **kwargs_clone)
 
             return inner
 
+        # Get the kernel-specific arguments for each kernel
+        kernel_args_list = self._get_kernel_specific_args(*args)
+
         return [
-            benchmarker.benchmark_gpu(wrap_fn(kernel), rep=40)
-            for kernel in self.kernels
+            benchmarker.benchmark_gpu(wrap_fn(kernel, kernel_args), rep=40)
+            for kernel, kernel_args in zip(self.kernels, kernel_args_list)
         ]
 
     # record_choice and lookup_choice are helper functions for cpp-wrapper
@@ -390,20 +416,45 @@ class MultiKernelCall:
 
     def run(self, *args, **kwargs):
         if self.picked_kernel is None:
-            timings = self.benchmark_sub_kernels(*args, **kwargs)
-            self.picked_kernel = timings.index(min(timings))
-            k0 = self.kernels[0]
-            log.debug(
-                "pick %dth sub-kernel in %s. Size hints %s. Reduction hint %s. Timings %s",
-                self.picked_kernel,
-                [k.inductor_meta.get("kernel_name") for k in self.kernels],
-                k0.size_hints,
-                k0.inductor_meta.get("reduction_hint"),
-                timings,
-            )
-            get_metric_table("persistent_red_perf").add_row(
-                functools.partial(self._metrics_table_row, timings)
-            )
+            cache_key = self._get_shape_cache_key(*args, **kwargs)
+            cached_choice = self._get_cached_shape_choice(cache_key)
+
+            if cached_choice is not None:
+                self.picked_kernel = cached_choice
+                log.debug(
+                    "using cached shape-specialized choice %dth sub-kernel in %s. Cache key: %s",
+                    self.picked_kernel,
+                    [k.inductor_meta.get("kernel_name") for k in self.kernels],
+                    cache_key,
+                )
+            else:
+                shape_choice = self._select_kernel_by_shape(*args, **kwargs)
+                if shape_choice is not None:
+                    self.picked_kernel = shape_choice
+                    log.debug(
+                        "using shape-based heuristic %dth sub-kernel in %s. Shape choice: %s",
+                        self.picked_kernel,
+                        [k.inductor_meta.get("kernel_name") for k in self.kernels],
+                        shape_choice,
+                    )
+                else:
+                    timings = self.benchmark_sub_kernels(*args, **kwargs)
+                    self.picked_kernel = timings.index(min(timings))
+                    k0 = self.kernels[0]
+                    log.debug(
+                        "pick %dth sub-kernel in %s. Size hints %s. Reduction hint %s. Timings %s",
+                        self.picked_kernel,
+                        [k.inductor_meta.get("kernel_name") for k in self.kernels],
+                        k0.size_hints,
+                        k0.inductor_meta.get("reduction_hint"),
+                        timings,
+                    )
+                    get_metric_table("persistent_red_perf").add_row(
+                        functools.partial(self._metrics_table_row, timings)
+                    )
+
+                self._cache_shape_choice(cache_key, self.picked_kernel)
+
             if not self.disable_cache:
                 self.store_cache()
 
@@ -414,8 +465,44 @@ class MultiKernelCall:
             )
             assert picked_kernel_name is not None
             self.record_choice(self.multi_kernel_name, picked_kernel_name)
+        # Get the correct arguments for the selected kernel
+        kernel_args_list = self._get_kernel_specific_args(*args)
+        selected_kernel_args = kernel_args_list[self.picked_kernel]
+
         self.run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
-        self.run(*args, **kwargs)
+        self.run(*selected_kernel_args, **kwargs)
+
+    def _get_shape_cache_key(self, *args, **kwargs):
+        """
+        Generate a cache key based on tensor shapes for shape-specialized dispatch.
+        """
+        shapes = []
+        for arg in args:
+            if hasattr(arg, "shape"):
+                shapes.append(tuple(arg.shape))
+        return tuple(shapes)
+
+    def _get_cached_shape_choice(self, cache_key):
+        """
+        Get cached kernel choice for a specific shape.
+        """
+        return self._shape_cache.get(cache_key)
+
+    def _cache_shape_choice(self, cache_key, kernel_idx):
+        """
+        Cache kernel choice for a specific shape
+        """
+        self._shape_cache[cache_key] = kernel_idx
+
+    def _select_kernel_by_shape(self, *args, **kwargs):
+        """
+        Benchmark kernels for a particular shape and return the
+        best kernel for this shape.
+        """
+        shape_key = self._get_shape_cache_key(*args, **kwargs)
+        timings = self.benchmark_sub_kernels(*args, **kwargs)
+        self.picked_kernel = timings.index(min(timings))
+        self._cache_shape_choice(shape_key, self.picked_kernel)
 
     def _metrics_table_row(self, timings):
         def get_kernel_path(k):
@@ -436,3 +523,58 @@ class MultiKernelCall:
                 row[f"kernel{i}_path"] = ""
                 row[f"kernel{i}_latency"] = ""
         return row
+
+    def _get_kernel_specific_args(self, *args):
+        """
+        Given the multi-kernel arguments, extract the kernel-specific arguments for each sub-kernel.
+        This handles the case where different kernels have different additional arguments (like grid size).
+        """
+        if not hasattr(self.kernels[0], "additional_call_args_and_types"):
+            # If kernels don't have additional args, all kernels use the same args
+            return [args] * len(self.kernels)
+
+        # Get the combined additional args that were used in call_kernel
+        all_additional_call_args = []
+        all_additional_arg_types = []
+
+        for kernel in self.kernels:
+            kernel_additional_call_args, kernel_additional_arg_types = (
+                kernel.additional_call_args_and_types()
+            )
+            all_additional_call_args.append(kernel_additional_call_args)
+            all_additional_arg_types.append(kernel_additional_arg_types)
+
+        # Get the combined args that were passed to the multi-kernel
+        combined_additional_call_args, _ = get_all_call_args(
+            all_additional_call_args, all_additional_arg_types
+        )
+
+        # Split the multi-kernel args back into base args and additional args
+        num_additional_args = len(combined_additional_call_args)
+        if num_additional_args == 0:
+            return [args] * len(self.kernels)
+
+        base_args = args[:-num_additional_args]
+        additional_args = args[-num_additional_args:]
+
+        # Create a mapping from combined additional args back to individual kernel args
+        kernel_args_list = []
+        for i, kernel in enumerate(self.kernels):
+            kernel_additional_call_args, _ = kernel.additional_call_args_and_types()
+
+            # Map the kernel's additional args from the combined additional args
+            kernel_additional_values = []
+            for arg in kernel_additional_call_args:
+                try:
+                    idx = combined_additional_call_args.index(arg)
+                    kernel_additional_values.append(additional_args[idx])
+                except ValueError:
+                    # This shouldn't happen if get_all_call_args works correctly
+                    raise RuntimeError(
+                        f"Kernel {i} additional arg {arg} not found in combined args {combined_additional_call_args}"
+                    )
+
+            kernel_specific_args = base_args + tuple(kernel_additional_values)
+            kernel_args_list.append(kernel_specific_args)
+
+        return kernel_args_list
