@@ -1136,7 +1136,7 @@ class TestMaxAutotune(TestCase):
         )
         make_key_args = len(
             inspect.signature(
-                torch._inductor.select_algorithm.GeneratedCodeCache.make_key
+                torch._inductor.codegen.triton_templates.template.GeneratedCodeCache.make_key
             ).parameters
         )
 
