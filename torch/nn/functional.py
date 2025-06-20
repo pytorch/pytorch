@@ -2764,6 +2764,105 @@ if embedding_bag.__doc__:
     embedding_bag.__doc__ = embedding_bag.__doc__.format(**reproducibility_notes)
 
 
+def rotary_embedding_freqs(
+    seq_len: int, 
+    dim: int, 
+    base: float = 10000.0, 
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype] = None
+) -> Tensor:
+    r"""Generate rotary position embedding frequencies.
+    
+    This function generates the frequency components needed for rotary position embeddings (RoPE).
+    The frequencies are computed as: 1.0 / (base^(2i / dim)) for i in [0, dim/2)
+    
+    Args:
+        seq_len (int): Maximum sequence length for which to generate frequencies
+        dim (int): Dimension of the embedding (should be even)
+        base (float, optional): Base for the geometric progression. Default: 10000.0
+        device (torch.device, optional): Device on which to create the tensor
+        dtype (torch.dtype, optional): Desired data type of returned tensor
+        
+    Returns:
+        Tensor: A tensor of shape (seq_len, dim//2, 2) containing cosine and sine components
+        
+    Example::
+        >>> freqs = torch.nn.functional.rotary_embedding_freqs(10, 4)
+        >>> freqs.shape
+        torch.Size([10, 2, 2])
+    """
+    if dim % 2 != 0:
+        raise ValueError(f"dim must be even, got {dim}")
+    
+    # Generate frequency components: 1.0 / (base^(2i / dim)) for i in [0, dim/2)
+    freqs = 1.0 / (base ** (torch.arange(0, dim, 2, device=device, dtype=dtype or torch.float32) / dim))
+    
+    # Generate position indices
+    t = torch.arange(seq_len, device=device, dtype=dtype or torch.float32)
+    
+    # Compute outer product to get frequencies for each position
+    freqs = torch.outer(t, freqs)  # shape: (seq_len, dim//2)
+    
+    # Convert to complex exponentials and extract real/imaginary parts
+    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
+    
+    # Stack cosine and sine components
+    cos_sin = torch.stack([freqs_cis.real, freqs_cis.imag], dim=-1)  # shape: (seq_len, dim//2, 2)
+    
+    return cos_sin
+
+
+def apply_rotary_embedding(
+    x: Tensor, 
+    freqs: Tensor, 
+    unsqueeze_dim: int = 1
+) -> Tensor:
+    r"""Apply rotary position embedding to input tensor.
+    
+    This function applies rotary position embeddings to the input tensor using
+    precomputed frequency components. The embedding is applied by treating
+    consecutive pairs of features as complex numbers and rotating them.
+    
+    Args:
+        x (Tensor): Input tensor of shape (..., seq_len, ..., dim)
+        freqs (Tensor): Frequency tensor from rotary_embedding_freqs of shape (seq_len, dim//2, 2)
+        unsqueeze_dim (int, optional): Dimension to unsqueeze freqs tensor for broadcasting. Default: 1
+        
+    Returns:
+        Tensor: Tensor with rotary embeddings applied, same shape as input
+        
+    Example::
+        >>> x = torch.randn(2, 10, 64)  # (batch_size, seq_len, dim)
+        >>> freqs = torch.nn.functional.rotary_embedding_freqs(10, 64)  
+        >>> rotated = torch.nn.functional.apply_rotary_embedding(x, freqs)
+        >>> rotated.shape
+        torch.Size([2, 10, 64])
+    """
+    if x.size(-1) != freqs.size(-2) * 2:
+        raise ValueError(f"Last dimension of x ({x.size(-1)}) must be twice the second-to-last dimension of freqs ({freqs.size(-2) * 2})")
+    
+    # Reshape input to separate real and imaginary parts
+    x_complex = x.float().reshape(*x.shape[:-1], -1, 2)
+    
+    # Ensure freqs has correct shape for broadcasting
+    # Add dimensions to freqs to match x_complex
+    freqs_shape = [1] * len(x_complex.shape)
+    freqs_shape[unsqueeze_dim] = freqs.size(0)  # seq_len
+    freqs_shape[-2] = freqs.size(-2)           # dim // 2
+    freqs_shape[-1] = 2                        # cos/sin components
+    
+    freqs_broadcast = freqs.view(*freqs_shape)
+    
+    # Apply rotation: (a + bi) * (cos + i*sin) = (a*cos - b*sin) + i*(a*sin + b*cos)
+    x_rot = torch.stack([
+        x_complex[..., 0] * freqs_broadcast[..., 0] - x_complex[..., 1] * freqs_broadcast[..., 1],  # real part
+        x_complex[..., 1] * freqs_broadcast[..., 0] + x_complex[..., 0] * freqs_broadcast[..., 1],  # imaginary part
+    ], dim=-1)
+    
+    # Flatten back to original shape and return with original dtype
+    return x_rot.flatten(-2).type_as(x)
+
+
 def _verify_batch_size(size: list[int]) -> None:
     # XXX: JIT script does not support the reduce from functools, and mul op is a
     # builtin, which cannot be used as a value to a func yet, so rewrite this size

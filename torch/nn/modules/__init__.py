@@ -155,7 +155,7 @@ from .pooling import (
     MaxUnpool3d,
 )
 from .rnn import GRU, GRUCell, LSTM, LSTMCell, RNN, RNNBase, RNNCell, RNNCellBase
-from .sparse import Embedding, EmbeddingBag
+from .sparse import Embedding, EmbeddingBag, RotaryPositionalEmbedding
 from .transformer import (
     Transformer,
     TransformerDecoder,
@@ -288,6 +288,7 @@ __all__ = [
     "RNNBase",
     "RNNCell",
     "RNNCellBase",
+    "RotaryPositionalEmbedding",
     "RReLU",
     "ReLU",
     "ReLU6",
