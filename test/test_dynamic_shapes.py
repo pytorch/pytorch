@@ -3418,7 +3418,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             compiled_func(x, torch.tensor([5, 20]))
 
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_unbacked_contiguous(self):
         cnt = CompileCounterWithBackend("inductor")
 
