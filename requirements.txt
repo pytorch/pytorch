@@ -1,6 +1,7 @@
 # Python dependencies required for development
 astunparse
-cmake
+build[uv]  # for building sdist and wheel
+cmake>=3.27
 expecttest>=0.3.0
 filelock
 fsspec
