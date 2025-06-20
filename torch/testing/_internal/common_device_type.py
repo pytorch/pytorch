@@ -976,7 +976,13 @@ def instantiate_device_type_tests(
     generic_members = set(generic_test_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith("test")]
 
-    def instantiate_class_helper(class_name: str, base: DeviceTypeTestBase) -> None:
+    def instantiate_class_helper(
+        class_name: str,
+        base: DeviceTypeTestBase,
+        class_decorators: Union[
+            None, list[Callable[[DeviceTypeTestBase], DeviceTypeTestBase]]
+        ],
+    ) -> None:
         # type set to Any and suppressed due to unsupport runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
         device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
@@ -1004,22 +1010,9 @@ def instantiate_device_type_tests(
         device_type_test_class.setUpClass = _setUpClass
         device_type_test_class.tearDownClass = _tearDownClass
 
-        # The dynamically-created test class derives from the test template class
-        # and the empty class. Arrange for both setUpClass and tearDownClass methods
-        # to be called. This allows the parameterized test classes to support setup
-        # and teardown.
-        @classmethod
-        def _setUpClass(cls):
-            base.setUpClass()
-            empty_class.setUpClass()
-
-        @classmethod
-        def _tearDownClass(cls):
-            empty_class.tearDownClass()
-            base.tearDownClass()
-
-        device_type_test_class.setUpClass = _setUpClass
-        device_type_test_class.tearDownClass = _tearDownClass
+        if class_decorators:
+            for cd in class_decorators:
+                device_type_test_class = cd(device_type_test_class)
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
@@ -1070,12 +1063,11 @@ def instantiate_device_type_tests(
                     + inductor_backend.capitalize()
                     + base.device_type.upper()
                 )
-                if class_decorators := base.get_inductor_backend_class_decorators(
+
+                class_decorators = base.get_inductor_backend_class_decorators(
                     inductor_backend
-                ):
-                    for cd in class_decorators:
-                        base = cd(base)
-                instantiate_class_helper(class_name, base)
+                )
+                instantiate_class_helper(class_name, base, class_decorators)
         else:
             class_name = generic_test_class.__name__ + base.device_type.upper()
             instantiate_class_helper(class_name, base)
