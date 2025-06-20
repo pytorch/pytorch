@@ -129,8 +129,11 @@ CapturedTraceback* getFromContext(
       "attempting to gather stack context from the wrong StackContext type.");
 }
 
-at::CallbackHandle _initRecordAnnotations() {
-  return at::addGlobalCallback(
+#define ADD_CALLBACK(callbackType) at::add##callbackType##Callback
+at::CallbackHandle _initRecordAnnotations(bool useGlobalCallback) {
+  auto addCallback =
+      useGlobalCallback ? ADD_CALLBACK(Global) : ADD_CALLBACK(ThreadLocal);
+  return addCallback(
       at::RecordFunctionCallback(
           [](const at::RecordFunction& fn)
               -> std::unique_ptr<at::ObserverContext> {
@@ -169,12 +172,16 @@ at::CallbackHandle _initCompileContexts() {
           .scopes({at::RecordScope::FUNCTION}));
 }
 
-void setRecordFunctionCallbacks(bool enabled, bool compileContext) {
+void setRecordFunctionCallbacks(
+    bool enabled,
+    bool compileContext,
+    bool globalRecordAnnotations) {
   // Handle Callbacks under mutex
   auto lock = callbackManager.lockCallbackMutex();
   if (enabled) {
     if (callbackManager.getAnnotationHandle() == 0) {
-      callbackManager.setAnnotationHandle(_initRecordAnnotations());
+      callbackManager.setAnnotationHandle(
+          _initRecordAnnotations(globalRecordAnnotations));
     }
     if (compileContext && callbackManager.getCompileContextHandle() == 0) {
       callbackManager.setCompileContextHandle(_initCompileContexts());
@@ -200,7 +207,8 @@ void _record_memory_history(
     bool trace_alloc_record_context,
     bool record_cpp_context,
     bool clearHistory,
-    bool compileContext) {
+    bool compileContext,
+    bool globalRecordAnnotations) {
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
@@ -216,7 +224,7 @@ void _record_memory_history(
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
-  setRecordFunctionCallbacks(enabled, compileContext);
+  setRecordFunctionCallbacks(enabled, compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled, recorder, trace_alloc_max_entries, when, clearHistory);
 }
@@ -235,7 +243,8 @@ void _record_memory_history(
     const std::string& stacks,
     size_t max_entries,
     bool clearHistory,
-    bool compileContext) {
+    bool compileContext,
+    bool globalRecordAnnotations) {
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -269,7 +278,8 @@ void _record_memory_history(
     }
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
-  setRecordFunctionCallbacks(enabled.has_value(), compileContext);
+  setRecordFunctionCallbacks(
+      enabled.has_value(), compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled.has_value(), recorder, max_entries, when, clearHistory);
 }
