@@ -210,7 +210,7 @@ function clone_pytorch_xla() {
 function checkout_install_torchbench() {
   local commit
   commit=$(get_pinned_commit torchbench)
-  git clone https://github.com/pytorch/benchmark torchbench
+  test -e torchbench || git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
   git checkout "$commit"
 
