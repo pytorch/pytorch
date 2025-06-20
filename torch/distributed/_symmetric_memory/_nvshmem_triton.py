@@ -19,9 +19,8 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
         dict[str, str]: A dictionary containing the NVSHMEM device library name
         and path.
     """
-    from triton.runtime.jit import JITFunction
-
     from torch._C._distributed_c10d import _nvshmemx_cumodule_init
+    from triton.runtime.jit import JITFunction
 
     # Detect NVSHMEM device library path from python library path
     if lib_dir is None:
@@ -115,6 +114,53 @@ if has_triton():
                     core.dtype("int64"),
                     core.dtype("int64"),
                 ): ("nvshmemx_putmem_signal_block", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def wait_until(ivar, cmp, cmp_val, _builder=None):  # type: ignore[no-untyped-def]
+        return core.extern_elementwise(
+            "",
+            "",
+            [ivar, cmp, cmp_val],
+            {
+                (
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                ): ("nvshmem_longlong_wait_until", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def signal_wait_until(sig_addr, cmp, cmp_val, _builder=None):  # type: ignore[no-untyped-def]
+        return core.extern_elementwise(
+            "",
+            "",
+            [sig_addr, cmp, cmp_val],
+            {
+                (
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                ): ("nvshmem_signal_wait_until", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def fence(_builder=None):  # type: ignore[no-untyped-def]
+        return core.extern_elementwise(
+            "",
+            "",
+            [],
+            {
+                (): ("nvshmem_fence", core.dtype("int32")),
             },
             is_pure=False,
             _builder=_builder,

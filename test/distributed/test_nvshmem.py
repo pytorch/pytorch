@@ -544,6 +544,302 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
                 flag, torch.tensor([SIGNAL_VAL], dtype=torch.int64, device=self.device)
             )
 
+    @skipIfRocm
+    @requires_triton()
+    def test_triton_wait_until(self) -> None:
+        # A Triton kernel that calls nvshmem device side API for PUT
+        @triton.jit
+        def put_kernel(
+            dst_ptr,
+            src_ptr,
+            numel: tl.constexpr,
+            peer: tl.constexpr,
+        ):
+            nvshmem.putmem_block(dst_ptr, src_ptr, numel, peer)
+
+        # A Triton kernel that calls nvshmem device side API for WAIT_UNTIL
+        @triton.jit
+        def wait_until_kernel(
+            ivar_ptr,
+            cmp_op: tl.constexpr,
+            cmp_val: tl.constexpr,
+        ):
+            nvshmem.wait_until(ivar_ptr, cmp_op, cmp_val)
+
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        nvshmem_lib = nvshmem.enable_triton()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+        rank = self.rank
+
+        # Data buffers
+        msg_size_bytes = 8
+        dtype = torch.int8
+        numel = msg_size_bytes // dtype.itemsize
+        val = 13
+        flag_val = 21
+        inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val)
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
+        inp_hdl = symm_mem.rendezvous(inp, group=group_name)
+        out_hdl = symm_mem.rendezvous(out, group=group_name)
+        dist.barrier()
+
+        peer = 1 - rank
+        NVSHMEM_CMP_EQ = 0  # from nvshmem.h
+
+        if rank == 0:
+            # Rank 0 waits for the flag to be set by Rank 1, then checks the data
+            ivar_ptr = out_hdl.signal_pad_ptrs[rank]
+            wait_until_kernel[(1, 1, 1)](
+                ivar_ptr,
+                cmp_op=NVSHMEM_CMP_EQ,
+                cmp_val=flag_val,
+                extern_libs=nvshmem_lib,
+            )
+            torch.testing.assert_close(
+                out, val * torch.ones(numel, dtype=dtype, device=self.device)
+            )
+
+        if rank == 1:
+            # Rank 1 puts data into Rank 0's output buffer
+            dst_ptr = out_hdl.buffer_ptrs[rank]
+            src_ptr = inp_hdl.buffer_ptrs[rank]
+            put_kernel[(1, 1, 1)](
+                dst_ptr,
+                src_ptr,
+                numel=numel,
+                peer=peer,
+                extern_libs=nvshmem_lib,
+            )
+            # Rank 1 sets the flag on Rank 0
+            # We use a temporary tensor for the value to put.
+            flag_update_val = torch.tensor(
+                [flag_val], dtype=torch.int64, device=self.device
+            )
+            dst_ptr = out_hdl.signal_pad_ptrs[rank]
+            src_ptr = flag_update_val.data_ptr()
+            put_kernel[(1, 1, 1)](
+                dst_ptr,
+                src_ptr,
+                numel=1,
+                peer=peer,
+                extern_libs=nvshmem_lib,
+            )
+
+    @skipIfRocm
+    @requires_triton()
+    def test_triton_signal_wait_until(self) -> None:
+        # A Triton kernel that waits on a signal variable until it meets the compare condition.
+        @triton.jit
+        def signal_wait_until_kernel(
+            sig_ptr,
+            cmp_op: tl.constexpr,
+            cmp_val: tl.constexpr,
+        ):
+            nvshmem.signal_wait_until(sig_ptr, cmp_op, cmp_val)
+
+        # A Triton kernel for the producer that puts data and then signals completion.
+        @triton.jit
+        def put_and_signal_kernel(
+            dst_ptr,
+            src_ptr,
+            numel: tl.constexpr,
+            sig_ptr,
+            signal_val: tl.constexpr,
+            sig_op: tl.constexpr,
+            peer: tl.constexpr,
+        ):
+            nvshmem.putmem_signal_block(
+                dst_ptr, src_ptr, numel, sig_ptr, signal_val, sig_op, peer
+            )
+
+        self._init_device()
+        # Enable NVSHMEM for Triton
+        nvshmem_lib = nvshmem.enable_triton()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+        rank = self.rank
+        peer = 1 - rank
+
+        # NVSHMEM constants from documentation
+        NVSHMEM_CMP_EQ = 0  # equal comparison
+        NVSHMEM_SIGNAL_SET = 0  # atomic set operation
+
+        # Message configuration
+        msg_size_bytes = 8
+        dtype = torch.int8
+        numel = msg_size_bytes // dtype.itemsize
+        val_to_put = 123  # arbitrary test value
+        COMPLETION_FLAG_VAL = 1
+
+        # Producer (rank 0) prepares the data to send
+        inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val_to_put)
+        inp_hdl = symm_mem.rendezvous(inp, group=group_name)
+        # Consumer (rank 1) prepares the destination buffer
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
+        out_hdl = symm_mem.rendezvous(out, group=group_name)
+        # Use the signal pad for synchronization, as in previous tests
+        flag_dtype = torch.int64
+        flag = out_hdl.get_signal_pad(rank, (1,), dtype=flag_dtype).fill_(0)
+        # Ensure setup is complete on all ranks before proceeding
+        dist.barrier()
+
+        if rank == 0:
+            # Producer (rank 0): Puts data into rank 1's `out` buffer and then sets the flag
+            dst_ptr = out_hdl.buffer_ptrs[peer]
+            src_ptr = inp_hdl.buffer_ptrs[rank]
+            sig_ptr = out_hdl.signal_pad_ptrs[peer]
+            put_and_signal_kernel[(1, 1, 1)](
+                dst_ptr,
+                src_ptr,
+                numel,
+                sig_ptr,
+                signal_val=COMPLETION_FLAG_VAL,
+                sig_op=NVSHMEM_SIGNAL_SET,
+                peer=peer,
+                extern_libs=nvshmem_lib,
+            )
+        elif rank == 1:
+            # Consumer (rank 1): Waits on the signal variable using `signal_wait_until`.
+            sig_ptr = out_hdl.signal_pad_ptrs[rank]
+            signal_wait_until_kernel[(1, 1, 1)](
+                sig_ptr,
+                cmp_op=NVSHMEM_CMP_EQ,
+                cmp_val=COMPLETION_FLAG_VAL,
+                extern_libs=nvshmem_lib,
+            )
+            # After the wait returns, verify data and flag
+            torch.testing.assert_close(
+                out, val_to_put * torch.ones(numel, dtype=dtype, device=self.device)
+            )
+            torch.testing.assert_close(
+                flag,
+                torch.tensor(
+                    [COMPLETION_FLAG_VAL], dtype=flag_dtype, device=self.device
+                ),
+            )
+        # Final barrier to ensure the test does not exit before assertions complete
+        dist.barrier()
+
+    @skipIfRocm
+    @requires_triton()
+    def test_triton_fence(self) -> None:
+        """
+        1. Rank 0 performs two put operations into Rank 1's buffers with a fence
+        between them, followed by another fence and a flag update. Rank 1 waits
+        for the flag, then verifies that both destination buffers contain the
+        expected values. The flag is transferred after the final fence, so
+        its arrival implies that both preceding puts have been delivered in
+        order.
+        """
+
+        # Triton kernel that issues two ordered puts separated by fences and
+        # finally writes the completion flag.
+        @triton.jit
+        def put_with_fence_kernel(
+            dst_ptr1,
+            dst_ptr2,
+            src_ptr1,
+            src_ptr2,
+            flag_ptr,
+            flag_src_ptr,
+            numel: tl.constexpr,
+            peer: tl.constexpr,
+        ):
+            # First put
+            nvshmem.putmem_block(dst_ptr1, src_ptr1, numel, peer)
+            # Ensure the first put is ordered before the next.
+            nvshmem.fence()
+            # Second put
+            nvshmem.putmem_block(dst_ptr2, src_ptr2, numel, peer)
+            # Order the second put before flag update.
+            nvshmem.fence()
+            # Write the flag (single int64) to signal completion.
+            nvshmem.putmem_block(flag_ptr, flag_src_ptr, 1, peer)
+
+        # Kernel for Rank 1 to wait until the flag becomes the expected value.
+        @triton.jit
+        def wait_until_kernel(
+            ivar_ptr,
+            cmp_op: tl.constexpr,
+            cmp_val: tl.constexpr,
+        ):
+            nvshmem.wait_until(ivar_ptr, cmp_op, cmp_val)
+
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        nvshmem_lib = nvshmem.enable_triton()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+        rank = self.rank
+        peer = 1 - rank
+        # Message configuration
+        msg_size_bytes = 8
+        dtype = torch.int8
+        numel = msg_size_bytes // dtype.itemsize
+        val1 = 10
+        val2 = 20
+        flag_val = 1
+        # Symmetric buffers
+        inp1 = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val1)
+        inp2 = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val2)
+        out1 = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
+        out2 = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
+        inp1_hdl = symm_mem.rendezvous(inp1, group=group_name)
+        inp2_hdl = symm_mem.rendezvous(inp2, group=group_name)
+        out1_hdl = symm_mem.rendezvous(out1, group=group_name)
+        out2_hdl = symm_mem.rendezvous(out2, group=group_name)
+
+        # Flag buffer resides in the signal pad of out2.
+        flag = out2_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
+        flag_update_val = torch.tensor(
+            [flag_val], dtype=torch.int64, device=self.device
+        )
+        NVSHMEM_CMP_EQ = 0  # compare equal
+        dist.barrier()
+
+        if rank == 0:
+            dst_ptr1 = out1_hdl.buffer_ptrs[rank]
+            dst_ptr2 = out2_hdl.buffer_ptrs[rank]
+            src_ptr1 = inp1_hdl.buffer_ptrs[rank]
+            src_ptr2 = inp2_hdl.buffer_ptrs[rank]
+            flag_ptr = out2_hdl.signal_pad_ptrs[rank]
+            flag_src_ptr = flag_update_val.data_ptr()
+
+            put_with_fence_kernel[(1, 1, 1)](
+                dst_ptr1,
+                dst_ptr2,
+                src_ptr1,
+                src_ptr2,
+                flag_ptr,
+                flag_src_ptr,
+                numel,
+                peer=peer,
+                extern_libs=nvshmem_lib,
+            )
+        elif rank == 1:
+            # Wait until flag is set by Rank 0.
+            ivar_ptr = out2_hdl.signal_pad_ptrs[rank]
+            wait_until_kernel[(1, 1, 1)](
+                ivar_ptr,
+                cmp_op=NVSHMEM_CMP_EQ,
+                cmp_val=flag_val,
+                extern_libs=nvshmem_lib,
+            )
+
+            # Verify ordered data arrival.
+            torch.testing.assert_close(
+                out1, val1 * torch.ones(numel, dtype=dtype, device=self.device)
+            )
+            torch.testing.assert_close(
+                out2, val2 * torch.ones(numel, dtype=dtype, device=self.device)
+            )
+            torch.testing.assert_close(
+                flag, torch.tensor([flag_val], dtype=torch.int64, device=self.device)
+            )
+        dist.barrier()
+
 
 if __name__ == "__main__":
     run_tests()
