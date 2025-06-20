@@ -322,6 +322,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 speculation_log=SpeculationLog(),
                 exn_vt_stack=ExceptionStack(),
                 distributed_state=None,
+                package=None,
             )
             with compile_context(CompileContext(CompileId(0, 0))), tracing(
                 tracer.output.tracing_context
