@@ -13,6 +13,10 @@ from torch.testing._internal.common_utils import make_dynamo_test, munge_exc
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
+class SetSubclass(set):
+    pass
+
+
 class _BaseSetTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -25,6 +29,9 @@ class _BaseSetTests(torch._dynamo.test_case.TestCase):
 
     def assertEqual(self, a, b):
         return self.assertTrue(a == b, f"{a} != {b}")
+
+    def assertNotEqual(self, a, b):
+        return self.assertTrue(a != b, f"{a} == {b}")
 
 
 class CustomSetTests(_BaseSetTests):
@@ -301,7 +308,7 @@ class _FrozensetBase:
     # + symmetric_difference
     # + union
     # BinOps:
-    # +, -, |, &, ^, <, >, <=, >=
+    # +, -, |, &, ^, <, >, <=, >=, ==, !=
 
     @make_dynamo_test
     def test_binop_sub(self):
@@ -328,6 +335,23 @@ class _FrozensetBase:
         p, q = map(self.thetype, ["abc", "bef"])
         self.assertEqual(p ^ p, self.thetype())
         self.assertEqual(p ^ q, self.thetype("acef"))
+
+    @make_dynamo_test
+    def test_cmp_eq(self):
+        p = self.thetype("abc")
+        self.assertEqual(p, p)
+        for C in set, frozenset, SetSubclass:
+            self.assertEqual(p, C("abc"))
+            self.assertEqual(p, C(p))
+
+    @make_dynamo_test
+    def test_cmp_ne(self):
+        p, q = map(self.thetype, ["abc", "bef"])
+        self.assertNotEqual(p, q)
+        self.assertNotEqual(q, p)
+        for C in set, frozenset, SetSubclass, dict.fromkeys, str, list, tuple:
+            self.assertNotEqual(p, C("abe"))
+        self.assertNotEqual(p, 1)
 
     @make_dynamo_test
     def test_cmp_less_than(self):
@@ -583,8 +607,8 @@ class UserDefinedSetTests(_SetBase, _BaseSetTests):
         super().test_cmp_less_than_or_equal()
 
     @unittest.expectedFailure
-    def test_binop_sub(self):
-        super().test_binop_sub()
+    def test_binop_or(self):
+        super().test_binop_or()
 
     @unittest.expectedFailure
     def test_in_frozenset(self):

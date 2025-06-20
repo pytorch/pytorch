@@ -84,6 +84,7 @@ from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
+    DictKeysVariable,
     DictViewVariable,
     FrozensetVariable,
     is_hashable,
@@ -104,7 +105,11 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .user_defined import (
+    UserDefinedObjectVariable,
+    UserDefinedSetVariable,
+    UserDefinedVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -2448,6 +2453,22 @@ class BuiltinVariable(VariableTracker):
             sym_num=None,
         )
 
+    def call_xor(self, tx: "InstructionTranslator", a, b):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+            return a.call_method(tx, "__xor__", [b], {})
+
+    def call_ixor(self, tx: "InstructionTranslator", a, b):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+            return a.call_method(tx, "__ixor__", [b], {})
+
+    def call_sub(self, tx: "InstructionTranslator", a, b):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+            return a.call_method(tx, "__sub__", [b], {})
+
+    def call_isub(self, tx: "InstructionTranslator", a, b):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+            return a.call_method(tx, "__isub__", [b], {})
+
     def call_and_(self, tx: "InstructionTranslator", a, b):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
@@ -2462,11 +2483,26 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if hasattr(a, "set_items") and hasattr(b, "set_items"):
-            return SetVariable(list(a.set_items & b.set_items))
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+            return a.call_method(tx, "__and__", [b], {})
         # None no-ops this handler and lets the driving function proceed
 
-    call_iand = call_and_
+    def call_iand(self, tx: "InstructionTranslator", a, b):
+        # Rely on constant_handler
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            return None
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
+            return SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", operator.iand, *proxy_args_kwargs([a, b], {})
+                ),
+                sym_num=None,
+            )
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+            return a.call_method(tx, "__iand__", [b], {})
 
     def call_or_(self, tx: "InstructionTranslator", a, b):
         # Rely on constant_handler
@@ -2482,15 +2518,41 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if hasattr(a, "set_items") and hasattr(b, "set_items"):
-            return SetVariable(list(a.set_items | b.set_items))
+
         # This call looks like `{"one": torch.ones(1)} | {"two": torch.ones(2)}`.
-        if isinstance(a, ConstDictVariable):
-            return a.call_method(tx, "__or__", args=[b], kwargs={})
+        if isinstance(
+            a,
+            (ConstDictVariable, DictKeysVariable, SetVariable, UserDefinedSetVariable),
+        ):
+            return a.call_method(tx, "__or__", [b], {})
+
         # None no-ops this handler and lets the driving function proceed
         return None
 
-    call_ior = call_or_
+    def call_ior(self, tx: "InstructionTranslator", a, b):
+        # Rely on constant_handler
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            return None
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
+            return SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", operator.ior, *proxy_args_kwargs([a, b], {})
+                ),
+                sym_num=None,
+            )
+
+        # This call looks like `{"one": torch.ones(1)} |= {"two": torch.ones(2)}`.
+        if isinstance(
+            a,
+            (ConstDictVariable, DictKeysVariable, SetVariable, UserDefinedSetVariable),
+        ):
+            return a.call_method(tx, "__ior__", [b], {})
+
+        # None no-ops this handler and lets the driving function proceed
+        return None
 
     def call_not_(self, tx: "InstructionTranslator", a):
         if isinstance(a, SymNodeVariable):
