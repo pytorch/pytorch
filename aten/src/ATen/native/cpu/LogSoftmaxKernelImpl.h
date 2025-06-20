@@ -14,6 +14,7 @@
 #include <type_traits>
 
 namespace at::native {
+inline namespace CPU_CAPABILITY {
 template <typename scalar_t>
 int64_t vec_log_softmax_lastdim_chunk_size(int64_t grain_size, int64_t outer_size, int64_t dim_size) {
   // Coincidentally, at::internal::GRAIN_SIZE is 32768, which is equal to the
@@ -327,4 +328,5 @@ serial_vec_logsoftmax_range(
       }
     }
   }
+} // namespace CPU_CAPABILITY
 }} // namespace at::native
