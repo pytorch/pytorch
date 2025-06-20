@@ -941,6 +941,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             elif isinstance(expr, ConstantVariable):
                 return expr
 
+        @register(torch.fx.experimental.symbolic_shapes.guard_scalar)
+        def guard_scalar(self, tx: "InstructionTranslator", expr):
+            if isinstance(expr, SymNodeVariable):
+                val = expr.sym_num
+            elif isinstance(expr, ConstantVariable):
+                val = expr.value
+            else:
+                raise torch._dynamo.exc.Unsupported("branch not supported")
+            return variables.ConstantVariable.create(
+                torch.fx.experimental.symbolic_shapes.guard_scalar(val)
+            )
+
         @register(torch.fx.experimental.symbolic_shapes.statically_known_true)
         def handle_statically_known_true(self, tx: "InstructionTranslator", expr):
             if isinstance(expr, SymNodeVariable):
