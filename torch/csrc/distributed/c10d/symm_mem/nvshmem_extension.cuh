@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 namespace c10d::nvshmem_extension {
 
@@ -14,6 +15,8 @@ void initialize_nvshmem_with_store(
 // Intializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
 TORCH_API void nvshmemx_cumodule_init(uintptr_t module);
+
+TORCH_API void nvshmem_put(at::Tensor& inp, c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory> dest, const int64_t peer);
 
 at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name);
 
