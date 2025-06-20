@@ -29,12 +29,16 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
-from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
+from torch._inductor.custom_graph_pass import (
+    CustomGraphModulePass,
+    CustomGraphPass,
+    get_hash_for_files,
+)
 from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
+from torch._inductor.utils import clear_caches, fresh_cache
 from torch._library import capture_triton
 from torch.compiler._cache import (
     CacheArtifact,
@@ -55,6 +59,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MULTIGPU,
     HAS_TRITON,
+    patch_inductor_backend,
     requires_gpu,
     requires_triton,
 )
@@ -141,7 +146,7 @@ class TestFxGraphCache(TestCase):
         AOTAutogradCache.clear()
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
-        clear_inductor_caches()
+        clear_caches()
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -374,16 +379,14 @@ class TestFxGraphCache(TestCase):
         ), patch.dict(os.environ), PatchCaches():
             os.environ.pop("TRITON_CACHE_MANAGER", None)
             for _ in range(4):
-                with fresh_inductor_cache():
+                with fresh_cache():
                     compiled_fn = torch.compile(fn, dynamic=dynamic)
                     self.assertEqual(fn(a, b), compiled_fn(a, b))
                 reset()
 
             self.assertEqual(global_stats.fx_graph, Stats(1, 3, 1))
 
-            with torch.compiler.config.patch(
-                {"cache_key_tag": "test"}
-            ), fresh_inductor_cache():
+            with torch.compiler.config.patch({"cache_key_tag": "test"}), fresh_cache():
                 compiled_fn = torch.compile(fn, dynamic=dynamic)
                 self.assertEqual(fn(a, b), compiled_fn(a, b))
 
@@ -421,7 +424,7 @@ class TestFxGraphCache(TestCase):
         b = torch.rand(100, 100, dtype=dtype, device=device)
 
         # Record artifacts
-        with fresh_inductor_cache():
+        with fresh_cache():
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
             # A first call should miss in the cache.
@@ -451,7 +454,7 @@ class TestFxGraphCache(TestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
         # We did not load anything so dont hit yet
-        with fresh_inductor_cache():
+        with fresh_cache():
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             self.assertEqual(eager_result, compiled_result)
@@ -465,7 +468,7 @@ class TestFxGraphCache(TestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
         # Hot load and hit
-        with fresh_inductor_cache():
+        with fresh_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
             self.assertEqual(len(cache_info.inductor_artifacts), 1)
@@ -498,7 +501,7 @@ class TestFxGraphCache(TestCase):
         a2 = torch.randn(4, 8)
         b2 = torch.randn(8, 4)
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             self.assertEqual(eager_result, compiled_result)
@@ -514,7 +517,7 @@ class TestFxGraphCache(TestCase):
 
         self.reset()
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             torch.compiler.load_cache_artifacts(artifact_bytes)
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
@@ -526,7 +529,7 @@ class TestFxGraphCache(TestCase):
 
         self.reset()
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             eager_result = fn(a2, b2)
             compiled_result = compiled_fn(a2, b2)
             self.assertEqual(eager_result, compiled_result)
@@ -550,7 +553,7 @@ class TestFxGraphCache(TestCase):
             return x * 2
 
         # Record artifacts
-        with torch.compiler.config.patch(job_id=self.id()), fresh_inductor_cache():
+        with torch.compiler.config.patch(job_id=self.id()), fresh_cache():
             f(torch.randn(2, 3))
             f(torch.randn(2, 4))
             self.assertEqual(backend.frame_count, 2)
@@ -577,7 +580,7 @@ class TestFxGraphCache(TestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
         # Hot load and hit
-        with torch.compiler.config.patch({"job_id": self.id()}), fresh_inductor_cache():
+        with torch.compiler.config.patch({"job_id": self.id()}), fresh_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
             self.assertEqual(len(cache_info.inductor_artifacts), 2)
@@ -612,7 +615,7 @@ class TestFxGraphCache(TestCase):
         with mock.patch(
             "torch._utils_internal.get_mast_job_name_version", return_value=("foo", 5)
         ):
-            with fresh_inductor_cache():
+            with fresh_cache():
                 f(torch.randn(2, 3))
                 f(torch.randn(2, 4))
                 self.assertEqual(backend.frame_count, 2)
@@ -634,7 +637,7 @@ class TestFxGraphCache(TestCase):
         # Hot load and hit
         with mock.patch(
             "torch._utils_internal.get_mast_job_name_version", return_value=("bar", 10)
-        ), fresh_inductor_cache():
+        ), fresh_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
             self.assertEqual(len(cache_info.pgo_artifacts), 2)
@@ -1577,7 +1580,7 @@ class TestStandaloneCompile(TestCase):
         AOTAutogradCache.clear()
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
-        clear_inductor_caches()
+        clear_caches()
 
     def capture(self, fn, dynamic=None):
         def inner(*args):
@@ -1633,7 +1636,7 @@ class TestStandaloneCompile(TestCase):
                 if format == "unpacked"
                 else os.path.join(temp_dir, "compiled_artifact.bin")
             )
-            with fresh_inductor_cache():
+            with fresh_cache():
                 gm, args, kwargs = self.capture(f)(x)
                 assert not kwargs
 
@@ -1642,7 +1645,7 @@ class TestStandaloneCompile(TestCase):
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-            with fresh_inductor_cache():
+            with fresh_cache():
                 loaded = torch._inductor.CompiledArtifact.load(path=path, format=format)
                 if dynamic:
                     concrete_args = [
@@ -1674,7 +1677,7 @@ class TestStandaloneCompile(TestCase):
         def backend(gm, args, **kwargs):
             return torch._inductor.standalone_compile(gm, args)
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             compiled_out = torch.compile(f, fullgraph=True, backend=backend)(x)
             self.assertEqual(eager_out, compiled_out)
 
@@ -1693,7 +1696,7 @@ class TestStandaloneCompile(TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             path = os.path.join(temp_dir, "new_dir")
-            with fresh_inductor_cache():
+            with fresh_cache():
                 gm, args, kwargs = self.capture(f)(x)
                 assert not kwargs
 
@@ -1702,7 +1705,7 @@ class TestStandaloneCompile(TestCase):
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-            with fresh_inductor_cache():
+            with fresh_cache():
                 loaded = torch._inductor.CompiledArtifact.load(
                     path=path, format="unpacked"
                 )
@@ -1726,7 +1729,7 @@ class TestStandaloneCompile(TestCase):
         eager_out = f(x)
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            with fresh_inductor_cache():
+            with fresh_cache():
                 gm, args, kwargs = self.capture(f)(x)
                 assert not kwargs
 
@@ -1738,7 +1741,7 @@ class TestStandaloneCompile(TestCase):
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-            with fresh_inductor_cache():
+            with fresh_cache():
                 # Now modify the output file and expect to see the changes
                 for subdir in os.listdir(temp_dir):
                     if subdir in ["aotautograd", "fxgraph"]:
@@ -1786,16 +1789,16 @@ class TestStandaloneCompile(TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = os.path.join(temp_dir, "compiled_artifact.bin")
 
-            with fresh_inductor_cache():
+            with fresh_cache():
                 compiled_artifact = torch._inductor.standalone_compile(gm, args)
                 compiled_artifact.save(path=path)
 
             script = f"""
 import torch
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 
 arg = torch.ones(4, 1)
-with fresh_inductor_cache():
+with fresh_cache():
     loaded = torch._inductor.CompiledArtifact.load(path="{path}")
     compiled_result = loaded(arg)[0]
 
@@ -1827,7 +1830,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         x = torch.ones(3)
         torch._dynamo.mark_dynamic(x, 0)
-        with fresh_inductor_cache():
+        with fresh_cache():
             # captured graph is lambda s0, x: x * s0
             gm, args, kwargs = self.capture(f)(x)
             assert not kwargs
@@ -1849,7 +1852,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         x = torch.ones(3)
         torch._dynamo.mark_dynamic(x, 0)
-        with fresh_inductor_cache():
+        with fresh_cache():
             # captured graph is lambda s0, x: x * s0
             gm, args, kwargs = self.capture(f)(x)
             assert not kwargs
@@ -1885,7 +1888,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             return x.shape[0] * x
 
         static_x = torch.randn(3)
-        with fresh_inductor_cache():
+        with fresh_cache():
             # static_gm is lambda x: x * 3
             static_gm, args, kwargs = self.capture(f, dynamic=False)(static_x)
             assert not kwargs
@@ -2300,6 +2303,42 @@ class TestFxGraphCacheHashing(TestCase):
                 pickler.dumps(details3),
             )
 
+    def test_hash_custom_backend_pass(self):
+        """
+        Test CustomGraphModulePass usage.
+        """
+
+        class TestCustomGraphModulePass(CustomGraphModulePass):
+            def __init__(self):
+                self._uuid = None
+
+            def __call__(self, gm: torch.fx.GraphModule) -> None:
+                return None
+
+            def uuid(self) -> Optional[Union[bytes, str]]:
+                return self._uuid
+
+        custom_pass = TestCustomGraphModulePass()
+        with patch_inductor_backend("cpu", custom_pass=custom_pass):
+            custom_pass._uuid = "1"
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+            custom_pass._uuid = "2"
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+            gm = torch.fx.GraphModule({}, torch.fx.Graph())
+            pickler = FxGraphCachePickler(gm)
+
+            self.assertEqual(
+                pickler.dumps(details1),
+                pickler.dumps(details2),
+            )
+            self.assertNotEqual(
+                pickler.dumps(details1),
+                pickler.dumps(details3),
+            )
+
     def test_bypass_unsupported(self):
         """
         Test _reduce_unsupported
@@ -2399,7 +2438,7 @@ class TestAutotuneCache(TestCase):
     def reset(self):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
-        clear_inductor_caches()
+        clear_caches()
 
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
@@ -2709,20 +2748,20 @@ class TestRemoteAOTAutogradCache(TestCase):
 
 class TestUtils(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
-    def test_fresh_inductor_cache(self):
+    def test_fresh_cache(self):
         def fn(x, y):
             return x + y
 
         a = torch.rand(10)
         b = torch.rand(10)
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             self.assertEqual(len(PyCodeCache.modules), 0)
             res1 = torch.compile(fn)(a, b)
             cache_dir1 = cache_dir()
 
         torch._dynamo.reset()
-        with fresh_inductor_cache():
+        with fresh_cache():
             self.assertEqual(len(PyCodeCache.modules), 0)
             res2 = torch.compile(fn)(a, b)
             cache_dir2 = cache_dir()

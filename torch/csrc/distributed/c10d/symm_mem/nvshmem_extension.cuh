@@ -11,9 +11,8 @@ void initialize_nvshmem_with_store(
     int rank,
     int world_size);
 
-void* nvshmem_malloc(size_t size);
-
-void* nvshmem_ptr(const void* dest, int pe);
+// Check if NVSHMEM is available
+TORCH_API bool is_nvshmem_available();
 
 // Intializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
