@@ -88,25 +88,6 @@ def accumulate_grad(x, new_grad):
         x.grad.add_(new_grad_strided)
 
 
-def iter_protocol(iterable):
-    if hasattr(iterable, "__iter__"):
-        return iterable.__iter__()
-    if hasattr(iterable, "__getitem__"):
-
-        # Needs to be a new function to avoid iter_protocol becoming a generator
-        def sequence_protocol(iterable):
-            i = 0
-            while True:
-                try:
-                    # Can this execute user code?
-                    yield iterable.__getitem__(i)
-                    i += 1
-                except IndexError:
-                    break
-
-        return sequence_protocol(iterable)
-
-
 # This mirrors
 # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
