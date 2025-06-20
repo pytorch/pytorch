@@ -1303,9 +1303,10 @@ def _group_tensors_by_device_and_dtype(
 
 # NB: There is no Capsule type in typing, see
 # https://github.com/python/cpython/issues/109562
-def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
-def _to_dlpack_versioned(data: Tensor) -> Any: ...  # THPModule_toDLPackVersioned
+def _to_dlpack(data: Tensor, dl_device: tuple[IntEnum, _int] | None = None, copy: _bool | None = None) -> Any: ...  # THPModule_toDLPack
+def _to_dlpack_versioned(data: Tensor, dl_device: tuple[IntEnum, _int] | None = None, copy: _bool | None = None) -> Any: ...  # THPModule_toDLPackVersioned
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
+def _torchDeviceToDLDevice(device: torch.device) -> tuple[_int, _int]: ...  # THPModule_torchDeviceToDLDevice
 def _get_cpp_backtrace(
     frames_to_skip: _int,
     maximum_number_of_frames: _int,
