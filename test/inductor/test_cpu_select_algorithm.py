@@ -2684,6 +2684,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
                 return self.epilogue(result) + noise
 
         counters.clear()
+
         u = torch.randn(bs, 8, Mdim, Kdim).to(dtype=dtype)
         v = torch.randn(bs, 8, Kdim, Ndim).to(dtype=dtype)
         noise = torch.randn(bs * 8, Mdim, Ndim).to(dtype=dtype)
