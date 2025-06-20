@@ -22,6 +22,7 @@ from torch._decomp.decompositions import (
     _index_add,
     embedding_dense_backward as decomp_embedding_dense_backward,
     pw_cast_for_opmath,
+    pw_cast_for_opmath_non_tensor_args,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._dynamo.utils import counters
@@ -181,7 +182,7 @@ def sym_constrain_range_for_size(
 
 
 @register_decomposition([aten.clamp])
-@pw_cast_for_opmath
+@pw_cast_for_opmath_non_tensor_args
 def clamp(
     x: torch.Tensor,
     min: Optional[torch.types.Number] = None,
@@ -495,6 +496,10 @@ def add(
         reshaped_tensor = tensor.view(new_shape)
         return reshaped_tensor
 
+    # Manually resolve complex tensors, as .is_conj() is unreliable after cloning during compilation.
+    x = x + 0
+    z = z + 0
+
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
     result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
@@ -503,7 +508,8 @@ def add(
 
 @register_decomposition([aten.conj_physical])
 def conj_physical(self: torch.Tensor) -> torch.Tensor:
-    assert not self.is_complex(), "TODO: implement this"
+    if self.is_complex():
+        return NotImplemented
     return self
 
 
@@ -855,7 +861,7 @@ def miopen_batch_norm(
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
     return {**decompositions, **extra_random_decomps}
 

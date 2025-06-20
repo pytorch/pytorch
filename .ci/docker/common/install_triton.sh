@@ -51,7 +51,12 @@ as_jenkins git clone --recursive ${TRITON_REPO} triton
 cd triton
 as_jenkins git checkout ${TRITON_PINNED_COMMIT}
 as_jenkins git submodule update --init --recursive
-cd python
+
+# Old versions of python have setup.py in ./python; newer versions have it in ./
+if [ ! -f setup.py ]; then
+  cd python
+fi
+
 pip_install pybind11==2.13.6
 
 # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
@@ -92,4 +97,7 @@ if [ -n "${CMAKE_VERSION}" ]; then
 fi
 if [ -n "${NUMPY_VERSION}" ]; then
   pip_install "numpy==${NUMPY_VERSION}"
+fi
+if [[ "$ANACONDA_PYTHON_VERSION" != 3.9* ]]; then
+  pip_install helion
 fi

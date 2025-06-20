@@ -64,15 +64,18 @@ class Wishart(ExponentialFamily):
     [5] Ku, Y.-C. & Bloomfield, P., 2010. `Generating Random Wishart Matrices with Fractional Degrees of Freedom in OX`.
     """
 
-    arg_constraints = {
-        "covariance_matrix": constraints.positive_definite,
-        "precision_matrix": constraints.positive_definite,
-        "scale_tril": constraints.lower_cholesky,
-        "df": constraints.greater_than(0),
-    }
     support = constraints.positive_definite
     has_rsample = True
     _mean_carrier_measure = 0
+
+    @property
+    def arg_constraints(self):
+        return {
+            "covariance_matrix": constraints.positive_definite,
+            "precision_matrix": constraints.positive_definite,
+            "scale_tril": constraints.lower_cholesky,
+            "df": constraints.greater_than(self.event_shape[-1] - 1),
+        }
 
     def __init__(
         self,
@@ -119,7 +122,6 @@ class Wishart(ExponentialFamily):
         elif precision_matrix is not None:
             self.precision_matrix = param.expand(batch_shape + (-1, -1))
 
-        self.arg_constraints["df"] = constraints.greater_than(event_shape[-1] - 1)
         if self.df.lt(event_shape[-1]).any():
             warnings.warn(
                 "Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim."

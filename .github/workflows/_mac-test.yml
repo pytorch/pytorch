@@ -21,7 +21,7 @@ on:
       python-version:
         required: false
         type: string
-        default: "3.9"
+        default: "3.12"
         description: |
           The python version to be used. Will be 3.9 by default
       timeout-minutes:
@@ -144,15 +144,16 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: ${{ inputs.python-version }}
-          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          environment-file: .github/requirements/conda-env-macOS-ARM64
+          pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
+          default-packages: ""
 
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
       - name: Check for keep-going label and re-enabled test issues
-        # This uses the filter-test-configs action because it conviniently
+        # This uses the filter-test-configs action because it conveniently
         # checks for labels and re-enabled test issues.  It does not actually do
         # any filtering.  All filtering is done in the build step.
         id: keep-going

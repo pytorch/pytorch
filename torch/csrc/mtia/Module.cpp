@@ -84,6 +84,12 @@ void initModule(PyObject* module) {
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
 
+  m.def("_mtia_getDeviceProperties", [](c10::DeviceIndex device_index) {
+    PyObject* raw_pyobject =
+        at::detail::getMTIAHooks().getDeviceProperties(device_index);
+    return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
+
   m.def("_mtia_emptyCache", []() { at::detail::getMTIAHooks().emptyCache(); });
 
   m.def(
