@@ -26,12 +26,15 @@ Error Formatting:
     - Debugging utilities for error reporting
 """
 
+import json
 import logging
 import os
 import re
 import textwrap
 import typing
 from enum import auto, Enum
+from functools import lru_cache
+from pathlib import Path
 from traceback import extract_stack, format_exc, format_list, StackSummary
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
@@ -494,8 +497,19 @@ def format_graph_break_message(
     return msg
 
 
-import json
-from pathlib import Path
+@lru_cache(maxsize=1)
+def _load_graph_break_registry() -> dict[str, Any]:
+    """
+    Loads the graph break registry from JSON file with caching.
+    """
+    try:
+        script_dir = Path(__file__).resolve().parent
+        registry_path = script_dir / "graph_break_registry.json"
+        with registry_path.open() as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        log.error("Error accessing the registry file: %s", e)
+        return {}
 
 
 def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
@@ -510,18 +524,11 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
     """
     GRAPH_BREAK_SITE_URL = "https://compile-graph-break-site.vercel.app/gb/"
 
-    try:
-        script_dir = Path(__file__).resolve().parent
-        registry_path = script_dir / "graph_break_registry.json"
+    registry = _load_graph_break_registry()
 
-        with registry_path.open() as f:
-            registry = json.load(f)
-
-        for k, v in registry.items():
-            if v and v[0].get("Gb_type") == gb_type:
-                return f"{GRAPH_BREAK_SITE_URL}{k}"
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        log.error("Error accessing the registry file: %s", e)
+    for k, v in registry.items():
+        if v and v[0].get("Gb_type") == gb_type:
+            return f"{GRAPH_BREAK_SITE_URL}{k}"
 
     return "None"
 
