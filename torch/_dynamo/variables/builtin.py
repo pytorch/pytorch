@@ -68,6 +68,7 @@ from ..utils import (
     cmp_name_to_op_mapping,
     dict_methods,
     extract_fake_example_value,
+    frozenset_methods,
     get_fake_value,
     guard_if_dyn,
     is_tensor_getset_descriptor,
@@ -75,6 +76,7 @@ from ..utils import (
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
+    set_methods,
     str_methods,
     tensortype_to_dtype,
 )
@@ -1274,6 +1276,20 @@ class BuiltinVariable(VariableTracker):
                 if isinstance(args[0], variables.UserDefinedDictVariable):
                     return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.ConstDictVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
+        if self.fn is set:
+            resolved_fn = getattr(self.fn, name)
+            if resolved_fn in set_methods:
+                if isinstance(args[0], variables.UserDefinedSetVariable):
+                    return args[0]._set_vt.call_method(tx, name, args[1:], kwargs)
+                elif isinstance(args[0], variables.SetVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
+        if self.fn is frozenset:
+            resolved_fn = getattr(self.fn, name)
+            if resolved_fn in frozenset_methods:
+                if isinstance(args[0], variables.FrozensetVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is str and len(args) >= 1:
