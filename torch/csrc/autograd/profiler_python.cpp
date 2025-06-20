@@ -769,19 +769,18 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     return;
   }
 
-  // Register the tracer in each thread.
-  for (const auto thread_state : interpreterThreads()) {
-    PyThreadState_Swap(thread_state);
+  auto interpreter_threads = interpreterThreads(); 
 
+  // Register the tracer in each thread.
+  for (const auto thread_state : interpreter_threads) {
     thread_local_results_.emplace_back(thread_state, &value_cache_, this);
-    auto* ctx = thread_local_results_.back().ctx_;
 
     // When we begin profiling there are already frames on the Python
     // interpreter stack. To ensure a complete trace, we must push calls
     // to all the prior frames onto our event stack. (We stop at depth=128)
 
     std::vector<THPFrameObjectPtr> current_stack;
-    auto frame = PyEval_GetFrame();
+    auto frame = PyThreadState_GetFrame(thread_state);
     Py_XINCREF(frame);
 
     size_t depth = 0; // Make sure we can't infinite loop.
@@ -813,11 +812,14 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
       // another.
       TORCH_INTERNAL_ASSERT(frame_refcount >= 2, frame_refcount);
     }
+  }
 
+  for (size_t i = 0; i < interpreter_threads.size(); i++) {
+    PyThreadState_Swap(interpreter_threads[i]);
     // Note:
     //   This profile will not compose with other CPython profilers, and
     //   cannot be round tripped via `sys.settrace(sys.gettrace())`
-    PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
+    PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)thread_local_results_[i].ctx_);
   }
 }
 

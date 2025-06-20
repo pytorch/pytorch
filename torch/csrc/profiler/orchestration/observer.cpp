@@ -153,7 +153,7 @@ std::shared_ptr<ProfilerStateBase> popTLS() {
 /*static*/ std::shared_ptr<ProfilerStateBase> ProfilerStateBase::pop(
     bool global) {
   auto out = global ? GlobalManager::pop() : popTLS();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!out || out->config().global() == global);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!out || out->config().global() == global || out->config().experimental_config.profile_all_threads);
   return out;
 }
 
