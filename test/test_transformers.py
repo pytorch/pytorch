@@ -3605,7 +3605,6 @@ class TestSDPACudaOnly(NNTestCase):
                                                n_heads: list[int], sdpa_backend: str):
 
 
-        #torch.backends.cuda.preferred_rocm_fa_library("ck")
         if isSM8XDevice or isSM120Device and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
@@ -3615,6 +3614,8 @@ class TestSDPACudaOnly(NNTestCase):
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
+
+        # ROCm now supports 2 different backends for SDPA that require different set up.
         TEST_WITH_CK = False
         if TEST_WITH_ROCM:
             torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
@@ -3623,9 +3624,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         if TEST_WITH_CK and head_dim > 128:
             self.skipTest("CK does not support head dims over 128")
-        #print("TEST_WITH_CK: ", TEST_WITH_CK)
-        #print("TWCK type: ", type(TEST_WITH_CK))
-        #print("BACKEND!: ", sdpa_backend)
+
         scale = scale if scale is None else (1 / head_dim)
         num_heads_q = num_heads_kv = 4
         if enable_gqa:
@@ -3682,6 +3681,9 @@ class TestSDPACudaOnly(NNTestCase):
             # This is the default implementation for the mask but we need to match CK if we are using it
             dropout_mask = softmax_mask >= 0
 
+            # This logic matches how CK calculates the dropout mask.
+            # This is necessary because CK doesn't support passing in custom dropout masks
+            # So we use this logic to ensure we are comparing apples to apples.
             if TEST_WITH_CK:
                 dropout_mask = (softmax_mask <=int((1.0 - dropout_p) * 255.0)).to(torch.float32)
 
@@ -3713,7 +3715,7 @@ class TestSDPACudaOnly(NNTestCase):
         if TEST_WITH_ROCM:
             if TEST_WITH_CK:
                 fudge_factors['out'] = 5
-                fudge_factors['grad_key'] = 145.0 # NEW CK MIN
+                fudge_factors['grad_key'] = 145.0
                 fudge_factors['grad_query'] = 855.0 # ck min = 855.0
                 fudge_factors['grad_value'] = 6
                 if seq_len_k >= 1024:
@@ -3739,13 +3741,12 @@ class TestSDPACudaOnly(NNTestCase):
                     fudge_factor['grad_key'] = 90.0
 
 
-
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors=fudge_factors,
         )
-        
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
