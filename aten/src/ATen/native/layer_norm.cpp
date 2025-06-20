@@ -302,7 +302,16 @@ std::tuple<Tensor, Tensor> rms_norm_composite(
       upcasted_result = upcasted_result.mul(weight_opt.value());
     }
 
-    return std::make_tuple(upcasted_result, rqrst_input);
+    // if nested do not make contiguous
+    if(input.is_nested() || (weight_opt.has_value() && weight_opt.value().is_nested())){
+      return std::make_tuple(upcasted_result, rqrst_input);
+    }
+
+    if(input.suggest_memory_format() == c10::MemoryFormat::ChannelsLast || input.suggest_memory_format() == c10::MemoryFormat::ChannelsLast3d){
+      return std::make_tuple(upcasted_result, rqrst_input);
+    }
+
+    return std::make_tuple(upcasted_result.contiguous(), rqrst_input.contiguous());
   });
   return std::make_tuple(
     std::get<0>(result).type_as(input), // Cast normalized result to original input type
