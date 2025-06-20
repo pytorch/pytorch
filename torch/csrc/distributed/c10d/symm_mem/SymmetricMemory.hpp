@@ -35,7 +35,7 @@ namespace c10d::symmetric_memory {
 // correctness of the barriers since signals issued from barrier on stream A
 // can be received by the barrier on stream B. By specifying different channels
 // for these two barriers, they can operate correctly in parallel.
-class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
+class TORCH_API SymmetricMemory : public torch::CustomClassHolder {
  public:
   ~SymmetricMemory() override = default;
 

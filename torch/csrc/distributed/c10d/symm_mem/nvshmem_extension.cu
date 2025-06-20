@@ -124,7 +124,7 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
   return input;
 }
 
-void nvshmem_put(at::Tensor& inp, c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory> dest, const int peer) {
+void nvshmem_put(at::Tensor& inp, c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory> dest, const int64_t peer) {
   void* buffer_ptr = dest->get_buffer_ptrs()[peer];
 
   auto stream = at::cuda::getCurrentCUDAStream();
