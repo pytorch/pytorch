@@ -413,6 +413,7 @@ def _type_of(key: Optional[torch.dtype]) -> str:
         # TODO: remove when support is added in triton
         # https://github.com/triton-lang/triton/issues/6054
         "float8_e8m0fnu": "u8",
+        "float4_e2m1fn_x2": "u8",
         "float16": "fp16",
         "bfloat16": "bf16",
         "float32": "fp32",
@@ -2858,6 +2859,7 @@ _triton_type_mapping = {
     # TODO: remove when support is added in triton
     # https://github.com/triton-lang/triton/issues/6054
     "tl.float8_e8m0fnu": "tl.uint8",
+    "tl.float4_e2m1fn_x2": "tl.uint8",
 }
 _torch_triton_mapping = {v: k for k, v in _triton_type_mapping.items()}
 
