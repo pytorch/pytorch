@@ -10,6 +10,14 @@ _T = typing.TypeVar("_T", bound=Callable)
 
 # ONNX to ATen decomp table
 ONNX_ATEN_DECOMP_TABLE: dict[torch._ops.OpOverload, Callable] = {}
+_ATTENTION_23_ALLOWED_INTERMEDIATE_PRECISIONS = frozenset(
+    {
+        1,  # FLOAT
+        10,  # FLOAT16
+        11,  # DOUBLE
+        16,  # BFLOAT16
+    }
+)
 
 
 def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
@@ -48,7 +56,10 @@ def rotary_embedding_23(
     sequence_length = x.shape[1]
     if len(x.shape) == 3:
         hidden_size = x.shape[2]
-        torch._check(num_heads != 0, lambda: f"num_heads must be provided for 3D inputs. Received input tensor with shape {x.shape}")
+        torch._check(
+            num_heads != 0,
+            lambda: f"num_heads must be provided for 3D inputs. Received input tensor with shape {x.shape}",
+        )
         head_size = hidden_size // num_heads
         new_shape = [batch_size, sequence_length, num_heads, head_size]
         x = torch.reshape(x, new_shape)
@@ -356,13 +367,7 @@ def attention_23(
         # Apply softmax with optional precision casting
         if softmax_precision is not None:
             # Map ONNX data type to torch dtype
-            allowed_intermediate_precisions = {
-                1,  # FLOAT
-                10,  # FLOAT16
-                11,  # DOUBLE
-                16,  # BFLOAT16
-            }
-            if softmax_precision in allowed_intermediate_precisions:
+            if softmax_precision in _ATTENTION_23_ALLOWED_INTERMEDIATE_PRECISIONS:
                 original_dtype = qk_with_bias.dtype
                 qk_with_bias = qk_with_bias.to(
                     _dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE[softmax_precision]
