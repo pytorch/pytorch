@@ -139,26 +139,26 @@ fi
 echo "Calling setup.py bdist at $(date)"
 
 if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    echo "Calling setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
+    echo "Calling -m build --wheel --no-isolation for split build (BUILD_LIBTORCH_WHL)"
     time EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
     BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 \
     BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
-    python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR
-    echo "Finished setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    echo "Calling setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
+    python -m build --wheel --no-isolation --outdir /tmp/$WHEELHOUSE_DIR
+    echo "Finished -m build --wheel --no-isolation for split build (BUILD_LIBTORCH_WHL)"
+    echo "Calling -m build --wheel --no-isolation for split build (BUILD_PYTHON_ONLY)"
     time EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
     BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 \
     BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
-    CMAKE_FRESH=1 python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR
-    echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
+    CMAKE_FRESH=1 python -m build --wheel --no-isolation --outdir /tmp/$WHEELHOUSE_DIR
+    echo "Finished -m build --wheel --no-isolation for split build (BUILD_PYTHON_ONLY)"
 else
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
         EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
         BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
         USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
-        python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR
+        python -m build --wheel --no-isolation --outdir /tmp/$WHEELHOUSE_DIR
 fi
 echo "Finished setup.py bdist at $(date)"
 

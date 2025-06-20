@@ -199,20 +199,20 @@ export USE_QNNPACK=OFF
 export BUILD_TEST=OFF
 
 pushd "$pytorch_rootdir"
-echo "Calling setup.py bdist_wheel at $(date)"
+echo "Calling -m build --wheel --no-isolation at $(date)"
 
 if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    echo "Calling setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel -d "$whl_tmp_dir"
-    echo "Finished setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    echo "Calling setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
-    BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 CMAKE_FRESH=1 python setup.py bdist_wheel -d "$whl_tmp_dir"
-    echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
+    echo "Calling -m build --wheel --no-isolation for split build (BUILD_LIBTORCH_WHL)"
+    BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python -m build --wheel --no-isolation --outdir "$whl_tmp_dir"
+    echo "Finished -m build --wheel --no-isolation for split build (BUILD_LIBTORCH_WHL)"
+    echo "Calling -m build --wheel --no-isolation for split build (BUILD_PYTHON_ONLY)"
+    BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 CMAKE_FRESH=1 python -m build --wheel --no-isolation --outdir "$whl_tmp_dir"
+    echo "Finished -m build --wheel --no-isolation for split build (BUILD_PYTHON_ONLY)"
 else
-    python setup.py bdist_wheel -d "$whl_tmp_dir"
+    python -m build --wheel --no-isolation --outdir "$whl_tmp_dir"
 fi
 
-echo "Finished setup.py bdist_wheel at $(date)"
+echo "Finished -m build --wheel --no-isolation at $(date)"
 
 if [[ $package_type != 'libtorch' ]]; then
     echo "delocating wheel dependencies"

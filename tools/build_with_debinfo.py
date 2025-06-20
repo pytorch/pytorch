@@ -95,7 +95,7 @@ def main() -> None:
         sys.exit(-95)
     if not is_devel_setup():
         print(
-            "Not a devel setup of PyTorch, please run `python3 setup.py develop --user` first"
+            "Not a devel setup of PyTorch, please run `python3 -m pip install -e . -v --no-build-isolation --user` first"
         )
         sys.exit(-1)
     if not has_build_ninja():

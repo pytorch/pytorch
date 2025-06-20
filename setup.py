@@ -370,7 +370,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == "-q" or arg == "--quiet":
         VERBOSE_SCRIPT = False
-    if arg in ["clean", "egg_info", "sdist"]:
+    if arg in ["clean", "dist_info", "egg_info", "sdist"]:
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
@@ -548,7 +548,7 @@ def build_deps():
         report(
             'Finished running cmake. Run "ccmake build" or '
             '"cmake-gui build" to adjust build options and '
-            '"python setup.py install" to build.'
+            '"python -m pip install . -v --no-build-isolation" to build.'
         )
         sys.exit()
 
@@ -1158,11 +1158,11 @@ build_update_message = """
     It is no longer necessary to use the 'build' or 'rebuild' targets
 
     To install:
-      $ python setup.py install
+      $ python -m pip install . -v --no-build-isolation
     To develop locally:
-      $ python setup.py develop
+      $ python -m pip install -e . -v --no-build-isolation
     To force cmake to re-generate native build files (off by default):
-      $ CMAKE_FRESH=1 python setup.py develop
+      $ CMAKE_FRESH=1 python -m pip install -e . -v --no-build-isolation
 """
 
 
