@@ -1,3 +1,4 @@
+# flake8: noqa: B950
 import math
 import typing
 from typing import Callable, Optional
@@ -514,7 +515,7 @@ def quantize_linear_23(
         # Blocked quantization
         torch._check(
             block_size > 0,
-            lambda: "block_size must be positive for blocked quantization"
+            lambda: f"block_size must be positive for blocked quantization. block_size: {block_size}"
         )
         effective_scale = _compute_blocked_quantization_scale(x, y_scale, axis, block_size)
 

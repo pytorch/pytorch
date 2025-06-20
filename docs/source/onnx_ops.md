@@ -59,7 +59,7 @@ onnx_program = torch.onnx.export(
 
 Printing the ONNX program will show the ONNX operators used in the graph:
 
-```py
+```
 <...>
 
 graph(
