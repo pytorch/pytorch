@@ -24,7 +24,10 @@ if not IS_WINDOWS:
     class TestLibtorchAgnostic(TestCase):
         @classmethod
         def setUpClass(cls):
-            install_cpp_extension(extension_root=Path(__file__).parent.parent)
+            try:
+                import libtorch_agnostic  # noqa: F401
+            except Exception:
+                install_cpp_extension(extension_root=Path(__file__).parent.parent)
 
         @onlyCPU
         def test_slow_sgd(self, device):
@@ -86,13 +89,51 @@ if not IS_WINDOWS:
             import libtorch_agnostic
 
             t = torch.rand(32, 16, device=device) - 0.5
-            cpu_t = libtorch_agnostic.ops.my_abs(t)
-            self.assertEqual(cpu_t, torch.abs(t))
+            res = libtorch_agnostic.ops.my_abs(t)
+            self.assertEqual(res, torch.abs(t))
 
             def _make_cuda_tensors(prior_mem):
                 cuda_t = libtorch_agnostic.ops.my_abs(t)
                 self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
                 self.assertEqual(cuda_t, torch.abs(t))
+
+            if t.is_cuda:
+                init_mem = torch.cuda.memory_allocated(device)
+                for _ in range(3):
+                    _make_cuda_tensors(init_mem)
+                    curr_mem = torch.cuda.memory_allocated(device)
+                    self.assertEqual(curr_mem, init_mem)
+
+        def test_neg_exp(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(32, 16, device=device) - 0.5
+            res = libtorch_agnostic.ops.neg_exp(t)
+            self.assertEqual(res, torch.neg(torch.exp(t)))
+
+            def _make_cuda_tensors(prior_mem):
+                cuda_res = libtorch_agnostic.ops.neg_exp(t)
+                self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+                self.assertEqual(cuda_res, torch.neg(torch.exp(t)))
+
+            if t.is_cuda:
+                init_mem = torch.cuda.memory_allocated(device)
+                for _ in range(3):
+                    _make_cuda_tensors(init_mem)
+                    curr_mem = torch.cuda.memory_allocated(device)
+                    self.assertEqual(curr_mem, init_mem)
+
+        def test_divide_neg_exp(self, device):
+            import libtorch_agnostic
+
+            t = torch.zeros(2, 3, device=device) - 0.5
+            res = libtorch_agnostic.ops.divide_neg_exp(t)
+            self.assertEqual(res, torch.neg(t) / torch.exp(t))
+
+            def _make_cuda_tensors(prior_mem):
+                cuda_res = libtorch_agnostic.ops.divide_neg_exp(t)
+                self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+                self.assertEqual(cuda_res, torch.neg(t) / torch.exp(t))
 
             if t.is_cuda:
                 init_mem = torch.cuda.memory_allocated(device)

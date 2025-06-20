@@ -10,7 +10,7 @@ import inspect
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -69,7 +69,7 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None, recursive=True, *, reason=None):
+def disable(fn=None, recursive=True, *, reason=None, wrapping=True):
     """
     Decorator to disable TorchDynamo
 
@@ -85,8 +85,8 @@ def disable(fn=None, recursive=True, *, reason=None):
         if fn is not None:
             fn = innermost_fn(fn)
             assert callable(fn)
-            return DisableContext(msg=reason)(fn)
-        return DisableContext(msg=reason)
+            return DisableContext(msg=reason, wrapping=wrapping)(fn)
+        return DisableContext(msg=reason, wrapping=wrapping)
     else:
 
         def wrap(fn):
@@ -524,7 +524,7 @@ class _DimRange:
 
 
 @forbid_in_graph
-def mark_unbacked(t, index, strict=False):
+def mark_unbacked(t, index, strict=False, specialize_on=None):
     """
     Mark a tensor as having an unbacked dim.  This changes the semantics of operations,
     we will always report the size does not equal zero/one, we will turn asserts
@@ -547,8 +547,17 @@ def mark_unbacked(t, index, strict=False):
             t._dynamo_strict_unbacked_indices.add(index)
             return
 
+        if not hasattr(t, "_specialized_on"):
+            t._specialize_on = {}
+
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
+
+        # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
+        # TypeError: 'Attribute' object does not support item assignment
+        if isinstance(t._specialize_on, dict):
+            t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
         t._dynamo_unbacked_indices.add(index)
         return
 
@@ -558,7 +567,7 @@ def mark_unbacked(t, index, strict=False):
 
 
 @forbid_in_graph
-def mark_dynamic(t, index, *, min=None, max=None):
+def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None):
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
@@ -581,6 +590,20 @@ def mark_dynamic(t, index, *, min=None, max=None):
     4) Attempts to trace this function will explicitly raise. As such, all calls to mark_dynamic must be made
     before torch.compile.
 
+    5) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
+    multiple specialized compilations in addition to a single generic compilation. NB: For now we only support
+    per dimension specialization, or in other words we do not generate a cross product of specializations.
+    At runtime, we will dispatch to a specialized compiled region if the input matches the specialization criteria.
+
+    For example:
+        mark_dynamic(..., specialize_on=[
+            lambda x: x == 8,
+            lambda x: x == 16
+        ])
+
+    This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
+    at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
+    2-8x speedups depending on the specific specialization and model architecture.
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
@@ -593,14 +616,25 @@ def mark_dynamic(t, index, *, min=None, max=None):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
             t._dynamo_dynamic_range = set()
+
+        if not hasattr(t, "_specialize_on"):
+            t._specialize_on = {}
+
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
+
+        # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
+        # TypeError: 'Attribute' object does not support item assignment
+        if isinstance(t._specialize_on, dict):
+            t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
         return
 
     assert isinstance(index, (list, tuple))
     for i in index:
         mark_dynamic(t, i, min=min, max=max)
+        mark_dynamic(t, i, min=min, max=max, specialize_on=specialize_on)
 
 
 @forbid_in_graph
@@ -783,6 +817,7 @@ _allowed_config_patches = (
     "allow_unspec_int_on_nn_module",
     "skip_torchrec",
     "dont_skip_tracing",
+    "error_on_graph_break",
 )
 
 from . import config
@@ -837,6 +872,14 @@ def patch_dynamo_config(
     return DynamoConfigPatchProxy(config_patch)
 
 
+@overload
+def dont_skip_tracing(fn: None = None) -> DynamoConfigPatchProxy: ...
+
+
+@overload
+def dont_skip_tracing(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
 def dont_skip_tracing(fn=None):
     """
     Context manager/decorator to trace into functions intentionally marked by developers to be skipped
@@ -848,3 +891,13 @@ def dont_skip_tracing(fn=None):
     if fn:
         return ctx(fn)
     return ctx
+
+
+def set_fullgraph(fullgraph: bool) -> DynamoConfigPatchProxy:
+    """
+    Context manager/decorator to toggle fullgraph setting.
+
+    More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
+    or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
+    """
+    return patch_dynamo_config(error_on_graph_break=fullgraph)

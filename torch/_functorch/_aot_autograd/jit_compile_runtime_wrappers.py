@@ -40,7 +40,11 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .autograd_cache import AOTAutogradCache, should_use_remote_autograd_cache
+from .autograd_cache import (
+    AOTAutogradCache,
+    serialize_graph_module,
+    should_use_remote_autograd_cache,
+)
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
     aot_dispatch_base_graph,
@@ -276,6 +280,7 @@ def aot_dispatch_base(
                 guards_expr=guards_expr,
                 backward_state_indices=None,
                 num_symints_saved_for_bw=None,
+                serialized_bw_module=None,
             )
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
@@ -759,6 +764,11 @@ def run_joint_graph_passes_on_hops(
                 ),
             )
             propagate_meta_info(new_bw_hop_gm, new_bw_node, bw_node)
+            # Since the partitioner is run after the graph passes, we have lost
+            # the eager information and cannot faithfully extract the eager
+            # inputs for the new partitioned backward graph. For the forward
+            # graph, it was fine because the input signature remains same.
+            new_bw_node.meta.pop("eager_input_vals", None)
 
         bw_node.replace_all_uses_with(new_bw_node)
         joint_gm.graph.erase_node(bw_node)
@@ -1753,7 +1763,10 @@ def aot_dispatch_autograd(
         # close over aot_config.cache_info, since aot_config never changes.
         # But closing over random variables is confusing IMO, so I'm leaving it.
         def try_save_cache_entry(  # noqa: F811
-            compiled_bw_func, _fw_metadata, aot_config
+            compiled_bw_func: Callable,
+            bw_module: torch.fx.GraphModule,
+            _fw_metadata: ViewAndMutationMeta,
+            aot_config: AOTConfig,
         ):
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
             bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
@@ -1775,7 +1788,7 @@ def aot_dispatch_autograd(
 
                 entry = AOTAutogradCache.make_entry(
                     compiled_fw_func,  # type: ignore[arg-type]
-                    compiled_bw_func,
+                    compiled_bw_func,  # type: ignore[arg-type]
                     aot_joint_graph_str,
                     aot_forward_graph_str,
                     aot_backward_graph_str,
@@ -1790,13 +1803,14 @@ def aot_dispatch_autograd(
                     guards_expr=guards_expr,
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
+                    serialized_bw_module=serialize_graph_module(bw_module),
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)
 
         if compiled_bw_func is not None:
-            # If we already compiled it we can just run it right now without waiting
-            try_save_cache_entry(compiled_bw_func, fw_metadata, aot_config)
+            # If we already compiled the backward, we save its cache entry now
+            try_save_cache_entry(compiled_bw_func, bw_module, fw_metadata, aot_config)
             try_save_cache_entry = None
 
     compiled_fn = AOTDispatchAutograd.post_compile(
