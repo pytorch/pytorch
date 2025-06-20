@@ -19,8 +19,9 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
         dict[str, str]: A dictionary containing the NVSHMEM device library name
         and path.
     """
-    from torch._C._distributed_c10d import _nvshmemx_cumodule_init
     from triton.runtime.jit import JITFunction
+
+    from torch._C._distributed_c10d import _nvshmemx_cumodule_init
 
     # Detect NVSHMEM device library path from python library path
     if lib_dir is None:
@@ -161,6 +162,19 @@ if has_triton():
             [],
             {
                 (): ("nvshmem_fence", core.dtype("int32")),
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def quiet(_builder=None):  # type: ignore[no-untyped-def]
+        return core.extern_elementwise(
+            "",
+            "",
+            [],
+            {
+                (): ("nvshmem_quiet", core.dtype("int32")),
             },
             is_pure=False,
             _builder=_builder,
