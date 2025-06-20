@@ -900,7 +900,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self.nn_module_stack_source = source
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _nn_module_method_ids():
         # Allow __setattr__ to fall through to base class handler
         supported = {torch.nn.Module.__setattr__, torch.nn.Module.__init__}
