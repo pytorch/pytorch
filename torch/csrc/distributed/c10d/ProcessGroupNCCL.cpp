@@ -1818,6 +1818,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // recorder and dump. After dump, the training should continue.
     if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
       // best effort dump, not waiting for the dump here
+      LOG(INFO) << pg_->logPrefix()
+                << "Dump signal received through pipe, triggering FR dump.";
       std::future<bool> fut = std::async(std::launch::async, [this]() {
         return this->pg_->dumpDebuggingInfo();
       });

@@ -1757,7 +1757,8 @@ class CppBuilder:
             current_arch = _nvcc_arch_as_compile_option()
             contents += textwrap.dedent(
                 f"""
-                find_package(CUDA REQUIRED)
+                enable_language(CUDA)
+                find_package(CUDAToolkit REQUIRED)
 
                 find_program(OBJCOPY_EXECUTABLE objcopy)
                 if(NOT OBJCOPY_EXECUTABLE)
@@ -1785,7 +1786,7 @@ class CppBuilder:
                     # --- PTX to FATBIN Command & Target ---
                     add_custom_command(
                         OUTPUT ${{FATBIN_FILE}}
-                        COMMAND ${{CUDA_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
+                        COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
                                 -gencode arch=compute_80,code=compute_80
                                 -gencode arch=compute_{current_arch},code=sm_{current_arch}
                         DEPENDS ${{PTX_FILE}}

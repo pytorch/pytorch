@@ -500,7 +500,7 @@ class SimpleElasticAgent(ElasticAgent):
         group_rank = rdzv_info.rank
         group_world_size = rdzv_info.world_size
 
-        # master_addr/master_port could be explicitly overriden
+        # master_addr/master_port could be explicitly overridden
         # TODO: BC - specific to static rdzv and can be simplifed further
         master_addr = spec.master_addr or rdzv_info.bootstrap_store_info.master_addr
         master_port = spec.master_port or rdzv_info.bootstrap_store_info.master_port
