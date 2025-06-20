@@ -76,7 +76,7 @@ struct IsVecMaskType<at::vec::VecMask<T, N>> : std::true_type {};
 
 template <typename T, uint64_t kChunkSize>
 struct CascadeSumHelper {
-  // A data struct to help cascade sum:
+  // A data struct to help cascade summation:
   std::vector<T> sum_stk{};
   uint64_t depth{0}; // depth of sum_stk.
   uint64_t num_chunks{0}; // number of chunks stored in sum_stk.
@@ -98,25 +98,46 @@ struct CascadeSumHelper {
 };
 
 template <typename T, uint64_t kChunkSize = 0>
-void cascade_sum_combine(T& data, CascadeSumHelper<T, kChunkSize>* c) {
+inline T cascade_sum_combine(
+    T& acc,
+    T& data,
+    CascadeSumHelper<T, kChunkSize>* c) {
+  // Note: In order to be consistent with other reductions in inductor,
+  // the returned value may be wrong and cascade_sum_final must be executed to
+  // get the final correct result. Inductor uses the reduction suffix to ensure
+  // that cascade_sum_final is called in the end.
   c->sum_stk[0] = c->sum_stk[0] + data;
+  // Use cascade summation to improve numerical stability.
+  // https://en.wikipedia.org/wiki/Pairwise_summation
   if (c->depth > 0) {
     c->index++;
     if (c->index == kChunkSize) {
       c->num_chunks += 1;
       c->index = 0;
       uint64_t mask = c->num_chunks;
-      for (uint64_t j = 1; j < c->depth && (mask & 1) == 0; ++j) {
+      uint64_t j = 1;
+      for (; j < c->depth && (mask & 1) == 0; ++j) {
         c->sum_stk[j] = c->sum_stk[j] + c->sum_stk[j - 1];
         c->sum_stk[j - 1] = T(0);
         mask >>= 1;
       }
+      return c->sum_stk[j - 1];
     }
   }
+  return c->sum_stk[0];
 }
 
 template <typename T, uint64_t kChunkSize = 0>
-T cascade_sum_final(CascadeSumHelper<T, kChunkSize>* c) {
+inline T cascade_sum_combine_direct(
+    T& acc,
+    T& data,
+    CascadeSumHelper<T, kChunkSize>* c) {
+  // Directly perform sum calculation
+  return acc + data;
+}
+
+template <typename T, uint64_t kChunkSize = 0>
+inline T cascade_sum_final(CascadeSumHelper<T, kChunkSize>* c) {
   T result = c->sum_stk[0];
   for (const auto i : c10::irange(1, c->depth)) {
     result = result + c->sum_stk[i];
@@ -262,7 +283,8 @@ Welford<T> welford_combine(
 }
 
 template <typename T, uint64_t kChunkSize = 0>
-void cascade_sum_combine(
+inline T cascade_sum_combine(
+    T& acc,
     T& data,
     int64_t tail_size,
     CascadeSumHelper<T, kChunkSize>* c) {
@@ -274,13 +296,16 @@ void cascade_sum_combine(
       c->num_chunks += 1;
       c->index = 0;
       uint64_t mask = c->num_chunks;
-      for (uint64_t j = 1; j < c->depth && (mask & 1) == 0; ++j) {
+      uint64_t j = 1;
+      for (; j < c->depth && (mask & 1) == 0; ++j) {
         c->sum_stk[j] = c->sum_stk[j] + c->sum_stk[j - 1];
         c->sum_stk[j - 1] = T(0);
         mask >>= 1;
       }
+      return c->sum_stk[j - 1];
     }
   }
+  return c->sum_stk[0];
 }
 
 template <typename T>

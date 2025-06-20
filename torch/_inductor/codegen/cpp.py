@@ -216,13 +216,17 @@ def reduction_combine(
     reduction_type,
     var,
     next_value,
+    helper_val=None,
     index: Optional[sympy.Symbol] = None,
     src_dtype=None,
 ):
     is_bool = src_dtype == torch.bool
     if reduction_type == "sum":
-        conjunction = "|" if is_bool else "+"
-        return f"{var} {conjunction} {next_value}"
+        if helper_val:
+            return f"cascade_sum_combine({var}, {next_value}, &{helper_val})"
+        else:
+            conjunction = "|" if is_bool else "+"
+            return f"{var} {conjunction} {next_value}"
     if reduction_type == "prod":
         return f"{var} * {next_value}"
     if reduction_type == "xor_sum":
@@ -360,7 +364,6 @@ def replace_acc_name(buffer: IndentedBuffer, name: str, new_name: str):
             line.line = re.sub(r"\b" + f"{name}" + r"\b", f"{new_name}", line.line)
         else:
             buffer._lines[i] = re.sub(r"\b" + f"{name}" + r"\b", f"{new_name}", line)
-
 
 @functools.lru_cache
 def stride_at(index: sympy.Expr, var: sympy.Symbol):
@@ -2129,6 +2132,113 @@ class CppKernel(Kernel):
         for gen_fn in self.reduction_prefix_generators:
             self.reduction_prefix.splice(gen_fn(size))
 
+    def apply_acc_helper(self, reduction_type, dtype, use_scalar):
+        # Apply accumulate hepler for the reduction operation.
+        # This method generates the necessary code to improve precision for
+        # sum and welford, by using helper structs
+        # Note: using hepler has non-negligible impact on performance
+
+        # keep the original behavior for welford_reduce
+        # acc hepler is not used for scalar welford_reduce
+        # TODO add cascade support for scalar welford_reduce
+        if reduction_type == "welford_reduce":
+            return not use_scalar
+
+        if reduction_type == "sum" and dtype == torch.float:
+            reduction_size = functools.reduce(
+                operator.mul, self.ranges[self.reduction_depth :]
+            )
+            # If the reduction size is dynamic, to be conservative, use acc_helper
+            if not isinstance(reduction_size, sympy.Integer):
+                return True
+            num_threads = (
+                "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
+            )
+            num_range_thread = CeilDiv(reduction_size, num_threads) if num_threads else reduction_size
+            # chunk size to balance accuracy and performance
+            chunk_size = 2**16
+            rt_size = num_range_thread if isinstance(num_range_thread, sympy.Integer) else reduction_size
+            if rt_size > chunk_size:
+                # use helper if the reduction size is too large
+                return True
+        return False
+
+    def _acc_helper_init(
+        self,
+        reduction_type,
+        helper_val,
+        helper_range,
+        dtype,
+        num_threads=None,
+        use_scalar=False,
+    ):
+        num_range_thread = (
+            CeilDiv(helper_range, num_threads) if num_threads else helper_range
+        )
+        num_range_thread_expr = cexpr_index(num_range_thread)
+        assert reduction_type in ["welford_reduce", "sum"]
+        chunk_size = 4096 if reduction_type == "welford_reduce" else 2**16
+        num_chunks = CeilDiv(num_range_thread, chunk_size)
+        helper_type = (
+            "WelfordHelper"
+            if reduction_type == "welford_reduce"
+            else "CascadeSumHelper"
+        )
+        if use_scalar:
+            h_type = DTYPE_TO_CPP[dtype]
+        else:
+            h_type = (
+                self._get_vec_type(dtype)
+                if hasattr(self, "_get_vec_type")
+                else DTYPE_TO_CPP[dtype]
+            )
+        helper_init_line = (
+            f"{helper_type}<{h_type}, {chunk_size}> {helper_val}"
+            f"("
+            f"{num_range_thread_expr}"
+            f");"
+        )
+        if reduction_type == "sum":
+            return helper_init_line
+        if isinstance(num_chunks, sympy.Integer) and num_chunks <= 1:
+            # When the number of chunks <= 1, there is no need to use cascade summation to improve
+            # reduction accuracy. We can initialize a static WelfordHelper to improve performance.
+            return f"static {helper_init_line}"
+        else:
+            return helper_init_line
+
+    def _use_acc_helper(
+        self, reduction_type, acc, helper_val, helper_range, dtype, use_scalar=False
+    ):
+        num_threads = (
+            "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
+        )
+        self.non_parallel_reduction_prefix.writeline(
+            self._acc_helper_init(
+                reduction_type, helper_val, helper_range, dtype, None, use_scalar
+            )
+        )
+        self.local_reduction_init.writeline(
+            self._acc_helper_init(
+                reduction_type, helper_val, helper_range, dtype, num_threads, use_scalar
+            )
+        )
+        result = acc if use_scalar else f"{acc}_vec"
+        if reduction_type == "welford_reduce":
+            self.non_parallel_reduction_suffix.writeline(
+                f"{result} = welford_combine({result}, &{helper_val});"
+            )
+            self.local_reduction_stores.writeline(
+                f"{result}_local = welford_combine({result}_local, &{helper_val});"
+            )
+        else:
+            self.non_parallel_reduction_suffix.writeline(
+                f"{result} = cascade_sum_final(&{helper_val});"
+            )
+            self.local_reduction_stores.writeline(
+                f"{result}_local = cascade_sum_final(&{helper_val});"
+            )
+
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
         reduction_key = src_dtype, reduction_type, value
@@ -2147,14 +2257,36 @@ class CppKernel(Kernel):
                 acc, acc_type, reduction_type, init_dtype, reduction_init
             )
         )
-        # TODO add cascade sum suport for scalar reduction
-        assert self.reduction_depth is not None
-        index = self.itervars[self.reduction_depth]
-        for i in range(self.reduction_depth + 1, len(self.itervars)):
-            index = index * self.ranges[i] + self.itervars[i]
-        self.stores.writeline(
-            f"{acc} = {reduction_combine(reduction_type, acc, value, index)};"
-        )
+
+        if self.apply_acc_helper(reduction_type, dtype, True):
+            # use cascade_helper for vec kernel
+            reduction_size = functools.reduce(
+                operator.mul, self.ranges[self.reduction_depth :]
+            )
+            helper_val = self.cascade_helper_cse.generate(
+                self.compute, f"reduction {reduction_key}", write=False
+            )
+            # rename the helper variable to distinguish it from vectorized version
+            scalar_helper_val = f"scalar_{helper_val}"
+            self._use_acc_helper(
+                reduction_type,
+                acc,
+                scalar_helper_val,
+                reduction_size,
+                dtype,
+                use_scalar=True,
+            )
+            self.stores.writeline(
+                f"{acc} = {reduction_combine(reduction_type, acc, value, scalar_helper_val)};"
+            )
+        else:
+            assert self.reduction_depth is not None
+            index = self.itervars[self.reduction_depth]
+            for i in range(self.reduction_depth + 1, len(self.itervars)):
+                index = index * self.ranges[i] + self.itervars[i]
+            self.stores.writeline(
+                f"{acc} = {reduction_combine(reduction_type, acc, value, index=index)};"
+            )
 
         self._gen_parallel_reduction_buffers(acc, acc_type, reduction_type, init_dtype)
         result = reduction_project(reduction_type, acc)
@@ -2832,6 +2964,7 @@ class CppVecKernel(CppKernel):
         )
         assert isinstance(acc, CppCSEVariable)
         acc_vec = f"{acc}_vec"
+        masked_acc = f"masked_{acc}"
         masked_acc_vec = f"masked_{acc_vec}"
         self.reduction_var_names += [f"{acc}", acc_vec, masked_acc_vec]
         self.is_reduction = True
@@ -2850,9 +2983,8 @@ class CppVecKernel(CppKernel):
             )
         )
 
-        if reduction_type == "welford_reduce" or (
-            reduction_type == "sum" and src_dtype != torch.bool
-        ):
+        should_use_acc_hepler = self.apply_acc_helper(reduction_type, dtype, False)
+        if should_use_acc_hepler:
             # use masked acc_vec for tail vec kernel
             self.reduction_prefix_generators.append(
                 self._gen_reduction_prefix(
@@ -2864,7 +2996,7 @@ class CppVecKernel(CppKernel):
                 )
             )
 
-            # use welford_helper for vec kernel
+            # use welford_helper/cascade_helper for vec kernel
             assert self.reduction_depth is not None
             reduction_size = functools.reduce(
                 operator.mul, self.ranges[self.reduction_depth :]
@@ -2897,12 +3029,25 @@ class CppVecKernel(CppKernel):
                 if self.ranges[self.tiling_idx] % self.tiling_factor
                 else sympy.Integer(0)
             )
-            self._use_improve_precision_helper(
-                reduction_type, acc_vec, helper_val, helper_vec_range, dtype
+            # scalar helper for scalar sum is also needed when vec kernel is included
+            # Note: is it diffent from welford reduction as welford reduction of scalar version
+            # does not need helper, and the helper needs the information of reduction size to initialize
+            if reduction_type == "sum":
+                scalar_helper_val = f"scalar_{helper_val}"
+                self._use_acc_helper(
+                    reduction_type,
+                    acc,
+                    scalar_helper_val,
+                    reduction_size,
+                    dtype,
+                    use_scalar=True,
+                )
+            self._use_acc_helper(
+                reduction_type, acc, helper_val, helper_vec_range, dtype
             )
-            self._use_improve_precision_helper(
+            self._use_acc_helper(
                 reduction_type,
-                masked_acc_vec,
+                masked_acc,
                 masked_helper_val,
                 masked_helper_vec_range,
                 dtype,
@@ -2913,7 +3058,7 @@ class CppVecKernel(CppKernel):
             helper_val_ = masked_helper_val if self.tail_size else helper_val
             if reduction_type == "sum":
                 self.stores.writeline(
-                    f"{self.reduction_combine_vec(reduction_type, acc_vec_, value, helper_val_)};"
+                    f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, helper_val_)};"
                 )
             else:
                 self.stores.writeline(
@@ -2949,9 +3094,7 @@ class CppVecKernel(CppKernel):
             reduction_combine_fn=reduction_combine,
             reduction_init_fn=reduction_init,
         )
-        if reduction_type == "welford_reduce" or (
-            reduction_type == "sum" and src_dtype != torch.bool
-        ):
+        if should_use_acc_hepler:
             # use masked acc_vec for tail vec kernel
             self._gen_parallel_reduction_buffers(
                 masked_acc_vec,
@@ -2999,7 +3142,8 @@ class CppVecKernel(CppKernel):
                 vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[vec_dtype]}>"
                 vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
                 result_vec = f"{acc_vec}"
-                if reduction_type == "sum" and not is_bool:
+                if should_use_acc_hepler:
+                    assert reduction_type == "sum"
                     result_vec = f"{acc_vec} + {masked_acc_vec}"
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {result_vec})"
 
@@ -3014,7 +3158,8 @@ class CppVecKernel(CppKernel):
                 self.reduction_suffix.writeline(
                     f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, masked_tmpvar)};"
                 )
-            elif reduction_type == "sum" and not is_bool:
+            elif should_use_acc_hepler:
+                assert reduction_type == "sum"
                 masked_tmpvar = f"masked_{tmpvar}"
                 self.reduction_suffix.writeline(
                     f"{tmpvar} = {tmpvar} + {masked_tmpvar};"
@@ -3144,67 +3289,6 @@ class CppVecKernel(CppKernel):
             return f"{self._get_mask_type()}"
         return vec_type
 
-    def _improve_precision_helper_init(
-        self, reduction_type, helper_val, helper_vec_range, dtype, num_threads=None
-    ):
-        vec_num_range_thread = (
-            CeilDiv(helper_vec_range, num_threads) if num_threads else helper_vec_range
-        )
-        vec_num_range_thread_expr = cexpr_index(vec_num_range_thread)
-        assert reduction_type in ["welford_reduce", "sum"]
-        chunk_size = 4096 if reduction_type == "welford_reduce" else 2**16
-        num_chunks = CeilDiv(vec_num_range_thread, chunk_size)
-        helper_type = (
-            "WelfordHelper"
-            if reduction_type == "welford_reduce"
-            else "CascadeSumHelper"
-        )
-        helper_init_line = (
-            f"{helper_type}<{self._get_vec_type(dtype)}, {chunk_size}> {helper_val}"
-            f"("
-            f"{vec_num_range_thread_expr}"
-            f");"
-        )
-        if reduction_type == "sum":
-            return helper_init_line
-        if isinstance(num_chunks, sympy.Integer) and num_chunks <= 1:
-            # When the number of chunks <= 1, there is no need to use cascade summation to improve
-            # reduction accuracy. We can initialize a static WelfordHelper to improve performance.
-            return f"static {helper_init_line}"
-        else:
-            return helper_init_line
-
-    def _use_improve_precision_helper(
-        self, reduction_type, acc_vec, helper_val, helper_vec_range, dtype
-    ):
-        num_threads = (
-            "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
-        )
-        self.non_parallel_reduction_prefix.writeline(
-            self._improve_precision_helper_init(
-                reduction_type, helper_val, helper_vec_range, dtype
-            )
-        )
-        self.local_reduction_init.writeline(
-            self._improve_precision_helper_init(
-                reduction_type, helper_val, helper_vec_range, dtype, num_threads
-            )
-        )
-        if reduction_type == "welford_reduce":
-            self.non_parallel_reduction_suffix.writeline(
-                f"{acc_vec} = welford_combine({acc_vec}, &{helper_val});"
-            )
-            self.local_reduction_stores.writeline(
-                f"{acc_vec}_local = welford_combine({acc_vec}_local, &{helper_val});"
-            )
-        else:
-            self.non_parallel_reduction_suffix.writeline(
-                f"{acc_vec} = cascade_sum_final(&{helper_val});"
-            )
-            self.local_reduction_stores.writeline(
-                f"{acc_vec}_local = cascade_sum_final(&{helper_val});"
-            )
-
     def reduction_combine_vec(
         self,
         reduction_type,
@@ -3235,11 +3319,11 @@ class CppVecKernel(CppKernel):
                     else f"at::vec::minimum({var}, {next_value})"
                 )
         elif reduction_type == "sum":
-            if helper_val and not is_bool:
+            if helper_val:
                 if self.tail_size:
-                    return f"cascade_sum_combine({next_value}, {cexpr_index(self.tail_size)}, &{helper_val})"
+                    return f"cascade_sum_combine({var}, {next_value}, {cexpr_index(self.tail_size)}, &{helper_val})"
                 else:
-                    return f"cascade_sum_combine({next_value}, &{helper_val})"
+                    return f"cascade_sum_combine({var}, {next_value}, &{helper_val})"
             else:
                 if self.tail_size:
                     return f"sum_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
@@ -4436,6 +4520,13 @@ class CppKernelProxy(CppKernel):
                             replace_acc_name(
                                 tail_loop_kernel.reduction_suffix, name, new_name
                             )
+                        # If tail loop kernel is a scalar kernel, use cascade_sum_combine_direct instead of cascade_sum_combine
+                        # as the reduction vars are extended: tmp_acc -> tmp_acc_arr[].
+                        replace_acc_name(
+                            tail_loop_kernel.stores,
+                            "cascade_sum_combine",
+                            "cascade_sum_combine_direct",
+                        )
                         suffix_buf.splice(
                             move_code_under_inner_loop(
                                 tail_loop_kernel.reduction_suffix,
