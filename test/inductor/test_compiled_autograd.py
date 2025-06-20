@@ -5156,8 +5156,6 @@ xfail_by_backend = {
         "test_reentrant_with_callbacks_depth_1",  # queue_callback
         "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
         "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
-        "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
-        "test_nested_checkpoint_set_early_stop_no_recompution_needed",  # TorchDispatchMode not yet implemented
         "test_post_accumulate_grad_hook_ordering",  # accuracy error
         "test_current_graph_task_id",  # autograd state already cleared once dynamo is called
         "test_custom_function_forward_mode_forward_is_no_op",  # forward AD
@@ -5250,6 +5248,7 @@ xfail_divergence_from_eager = {
     "test_vjp_call_compiled_backward_fn",  # different functorch error
     "test_vmap_call_compiled_backward_fn",  # different functorch error
     "test_accumulate_grad",  # always out of place add for compiled autograd
+    "test_current_node",  # slightly different dispatched ops
 }
 
 skipped_tests = set()
