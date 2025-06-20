@@ -508,6 +508,29 @@ class CommonListMethodsVariable(BaseListVariable):
             else:
                 self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
+        elif name == "__delitem__" and self.is_mutable():
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(tx, name)
+
+            tx.output.side_effects.mutation(self)
+            if args[0].is_python_constant() and isinstance(
+                args[0].as_python_constant(), (int, slice)
+            ):
+                idx = args[0].as_python_constant()
+                try:
+                    self.items.__delitem__(idx)
+                except Exception as exc:
+                    raise_observed_exception(
+                        type(exc),
+                        tx,
+                        args=list(map(ConstantVariable.create, exc.args)),
+                    )
+            else:
+                msg = ConstantVariable.create(
+                    f"list indices must be integers or slices, not {args[0].python_type_name()}"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
+            return ConstantVariable.create(None)
         elif name == "copy":
             # List copy() doesn't have args and kwargs
             if args or kwargs:
