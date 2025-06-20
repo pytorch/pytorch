@@ -36,6 +36,8 @@ static void get_shapes(MPSShape* input_shape_readonly,
 
 // Note - Currently only supported for 4D image tensors
 
+// KURT: Current impl of softmax, needs to be updated to use Metal, probably
+// with TensorIterator.
 TORCH_IMPL_FUNC(softmax_mps_out)
 (const Tensor& input_, const int64_t dim, const bool half_to_float, const Tensor& output) {
   TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on MPS");

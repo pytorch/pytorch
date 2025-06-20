@@ -16,6 +16,8 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/CrossKernel_metallib.h>
 #endif
 
+// KURT: This is a very easy to follow example for how to dispatch Metal GPU
+// kernels.
 void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other, int64_t dim) {
   TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
 

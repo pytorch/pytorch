@@ -988,6 +988,7 @@ void MetalShaderLibrary::bind_tensors(id<MTLComputeCommandEncoder> encoder, Tens
   }
 }
 
+// KURT: Shows how the unary kernel is executed on the iterator.
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<c10::Scalar> alpha,

@@ -1,5 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -15,9 +17,17 @@
 #include <ATen/ops/max_pool2d_native.h>
 #include <ATen/ops/max_pool2d_with_indices_backward_native.h>
 #include <ATen/ops/max_pool2d_with_indices_native.h>
+#include <ATen/ops/max_pool3d_with_indices_native.h>
 #endif
 
 namespace at::native {
+
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Pooling_metallib.h>
+#endif
+
 namespace mps {
 
 struct PoolingCachedGraph : public MPSCachedGraph {
@@ -238,6 +248,169 @@ static void pool2d_template(const Tensor& input,
       const_cast<Tensor&>(output) = output.to(suggested_memory_format);
     }
   }
+}
+
+static Tensor intarrayref_to_tensor(IntArrayRef arrayref) {
+  at::Tensor tensor = at::empty(
+    {static_cast<int64_t>(arrayref.size())},
+    TensorOptions().device(c10::kCPU).dtype(at::kLong).memory_format(at::MemoryFormat::Contiguous));
+  std::memcpy(tensor.data_ptr<int64_t>(), arrayref.data(), arrayref.size() * sizeof(int64_t));
+  return tensor;
+}
+
+// NOTE: output is only valid as long as the tensor stays alive and its shape
+// doesn't change.
+static IntArrayRef tensor_to_intarrayref(const Tensor& tensor) {
+    TORCH_INTERNAL_ASSERT(tensor.dim() == 1);
+    TORCH_INTERNAL_ASSERT(tensor.dtype() == at::kLong);
+    auto data_ptr = tensor.data_ptr<int64_t>();
+    auto length = tensor.size(0);
+    return IntArrayRef(data_ptr, length);
+}
+
+static void max_pool_with_indices_out_mps_template(const Tensor& output,
+                                                   const Tensor& indices,
+                                                   const Tensor& input,
+                                                   IntArrayRef kernel_size,
+                                                   IntArrayRef stride,
+                                                   IntArrayRef padding,
+                                                   IntArrayRef dilation,
+                                                   bool ceil_mode,
+                                                   const int64_t pooling_dims,
+                                                   const std::string& op_name) {
+  TORCH_INTERNAL_ASSERT(pooling_dims == 1 || pooling_dims == 2 || pooling_dims == 3);
+
+  TORCH_CHECK(
+    input.dim() == pooling_dims + 1 || input.dim() == pooling_dims + 2,
+    op_name, ": non-empty ", pooling_dims + 1, "D or ", pooling_dims + 2,
+    "D (batch mode) tensor expected for input");
+
+  TORCH_CHECK(
+    kernel_size.size() == 1 || kernel_size.size() == pooling_dims,
+    op_name, ": kernel_size must either be a single int, or a tuple of ",
+    pooling_dims, " ints");
+
+  TORCH_CHECK(
+    stride.empty() || stride.size() == 1 || stride.size() == 3,
+    op_name, ": stride must either be omitted, a single int, or a tuple of ",
+    pooling_dims, " ints");
+
+  TORCH_CHECK(
+    padding.size() == 1 || padding.size() == 3,
+    op_name, ": padding must either be a single int, or a tuple of ",
+    pooling_dims, " ints");
+
+  TORCH_CHECK(
+    dilation.size() == 1 || dilation.size() == pooling_dims,
+    op_name, ": dilation must be either a single int, or a tuple of ",
+    pooling_dims, " ints");
+
+  uint32_t leading_dims = input.dim() - pooling_dims;
+
+  at::Tensor t_input_size = intarrayref_to_tensor(input.sizes());
+  at::Tensor t_input_pooling_size = t_input_size.slice(/*dim=*/0, /*start=*/leading_dims);
+
+  at::Tensor t_kernel_size = intarrayref_to_tensor(kernel_size);
+  if (kernel_size.size() == 1) {
+    t_kernel_size.repeat(pooling_dims);
+  }
+
+  at::Tensor t_stride = stride.empty() ? t_kernel_size : intarrayref_to_tensor(stride);
+  if (!stride.empty() && stride.size() == 1) {
+    t_stride.repeat(pooling_dims);
+  }
+
+  at::Tensor t_padding = intarrayref_to_tensor(padding);
+  if (padding.size() == 1) {
+    t_padding.repeat(pooling_dims);
+  }
+
+  at::Tensor t_dilation = intarrayref_to_tensor(dilation);
+  if (dilation.size() == 1) {
+    t_dilation.repeat(pooling_dims);
+  }
+
+  at::Tensor t_output_size = t_input_size.clone();
+  
+  // According to the documentation, the output size of each pooling dimension
+  // follows the formula:
+  // (in_size + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1
+  // TODO: Account for ceil_mode
+  at::Tensor t_output_pooling_size = (t_input_pooling_size 
+      .add(t_padding.mul(2))
+      .sub(t_dilation.mul(t_kernel_size.sub(1)))
+      .sub(1))
+      .floor_divide(t_stride)
+      .add(1);
+
+  t_output_size.slice(0, leading_dims) = t_output_pooling_size;
+
+  IntArrayRef output_size = tensor_to_intarrayref(t_output_size);
+  output.resize_(output_size);
+  indices.resize_(output_size);
+
+  auto iter = TensorIteratorConfig()
+    .add_output(output)
+    .resize_outputs(false)
+    .check_all_same_dtype(false)
+    .build();
+
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+  const uint32_t numThreads = iter.numel();
+  TORCH_INTERNAL_ASSERT(numThreads == output.numel());
+  const int64_t dims = input.dim();
+
+
+  IntArrayRef input_strides = input.strides();
+  IntArrayRef input_sizes = input.sizes();
+  IntArrayRef output_strides = output.strides();
+  IntArrayRef output_sizes = output.sizes();
+
+  IntArrayRef kernel_size_fixed = tensor_to_intarrayref(t_kernel_size);
+  IntArrayRef stride_fixed = tensor_to_intarrayref(t_stride);
+  IntArrayRef padding_fixed = tensor_to_intarrayref(t_padding);
+  IntArrayRef dilation_fixed = tensor_to_intarrayref(t_dilation);
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      auto maxPoolPSO = lib.getPipelineStateForFunc("max_pool_" + scalarToMetalTypeString(input));
+
+      // Each thread needs to keep track of the indices into the pooling
+      // dimensions for the element of the output that it calculates. In other
+      // words, if the thread calculates `output[N, C, d, h, w]` for a 3D pool,
+      // the kernel needs to keep track of the indices `[d, h, w]`. So we create
+      // a device-side buffer for the threads to store these indices.
+      id<MTLBuffer> work_pooling_dim_indices = [[
+        device newBufferWithLength:numThreads * pooling_dims * sizeof(int64_t)
+        options:0] autorelease];
+
+      getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input});
+      [computeEncoder setComputePipelineState:maxPoolPSO];
+      mtl_setArgs(
+        computeEncoder
+        ,input
+        ,output
+        ,indices
+        ,dims
+        ,pooling_dims
+        ,input_sizes
+        ,input_strides
+        ,output_sizes
+        ,output_strides
+        ,work_pooling_dim_indices
+        ,numThreads
+        ,kernel_size_fixed
+        ,stride_fixed
+        ,padding_fixed
+        ,dilation_fixed
+      );
+
+      mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
+      getMPSProfiler().endProfileKernel(maxPoolPSO);
+    }
+  });
 }
 
 static void avg_pool2d_template(const Tensor& input,
@@ -491,6 +664,55 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)
                        std::nullopt,
                        pooling_op_block,
                        "max_pool2d_indices_backward");
+}
+
+std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_mps(const Tensor& input,
+                                                             IntArrayRef kernel_size,
+                                                             IntArrayRef stride,
+                                                             IntArrayRef padding,
+                                                             IntArrayRef dilation,
+                                                             bool ceil_mode,
+                                                             Tensor& output,
+                                                             Tensor& indices) {
+  mps::max_pool_with_indices_out_mps_template(output,
+                                              indices,
+                                              input,
+                                              kernel_size,
+                                              stride,
+                                              padding,
+                                              dilation,
+                                              ceil_mode,
+                                              /*pooling_dims=*/3,
+                                              "max_pool3d");
+  return std::tuple<Tensor&, Tensor&>(output, indices);
+}
+
+std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(const Tensor& input,
+                                                       IntArrayRef kernel_size,
+                                                       IntArrayRef stride,
+                                                       IntArrayRef padding,
+                                                       IntArrayRef dilation,
+                                                       bool ceil_mode) {
+  NoNamesGuard guard;
+
+  Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
+  Tensor indices = at::empty({0}, input.options().dtype(kLong), MemoryFormat::Contiguous);
+  mps::max_pool_with_indices_out_mps_template(output,
+                                              indices,
+                                              input,
+                                              kernel_size,
+                                              stride,
+                                              padding,
+                                              dilation,
+                                              ceil_mode,
+                                              /*pooling_dims=*/3,
+                                              "max_pool3d");
+
+  guard.reset();
+  namedinference::propagate_names(output, input);
+  namedinference::propagate_names(indices, input);
+
+  return std::tuple<Tensor, Tensor>(output, indices);
 }
 
 TORCH_IMPL_FUNC(avg_pool2d_out_mps)

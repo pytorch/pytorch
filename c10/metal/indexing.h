@@ -70,6 +70,8 @@ kernel void unary_strided(
   output[output_offs] = f(input[input_offs]);
 }
 
+// KURT: the `host_name` thing defines what function the CPU code can call
+// to access the GPU op.
 #define REGISTER_UNARY_OP(NAME, DTYPE0, DTYPE1)                                \
   static_assert(                                                               \
       ::metal::                                                                \
