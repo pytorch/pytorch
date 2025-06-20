@@ -431,7 +431,7 @@ Tensor& set_storage_meta__symint(
       size, stride, storage_offset);
 
   // Matches maybe_resize_storage_cpu no-numel behavior
-  if (TORCH_GUARD_SIZE_OBLIVIOUS(result.sym_numel().sym_ne(0))) {
+  if (TORCH_GUARD_OR_TRUE(result.sym_numel().sym_ne(0))) {
     // maybe_resize_storage_cpu can handle no storage exists at all but
     // that should never be the case here
     TORCH_INTERNAL_ASSERT(storage);
@@ -440,12 +440,7 @@ Tensor& set_storage_meta__symint(
     // All meta data pointers are the same, so we don't have to "re" allocate
     // it.  TODO: Actually this might not quite be correct if we use special
     // pointers to track whether or not fake cuda tensors are pinned or not
-    const auto itemsize = result.dtype().itemsize();
-    c10::SymInt new_size_bytes = result.is_contiguous()
-        ? at::detail::computeStorageNbytesContiguous(
-              size, itemsize, std::move(storage_offset))
-        : at::detail::computeStorageNbytes(
-              size, stride, itemsize, std::move(storage_offset));
+
     // TODO: When there are unbacked SymInts, we unconditionally skip the
     // setter.  This is technically wrong, but we cannot conveniently test
     // the real condition in many cases, because a lot of people are using
@@ -454,10 +449,20 @@ Tensor& set_storage_meta__symint(
     //
     // The old behavior was to unconditionally set_nbytes, but I think not
     // setting it is more safe.
-    if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() &&
-        TORCH_GUARD_SIZE_OBLIVIOUS(
-            new_size_bytes.sym_gt(storage.sym_nbytes()))) {
-      storage.set_nbytes(std::move(new_size_bytes));
+    if (result.sym_numel().has_hint()) {
+      const auto itemsize = result.dtype().itemsize();
+
+      c10::SymInt new_size_bytes = result.is_contiguous()
+          ? at::detail::computeStorageNbytesContiguous(
+                size, itemsize, std::move(storage_offset))
+          : at::detail::computeStorageNbytes(
+                size, stride, itemsize, std::move(storage_offset));
+
+      if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() &&
+          TORCH_GUARD_SIZE_OBLIVIOUS(
+              new_size_bytes.sym_gt(storage.sym_nbytes()))) {
+        storage.set_nbytes(std::move(new_size_bytes));
+      }
     }
   }
   return result;
@@ -758,22 +763,22 @@ TORCH_IMPL_FUNC(cat_out_cpu)
 }
 
 Tensor& cat_out(TensorList tensors, Dimname dim, Tensor& result) {
-  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
+  TORCH_CHECK_VALUE(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
 }
 
 Tensor cat(TensorList tensors, Dimname dim) {
-  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
+  TORCH_CHECK_VALUE(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat(tensors, dimname_to_position(tensors[0], dim));
 }
 
 // torch.concat, alias for torch.cat
 Tensor& concat_out(TensorList tensors, Dimname dim, Tensor& result) {
-  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+  return cat_out(tensors, dim, result);
 }
 
 Tensor concat(TensorList tensors, Dimname dim) {
-  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+  return at::cat(tensors, dim);
 }
 
 Tensor& concat_out(TensorList tensors, int64_t dim, Tensor& result) {
@@ -786,11 +791,11 @@ Tensor concat(TensorList tensors, int64_t dim) {
 
 // torch.concatenate, alias for torch.cat
 Tensor& concatenate_out(TensorList tensors, Dimname dim, Tensor& result) {
-  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+  return cat_out(tensors, dim, result);
 }
 
 Tensor concatenate(TensorList tensors, Dimname dim) {
-  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+  return at::cat(tensors, dim);
 }
 
 Tensor& concatenate_out(TensorList tensors, int64_t dim, Tensor& result) {

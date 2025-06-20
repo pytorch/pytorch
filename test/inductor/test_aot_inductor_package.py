@@ -18,9 +18,15 @@ import torch
 from torch._inductor.codecache import get_kernel_bin_format
 from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.export import Dim
-from torch.testing._internal.common_utils import IS_FBCODE, skipIfXpu, TEST_CUDA
+from torch.export.pt2_archive._package import load_pt2, load_weights_to_pt2_contents
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    skipIfRocm,
+    skipIfXpu,
+    TEST_CUDA,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -131,7 +137,7 @@ class TestAOTInductorPackage(TestCase):
 
     def test_remove_intermediate_files(self):
         # For CUDA, generated cpp files contain absolute path to the generated cubin files.
-        # With the package artifact, that cubin path should be overriden at the run time,
+        # With the package artifact, that cubin path should be overridden at the run time,
         # so removing those intermeidate files in this test to verify that.
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -152,7 +158,7 @@ class TestAOTInductorPackage(TestCase):
             torch.manual_seed(0)
             with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
                 ep = torch.export.export(model, example_inputs, strict=True)
-                with fresh_inductor_cache():
+                with fresh_cache():
                     # cubin files are removed when exiting this context
                     package_path = torch._inductor.aoti_compile_and_package(
                         ep,
@@ -231,6 +237,73 @@ class TestAOTInductorPackage(TestCase):
                 self.assertTrue(not build_path.exists())
 
                 # Create a build directory to run cmake
+                build_path.mkdir()
+                custom_env = os.environ.copy()
+                custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
+                subprocess.run(
+                    ["cmake", ".."],
+                    cwd=build_path,
+                    env=custom_env,
+                )
+                subprocess.run(["make"], cwd=build_path)
+
+                # Check if the .so file was build successfully
+                so_path = build_path / "libaoti_model.so"
+                self.assertTrue(so_path.exists())
+                optimized = torch._export.aot_load(str(so_path), self.device)
+                actual = optimized(*example_inputs)
+                self.assertTrue(torch.allclose(actual, expected))
+
+    @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @skipIfRocm  # doesn't support multi-arch binary
+    @skipIfXpu  # doesn't support multi-arch binary
+    def test_compile_after_package_multi_arch(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Only meant to test GPU_TYPE")
+        if not self.package_cpp_only:
+            raise unittest.SkipTest("Only meant to test cpp package")
+        if shutil.which("cmake") is None:
+            raise unittest.SkipTest("cmake is not available")
+        if shutil.which("make") is None:
+            raise unittest.SkipTest("make is not available")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        with torch.no_grad():
+            example_inputs = (
+                torch.randn(10, 10, device=self.device),
+                torch.randn(10, 10, device=self.device),
+            )
+            model = Model().to(device=self.device)
+            expected = model(*example_inputs)
+
+            options = {
+                "aot_inductor.package_cpp_only": self.package_cpp_only,
+                # Expect kernel to be embeded in the final binary.
+                # We will make it the default behavior for the standalone mode.
+                "aot_inductor.emit_multi_arch_kernel": True,
+                "aot_inductor.embed_kernel_binary": True,
+            }
+            ep = torch.export.export(model, example_inputs)
+            package_path = torch._inductor.aoti_compile_and_package(
+                ep, inductor_configs=options
+            )
+            with tempfile.TemporaryDirectory() as tmp_dir, zipfile.ZipFile(
+                package_path, "r"
+            ) as zip_ref:
+                filenames = zip_ref.namelist()
+                prefix = filenames[0].split("/")[0]
+                zip_ref.extractall(tmp_dir)
+                tmp_path = Path(tmp_dir) / prefix / "data" / "aotinductor" / "model"
+                self.assertTrue(tmp_path.exists())
+                # Create a build directory to run cmake
+                build_path = tmp_path / "build"
                 build_path.mkdir()
                 custom_env = os.environ.copy()
                 custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
@@ -445,8 +518,8 @@ class TestAOTInductorPackage(TestCase):
             )
 
     @skipif(
-        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
-        "No support for cpp only and cpu",
+        lambda device, package_cpp_only: package_cpp_only,
+        "No support for cpp only",
     )
     def test_package_without_weight(self):
         class Model(torch.nn.Module):
@@ -479,8 +552,8 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(expected, output)
 
     @skipif(
-        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
-        "No support for cpp only and cpu",
+        lambda device, package_cpp_only: package_cpp_only,
+        "No support for cpp only",
     )
     def test_package_user_managed_weight(self):
         class Model(torch.nn.Module):
@@ -558,8 +631,8 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(expected, output_copy)
 
     @skipif(
-        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
-        "No support for cpp only and cpu",
+        lambda device, package_cpp_only: package_cpp_only,
+        "No support for cpp only",
     )
     def test_update_weights(self):
         class Model(torch.nn.Module):
@@ -588,6 +661,124 @@ class TestAOTInductorPackage(TestCase):
         expected = model(test_inputs)
         output = compiled(test_inputs)
         self.assertEqual(expected, output)
+
+    @skipif(
+        lambda device, package_cpp_only: package_cpp_only,
+        "No support for cpp only",
+    )
+    def test_package_shared_weights(self):
+        options = {
+            "aot_inductor.package": True,
+            "aot_inductor.package_cpp_only": self.package_cpp_only,
+            "always_keep_tensor_constants": True,
+            "aot_inductor.package_constants_in_so": False,
+            "aot_inductor.package_constants_on_disk": True,
+        }
+
+        class Bar(torch.nn.Module):
+            def __init__(self, p1, p2):
+                super().__init__()
+                self.p1 = p1
+                self.register_buffer("p2", p2)
+
+            def forward(self):
+                self.p1 += 1
+                self.p2 += 1
+                return self.p1, self.p2
+
+        class Bar2(torch.nn.Module):
+            def __init__(self, p1, p2):
+                super().__init__()
+                self.p1 = p1
+                self.register_buffer("p2", p2[2:3])
+
+            def forward(self):
+                self.p1 += 3
+                self.p2 += 3
+                return self.p1, self.p2
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        buffer = torch.nn.Buffer(x.clone())
+        buffer2 = torch.nn.Buffer(y.clone())
+        bar1 = Bar(buffer, buffer2)
+        bar2 = Bar2(buffer, buffer2)
+        ep1 = torch.export.export(bar1, ())
+        ep2 = torch.export.export(bar2, ())
+        aoti_files1 = torch._inductor.aot_compile(ep1.module(), (), options=options)
+        aoti_files2 = torch._inductor.aot_compile(ep2.module(), (), options=options)
+
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            package_path = package_aoti(
+                f.name,
+                {"model1": aoti_files1, "model2": aoti_files2},
+            )
+            pt2_contents = load_pt2(package_path, load_weights_from_disk=True)
+            loaded1 = pt2_contents.aoti_runners["model1"]
+            loaded2 = pt2_contents.aoti_runners["model2"]
+
+            # note that loading like below doesn't work, because new weights will be loaded
+            # for each load_package call.
+            # loaded1 = load_package(package_path, "model1")
+            # loaded2 = load_package(package_path, "model2")
+
+        result_1_p1, result_1_p2 = loaded1()
+        self.assertEqual(result_1_p1, x + 1)
+        self.assertEqual(result_1_p2, y + 1)
+
+        result_2_p1, result_2_p2 = loaded2()
+        # the result already incremented by 1 from the run above
+        self.assertEqual(result_2_p1, x + 4)
+        self.assertEqual(result_2_p2, y[2:3] + 4)
+
+        # note that the returned result will not change though p2 changed
+        self.assertEqual(result_1_p2, y + 1)
+
+        # test shared weights but user managed
+        gm1 = ep1.module()
+        gm2 = ep2.module()
+        load_weights_to_pt2_contents(
+            pt2_contents, {"model1": gm1.state_dict(), "model2": gm2.state_dict()}
+        )
+        result_1_p1, result_1_p2 = loaded1()
+        self.assertEqual(result_1_p1, x + 1)
+        self.assertEqual(result_1_p2, y + 1)
+        self.assertEqual(gm1.p1, x + 1)
+        self.assertEqual(gm1.p2, y + 1)
+
+    @skipif(
+        lambda device, package_cpp_only: package_cpp_only,
+        "No support for cpp only",
+    )
+    def test_package_weights_on_disk_nested_module(self):
+        options = {
+            "aot_inductor.package": True,
+            "aot_inductor.package_cpp_only": self.package_cpp_only,
+            "always_keep_tensor_constants": True,
+            "aot_inductor.package_constants_in_so": False,
+            "aot_inductor.package_constants_on_disk": True,
+        }
+
+        # linear.weight's node name is linear_weight.
+        # This unit test tests that we package the right weight name
+        # `liear.weight`, but not `linear_weight`
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        x = torch.randn(3, 3).to(self.device)
+        bar1 = Bar().to(self.device)
+        ep = torch.export.export(bar1, (x,))
+        package_path = torch._inductor.aoti_compile_and_package(
+            ep, inductor_configs=options
+        )
+        pt2_contents = load_pt2(package_path, load_weights_from_disk=True)
+        loaded1 = pt2_contents.aoti_runners["model"]
+        self.assertEqual(loaded1(x), bar1(x))
 
 
 if __name__ == "__main__":

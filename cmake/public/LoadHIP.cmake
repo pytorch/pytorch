@@ -65,8 +65,14 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
-  message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
-  list(APPEND ROCM_INCLUDE_DIRS ${${PACKAGE_NAME}_INCLUDE_DIR})
+  if(NOT ${PACKAGE_NAME}_FOUND)
+    message("Optional package ${PACKAGE_NAME} not found")
+  else()
+    message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
+    if(${PACKAGE_NAME}_INCLUDE_DIR)
+      list(APPEND ROCM_INCLUDE_DIRS ${${PACKAGE_NAME}_INCLUDE_DIR})
+    endif()
+  endif()
 endmacro()
 
 # Find the HIP Package
@@ -76,16 +82,32 @@ find_package_and_print_version(HIP 1.0 MODULE)
 
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
-
   find_package_and_print_version(hip REQUIRED CONFIG)
-  # Find ROCM version for checks. UNIX filename is rocm_version.h, Windows is hip_version.h
-  if(UNIX)
-    find_package_and_print_version(rocm-core REQUIRED CONFIG)
-    find_file(ROCM_VERSION_HEADER_PATH NAMES rocm_version.h
-      HINTS ${rocm_core_INCLUDE_DIR}/rocm-core /usr/include)
-  else() # Win32
-    find_file(ROCM_VERSION_HEADER_PATH NAMES hip_version.h
-      HINTS ${hip_INCLUDE_DIR}/hip)
+
+  # The rocm-core package was only introduced in ROCm 6.4, so we make it optional.
+  find_package(rocm-core CONFIG)
+
+  # Some old consumer HIP SDKs do not distribute rocm_version.h, so we allow
+  # falling back to the hip version, which everyone should have.
+  # rocm_version.h lives in the rocm-core package and hip_version.h lives in the
+  # hip (lower-case) package. Both are probed above and will be in
+  # ROCM_INCLUDE_DIRS if available.
+  find_file(ROCM_VERSION_HEADER_PATH
+    NAMES rocm-core/rocm_version.h
+    NO_DEFAULT_PATH
+    PATHS ${ROCM_INCLUDE_DIRS}
+  )
+  set(ROCM_LIB_NAME "ROCM")
+  if(NOT ROCM_VERSION_HEADER_PATH)
+    find_file(ROCM_VERSION_HEADER_PATH
+      NAMES hip/hip_version.h
+      NO_DEFAULT_PATH
+      PATHS ${ROCM_INCLUDE_DIRS}
+    )
+    set(ROCM_LIB_NAME "HIP")
+  endif()
+  if(NOT ROCM_VERSION_HEADER_PATH)
+    message(FATAL_ERROR "Could not find hip/hip_version.h or rocm-core/rocm_version.h in ${ROCM_INCLUDE_DIRS}")
   endif()
   get_filename_component(ROCM_HEADER_NAME ${ROCM_VERSION_HEADER_PATH} NAME)
 
@@ -96,15 +118,10 @@ if(HIP_FOUND)
   endif()
 
   # Read the ROCM headerfile into a variable
-  file(READ ${ROCM_HEADER_FILE} ROCM_HEADER_CONTENT)
+  message(STATUS "Reading ROCM version from: ${ROCM_HEADER_FILE}")
+  message(STATUS "Content: ${ROCM_HEADER_CONTENT}")
+  file(READ "${ROCM_HEADER_FILE}" ROCM_HEADER_CONTENT)
 
-  # Since Windows currently supports only a part of ROCm and names it HIP-SDK,
-  # we need to refer to the HIP-SDK equivalents of entities existing in ROCm lib.
-  if(UNIX)
-    set(ROCM_LIB_NAME "ROCM")
-  else() # Win32
-    set(ROCM_LIB_NAME "HIP")
-  endif()
   # Below we use a RegEx to find ROCM version numbers.
   # Note that CMake does not support \s for blank space. That is
   # why in the regular expressions below we have a blank space in
@@ -171,6 +188,9 @@ if(HIP_FOUND)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
   endif()
 
+  # Optional components.
+  find_package_and_print_version(hipsparselt)  # Will be required when ready.
+
   list(REMOVE_DUPLICATES ROCM_INCLUDE_DIRS)
 
   if(UNIX)
@@ -180,6 +200,21 @@ if(HIP_FOUND)
     set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
 
     if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
+      # check whether hipblaslt provides HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F
+      set(file "${PROJECT_BINARY_DIR}/hipblaslt_test_outer_vec.cc")
+      file(WRITE ${file} ""
+        "#define LEGACY_HIPBLAS_DIRECT\n"
+        "#include <hipblaslt/hipblaslt.h>\n"
+        "int main() {\n"
+        "    hipblasLtMatmulMatrixScale_t attr = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;\n"
+        "    return 0;\n"
+        "}\n"
+        )
+      try_compile(hipblaslt_compile_result_outer_vec ${PROJECT_RANDOM_BINARY_DIR} ${file}
+        CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
+        COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
+        OUTPUT_VARIABLE hipblaslt_compile_output_outer_vec)
+
       # check whether hipblaslt provides HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT
       set(file "${PROJECT_BINARY_DIR}/hipblaslt_test_vec_ext.cc")
       file(WRITE ${file} ""
@@ -193,15 +228,21 @@ if(HIP_FOUND)
       try_compile(hipblaslt_compile_result_vec_ext ${PROJECT_RANDOM_BINARY_DIR} ${file}
         CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
         COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
-        OUTPUT_VARIABLE hipblaslt_compile_output)
-      if(hipblaslt_compile_result_vec_ext)
+        OUTPUT_VARIABLE hipblaslt_compile_output_vec_ext)
+
+      if(hipblaslt_compile_result_outer_vec)
+        set(HIPBLASLT_OUTER_VEC ON)
+        set(HIPBLASLT_VEC_EXT OFF)
+        message("hipblaslt is using scale pointer outer vec")
+      elseif(hipblaslt_compile_result_vec_ext)
+        set(HIPBLASLT_OUTER_VEC OFF)
         set(HIPBLASLT_VEC_EXT ON)
-        #message("hipblaslt is using scale pointer vec ext: ${hipblaslt_compile_output}")
         message("hipblaslt is using scale pointer vec ext")
       else()
+        set(HIPBLASLT_OUTER_VEC OFF)
         set(HIPBLASLT_VEC_EXT OFF)
-        message("hipblaslt is NOT using scale pointer vec ext: ${hipblaslt_compile_output}")
-        #message("hipblaslt is NOT using scale pointer vec ext")
+        message("hipblaslt is NOT using scale pointer outer vec: ${hipblaslt_compile_output_outer_vec}")
+        message("hipblaslt is NOT using scale pointer vec ext: ${hipblaslt_compile_output_vec_ext}")
       endif()
     endif()
   endif()

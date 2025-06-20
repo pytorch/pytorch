@@ -700,7 +700,9 @@ Tensor _mps_convolution_transpose(const Tensor& input_t,
                                   IntArrayRef stride,
                                   IntArrayRef dilation,
                                   int64_t groups) {
-  TORCH_CHECK(input_t.dim() < 5, "ConvTranspose 3D is not supported on MPS");
+  bool is_unsupported_3d_dtype =
+      (input_t.dim() == 5 && (input_t.scalar_type() == kHalf || input_t.scalar_type() == kBFloat16));
+  TORCH_CHECK(!is_unsupported_3d_dtype, "ConvTranspose 3D with BF16 or FP16 types is not supported on MPS");
 
   auto output_t =
       mps_convolution_transpose_forward(input_t, weight_t, padding, output_padding, stride, dilation, groups);

@@ -7,36 +7,31 @@ using namespace metal;
 constant uint TILE_DIM = 16;
 
 template <typename T>
-kernel void matmul(
-    constant T* mat1Data [[buffer(0)]],
-    constant T* mat2Data [[buffer(1)]],
-    device T* outputData [[buffer(2)]],
-    constant array<ulong2, 3>& strides [[buffer(3)]],
-    constant uint3& sizes [[buffer(4)]],
-    uint2 tid [[thread_position_in_threadgroup]],
-    uint2 group_id [[threadgroup_position_in_grid]]) {
-  uint col = group_id.x * TILE_DIM + tid.x;
-  uint row = group_id.y * TILE_DIM + tid.y;
-
+inline c10::metal::opmath_t<T> matmul_inner(
+    constant T* mat1Data,
+    constant T* mat2Data,
+    constant array<ulong2, 3>& strides,
+    constant uint3& sizes,
+    threadgroup T A_tile[TILE_DIM][TILE_DIM],
+    threadgroup T B_tile[TILE_DIM][TILE_DIM],
+    uint2 tid,
+    uint2 thread_id) {
   c10::metal::opmath_t<T> sum = 0;
-
-  threadgroup T A_tile[TILE_DIM][TILE_DIM];
-  threadgroup T B_tile[TILE_DIM][TILE_DIM];
 
   uint numTiles = (sizes.y + TILE_DIM - 1) / TILE_DIM;
   for (uint t = 0; t < numTiles; t++) {
     uint tiledCol = t * TILE_DIM + tid.x;
-    if (row < sizes.x && tiledCol < sizes.y) {
+    if (thread_id.y < sizes.x && tiledCol < sizes.y) {
       A_tile[tid.y][tid.x] =
-          mat1Data[row * strides[0].x + tiledCol * strides[0].y];
+          mat1Data[thread_id.y * strides[0].x + tiledCol * strides[0].y];
     } else {
       A_tile[tid.y][tid.x] = 0;
     }
 
     uint tiledRow = t * TILE_DIM + tid.y;
-    if (tiledRow < sizes.y && col < sizes.z) {
+    if (tiledRow < sizes.y && thread_id.x < sizes.z) {
       B_tile[tid.y][tid.x] =
-          mat2Data[tiledRow * strides[1].x + col * strides[1].y];
+          mat2Data[tiledRow * strides[1].x + thread_id.x * strides[1].y];
     } else {
       B_tile[tid.y][tid.x] = 0;
     }
@@ -50,8 +45,26 @@ kernel void matmul(
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 
-  if (row < sizes.x && col < sizes.z) {
-    outputData[row * strides[2].x + col * strides[2].y] = static_cast<T>(sum);
+  return sum;
+}
+
+template <typename T>
+kernel void matmul(
+    constant T* mat1Data [[buffer(0)]],
+    constant T* mat2Data [[buffer(1)]],
+    device T* outputData [[buffer(2)]],
+    constant array<ulong2, 3>& strides [[buffer(3)]],
+    constant uint3& sizes [[buffer(4)]],
+    uint2 tid [[thread_position_in_threadgroup]],
+    uint2 thread_id [[thread_position_in_grid]]) {
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
+
+  auto sum = matmul_inner(
+      mat1Data, mat2Data, strides, sizes, A_tile, B_tile, tid, thread_id);
+  if (thread_id.y < sizes.x && thread_id.x < sizes.z) {
+    outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] =
+        static_cast<T>(sum);
   }
 }
 
