@@ -302,16 +302,7 @@ std::tuple<Tensor, Tensor> rms_norm_composite(
       upcasted_result = upcasted_result.mul(weight_opt.value());
     }
 
-    // if nested do not make contiguous
-    if(input.is_nested() || (weight_opt.has_value() && weight_opt.value().is_nested())){
-      return std::make_tuple(upcasted_result, rqrst_input);
-    }
-
-    if(input.suggest_memory_format() == c10::MemoryFormat::ChannelsLast || input.suggest_memory_format() == c10::MemoryFormat::ChannelsLast3d){
-      return std::make_tuple(upcasted_result, rqrst_input);
-    }
-
-    return std::make_tuple(upcasted_result.contiguous(), rqrst_input.contiguous());
+    return std::make_tuple(upcasted_result, rqrst_input);
   });
   return std::make_tuple(
     std::get<0>(result).type_as(input), // Cast normalized result to original input type
@@ -343,12 +334,9 @@ Tensor rms_norm_symint(
   #ifdef USE_MPS
   if (input.device().type() == DeviceType::MPS && weight_opt.has_value()) {
     const Tensor weight = weight_opt.value();
-    const bool any_nested = input.is_nested() || weight.is_nested();
     const bool any_inputs_require_grad = input.requires_grad() || weight.requires_grad();
-    const bool is_input_fp = isFloatingType(input.scalar_type());
-    const bool is_weight_fp = isFloatingType(weight.scalar_type());
 
-    if (!(GradMode::is_enabled() && any_inputs_require_grad) && !any_nested && is_input_fp && is_weight_fp) {
+    if (!(GradMode::is_enabled() && any_inputs_require_grad)) {
       return std::get<0>(at::_fused_rms_norm(input.contiguous(), IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
     }
   }
