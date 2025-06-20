@@ -5,6 +5,7 @@ import re
 import traceback
 import unittest
 import warnings
+from functools import lru_cache
 
 import torch
 import torch._dynamo
@@ -1185,21 +1186,57 @@ User code traceback:
 
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_logs_user_stack_trace(self, records):
-        from functools import lru_cache
-
         @lru_cache
         def foo(x):
             return x + 1
 
         torch.compile(foo, backend="eager")(torch.randn(4))
 
-        self.assertTrue(
-            any(
-                "call to a lru_cache` wrapped function from user code at:"
-                in record.getMessage()
-                for record in records
-            ),
-            "No lru_cache warning was logged",
+        lru_cache_log = None
+        for record in records:
+            if "call to a lru_cache wrapped function at:" in record.getMessage():
+                lru_cache_log = record.getMessage()
+                break
+
+        self.assertIsNotNone(lru_cache_log, "No lru_cache warning was logged")
+
+        self.assertExpectedInline(
+            munge_exc(lru_cache_log),
+            """\
+call to a lru_cache wrapped function at: _dynamo/external_utils.py:N
+  File "test_error_messages.py", line N, in test_lru_cache_warning_logs_user_stack_trace
+    torch.compile(foo, backend="eager")(torch.randn(4))
+""",
+        )
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_lru_cache_warning_logs_nested_call(self, records):
+        @lru_cache
+        def foo(x):
+            return x + 1
+
+        def nested(x):
+            return foo(x)
+
+        torch.compile(nested, backend="eager")(torch.randn(4))
+
+        lru_cache_log = None
+        for record in records:
+            if "call to a lru_cache wrapped function at:" in record.getMessage():
+                lru_cache_log = record.getMessage()
+                break
+
+        self.assertIsNotNone(lru_cache_log, "No lru_cache warning was logged")
+
+        self.assertExpectedInline(
+            munge_exc(lru_cache_log),
+            """\
+call to a lru_cache wrapped function at: test_error_messages.py:N
+  File "test_error_messages.py", line N, in test_lru_cache_warning_logs_nested_call
+    torch.compile(nested, backend="eager")(torch.randn(4))
+  File "test_error_messages.py", line N, in nested
+    return foo(x)
+""",
         )
 
     def test_disable_message(self):

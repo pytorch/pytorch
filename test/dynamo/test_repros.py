@@ -4776,8 +4776,11 @@ class ReproTests(LoggingTestCase, torch._dynamo.test_case.TestCase):
         self.assertEqual(counter, 1)
         self.assertEqual(result1, result2)
 
+    @requires_cuda
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_issued_during_tracing(self, records):
+        torch.set_default_device("cuda")
+
         @torch.compile(backend="eager")
         def f(x):
             x = x.cos().sin()
@@ -4787,10 +4790,7 @@ class ReproTests(LoggingTestCase, torch._dynamo.test_case.TestCase):
         self.assertIsInstance(result, torch.Tensor)
 
         for record in records:
-            if (
-                "call to a lru_cache` wrapped function from user code at:"
-                in record.getMessage()
-            ):
+            if "call to a lru_cache wrapped function at:" in record.getMessage():
                 self.fail("lru_cache warning was incorrectly logged")
 
     def test_dont_aggressively_write_assert(self):

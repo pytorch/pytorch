@@ -1566,10 +1566,10 @@ class WrapperUserFunctionVariable(VariableTracker):
                 dynamo_logger = torch._dynamo.utils.logging.getLogger("torch._dynamo")
                 if dynamo_logger.isEnabledFor(logging.DEBUG):
                     user_stack = torch._guards.TracingContext.extract_stack()
-                    user_stack = get_stack_above_dynamo()
+                    user_stack = get_stack_above_dynamo() + user_stack
                     frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                     user_stack_formatted = "".join(traceback.format_list(user_stack))
-                    user_stack_trace = f"call to a lru_cache` wrapped function from user code at: {frame_loc[0]}:{frame_loc[1]}\n"
+                    user_stack_trace = f"call to a lru_cache wrapped function at: {frame_loc[0]}:{frame_loc[1]}\n"
                     user_stack_trace += str(user_stack_formatted)
                     dynamo_logger.debug(user_stack_trace)
 
