@@ -12870,7 +12870,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
     @largeTensorTest("1GB", inductor=True)
-    def test_large_grid(self):
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+    )
+    def test_large_grid(self, use_block_ptr):
         # https://github.com/pytorch/pytorch/issues/123210
         def fn(primals_5):
             view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
@@ -12883,9 +12887,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         s0 = 16777472
         s1 = 8
-        compiled_fn = torch.compile(fn)
-        actual = compiled_fn(torch.ones(s0, s1, device=self.device))
-        self.assertTrue((actual == 1).all())
+
+        with config.patch({"triton.use_block_ptr": use_block_ptr}):
+            compiled_fn = torch.compile(fn)
+            actual = compiled_fn(torch.ones(s0, s1, device=self.device))
+            self.assertTrue((actual == 1).all())
 
     @skip_if_gpu_halide
     def test_pattern_matcher_multi_user(self):
