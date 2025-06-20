@@ -122,6 +122,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.mul.Scalar": {},
     "aten.mul.Tensor": {},
     "aten.nanmedian.default": {},
+    "aten.narrow.default": {},
     "aten.native_dropout.default": {},
     "aten.nonzero.default": {},
     "aten.normal_functional.default": {},
