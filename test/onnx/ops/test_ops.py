@@ -1245,7 +1245,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         onnx_program_3d = self.export(model_3d, (Q, K, V, mask_3d), opset_version=23)
 
         node_3d = onnx_program_3d.model.graph.node(0)
-        self.assertEqual(node_3d.inputs[3].shape, [batch_size, q_seq_len, kv_seq_len])
+        self.assertEqual(node_3d.inputs[3].shape, [batch_size, 1, q_seq_len, kv_seq_len])
 
         # Test 4D mask
         mask_4d = torch.randint(
