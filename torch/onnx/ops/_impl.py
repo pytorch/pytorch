@@ -1,3 +1,4 @@
+# flake8: noqa: B950
 import math
 import typing
 from typing import Callable, Optional
