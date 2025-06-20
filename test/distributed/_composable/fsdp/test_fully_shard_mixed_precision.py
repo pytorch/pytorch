@@ -123,7 +123,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
-        predivide_factor, postdivide_factor = _get_gradient_divide_factors(
+        predivide_factor, postdivide_factor, _, _ = _get_gradient_divide_factors(
             self.process_group, all_reduce_group=None, reduce_dtype=param_dtype
         )
 
