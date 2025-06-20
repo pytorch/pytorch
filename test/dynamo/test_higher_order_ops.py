@@ -297,8 +297,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self._test_wrap_simple(f, default_args_generator((x,)), arg_count)
 
     def test_allow_python_side_effects_utility(self):
-        from torch._higher_order_ops.wrap import dynamo_bypassing_wrapper
         from torch._dynamo.utils import _UNSAFE_allow_side_effects
+        from torch._higher_order_ops.wrap import dynamo_bypassing_wrapper
 
         def wrapper(fn):
             return fn
@@ -317,7 +317,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return dynamo_bypassing_wrapper(wrapper, does_side_effect_wrapped, x)
 
-        x = torch.tensor(1.)
+        x = torch.tensor(1.0)
         fn(x)
 
         def inner_does_side_effect(x):
@@ -327,11 +327,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         # Test that any nested HOPs are unaffected
         def outer(x):
-            return dynamo_bypassing_wrapper(
-                wrapper,
-                inner_does_side_effect,
-                x
-            )
+            return dynamo_bypassing_wrapper(wrapper, inner_does_side_effect, x)
 
         def outer_wrapped(*args, **kwargs):
             return _UNSAFE_allow_side_effects(outer, *args, **kwargs)
@@ -340,8 +336,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         def fn_nested(x):
             return dynamo_bypassing_wrapper(wrapper, outer_wrapped, x)
 
-        x = torch.tensor(1.)
-        with self.assertRaisesRegex(RuntimeError, "Mutating a variable not in the current scope"):
+        x = torch.tensor(1.0)
+        with self.assertRaisesRegex(
+            RuntimeError, "Mutating a variable not in the current scope"
+        ):
             fn_nested(x)
 
     def test_symint_input(self):
