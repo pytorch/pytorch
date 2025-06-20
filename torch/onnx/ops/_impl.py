@@ -175,7 +175,11 @@ def _compute_qk_output_for_mode_0(
         K_for_qk = K.repeat_interleave(repeat_factor, dim=1)
 
     scale_factor = _get_scale_factor(scale, Q.shape[3])
-    return torch.matmul(Q, K_for_qk.transpose(-2, -1)) * scale_factor
+    # Scale both Q and K by sqrt(scale_factor) for numerical stability
+    sqrt_scale = math.sqrt(scale_factor)
+    Q_scaled = Q * sqrt_scale
+    K_scaled = K_for_qk * sqrt_scale
+    return torch.matmul(Q_scaled, K_scaled.transpose(-2, -1))
 
 
 @_onnx_op("Attention", 23)
@@ -325,8 +329,13 @@ def attention_23(
         # Apply scaling factor
         scale_factor = _get_scale_factor(scale, Q.shape[3])
 
+        # Scale both Q and K by sqrt(scale_factor) for numerical stability
+        sqrt_scale = math.sqrt(scale_factor)
+        Q_scaled = Q * sqrt_scale
+        K_scaled = K * sqrt_scale
+
         # Compute Q @ K^T
-        qk_matmul_output = torch.matmul(Q, K.transpose(-2, -1)) * scale_factor
+        qk_matmul_output = torch.matmul(Q_scaled, K_scaled.transpose(-2, -1))
 
         # Initialize QK output based on mode
         qk_output = qk_matmul_output  # Default case for mode 0
