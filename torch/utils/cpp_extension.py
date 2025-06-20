@@ -291,16 +291,27 @@ def _get_sycl_arch_list():
 # If arch list returned by _get_sycl_arch_list() is empty, then sycl kernels will be compiled
 # for default spir64 target and avoid device specific compilations entirely. Further, kernels
 # will be JIT compiled at runtime.
-def _get_sycl_target_flags():
+def _append_sycl_targets_if_missing(cflags):
+    if any(flag.startswith('-fsycl-targets=') for flag in cflags):
+        # do nothing: user has manually specified sycl targets
+        return
     if _get_sycl_arch_list() != '':
-        return ['-fsycl-targets=spir64_gen,spir64']
-    return ['']
+        # AOT (spir64_gen) + JIT (spir64)
+        cflags.append('-fsycl-targets=spir64_gen,spir64')
+    else:
+        # JIT (spir64)
+        cflags.append('-fsycl-targets=spir64')
 
-def _get_sycl_device_flags():
+def _get_sycl_device_flags(cflags):
+    # We need last occurence of -fsycl-targets as it will be the one taking effect.
+    # So searching in reversed list.
+    flags = [f for f in reversed(cflags) if f.startswith('-fsycl-targets=')]
+    assert flags, "bug: -fsycl-targets should have been ammended to cflags"
+
     arch_list = _get_sycl_arch_list()
     if arch_list != '':
-        return [f'-Xs "-device {arch_list}"']
-    return ['']
+        flags += [f'-Xs "-device {arch_list}"']
+    return flags
 
 _COMMON_SYCL_FLAGS = [
     '-fsycl',
@@ -821,11 +832,11 @@ class BuildExtension(build_ext):
             sycl_dlink_post_cflags = None
             if with_sycl:
                 sycl_cflags = extra_cc_cflags + common_cflags + _COMMON_SYCL_FLAGS
-                sycl_cflags += _get_sycl_target_flags()
                 if isinstance(extra_postargs, dict):
                     sycl_post_cflags = extra_postargs['sycl']
                 else:
                     sycl_post_cflags = list(extra_postargs)
+                _append_sycl_targets_if_missing(sycl_post_cflags)
                 append_std17_if_no_std_present(sycl_cflags)
                 _append_sycl_std_if_no_std_present(sycl_cflags)
                 host_cflags = extra_cc_cflags + common_cflags + post_cflags
@@ -838,8 +849,8 @@ class BuildExtension(build_ext):
                 # strings passed to SYCL compiler.
                 sycl_cflags = [shlex.quote(f) for f in sycl_cflags]
                 sycl_cflags += _wrap_sycl_host_flags(host_cflags)
-                sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS
-                sycl_dlink_post_cflags += _get_sycl_device_flags()
+                sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS.copy()
+                sycl_dlink_post_cflags += _get_sycl_device_flags(sycl_post_cflags)
                 sycl_post_cflags = [shlex.quote(f) for f in sycl_post_cflags]
 
             _write_ninja_file_and_compile_objects(
@@ -2709,16 +2720,16 @@ def _write_ninja_file_to_build_library(path,
 
     if with_sycl:
         sycl_cflags = cflags + _COMMON_SYCL_FLAGS
-        sycl_cflags += _get_sycl_target_flags()
         sycl_cflags += extra_sycl_cflags
+        _append_sycl_targets_if_missing(sycl_cflags)
         _append_sycl_std_if_no_std_present(sycl_cflags)
         host_cflags = cflags
         # escaping quoted arguments to pass them thru SYCL compiler
         host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
         host_cflags = ' '.join(host_cflags)
         sycl_cflags += _wrap_sycl_host_flags(host_cflags)
-        sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS
-        sycl_dlink_post_cflags += _get_sycl_device_flags()
+        sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS.copy()
+        sycl_dlink_post_cflags += _get_sycl_device_flags(sycl_cflags)
     else:
         sycl_cflags = None
         sycl_dlink_post_cflags = None

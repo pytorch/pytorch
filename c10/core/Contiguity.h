@@ -33,7 +33,7 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
 }
 
 // Return a SymBool with underlying symbolic expression that represents
-// contiguity.
+// contiguity, guaranteed to not add guards.
 inline static c10::SymBool _compute_contiguous_sym(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides,
@@ -74,7 +74,7 @@ inline static c10::SymBool _compute_contiguous_sym(
     return c10::SymBool(true);
   }
 
-  // Build a single sympy expression that represents contiguity and return it.
+  // Build a single expression that represents contiguity and return it.
   c10::SymBool is_empty = sym_eq(numel, 0);
   c10::SymBool is_contiguous_cond = true;
 
