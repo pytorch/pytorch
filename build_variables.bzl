@@ -600,11 +600,14 @@ libtorch_nativert_sources = [
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/ExecutionPlanner.cpp",
     "torch/nativert/executor/ExecutionFrame.cpp",
+    "torch/nativert/executor/GraphExecutorBase.cpp",
+    "torch/nativert/executor/OpKernel.cpp",
     "torch/nativert/executor/PlacementUtils.cpp",
     "torch/nativert/executor/Weights.cpp",
     "torch/nativert/executor/memory/FunctionSchema.cpp",
     "torch/nativert/common/FileUtil.cpp",
     "torch/nativert/detail/ITree.cpp",
+    "torch/nativert/kernels/C10Kernel.cpp",
 ]
 
 torch_mobile_tracer_sources = [
@@ -1521,7 +1524,7 @@ aten_cuda_cu_with_sort_by_key_source_list = [
     "aten/src/ATen/native/cuda/Unique.cu",
 ]
 
-# Followings are source code for xnnpack delegate
+# Following are source code for xnnpack delegate
 
 xnnpack_delegate_serializer_header = [
     "torch/csrc/jit/backends/xnnpack/serialization/serializer.h",

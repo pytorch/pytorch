@@ -1194,6 +1194,16 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         pg_2 = c10d.new_group([0, 1])
         self.assertEqual(pg_2.group_desc, "undefined")
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_deterministic_mode_no_break(self):
+        torch.use_deterministic_algorithms(True)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        self._create_process_group_nccl(store, self.opts(), device_id=device)
+        tensor = torch.empty(10, 10, device=device)
+        dist.all_reduce(tensor)
+
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
@@ -3413,6 +3423,21 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(pg_opts.config.cga_cluster_size, int(cga_cluster_size))
         self.assertEqual(pg_opts.config.net_name, net_name.decode())
         self.assertEqual(pg_opts.config.split_share, int(split_share))
+
+        # Tests that config is inited correctly
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        self.assertEqual(pg_opts.config.min_ctas, -2147483648)
+        self.assertEqual(nccl_cfg.min_ctas, -2147483648)
+
+        # Tests that opts and config can be copied
+        pg_opts_2 = copy.deepcopy(pg_opts)
+        nccl_cfg_2 = copy.copy(pg_opts_2.config)
+        pg_opts_2.config.min_ctas = 2
+        nccl_cfg_2.min_ctas = 4
+        self.assertEqual(pg_opts.config.min_ctas, -2147483648)
+        self.assertEqual(pg_opts_2.config.min_ctas, 2)
+        self.assertEqual(nccl_cfg_2.min_ctas, 4)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
