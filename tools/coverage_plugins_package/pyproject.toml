@@ -1,17 +1,16 @@
 [build-system]
-requires = ["setuptools>=42"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "coverage-plugins"
 version = "0.0.1"
-description = "plug-in to coverage for PyTorch JIT"
+description = "Plug-in to coverage for PyTorch JIT"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 
