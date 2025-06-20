@@ -104,9 +104,9 @@ def _assign_attr(
             assert isinstance(from_obj, torch.Tensor)
             to_module.register_buffer(field, from_obj, persistent=persistent)
         elif attr_kind == _AttrKind.CONSTANT:
-            assert not isinstance(
-                from_obj, FakeScriptObject
-            ), "FakeScriptObject should only exist during tracing."
+            assert not isinstance(from_obj, FakeScriptObject), (
+                "FakeScriptObject should only exist during tracing."
+            )
             assert isinstance(
                 from_obj,
                 (
@@ -143,7 +143,7 @@ class InterpreterModule(_SubmoduleBase, torch.nn.Module):
         super().__init__()
         self.graph = graph
         self._ty = ty
-        self.graph.owning_module = self
+        self.graph.owning_module = self  # type: ignore[assignment]
         self._run_with_interpreter = RUN_WITH_INTERPRETER
 
     def forward(self, *args, **kwargs):
@@ -296,7 +296,7 @@ class UnflattenedModule(torch.nn.Module):
         export_graph = deepcopy(export_module.graph)
         self.graph_signature = deepcopy(export_module.graph_signature)
         self.graph = torch.fx.Graph()
-        self.graph.owning_module = self
+        self.graph.owning_module = self  # type: ignore[assignment]
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         self.flat_args_adapter = flat_args_adapter
 
@@ -461,9 +461,9 @@ class UnflattenedModule(torch.nn.Module):
         # add constants that are aliased and don't appear in graph signature
         for const_name, const in export_module.constants.items():
             if const_name not in consts_targets:
-                assert (
-                    id(const) in consts_map
-                ), "Constants should be either aliased or appear in graph signature"
+                assert id(const) in consts_map, (
+                    "Constants should be either aliased or appear in graph signature"
+                )
                 ph_name, _ = consts_map[id(const)][0]
                 add_to_consts_map(id(const), ph_name, const_name)
                 added_params_buffers.add(s.target)
@@ -1041,9 +1041,9 @@ class _ModuleFrame:
 
                     if arg.name in self.seen_nodes:
                         flat_arg_node.meta = copy.copy(self.seen_nodes[arg.name].meta)
-                        self.node_to_placeholder[
-                            self.seen_nodes[arg.name]
-                        ] = flat_arg_node
+                        self.node_to_placeholder[self.seen_nodes[arg.name]] = (
+                            flat_arg_node
+                        )
 
             with self.parent.graph.inserting_before(self.parent_call_module):
                 input_nodes: list[Optional[torch.fx.Node]] = []
@@ -1125,8 +1125,7 @@ class _ModuleFrame:
         if x in self.node_to_placeholder:
             return self.node_to_placeholder[x]
         elif (
-            x.op == "placeholder"
-            or self.module_call_graph.get(self.fqn) is None
+            x.op == "placeholder" or self.module_call_graph.get(self.fqn) is None
             # allow placeholder creation if we are not preserving module call signature
         ):
             self.add_placeholder(x)

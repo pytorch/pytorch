@@ -4,15 +4,8 @@
 import torch
 import torch.nn.utils.parametrize as parametrize
 from torch import nn
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestParametrization(JitTestCase):
@@ -68,3 +61,7 @@ class TestParametrization(JitTestCase):
                 # Check the scripting process throws an error when caching
                 with self.assertRaisesRegex(RuntimeError, "Caching is not implemented"):
                     scripted_model = torch.jit.trace_module(model)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

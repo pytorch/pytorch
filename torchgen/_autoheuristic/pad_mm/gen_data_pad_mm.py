@@ -18,7 +18,7 @@ import torch
 from torch._inductor.fx_passes.pad_mm import (  # type: ignore[import-not-found]
     get_alignment_size_dtype,
 )
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 
 
 class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimported]
@@ -74,7 +74,7 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
         print(f"transpose_left={transpose_left} transpose_right={transpose_right}")
         print(f"prepadded_left={prepadded_left} prepadded_right={prepadded_right}")
 
-        with fresh_inductor_cache():
+        with fresh_cache():
 
             def mm(a: Any, b: Any) -> Any:
                 return torch.mm(a, b)

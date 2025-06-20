@@ -5,6 +5,7 @@ from unittest import mock
 import torch.distributed as c10d
 from torch.distributed.collective_utils import all_gather, broadcast
 from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestCollectiveUtils(MultiProcessTestCase):
@@ -114,3 +115,7 @@ class TestCollectiveUtils(MultiProcessTestCase):
         expected_exception = "test exception"
         with self.assertRaisesRegex(Exception, expected_exception):
             all_gather(data_or_fn=func)
+
+
+if __name__ == "__main__":
+    run_tests()
