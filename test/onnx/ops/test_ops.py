@@ -538,7 +538,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
         # Test eager mode
-        torch.library.opcheck(_impl.attention_23, (Q, K, V, None))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None, None, None))
         output, present_key, present_value, qk_output = torch.onnx.ops.attention(
             Q, K, V
         )
@@ -562,7 +562,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         torch.library.opcheck(
             _impl.attention_23,
-            (Q, K, V, Nonee, None, None),
+            (Q, K, V, None, None, None),
             dict(q_num_heads=q_num_heads, kv_num_heads=kv_num_heads),
         )
         output, present_key, present_value, qk_output = torch.onnx.ops.attention(
@@ -588,14 +588,18 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
-        torch.library.opcheck(_impl.attention_23, (Q, K, V, None))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None, None, None))
         output, present_key, present_value, qk_output = torch.onnx.ops.attention(
             Q, K, V
+        )
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            Q, K, V, None, enable_gqa=True
         )
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
         self.assertEqual(present_key.shape, K.shape)
         self.assertEqual(present_value.shape, V.shape)
+        torch.testing.assert_close(output, expected)
 
     def test_attention_mqa(self):
         """Test Multi-Query Attention (MQA)."""
@@ -607,12 +611,16 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
-        torch.library.opcheck(_impl.attention_23, (Q, K, V, None))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None, None, None))
         output, present_key, present_value, qk_output = torch.onnx.ops.attention(
             Q, K, V
         )
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            Q, K, V, None, enable_gqa=True
+        )
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
+        torch.testing.assert_close(output, expected)
 
     def test_attention_with_2d_mask(self):
         """Test attention with 2D attention mask (q_seq_len, kv_seq_len)."""
@@ -626,12 +634,12 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         # Test with boolean mask
         bool_mask = torch.randint(0, 2, (q_seq_len, kv_seq_len), dtype=torch.bool)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V, None), dict(attn_mask=bool_mask))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, bool_mask, None, None))
         output_bool, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=bool_mask)
 
         # Test with float mask
         float_mask = torch.randn(q_seq_len, kv_seq_len)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V, None), dict(attn_mask=float_mask))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, float_mask, None, None))
         output_float, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
 
         self.assertEqual(
@@ -655,12 +663,12 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         bool_mask = torch.randint(
             0, 2, (batch_size, q_num_heads, q_seq_len, kv_seq_len), dtype=torch.bool
         )
-        torch.library.opcheck(_impl.attention_23, (Q, K, V, None), dict(attn_mask=bool_mask))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, bool_mask, None, None))
         output_bool, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=bool_mask)
 
         # Test with float mask
         float_mask = torch.randn(batch_size, q_num_heads, q_seq_len, kv_seq_len)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V, None), dict(attn_mask=float_mask))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, float_mask, None, None))
         output_float, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
 
         self.assertEqual(
@@ -698,9 +706,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         # Create a lower triangular causal mask
         causal_mask = torch.tril(torch.ones(q_seq_len, kv_seq_len, dtype=torch.bool))
-        torch.library.opcheck(
-            _impl.attention_23, (Q, K, V, causal_mask, None, None)
-        )
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, causal_mask, None, None))
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=causal_mask)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
@@ -764,7 +770,9 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
-        torch.library.opcheck(_impl.attention_23, (Q, K, V, None, None, None), dict(is_causal=True))
+        torch.library.opcheck(
+            _impl.attention_23, (Q, K, V, None, None, None), dict(is_causal=True)
+        )
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, is_causal=True)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
@@ -810,7 +818,9 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
-        torch.library.opcheck(_impl.attention_23, (Q, K, V, None, None, None), dict(softcap=30.0))
+        torch.library.opcheck(
+            _impl.attention_23, (Q, K, V, None, None, None), dict(softcap=30.0)
+        )
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, softcap=30.0)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
@@ -827,7 +837,9 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         for mode in [0, 1, 2, 3]:
             torch.library.opcheck(
-                _impl.attention_23, (Q, K, V, None, None, None), dict(qk_matmul_output_mode=mode)
+                _impl.attention_23,
+                (Q, K, V, None, None, None),
+                dict(qk_matmul_output_mode=mode),
             )
             output, _, _, qk_output = torch.onnx.ops.attention(
                 Q, K, V, qk_matmul_output_mode=mode
@@ -851,7 +863,9 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
         custom_scale = 0.25
-        torch.library.opcheck(_impl.attention_23, (Q, K, V, None, None, None), dict(scale=custom_scale))
+        torch.library.opcheck(
+            _impl.attention_23, (Q, K, V, None, None, None), dict(scale=custom_scale)
+        )
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, scale=custom_scale)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
@@ -1012,9 +1026,15 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         # Verify inputs
         self.assertEqual(len(node.inputs), 3)  # Q, K, V (no optional inputs)
-        self.assertEqual(node.inputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size])
-        self.assertEqual(node.inputs[1].shape, [batch_size, kv_num_heads, kv_seq_len, head_size])
-        self.assertEqual(node.inputs[2].shape, [batch_size, kv_num_heads, kv_seq_len, head_size])
+        self.assertEqual(
+            node.inputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size]
+        )
+        self.assertEqual(
+            node.inputs[1].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
+        )
+        self.assertEqual(
+            node.inputs[2].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
+        )
 
         # Verify default attributes (should be minimal)
         expected_attrs = {}  # All default values
@@ -1036,7 +1056,12 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         class FullAttentionModel(torch.nn.Module):
             def forward(self, Q, K, V, attn_mask, past_key, past_value):
                 output, _, _, _ = torch.onnx.ops.attention(
-                    Q, K, V, attn_mask=attn_mask, past_key=past_key, past_value=past_value
+                    Q,
+                    K,
+                    V,
+                    attn_mask=attn_mask,
+                    past_key=past_key,
+                    past_value=past_value,
                 )
                 return output
 
@@ -1049,13 +1074,25 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(node.op_type, "Attention")
 
         # Verify all 6 inputs are present
-        self.assertEqual(len(node.inputs), 6)  # Q, K, V, attn_mask, past_key, past_value
-        self.assertEqual(node.inputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size])
-        self.assertEqual(node.inputs[1].shape, [batch_size, kv_num_heads, kv_seq_len, head_size])
-        self.assertEqual(node.inputs[2].shape, [batch_size, kv_num_heads, kv_seq_len, head_size])
+        self.assertEqual(
+            len(node.inputs), 6
+        )  # Q, K, V, attn_mask, past_key, past_value
+        self.assertEqual(
+            node.inputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size]
+        )
+        self.assertEqual(
+            node.inputs[1].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
+        )
+        self.assertEqual(
+            node.inputs[2].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
+        )
         self.assertEqual(node.inputs[3].shape, [q_seq_len, kv_seq_len])
-        self.assertEqual(node.inputs[4].shape, [batch_size, kv_num_heads, past_seq_len, head_size])
-        self.assertEqual(node.inputs[5].shape, [batch_size, kv_num_heads, past_seq_len, head_size])
+        self.assertEqual(
+            node.inputs[4].shape, [batch_size, kv_num_heads, past_seq_len, head_size]
+        )
+        self.assertEqual(
+            node.inputs[5].shape, [batch_size, kv_num_heads, past_seq_len, head_size]
+        )
 
     def test_attention_export_with_gqa_attributes(self):
         """Test export with GQA and verify num_heads attributes."""
@@ -1105,9 +1142,15 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(node.op_type, "Attention")
 
         # Verify 3D input shapes
-        self.assertEqual(node.inputs[0].shape, [batch_size, q_seq_len, q_num_heads * head_size])
-        self.assertEqual(node.inputs[1].shape, [batch_size, kv_seq_len, kv_num_heads * head_size])
-        self.assertEqual(node.inputs[2].shape, [batch_size, kv_seq_len, kv_num_heads * head_size])
+        self.assertEqual(
+            node.inputs[0].shape, [batch_size, q_seq_len, q_num_heads * head_size]
+        )
+        self.assertEqual(
+            node.inputs[1].shape, [batch_size, kv_seq_len, kv_num_heads * head_size]
+        )
+        self.assertEqual(
+            node.inputs[2].shape, [batch_size, kv_seq_len, kv_num_heads * head_size]
+        )
 
         # Verify num_heads attributes are set
         attrs = node.attributes
@@ -1129,7 +1172,9 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         class FullAttributesModel(torch.nn.Module):
             def forward(self, Q, K, V):
                 output, _, _, _ = torch.onnx.ops.attention(
-                    Q, K, V,
+                    Q,
+                    K,
+                    V,
                     is_causal=True,
                     qk_matmul_output_mode=2,
                     scale=0.25,
@@ -1183,7 +1228,9 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(node_2d.inputs[3].shape, [q_seq_len, kv_seq_len])
 
         # Test 3D mask
-        mask_3d = torch.randint(0, 2, (batch_size, q_seq_len, kv_seq_len), dtype=torch.bool)
+        mask_3d = torch.randint(
+            0, 2, (batch_size, q_seq_len, kv_seq_len), dtype=torch.bool
+        )
 
         class Mask3DModel(torch.nn.Module):
             def forward(self, Q, K, V, mask):
@@ -1197,7 +1244,9 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(node_3d.inputs[3].shape, [batch_size, q_seq_len, kv_seq_len])
 
         # Test 4D mask
-        mask_4d = torch.randint(0, 2, (batch_size, q_num_heads, q_seq_len, kv_seq_len), dtype=torch.bool)
+        mask_4d = torch.randint(
+            0, 2, (batch_size, q_num_heads, q_seq_len, kv_seq_len), dtype=torch.bool
+        )
 
         class Mask4DModel(torch.nn.Module):
             def forward(self, Q, K, V, mask):
@@ -1208,7 +1257,9 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         onnx_program_4d = self.export(model_4d, (Q, K, V, mask_4d), opset_version=23)
 
         node_4d = onnx_program_4d.model.graph.node(0)
-        self.assertEqual(node_4d.inputs[3].shape, [batch_size, q_num_heads, q_seq_len, kv_seq_len])
+        self.assertEqual(
+            node_4d.inputs[3].shape, [batch_size, q_num_heads, q_seq_len, kv_seq_len]
+        )
 
     def test_attention_export_with_float_mask(self):
         """Test export with float attention mask."""
@@ -1246,6 +1297,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
         for mode in [0, 1, 2, 3]:
+
             class QKOutputModel(torch.nn.Module):
                 def __init__(self, qk_mode):
                     super().__init__()
@@ -1293,9 +1345,15 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(node.op_type, "Attention")
 
         # Verify MQA tensor shapes
-        self.assertEqual(node.inputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size])
-        self.assertEqual(node.inputs[1].shape, [batch_size, kv_num_heads, kv_seq_len, head_size])  # kv_num_heads = 1
-        self.assertEqual(node.inputs[2].shape, [batch_size, kv_num_heads, kv_seq_len, head_size])
+        self.assertEqual(
+            node.inputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size]
+        )
+        self.assertEqual(
+            node.inputs[1].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
+        )  # kv_num_heads = 1
+        self.assertEqual(
+            node.inputs[2].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
+        )
 
     def test_attention_export_with_softmax_precision(self):
         """Test export with different softmax precision values."""
@@ -1312,10 +1370,11 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             (1, "FLOAT"),
             (10, "FLOAT16"),
             (11, "DOUBLE"),
-            (16, "BFLOAT16")
+            (16, "BFLOAT16"),
         ]
 
         for precision_val, precision_name in precision_types:
+
             class SoftmaxPrecisionModel(torch.nn.Module):
                 def __init__(self, precision):
                     super().__init__()
@@ -1363,16 +1422,24 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(len(outputs), 4)
 
         # output: (batch_size, q_num_heads, q_seq_len, head_size)
-        self.assertEqual(outputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size])
+        self.assertEqual(
+            outputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size]
+        )
 
         # present_key: (batch_size, kv_num_heads, kv_seq_len, head_size)
-        self.assertEqual(outputs[1].shape, [batch_size, kv_num_heads, kv_seq_len, head_size])
+        self.assertEqual(
+            outputs[1].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
+        )
 
         # present_value: (batch_size, kv_num_heads, kv_seq_len, head_size)
-        self.assertEqual(outputs[2].shape, [batch_size, kv_num_heads, kv_seq_len, head_size])
+        self.assertEqual(
+            outputs[2].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
+        )
 
         # qk_output: (batch_size, q_num_heads, q_seq_len, kv_seq_len)
-        self.assertEqual(outputs[3].shape, [batch_size, q_num_heads, q_seq_len, kv_seq_len])
+        self.assertEqual(
+            outputs[3].shape, [batch_size, q_num_heads, q_seq_len, kv_seq_len]
+        )
 
 
 if __name__ == "__main__":
