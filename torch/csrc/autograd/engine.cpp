@@ -1345,7 +1345,7 @@ auto Engine::execute(
   }
 
   if (compiled_autograd != nullptr) {
-    TORCH_CHECK(
+    TORCH_CHECK_NOT_IMPLEMENTED(
         num_threads_in_compiled_autograd.load() == 0,
         "Re-entrant into Compiled Autograd from a parent Compiled Autograd call is not yet supported. Consider disabling Compiled Autograd on the re-entrant call.");
     // Allows us to assert no other threads are in backwards
