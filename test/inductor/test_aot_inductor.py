@@ -20,6 +20,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_cpp_code
@@ -27,6 +28,7 @@ from torch._utils_internal import full_aoti_runtime_assert
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.export import Dim, export, export_for_training
+from torch.export.pt2_archive._package import load_pt2
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM80OrLater
@@ -5378,6 +5380,44 @@ class AOTInductorTestsTemplate:
         expected = model(test_inputs)
         output = runner_call(test_inputs)
         self.assertEqual(expected, output)
+
+    def test_weight_on_disk_legacy(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M, N, K = 128, 2048, 4096
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+
+        with torch.no_grad(), config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.package_constants_in_so": False,
+                "aot_inductor.package_constants_on_disk": True,
+                "aot_inductor.package": True,
+            }
+        ):
+            aoti_files = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            package_path = package_aoti(
+                f.name,
+                {"model": aoti_files},
+            )
+            pt2_contents = load_pt2(package_path, load_weights_from_disk=True)
+            loaded1 = pt2_contents.aoti_runners["model"]
+
+        self.assertEqual(loaded1(a), model(a))
 
     def test_extract_constants_map(self):
         class Model(torch.nn.Module):

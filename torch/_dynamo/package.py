@@ -178,7 +178,12 @@ class CompilePackage:
         updates with compiled functions and resume functions.
     """
 
-    def __init__(self, fn: Any, dynamo: Optional[_DynamoCacheEntry] = None) -> None:
+    def __init__(
+        self,
+        fn: Any,
+        dynamo: Optional[_DynamoCacheEntry] = None,
+        ignore_inlined_sources=False,
+    ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
@@ -190,14 +195,20 @@ class CompilePackage:
         self._inlined_sources: set[InlinedSource] = set()
         self._resume_codes: set[types.CodeType] = set()
 
-        self._initialize(fn, dynamo)
+        self._initialize(fn, dynamo, ignore_inlined_sources)
         # Always go back to a clean state after initialization.
         self.uninstall()
         self.validate()
 
-    def _initialize(self, fn: Any, dynamo: Optional[_DynamoCacheEntry] = None) -> None:
+    def _initialize(
+        self,
+        fn: Any,
+        dynamo: Optional[_DynamoCacheEntry] = None,
+        ignore_inlined_sources=False,
+    ) -> None:
         from .eval_frame import innermost_fn
 
+        self._inlined_sources = set()
         self._innermost_fn = innermost_fn(fn)
         assert self._innermost_fn is not None
         if dynamo is not None:
@@ -210,22 +221,22 @@ class CompilePackage:
                 raise RuntimeError(
                     f"Compile package was created with a different PyTorch version: {dynamo.torch_version}"
                 )
-            for code in dynamo.inlined_sources:
-                m = importlib.import_module(code.module)
-                checksum = _hash_sourcelines(m, code.firstlineno, code.lastlineno)
-                if checksum != code.checksum:
-                    raise RuntimeError(
-                        f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
-                    )
+            if not ignore_inlined_sources:
+                for code in dynamo.inlined_sources:
+                    m = importlib.import_module(code.module)
+                    checksum = _hash_sourcelines(m, code.firstlineno, code.lastlineno)
+                    if checksum != code.checksum:
+                        raise RuntimeError(
+                            f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
+                        )
 
-            self._inlined_sources = dynamo.inlined_sources
+                self._inlined_sources = dynamo.inlined_sources
 
             main, *codes = dynamo.codes
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
         else:
-            self._inlined_sources = set()
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
             )
