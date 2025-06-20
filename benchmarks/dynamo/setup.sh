@@ -68,11 +68,11 @@ fi
 
 # only dlrm needs fbgemm and torchrec
 if [[ "$MODELS" == *"dlrm"* ]]; then
-	uv pip uninstall torchrec-nightly fbgemm-gpu-nightly
+    uv pip uninstall torchrec-nightly fbgemm-gpu-nightly
     uv pip install setuptools-git-versioning scikit-build pyre-extensions
     # Do this after checkout_install_torchbench to ensure we clobber any
     # nightlies that torchbench may pull in
-	(cd ../../../torchrec && uv pip install -e .)
+    (cd ../../../torchrec && uv pip install -e .)
 
     # current fbgemm pin is too old such that git checkout would fail.
     # So install from git instead.
