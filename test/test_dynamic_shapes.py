@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch._dynamo.testing import CompileCounterWithBackend
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
@@ -949,7 +949,7 @@ def forward(self, x_1):
         shape_env = ShapeEnv()
         a = shape_env.create_unbacked_symint()
 
-        shape_env.defer_runtime_assert((a // 3 == 1).node.expr, " test")
+        shape_env.guard_or_defer_runtime_assert((a // 3 == 1).node.expr, " test")
 
         from sympy import Eq
 
@@ -960,7 +960,7 @@ def forward(self, x_1):
         self.assertEqual(shape_env._maybe_evaluate_static(test2), None)
 
         # After this FloorDiv(a, 3) is simplified to CleanDiv(a, 3)
-        shape_env.defer_runtime_assert(Eq(Mod(a, 3), 0), " test")
+        shape_env.guard_or_defer_runtime_assert(Eq(Mod(a, 3), 0), " test")
         self.assertEqual(test2, shape_env.simplify(test1))
 
         self.assertTrue(shape_env.evaluate_expr(test1))
@@ -3050,6 +3050,7 @@ def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
 
 
 class TestUnbacked(TestCase):
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
     def test_deferred_neq_assert(self, backend):
@@ -3097,6 +3098,7 @@ class TestUnbacked(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.rand(2, 50), torch.tensor([51]))
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
     def test_deferred_sym_or_assert(self, backend):
@@ -3118,6 +3120,7 @@ class TestUnbacked(TestCase):
         self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
         self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
     def test_deferred_sym_eq_assert(self, backend):
@@ -3150,7 +3153,7 @@ class TestUnbacked(TestCase):
 
 
 class TestUbackedOps(TestCase):
-    @fresh_inductor_cache()
+    @fresh_cache()
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_reshape1(self):
@@ -3242,8 +3245,8 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
-        view: "i64[u0, u0][u0, 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
-        view_1: "i64[u0, u0][u0, 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
+        view: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
+        view_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
         mul_4: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         mul_7: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
         return (mul_4, mul_7)""",  # noqa: B950
@@ -3311,8 +3314,8 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         _assert_scalar_4 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_4 = None
         clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
         view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
-        mul_18: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        return (mul_18,)""",  # noqa: B950
+        mul_19: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        return (mul_19,)""",  # noqa: B950
             ignore_comments=True,
             ignore_empty_lines=True,
         )
