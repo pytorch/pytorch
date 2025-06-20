@@ -370,17 +370,42 @@ def attention(
 
     This operator covers self and cross variants of the attention operation based on sequence lengths of K, Q and V.
 
-    For self attention, kv_sequence_length equals to q_sequence_length.
+    For self attention, ``kv_sequence_length`` equals to ``q_sequence_length``.
 
     For cross attention, query and key might have different lengths.
 
     This operator also covers the 3 following variants based on the number of heads:
 
-    Multi-headed Attention (MHA): Described in the paper https://arxiv.org/pdf/1706.03762, q_num_heads = kv_num_heads.
+    1. Multi-headed Attention (MHA): Described in the paper https://arxiv.org/pdf/1706.03762, `q_num_heads = kv_num_heads`.
+    2. Group-query Attention (GQA): Described in the paper https://arxiv.org/pdf/2305.13245, `q_num_heads > kv_num_heads`, `q_num_heads % kv_num_heads == 0`.
+    3. Multi-query Attention (MQA): Described in the paper https://arxiv.org/pdf/1911.02150, `q_num_heads > kv_num_heads`, `kv_num_heads=1`.
 
-    Group-query Attention (GQA): Described in the paper https://arxiv.org/pdf/2305.13245, q_num_heads > kv_num_heads, q_num_heads % kv_num_heads == 0.
+    Attention bias to be added is calculated based on ``attn_mask`` input and ``is_causal` `attribute``, only one of which can be provided.
 
-    Multi-query Attention (MQA): Described in the paper https://arxiv.org/pdf/1911.02150, q_num_heads > kv_num_heads, kv_num_heads=1.
+    1. If ``is_causal`` is set to `1`, the attention masking is a lower triangular matrix when the mask is a square matrix. The attention masking has the form of the upper left causal bias due to the alignment.
+    2. `attn_mask`: A boolean mask where a value of `True` indicates that the element should take part in attention or a float mask of the same type as query, key, value that is added to the attention score.
+
+    Both past and present state key/values are optional. They shall be used together, and not allowed to use only one of them.
+    The following pattern is applied to the Q, K and V inputs after appropriate reshaping of K and V inputs based on sequence lengths and num heads provided::
+
+        The following pattern is applied by this operator:
+                Q          K          V
+                |          |          |
+        Q*sqrt(scale) K*sqrt(scale) |
+                |          |          |
+                |       Transpose     |
+                |          |          |
+                ---MatMul---          |
+                    |               |
+        at_mask---Add              |
+                    |               |
+            softcap (if provided)     |
+                    |               |
+                Softmax            |
+                    |               |
+                    -----MatMul------
+                            |
+                            Y
 
     Args:
         Q: Query tensor. 4D tensor with shape `(batch_size, q_num_heads, q_sequence_length, head_size)` or 3D tensor
@@ -429,9 +454,9 @@ def attention(
         Q,
         K,
         V,
-        attn_mask,
-        past_key,
-        past_value,
+        attn_mask=attn_mask,
+        past_key=past_key,
+        past_value=past_value,
         is_causal=is_causal,
         kv_num_heads=kv_num_heads,
         q_num_heads=q_num_heads,
