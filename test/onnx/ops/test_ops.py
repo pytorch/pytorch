@@ -932,6 +932,21 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         self.assertEqual(onnx_program.model.opset_imports[""], 23)
         self.assertEqual("Attention", onnx_program.model.graph.node(0).op_type)
+        node = onnx_program.model.graph.node(0)
+        # Verify inputs
+        self.assertEqual(len(node.inputs), 3)  # Q, K, V (no optional inputs)
+        self.assertEqual(
+            node.inputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size]
+        )
+        self.assertEqual(
+            node.inputs[1].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
+        )
+        self.assertEqual(
+            node.inputs[2].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
+        )
+
+        # Verify default attributes (should be minimal)
+        self.assertEqual(len(node.attributes), 0)
 
     def test_attention_3d_export(self):
         """Test attention export with 3D inputs."""
@@ -999,33 +1014,43 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             model(Q, K, V),
         )
 
-    def test_attention_export_comprehensive(self):
-        """Test comprehensive export verification for all attention input combinations."""
-
-        # Test 1: Basic 4D attention with default parameters
-        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
+    def test_attention_export_with_past_key_value(self):
+        """Test export with past_key, past_value to ensure the optional input order is correct."""
+        batch_size, q_seq_len, kv_seq_len, past_seq_len = 2, 4, 6, 3
         q_num_heads, kv_num_heads = 8, 8
         head_size = 64
 
         Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        past_key = torch.rand(batch_size, kv_num_heads, past_seq_len, head_size)
+        past_value = torch.rand(batch_size, kv_num_heads, past_seq_len, head_size)
 
-        class BasicAttentionModel(torch.nn.Module):
-            def forward(self, Q, K, V):
-                output, _, _, _ = torch.onnx.ops.attention(Q, K, V)
+        class FullAttentionModel(torch.nn.Module):
+            def forward(self, Q, K, V, attn_mask, past_key, past_value):
+                output, _, _, _ = torch.onnx.ops.attention(
+                    Q,
+                    K,
+                    V,
+                    past_key=past_key,
+                    attn_mask=None,
+                    # Switched argument order
+                    past_value=past_value,
+                )
                 return output
 
-        model = BasicAttentionModel()
-        onnx_program = self.export(model, (Q, K, V), opset_version=23)
+        model = FullAttentionModel()
+        onnx_program = self.export(
+            model, (Q, K, V, None, past_key, past_value), opset_version=23
+        )
 
-        # Verify ONNX model structure
-        self.assertEqual(onnx_program.model.opset_imports[""], 23)
         node = onnx_program.model.graph.node(0)
         self.assertEqual(node.op_type, "Attention")
 
-        # Verify inputs
-        self.assertEqual(len(node.inputs), 3)  # Q, K, V (no optional inputs)
+        # Verify all 6 inputs are present
+        self.assertEqual(
+            len(node.inputs), 6
+        )  # Q, K, V, attn_mask, past_key, past_value
         self.assertEqual(
             node.inputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size]
         )
@@ -1035,10 +1060,13 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(
             node.inputs[2].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
         )
-
-        # Verify default attributes (should be minimal)
-        expected_attrs = {}  # All default values
-        self.assertEqual(len(node.attributes), len(expected_attrs))
+        self.assertIsNone(node.inputs[3])
+        self.assertEqual(
+            node.inputs[4].shape, [batch_size, kv_num_heads, past_seq_len, head_size]
+        )
+        self.assertEqual(
+            node.inputs[5].shape, [batch_size, kv_num_heads, past_seq_len, head_size]
+        )
 
     def test_attention_export_with_all_optional_inputs(self):
         """Test export with all optional inputs: mask, past_key, past_value."""
@@ -1093,30 +1121,6 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(
             node.inputs[5].shape, [batch_size, kv_num_heads, past_seq_len, head_size]
         )
-
-    def test_attention_export_with_gqa_attributes(self):
-        """Test export with GQA and verify num_heads attributes."""
-        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
-        q_num_heads, kv_num_heads = 8, 4  # GQA
-        head_size = 64
-
-        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
-        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-
-        class GQAAttentionModel(torch.nn.Module):
-            def forward(self, Q, K, V):
-                output, _, _, _ = torch.onnx.ops.attention(Q, K, V)
-                return output
-
-        model = GQAAttentionModel()
-        onnx_program = self.export(model, (Q, K, V), opset_version=23)
-
-        node = onnx_program.model.graph.node(0)
-        self.assertEqual(node.op_type, "Attention")
-
-        # For 4D inputs, num_heads attributes should be inferred from tensor shapes
-        # and not explicitly set unless they differ from tensor dimensions
 
     def test_attention_export_3d_with_num_heads_attributes(self):
         """Test export with 3D inputs and explicit num_heads attributes."""
@@ -1317,6 +1321,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
             # Verify qk_matmul_output_mode attribute
             attrs = node.attributes
+            print(onnx_program)
             self.assertIn("qk_matmul_output_mode", attrs)
             self.assertEqual(attrs["qk_matmul_output_mode"].value, mode)
 
@@ -1397,7 +1402,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             self.assertIn("softmax_precision", attrs)
             self.assertEqual(attrs["softmax_precision"].value, precision_val)
 
-    def test_attention_export_output_shapes(self):
+    def test_attention_export_gqa(self):
         """Test export and verify output tensor shapes."""
         batch_size, q_seq_len, kv_seq_len = 2, 4, 6
         q_num_heads, kv_num_heads = 8, 4  # GQA
