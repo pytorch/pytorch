@@ -118,8 +118,10 @@ class BaseListVariable(VariableTracker):
             assert isinstance(index, (int, torch.SymInt))
             try:
                 return self.items[index]
-            except IndexError as e:
-                raise_observed_exception(IndexError, tx, args=["list index out of range"])
+            except IndexError:
+                raise_observed_exception(
+                    IndexError, tx, args=["list index out of range"]
+                )
 
     def unpack_var_sequence(self, tx):
         return list(self.items)
