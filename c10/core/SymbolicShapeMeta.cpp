@@ -80,6 +80,13 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   c10::SymIntArrayRef sizes(sizes_);
   c10::SymIntArrayRef strides(strides_);
 
+  auto result = _compute_contiguous_sym(sizes, strides, numel());
+
+  // If the result are already determined without guarding, just return it.
+  if (result.maybe_as_bool().has_value() && *(result.maybe_as_bool())) {
+    return true;
+  }
+
   auto all_hinted = true;
   for (const auto& s : sizes) {
     if (!s.has_hint()) {
@@ -88,10 +95,12 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
     }
   }
 
-  for (const auto& s : strides) {
-    if (!s.has_hint()) {
-      all_hinted = false;
-      break;
+  if (all_hinted) {
+    for (const auto& s : strides) {
+      if (!s.has_hint()) {
+        all_hinted = false;
+        break;
+      }
     }
   }
 
@@ -102,7 +111,7 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
     return _compute_contiguous<SymInt>(sizes_, strides_, numel());
   }
 
-  return _compute_contiguous_sym(sizes, strides, numel());
+  return result;
 }
 
 // The rest of them
