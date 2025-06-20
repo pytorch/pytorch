@@ -519,6 +519,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         args = [a, b]
         return sub(*args)
 
+    def test_size_tuple_add(self):
+        def fn():
+            size = torch.Size([])
+            assert isinstance(size + size, torch.Size)
+            assert isinstance(size + (), tuple)
+            assert isinstance(size + (), torch.Size)
+
+        fn()
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_fn()
+
     @make_test
     def test_is_in_onnx_export(x, y):
         if torch.onnx.is_in_onnx_export():
@@ -4083,6 +4094,24 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(same(res, torch.ones(1)))
         self.assertTrue(f is f())
 
+    def test_functools_partial_binding(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+            @functools.lru_cache  # noqa: B019
+            def incr(self, val):
+                self.x += val
+
+        def fn(x):
+            f = Foo(4)
+            f.incr(3)
+            return x + f.x
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 def udf_mul(x, y):
     return x * y
@@ -4841,6 +4870,68 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertTrue(ref_tup.checked)
         self.assertTrue(res_tup.checked)
+
+    def test_udf_tuple_construction(self):
+        class MyTuple(tuple):  # noqa: SLOT001
+            pass
+
+        def fn(x):
+            tup = MyTuple([1, 2, 3])
+            if 3 in tup:
+                x = torch.cos(x)
+            else:
+                x = torch.sin(x)
+            return x, tup
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_x, ref_tup = fn(x)
+        res_x, res_tup = opt_fn(x)
+        self.assertEqual(ref_x, res_x)
+        self.assertEqual(ref_tup, res_tup)
+
+    def test_udf_tuple_construction_custom_new(self):
+        class MyTuple(tuple):  # noqa: SLOT001
+            def __new__(cls, *args, **kwargs):
+                return super().__new__(cls, [1, 2, 3])
+
+        def fn(x):
+            tup = MyTuple()
+            if 3 in tup:
+                x = torch.cos(x)
+            else:
+                x = torch.sin(x)
+            return x, tup
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_x, ref_tup = fn(x)
+        res_x, res_tup = opt_fn(x)
+        self.assertEqual(ref_x, res_x)
+        self.assertEqual(ref_tup, res_tup)
+
+    def test_udf_namedtuple(self):
+        class MyTuple(NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+        class PairTensor(MyTuple):
+            def __new__(cls, a, b):
+                return super().__new__(cls, a, b)
+
+            def __add__(self, other):
+                return PairTensor(self.a + other.a, self.b + other.b)
+
+        def fn(pair1, pair2):
+            return pair1 + pair2
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        pair1 = PairTensor(torch.randn(4), torch.randn(2, 8))
+        pair2 = PairTensor(torch.randn(1), torch.randn(2, 1))
+        ref = fn(pair1, pair2)
+        res = opt_fn(pair1, pair2)
+        self.assertEqual(ref.a, res.a)
+        self.assertEqual(ref.b, res.b)
 
     def test_udf_tuple_reconstruction(self):
         class MyTuple(tuple):  # noqa: SLOT001

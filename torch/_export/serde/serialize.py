@@ -1713,6 +1713,9 @@ class GraphModuleDeserializer(metaclass=Final):
         elif serialized_target.startswith("torch"):
             module = torch  # type: ignore[misc]
             serialized_target_names = serialized_target.split(".")[1:]
+        elif serialized_target.startswith("math"):
+            module = math  # type: ignore[misc]
+            serialized_target_names = serialized_target.split(".")[1:]
         elif serialized_target.startswith("#"):
             return self.deserialize_extension_operator(serialized_target)
         else:  # TODO(zhxchen17) Don't catch all here.
@@ -2495,6 +2498,7 @@ class GraphModuleDeserializer(metaclass=Final):
             len(serialized_node.outputs) == 1
             and "torch.ops.higher_order" in serialized_node.target
             and not getattr(serialized_node, "is_hop_single_tensor_return", True)
+            and serialized_node.outputs[0].type != "as_none"
         ):
 
             def _deserialize_hop_with_single_return(serialized_node, fx_node):
