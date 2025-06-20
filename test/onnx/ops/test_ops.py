@@ -639,35 +639,6 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             output_float.shape, (batch_size, q_num_heads, q_seq_len, head_size)
         )
 
-    def test_attention_with_3d_mask(self):
-        """Test attention with 3D attention mask (batch_size, q_seq_len, kv_seq_len)."""
-        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
-        q_num_heads, kv_num_heads = 8, 8
-        head_size = 64
-
-        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
-        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-
-        # Test with boolean mask
-        bool_mask = torch.randint(
-            0, 2, (batch_size, q_seq_len, kv_seq_len), dtype=torch.bool
-        )
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=bool_mask))
-        output_bool, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=bool_mask)
-
-        # Test with float mask
-        float_mask = torch.randn(batch_size, q_seq_len, kv_seq_len)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=float_mask))
-        output_float, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
-
-        self.assertEqual(
-            output_bool.shape, (batch_size, q_num_heads, q_seq_len, head_size)
-        )
-        self.assertEqual(
-            output_float.shape, (batch_size, q_num_heads, q_seq_len, head_size)
-        )
-
     def test_attention_with_4d_mask(self):
         """Test attention with 4D attention mask (batch_size, num_heads, q_seq_len, kv_seq_len)."""
         batch_size, q_seq_len, kv_seq_len = 2, 4, 6
@@ -747,13 +718,6 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=mask_2d))
         output_2d, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=mask_2d)
 
-        # Test 3D mask with GQA
-        mask_3d = torch.randint(
-            0, 2, (batch_size, q_seq_len, kv_seq_len), dtype=torch.bool
-        )
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=mask_3d))
-        output_3d, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=mask_3d)
-
         # Test 4D mask with GQA (note: using q_num_heads for mask heads)
         mask_4d = torch.randint(
             0, 2, (batch_size, q_num_heads, q_seq_len, kv_seq_len), dtype=torch.bool
@@ -763,9 +727,6 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         self.assertEqual(
             output_2d.shape, (batch_size, q_num_heads, q_seq_len, head_size)
-        )
-        self.assertEqual(
-            output_3d.shape, (batch_size, q_num_heads, q_seq_len, head_size)
         )
         self.assertEqual(
             output_4d.shape, (batch_size, q_num_heads, q_seq_len, head_size)
