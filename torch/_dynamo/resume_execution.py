@@ -49,6 +49,7 @@ CO_ASYNC_GENERATOR = 0x0200
 
 # trace_rules.py import this constant for consistency
 TORCH_DYNAMO_RESUME_IN_PREFIX = "torch_dynamo_resume_in"
+IS_TRACING_RESUME_PROLOGUE_VARNAME = "__is_tracing_resume_prologue"
 
 
 def _initial_push_null(insts):
@@ -356,6 +357,7 @@ class ContinueExecutionCache:
                     for v in code_options["co_varnames"]
                     if v not in args and v not in freevars
                 ]
+                + [IS_TRACING_RESUME_PROLOGUE_VARNAME]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
@@ -369,6 +371,18 @@ class ContinueExecutionCache:
                         create_instruction("COPY_FREE_VARS", arg=len(freevars))
                     )
                 prefix.append(create_instruction("RESUME", arg=0))
+
+            # Set is_tracing_resume_prologue to prevent graph breaks.
+            # This doesn't really do anything at runtime, but dynamo will trace this
+            # and will know that we're in a resume function prologue.
+            prefix.extend(
+                [
+                    create_instruction("LOAD_CONST", argval=True),
+                    create_instruction(
+                        "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
+                    ),
+                ]
+            )
 
             cleanup: list[Instruction] = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
@@ -430,6 +444,16 @@ class ContinueExecutionCache:
                             create_instruction("STORE_FAST", argval=v),
                         ]
                     )
+
+            # Set is_tracing_resume_prologue back to allow graph breaks.
+            prefix.extend(
+                [
+                    create_instruction("LOAD_CONST", argval=False),
+                    create_instruction(
+                        "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
+                    ),
+                ]
+            )
 
             prefix.append(create_jump_absolute(target))
 
