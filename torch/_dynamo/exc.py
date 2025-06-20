@@ -70,10 +70,6 @@ class InternalTorchDynamoError(TorchDynamoException):
     pass
 
 
-class ResumePrologueTracingError(TorchDynamoException):
-    pass
-
-
 class RestartAnalysis(TorchDynamoException):
     restart_reason: Optional[str]
 

@@ -64,7 +64,6 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfRocm,
     skipIfTorchDynamo,
-    skipIfWindows,
     TemporaryFileName,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -2227,9 +2226,6 @@ class FakeTensorDispatchCache(TestCase):
                 lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
             )
 
-    @skipIfWindows(
-        msg="weird bug - cache doesn't get cleared after https://github.com/pytorch/pytorch/pull/154782"
-    )
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
     def test_invoke_subgraph(self):
         """

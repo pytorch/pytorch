@@ -7,7 +7,9 @@
 #include <c10/util/irange.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <type_traits>
 
@@ -28,7 +30,7 @@ template <typename scalar_t>
 void serial_vec_log_softmax_lastdim_range(
     const scalar_t* input_data_base,
     scalar_t* output_data_base,
-    int64_t lastdim_size,
+    int64_t dim_size,
     int64_t chunk_size,
     int64_t begin,
     int64_t end) {
@@ -47,21 +49,21 @@ void serial_vec_log_softmax_lastdim_range(
     }
     for (const auto j : c10::irange(loop_end)) {
       int64_t i = ii + j;
-      const scalar_t* input_data = input_data_base + i * lastdim_size;
+      const scalar_t* input_data = input_data_base + i * dim_size;
       max_input_arr[j] = vec::reduce_all<scalar_t>(
           [](Vec& x, Vec& y) { return vec::maximum(x, y); },
           input_data,
-          lastdim_size);
+          dim_size);
     }
     for (const auto j : c10::irange(loop_end)) {
       int64_t i = ii + j;
-      const scalar_t* input_data = input_data_base + i * lastdim_size;
+      const scalar_t* input_data = input_data_base + i * dim_size;
       scalar_t max_input = max_input_arr[j];
       tmp_sum_scalar[j] = vec::map_reduce_all<scalar_t>(
           [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
           [](Vec x, Vec y) { return x + y; },
           input_data,
-          lastdim_size);
+          dim_size);
     }
     // See [Note AVX-SSE transitions] for why this should call the
     // vectorized version (aside from perf improvements).
@@ -72,8 +74,8 @@ void serial_vec_log_softmax_lastdim_range(
         loop_end);
     for (const auto j : c10::irange(loop_end)) {
       int64_t i = ii + j;
-      const scalar_t* input_data = input_data_base + i * lastdim_size;
-      scalar_t* output_data = output_data_base + i * lastdim_size;
+      const scalar_t* input_data = input_data_base + i * dim_size;
+      scalar_t* output_data = output_data_base + i * dim_size;
       scalar_t tmp_sum = tmp_sum_scalar[j];
       scalar_t max_input = max_input_arr[j];
 
@@ -88,7 +90,7 @@ void serial_vec_log_softmax_lastdim_range(
           },
           output_data,
           input_data,
-          lastdim_size);
+          dim_size);
     }
   }
 }
