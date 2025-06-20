@@ -1194,13 +1194,10 @@ User code traceback:
 
         torch.compile(foo, backend="eager")(torch.randn(4))
 
-        found_warning = False
-        for record in records:
-            if "call to a lru_cache` wrapped function from user code at:" in record.getMessage():
-                found_warning = True
-                break
-
-        self.assertTrue(found_warning, "No lru_cache warning was logged")
+        self.assertTrue(
+            any("call to a lru_cache` wrapped function from user code at:" in record.getMessage() for record in records),
+            "No lru_cache warning was logged"
+        )
 
     def test_disable_message(self):
         @torch.compile(backend="eager", fullgraph=True)

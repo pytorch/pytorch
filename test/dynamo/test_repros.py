@@ -4789,8 +4789,8 @@ class ReproTests(LoggingTestCase, torch._dynamo.test_case.TestCase):
         self.assertIsInstance(result, torch.Tensor)
 
         for record in records:
-            if "Dynamo detected a call to a `functools.lru_cache`-wrapped " in record.getMessage():
-                self.fail("lru_cache warning was incorrectly logged at DEBUG level")
+            if "call to a lru_cache` wrapped function from user code at:" in record.getMessage():
+                self.fail("lru_cache warning was incorrectly logged")
 
 
     def test_dont_aggressively_write_assert(self):
