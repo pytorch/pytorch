@@ -335,9 +335,6 @@ class FunctionMeta(type):
             name + "Backward", (BackwardCFunction,), {"_forward_cls": cls}
         )
         backward_fn._autograd_function_id = next(AUTOGRAD_FUNCTION_COUNTER)  # type: ignore[attr-defined]
-        backward_fn._bw_module = None  # type: ignore[attr-defined]
-        if getattr(cls, "_lazy_backward_info", None):
-            backward_fn._bw_module = cls._lazy_backward_info.bw_module  # type: ignore[attr-defined]
         cls._backward_cls = backward_fn
 
         super().__init__(name, bases, attrs)
@@ -815,7 +812,7 @@ class NestedIOFunction(Function):
         self._to_save_nested = args
 
     @property
-    def saved_tensors(self):
+    def saved_tensors(self):  # type: ignore[override]
         r"""
         See :meth:`Function.saved_tensors`.
         """

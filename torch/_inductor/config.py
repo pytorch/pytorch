@@ -175,6 +175,15 @@ triton_kernel_default_layout_constraint: Literal[
 # incompatible with disable_cpp_codegen
 cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
+# controls whether to compile entry and kernel separately for cpp_wrapper mode.
+# turn on this option to compile entry and kernel separately and minimize compile time of the entry part.
+# see https://github.com/pytorch/pytorch/pull/148773
+# Note: compiling entry and kernel separately may have a non-negligible impact on the performance.
+# see https://github.com/pytorch/pytorch/issues/156037
+cpp_wrapper_build_separate: bool = (
+    os.environ.get("TORCHINDUCTOR_CPP_WRAPPER_BUILD_SEPARATE", "0") == "1"
+)
+
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
@@ -433,6 +442,7 @@ force_same_precision = (
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
+
 
 # As above, specify candidate backends for conv autotune.
 # NB: in some cases for 1x1 convs we emit as matmul,
@@ -1352,6 +1362,9 @@ class aot_inductor:
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
 
+    # Experimental. Flag to control whether to package weight separately on disk
+    package_constants_on_disk: bool = False
+
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = not is_fbcode()
 
@@ -1486,6 +1499,23 @@ class cuda:
     cutlass_prescreening: bool = (
         os.environ.get("TORCHINDUCTOR_CUTLASS_PRESCREENING", "1") == "1"
     )
+
+    # Specify which operations should use CUTLASS backend
+    # Comma-separated list like "mm,addmm,bmm", "all" for all operations, and "" for none.
+    # Acceptable operations: mm, int_mm, addmm, sparse_semi_structured_mm, bmm, scaled_mm
+    cutlass_enabled_ops: str = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_ENABLED_OPS", "all"
+    )
+
+    # Whether to consult the binary remote cache
+    use_binary_remote_cache: bool = True
+
+    # Whether to upload compiled kernels to remote cache
+    upload_to_binary_remote_cache: bool = False
+
+    # Whether to force upload if the key already exists
+    # Use this to overwrite and handle cache pollution
+    binary_remote_cache_force_write: bool = False
 
 
 class rocm:
@@ -1647,7 +1677,7 @@ class trace:
     compile_profile = False
 
     # Upload the .tar.gz file
-    # Needs to be overriden based on specific environment needs
+    # Needs to be overridden based on specific environment needs
     upload_tar: Optional[Callable[[str], None]] = None
 
     log_autotuning_results: bool = False
@@ -1685,6 +1715,11 @@ _cache_config_ignore_prefix: list[str] = [
     "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
+    # cache related options are not relevant to cache results
+    "fx_graph_cache",
+    "fx_graph_remote_cache",
+    "autotune_local_cache",
+    "autotune_remote_cache",
 ]
 
 # External callable for matmul tuning candidates
