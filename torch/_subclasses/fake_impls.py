@@ -1026,7 +1026,7 @@ def make_fast_binary_impl(
                 if not isinstance(op, torch.Tensor):
                     continue
                 definitely_contiguous = (
-                    contiguous_or_false
+                    definitely_contiguous
                     and contiguous_for_memory_format_or_false(
                         op, memory_format=torch.contiguous_format
                     )

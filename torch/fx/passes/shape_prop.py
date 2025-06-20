@@ -35,8 +35,8 @@ class TensorMetadata(NamedTuple):
 
 # When include_contiguity is True, we will set contiguity when its always true for the tensor.
 # Some tensors can represent both contiguous and non-contiguous tensors. e.g: (u0, u1) with (u2, u3).
-# In such situation contiguity is not set. We could also make it a tri-state i.e: (contiguous_or_false,
-# contiguous, and unknown).
+# In such situation contiguity is not set. We could also make it a tri-state i.e: (def_contiguous,
+# def_not_contiguous and unknown).
 def _extract_tensor_metadata(
     result: torch.Tensor, include_contiguity=True
 ) -> TensorMetadata:
