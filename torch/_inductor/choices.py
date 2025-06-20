@@ -127,9 +127,7 @@ class InductorChoices:
         """
         # Get template ID and device type
         template_id = template.id
-        device_type = kernel_inputs.device_type
-        if device_type is None:
-            device_type = "cuda"
+        device_type = kernel_inputs.device_type or "cuda"
 
         # Determine which heuristics dictionary to use
         if template_id in self._template_config_heuristics:
