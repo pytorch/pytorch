@@ -8,6 +8,7 @@ from onnxscript import ir
 import torch
 from torch.onnx.ops import _impl, _symbolic_impl
 from torch.testing._internal import common_utils
+import onnx_ir.passes.common as common_passes
 
 
 class SchemaTest(common_utils.TestCase):
@@ -426,6 +427,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             **options,
         )
         assert onnx_program is not None
+        common_passes.CheckerPass()(onnx_program.model)
         return onnx_program
 
     def test_onnx_ops_can_be_decomposed_to_aten(self):
@@ -536,7 +538,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
         # Test eager mode
-        torch.library.opcheck(_impl.attention_23, (Q, K, V))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None))
         output, present_key, present_value, qk_output = torch.onnx.ops.attention(
             Q, K, V
         )
@@ -560,7 +562,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         torch.library.opcheck(
             _impl.attention_23,
-            (Q, K, V),
+            (Q, K, V, Nonee, None, None),
             dict(q_num_heads=q_num_heads, kv_num_heads=kv_num_heads),
         )
         output, present_key, present_value, qk_output = torch.onnx.ops.attention(
@@ -586,7 +588,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
-        torch.library.opcheck(_impl.attention_23, (Q, K, V))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None))
         output, present_key, present_value, qk_output = torch.onnx.ops.attention(
             Q, K, V
         )
@@ -605,7 +607,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
-        torch.library.opcheck(_impl.attention_23, (Q, K, V))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None))
         output, present_key, present_value, qk_output = torch.onnx.ops.attention(
             Q, K, V
         )
@@ -624,12 +626,12 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         # Test with boolean mask
         bool_mask = torch.randint(0, 2, (q_seq_len, kv_seq_len), dtype=torch.bool)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=bool_mask))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None), dict(attn_mask=bool_mask))
         output_bool, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=bool_mask)
 
         # Test with float mask
         float_mask = torch.randn(q_seq_len, kv_seq_len)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=float_mask))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None), dict(attn_mask=float_mask))
         output_float, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
 
         self.assertEqual(
@@ -653,12 +655,12 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         bool_mask = torch.randint(
             0, 2, (batch_size, q_num_heads, q_seq_len, kv_seq_len), dtype=torch.bool
         )
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=bool_mask))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None), dict(attn_mask=bool_mask))
         output_bool, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=bool_mask)
 
         # Test with float mask
         float_mask = torch.randn(batch_size, q_num_heads, q_seq_len, kv_seq_len)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=float_mask))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None), dict(attn_mask=float_mask))
         output_float, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
 
         self.assertEqual(
@@ -679,7 +681,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
         zero_mask = torch.zeros(q_seq_len, kv_seq_len)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=zero_mask))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, zero_mask, None, None))
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=zero_mask)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
@@ -697,7 +699,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         # Create a lower triangular causal mask
         causal_mask = torch.tril(torch.ones(q_seq_len, kv_seq_len, dtype=torch.bool))
         torch.library.opcheck(
-            _impl.attention_23, (Q, K, V), dict(attn_mask=causal_mask)
+            _impl.attention_23, (Q, K, V, causal_mask, None, None)
         )
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=causal_mask)
 
@@ -715,14 +717,14 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         # Test 2D mask with GQA
         mask_2d = torch.randint(0, 2, (q_seq_len, kv_seq_len), dtype=torch.bool)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=mask_2d))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, mask_2d, None, None))
         output_2d, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=mask_2d)
 
         # Test 4D mask with GQA (note: using q_num_heads for mask heads)
         mask_4d = torch.randint(
             0, 2, (batch_size, q_num_heads, q_seq_len, kv_seq_len), dtype=torch.bool
         )
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=mask_4d))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, mask_4d, None, None))
         output_4d, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=mask_4d)
 
         self.assertEqual(
@@ -747,7 +749,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         # Allow some positions
         float_mask[:, :3] = 0.0
 
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=float_mask))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, float_mask, None, None))
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
@@ -762,7 +764,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(is_causal=True))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None, None, None), dict(is_causal=True))
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, is_causal=True)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
@@ -781,8 +783,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         torch.library.opcheck(
             _impl.attention_23,
-            (Q, K, V),
-            dict(past_key=past_key, past_value=past_value),
+            (Q, K, V, None, past_key, past_value),
         )
         output, present_key, present_value, _ = torch.onnx.ops.attention(
             Q, K, V, past_key=past_key, past_value=past_value
@@ -809,7 +810,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(softcap=30.0))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None, None, None), dict(softcap=30.0))
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, softcap=30.0)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
@@ -826,7 +827,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         for mode in [0, 1, 2, 3]:
             torch.library.opcheck(
-                _impl.attention_23, (Q, K, V), dict(qk_matmul_output_mode=mode)
+                _impl.attention_23, (Q, K, V, None, None, None), dict(qk_matmul_output_mode=mode)
             )
             output, _, _, qk_output = torch.onnx.ops.attention(
                 Q, K, V, qk_matmul_output_mode=mode
@@ -850,7 +851,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
         custom_scale = 0.25
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(scale=custom_scale))
+        torch.library.opcheck(_impl.attention_23, (Q, K, V, None, None, None), dict(scale=custom_scale))
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, scale=custom_scale)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
