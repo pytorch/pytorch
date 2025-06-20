@@ -1572,7 +1572,6 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             is_export=False,
             no_tangents=False,
             enable_log=False,
-            precompile_backend_id=None,
         )
 
     def _get_dynamo_output(self, fn, *args, **kwargs):
@@ -1601,8 +1600,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         # Needs a shape env for FxGraphCache.check_can_cache to pass.
         # Not needed for actual key calculation.
         with torch._guards.tracing(ctx):
-            with sanitize_gm_for_cache(fx_g):
-                return autograd_cache_key(fx_g, example_inputs, config, {})
+            return autograd_cache_key(fx_g, example_inputs, config, {})
 
     def test_basic_hash_key(self):
         def fn(x):
