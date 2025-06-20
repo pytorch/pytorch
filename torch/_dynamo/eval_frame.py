@@ -206,7 +206,9 @@ def _callback_from_stance(callback):
         if callback in (False, None):
             return callback
 
-        def fail_callback(*args, **kwargs):
+        def fail_callback(frame, *args, **kwargs):
+            if trace_rules.check(frame.f_code):
+                return ConvertFrameReturn()
             raise RuntimeError(
                 "Detected recompile when torch.compile stance is 'fail_on_recompile'"
             )
@@ -526,9 +528,11 @@ class _TorchDynamoContext:
         patch_fn=nothing,
         first_ctx=False,
         *,
+        error_on_graph_break=False,
         export=False,
         dynamic=None,
         compiler_config=None,
+        package=None,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -536,11 +540,13 @@ class _TorchDynamoContext:
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Union[Unset, DynamoCallback] = unset
         self.first_ctx = first_ctx
+        self.error_on_graph_break = error_on_graph_break
         self.export = export
         self._dynamic = dynamic
         self.compiler_config = compiler_config
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
+        self._package = package
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -683,6 +689,10 @@ class _TorchDynamoContext:
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
+                prior_error_on_graph_break = None
+                if self.error_on_graph_break is not None:
+                    prior_error_on_graph_break = config.error_on_graph_break
+                    config.error_on_graph_break = self.error_on_graph_break
 
                 # Ensure that if an assertion occurs after graph pushes
                 # something onto the DynamicLayerStack then we pop it off (the
@@ -693,6 +703,7 @@ class _TorchDynamoContext:
                 saved_dynamic_layer_stack_depth = (
                     torch._C._functorch.get_dynamic_layer_stack_depth()
                 )
+
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
                 try:
@@ -713,6 +724,8 @@ class _TorchDynamoContext:
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
+                    if prior_error_on_graph_break is not None:
+                        config.error_on_graph_break = prior_error_on_graph_break
                     torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                         saved_dynamic_layer_stack_depth
                     )
@@ -724,7 +737,9 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
-        compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
+            external_utils.wrap_inline_with_set_fullgraph(fn, self.error_on_graph_break)
+        )
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
@@ -784,12 +799,14 @@ class OptimizeContext(_TorchDynamoContext):
         backend_ctx_ctor,
         first_ctx=False,
         *,
+        error_on_graph_break=False,
         export=False,
         dynamic=None,
         compiler_config=None,
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
+        package=None,
     ) -> None:
         def on_enter():
             install_generation_tagging_init()
@@ -800,9 +817,11 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
+            error_on_graph_break=error_on_graph_break,
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
+            package=package,
         )
 
         if config.compiled_autograd:
@@ -814,7 +833,7 @@ class OptimizeContext(_TorchDynamoContext):
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
                 ctx = torch._dynamo.compiled_autograd._enable(
-                    compiler_fn, dynamic=_dynamic
+                    compiler_fn, dynamic=_dynamic, ignore_active_disable_ctx=False
                 )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
@@ -846,9 +865,10 @@ class RunOnlyContext(_TorchDynamoContext):
 
 
 class DisableContext(_TorchDynamoContext):
-    def __init__(self, msg: Optional[str] = None) -> None:
+    def __init__(self, msg: Optional[str] = None, wrapping: bool = True) -> None:
         super().__init__(callback=None)
         self.msg = msg
+        self.wrapping = wrapping
 
     def __call__(self, fn):
         # Earlier this code was in the base class _TorchDynamoContext. But we
@@ -863,14 +883,14 @@ class DisableContext(_TorchDynamoContext):
             new_mod._torchdynamo_orig_callable = mod.forward
             return new_mod
 
-        if inspect.isclass(fn):
+        if isinstance(fn, type):
             # User has wrapped the class with compile/disable decorator. Apply
             # disable to init/call method.
             cls_obj = fn
             # Disable on init is useful for reconstruction of bytecodes where we
             # want to prevent Dynamo from tracing into the init function. Check
             # test_reconstruction in test_model_output.py.
-            cls_obj.__init__ = self(cls_obj.__init__)
+            cls_obj.__init__ = self(cls_obj.__init__)  # type: ignore[misc]
             cls_obj.__call__ = self(cls_obj.__call__)
             if issubclass(cls_obj, torch.nn.Module):
                 # NN module variable tracker directly inlines the _call_impl. Disable it.
@@ -881,7 +901,6 @@ class DisableContext(_TorchDynamoContext):
             f"A callable function is expected, but {type(fn)} is provided."
         )
 
-        @functools.wraps(fn)
         def _fn(*args, **kwargs):
             prior = set_eval_frame(None)
             try:
@@ -896,6 +915,14 @@ class DisableContext(_TorchDynamoContext):
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
             finally:
                 _maybe_set_eval_frame(prior)
+
+        # Under some circumstances (e.g. precompile) we can end up calling @disable
+        # decorator in generated bytecode and trigger recompile. This is due to the
+        # fact that the old callback from torch.compile() is still active and under
+        # this circumstance we will trigger a failure with set_stance("fail_on_recompile").
+        # Therefore we want to skip calling into any frame in this case.
+        if self.wrapping:
+            _fn = functools.wraps(fn)(_fn)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
         _fn._torchdynamo_disable_msg = self.msg  # type: ignore[attr-defined]
@@ -914,19 +941,23 @@ def _optimize_catch_errors(
     compile_fn,
     hooks: Hooks,
     backend_ctx_ctor=null_context,
+    error_on_graph_break=False,
     export=False,
     dynamic=None,
     compiler_config=None,
     rebuild_ctx=None,
+    package=None,
 ):
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
+        error_on_graph_break=error_on_graph_break,
         export=export,
         dynamic=dynamic,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
+        package=package,
     )
 
 
@@ -1017,6 +1048,7 @@ def _optimize(
     guard_filter_fn=None,
     disable=False,
     dynamic=None,
+    package=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -1063,14 +1095,6 @@ def _optimize(
     ):
         return _NullDecorator()
 
-    if nopython:
-        return optimize_assert(
-            backend,
-            dynamic=dynamic,
-            hooks=hooks,
-            rebuild_ctx=rebuild_ctx,
-        )
-
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -1080,9 +1104,10 @@ def _optimize(
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks=hooks),
+        convert_frame.convert_frame(backend, hooks, package=package),
         hooks,
         backend_ctx_ctor,
+        error_on_graph_break=nopython,
         dynamic=dynamic,
         compiler_config=(
             backend.get_compiler_config()
@@ -1090,6 +1115,7 @@ def _optimize(
             else None
         ),
         rebuild_ctx=rebuild_ctx,
+        package=package,
     )
 
 
@@ -1980,9 +2006,14 @@ def _optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=None,
+    package=None,
 ):
     """
-    The same as `torch._dynamo.optimize(backend, nopython=True)`
+    The same as `torch._dynamo.optimize(backend, nopython=True)`,
+    but ignores config.error_on_graph_break setting.
+
+    Used for export, since we must always error on graph breaks and ignore
+    config.error_on_graph_break. Can also be used for testing.
     """
     backend = get_compiler_fn(backend)
 
@@ -1991,19 +2022,23 @@ def _optimize_assert(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
-            backend, export=export, export_constraints=export_constraints
+            backend,
+            export=export,
+            export_constraints=export_constraints,
+            package=package,
         ),
         hooks,
         backend_ctx_ctor,
         export=export,
         dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
+        package=package,
     )
 
 
 class TorchPatcher:
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def patch():
         # A better way to disable the following would be decorate the source
         # functions with @torch._disable_dynamo. However, this causes issues

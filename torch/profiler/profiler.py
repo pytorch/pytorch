@@ -157,6 +157,7 @@ class _KinetoProfile:
         self.acc_events = acc_events
         self.custom_trace_id_callback = custom_trace_id_callback
         self.profiler: Optional[prof.profile] = None
+        self.has_cudagraphs = False
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
         if ProfilerActivity.CUDA in self.activities:
@@ -181,6 +182,10 @@ class _KinetoProfile:
         self.stop_trace()
 
     def prepare_trace(self):
+        if hasattr(torch, "_inductor"):
+            import torch._inductor.config as inductor_config
+
+            self.has_cudagraphs = inductor_config.triton.cudagraphs
         if (self.profiler is None) or (not self.acc_events):
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
@@ -221,26 +226,23 @@ class _KinetoProfile:
                     "distributedInfo", json.dumps(dist_info, cls=_NumpyEncoder)
                 )
 
-            if hasattr(torch, "_inductor"):
-                import torch._inductor.config as inductor_config
+            cuda_version = None
+            if hasattr(torch, "version"):
+                from torch.torch_version import TorchVersion
 
-                cuda_version = None
-                if hasattr(torch, "version"):
-                    from torch.torch_version import TorchVersion
+                cuda_version = TorchVersion(getattr(torch.version, "cuda", "0.0"))
 
-                    cuda_version = TorchVersion(getattr(torch.version, "cuda", "0.0"))
-
-                if inductor_config.triton.cudagraphs and (
-                    (cuda_version and cuda_version < "12.6")
-                    or not profiler_allow_cudagraph_cupti_lazy_reinit_cuda12()
-                ):
-                    os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
-                    self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
-                    # FIXME: CUDA Graph does not work well with CUPTI teardown.
-                    #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
-                    #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
-                    # Workaround: turn off CUPTI teardown when using CUDA Graphs.
-                    os.environ["TEARDOWN_CUPTI"] = "0"
+            if self.has_cudagraphs and (
+                (cuda_version and cuda_version < "12.6")
+                or not profiler_allow_cudagraph_cupti_lazy_reinit_cuda12()
+            ):
+                os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+                self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
+                # FIXME: CUDA Graph does not work well with CUPTI teardown.
+                #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
+                #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
+                # Workaround: turn off CUPTI teardown when using CUDA Graphs.
+                os.environ["TEARDOWN_CUPTI"] = "0"
 
             # Insert the preset user metadata to the trace
             for k, v in self.preset_metadata.items():
