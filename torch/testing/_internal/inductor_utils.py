@@ -9,7 +9,7 @@ import contextlib
 import os
 from subprocess import CalledProcessError
 import sys
-from typing import Any
+from typing import Any, Optional
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch._dynamo.device_interface import get_interface_for_device
@@ -229,7 +229,7 @@ def clone_preserve_strides_offset(x, device=None):
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
 
-def backend_for_device(device: str) -> str | None:
+def backend_for_device(device: str) -> Optional[str]:
     """ Get the Inductor codegen backend used for the device ``device``. """
     if dev_int := get_interface_for_device(device):
         return dev_int.inductor_backend()
