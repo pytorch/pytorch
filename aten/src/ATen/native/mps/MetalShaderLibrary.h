@@ -134,6 +134,9 @@ class MetalShaderLibrary {
     return getLibraryPipelineState(getLibrary(params), fname).second;
   }
   static MetalShaderLibrary& getBundledLibrary();
+  // KURT: runs pointwise unary kernel that has been registered with
+  // `REGISTER_UNARY_OP`. The iterator is built by the native_function.yaml
+  // target.
   void exec_unary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,

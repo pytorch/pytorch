@@ -12419,6 +12419,7 @@
   dispatch:
     CPU: max_pool3d_with_indices_out_cpu
     CUDA: max_pool3d_with_indices_out_cuda
+    MPS: max_pool3d_with_indices_out_mps
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
@@ -12426,6 +12427,7 @@
   dispatch:
     CPU: max_pool3d_with_indices_cpu
     CUDA: max_pool3d_with_indices_cuda
+    MPS: max_pool3d_with_indices_mps
   tags: core
 
 - func: max_pool3d_with_indices_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)

@@ -508,6 +508,7 @@ DEFINE_UNARY_FLOATING_FUNCTOR(erfc);
 DEFINE_UNARY_FLOATING_FUNCTOR(erfinv);
 DEFINE_UNARY_FLOATING_FUNCTOR(sinc);
 
+// KURT: REGISTER_UNARY_OP creates the kernel func that a thread calls
 REGISTER_UNARY_OP(neg, int, int);
 REGISTER_UNARY_OP(neg, long, long);
 REGISTER_UNARY_OP(neg, short, short);

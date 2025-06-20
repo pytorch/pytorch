@@ -24,6 +24,7 @@ REGISTER_CROSS_FUNC(bool);
 REGISTER_CROSS_FUNC(bfloat);
 #endif
 
+// KURT: Good example of a Metal GPU kernel
 template <typename T, typename U>
 kernel void cross(
     constant void* input_ [[buffer(0)]],

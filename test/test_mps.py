@@ -1383,6 +1383,47 @@ class TestMPS(TestCaseMPS):
             torch.randperm(n, out=non_contiguous_tensor)
             self.assertEqual(res.cpu().sort().values.long(), torch.arange(n, device=device))
 
+    @parametrize("device", ['cpu', 'mps'])
+    def test_max_pool3d_errors(self, device):
+        for ndim in [0, 1, 2, 3, 6, 7, 8]:
+            with self.assertRaisesRegex(RuntimeError, "4D or 5D"):
+                torch.nn.functional.max_pool3d(torch.randn((1,) * ndim, device=device), 1)
+
+        for kernel_size in [(1, 1), (1, 1, 1, 1)]:
+            with self.assertRaisesRegex(RuntimeError, "kernel_size must either be a single int, or a tuple"):
+                torch.nn.functional.max_pool3d(torch.randn((1,) * 4, device=device), kernel_size)
+
+        for dilation in [(1, 1), (1, 1, 1, 1)]:
+            with self.assertRaisesRegex(RuntimeError, "dilation must be either a single int, or a tuple"):
+                torch.nn.functional.max_pool3d(torch.randn((1,) * 4, device=device), (1, 1, 1), dilation=dilation)
+
+        for stride in [(1, 1), (1, 1, 1, 1)]:
+            with self.assertRaisesRegex(RuntimeError, "stride must either be omitted, a single int, or a tuple"):
+                torch.nn.functional.max_pool3d(torch.randn((1,) * 4, device=device), (1, 1, 1), stride=stride)
+
+    _test_max_pool3d_cases = [
+        # (input_size, kernel_size)
+        ((12, 7, 4, 5, 16), (1, 1, 1)),
+        ((3, 5, 34, 83, 6), (2, 2, 2)),
+        ((20, 3, 40, 1, 6), (10, 1, 3)),
+        ((10, 4, 5, 16), (1, 1, 1)),
+        ((38, 34, 83, 6), (2, 2, 2)),
+        ((2, 40, 1, 6), (10, 1, 3)),
+        ((2, 40, 132, 16), (10, 4, 5)),
+        ((1, 1, 2, 2, 2), (1, 1, 1)),
+        ((1, 1, 2, 2, 2), (1, 1, 1)),
+    ]
+
+    @parametrize("case", arg_values=range(len(_test_max_pool3d_cases)))
+    def test_max_pool3d(self, case):
+        a_size, kernel_size = self._test_max_pool3d_cases[case]
+        a = torch.arange(torch.tensor(a_size).prod(), device='mps').reshape(a_size)
+        r, i = torch.nn.functional.max_pool3d(a, kernel_size, return_indices=True)
+        r_cpu, i_cpu = torch.nn.functional.max_pool3d(a.cpu(), kernel_size, return_indices=True)
+        self.assertEqual(r.shape, r_cpu.shape)
+        self.assertEqual(i.shape, i_cpu.shape)
+        self.assertEqual(r, r_cpu)
+
     # Test forward maxpool2d
     def test_max_pool2d(self):
         def helper(shape, ks, padding=0, dilation=1, ceil_mode=False, return_indices=False, test_ties=False):
