@@ -406,6 +406,18 @@ ghstack submit
 [`ghstack`](https://github.com/ezyang/ghstack). It creates a large commit that is
 of very low signal to reviewers.
 
+## Keeping Your Branch Up-to-Date
+
+Before opening a pull request, ensure your local feature branch is synchronized with the latest `main` branch to avoid merge conflicts.
+
+If you haven't added the upstream remote already:
+
+```bash
+git remote add upstream https://github.com/pytorch/pytorch.git
+git fetch upstream
+git rebase upstream/main
+
+
 ## Merging your Change
 If you know the right people or team that should approve your PR (and you have the required permissions to do so), add them to the Reviewers list.
 
