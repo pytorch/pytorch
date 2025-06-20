@@ -1613,7 +1613,7 @@ class BuiltinVariable(VariableTracker):
             # If the object implements a __getitem__ method, iter(...) will call obj.__getitem__()
             # with an integer argument starting at 0, until __getitem__ raises IndexError
             return variables.UserFunctionVariable(
-                polyfills.iter_protocol
+                polyfills.builtins.iter
             ).call_function(
                 tx,
                 [obj],
