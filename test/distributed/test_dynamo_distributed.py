@@ -668,6 +668,50 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_ddp_optimizer_cudagraph(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # need a large channel to trigger ddp optimizer split module
+                self.CHANNELS = 640
+                self.convi = nn.Conv2d(46, self.CHANNELS, 3, padding=1, bias=False)
+                self.convp = nn.Conv2d(
+                    self.CHANNELS, self.CHANNELS, 1, padding=0, bias=False
+                )
+                self.bni = nn.BatchNorm2d(self.CHANNELS)
+
+            def forward(self, bitmap_channels):
+                x = self.convi(bitmap_channels)
+                x = self.bni(x)
+                x = self.convp(x)
+                return x
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            net = Net().to(self.rank)
+            optimizer = torch.optim.SGD(
+                net.parameters(),
+                lr=5e-2,
+            )
+
+            net = DDP(net, device_ids=[self.rank])
+            opt_net = torch.compile(net, mode="reduce-overhead")
+            opt_net.train()
+
+            for _ in range(10):
+                optimizer.zero_grad()
+                data = torch.randn((16, 46, 8, 8), dtype=torch.float32, device="cuda")
+                opt_net(data).sum().backward()
+
+            # 2 fwd and 2 bwd graph such that 4 graphs in total
+            graph_id = (
+                torch._inductor.cudagraph_trees.get_container(self.rank)
+                .tree_manager.new_graph_id()
+                .id
+            )
+            self.assertTrue(graph_id == 4)
+
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     def test_fsdp_setattr(self):
@@ -1174,11 +1218,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "sleep_sec_TESTING_ONLY", 10)
     def test_asymmetric_compilation_with_fx_cache(self):
         from torch._dynamo.utils import counters
-        from torch._inductor.utils import fresh_inductor_cache
+        from torch._inductor.utils import fresh_cache
 
-        with fresh_inductor_cache(), _dynamo_dist_per_rank_init(
-            self.rank, self.world_size
-        ):
+        with fresh_cache(), _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
 
             device = f"cuda:{self.rank}"
@@ -1208,7 +1250,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             torch._dynamo.reset()
 
             if self.rank == 0:
-                with fresh_inductor_cache():
+                with fresh_cache():
                     f(x)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
