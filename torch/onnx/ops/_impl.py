@@ -48,7 +48,7 @@ def rotary_embedding_23(
     sequence_length = x.shape[1]
     if len(x.shape) == 3:
         hidden_size = x.shape[2]
-        torch._check(num_heads != 0, lambda: "num_heads must be provided for 3D inputs")
+        torch._check(num_heads != 0, lambda: f"num_heads must be provided for 3D inputs. Received input tensor with shape {x.shape}")
         head_size = hidden_size // num_heads
         new_shape = [batch_size, sequence_length, num_heads, head_size]
         x = torch.reshape(x, new_shape)
