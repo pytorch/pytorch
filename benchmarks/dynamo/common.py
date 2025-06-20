@@ -2117,7 +2117,7 @@ class BenchmarkRunner:
             except Exception:
                 log.warning(
                     "%s golden ref were not generated for %s. Setting accuracy check to cosine",
-                    ref_dtype.__name__,
+                    str(ref_dtype),
                     name,
                 )
                 self.args.cosine = True
