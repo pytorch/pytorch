@@ -4761,6 +4761,13 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
             return tuple([N, C] + ([size] * rank))
         return tuple([size] * rank)
 
+    def uneven_shape(size, rank, with_batch_channel=True):
+        rc = list(shape(size, rank, with_batch_channel))
+        rc[-1] += 1
+        if rank > 2:
+            rc[-2] -= 1
+        return tuple(rc)
+
     if mode in ('bilinear', 'bicubic') and dtype == torch.uint8:
         make_arg = partial(
             make_tensor,
@@ -4799,6 +4806,21 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
                 mode=mode,
                 align_corners=align_corners,
             )
+            if rank > 1 and dtype.is_floating_point:
+                yield SampleInput(
+                    make_arg(uneven_shape(D, rank)),
+                    uneven_shape(S, rank, False),
+                    scale_factor=None,
+                    mode=mode,
+                    align_corners=align_corners,
+                )
+                yield SampleInput(
+                    make_arg(uneven_shape(D, rank)),
+                    uneven_shape(L, rank, False),
+                    scale_factor=None,
+                    mode=mode,
+                    align_corners=align_corners,
+                )
             for recompute_scale_factor in [False, True]:
                 for scale_factor in [1.7, 0.6]:
                     yield SampleInput(
