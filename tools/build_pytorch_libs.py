@@ -19,7 +19,9 @@ def _get_vc_env(vc_arch: str) -> dict[str, str]:
 
         return distutils._msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
     except AttributeError:
-        from setuptools._distutils import _msvccompiler  # type: ignore[import,attr-defined]
+        from setuptools._distutils import (
+            _msvccompiler,  # type: ignore[import,attr-defined]
+        )
 
         return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
 
