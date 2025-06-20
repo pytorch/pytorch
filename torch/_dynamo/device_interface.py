@@ -423,7 +423,7 @@ class MpsInterface(DeviceInterface):
 
     @staticmethod
     def inductor_backend() -> Union[str, None]:
-        return "metal"
+        return "mps"
 
 
 device_interfaces: dict[str, type[DeviceInterface]] = {}
