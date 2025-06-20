@@ -12,10 +12,15 @@ import torch
 import torch._logging._internal
 import torch._logging.structured
 import torch.utils._pytree as pytree
-from torch._export.passes.insert_custom_op_guards import insert_custom_op_guards
-from torch.export import ExportedProgram
-from torch.export._trace import _export
-from torch.export.dynamic_shapes import _DimHint, _DimHintType, Dim
+from torch._export.passes.insert_custom_op_guards import (
+    get_op_profiles,
+    insert_custom_op_guards,
+    OpProfile,
+)
+
+from ._trace import _export
+from .dynamic_shapes import _DimHint, _DimHintType, Dim
+from .exported_program import ExportedProgram
 
 
 log = logging.getLogger(__name__)
@@ -38,7 +43,7 @@ def prettify_stack(stack: list[dict[str, str]], str_to_filename: dict[int, str])
             continue
 
         res += f"""
-        File {str_to_filename[frame['filename']]}, lineno {frame['line']}, in {frame['name']}"""  # type: ignore[index]
+        File {str_to_filename[frame["filename"]]}, lineno {frame["line"]}, in {frame["name"]}"""  # type: ignore[index]
 
     res += f"\n            {stack[-1]['loc']}"
     return res
@@ -154,10 +159,12 @@ class DraftExportReport:
         failures: list[FailureReport],
         str_to_filename: dict[int, str],
         expressions_created: dict[int, dict[str, Any]],
+        op_profiles: dict[str, set[OpProfile]],
     ):
         self.failures: list[FailureReport] = failures
         self.str_to_filename = str_to_filename
         self.expressions_created: dict[int, dict[str, Any]] = expressions_created
+        self.op_profiles = op_profiles
 
     def successful(self) -> bool:
         return len(self.failures) == 0 or all(
@@ -320,12 +327,12 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
                         # We don't want to log all expression_created logs, only
                         # the ones that are relevant to the
                         # guards/propagate_real_tensor
-                        self.expression_created_logs[
-                            metadata[key]["result_id"]
-                        ] = ExpressionCreatedNode(
-                            metadata[key]["result_id"],
-                            metadata[key].get("argument_ids", []),
-                            record,
+                        self.expression_created_logs[metadata[key]["result_id"]] = (
+                            ExpressionCreatedNode(
+                                metadata[key]["result_id"],
+                                metadata[key].get("argument_ids", []),
+                                record,
+                            )
                         )
                         return
 
@@ -360,17 +367,20 @@ def draft_export(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
-    pre_dispatch: bool = False,
+    pre_dispatch: bool = True,
 ) -> ExportedProgram:
     kwargs = kwargs or {}
     dynamic_shapes = dynamic_shapes or {}
 
     capture_structured_log = CaptureStructuredTrace()
 
-    with torch._functorch.config.patch(
-        fake_tensor_propagate_real_tensors=True,
-        generate_fake_kernels_from_real_mismatches=True,
-    ), capture_structured_log:
+    with (
+        torch._functorch.config.patch(
+            fake_tensor_propagate_real_tensors=True,
+            generate_fake_kernels_from_real_mismatches=True,
+        ),
+        capture_structured_log,
+    ):
         try:
             new_shapes = None
             ep = _export(
@@ -406,9 +416,7 @@ def draft_export(
 
         str_to_filename: dict[int, str] = {}
         failures: list[FailureReport] = []
-        custom_ops_logs: dict[
-            Any, tuple[dict[str, Any], FailureType]
-        ] = {}  # For adding in assertions before custom ops
+        incorrect_custom_ops: set[str] = set()
         expressions_created: dict[int, dict[str, Any]] = {}
 
         for log_name, log_contents in capture_structured_log.log_record.logs:
@@ -419,10 +427,10 @@ def draft_export(
                 continue
 
             elif log_name == "propagate_real_tensors_provenance":
-                log_contents[
-                    "occurrences"
-                ] = capture_structured_log.log_record.get_log_count(
-                    (log_name, log_contents)
+                log_contents["occurrences"] = (
+                    capture_structured_log.log_record.get_log_count(
+                        (log_name, log_contents)
+                    )
                 )
 
                 failure_type = FailureType.DATA_DEPENDENT_ERROR
@@ -435,14 +443,11 @@ def draft_export(
                 log_contents["new_dynamic_shapes"] = new_shapes
             elif log_name == "missing_fake_kernel":
                 failure_type = FailureType.MISSING_FAKE_KERNEL
-                custom_ops_logs[log_contents["op"]] = (log_contents, failure_type)
+                incorrect_custom_ops.add(log_contents["op"])
 
             elif log_name == "mismatched_fake_kernel":
                 failure_type = FailureType.MISMATCHED_FAKE_KERNEL
-                custom_ops_logs[(log_contents["op"], log_contents["reason"])] = (
-                    log_contents,
-                    failure_type,
-                )
+                incorrect_custom_ops.add(log_contents["op"])
 
             else:
                 continue
@@ -459,27 +464,41 @@ def draft_export(
             if v.visited:
                 expressions_created[k] = v.record
 
-        report = DraftExportReport(failures, str_to_filename, expressions_created)
+        op_profiles = get_op_profiles(ep.graph_module, incorrect_custom_ops)
+        report = DraftExportReport(
+            failures, str_to_filename, expressions_created, op_profiles
+        )
 
         # Add asserts around custom ops
-        insert_custom_op_guards(ep.graph_module, list(custom_ops_logs.keys()))
+        insert_custom_op_guards(ep.graph_module, incorrect_custom_ops)
 
     ep._report = report
     if not report.successful():
         log_filename = capture_structured_log.stream.name
 
-        log.warning(
-            """
+        warning_msg = f"""
 ###################################################################################################
-WARNING: %s issue(s) found during export, and it was not able to soundly produce a graph.
+WARNING: {len(report.failures)} issue(s) found during export, and it was not able to soundly produce a graph.
 To view the report of failures in an html page, please run the command:
-    `tlparse %s --export`
+    `tlparse {log_filename} --export`
 Or, you can view the errors in python by inspecting `print(ep._report)`.
-###################################################################################################
-        """,
-            len(report.failures),
-            log_filename,
-        )
+"""
+
+        if len(report.op_profiles) > 0:
+            warning_msg += f"""
+While tracing we found {len(report.op_profiles)} operator(s) which do not have a fake kernel registered.
+If you intend to retrace the exported graph or run it with fake tensors, please run it under the
+following context manager, which will register a fake kernel for those operators.
+```
+with torch._library.fake_profile.unsafe_generate_fake_kernels(ep._report.op_profiles):
+    # run with fake tensors
+```
+"""
+
+        warning_msg += """#################################################################################################"""
+
+        log.warning(warning_msg)
+
     else:
         log.info(
             """

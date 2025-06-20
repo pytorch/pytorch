@@ -585,7 +585,7 @@ cpu_adaptive_max_pool3d_channels_last(
   using Vec = vec::Vectorized<scalar_t>;
   using integer_t = vec::int_same_size_t<scalar_t>;
   using iVec = vec::Vectorized<integer_t>;
-  // for the convience of vectorization, use integer of the same size of scalar_t,
+  // for the convenience of vectorization, use integer of the same size of scalar_t,
   //   e.g. int32_t for float, int64_t for double
   // need to make sure doesn't overflow
   TORCH_CHECK(input_height * input_width <= std::numeric_limits<integer_t>::max());

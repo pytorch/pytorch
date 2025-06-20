@@ -3,6 +3,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -47,12 +48,11 @@ bool reportSourceLocation(size_t file_size) {
   if (file_size < 512ull * 1024) {
     return true;
   }
-  const char* enable_env =
-      std::getenv("PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION");
+  const auto enable_env =
+      c10::utils::get_env("PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION");
   bool flag = true;
-  if (enable_env == nullptr || std::strcmp(enable_env, "0") == 0 ||
-      std::strcmp(enable_env, "FALSE") == 0 ||
-      std::strcmp(enable_env, "false") == 0) {
+  if (!enable_env.has_value() || enable_env == "0" || enable_env == "FALSE" ||
+      enable_env == "false") {
     flag = false;
   }
   return flag;

@@ -51,19 +51,18 @@ We may eventually upstream them into PyTorch itself along with `functorch`.
 We have to install a nightly build of PyTorch so first set up an environment:
 
 ```sh
-conda create --name dim
-conda activate dim
+python -m venv dim
+source dim/bin/activate  # or `& .\dim\Scripts\Activate.ps1` on Windows
 ```
 
 First-class dims requires a fairly recent nightly build of PyTorch so that functorch will work. You can install it using one of these commands:
 
 ```sh
-# For CUDA 10.2
-conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch-nightly
-# For CUDA 11.3
-conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch-nightly
+# For CUDA
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu116
+
 # For CPU-only build
-conda install pytorch torchvision torchaudio cpuonly -c pytorch-nightly
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 ```
 
 Install dim. You will be asked for github credentials to access the fairinternal organization.

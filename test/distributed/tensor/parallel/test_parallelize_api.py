@@ -3,7 +3,7 @@ from collections import OrderedDict
 from copy import deepcopy
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import (

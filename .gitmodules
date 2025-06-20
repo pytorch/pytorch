@@ -25,7 +25,7 @@
 [submodule "third_party/gloo"]
     ignore = dirty
     path = third_party/gloo
-    url = https://github.com/facebookincubator/gloo
+    url = https://github.com/pytorch/gloo
 [submodule "third_party/NNPACK_deps/pthreadpool"]
     ignore = dirty
     path = third_party/pthreadpool

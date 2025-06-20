@@ -247,7 +247,7 @@ class NNModuleToString:
         return model_str
 
 
-@functools.lru_cache(None)  # subprocess is expensive
+@functools.cache  # subprocess is expensive
 def _cuda_system_info_comment():
     if not torch.cuda.is_available():
         return "# torch.cuda.is_available()==False, no GPU info collected\n"
@@ -780,7 +780,7 @@ def aot_graph_input_parser(
     forward(**kwargs)
     """
 
-    from torch.fx.graph import dtype_abbrs
+    from torch.utils._dtype_abbrs import dtype_abbrs
 
     dtype_map = {value: key for key, value in dtype_abbrs.items()}
     dtype_pattern = "|".join(dtype_abbrs.values())

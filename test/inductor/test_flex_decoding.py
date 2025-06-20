@@ -277,7 +277,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
 
 class TestFlexDecoding(InductorTestCase):
     def setUp(self):
-        super(self.__class__, self).setUp()
+        super().setUp()
         self.test_inference_only = False
         if test_device[0] == "cpu":
             if LONG_COMPILATION_ON_CPU:
@@ -1814,9 +1814,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
             # Ensure no more re-compilation after the second automatic dynamic shape version.
             if i == 0:
-                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
-            else:
                 self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+            else:
+                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 4)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)

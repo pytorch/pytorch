@@ -7,13 +7,14 @@ from pprint import pformat
 from typing import NamedTuple
 
 import torch
-from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
-    init_device_mesh,
+    Replicate,
+    Shard,
 )
 from torch.distributed.tensor._ops.utils import is_tensor_partial, normalize_dim
 from torch.distributed.tensor.debug import CommDebugMode
@@ -310,7 +311,7 @@ class DistMathOpsTest(DTensorTestBase):
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
-            from torch.distributed._tensor.placement_types import TensorMeta
+            from torch.distributed.tensor._dtensor_spec import TensorMeta
 
             dtensor_meta = y_dist._spec.tensor_meta
             assert isinstance(dtensor_meta, TensorMeta)

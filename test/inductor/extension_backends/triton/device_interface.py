@@ -76,7 +76,7 @@ class DeviceInterface(device_interface.DeviceInterface):
 
     @staticmethod
     def device_count() -> int:
-        raise NotImplementedError
+        return 1
 
     @staticmethod
     def maybe_exchange_device(device: int) -> int:
@@ -93,24 +93,12 @@ class DeviceInterface(device_interface.DeviceInterface):
         return 0  # previous device is always 0
 
     @staticmethod
-    def current_stream():
-        raise NotImplementedError
-
-    @staticmethod
-    def set_stream(stream) -> None:
-        raise NotImplementedError
-
-    @staticmethod
     def get_raw_stream(device_index: int):
         return None
 
     @staticmethod
     def synchronize(device) -> None:
         pass
-
-    @classmethod
-    def get_device_properties(cls, device=None) -> DeviceProperties:
-        return cls.Worker.get_device_properties(device)
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -120,7 +108,3 @@ class DeviceInterface(device_interface.DeviceInterface):
     @staticmethod
     def get_compute_capability(device) -> int:
         return 0
-
-    @staticmethod
-    def triton_supported() -> bool:
-        return True
