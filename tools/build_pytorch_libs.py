@@ -15,11 +15,11 @@ from .setup_helpers.env import (
 
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
     try:
-        from setuptools import distutils  # type: ignore[import]
+        from setuptools import distutils  # type: ignore[import,attr-defined]
 
         return distutils._msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
     except AttributeError:
-        from setuptools._distutils import _msvccompiler  # type: ignore[import]
+        from setuptools._distutils import _msvccompiler  # type: ignore[import,attr-defined]
 
         return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
 
