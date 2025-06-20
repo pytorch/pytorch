@@ -47,13 +47,13 @@ inline static c10::SymBool _compute_contiguous_sym(
 
     // When calculating the expected stride, we can choose to multiply
     // with max(1, size[d]) or size[d]. Regardless, this is ok for this
-    // function. Why? 
+    // function. Why?
     // (1) If size[d] == 0, then the tensor is contiguous and if
     //     we return true or false it won't break the invariance that it returns
-    //     true if the tensor is contiguous. 
-    // (2) If size[d] is not 0, then max(1,size[d]) and size[d] are equal. 
-    //     Therefore, if we choose to use max(1, size[d]) or size[d] to calculate 
-    //     the expected stride, the result is the same.
+    //     true if the tensor is contiguous.
+    // (2) If size[d] is not 0, then max(1,size[d]) and size[d] are equal.
+    //     Therefore, if we choose to use max(1, size[d]) or size[d] to
+    //     calculate the expected stride, the result is the same.
     //
     // We symbolically check both paths to maximize the cases where this
     // function returns true. This is because make_contiguous_strides_for adds
