@@ -210,7 +210,11 @@ def _callback_from_stance(callback):
             if trace_rules.check(frame.f_code):
                 return ConvertFrameReturn()
             raise RuntimeError(
-                "Detected recompile when torch.compile stance is 'fail_on_recompile'"
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'. "
+                + "Frame info: "
+                + f"filename: '{frame.f_code.co_filename}', "
+                + f"function name: '{frame.f_code.co_name}', "
+                + f"line number: {frame.f_lineno}"
             )
 
         # to prevent cache miss due to different callback
