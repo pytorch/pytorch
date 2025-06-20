@@ -2333,6 +2333,7 @@ class _XpuDeviceProperties:
     name: str
     platform_name: str
     vendor: str
+    device_id: _int
     driver_version: str
     version: str
     max_compute_units: _int
