@@ -17,10 +17,11 @@ def compile_full_model(model):
 
 
 def compile_regions(model, nn_modules):
-    for submod in model.modules():
-        if isinstance(submod, nn_modules):
-            print("Compiling", submod.__class__)
-            submod.compile(fullgraph=True)
+    model.compile_repeated_blocks(fullgraph=True)
+    # for submod in model.modules():
+    #     if isinstance(submod, nn_modules):
+    #         print("Compiling", submod.__class__)
+    #         submod.compile(fullgraph=True)
 
 
 def compile_hierarchical(model, nn_modules):
