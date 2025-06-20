@@ -7,6 +7,7 @@ import typing_extensions
 
 import torch
 from torch.export.exported_program import _decompose_exported_program
+from torch.utils import _pytree as pytree
 
 
 def _copy_graph_module_and_signature(
@@ -113,6 +114,38 @@ def _sticky_export(forward_func, dynamic_shapes_callback=None):
 class _ExportMethod:
     overloads: dict[str, torch.export.ExportedProgram]
     fallbacks: list[torch.export.ExportedProgram]
+
+
+@dataclasses.dataclass
+class _TensorMeta:
+    device: torch.device
+    dtype: torch.dtype
+    rank: int
+
+    def __hash__(self):
+        return hash((self.device, self.dtype))
+
+
+@dataclasses.dataclass
+class _InputDescriptor:
+    num_elems: int
+    spec: pytree.TreeSpec
+    inputs: list[typing.Union[typing.Any, _TensorMeta]]
+
+    def __hash__(self):
+        return hash((self.num_elems, self.spec, tuple(self.inputs)))
+
+
+def traverse_inputs(args, kwargs):
+    flat_args, input_spec = pytree.tree_flatten((args, kwargs))
+    hashable_inputs = []
+    for i in flat_args:
+        if isinstance(i, torch.Tensor):
+            hashable_inputs.append(_TensorMeta(i.device, i.dtype, i.ndim))
+        else:
+            hashable_inputs.append(i)
+
+    return _InputDescriptor(len(flat_args), input_spec, hashable_inputs)
 
 
 _InputT = typing_extensions.ParamSpec("_InputT")
@@ -257,7 +290,10 @@ class _ExportPackage:
 
         """
 
-        fallbacks: list[torch.export.ExportedProgram] = []
+        fallbacks: dict[
+            str,
+            tuple[torch.export.ExportedProgram, torch.export.AdditionalInputs],
+        ] = {}
         specs: dict[str, typing.Callable[_InputT, typing.Any]] = {}
         overloads: dict[str, torch.export.ExportedProgram] = {}
         self.methods[method] = _ExportMethod(fallbacks=fallbacks, overloads=overloads)
@@ -293,18 +329,51 @@ class _ExportPackage:
                     f"Exporter: Cannot export fallback {fn} when fallback policy is set to 'error',"
                     + "please specify an overload or adjust the fallback policy."
                 )
-            elif fallback == "once":
+
+            if fallback == "once":
                 if len(fallbacks) > 0:
                     raise RuntimeError(
                         f"Exporter: Cannot export {fn} more than once, "
                         + "please specify an overload or adjust the fallback policy."
                     )
-            else:
-                raise RuntimeError(f"Unknown fallback policy: {fallback}")
-            ep = torch.export.export(model, args, kwargs)
+                if len(fallbacks) == 0:
+                    ep = torch.export.export(model, args, kwargs)
+                    inputs_collection = torch.export.AdditionalInputs()
+                    fallbacks[traverse_inputs(args, kwargs)] = (
+                        ep,
+                        inputs_collection.add(args, kwargs),
+                    )
 
-            fallbacks.append(ep)
-            return ep.module()(*args, **kwargs)
+                traversed_input = traverse_inputs(args, kwargs)
+                assert traversed_input in fallbacks
+                fallbacks[traversed_input][1].add(args, kwargs)
+                return fallbacks[traversed_input][0].module()(*args, **kwargs)
+
+            if fallback == "auto":
+                key = traverse_inputs(args, kwargs)
+                if key in fallbacks:
+                    ep, example_inputs = fallbacks[key]
+                    example_inputs.add(args, kwargs)
+                    try:
+                        example_inputs.verify(ep)
+                    except RuntimeError as _:
+                        ep = torch.export.export(
+                            model, args, kwargs, dynamic_shapes=example_inputs
+                        )
+                        fallbacks[key] = (ep, example_inputs)
+                    else:
+                        fallbacks[key] = (ep, example_inputs)
+                else:
+                    example_inputs = torch.export.AdditionalInputs()
+                    example_inputs.add(args, kwargs)
+                    ep = torch.export.export(
+                        model, args, kwargs, dynamic_shapes=example_inputs
+                    )
+                    fallbacks[key] = (ep, example_inputs)
+
+                return fallbacks[key][0].module()(*args, **kwargs)
+
+            raise RuntimeError(f"Unknown fallback policy: {fallback}")
 
         if isinstance(fn, torch.nn.Module):
             _exporter_context = torch._dynamo.eval_frame.OptimizedModule(  # type: ignore[assignment] # noqa: F811
