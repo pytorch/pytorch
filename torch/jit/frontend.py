@@ -12,7 +12,6 @@ from typing import Any, Optional, Union
 import torch
 import torch.jit.annotations
 from torch import _jit_internal
-# from torch._C import Decl
 from torch._C._jit_tree_views import (
     Apply,
     Assert,
