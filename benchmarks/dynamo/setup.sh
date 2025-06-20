@@ -48,7 +48,7 @@ if [ "$1" == "timm" ] || [ "$1" == "huggingface" ]; then
     exit 0
 elif [ "$1" == "torchbench" ]; then
     (cd ../.. && install_torchaudio $HARDWARE) # ETA: 1 min
-    (cd ../.. && checkout_install_torchbench $MODELS) # ETA: 0.5 min per model
+    (cd ../.. && checkout_install_torchbench $MODELS) # ETA: 20 seconds per model
 fi
 
 # only dlrm needs fbgemm and torchrec
