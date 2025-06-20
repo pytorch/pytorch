@@ -64,7 +64,12 @@ bool check_grad(sdp::sdp_params const& params, bool debug) {
         "scale_dot_product_attention on xpu is not supported with attn_mask.requires_grad() == True.");
   }
 
-  return !is_gqa && !attn_mask_needs_grad;
+  bool is_causal = params.is_causal;
+  if (debug && is_causal) {
+    TORCH_WARN(
+        "scale_dot_product_attention on xpu is not supported with is_causal == True for training.");
+  }
+  return !is_gqa && !attn_mask_needs_grad && !is_causal;
 }
 
 bool use_overrideable_xpu(sdp::sdp_params const& params, bool debug) {
@@ -223,7 +228,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   at::Tensor logsumexp;
   if (compute_logsumexp) {
     logsumexp = at::empty(
-        {batch_size, num_head_q, seq_len_q, 1}, opts.dtype(at::kFloat));
+        {batch_size, num_head_q, seq_len_q}, opts.dtype(at::kFloat));
   }
 
   at::native::onednn::gpu_float_sdpa(
@@ -282,10 +287,6 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
     std::optional<double> scale) {
-  if (!grad_out.defined()) {
-    return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
-  }
-
   TORCH_INTERNAL_ASSERT(
     grad_out.dim() == 4 && out.dim() == 4 &&
     grad_out.size(0) == out.size(0) &&
@@ -317,20 +318,19 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
   TORCH_INTERNAL_ASSERT(
       dropout_p == 0.0,
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: Currently do not support dropout > 0");
-  TORCH_INTERNAL_ASSERT(logsumexp.dim() == 4 &&
+  TORCH_INTERNAL_ASSERT(logsumexp.dim() == 3 &&
       logsumexp.size(0) == query.size(0) &&
       logsumexp.size(1) == query.size(1) &&
       logsumexp.size(2) == query.size(2) &&
-      logsumexp.size(3) == 1,
-      "scaled_dot_product_fused_attention_overrideable_backward_xpu: logsumexp should have the shape of {(B), H, T, 1}");
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: logsumexp should have the shape of {(B), H, T}");
 
   std::optional<Tensor> attn_bias_opt;
   if (attn_bias.defined()) {
     attn_bias_opt = attn_bias;
   }
   TORCH_INTERNAL_ASSERT(
-      !(attn_bias_opt.has_value() && is_causal),
-      "scaled_dot_product_fused_attention_overrideable_backward_xpu: attn_bias cannot present with is_causal");
+      !is_causal,
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: Curently do not support is_causal = True");
 
   const int64_t batch_size = query.size(0);
   const int64_t num_head_q = query.size(1);
@@ -343,7 +343,9 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
   auto grad_q = at::empty_like(query);
   auto grad_k = at::empty_like(key);
   auto grad_v = at::empty_like(value);
-
+  auto grad_attn_bias = attn_bias_opt.has_value()
+      ? at::empty_like(attn_bias_opt.value())
+      : at::Tensor();
   at::native::onednn::gpu_float_sdpa_backward(
       batch_size,
       num_head_q,
@@ -368,7 +370,7 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
       std::move(grad_q),
       std::move(grad_k),
       std::move(grad_v),
-      at::Tensor());
+      std::move(grad_attn_bias));
 }
 
 REGISTER_XPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_xpu);

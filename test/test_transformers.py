@@ -4251,7 +4251,7 @@ class TestSDPAXpuOnly(NNTestCase):
         (1, 32, 2016, 2016, 128),
         (4, 32, 2016, 2016, 128),
     ])
-    @parametrize("mask_type", ["float",]) #"causal"])
+    @parametrize("mask_type", ["float", "causal"])
     @parametrize("train", [False, True])
     def test_scaled_dot_product_fused_attention_mask_vs_math(
         self,
@@ -4309,7 +4309,7 @@ class TestSDPAXpuOnly(NNTestCase):
         attn_mask2 = attn_mask.float() if attn_mask is not None else None
 
         if fused_kernel == SDPBackend.OVERRIDEABLE:
-            with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
+            with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE, SDPBackend.MATH]):
                 actual = F.scaled_dot_product_attention(
                     q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=is_causal)
         else:
