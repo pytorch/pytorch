@@ -1923,6 +1923,7 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
     def get_val(dtype):
         return make_tensor([], dtype=dtype, device="cpu").item()
 
+    double_dtype = torch.double if device != "mps:0" else torch.float
     inputs = [
         ((), get_val(dtype), {}),
         ((S, S), get_val(dtype), {}),
@@ -1930,12 +1931,15 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
         ((S,), get_val(dtype), {'dtype': dtype, 'device': device}),
         # Hard-code some dtypes/devices. We want to test cases where the
         # (dtype, device) is different from the input's (dtype, device)
-        ((S,), get_val(torch.double), {'dtype': torch.double}),
+        ((S,), get_val(double_dtype), {'dtype': double_dtype}),
         ((S,), get_val(dtype), {'device': 'cpu'}),
-        ((S,), get_val(torch.double), {'dtype': torch.double, 'device': 'cpu'}),
+        ((S,), get_val(double_dtype), {'dtype': double_dtype, 'device': 'cpu'}),
     ]
     if torch.cuda.is_available():
         inputs.append(((S,), get_val(dtype), {'device': 'cuda'}))
+
+    if torch.mps.is_available() and dtype not in [torch.float64, torch.complex128, torch.uint32, torch.uint16]:
+        inputs.append(((S,), get_val(dtype), {'device': 'mps'}))
 
     if not dtype.is_signed:
         # For unsigned dtypes, negative values are converted.
@@ -4757,6 +4761,13 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
             return tuple([N, C] + ([size] * rank))
         return tuple([size] * rank)
 
+    def uneven_shape(size, rank, with_batch_channel=True):
+        rc = list(shape(size, rank, with_batch_channel))
+        rc[-1] += 1
+        if rank > 2:
+            rc[-2] -= 1
+        return tuple(rc)
+
     if mode in ('bilinear', 'bicubic') and dtype == torch.uint8:
         make_arg = partial(
             make_tensor,
@@ -4795,6 +4806,21 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
                 mode=mode,
                 align_corners=align_corners,
             )
+            if rank > 1 and dtype.is_floating_point:
+                yield SampleInput(
+                    make_arg(uneven_shape(D, rank)),
+                    uneven_shape(S, rank, False),
+                    scale_factor=None,
+                    mode=mode,
+                    align_corners=align_corners,
+                )
+                yield SampleInput(
+                    make_arg(uneven_shape(D, rank)),
+                    uneven_shape(L, rank, False),
+                    scale_factor=None,
+                    mode=mode,
+                    align_corners=align_corners,
+                )
             for recompute_scale_factor in [False, True]:
                 for scale_factor in [1.7, 0.6]:
                     yield SampleInput(
@@ -15619,9 +15645,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
                DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule'),
-               # NotImplementedError: The operator 'aten::_upsample_nearest_exact3d.out' is not currently implemented
-               # for the MPS device.
-               DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
