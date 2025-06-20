@@ -581,7 +581,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         return partial(self.preprocess_mm_configs, configs=self.conv_configs)
 
     # Flex attn helpers
-    def get_flex_attn_fwd_configs(self, head_dim, dtype) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
@@ -875,14 +875,14 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 256): ROCmFlexConfig(32, 64, 1, 4),
         }
 
-        self.flex_attn_fwd_autotune_configs: list[ROCmFlexConfig] = [
+        self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
             ROCmFlexConfig(BLOCK1, BLOCK2, 1, w)
             for BLOCK1 in [16, 64, 128]
             for BLOCK2 in [16, 32, 64, 128]
             for w in [4, 8]
         ]
 
-        self.flex_attn_bwd_autotune_configs: list[ROCmFlexConfig] = [
+        self.flex_attn_bwd_autotune_configs: list[FlexConfig] = [
             ROCmFlexConfig(BLOCK1, BLOCK2, 1, w, mfma)
             for BLOCK1 in [16, 32, 64]
             for BLOCK2 in [32, 64, 128]
@@ -891,7 +891,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if BLOCK2 % BLOCK1 == 0
         ]
 
-        self.flex_decode_autotune_configs: list[ROCmFlexDecodeConfig] = [
+        self.flex_decode_autotune_configs: list[FlexDecodeConfig] = [
             ROCmFlexDecodeConfig(32, 1, 4),
             ROCmFlexDecodeConfig(64, 1, 4),
             ROCmFlexDecodeConfig(128, 1, 4),
@@ -900,7 +900,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ROCmFlexDecodeConfig(128, 1, 8),
         ]
 
-        self.exhaustive_flex_attn_fwd_configs: list[ROCmFlexConfig] = [
+        self.exhaustive_flex_attn_fwd_configs: list[FlexConfig] = [
             ROCmFlexConfig(BLOCK_M, BLOCK_N, num_stages, num_warps, mfma, wpeu)
             for BLOCK_M in [16, 32, 64, 128]
             for BLOCK_N in [32, 64, 128]
@@ -910,7 +910,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for wpeu in [0, int(8 // num_warps)]
         ]
 
-        self.exhaustive_flex_attn_bwd_configs: list[ROCmFlexConfig] = [
+        self.exhaustive_flex_attn_bwd_configs: list[FlexConfig] = [
             ROCmFlexConfig(BLOCK1, BLOCK2, num_stages, num_warps, mfma, wpeu)
             for BLOCK1 in [16, 32, 64, 128]
             for BLOCK2 in [16, 32, 64, 128]
@@ -921,7 +921,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if BLOCK2 % BLOCK1 == 0
         ]
 
-        self.exhaustive_flex_decode_configs: list[ROCmFlexDecodeConfig] = [
+        self.exhaustive_flex_decode_configs: list[FlexDecodeConfig] = [
             ROCmFlexDecodeConfig(block_n, num_stages, num_warps, mfma, wpeu, kpack=2)
             for block_n in [16, 32, 64, 128]
             for num_stages in [1, 2]
@@ -1057,8 +1057,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
     def get_flex_attn_fwd_configs(
         self, head_dim: int, dtype: Any
-    ) -> list[ROCmFlexConfig]:
-        flex_attn_fwd_configs: list[ROCmFlexConfig] = []
+    ) -> list[FlexConfig]:
+        flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
@@ -1086,8 +1086,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
-    ) -> list[ROCmFlexConfig]:
-        flex_attn_bwd_configs: list[ROCmFlexConfig] = []
+    ) -> list[FlexConfig]:
+        flex_attn_bwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
@@ -1113,8 +1113,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
-    ) -> list[ROCmFlexDecodeConfig]:
-        flex_decode_configs: list[ROCmFlexDecodeConfig] = []
+    ) -> list[FlexDecodeConfig]:
+        flex_decode_configs: list[FlexDecodeConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
