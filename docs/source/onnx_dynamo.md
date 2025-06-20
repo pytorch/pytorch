@@ -183,12 +183,7 @@ The following metadata fields are added to each ONNX node:
 
   *Example:*
   ```
-  File "/opt/conda/envs/ptca/lib/python3.10/site-packages/transformers/models/electra/modeling_electra.py", line 1615, in forward
-    outputs = self.electra(
-  File "/opt/conda/envs/ptca/lib/python3.10/site-packages/transformers/models/electra/modeling_electra.py", line 908, in forward
-    hidden_states = self.embeddings_project(hidden_states)
-  File "/opt/conda/envs/ptca/lib/python3.10/site-packages/torch/nn/modules/linear.py", line 125, in forward
-    return F.linear(input, self.weight, self.bias)
+  File "simpleadd.py", line 7, in forward\n    return torch.add(x, y)
   ```
 
 These metadata fields are stored in the metadata_props attribute of each ONNX node and can be inspected using Netron or programmatically.
