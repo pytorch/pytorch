@@ -123,13 +123,14 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
   return input;
 }
 
-void nvshmem_put(at::Tensor& inp, c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory> dest, const int64_t peer) {
+void nvshmem_put(at::Tensor& inp, c10::intrusive_ptr<SymmetricMemory> dest, const int64_t peer) {
   void* buffer_ptr = dest->get_buffer_ptrs()[peer];
 
+  c10::cuda::CUDAGuard guard(inp.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   // TODO: If the size of the tensor is one of 8, 16, 32, 64, 128
   // use nvshmemx_putSIZE_on_stream
-  nvshmemx_getmem_on_stream(buffer_ptr, inp.data_ptr(), inp.numel(), 0, stream);
+  nvshmemx_putmem_on_stream(buffer_ptr, inp.data_ptr(), inp.numel(), 0, stream);
 }
 
 at::Tensor nvshmem_all_to_all(

@@ -7,6 +7,8 @@
 
 namespace c10d::nvshmem_extension {
 
+using SymmetricMemory = ::c10d::symmetric_memory::SymmetricMemory;
+
 void initialize_nvshmem_with_store(
     c10::intrusive_ptr<c10d::Store> store,
     int rank,
@@ -16,7 +18,7 @@ void initialize_nvshmem_with_store(
 // operations.
 TORCH_API void nvshmemx_cumodule_init(uintptr_t module);
 
-TORCH_API void nvshmem_put(at::Tensor& inp, c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory> dest, const int64_t peer);
+TORCH_API void nvshmem_put(at::Tensor& inp, c10::intrusive_ptr<SymmetricMemory> dest, const int64_t peer);
 
 at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name);
 
