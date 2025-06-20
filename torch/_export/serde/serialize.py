@@ -2498,6 +2498,7 @@ class GraphModuleDeserializer(metaclass=Final):
             len(serialized_node.outputs) == 1
             and "torch.ops.higher_order" in serialized_node.target
             and not getattr(serialized_node, "is_hop_single_tensor_return", True)
+            and serialized_node.outputs[0].type != "as_none"
         ):
 
             def _deserialize_hop_with_single_return(serialized_node, fx_node):

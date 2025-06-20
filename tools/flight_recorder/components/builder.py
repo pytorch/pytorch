@@ -300,7 +300,7 @@ def build_collectives(
                     for _ in range(1, num_coalesced_entries):
                         all_entries[i].pop(k)
         else:
-            # Iterate through all the ranks and check if there is a mis-match for the current entry.
+            # Iterate through all the ranks and check if there is a mismatch for the current entry.
             check_current_entry_match(
                 all_entries,
                 _pg_guids,

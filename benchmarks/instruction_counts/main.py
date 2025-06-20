@@ -2,7 +2,7 @@
 
 The contents of this file are placeholders, and will be replaced by more
 expressive and robust components (e.g. better runner and result display
-components) in future iterations. However this allows us to excercise the
+components) in future iterations. However this allows us to exercise the
 underlying benchmark generation infrastructure in the mean time.
 """
 
