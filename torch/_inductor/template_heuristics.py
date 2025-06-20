@@ -688,20 +688,20 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
                 default_config = FlexConfig(128, 64, 3, 4)
+            if capability >= (9, 0):
+                default_config = self.h100_default_flex_config.get(
+                    (dtype, head_dim), default_config
+                )
+            elif capability >= (8, 0):
+                default_config = self.a100_default_flex_config.get(
+                    (dtype, head_dim), default_config
+                )
         else:
             if dtype == torch.float32:
                 default_config = FlexConfig(32, 16, 3, 4)
             else:
                 default_config = FlexConfig(64, 32, 3, 4)
 
-        if capability >= (9, 0):
-            default_config = self.h100_default_flex_config.get(
-                (dtype, head_dim), default_config
-            )
-        elif capability >= (8, 0):
-            default_config = self.a100_default_flex_config.get(
-                (dtype, head_dim), default_config
-            )
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
