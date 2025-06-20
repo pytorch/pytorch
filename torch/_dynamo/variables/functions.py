@@ -501,10 +501,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             )
 
         if (
-            not tx.output.current_tracer.allow_side_effects
-            and self.fn is torch._dynamo.utils._UNSAFE_allow_side_effects
+            not tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
+            and self.fn
+            is torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer
         ):
-            with torch._dynamo.side_effects.allow_side_effects(tx):
+            with torch._dynamo.side_effects.allow_externally_visible_side_effects_in_subtracer(
+                tx
+            ):
                 return super().call_function(tx, args, kwargs)
 
         if (

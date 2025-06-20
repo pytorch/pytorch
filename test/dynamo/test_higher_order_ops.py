@@ -297,7 +297,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self._test_wrap_simple(f, default_args_generator((x,)), arg_count)
 
     def test_allow_python_side_effects_utility(self):
-        from torch._dynamo.utils import _UNSAFE_allow_side_effects
+        from torch._dynamo.utils import (
+            _disable_side_effect_safety_checks_for_current_subtracer,
+        )
         from torch._higher_order_ops.wrap import dynamo_bypassing_wrapper
 
         def wrapper(fn):
@@ -311,7 +313,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return x.sin()
 
         def does_side_effect_wrapped(*args, **kwargs):
-            return _UNSAFE_allow_side_effects(does_side_effect, *args, **kwargs)
+            return _disable_side_effect_safety_checks_for_current_subtracer(
+                does_side_effect, *args, **kwargs
+            )
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
@@ -330,7 +334,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return dynamo_bypassing_wrapper(wrapper, inner_does_side_effect, x)
 
         def outer_wrapped(*args, **kwargs):
-            return _UNSAFE_allow_side_effects(outer, *args, **kwargs)
+            return _disable_side_effect_safety_checks_for_current_subtracer(
+                outer, *args, **kwargs
+            )
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn_nested(x):
