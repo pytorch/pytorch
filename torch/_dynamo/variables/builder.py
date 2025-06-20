@@ -277,6 +277,7 @@ from .user_defined import (
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
 
@@ -1468,6 +1469,23 @@ class VariableBuilder:
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
             result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, set):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            L = list(dict.fromkeys(value))
+            output = [
+                LazyVariableTracker.create(
+                    list.__getitem__(L, i),
+                    source=NonSerializableSetGetItemSource(self.get_source(), i),
+                )
+                for i in range(list.__len__(L))
+            ]
+            set_vt = SetVariable(
+                output, source=self.source, mutation_type=ValueMutationExisting()
+            )
+            result = UserDefinedSetVariable(value, set_vt=set_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
