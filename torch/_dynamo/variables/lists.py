@@ -171,9 +171,9 @@ class BaseListVariable(VariableTracker):
             if len(args) != 1:
                 msg = f"{name} takes exactly one argument ({len(args)} given)"
                 raise_observed_exception(TypeError, tx, [ConstantVariable(msg)])
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.count),
-                [self] + list(args),
+            return VariableTracker.build(tx, operator.countOf).call_function(
+                tx,
+                [self, args[0]],
                 kwargs,
             )
         elif name in cmp_name_to_op_mapping:
