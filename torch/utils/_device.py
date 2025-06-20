@@ -1,12 +1,15 @@
 # mypy: allow-untyped-defs
-from typing import Optional
-import torch
-from torch.overrides import TorchFunctionMode, _pop_mode, _push_mode
-from torch.utils._contextlib import context_decorator
-from torch._C import _len_torch_function_stack
 import functools
+from typing import Optional
+
+import torch
+from torch._C import _len_torch_function_stack
+from torch.overrides import _pop_mode, _push_mode, TorchFunctionMode
+from torch.utils._contextlib import context_decorator
+
 
 CURRENT_DEVICE: Optional[torch.device] = None
+
 
 @functools.lru_cache(1)
 def _device_constructors():
@@ -50,8 +53,9 @@ def _device_constructors():
         # weird ones
         torch.tensor,
         torch.as_tensor,
-        torch.scalar_tensor
+        torch.scalar_tensor,
     }
+
 
 # NB: This is directly called from C++ in torch/csrc/Device.cpp
 class DeviceContext(TorchFunctionMode):
@@ -72,7 +76,6 @@ class DeviceContext(TorchFunctionMode):
 
         for mode in reversed(cur_stack):
             _push_mode(mode)
-
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         global CURRENT_DEVICE
@@ -95,13 +98,15 @@ class DeviceContext(TorchFunctionMode):
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        if func in _device_constructors() and kwargs.get('device') is None:
-            kwargs['device'] = self.device
+        if func in _device_constructors() and kwargs.get("device") is None:
+            kwargs["device"] = self.device
         return func(*args, **kwargs)
+
 
 # NB: This is directly called from C++ in torch/csrc/Device.cpp
 def device_decorator(device, func):
     return context_decorator(lambda: device, func)
+
 
 def set_device(device):
     """

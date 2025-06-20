@@ -175,6 +175,15 @@ triton_kernel_default_layout_constraint: Literal[
 # incompatible with disable_cpp_codegen
 cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
+# controls whether to compile entry and kernel separately for cpp_wrapper mode.
+# turn on this option to compile entry and kernel separately and minimize compile time of the entry part.
+# see https://github.com/pytorch/pytorch/pull/148773
+# Note: compiling entry and kernel separately may have a non-negligible impact on the performance.
+# see https://github.com/pytorch/pytorch/issues/156037
+cpp_wrapper_build_separate: bool = (
+    os.environ.get("TORCHINDUCTOR_CPP_WRAPPER_BUILD_SEPARATE", "0") == "1"
+)
+
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
@@ -434,6 +443,7 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
+
 # As above, specify candidate backends for conv autotune.
 # NB: in some cases for 1x1 convs we emit as matmul,
 # which will use the backends of `max_autotune_gemm_backends`
@@ -581,6 +591,9 @@ max_epilogue_benchmarked_choices = 1
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
+
+# how many nodes to attempt pairwise fusion with in a buffer group
+max_fusion_buffer_group_pairwise_attempts = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
 max_pointwise_cat_inputs = 8
@@ -1115,12 +1128,23 @@ class triton:
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
+    # TODO - enable by default
+    coalesce_tiling_analysis: bool = (
+        os.environ.get(
+            "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS", "1" if not is_fbcode() else "0"
+        )
+        == "1"
+    )
+
     # limit tiling dimensions
     #   - max_tiles=1 disables tiling
-    #   - max_tiles=2 is the default
+    #   - max_tiles=2
     #   - max_tiles=3 is experimental and may have bugs
     # higher values are unsupported
-    max_tiles = 2
+
+    #  We use a max of 3 if coalesce_tiling_analysis is True, and 2 otherwise.
+    #  Note - coalesce_tiling_analysis does not yet apply to dynamic shapes.
+    max_tiles: Optional[int] = None
 
     # Prefer higher dimensional tilings. This simplifies indexing expressions, making
     # it easier to identify block pointers.
@@ -1246,6 +1270,10 @@ class triton:
 
 
 class aot_inductor:
+    """
+    Settings for Ahead-Of-Time Inductor Compilation
+    """
+
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
@@ -1334,6 +1362,9 @@ class aot_inductor:
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
 
+    # Experimental. Flag to control whether to package weight separately on disk
+    package_constants_on_disk: bool = False
+
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = not is_fbcode()
 
@@ -1341,10 +1372,13 @@ class aot_inductor:
     embed_kernel_binary: bool = False
 
     # Generate kernel files that support multiple archs
-    # Default it will emit multi arch kernels as asm files, e.g. PTX for CUDA.
+    # For CUDA, this means generating fatbin files for kernels, and the fatbin files
+    # contains PTX and SASS for the current architecture.
     emit_multi_arch_kernel: bool = False
-    # In addition to emit asm files, also emit binary files for current arch
-    emit_current_arch_binary: bool = False
+
+    # If not None, the generated files with use this name in file stem.
+    # If None, we will use a hash to name files.
+    model_name_for_generated_files: Optional[str] = None
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
@@ -1465,6 +1499,23 @@ class cuda:
     cutlass_prescreening: bool = (
         os.environ.get("TORCHINDUCTOR_CUTLASS_PRESCREENING", "1") == "1"
     )
+
+    # Specify which operations should use CUTLASS backend
+    # Comma-separated list like "mm,addmm,bmm", "all" for all operations, and "" for none.
+    # Acceptable operations: mm, int_mm, addmm, sparse_semi_structured_mm, bmm, scaled_mm
+    cutlass_enabled_ops: str = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_ENABLED_OPS", "all"
+    )
+
+    # Whether to consult the binary remote cache
+    use_binary_remote_cache: bool = True
+
+    # Whether to upload compiled kernels to remote cache
+    upload_to_binary_remote_cache: bool = False
+
+    # Whether to force upload if the key already exists
+    # Use this to overwrite and handle cache pollution
+    binary_remote_cache_force_write: bool = False
 
 
 class rocm:
@@ -1626,7 +1677,7 @@ class trace:
     compile_profile = False
 
     # Upload the .tar.gz file
-    # Needs to be overriden based on specific environment needs
+    # Needs to be overridden based on specific environment needs
     upload_tar: Optional[Callable[[str], None]] = None
 
     log_autotuning_results: bool = False
@@ -1645,6 +1696,8 @@ _save_config_ignore: list[str] = [
     "aot_inductor.dump_aoti_minifier",
     "post_grad_custom_pre_pass",
     "post_grad_custom_post_pass",
+    "_fuse_ddp_communication_passes",
+    "_pre_fusion_custom_pass",
 ]
 
 _cache_config_ignore_prefix: list[str] = [
@@ -1658,8 +1711,15 @@ _cache_config_ignore_prefix: list[str] = [
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
+    "_fuse_ddp_communication_passes",
+    "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
+    # cache related options are not relevant to cache results
+    "fx_graph_cache",
+    "fx_graph_remote_cache",
+    "autotune_local_cache",
+    "autotune_remote_cache",
 ]
 
 # External callable for matmul tuning candidates
@@ -1680,9 +1740,6 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
-
-    # TODO - temporary config before enabled by default
-    global_tiling_analysis: bool = False
 
 
 if TYPE_CHECKING:
