@@ -159,8 +159,22 @@ class TestSetGuards(LoggingTestCase):
             return x + z
 
         x = torch.tensor([1.0])
-        with self.assertRaises(Unsupported):
-            fn(x, s)
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: fn(x, s),
+            """\
+Attempted to wrap a set with tensors
+  Explanation: Dynamo cannot trace sets of tensors. To get a stable ordering, Dynamo needs to convert the set into a list and the order might not be stable if the set contains tensors.
+  Hint: Use a dictionary instead
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: Python set containing torch.Tensor elements
+
+
+from user code:
+   File "test_sets.py", line N, in fn
+    for i in s:""",  # noqa: B950
+        )
 
     def test_set_multiple_types(self):
         s = {
