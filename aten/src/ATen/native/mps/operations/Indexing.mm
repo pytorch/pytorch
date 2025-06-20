@@ -67,7 +67,9 @@ id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEnco
   std::vector<uint32_t> iterShapeData(iterShape.size());
   std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
   TORCH_INTERNAL_ASSERT(iter.ntensors() >= nOffsets);
-  TORCH_CHECK(use_64bit_index || iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
+  TORCH_CHECK(use_64bit_index || iter.can_use_32bit_indexing(),
+              "kernel data offsets can't be computed using 32-bit iterator of shape ",
+              iterShape);
 
   for (const auto i : c10::irange(iterShape.size())) {
     iterShapeData[i] = static_cast<uint32_t>(iterShape[i]);

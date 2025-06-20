@@ -70,6 +70,10 @@ class InternalTorchDynamoError(TorchDynamoException):
     pass
 
 
+class ResumePrologueTracingError(TorchDynamoException):
+    pass
+
+
 class RestartAnalysis(TorchDynamoException):
     restart_reason: Optional[str]
 
@@ -404,6 +408,7 @@ exceptions_allowed_to_be_fallback = (
     torch._subclasses.fake_tensor.DynamicOutputShapeException,
     torch._subclasses.fake_tensor.UnsupportedOperatorException,
     torch._subclasses.fake_tensor.UnsupportedFakeTensorException,
+    torch._subclasses.fake_tensor.UnsupportedMutationAliasingException,
 )
 
 
