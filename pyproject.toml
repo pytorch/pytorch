@@ -10,12 +10,12 @@ requires = [
     "setuptools>=62.3.0,<80.0",
     "wheel",
     "astunparse",
-    "numpy",
-    "ninja",
-    "pyyaml",
     "cmake>=3.27",
-    "typing-extensions>=4.10.0",
+    "ninja",
+    "numpy",
+    "pyyaml",
     "requests",
+    "typing-extensions>=4.10.0",
 ]
 build-backend = "setuptools.build_meta"
 
