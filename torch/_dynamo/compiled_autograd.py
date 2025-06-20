@@ -69,11 +69,11 @@ if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
 
 
-TURN_OFF_MSG = """Turn off compiled autograd by either:
-1. Moving the unsupported autograd calls outside of the torch.compile'd region.
-2. Wrapping the unsupported in the torch._dynamo.compiled_autograd._disable() context manager.
-3. Setting torch._dynamo.config.compiled_autograd to False for the torch.compile call containing the unsupported autograd call.
-4. Setting torch._dynamo.config.compiled_autograd to False at the start of the program."""
+TURN_OFF_MSG = """You can turn off compiled autograd by either:
+1. Moving the unsupported autograd call outside of the torch.compile'd region.
+2. Wrapping the unsupported autograd call in the torch._dynamo.compiled_autograd._disable() context manager.
+3. Setting torch._dynamo.config.compiled_autograd=False for the torch.compile call containing the unsupported autograd call.
+4. Setting torch._dynamo.config.compiled_autograd=False at the start of the program."""
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
@@ -164,7 +164,7 @@ class NaNChecker:
             if grad is not None:
                 assert not torch.isnan(grad).any(), (
                     f"Compiled autograd running under anomaly mode with inputs[{idx}] already "
-                    "having NaN gradient. This is not supported."
+                    "having NaN gradient. This is not supported. {TURN_OFF_MSG}"
                 )
 
             self.params_to_check[f"inputs[{idx}]"] = inputs[idx]
