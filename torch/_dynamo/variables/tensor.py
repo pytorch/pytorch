@@ -1080,22 +1080,18 @@ class TensorVariable(VariableTracker):
             )
 
     def method___setitem__(self, key, value):
-        def has_bool_key(v):
-            if isinstance(v, TensorVariable):
-                return v.dtype in (torch.bool, torch.int8)
-            elif isinstance(v, variables.TupleVariable):
-                return any(has_bool_key(item) for item in v.items)
-            else:
-                return False
-
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        tx.output.create_proxy(
+        proxy = tx.output.create_proxy(
             "call_function",
             operator.setitem,
             *proxy_args_kwargs([self, key, value], {}),
         )
+
+        if config.use_graph_deduplication or config.track_nodes_for_deduplication:
+            tx.output.region_tracker.add_node_mutation(proxy.node, 0)
+
         return ConstantVariable.create(None)
 
     def method_resize_(self, *args, **kwargs):

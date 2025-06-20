@@ -69,6 +69,7 @@ from ..utils import (
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
+    is_lru_cache_wrapped_function,
     is_namedtuple_cls,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -163,8 +164,21 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def _in_graph_classes():
         _in_graph_class_list = {
             torch.Tensor,
+            torch.cuda.FloatTensor,
+            torch.cuda.DoubleTensor,
+            torch.cuda.HalfTensor,
+            torch.cuda.BFloat16Tensor,
+            torch.cuda.ByteTensor,
+            torch.cuda.CharTensor,
+            torch.cuda.IntTensor,
+            torch.cuda.ShortTensor,
+            torch.cuda.LongTensor,
+            torch.Stream,
+            torch.Event,
             torch.cuda.Stream,
             torch.cuda.Event,
+            torch.xpu.Stream,
+            torch.xpu.Event,
         }
         if hasattr(torch, "hpu"):
             _in_graph_class_list.update(
@@ -477,7 +491,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
         elif self.value is weakref.ref:
-            return variables.WeakRefVariable(args[0])
+            if len(args) > 1:
+                callback = args[1]
+            else:
+                callback = variables.ConstantVariable.create(None)
+            return variables.WeakRefVariable(args[0], callback)
         elif self.value is functools.partial:
             if not args:
                 unimplemented("functools.partial malformed")
@@ -1243,6 +1261,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # e.g.: inspect.getattr_static({}, "fromkeys")
             func = subobj.__get__(self.value, None)
             return VariableTracker.build(tx, func, source)
+        elif is_lru_cache_wrapped_function(subobj):
+            # getattr_static returns the lru_wrapped function, and we cannot
+            # extract the underlying method from the wrapped function. To handle
+            # it, manually create a wrapped user method vt.
+            return variables.WrapperUserMethodVariable(
+                subobj, "__wrapped__", self, source=self.source
+            )
         elif inspect.getattr_static(
             type(subobj), "__get__", NO_SUCH_SUBOBJ
         ) is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(
