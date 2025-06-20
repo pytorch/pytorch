@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import os
 import textwrap
 from dataclasses import dataclass
@@ -648,9 +649,20 @@ def gen_aoti_c_shim_files(
                     os.path.join(aoti_fm.install_dir, header_file_name)
                 ) as old_file:
                     old_header = old_file.read()
-                    assert old_header == new_header, """
 
-WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
+                    if old_header != new_header:
+                        diff = "\n".join(
+                            difflib.unified_diff(
+                                old_header.splitlines(),
+                                new_header.splitlines(),
+                                fromfile="expected",
+                                tofile="actual",
+                                lineterm="",
+                            )
+                        )
+
+                        raise RuntimeError(f"""
+The generated AOTInductor C shim header files have unexpectedly changed. This
 indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!
 Only in a limited number of situations, this is allowed:
 
@@ -664,7 +676,8 @@ torchgen/aoti/fallback_ops.py, and then run `python torchgen/gen.py --update-aot
 update the C shim header files by creating different versions of the fallback op. See
 https://github.com/pytorch/pytorch/pull/154848 as an example.
 
-                    """
+{diff}
+                    """)
             except FileNotFoundError:
                 print(
                     f"{os.path.join(aoti_fm.install_dir, header_file_name)} not found"

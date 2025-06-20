@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from torch._inductor import metrics
     from torch._inductor.graph import GraphLowering
     from torch._library.fake_class_registry import FakeScriptObject
+    from torch.export.pt2_archive._package_weights import Weights
 
     from .compile_fx import _CompileFxKwargs
     from .triton_bundler import TritonBundle
@@ -718,7 +719,7 @@ class CompiledAOTI(OutputCode):
     Class holding an AOTInductor compiled so.
     """
 
-    filename: Union[str, list[str]]
+    filename: Union[str, list[Union[str, Weights]]]
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         raise NotImplementedError("NYI")
