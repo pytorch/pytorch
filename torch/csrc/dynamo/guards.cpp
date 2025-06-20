@@ -6,6 +6,7 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <c10/util/flat_hash_map.h>
+#include <fmt/format.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/guards.h>
@@ -1957,6 +1958,29 @@ class DICT_CONTAINS : public LeafGuard {
  private:
   int _contains;
   py::object _key;
+};
+
+// Check that set contains an item.
+class SET_CONTAINS : public LeafGuard {
+ public:
+  SET_CONTAINS(bool contains, py::object item, py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)),
+        _contains(contains ? 1 : 0),
+        _item(std::move(item)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    int result = (PySet_Check(value) || PyFrozenSet_Check(value)) &&
+        PySet_Contains(value, _item.ptr());
+    if (result == -1) {
+      PyErr_Clear();
+      return false;
+    }
+    return result == _contains;
+  }
+
+ private:
+  int _contains;
+  py::object _item;
 };
 
 /**
@@ -4153,6 +4177,82 @@ class ListGetItemGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represents set[index] accessor by converting the set into a list.
+ */
+class SetGetItemGuardAccessor : public GuardAccessor {
+ public:
+  SetGetItemGuardAccessor(
+      RootGuardManager* root,
+      const py::object& index,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            index,
+            std::move(source),
+            example_value,
+            guard_manager_enum),
+        _index(py::cast<Py_ssize_t>(index)) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+
+    PyObject* lst = PySequence_List(obj);
+    PyObject* x = PyList_GetItem(lst, _index); // borrowed ref
+    Py_XDECREF(lst);
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+
+    PyObject* lst = PySequence_List(obj);
+    PyObject* x = PyList_GetItem(lst, _index); // borrowed ref
+    Py_XDECREF(lst);
+
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(false, 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return fmt::format("SetGetItemGuardAccessor(index={})", _index);
+  }
+
+ public: // cloning functions
+  SetGetItemGuardAccessor(
+      GuardManager* guard_manager,
+      SetGetItemGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<SetGetItemGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(SetGetItemGuardAccessor* to) {
+    to->_index = _index;
+  }
+
+ private:
+  Py_ssize_t _index{-1};
+};
+
+/**
  * Represents tuple[index] accessor. It is faster than generic
  * GetItemGuardAccessor.
  */
@@ -5534,6 +5634,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DICT_CONTAINS")
       .def(py::init<bool, py::object, py::list>())
       .def("__call__", &DICT_CONTAINS::check);
+  py::class_<SET_CONTAINS, LeafGuard, std::shared_ptr<SET_CONTAINS>>(
+      py_m, "SET_CONTAINS")
+      .def(py::init<bool, py::object, py::list>())
+      .def("__call__", &SET_CONTAINS::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
       .def(py::init<py::set, py::list>())
@@ -5872,6 +5976,15 @@ PyObject* torch_c_dynamo_guards_init() {
                 contains, std::move(key), std::move(verbose_code_parts)));
           })
       .def(
+          "add_set_contains_guard",
+          [](GuardManager& self,
+             bool contains,
+             py::object item,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<SET_CONTAINS>(
+                contains, std::move(item), std::move(verbose_code_parts)));
+          })
+      .def(
           "add_dynamic_indices_guard",
           [](GuardManager& self,
              py::set value,
@@ -6119,6 +6232,14 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "tuple_iterator_getitem_manager",
           &GuardManager::get_child_manager<TupleIteratorGetItemAccessor>,
+          py::arg("index"),
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      .def(
+          "set_getitem_manager",
+          &GuardManager::get_child_manager<SetGetItemGuardAccessor>,
           py::arg("index"),
           py::arg("source"),
           py::arg("example_value"),
