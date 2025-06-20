@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
-from torch._inductor.utils import clear_inductor_caches
+from torch._inductor.utils import clear_caches
 from torch.export import Dim
 from torch.testing._internal.logging_utils import log_settings
 
@@ -38,7 +38,7 @@ from torch._inductor.exc import InductorError
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
@@ -129,7 +129,6 @@ use_evt_config = config.patch(
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
         "cuda.cutlass_max_profiling_configs": 1,
-        "autotune_fallback_to_aten": False,
         "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
         "cuda.cutlass_tma_only": True,
         "cuda.cutlass_epilogue_fusion_enabled": True,
@@ -141,7 +140,6 @@ fp8_config = config.patch(
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
         "cuda.cutlass_max_profiling_configs": 1,
-        "autotune_fallback_to_aten": False,
         "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
         "cuda.cutlass_tma_only": True,
     }
@@ -175,7 +173,7 @@ class TestCutlassBackend(TestCase):
 
     def tearDown(self):
         super().tearDown()
-        clear_inductor_caches()
+        clear_caches()
 
     def run_evt_test(self, model, op, shape, num_fusions=1):
         M, N = shape
@@ -269,7 +267,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_max_profiling_configs": 4,
-                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(torch.mm)(a, b)
@@ -308,7 +305,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_max_profiling_configs": 4,
-                "autotune_fallback_to_aten": False,
             }
         ):
             for x_shape in x_shapes:
@@ -336,7 +332,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_max_profiling_configs": 4,
-                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(torch.bmm)(a, b)
@@ -369,7 +364,6 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
             }
         ):
             from torch._inductor.utils import run_and_get_code
@@ -412,7 +406,6 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_max_profiling_swizzle_options": [
                     1,
                     2,
@@ -453,21 +446,26 @@ class TestCutlassBackend(TestCase):
         Main test for mm.
         """
 
-        class MyModel(torch.nn.Module):
-            def forward(self, a, b):
-                return a @ b
-
-        model = MyModel().cuda()
         # M, N, K
         shapes = [
             (128, 128, 16),
             (1024, 1024, 256),
         ]
-        shapes = shapes[0:1] if not dynamic else shapes
+
+        # M, N, K
+        shapes = shapes if dynamic else shapes[0:1]
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                return a @ b
+
+        model = MyModel().cuda()
+
         inputs = [
             (torch.randn(M, K).cuda().to(dtype), torch.randn(K, N).cuda().to(dtype))
             for (M, N, K) in shapes
         ]
+
         dynamic_shapes = (
             {
                 "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
@@ -482,7 +480,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ), dynamo_config.patch({"error_on_recompile": dynamic}):
             expected = [model(*input) for input in inputs]
@@ -491,10 +488,99 @@ class TestCutlassBackend(TestCase):
                     model, inputs, dynamic_shapes=dynamic_shapes
                 )
             else:
-                compiled_model = torch.compile(model, dynamic=dynamic)
+                compiled_model = torch.compile(model, dynamic=True)
                 actual = [compiled_model(*input) for input in inputs]
 
             torch.testing.assert_close(actual, expected)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @parametrize("dynamic", (False, True))
+    @parametrize("use_aoti", (False, True))
+    @parametrize("dtype", (torch.float8_e4m3fn,))
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_fp8_scaled_mm(
+        self,
+        dynamic: bool,
+        max_autotune_gemm_backends: str = "CUTLASS",
+        use_aoti: bool = False,
+        dtype: torch.dtype = torch.float16,
+    ):
+        """
+        Main test for mm.
+        """
+
+        # M, N, K
+        shapes = [
+            (128, 128, 16),
+            (1024, 1024, 256),
+        ]
+
+        # M, N, K
+        shapes = shapes if dynamic else shapes[0:1]
+
+        inputs = []
+        for shape in shapes:
+            M, N, K = shape
+            output_dtype = torch.bfloat16
+            device = "cuda"
+
+            x = torch.randn(M, K, dtype=output_dtype, device=device)
+            w = torch.randn(N, K, dtype=output_dtype, device=device)
+
+            # quantize weight (prior to inference)
+            w_fp8, w_inverse_scale = _quantize_rowwise(w, dtype)
+            w_t_fp8 = w_fp8.t()
+            w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+
+            # quantize input x
+            x_fp8, x_inverse_scale = _quantize_rowwise(x, dtype)
+
+            inputs.append((x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale))
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale):
+                y = torch._scaled_mm(
+                    x_fp8,
+                    w_t_fp8,
+                    x_inverse_scale,
+                    w_inverse_scale,
+                    None,
+                    out_dtype=torch.bfloat16,
+                    use_fast_accum=False,
+                )
+                return y
+
+        dynamic_shapes = (
+            {
+                "x_fp8": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                "x_inverse_scale": {0: Dim.DYNAMIC, 1: 1},
+                "w_t_fp8": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                "w_inverse_scale": {0: 1, 1: Dim.DYNAMIC},
+            }
+            if dynamic
+            else None
+        )
+        model = MyModel().cuda()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+                "cuda.cutlass_tma_only": True,
+            }
+        ), dynamo_config.patch({"error_on_recompile": dynamic}):
+            expected = [model(*input) for input in inputs]
+            if use_aoti:
+                actual = AOTIRunnerUtil.run_multiple(
+                    model, inputs, dynamic_shapes=dynamic_shapes
+                )
+            else:
+                compiled_model = torch.compile(model, dynamic=True)
+                actual = [compiled_model(*input) for input in inputs]
+
+            torch.testing.assert_close(actual, expected, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
@@ -532,7 +618,7 @@ class TestCutlassBackend(TestCase):
         ]
         for x_shape in x_shapes:
             torch._dynamo.reset()
-            clear_inductor_caches()
+            clear_caches()
 
             inputs = [
                 (
@@ -560,7 +646,6 @@ class TestCutlassBackend(TestCase):
                     "max_autotune": True,
                     "max_autotune_gemm_backends": max_autotune_gemm_backends,
                     "cuda.cutlass_max_profiling_configs": 2,
-                    "autotune_fallback_to_aten": False,
                 }
             ), dynamo_config.patch({"error_on_recompile": dynamic}):
                 expected = [model(*input) for input in inputs]
@@ -622,7 +707,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ):
             expected = [model(*input) for input in inputs]
@@ -657,7 +741,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
                 "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
-                "autotune_fallback_to_aten": False,
             }
         ):
             for M, K, N in (
@@ -713,7 +796,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 4,
                 "cuda.version": "12.2",  # required to enable the Kernels we need
-                "autotune_fallback_to_aten": False,
             }
         ):
             counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
@@ -812,7 +894,6 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
@@ -831,7 +912,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
@@ -870,7 +950,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
@@ -904,7 +983,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_op_allowlist_regex": "128x256x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
                 "cuda.cutlass_max_profiling_configs": 1,
             }
@@ -951,7 +1029,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
                 "autotune_local_cache": True,
-                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a_sparse, b)
@@ -988,7 +1065,7 @@ class TestCutlassBackend(TestCase):
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             with config.patch(
                 {
                     "max_autotune": True,
@@ -1036,7 +1113,7 @@ class TestCutlassBackend(TestCase):
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             with config.patch(
                 {
                     "max_autotune": True,
@@ -1071,6 +1148,93 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_backend_fp8_scaled_mm_fast_accum_filtering(
+        self,
+    ):
+        float8_dtype = torch.float8_e4m3fn
+        # Only bf16 output type is supported for row-wise scaling, not fp32
+        output_dtype: torch.dtype = torch.bfloat16
+        device = "cuda"
+        M, K, N = 128, 128, 128  # Matmul Y = X [M, K] x W [N, K]
+        x = torch.randn(M, K, dtype=output_dtype, device=device)
+        w = torch.randn(N, K, dtype=output_dtype, device=device)
+        bias = None
+        # quantize weight (prior to inference)
+        w_fp8, w_inverse_scale = _quantize_rowwise(w, float8_dtype)
+        w_t_fp8 = w_fp8.t()
+        w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+
+        # quantize input x
+        x_fp8, x_inverse_scale = _quantize_rowwise(x, float8_dtype)
+
+        def linear(
+            x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias, use_fast_accum
+        ):
+            y = torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                w_inverse_scale,
+                bias,
+                out_dtype=output_dtype,
+                use_fast_accum=use_fast_accum,
+            )
+            return y
+
+        linear_compiled = torch.compile(linear, backend="inductor")
+
+        def select_no_algorithm(*args, **kwargs):
+            raise NoValidChoicesError
+
+        def run_test(use_fast_accum):
+            with fresh_cache():
+                with config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_gemm_backends": "CUTLASS",
+                        "cuda.cutlass_max_profiling_configs": 2,
+                    }
+                ):
+                    with mock.patch(
+                        "torch._inductor.kernel.mm.autotune_select_algorithm",
+                        wraps=select_no_algorithm,
+                    ) as sa:
+                        with self.assertRaisesRegex(
+                            InductorError, r".*NoValidChoicesError.*"
+                        ):
+                            linear_compiled(
+                                x_fp8,
+                                x_inverse_scale,
+                                w_t_fp8,
+                                w_inverse_scale,
+                                bias,
+                                use_fast_accum,
+                            )
+
+                        args, _ = sa.call_args
+                        _, choices, _, _ = args
+                        cuda_template_count = 0
+                        for choice in choices:
+                            if isinstance(choice, CUDATemplateCaller):
+                                choice_info = choice.info_dict()
+                                op_conf_name = choice_info.get("op_conf_name", "")
+                                assert isinstance(op_conf_name, str)
+                                if use_fast_accum:
+                                    assert (
+                                        "fastaccum" in op_conf_name
+                                    ), "Only fastaccum Kernels should have been allowed"
+                                else:
+                                    assert (
+                                        "fastaccum" not in op_conf_name
+                                    ), "fastaccum Kernels should have been filtered"
+                                cuda_template_count += 1
+                        assert cuda_template_count > 0, "No CUDATemplateCaller choices"
+
+        run_test(True)
+        run_test(False)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_shape_coverage_mm(
         self,
     ):
@@ -1102,12 +1266,11 @@ class TestCutlassBackend(TestCase):
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
 
-        with fresh_inductor_cache(), config.patch(
+        with fresh_cache(), config.patch(
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ), mock.patch(
             "torch._inductor.kernel.mm.autotune_select_algorithm",
@@ -1161,12 +1324,11 @@ class TestCutlassBackend(TestCase):
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
 
-        with fresh_inductor_cache(), config.patch(
+        with fresh_cache(), config.patch(
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_presets": presets,
             }
         ), mock.patch(
@@ -1272,7 +1434,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
                 "cuda.generate_test_runner": True,  # put standalone runner in the generated code
             }
         ):
@@ -1389,7 +1550,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ):
             compiled = torch.compile(torch.mm)
@@ -1413,7 +1573,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
             }
         ):
             _ = torch.compile(model)(B)
@@ -1436,7 +1595,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
             }
         ):
             _ = torch.compile(model)(B)
@@ -1589,7 +1747,10 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
-    def test_evt_multi_output(self, op):
+    @parametrize(
+        "dynamic", (False, True)
+    )  # To not drastically increase test time we only test dynamic on this test
+    def test_evt_multi_output(self, op, dynamic):
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
                 acc = a @ b
@@ -1600,18 +1761,24 @@ class TestCutlassBackend(TestCase):
 
         M = 1024
         N = 512
-        a = torch.ones(M, N).cuda().half()
-        b = torch.ones(N, N).cuda().half()
-        extra_args = gen_args(op, (M, N))
-        model = TestModel().cuda()
+        shapes = [(512, 512)] if not dynamic else [(1024, 64), (128, 256)]
+        for i, shape in enumerate(shapes):
+            M, N = shape
+            a = torch.ones(M, N).cuda().half()
+            b = torch.ones(N, N).cuda().half()
+            extra_args = gen_args(op, (M, N))
+            model = TestModel().cuda()
 
-        result = torch.compile(model)(a, b, extra_args)
-        ref_result = model(a, b, extra_args)
+            result = torch.compile(model)(a, b, extra_args)
+            ref_result = model(a, b, extra_args)
 
-        self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 2
-        )
-        torch.testing.assert_close(result, ref_result)
+            self.assertEqual(
+                torch._dynamo.utils.counters["inductor"][
+                    "cuda_epilogue_fusion_counter"
+                ],
+                2 * (i + 1),
+            )
+            torch.testing.assert_close(result, ref_result)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
@@ -1671,13 +1838,13 @@ class TestCutlassBackend(TestCase):
         "shape",
         (
             (
-                16,
-                16,
-                32,
+                512,
+                128,
+                64,
             ),
         ),
     )
-    @parametrize("has_bias", (False,))
+    @parametrize("has_bias", (False, True))
     @parametrize("use_fast_accum", (False,))
     def test_fp8_rowwise_scaling(
         self,
@@ -1743,13 +1910,13 @@ class TestCutlassBackend(TestCase):
         "shape",
         (
             (
-                16,
-                16,
-                32,
+                512,
+                128,
+                64,
             ),
         ),
     )
-    @parametrize("has_bias", (False,))
+    @parametrize("has_bias", (False, True))
     @parametrize("use_fast_accum", (False,))
     def test_fp8_tensorwise_scaling(
         self,
