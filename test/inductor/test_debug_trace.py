@@ -10,7 +10,7 @@ from pathlib import Path
 
 import torch
 from torch._inductor import config, test_operators
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.logging_utils import multiple_logs_to_string
@@ -44,7 +44,7 @@ class TestDebugTrace(test_torchinductor.TestCase):
             "torch._inductor.debug", "ir_pre_fusion", "ir_post_fusion"
         )
 
-        # TODO(aakhundov): make this work with fresh_inductor_cache
+        # TODO(aakhundov): make this work with fresh_cache
         # instead of force_disable_caches. currently, with the latter
         # enabled, we get `inductor [('fxgraph_cache_hit', 1)]` in
         # the counters: so the cache is actually hit and the test fails.
@@ -263,7 +263,7 @@ op2.node.kernel = extern_kernels.mm""",
         # no failure
         with self.assertLogs(
             logging.getLogger("torch._inductor.debug"), level=logging.WARNING
-        ), fresh_inductor_cache():
+        ), fresh_cache():
             m = ToyModel().to(device=GPU_TYPE)
             m = torch.compile(m, mode="max-autotune")
             input_tensor = torch.randn(100).to(device=GPU_TYPE)
