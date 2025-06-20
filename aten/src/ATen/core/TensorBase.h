@@ -265,7 +265,6 @@ class TORCH_API TensorBase {
     return impl_->is_contiguous(memory_format);
   }
 
-  // Note [is_contiguous_or_false]
   // Like is_contiguous, but more dynamic shape-friendly. Can returns
   // false instead of throwing data-dependent errors for tensors with unbacked
   // sizes or strides.

@@ -33,7 +33,7 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
 }
 
 // Return a SymBool with underlying symbolic expression that represents
-// contiguity, guaranteed to not add guards.
+// contiguity. Guaranteed not to add guards.
 inline static c10::SymBool _compute_contiguous_sym(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides,
@@ -45,13 +45,20 @@ inline static c10::SymBool _compute_contiguous_sym(
       return true;
     }
 
-    // When calculating the expected stride, we can choose to use a max(1, size)
-    // check or not. Regardless, if this function returns true, it's correct. If
-    // the size is 0, the tensor is empty and therefore contiguous. We
-    // symbolically check both paths to maximize the cases where this function
-    // returns true. This is because make_contiguous_strides_for adds the max
-    // symbolically, and we want to ensure we return true for tensors built with
-    // it.
+    // When calculating the expected stride, we can choose to multiply
+    // with max(1, size[d]) or size[d]. Regardless, this is ok for this
+    // function. Why? 
+    // (1) If size[d] == 0, then the tensor is contiguous and if
+    //     we return true or false it won't break the invariance that it returns
+    //     true if the tensor is contiguous. 
+    // (2) If size[d] is not 0, then max(1,size[d]) and size[d] are equal. 
+    //     Therefore, if we choose to use max(1, size[d]) or size[d] to calculate 
+    //     the expected stride, the result is the same.
+    //
+    // We symbolically check both paths to maximize the cases where this
+    // function returns true. This is because make_contiguous_strides_for adds
+    // the max symbolically, and in some other situations the max might not be
+    // there. And we want to ensure we return true in both cases.
     c10::SymInt expected_stride = 1;
     c10::SymInt expected_stride_max = 1;
     // NB: make sure we do signed arithmetic
