@@ -206,6 +206,23 @@ class BaseListVariable(VariableTracker):
             else:
                 self.items += args[0].items
                 return self
+        elif name in ("__mul__", "__imul__"):
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(tx, name)
+
+            if not (args[0].is_python_constant() and args[0].python_type() is int):
+                msg = ConstantVariable.create(
+                    f"can't multiply sequence by non-int type of '{args[0].python_type_name()}'"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
+
+            val = args[0].as_python_constant()
+
+            if name == "__mul__":
+                return type(self)(self.items * val, source=self.source)
+            else:
+                self.items *= val
+                return self
         elif name in cmp_name_to_op_mapping:
             if len(args) != 1:
                 raise_args_mismatch(tx, name)
