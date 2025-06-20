@@ -447,6 +447,14 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         peer = 1 - rank
         NVSHMEM_SIGNAL_SET = 0  # value defined by NVSHMEM for atomic set
         SIGNAL_VAL = 1  # Signal completion value
+        NVSHMEM_CMP_EQ = 0  # compare equal for signal wait until
+
+        # Kernel for waiting on the signal locally (Rank 1).
+        @triton.jit
+        def signal_wait_until_kernel(
+            sig_ptr, cmp_op: tl.constexpr, cmp_val: tl.constexpr
+        ):
+            nvshmem.signal_wait_until(sig_ptr, cmp_op, cmp_val)
 
         if rank == 0:
             # Rank 0 puts into Rank 1
@@ -464,8 +472,16 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
                 extern_libs=nvshmem_lib,
             )
 
-        dist.barrier()
         if rank == 1:
+            # Wait until signal flag is set by Rank 0
+            sig_ptr_local = out_hdl.signal_pad_ptrs[rank]
+            signal_wait_until_kernel[(1,)](
+                sig_ptr_local,
+                cmp_op=NVSHMEM_CMP_EQ,
+                cmp_val=SIGNAL_VAL,
+                extern_libs=nvshmem_lib,
+            )
+            # After wait completes, verify data and flag contents
             torch.testing.assert_close(
                 out, val * torch.ones(numel, dtype=dtype, device=self.device)
             )
@@ -518,6 +534,13 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         peer = 1 - rank
         NVSHMEM_SIGNAL_ADD = 5  # atomic add operation
         SIGNAL_VAL = 16  # val + NVSHMEM_SIGNAL_ADD
+        NVSHMEM_CMP_EQ = 0
+
+        @triton.jit
+        def signal_wait_until_kernel(
+            sig_ptr, cmp_op: tl.constexpr, cmp_val: tl.constexpr
+        ):
+            nvshmem.signal_wait_until(sig_ptr, cmp_op, cmp_val)
 
         if rank == 0:
             # Rank 0 puts into Rank 1
@@ -535,8 +558,14 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
                 extern_libs=nvshmem_lib,
             )
 
-        dist.barrier()
         if rank == 1:
+            sig_ptr_local = out_hdl.signal_pad_ptrs[rank]
+            signal_wait_until_kernel[(1, 1, 1)](
+                sig_ptr_local,
+                cmp_op=NVSHMEM_CMP_EQ,
+                cmp_val=SIGNAL_VAL,
+                extern_libs=nvshmem_lib,
+            )
             torch.testing.assert_close(
                 out, val * torch.ones(numel, dtype=dtype, device=self.device)
             )
@@ -661,7 +690,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         peer = 1 - rank
-        
+
         # NVSHMEM constants from documentation
         NVSHMEM_CMP_EQ = 0  # equal comparison
         NVSHMEM_SIGNAL_SET = 0  # atomic set operation
