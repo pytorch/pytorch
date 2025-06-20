@@ -486,6 +486,13 @@ class CommonListMethodsVariable(BaseListVariable):
             self.items.reverse()
             tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
+        elif name == "remove" and self.is_mutable():
+            if len(args) != 1 or kwargs:
+                raise_args_mismatch(tx, name)
+
+            idx = self.call_method(tx, "index", args, kwargs)
+            self.call_method(tx, "pop", [idx], {})
+            return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
 
