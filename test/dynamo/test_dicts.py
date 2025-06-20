@@ -10,7 +10,6 @@ from collections import defaultdict, namedtuple, OrderedDict
 from typing import Any
 
 import torch
-import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
