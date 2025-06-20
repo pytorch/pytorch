@@ -643,6 +643,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
         finally:
             counters["unimplemented"] |= counters["inline_call"]
 
+    def call_obj_hasattr(self, tx, name):
+        if name == "__iter__":
+            return ConstantVariable.create(True)
+        return super().call_obj_hasattr(tx, name)
+
     def has_unpack_var_sequence(self, tx):
         return False
 
