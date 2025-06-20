@@ -981,7 +981,7 @@ def instantiate_device_type_tests(
         base: DeviceTypeTestBase,
         class_decorators: Union[
             None, list[Callable[[DeviceTypeTestBase], DeviceTypeTestBase]]
-        ],
+        ] = None,
     ) -> None:
         # type set to Any and suppressed due to unsupport runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
