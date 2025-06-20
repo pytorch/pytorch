@@ -2,7 +2,7 @@
 #
 # NOTE: If any changes are being made to the ADInplaceOrView codegen please also check
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
-# The fallback is expected to mimick this codegen, so we should keep the two in sync.
+# The fallback is expected to mimic this codegen, so we should keep the two in sync.
 
 from __future__ import annotations
 

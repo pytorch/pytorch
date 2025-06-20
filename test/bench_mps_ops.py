@@ -98,6 +98,56 @@ def bench_reduction(
     return rc
 
 
+def bench_scan(
+    scan_func, device: str = "mps", dtype: torch.dtype = torch.float32
+) -> list[Measurement]:
+    rc = []
+
+    # Bench cumsum along different dimensions
+    for dim in [0, 1]:
+
+        def f(t):
+            return scan_func(t, dim=dim)
+
+        f_c = torch.compile(f, dynamic=False)
+
+        for size in (32, 128, 512, 1024):
+            f.__name__ = f"{scan_func.__name__}-dim{dim}-{size}x{size}"
+            f_c.__name__ = f.__name__
+            x = torch.testing.make_tensor(size, size, device=device, dtype=dtype)
+            rc_c, rc_e = f(x), f_c(x)
+            if not torch.allclose(rc_c, rc_e):
+                mdiff = (rc_c - rc_e).abs().max()
+                warnings.warn(
+                    f"Eager and compile scan do not match for {scan_func.__name__} dim={dim} and {dtype} max_diff={mdiff}",
+                    stacklevel=2,
+                )
+            rc.append(bench_unary_op(f, x, "eager"))
+            rc.append(bench_unary_op(f_c, x, "compile"))
+
+    # Bench 1D cumsum for different sizes
+    def f_1d(t):
+        return scan_func(t, dim=0)
+
+    f_1d_c = torch.compile(f_1d, dynamic=False)
+
+    for size in (100, 10000, 1000000):
+        f_1d.__name__ = f"{scan_func.__name__}-1d-{size}"
+        f_1d_c.__name__ = f_1d.__name__
+        x = torch.testing.make_tensor(size, device=device, dtype=dtype)
+        rc_c, rc_e = f_1d(x), f_1d_c(x)
+        if not torch.allclose(rc_c, rc_e):
+            mdiff = (rc_c - rc_e).abs().max()
+            warnings.warn(
+                f"Eager and compile 1D scan do not match for {scan_func.__name__} and {dtype} max_diff={mdiff}",
+                stacklevel=2,
+            )
+        rc.append(bench_unary_op(f_1d, x, "eager"))
+        rc.append(bench_unary_op(f_1d_c, x, "compile"))
+
+    return rc
+
+
 def main() -> None:
     dtypes = [torch.float16, torch.float32]
     if torch.backends.mps.is_macos_or_newer(14, 0):
@@ -113,6 +163,12 @@ def main() -> None:
     rc = []
     for op in [torch.sum, torch.max]:
         rc.extend(bench_reduction(op))
+    Compare(rc).print()
+
+    # Profile scan ops (cumsum)
+    rc = []
+    for dtype in dtypes:
+        rc.extend(bench_scan(torch.cumsum, dtype=dtype))
     Compare(rc).print()
 
     # Profile binary ops
