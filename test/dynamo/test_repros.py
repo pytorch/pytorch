@@ -4774,6 +4774,22 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter, 1)
         self.assertEqual(result1, result2)
 
+    def test_lru_cache_no_warning_for_torch_functions(self):
+        def test_fn():
+            import torch
+
+            torch.set_default_device('cuda')
+
+            @torch.compile(backend='eager')
+            def f(x):
+                x = x.cos().sin()
+                return x
+
+            result = f(torch.randn(1024))
+            self.assertIsInstance(result, torch.Tensor)
+
+        test_fn()
+
     def test_dont_aggressively_write_assert(self):
         record_graph = torch._dynamo.testing.EagerAndRecordGraphs()
 

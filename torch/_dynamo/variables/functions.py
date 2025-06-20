@@ -29,12 +29,15 @@ import inspect
 import itertools
 import sys
 import types
+import traceback
+import logging
 from collections.abc import Sequence
 from types import FunctionType
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 from weakref import WeakKeyDictionary
+from torch._dynamo.exc import get_stack_above_dynamo
 
 import torch
 
@@ -1546,9 +1549,6 @@ class WrapperUserFunctionVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if hasattr(self.wrapper_obj, "cache_info"):
-            import traceback
-
-            from torch._dynamo.exc import get_stack_above_dynamo
 
             target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
             module_name = getattr(target_fn, "__module__", "") or ""
@@ -1564,15 +1564,16 @@ class WrapperUserFunctionVariable(VariableTracker):
 
                 torch._dynamo.utils.warn_once(msg)
 
-                user_stack = torch._guards.TracingContext.extract_stack()
-                user_stack = get_stack_above_dynamo()
-                frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-                user_stack_formatted = "".join(traceback.format_list(user_stack))
-                user_stack_trace = f"call to a lru_cache` wrapped function from user code at: {frame_loc[0]}:{frame_loc[1]}\n"
-                user_stack_trace += str(user_stack_formatted)
-
                 dynamo_logger = torch._dynamo.utils.logging.getLogger("torch._dynamo")
-                dynamo_logger.debug(user_stack_trace)
+                if dynamo_logger.isEnabledFor(logging.DEBUG):
+                    user_stack = torch._guards.TracingContext.extract_stack()
+                    user_stack = get_stack_above_dynamo()
+                    frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+                    user_stack_formatted = "".join(traceback.format_list(user_stack))
+                    user_stack_trace = f"call to a lru_cache` wrapped function from user code at: {frame_loc[0]}:{frame_loc[1]}\n"
+                    user_stack_trace += str(user_stack_formatted)
+                    dynamo_logger.debug(user_stack_trace)
+
         all_args = self.self_args() + args
         return variables.UserFunctionVariable(
             polyfills.getattr_and_trace
