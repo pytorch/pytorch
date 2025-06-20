@@ -1,11 +1,20 @@
 import argparse
 import os
 import subprocess
+import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast, Optional, Union
 
 import requests
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+from tools.stats.upload_metrics import emit_metric
+
+
+sys.path.remove(str(REPO_ROOT))  # Clean up sys.path after import
 
 
 FORCE_REBUILD_LABEL = "ci-force-rebuild"
@@ -114,6 +123,8 @@ def ok_changed_file(file: str) -> bool:
         return True
     if file.startswith("test/") and file.endswith(".py"):
         return True
+    if file.startswith("docs/") and file.endswith((".md", ".rst")):
+        return True
     return False
 
 
@@ -121,17 +132,26 @@ def check_changed_files(sha: str) -> bool:
     # Return true if all the changed files are in the list of allowed files to
     # be changed to reuse the old whl
 
-    # Removing any files is not allowed since rysnc will not remove files
+    # Removing files in the torch folder is not allowed since rsync will not
+    # remove files
     removed_files = (
         subprocess.check_output(
-            ["git", "diff", "--name-only", sha, "HEAD", "--diff-filter=D"],
+            [
+                "git",
+                "diff",
+                "--name-only",
+                sha,
+                "HEAD",
+                "--diff-filter=D",
+                "--no-renames",
+            ],
             text=True,
             stderr=subprocess.DEVNULL,
         )
         .strip()
         .split()
     )
-    if removed_files:
+    if any(file.startswith("torch/") for file in removed_files):
         print(
             f"Removed files between {sha} and HEAD: {removed_files}, cannot reuse old whl"
         )
@@ -139,7 +159,7 @@ def check_changed_files(sha: str) -> bool:
 
     changed_files = (
         subprocess.check_output(
-            ["git", "diff", "--name-only", sha, "HEAD"],
+            ["git", "diff", "--name-only", sha, "HEAD", "--no-renames"],
             text=True,
             stderr=subprocess.DEVNULL,
         )
@@ -306,46 +326,60 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def can_reuse_whl(args: argparse.Namespace) -> bool:
-    # if is_main_branch() or (
-    #     args.github_ref
-    #     and any(
-    #         args.github_ref.startswith(x)
-    #         for x in ["refs/heads/release", "refs/tags/v", "refs/heads/main"]
-    #     )
-    # ):
-    #     print("On main branch or release branch, rebuild whl")
-    #     return False
-
-    if check_labels_for_pr():
-        print(f"Found {FORCE_REBUILD_LABEL} label on PR, rebuild whl")
-        return False
-
-    if check_issue_open():
-        print("Issue #153759 is open, rebuild whl")
-        return False
+def can_reuse_whl(args: argparse.Namespace) -> tuple[bool, str]:
+    if args.github_ref and any(
+        args.github_ref.startswith(x)
+        for x in [
+            "refs/heads/release",
+            "refs/tags/v",
+            "refs/heads/nightly",
+        ]
+    ):
+        print("Release branch, rebuild whl")
+        return (False, "Release branch")
 
     if not check_changed_files(get_merge_base()):
         print("Cannot use old whl due to the changed files, rebuild whl")
-        return False
+        return (False, "Changed files not allowed")
+
+    if check_labels_for_pr():
+        print(f"Found {FORCE_REBUILD_LABEL} label on PR, rebuild whl")
+        return (False, "Found FORCE_REBUILD_LABEL on PR")
+
+    if check_issue_open():
+        print("Issue #153759 is open, rebuild whl")
+        return (False, "Issue #153759 is open")
 
     workflow_id = get_workflow_id(args.run_id)
     if workflow_id is None:
         print("No workflow ID found, rebuild whl")
-        return False
+        return (False, "No workflow ID found")
 
     if not find_old_whl(workflow_id, args.build_environment, get_merge_base()):
         print("No old whl found, rebuild whl")
+        return (False, "No old whl found")
         # TODO: go backwards from merge base to find more runs
-        return False
 
-    return True
+    return (True, "Found old whl")
 
 
 if __name__ == "__main__":
     args = parse_args()
 
-    if can_reuse_whl(args):
+    reuse_whl, reason = can_reuse_whl(args)
+
+    if reuse_whl:
         print("Reusing old whl")
         unzip_artifact_and_replace_files()
         set_output()
+
+    emit_metric(
+        "reuse_old_whl",
+        {
+            "reuse_whl": reuse_whl,
+            "reason": reason,
+            "build_environment": args.build_environment,
+            "merge_base": get_merge_base(),
+            "head_sha": get_head_sha(),
+        },
+    )

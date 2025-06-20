@@ -99,6 +99,7 @@ from ..source import (
     ConstDictKeySource,
     ConvertIntSource,
     DictGetItemSource,
+    DictSubclassGetItemSource,
     FloatTensorSource,
     GetItemSource,
     GradSource,
@@ -189,7 +190,8 @@ from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
-    CreateTMADescriptorVariable,
+    CreateTMADescriptorExperimentalVariable,
+    CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
     SysFunctionVariable,
@@ -477,7 +479,7 @@ class VariableBuilder:
         return cls._type_dispatch_impl(config.trace_numpy)
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _type_dispatch_impl(cls, trace_numpy):
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
@@ -578,7 +580,7 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_mutable(value, result)
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _id_dispatch(
         cls,
     ) -> dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
@@ -607,7 +609,11 @@ class VariableBuilder:
 
     def _wrap(self, value):
         # import here to avoid circular dependencies
-        from torch.utils._triton import has_triton, has_triton_tma
+        from torch.utils._triton import (
+            has_triton,
+            has_triton_experimental_host_tma,
+            has_triton_tensor_descriptor_host_tma,
+        )
 
         from ..decorators import DynamoConfigPatchProxy
 
@@ -622,18 +628,25 @@ class VariableBuilder:
             class Autotuner:
                 pass
 
-        if has_triton_tma():
-            from triton.tools.experimental_descriptor import (
+        # default implementations, in case we don't have triton (or the wrong triton version)
+        def create_1d_tma_descriptor():
+            pass
+
+        def create_2d_tma_descriptor():
+            pass
+
+        class TensorDescriptor:
+            @staticmethod
+            def from_tensor():
+                pass
+
+        if has_triton_experimental_host_tma():
+            from triton.tools.experimental_descriptor import (  # noqa: F811
                 create_1d_tma_descriptor,
                 create_2d_tma_descriptor,
             )
-        else:
-
-            def create_1d_tma_descriptor():
-                pass
-
-            def create_2d_tma_descriptor():
-                pass
+        if has_triton_tensor_descriptor_host_tma():
+            from triton.tools.tensor_descriptor import TensorDescriptor  # noqa: F811
 
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
@@ -758,6 +771,19 @@ class VariableBuilder:
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
         elif istype(value, set):
+            if any(isinstance(x, torch.Tensor) for x in value):
+                unimplemented_v2(
+                    gb_type="Attempted to wrap a set with tensors",
+                    context="Python set containing torch.Tensor elements",
+                    explanation=(
+                        "Dynamo cannot trace sets of tensors. To get a stable ordering, "
+                        "Dynamo needs to sort the set using the hash of each element. "
+                        "However, for tensors, the hash is their object ID, which "
+                        "is not stable during symbolic execution."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -1129,9 +1155,11 @@ class VariableBuilder:
                 source=self.source,
             )
         elif value is create_1d_tma_descriptor:
-            return CreateTMADescriptorVariable(rank=1)
+            return CreateTMADescriptorExperimentalVariable(rank=1)
         elif value is create_2d_tma_descriptor:
-            return CreateTMADescriptorVariable(rank=2)
+            return CreateTMADescriptorExperimentalVariable(rank=2)
+        elif value is TensorDescriptor.from_tensor:
+            return CreateTMADescriptorStableVariable()
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(
@@ -1374,7 +1402,7 @@ class VariableBuilder:
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
 
-                source_value = DictGetItemSource(base, source_key)
+                source_value = DictSubclassGetItemSource(base, source_key)
                 res_value = LazyVariableTracker.create(v, source_value)
 
                 return key, res_value
@@ -1795,14 +1823,18 @@ class VariableBuilder:
                 and not value.__module__.startswith("torch.nn.modules.container")
             ) or getattr(value.__class__, "_dynamo_marked_static", False):
                 new_source = self.source
-                if config.inline_inbuilt_nn_modules:
+                if config.inline_inbuilt_nn_modules and (
+                    not self.tx.output.export or config.install_free_tensors
+                ):
                     # Export corner case - look at test_repros.py test_inlining_cornercase
                     new_source = UnspecializedBuiltinNNModuleSource(self.source)
                 result = UnspecializedBuiltinNNModuleVariable(value, source=new_source)
                 install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
             else:
                 new_source = self.source
-                if config.inline_inbuilt_nn_modules:
+                if config.inline_inbuilt_nn_modules and (
+                    not self.tx.output.export or config.install_free_tensors
+                ):
                     # Export corner case - look at test_repros.py test_inlining_cornercase
                     new_source = UnspecializedNNModuleSource(self.source)
                 result = UnspecializedNNModuleVariable(value, source=new_source)
