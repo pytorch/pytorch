@@ -3,6 +3,7 @@
 import re
 import traceback
 import unittest
+import unittest.mock
 import warnings
 
 import torch
@@ -10,7 +11,7 @@ import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch.utils._pytree as python_pytree
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import ResumePrologueTracingError, Unsupported
 from torch._dynamo.testing import skipIfNotPy312
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
@@ -1256,6 +1257,48 @@ from user code:
     return fn(x)""",
             post_munge=post_munge,
         )
+
+    # Test that errors while tracing resume function prologues do not get suppressed
+    def test_graph_break_in_buggy_resume_prologue(self):
+        import torch._dynamo.bytecode_transformation as bt
+        import torch._dynamo.resume_execution as rex
+
+        # NOTE: do not define non_global as a global in this file!
+        @torch.compile(backend="eager")
+        def fn(non_global):
+            non_global = non_global + 1
+            torch._dynamo.graph_break()
+            return non_global + 1
+
+        orig_clean_and_assemble_instructions = bt.clean_and_assemble_instructions
+
+        def bad_clean_and_assemble_instructions(instructions, *args):
+            # Inject an invalid LOAD_GLOBAL after the first STORE_FAST IS_TRACING_RESUME_PROLOGUE_VARNAME
+            for i, inst in enumerate(instructions):
+                if (
+                    inst.opname == "STORE_FAST"
+                    and inst.argval == rex.IS_TRACING_RESUME_PROLOGUE_VARNAME
+                ):
+                    instructions[:] = (
+                        instructions[: i + 1]
+                        + [
+                            # this should cause a graph break
+                            bt.create_instruction("LOAD_GLOBAL", argval="non_global"),
+                        ]
+                        + instructions[i + 1 :]
+                    )
+                    break
+            return orig_clean_and_assemble_instructions(instructions, *args)
+
+        with unittest.mock.patch(
+            "torch._dynamo.bytecode_transformation.clean_and_assemble_instructions",
+            bad_clean_and_assemble_instructions,
+        ):
+            with self.assertRaisesRegex(
+                ResumePrologueTracingError,
+                "Error while tracing through a Dynamo-generated resume function prologue.",
+            ):
+                fn(torch.randn(3))
 
 
 if __name__ == "__main__":
