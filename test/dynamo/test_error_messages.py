@@ -4,6 +4,7 @@ import re
 import traceback
 import unittest
 import warnings
+import logging
 
 import torch
 import torch._dynamo
@@ -1181,6 +1182,25 @@ User code traceback:
     torch._dynamo.graph_break()  # correct
 """,
         )
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_lru_cache_warning_logs_user_stack_trace(self, records):
+        import warnings
+        from functools import lru_cache
+
+        @lru_cache
+        def foo(x):
+            return x + 1
+
+        torch.compile(foo, backend="eager")(torch.randn(4))
+
+        found_warning = False
+        for record in records:
+            if "call to a lru_cache` wrapped function from user code at:" in record.getMessage():
+                found_warning = True
+                break
+
+        self.assertTrue(found_warning, "No lru_cache warning was logged")
 
     def test_disable_message(self):
         @torch.compile(backend="eager", fullgraph=True)

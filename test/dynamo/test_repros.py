@@ -21,6 +21,7 @@ import typing
 import unittest
 import warnings
 import weakref
+import logging
 from abc import ABC
 from collections import defaultdict, namedtuple
 from collections.abc import Iterator
@@ -29,6 +30,7 @@ from enum import Enum, IntEnum
 from functools import wraps
 from typing import Any, Literal, TypedDict
 from unittest import mock
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 import numpy as np
 
@@ -945,7 +947,7 @@ class IncByTwo:
         self.x = x + 2
 
 
-class ReproTests(torch._dynamo.test_case.TestCase):
+class ReproTests(LoggingTestCase, torch._dynamo.test_case.TestCase):
     def setUp(self) -> None:
         try:
             from .utils import install_guard_manager_testing_hook
@@ -4774,21 +4776,22 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter, 1)
         self.assertEqual(result1, result2)
 
-    def test_lru_cache_no_warning_for_torch_functions(self):
-        def test_fn():
-            import torch
 
-            torch.set_default_device('cuda')
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_lru_cache_warning_issued_during_tracing(self,records):
 
-            @torch.compile(backend='eager')
-            def f(x):
-                x = x.cos().sin()
-                return x
+        @torch.compile(backend='eager')
+        def f(x):
+            x = x.cos().sin()
+            return x
 
-            result = f(torch.randn(1024))
-            self.assertIsInstance(result, torch.Tensor)
+        result = f(torch.randn(1024))
+        self.assertIsInstance(result, torch.Tensor)
 
-        test_fn()
+        for record in records:
+            if "Dynamo detected a call to a `functools.lru_cache`-wrapped " in record.getMessage():
+                self.fail("lru_cache warning was incorrectly logged at DEBUG level")
+
 
     def test_dont_aggressively_write_assert(self):
         record_graph = torch._dynamo.testing.EagerAndRecordGraphs()
