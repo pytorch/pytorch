@@ -91,6 +91,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.cumprod.default": {},
     "aten.cumsum.default": {},
     "aten.exponential.default": {},
+    "aten.fill_.Scalar": {},
     "aten.fractional_max_pool2d_backward.default": {},
     "aten.fractional_max_pool2d.default": {},
     "aten.fractional_max_pool3d_backward.default": {},
