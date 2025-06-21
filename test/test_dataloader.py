@@ -23,6 +23,7 @@ from torch import multiprocessing as mp
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_CI,
     IS_JETSON,
     IS_S390X,
@@ -3664,7 +3665,32 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertEqual(expected_data, data)
 
 
+class TestRandomBatchSampler(TestCase):
+    """
+    Test RandomBatchSampler is equal to BatchSampler(RandomSampler)
+    """
+    @parametrize('replacement', [False, True])
+    @parametrize('drop_last', [False, True])
+    def test_random_batch_sampler(self, replacement, drop_last):
+        from torch.utils.data import RandomSampler, BatchSampler, RandomBatchSampler
+
+        data = range(10)
+        batch_size = 3
+
+        sampler = RandomSampler(data, replacement, generator=torch.manual_seed(42))
+        batch_sampler = BatchSampler(sampler, batch_size, drop_last)
+        batches1 = list(batch_sampler)
+
+        random_batch_sampler = RandomBatchSampler(data, batch_size, drop_last, replacement, torch.manual_seed(42))
+        batches2 = list(random_batch_sampler)
+
+        self.assertEqual(len(batches1), len(batches2))
+
+        for i in range(len(batches1)):
+            self.assertEqual(batches1[i], list(batches2[i]))
+
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
+instantiate_parametrized_tests(TestRandomBatchSampler)
 
 
 if __name__ == "__main__":
