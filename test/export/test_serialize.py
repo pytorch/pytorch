@@ -1,19 +1,5 @@
-"""
-PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
-with test_sym_bool)
-"""
-
-# Owner(s): ["oncall: export"]
-import copy
+# Owner(s): ["oncall: distributed"]
 import io
-import math
-import tempfile
-import unittest
-import zipfile
-from collections import namedtuple
-from pathlib import Path
-from typing import NamedTuple
-
 import torch
 import torch._dynamo as torchdynamo
 import torch._export.serde.schema as schema
@@ -48,7 +34,13 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
+def test_deserialize_torch_artifact_dict():
+    data = {"key": torch.tensor([1, 2, 3])}
+    buf = io.BytesIO()
+    torch.save(data, buf)
+    serialized = buf.getvalue()
 
+<<<<<<< HEAD
 def get_filtered_export_db_tests():
     return [
         (name, case)
@@ -1812,6 +1804,12 @@ def forward(self, x):
                 self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
         self.assertEqual(counter, 1)
 
+=======
+    result = deserialize_torch_artifact(serialized)
+    assert isinstance(result, dict)
+    assert torch.equal(result["key"], torch.tensor([1, 2, 3]))
+>>>>>>> 451339e38fc (Move test_deserialize_torch_artifact_dict to test/export/test_serialize.py as per review)
 
 if __name__ == "__main__":
+    from torch.testing._internal.common_utils import run_tests
     run_tests()
