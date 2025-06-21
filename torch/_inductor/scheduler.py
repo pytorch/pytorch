@@ -2817,7 +2817,12 @@ class Scheduler:
             and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
             for n in (node1, node2)
         )
-        if not config.benchmark_fusion and not is_multi_template:
+
+        if (
+            not config.benchmark_fusion
+            and not is_multi_template
+            and not isinstance(node1.get_template_node(), ir.TritonTemplateBuffer)
+        ):
             return True
 
         if (
@@ -3048,7 +3053,10 @@ class Scheduler:
 
                 except NoTritonConfigsError:
                     return False
-
+                except RuntimeError as e:
+                    if "out of resource: shared memory" in str(e):
+                        return False
+                    raise
                 except CompilationError as e:
                     if "Loop-carried variable" in str(e):
                         return True

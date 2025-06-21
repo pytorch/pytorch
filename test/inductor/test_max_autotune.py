@@ -10,6 +10,7 @@ import random
 import re
 import tempfile
 import unittest
+from functools import partial
 from typing import Callable, Optional
 from unittest import mock
 from unittest.mock import MagicMock
@@ -35,6 +36,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
+from torch._inductor.template_heuristics import BaseConfigHeuristic, GemmConfig
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1454,6 +1456,58 @@ class TestMaxAutotune(TestCase):
 
         for codegen in code:
             FileCheck().check_not("decompose_k").run(codegen)
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_one_triton_choice_epilogue_fusion(self):
+        """
+        Here we test the fusion case with only 1 Triton choice for mm lowering.
+        The hardcoded config itself is valid, but when fused with the torch.float32
+        case, the shared memory requirements is higher than the amount available on H100.
+
+        This test checks that the fusion does not occur in this edge case. This is important
+        for future work on lookup table for autotuned gemm configs.
+        """
+
+        def f(a, b):
+            return (a @ b).to(torch.float32)
+
+        a = torch.randn(512, 1152, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(1152, 7680, device="cuda", dtype=torch.bfloat16)
+
+        config_heuristic = BaseConfigHeuristic()
+        with config.patch(
+            {
+                "triton.enable_persistent_tma_matmul": "1",
+            }
+        ):
+            with mock.patch(
+                "torch._inductor.kernel.mm.V.choices.get_base_mm_configs"
+            ) as base_mm_mock, mock.patch(
+                "torch._inductor.kernel.mm.V.choices.get_persistent_mm_configs"
+            ) as persistent_mm_mock:
+                base_mm_mock.return_value = partial(
+                    config_heuristic.preprocess_mm_configs, configs=[]
+                )
+                persistent_mm_mock.return_value = partial(
+                    config_heuristic.preprocess_mm_configs,
+                    configs=[GemmConfig(256, 128, 64, 4, 8, 8)],
+                )
+
+                compiled_f = torch.compile(f)
+                out, code = run_and_get_code(compiled_f, a, b)
+
+                FileCheck().check("triton_tem_fused_mm").check(
+                    "triton_poi_fused__to_copy"
+                ).run(code[0])
+
+                torch.testing.assert_close(out, f(a, b), atol=1e-2, rtol=1e-2)
 
 
 class TestMaxAutotunePrecompile(TestCase):
