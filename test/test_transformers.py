@@ -1931,6 +1931,40 @@ class TestSDPAFailureModes(NNTestCase):
                                                           attn_bias=None, compute_log_sumexp=True,
                                                           dropout_p=0.01)
 
+    @onlyCUDA
+    def test_mem_eff_attention_large_seq_len_uniform_attention(self):
+        device = torch.device("cuda")
+        dtype = torch.bfloat16
+
+        num_queries = 49999
+        num_heads = 2
+        feature_dim = 16
+
+        # Q and K are all zeros -> uniform attention
+        query = torch.zeros(1, num_heads, num_queries, feature_dim, device=device, dtype=dtype, requires_grad=True)
+        key = torch.zeros(1, num_heads, num_queries, feature_dim, device=device, dtype=dtype, requires_grad=True)
+        value = torch.ones(1, num_heads, num_queries, feature_dim, device=device, dtype=dtype, requires_grad=True)
+        mask = torch.ones((num_queries, num_queries), dtype=torch.bool, device=device)
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            output = torch.nn.functional.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=mask,
+            )
+            expected = torch.ones_like(output)
+            grad_output = torch.ones_like(output)
+            output.backward(grad_output)
+
+            self.assertTrue(torch.allclose(output, expected))
+            self.assertTrue(torch.allclose(query.grad, torch.zeros_like(query)))
+            self.assertTrue(torch.allclose(key.grad, torch.zeros_like(key)))
+            # For value, since each input position contributed 1/num_queries to each output, the grad should sum accordingly
+            # for all ones grad_output, each value position receives grad of 1 (because sum of all softmax weights per row is 1)
+            self.assertTrue(torch.allclose(value.grad, torch.ones_like(value)))
+
+
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     # This should match the block sizes in the CUDA kernel
     assert head_dim <= 256
