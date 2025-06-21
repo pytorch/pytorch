@@ -2109,6 +2109,39 @@ FeedbackFunction = Callable[
     None,
 ]
 
+# Args to PreprocessingFunctions
+# choices: list of ChoiceCaller objects to preprocess
+# Returns: modified list of ChoiceCaller objects
+PreprocessingFunction = Callable[[list[ChoiceCaller]], list[ChoiceCaller]]
+
+
+def filter_choices_by_name_regex(choices: list[ChoiceCaller]) -> list[ChoiceCaller]:
+    """Filter choices based on autotune_choice_name_regex config."""
+    if config.test_configs.autotune_choice_name_regex is not None:
+        return [
+            c
+            for c in choices
+            if re.search(
+                config.test_configs.autotune_choice_name_regex,
+                c.name,
+            )
+        ]
+    return choices
+
+
+def filter_choices_by_desc_regex(choices: list[ChoiceCaller]) -> list[ChoiceCaller]:
+    """Filter choices based on autotune_choice_desc_regex config."""
+    if config.test_configs.autotune_choice_desc_regex is not None:
+        return [
+            c
+            for c in choices
+            if re.search(
+                config.test_configs.autotune_choice_desc_regex,
+                c.description,
+            )
+        ]
+    return choices
+
 
 class AlgorithmSelectorCache(PersistentCache):
     """
@@ -2129,12 +2162,23 @@ class AlgorithmSelectorCache(PersistentCache):
         # first to benchmark it. share a single precompilation function for all lowerings
         # of a particular key
         self.precompile_cache: dict[str, Callable[[], None]] = {}
-        # list of callbacks that are called after benchmarking
-        self.feedback_saver_fns: list[FeedbackFunction] = []
         # cache for prescreening results to ensure deterministic candidate selection
         self.prescreening_cache: dict[str, OrderedSet[str]] = {}
+        # list of callbacks that are called after benchmarking
+        self.feedback_saver_fns: list[FeedbackFunction] = []
+        # list of callbacks that are called to preprocess choices
+        self.preprocessing_fns: list[PreprocessingFunction] = []
+
+        self._register_default_preprocessing_fns()
 
         clear_on_fresh_cache(self)
+
+    def _register_default_preprocessing_fns(self):
+        """Register default preprocessing functions."""
+        # Note: broken out into its own function so that we can avoid clearing
+        # them (i.e. so we can restore them after clearing user provided ones)
+        self.add_preprocessing_fn(filter_choices_by_name_regex)
+        self.add_preprocessing_fn(filter_choices_by_desc_regex)
 
     def cache_clear(self) -> None:
         self.precompile_cache.clear()
@@ -2157,6 +2201,10 @@ class AlgorithmSelectorCache(PersistentCache):
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
+        # Run preprocessing functions on choices
+        for preprocessing_fn in self.preprocessing_fns:
+            choices = preprocessing_fn(choices)
+
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
         # TODO(jgong5): support multi-template on CPU
@@ -2164,25 +2212,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
-
-        if config.test_configs.autotune_choice_name_regex is not None:
-            choices = [
-                c
-                for c in choices
-                if re.search(
-                    config.test_configs.autotune_choice_name_regex,
-                    c.name,
-                )
-            ]
-        if config.test_configs.autotune_choice_desc_regex is not None:
-            choices = [
-                c
-                for c in choices
-                if re.search(
-                    config.test_configs.autotune_choice_desc_regex,
-                    c.description,
-                )
-            ]
 
         if mm_file_name := get_mm_log_filename():
             M, K = input_nodes[-2].get_size()[:2]
@@ -3112,6 +3141,20 @@ class AlgorithmSelectorCache(PersistentCache):
     def add_feedback_saver(self, fn: FeedbackFunction):
         self.feedback_saver_fns.append(fn)
 
+    def add_preprocessing_fn(self, fn: PreprocessingFunction):
+        self.preprocessing_fns.append(fn)
+
+    def clear_preprocessing_fns(self, clear_defaults: bool = False):
+        """Clear preprocessing functions.
+
+        Args:
+            clear_defaults: If True, clears all functions including defaults.
+                           If False, clears only user-added functions and re-registers defaults.
+        """
+        self.preprocessing_fns.clear()
+        if not clear_defaults:
+            self._register_default_preprocessing_fns()
+
 
 _ALGORITHM_SELECTOR_CACHE: Optional[AlgorithmSelectorCache] = None
 
@@ -3139,6 +3182,45 @@ def add_feedback_saver(
     if _ALGORITHM_SELECTOR_CACHE is None:
         _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
     _ALGORITHM_SELECTOR_CACHE.add_feedback_saver(fn)
+
+
+def add_preprocessing_fn(
+    fn: PreprocessingFunction,
+):
+    """Add a preprocessing function to be applied to choices before autotuning.
+
+    Preprocessing functions are called sequentially in the order they were registered,
+    with each function receiving the output of the previous one. They can filter,
+    reorder, transform, or modify the list of choices in any way.
+
+    Args:
+        fn: A function that takes a list of ChoiceCaller objects and returns
+            a modified list of ChoiceCaller objects.
+
+    Example:
+        def my_filter(choices):
+            # Filter out choices with certain names
+            return [c for c in choices if 'slow' not in c.name.lower()]
+
+        add_preprocessing_fn(my_filter)
+    """
+    global _ALGORITHM_SELECTOR_CACHE
+    if _ALGORITHM_SELECTOR_CACHE is None:
+        _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+    _ALGORITHM_SELECTOR_CACHE.add_preprocessing_fn(fn)
+
+
+def clear_preprocessing_fns(clear_defaults: bool = False):
+    """Clear preprocessing functions at module level.
+
+    Args:
+        clear_defaults: If True, clears all functions including defaults.
+                       If False, clears only user-added functions and re-registers defaults.
+    """
+    global _ALGORITHM_SELECTOR_CACHE
+    if _ALGORITHM_SELECTOR_CACHE is None:
+        _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+    _ALGORITHM_SELECTOR_CACHE.clear_preprocessing_fns(clear_defaults)
 
 
 def realize_inputs(*args):

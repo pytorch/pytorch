@@ -51,6 +51,8 @@ class TestSelectAlgorithm(TestCase):
         super().setUp()
         if not is_big_gpu():
             return self.skipTest("Need a big GPU to run max_autotune=True")
+        # Clear preprocessing functions to ensure clean state
+        select_algorithm.clear_preprocessing_fns()
 
     @patches
     def test_linear_relu(self):
@@ -82,6 +84,30 @@ class TestSelectAlgorithm(TestCase):
 
         foo(*inps)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_preprocessing_single_choice(self):
+        # Register a preprocessing function that returns only the first choice
+        # This in turn will lead to autotuning being skipped as it's a single
+        # choice, and the counter itself will not be bumped
+        def return_first_choice_only(choices):
+            return choices[:1] if choices else []
+
+        select_algorithm.add_preprocessing_fn(return_first_choice_only)
+
+        @torch.compile
+        def foo(input, weight, bias):
+            return torch.addmm(bias, input, weight)
+
+        inps = (
+            torch.randn(20, 33, device=GPU_TYPE),
+            torch.randn(33, 16, device=GPU_TYPE),
+            torch.randn(20, 16, device=GPU_TYPE),
+        )
+
+        foo(*inps)
+        # Since we only have one choice, autotuning should be skipped
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
 
     @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
     @patches
