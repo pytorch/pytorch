@@ -7462,28 +7462,39 @@ def sigmoid(self: Tensor) -> Tensor:
     return torch.empty_like(self, dtype=result_dtype)
 
 
-def _compute_grouped_mm_output_size(mat1, mat2, offs):
+def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
     mat1_is_2d = mat1.dim() == 2
     mat2_is_2d = mat2.dim() == 2
 
     if mat1_is_2d:
         if mat2_is_2d:
-            return offs.size(0), mat1.size(0), mat2.size(1)
+            out_size = [offs.size(0), mat1.size(0), mat2.size(1)]
         else:
             torch._check(
                 offs.size(0) == mat2.size(0), "matrix batch sizes have to match"
             )
-            return mat1.size(0), mat2.size(-1)
+            out_size = [mat1.size(0), mat2.size(-1)]
     else:
         if mat2_is_2d:
             torch._check(
                 offs.size(0) == mat1.size(0), "matrix batch sizes have to match"
             )
-            return mat1.size(1), mat2.size(1)
+            out_size = [mat1.size(1), mat2.size(1)]
         else:
             # regular bmm
             torch._check(mat1.size(0) == mat2.size(0), "batched dimension has to match")
-            return mat1.size(0), mat1.size(1), mat2.size(-1)
+            out_size = [mat1.size(0), mat1.size(1), mat2.size(-1)]
+
+    out_dtype = out_dtype or mat1.dtype
+
+    alignment = 16 // out_dtype.itemsize
+    size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
+    if mat1_is_2d == mat2_is_2d:
+        out_stride = [out_size[1] * size_padded, size_padded, 1]
+    else:
+        out_stride = [size_padded, 1]
+    out = torch.empty_strided(out_size, out_stride, dtype=out_dtype, device=mat1.device)
+    return out
 
 
 def _meta_grouped_mm_common(
@@ -7526,15 +7537,6 @@ def _meta_grouped_mm_common(
     mat_a_is_2d = mat_a.dim() == 2
     mat_b_is_2d = mat_b.dim() == 2
 
-    torch._check(
-        mat_a.shape[-1] % 16 == 0,
-        lambda: f"Expected mat_a.shape[-1] to be divisible by 16, but got mat_a.shape[-1]={mat_a.shape[1]}",
-    )
-    torch._check(
-        mat_b.shape[-2] % 16 == 0 and mat_b.shape[-1] % 16 == 0,
-        lambda: f"Expected mat_b.shape[-2] and mat_b.shape[-1] to be both divisble by 16 but got {mat_b.shape[-2]} and {mat_b.shape[-1]}",  # noqa: B950
-    )
-
     if scaled:
 
         def is_row_major(mat):
@@ -7556,7 +7558,7 @@ def _meta_grouped_mm_common(
 
     def check_valid_strides(mat_name, mat):
         end_dim = mat.dim() - 1
-        alignment = 16 / mat.element_size()
+        alignment = 16 // mat.element_size()
         mat_stride = mat.stride()
         if mat_stride[end_dim - 1] == 1 and mat_stride[end_dim] >= max(
             1, mat.shape[end_dim - 1]
@@ -7575,7 +7577,7 @@ def _meta_grouped_mm_common(
         else:
             torch._check(
                 False,
-                lambda: f"Expected {mat_name} to have a contiguous dimension and not be mat_a-overlapping, got {mat_stride} for strides and {mat.shape} for sizes.",  # noqa: B950
+                lambda: f"Invalid strides/sizes, got {mat_stride} for strides and {mat.shape} for sizes.",  # noqa: B950
             )
 
     check_valid_strides("mat_a", mat_a)
@@ -7660,9 +7662,7 @@ def _meta_grouped_mm_common(
         lambda: "If output dtype provided, it must be torch.bfloat16.",
     )
 
-    out_size = _compute_grouped_mm_output_size(mat_a, mat_b, offs)
-    out_dtype = out_dtype or mat_a.dtype
-    return torch.empty(out_size, dtype=out_dtype, device=mat_a.device)
+    return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
 
 
 @register_meta(aten._grouped_mm)
