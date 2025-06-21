@@ -847,7 +847,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     if (!checkFunctionOutputsForLogging(fn)) {
       return;
     }
-    auto outputs = fn.outputs();
+    const auto& outputs = fn.outputs();
     auto num_outputs = fn.num_outputs();
     // need to account for Stack mode where the outputs are at the end.
     size_t output_start = outputs.size() - num_outputs;

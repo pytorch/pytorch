@@ -107,7 +107,7 @@ static int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize
 inline Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
-    QuantizerPtr quantizer) {
+    const QuantizerPtr& quantizer) {
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   auto device = options.device();
   at::Allocator* allocator = nullptr;
@@ -338,7 +338,7 @@ Tensor from_blob_quantized_per_tensor_affine(
   const std::size_t datasize = size * itemsize;
 
   DataPtr data_ptr = InefficientStdFunctionContext::makeDataPtr(
-      data, deleter, options.device());
+      data, std::move(deleter), options.device());
 
   Storage storage{Storage::use_byte_size_t{}, datasize, std::move(data_ptr)};
 
@@ -411,7 +411,7 @@ Tensor from_blob_quantized_per_channel_affine(
   const std::size_t datasize = size * itemsize;
 
   DataPtr data_ptr = InefficientStdFunctionContext::makeDataPtr(
-      data, deleter, options.device());
+      data, std::move(deleter), options.device());
 
   Storage storage{Storage::use_byte_size_t{}, datasize, std::move(data_ptr)};
 

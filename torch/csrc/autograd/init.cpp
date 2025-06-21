@@ -1362,7 +1362,7 @@ static PyObject* pop_torch_dispatch_stack(
         "Attempted to unset ",
         c10::impl::to_string(mode_key.value()),
         ", but there wasn't one active.");
-    auto mode = maybe_mode.value();
+    const auto& mode = maybe_mode.value();
     r = mode->ptr(getPyInterpreter());
   } else {
     auto mode = c10::impl::TorchDispatchModeTLS::pop_stack();
