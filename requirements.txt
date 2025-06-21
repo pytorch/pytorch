@@ -1,22 +1,22 @@
 # Python dependencies required for development
-astunparse
-cmake
-expecttest>=0.3.0
-filelock
-fsspec
-hypothesis
-jinja2
-lintrunner ; platform_machine != "s390x"
-networkx
-ninja
-numpy
-optree>=0.13.0
-packaging
-psutil
-pyyaml
-requests
+astunparse~=1.6
+cmake~=4.0
+expecttest~=0.3.0
+filelock~=3.18
+fsspec==2025.3.2
+hypothesis~=6.130
+jinja2~=3.1
+lintrunner~=0.12.7 ; platform_machine != "s390x"
+networkx~=3.4
+ninja~=1.11
+numpy~=2.0
+optree~=0.15.0
+packaging~=24.2
+psutil~=7.0
+PyYAML~=6.0
+requests~=2.32
 # setuptools develop deprecated on 80.0
 setuptools>=62.3.0,<80.0
-sympy>=1.13.3
-types-dataclasses
-typing-extensions>=4.10.0
+sympy>=1.13.3,<2
+types-dataclasses~=0.6.6
+typing-extensions~=4.13
