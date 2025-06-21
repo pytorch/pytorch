@@ -1183,7 +1183,7 @@ class MemPool(_MemPool):
     @property
     def is_symmetric(self) -> bool:
         r"""Returns whether this pool is used for NCCL's symmetric memory."""
-        return super().is_symmetric()
+        return super().is_symmetric
 
     @property
     def allocator(self) -> Optional[_cuda_CUDAAllocator]:
