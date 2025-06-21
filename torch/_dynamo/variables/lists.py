@@ -77,6 +77,23 @@ class BaseListVariable(VariableTracker):
         super().__init__(**kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
+        self.are_items_same = False
+        if all(isinstance(x, variables.LazyVariableTracker) for x in items):
+            values = [x.peek_value() for x in items]
+            if all(variables.ConstantVariable.is_literal(v) for v in values):
+                self.are_items_same = True
+            if all(isinstance(v, torch.Tensor) for v in values):
+                from torch.fx.passes.shape_prop import _extract_tensor_metadata
+
+                metadata0 = _extract_tensor_metadata(values[0])
+                same_metedata = True
+                for v in values[1:]:
+                    if _extract_tensor_metadata(v) != metadata0:
+                        same_metedata = False
+                        break
+
+                if same_metedata:
+                    self.are_items_same = True
         self.items: list[VariableTracker] = items
 
     def _as_proxy(self):

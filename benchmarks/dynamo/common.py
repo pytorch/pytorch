@@ -2037,8 +2037,7 @@ class BenchmarkRunner:
     ):
         """
         Checks accuracy.
-        1) Collect the outputs with reference datatype. This is useful for error checking.
-           (reference datatype is fp64 if supported otherwise fp32"
+        1) Collect the outputs with fp64 datatype. This is useful for error checking.
         2) Checks if eager itself has variations.
         """
         start_stats = get_dynamo_stats()
@@ -2092,38 +2091,35 @@ class BenchmarkRunner:
         if self.args.backend == "torchao":
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
-        ref_dtype = torch.float64 if current_device != "mps" else torch.float32
         with self.pick_grad(name, self.args.training):
             # Collect the fp64 reference outputs to be used later for accuracy checking.
-            ref_outputs = None
-            model_ref = None
-            inputs_ref = None
+            fp64_outputs = None
+            model_fp64 = None
+            inputs_fp64 = None
             try:
-                model_ref, inputs_ref = cast_to(
-                    ref_dtype,
+                model_fp64, inputs_fp64 = cast_to_fp64(
                     self.deepcopy_and_maybe_parallelize(model),
                     clone_inputs(example_inputs),
                 )
-                self.init_optimizer(name, current_device, model_ref.parameters())
-                ref_outputs = self.run_n_iterations(
-                    model_ref, inputs_ref, self.model_iter_fn
+                self.init_optimizer(name, current_device, model_fp64.parameters())
+                fp64_outputs = self.run_n_iterations(
+                    model_fp64, inputs_fp64, self.model_iter_fn
                 )
-                ref_outputs = tree_map(
-                    lambda x: x.to(ref_dtype)
+                fp64_outputs = tree_map(
+                    lambda x: x.to(torch.float64)
                     if isinstance(x, torch.Tensor) and x.is_floating_point()
                     else x,
-                    ref_outputs,
+                    fp64_outputs,
                 )
             except Exception:
                 log.warning(
-                    "%s golden ref were not generated for %s. Setting accuracy check to cosine",
-                    ref_dtype.__name__,
+                    "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
                     name,
                 )
                 self.args.cosine = True
-                ref_outputs = None
+                fp64_outputs = None
             finally:
-                del model_ref, inputs_ref
+                del model_fp64, inputs_fp64
                 empty_gpu_cache(current_device)
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
@@ -2258,12 +2254,12 @@ class BenchmarkRunner:
                     ):
                         correct_result = process_fn(correct_result)
                         new_result = process_fn(new_result)
-                        ref_outputs = process_fn(ref_outputs)
+                        fp64_outputs = process_fn(fp64_outputs)
 
                 if not same(
                     correct_result,
                     new_result,
-                    ref_outputs,
+                    fp64_outputs,
                     equal_nan=self.equal_nan,
                     use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
                         name
