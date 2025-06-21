@@ -252,3 +252,6 @@ class AdaptiveRoundingOptimizer:
         q_module.weight.data.copy_(q_weight)  # type: ignore[operator]
         # Eager mode requires observer to be set as "weight_fake_quant" to be parsed
         q_module.weight_fake_quant = ada_quantizer.activation_post_process
+
+
+__all__ = ["AdaptiveRoundingOptimizer"]

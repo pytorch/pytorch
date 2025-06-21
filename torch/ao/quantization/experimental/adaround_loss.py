@@ -94,3 +94,6 @@ class AdaptiveRoundingLoss(torch.nn.Module):
             soft_quantized_output, original_output
         )
         return regularization_term, reconstruction_term
+
+
+__all__ = ["AdaptiveRoundingLoss"]
