@@ -474,6 +474,10 @@ def try_match_insignificant_strides(
 
     if all(
         V.graph.sizevars.statically_known_equals(s1, s2)
+        or (
+            V.graph.sizevars.statically_known_true(sympy.Ne(s1, 0))
+            and V.graph.sizevars.statically_known_equals(sympy.Max(1, s1), s2)
+        )
         for s1, s2 in zip(strides, tensor.get_stride())
     ):
         return tensor  # type: ignore[arg-type]
