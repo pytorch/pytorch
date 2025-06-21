@@ -103,7 +103,6 @@ from .exc import (
     InternalTorchDynamoError,
     PackageError,
     RecompileLimitExceeded,
-    ResumePrologueTracingError,
     ShortenTraceback,
     SkipCodeRecursiveException,
     TorchRuntimeError,
@@ -117,7 +116,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .pgo import put_code_state
+from .pgo import log_frame_dynamic_whitelist, put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
@@ -477,12 +476,6 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
 @dataclass
 class ConvertFrameBox:
     error_on_graph_break: Optional[bool] = None
-
-
-def _is_error_on_graph_break(tx: Optional[InstructionTranslator]) -> bool:
-    if tx is None:
-        return config.error_on_graph_break
-    return tx.error_on_graph_break
 
 
 class ConvertFrameAssert:
@@ -880,7 +873,12 @@ def _compile(
                     code.co_filename,
                     code.co_firstlineno,
                 )
-                if one_graph or _is_error_on_graph_break(tracer):
+                error_on_graph_break = (
+                    tracer.error_on_graph_break
+                    if tracer
+                    else config.error_on_graph_break
+                )
+                if one_graph or error_on_graph_break:
                     log.debug(
                         "No graph captured with one_graph=True or torch._dynamo.config.error_on_graph_break=True"
                     )
@@ -1045,11 +1043,14 @@ def _compile(
                 recompile_reason,
                 troubleshooting_url,
             )
+            error_on_graph_break = (
+                tracer.error_on_graph_break if tracer else config.error_on_graph_break
+            )
             if config.fail_on_recompile_limit_hit:
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph or _is_error_on_graph_break(tracer):
+            elif one_graph or error_on_graph_break:
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached with one_graph=True or torch._dynamo.config.error_on_graph_break=True. "
                     "Excessive recompilations can degrade "
@@ -1141,6 +1142,7 @@ def _compile(
             # to upload for graph break though, because this can prevent
             # extra graph break compilations.)
             put_code_state()
+            log_frame_dynamic_whitelist(code)
 
             return guarded_code
         except Exception as e:
@@ -1162,15 +1164,7 @@ def _compile(
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
                 e, compile_id
             )
-            if tracer and tracer.is_tracing_resume_prologue:
-                # Do not allow any errors to be suppressed if tracer is currently tracing
-                # through resume function.
-                raise ResumePrologueTracingError(
-                    "Error while tracing through a Dynamo-generated resume function prologue. "
-                    "Errors are not allowed when tracing resume function prologues.\n"
-                    f"{type(e).__qualname__}: {str(e)}"
-                ).with_traceback(e.__traceback__) from None
-            elif isinstance(
+            if isinstance(
                 e,
                 (
                     Unsupported,
@@ -1317,10 +1311,6 @@ class ConvertFrame:
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:
-            # Do not allow errors to be suppressed if we're tracing a resume function prologue
-            if isinstance(e, ResumePrologueTracingError):
-                raise
-
             error_on_graph_break = (
                 self._inner_convert._box.error_on_graph_break is not None
             )
