@@ -57,6 +57,10 @@ case ${CUDA_VERSION} in
     12.8|12.9)
         TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX" #removing sm_50-sm_70 as these architectures are deprecated in CUDA 12.8/9 and will be removed in future releases
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
+        # WAR to resolve the ld error in libtorch build with CUDA 12.9
+        if [[ "$DESIRED_CUDA" == "cu129" && "$PACKAGE_TYPE" == "libtorch" ]]; then
+            TORCH_CUDA_ARCH_LIST="7.5;8.0;9.0;10.0;12.0+PTX"
+        fi
         ;;
     12.6)
         TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
@@ -103,12 +107,11 @@ DEPS_SONAME=(
 )
 
 
-# CUDA_VERSION 12.6, 12.8
+# CUDA_VERSION 12.6, 12.8, 12.9
 if [[ $CUDA_VERSION == 12* ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
     export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
-
     if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
         echo "Bundling with cudnn and cublas."
         DEPS_LIST+=(
@@ -124,7 +127,6 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "/usr/local/cuda/lib64/libcublasLt.so.12"
             "/usr/local/cuda/lib64/libcusparseLt.so.0"
             "/usr/local/cuda/lib64/libcudart.so.12"
-            "/usr/local/cuda/lib64/libnvToolsExt.so.1"
             "/usr/local/cuda/lib64/libnvrtc.so.12"
             "/usr/local/cuda/lib64/libnvrtc-builtins.so"
             "/usr/local/cuda/lib64/libcufile.so.0"
@@ -143,12 +145,16 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "libcublasLt.so.12"
             "libcusparseLt.so.0"
             "libcudart.so.12"
-            "libnvToolsExt.so.1"
             "libnvrtc.so.12"
             "libnvrtc-builtins.so"
             "libcufile.so.0"
             "libcufile_rdma.so.1"
         )
+        # Add libnvToolsExt only if CUDA version is not 12.9
+        if [[ $CUDA_VERSION != 12.9* ]]; then
+            DEPS_LIST+=("/usr/local/cuda/lib64/libnvToolsExt.so.1")
+            DEPS_SONAME+=("libnvToolsExt.so.1")
+        fi
     else
         echo "Using nvidia libs from pypi."
         CUDA_RPATHS=(
