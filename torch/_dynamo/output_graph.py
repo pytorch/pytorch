@@ -55,6 +55,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
@@ -69,7 +70,7 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-
+from torch._functorch._aot_autograd.functional_utils import from_fun
 from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
@@ -437,7 +438,12 @@ class OutputGraph(OutputGraphGuardsState):
                 allow_non_fake_inputs=True if self.export else False,
                 export=self.export,
             )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        functional_mode = FunctionalTensorMode(
+            export=self.export, _allow_token_discovery=True
+        )
+        self.tracing_context: TracingContext = TracingContext(
+            fake_mode, functional_mode
+        )
         self.tracing_context.traced_code.append(f_code)
         self.dynamo_compile_id: Optional[CompileId] = (
             CompileContext.current_compile_id()
@@ -685,6 +691,7 @@ class OutputGraph(OutputGraphGuardsState):
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
         """
+        # NOTE: Where does this get used???
         example_value = fn(*args)
         varname = self.new_var()
         cg = PyCodegen(self.root_tx)
@@ -794,6 +801,10 @@ class OutputGraph(OutputGraphGuardsState):
     @property
     def fake_mode(self):
         return self.tracing_context.fake_mode
+
+    @property
+    def functional_mode(self):
+        return self.tracing_context.functional_mode
 
     @property
     def shape_env(self):
@@ -911,6 +922,7 @@ class OutputGraph(OutputGraphGuardsState):
         # than just nn module objects, fix that.
         self.nn_modules[attr_name] = attr_value
         proxy = self.create_proxy("get_attr", attr_name, (), {})
+        # NOTE: Figure where this gets used
         set_example_value(proxy.node, attr_value)
         return proxy
 
@@ -1678,18 +1690,18 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.call_cleanup_hooks()
             old_fake_mode = self.tracing_context.fake_mode
-            if not self.export:
-                import torch._functorch.config as _config
+            # if not self.export:
+            #     import torch._functorch.config as _config
 
-                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                    # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
-                    backend_fake_mode = torch._subclasses.FakeTensorMode(
-                        shape_env=old_fake_mode.shape_env,
-                    )
-                # TODO(voz): Ostensibily, this should be scoped and
-                # restore back to old_fake_mode, but doing so currently violates
-                # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
-                self.tracing_context.fake_mode = backend_fake_mode
+            #     with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            #         # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+            #         backend_fake_mode = torch._subclasses.FakeTensorMode(
+            #             shape_env=old_fake_mode.shape_env,
+            #         )
+            #     # TODO(voz): Ostensibily, this should be scoped and
+            #     # restore back to old_fake_mode, but doing so currently violates
+            #     # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
+            #     self.tracing_context.fake_mode = backend_fake_mode
 
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
@@ -2784,6 +2796,7 @@ class SubgraphTracer(fx.Tracer):
     def track_unbacked_symbols(
         self, example_value, e_proxy: Union[LazyProxy, torch.fx.Proxy]
     ):
+        # breakpoint()
         # When binding the symbols in an exmaple_value, we bind the symbols
         # to the proxy's associatied Tracer instead of current tracer.
         # This is because:
@@ -2816,6 +2829,7 @@ class SubgraphTracer(fx.Tracer):
             return proxy
 
         if isinstance(example_value, torch.Tensor):
+            example_value = from_fun(example_value)
             for i, s in enumerate(example_value.size()):
                 if need_bind(s):
                     log.debug(

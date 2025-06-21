@@ -9,6 +9,7 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
+from torch._functorch._aot_autograd.functional_utils import from_fun
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
@@ -360,21 +361,23 @@ def _collect_fake_inputs(inputs):
             if hasattr(inp, "meta"):
                 val = inp.meta["example_value"]
                 if isinstance(val, torch.Tensor):
+                    # Check for and unwrap common FakeTensor Wrappers in 'example_value'
                     if torch._C._functorch.is_batchedtensor(
                         val
                     ) or torch._C._functorch.is_functionaltensor(val):
-                        # This case is for batched or functional tensors
-                        # Unwrap the tensors
                         while torch._C._functorch.is_batchedtensor(
                             val
                         ) or torch._C._functorch.is_functionaltensor(val):
                             val = torch._C._functorch.get_unwrapped(val)
-                        assert isinstance(val, FakeTensor)
-                        inputs_fake.append(val)
-                    else:
-                        # This is the standard case of a TensorVariable
-                        assert isinstance(val, FakeTensor)
-                        inputs_fake.append(val)
+                    elif isinstance(val, FunctionalTensor):
+                        # TODO: Figure out why these may be different
+                        # than the C subclass semantics laid out above
+                        # NOTE: The implementation for `is_functionaltensor`
+                        # checks the DispatchKeySet, and it is possible this has
+                        # been disabled as is the case for collect_view_and_mutation_metadata
+                        val = from_fun(val)
+                    assert isinstance(val, FakeTensor)
+                    inputs_fake.append(val)
                 else:
                     # This case is for SymInts and other non-Tensor elements
                     assert not isinstance(val, torch.Tensor)

@@ -65,6 +65,7 @@ from typing import (
 from typing_extensions import Literal, TypeAlias, TypeGuard, TypeIs
 
 import torch
+from torch._functorch._aot_autograd.functional_utils import from_fun
 import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
@@ -91,7 +92,7 @@ from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
-
+from torch._subclasses.functional_tensor import disable_functional_mode
 from .graph_utils import _get_flat_args
 
 
@@ -3192,7 +3193,6 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     )
 
     op = node.op
-
     # FX Node should always return the same fake value
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
@@ -3200,7 +3200,6 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     args, kwargs = get_fake_values_from_nodes(
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
-
     if (
         torch._dynamo.config.use_graph_deduplication
         or torch._dynamo.config.track_nodes_for_deduplication
@@ -3214,11 +3213,14 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     else:
         flat_args_kwargs = []
         id_to_initial_version = {}
-
     nnmodule = None
+    # CURRENT ISSUE: deepcopy_to_fake_tensor doesn't work with FunctionalMode
+    # without this mode though, we don't have parameters of proper tensor types
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
         # If the first argument is nn.Module, should copy to fake mode.
-        args = (deepcopy_to_fake_tensor(args[0], tx.fake_mode),) + tuple(args[1:])
+        # with disable_functional_mode():
+        copied = deepcopy_to_fake_tensor(args[0], tx.fake_mode)
+        args = (copied,) + tuple(args[1:])
 
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
@@ -3245,7 +3247,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         )
 
     try:
-        with tx.fake_mode, enable_python_dispatcher():
+        with tx.functional_mode, tx.fake_mode, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
@@ -3401,7 +3403,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     raise an AssertionError.
     """
     op = node.op
-
+    # breakpoint()
     with set_current_node(node):
 
         def make_error_message(e):

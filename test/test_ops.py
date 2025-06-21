@@ -824,7 +824,6 @@ class TestCommon(TestCase):
             # calls it normally to get the expected result
             expected = op(sample.input, *sample.args, **sample.kwargs)
             op_out = partial(op, sample.input, *sample.args, **sample.kwargs)
-
             # Short-circuits if output is not a single tensor or an
             #   iterable of tensors
             if not isinstance(expected, torch.Tensor) and not is_iterable_of_tensors(

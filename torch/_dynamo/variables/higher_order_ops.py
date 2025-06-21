@@ -1850,7 +1850,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             additional_inputs_proxy,
         )
 
-        with tx.fake_mode:
+        with tx.fake_mode, tx.functional_mode:
             example_carry = [
                 init_p.node.meta["example_value"].clone() for init_p in init_proxy
             ]
@@ -3234,7 +3234,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # (e.g, tensor.requires_grad), which would be used by downstream Dynamo tracing.
         # Since there can be other ops like Triton kernels, which depends on python dispatcher, we have to enable it.
         with enable_python_dispatcher():
-            with tx.output.fake_mode:
+            with tx.output.fake_mode, tx.output.functional_mode:
                 fake_args = (
                     tx.output.nn_modules[fwd_node.node.name],
                     tx.output.nn_modules[bwd_node.node.name],

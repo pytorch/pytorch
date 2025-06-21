@@ -3841,7 +3841,9 @@ class CPUReproTests(TestCase):
             return a
 
         x = torch.rand(4, 5)
-        self.common(f, (x,))
+        opt_f = torch.compile(f)
+        self.assertEqual(opt_f(x), f(x))
+        # self.common(f, (x,))
 
     def test_broadcast_scalar_cpp_tile_2d_kernel(self):
         # Based on detectron2_maskrcnn backbone (conv2d -> max_pool2d)

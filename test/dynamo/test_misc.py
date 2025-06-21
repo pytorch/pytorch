@@ -7785,7 +7785,9 @@ utils_device.CURRENT_DEVICE == None""".split(
         y = torch.randn(3, 3, 3, 4)
 
         self.assertEqual(fn(y, y, 1.0), fn_opt(y, y, 1.0))
-        self.assertEqual(fn(y, y, 2.0), fn_opt(y, y, 2.0))
+        pass_2 = fn(y, y, 2.0)
+        pass_2_opt = fn_opt(y, y, 2.0)
+        self.assertEqual(pass_2, pass_2_opt)
 
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])

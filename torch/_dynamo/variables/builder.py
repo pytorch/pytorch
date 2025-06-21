@@ -51,6 +51,7 @@ from torch._dynamo.utils import (
     is_torch_sym,
     set_feature_use,
 )
+from torch._functorch._aot_autograd.functional_utils import to_fun
 from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
@@ -2027,11 +2028,18 @@ class VariableBuilder:
         # then the relevant SubgraphTracer will lift it to being an input of
         # the subgraph.
         # See NOTE [HigherOrderOperator tracing design] for more details.
-
-        example_value = wrap_to_fake_tensor_and_record(
-            value, tx=self.tx, is_tensor=True, source=source
-        )
-
+        # Need to handle weird edge case where value is already a functional tensor...
+        if torch._is_functional_tensor(value):
+            val = torch._from_functional_tensor(value)
+        else:
+            val = value
+        # breakpoint()
+        with self.tx.functional_mode:
+            example_value = to_fun(
+                wrap_to_fake_tensor_and_record(
+                    val, tx=self.tx, is_tensor=True, source=source
+                )
+            )
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(value),
@@ -2145,12 +2153,15 @@ class VariableBuilder:
         # that there's not another great way to do this atm.
         # This creates the right graphargs, as well as registration for guards in tensor names and shape env.
         LazyVariableTracker.realize_all(VariableBuilder(self.tx, source)(tensor_value))
-        example_value = wrap_to_fake_tensor_and_record(
-            tensor_value,
-            tx=self.tx,
-            is_tensor=False,
-            source=source,
-        )
+        with self.tx.functional_mode:
+            example_value = to_fun(
+                wrap_to_fake_tensor_and_record(
+                    tensor_value,
+                    tx=self.tx,
+                    is_tensor=False,
+                    source=source,
+                )
+            )
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(tensor_value),
@@ -2377,9 +2388,12 @@ class VariableBuilder:
 
         # TODO: Maybe the tensor-ification should be built into the source,
         # rather than by special pattern match
-        example_value = wrap_to_fake_tensor_and_record(
-            wrapped_value, tx=self.tx, is_tensor=False, source=source
-        )
+        with self.tx.functional_mode:
+            example_value = to_fun(
+                wrap_to_fake_tensor_and_record(
+                    wrapped_value, tx=self.tx, is_tensor=False, source=source
+                )
+            )
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(wrapped_value),
@@ -2407,7 +2421,7 @@ class VariableBuilder:
         assert is_fake(example_value)
 
         fake_tensor_value = example_value
-        assert fake_tensor_value.fake_mode is self.tx.fake_mode, (
+        assert maybe_get_fake_mode(fake_tensor_value) is self.tx.fake_mode, (
             f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
             "({self.tx.fake_mode}) from InstructionTranslator"
         )
@@ -2720,7 +2734,8 @@ def _wrap_fx_proxy(
         # with preserve_rng_state():
         # only allow_non_graph_fake in this instance because we handle the non-fake
         # cases properly below.
-        example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+        with tx.functional_mode:
+            example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
 
     return handle_traced_output(
         example_value, tx, proxy, options, subclass_type, target_cls
@@ -2940,8 +2955,9 @@ def construct_tensor_variable(
     specialized_props = target_cls.specialize(example_value)
     # TODO: not sure about this fake mode test
     if (
-        isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
-        and example_value.fake_mode is tx.fake_mode
+        (isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
+        or isinstance(example_value, torch._subclasses.functional_tensor.FunctionalTensor))
+        and maybe_get_fake_mode(example_value) is tx.fake_mode
     ):
         if subclass_type:
             tensor_type = subclass_type

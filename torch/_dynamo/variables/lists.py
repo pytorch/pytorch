@@ -43,6 +43,7 @@ from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
+from torch._functorch._aot_autograd.functional_utils import from_fun
 
 
 if TYPE_CHECKING:
@@ -139,6 +140,7 @@ class BaseListVariable(VariableTracker):
             assert not kwargs and len(args) == 1
             if isinstance(args[0], TensorVariable):
                 value = get_fake_value(args[0].as_proxy().node, tx)
+                value = from_fun(value)
                 if value.constant is not None and value.constant.numel() == 1:
                     value = variables.ConstantVariable.create(value.constant.item())
                 else:

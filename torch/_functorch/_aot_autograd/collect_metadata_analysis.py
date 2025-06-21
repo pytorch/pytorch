@@ -152,10 +152,11 @@ def run_functionalized_fw_and_collect_metadata(
     is_train: bool = False,
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: Optional[list[int]] = None,
-    pre_dispatch: bool = False,
     # is_export is technically only needed to avoid using functionalization V2
     # during analysis
     is_export: bool = False,
+    gm: Optional[torch.fx.GraphModule] = None,
+    functional_mode: Optional[FunctionalTensorMode] = None,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: dict[Tensor, Tensor] = {}
 
@@ -171,6 +172,21 @@ def run_functionalized_fw_and_collect_metadata(
 
     @wraps(f)
     def inner(*flat_args):
+        nonlocal static_input_indices
+        view_and_mutation_meta_no_gm = None
+        # Short circut and don't run full thing if freezing, since the input placeholders won't be
+        if gm is not None:
+            # Hacky work around - we want to check against functionalized, so let us call
+            # into this for now to verify correcntess
+            to_call = run_functionalized_fw_and_collect_metadata(
+                f,
+                keep_input_mutations=keep_input_mutations,
+                is_train=is_train,
+                static_input_indices=static_input_indices,
+                is_export=is_export,
+                gm=None,
+            )
+            view_and_mutation_meta_no_gm = to_call(*flat_args)
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
 
@@ -189,20 +205,64 @@ def run_functionalized_fw_and_collect_metadata(
         # only for figuring out metadata
         mode = FunctionalTensorMode(_allow_token_discovery=True, export=is_export)
         suppress_pending = contextlib.nullcontext()
+
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        with disable_above, mode, suppress_pending:
-            # precondition: The passed in function already handles unflattening inputs + flattening outputs
-            flat_f_args = pytree.tree_map(_to_fun, flat_args)
-            flat_f_outs = f(*flat_f_args)
-            # We didn't do any tracing, so we don't need to process the
-            # unbacked symbols, they will just disappear into the ether.
-            # Also, prevent memoization from applying.
-            if fake_mode:
-                fake_mode.epoch += 1
-                fake_mode.reset_nt_tensor_id_counter()
+        if gm is None:
+            # NOTE: If we don't have fx module (assume no dynamo),
+            # need to get functional tensors and do call
+            import time
 
+            start_time = time.time()
+
+            with disable_above, mode, suppress_pending:
+                # precondition: The passed in function already handles unflattening inputs + flattening outputs
+                flat_f_args = pytree.tree_map(_to_fun, flat_args)
+                flat_f_outs = f(*flat_f_args)
+                # We didn't do any tracing, so we don't need to process the
+                # unbacked symbols, they will just disappear into the ether.
+                # Also, prevent memoization from applying.
+                if fake_mode:
+                    fake_mode.epoch += 1
+                    fake_mode.reset_nt_tensor_id_counter()
+
+            elapsed_time_ms = (time.time() - start_time) * 1000
+            log.debug(
+                f"Time taken for functionalized execution: {elapsed_time_ms:.2f} ms"
+            )
+        else:
+            # NOTE: This makes a strong assumption that the order of f_args is analogous to args
+            # this may not be true...
+
+            import time
+
+            if functional_mode:
+                mode = functional_mode
+            else:
+                raise RuntimeError("Expected functional mode to be set")
+            # All `example_value` tensors on the nodes are already wrapped in
+            # functional tensor, so we don't need to wrap them again, only extract them
+            start_time = time.time()
+            flat_f_args = tuple(
+                node.meta["example_value"]
+                if hasattr(node, "meta") and "example_value" in node.meta
+                else None
+                for node in gm.graph.find_nodes(op="placeholder")
+            )
+            # The output nodes are the last nodes (args) into the singular output node
+            output_args = gm.graph.find_nodes(op="output")[0].args
+            output_nodes = output_args[0] if len(output_args) > 0 else []
+            flat_f_outs = tuple(
+                node.meta["example_value"]
+                if hasattr(node, "meta") and "example_value" in node.meta
+                else None
+                for node in output_nodes
+            )
+            elapsed_time_ms = (time.time() - start_time) * 1000
+            log.debug(f"Time taken: {elapsed_time_ms:.2f} ms from graph")
+        # print(flat_f_args)
+        # print(flat_f_outs)
         if prior_autocast_states != _get_autocast_states():
             raise RuntimeError(
                 "AOTAutograd does not support tracing graphs that mutate the autocast state. "
@@ -213,11 +273,13 @@ def run_functionalized_fw_and_collect_metadata(
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
+        # import pdb; pdb.set_trace()s
         for i, (arg, f_arg) in enumerate(zip(flat_args, flat_f_args)):
             # NB: Mutation of non-contiguous tensor subclass input can result in a mismatch in
             # strides between the functionalized arg inner tensors and non-functionalized arg inner
             # tensors. This is a problem as the inner tensor stride change may not be reflected
             # correctly in the outer tensor, so disallow this for now.
+            # breakpoint()
             mutates_data = has_data_mutation(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
@@ -738,7 +800,6 @@ from a multi-output view call"
             coerce_tangent_and_suggest_memory_format(tt)[0]
             for i, tt in enumerate(traced_tangents)
         ]
-        nonlocal static_input_indices
         static_input_indices = static_input_indices or []
         if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
             passed_indices = set(static_input_indices)
@@ -808,6 +869,17 @@ from a multi-output view call"
             static_input_indices=static_input_indices,
             tokens=mode._tokens,
         )
+        if view_and_mutation_meta_no_gm is not None:
+            for k, v in view_and_mutation_meta_no_gm.__dict__.items():
+                try:
+                    assert (
+                        metadata.__dict__[k] == v
+                    ), f"{k} mismatch: {metadata.__dict__[k]} vs {v}"
+                except RuntimeError as e:
+                    # traced tangents results in multiple in nested case so call all
+                    log.debug(
+                        f"~~~~Got error on KEY: {k}: {e}, \nPlease inspect manually: {metadata.__dict__[k]} vs {v}"
+                    )
         return metadata
 
     return inner

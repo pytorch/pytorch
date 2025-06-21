@@ -1145,7 +1145,13 @@ def _free_unbacked_symbols_with_path(
             r.update(go(sub, path + (InnerTensorKey(attr),)))
     elif isinstance(a, torch.Tensor):
         from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.functional_tensor import FunctionalTensor
 
+        # Note, a may also be functional wrapping a Fake, so check and unwrap if needed
+        if isinstance(a, FunctionalTensor):
+            from torch._functorch._aot_autograd.functional_utils import from_fun
+
+            a = from_fun(a)
         assert isinstance(a, FakeTensor)
         r.update(
             go(

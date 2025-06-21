@@ -354,6 +354,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             super().__exit__(a, b, c)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        # breakpoint()
         if kwargs is None:
             kwargs = {}
 

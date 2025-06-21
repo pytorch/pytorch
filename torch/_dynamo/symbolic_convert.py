@@ -2374,6 +2374,7 @@ class InstructionTranslatorBase(
     @break_graph_if_unsupported(push=0)
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
+        # breakpoint()
         obj.call_method(self, "__setitem__", [key, val], {})
 
     def DELETE_SUBSCR(self, inst):
@@ -3163,6 +3164,10 @@ class InstructionTranslatorBase(
     @property
     def fake_mode(self):
         return self.output.tracing_context.fake_mode
+
+    @property
+    def functional_mode(self):
+        return self.output.tracing_context.functional_mode
 
     @contextlib.contextmanager
     def strict_translation_mode(self, check_fn: Callable[[VariableTracker], bool]):
@@ -4030,6 +4035,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @property
     def fake_mode(self):
         return self.parent.fake_mode
+
+    @property
+    def functional_mode(self):
+        return self.parent.functional_mode
 
     def run_ctx_mgr(self):
         return TracingContext.current_frame(self.parent.frame_summary())

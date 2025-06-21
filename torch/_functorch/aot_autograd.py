@@ -682,6 +682,14 @@ def _create_aot_dispatcher_function(
                     dynamo_timed_ctx = dynamo_timed(
                         "aot_collect_metadata", log_pt2_compile_event=True
                     )
+                if aot_config.gm is not None and aot_config.functional_mode is not None:
+                    # Need both to be non None else both should be None
+                    # this is because functional_mode contains pertinent info to the
+                    # FunctionalTensors in gm; if it is not preserved, we can't get this
+                    # info properly
+                    gm, func_mode = aot_config.gm, aot_config.functional_mode
+                else:
+                    gm, func_mode = None, None
 
                 with dynamo_timed_ctx, ctx:
                     fw_metadata = run_functionalized_fw_and_collect_metadata(
@@ -689,8 +697,9 @@ def _create_aot_dispatcher_function(
                         static_input_indices=aot_config.static_input_indices,
                         keep_input_mutations=aot_config.keep_inference_input_mutations,
                         is_train=needs_autograd,
-                        pre_dispatch=aot_config.pre_dispatch,
                         is_export=aot_config.is_export,
+                        gm=gm,
+                        functional_mode=func_mode,
                     )(*_dup_fake_script_obj(fake_flat_args))
 
                 req_subclass_dispatch = requires_subclass_dispatch(
@@ -735,7 +744,6 @@ def _create_aot_dispatcher_function(
                             flat_fn,
                             keep_input_mutations=aot_config.keep_inference_input_mutations,
                             is_train=False,
-                            pre_dispatch=aot_config.pre_dispatch,
                             static_input_indices=aot_config.static_input_indices,
                         )(*fake_flat_args)
                     else:
@@ -1171,6 +1179,13 @@ def aot_module_simplified(
         no_tangents=False,
         cache_info=None,
         ignore_shape_env=ignore_shape_env,
+        gm=mod
+        if (
+            isinstance(mod, torch.fx.GraphModule)
+            and not torch._inductor.config.freezing
+        )
+        else None,
+        functional_mode=tracing_context.functional_mode if tracing_context else None,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(
