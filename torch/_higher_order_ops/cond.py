@@ -340,7 +340,7 @@ class CondAutogradOp(torch.autograd.Function):
         operands = saved_tensors_and_symints(ctx)
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
-        # trace through the joint funcion when torch.compile torch.autograd.grad.
+        # trace through the joint function when torch.compile torch.autograd.grad.
         true_bw_gm = materialize_as_graph(
             ctx._true_bw_fn,
             args,
@@ -523,7 +523,7 @@ def _merge_output(
 
     """
     This follows the logic in symbolic_shapes._compute_symbolic_stride
-    Step 2: Since tensor stride is an accumulative muliplication of the sizes, which is a permutated
+    Step 2: Since tensor stride is an accumulative multiplication of the sizes, which is a permutated
         (due to view ops) non-decending sequence.
 
         Case 1: No size is 1. In this case, strides have unique values.
@@ -544,7 +544,7 @@ def _merge_output(
                 ...
 
         Case 2: At least one dimension has size 1, which can produce duplicates in strides.
-            In this case, theorectically, we cannot uniquely determine the expr of strides because
+            In this case, theoretically, we cannot uniquely determine the expr of strides because
             the accessing stride_expr with same key in different order causes the final stride expression
             to be different.
 
@@ -554,7 +554,7 @@ def _merge_output(
                 merged_size: (u0, u1)
 
             The stride expr could either be (u1, 1) or (1, u0) depending on whether we start with u1 or u0.
-            For this reason, we try to break tie by sorting via decending index so we always get (u1, 1).
+            For this reason, we try to break tie by sorting via descending index so we always get (u1, 1).
 
             Note that backend might optimize the strides anyway so this is usually not a problem as long
             as two branches matches. See relevant discussions in https://github.com/pytorch/pytorch/issues/142024.

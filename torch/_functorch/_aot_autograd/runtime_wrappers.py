@@ -1344,12 +1344,12 @@ def merge_view_inputs(
     storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
     base_args = []
     other_args = []
-    for i, inpt in enumerate(fwd_inputs):
-        if isinstance(inpt, Tensor):
-            storage_ref = StorageWeakRef(inpt.untyped_storage())
+    for i, input in enumerate(fwd_inputs):
+        if isinstance(input, Tensor):
+            storage_ref = StorageWeakRef(input.untyped_storage())
             storage_ref_to_idx[storage_ref].append(i)
         else:
-            other_args.append(inpt)
+            other_args.append(input)
     # Note [Synthetic Base Info Metadata]
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:
@@ -1439,7 +1439,7 @@ def merge_view_inputs(
             # to have incorrect sizes.
             example_idx = aliased_input_indices[0]
             example_alias = fwd_inputs[example_idx]
-            # Note that this function is re-used at both trace time and runtime.
+            # Note that this function is reused at both trace time and runtime.
             # At trace time, we're under a FakeMode so synthetic_base becomes a FakeTensor.
             synthetic_base = torch.empty(
                 (0,), dtype=example_alias.dtype, device=example_alias.device
@@ -1518,7 +1518,7 @@ def merge_view_inputs(
 # unless we suspect that inductor might specialize and insert additional guards. When we do lazy
 # lowering, we stash the AOT backward graph (bw_module) in this class.
 #
-# Lowering passes are performed on a deepcopy of this bw_module due to compatbility
+# Lowering passes are performed on a deepcopy of this bw_module due to compatibility
 # with compiled autograd. See: https://github.com/pytorch/pytorch/pull/149229#discussion_r2002122645.
 @dataclass
 class AutogradLazyBackwardCompileInfo:
@@ -1841,7 +1841,7 @@ def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryForma
         return x
 
     # Empty_strided creates a raw Tensor.
-    # We are guranteed that only raw Tensors has expected size and stride.
+    # We are guaranteed that only raw Tensors has expected size and stride.
     # Subclasses have only expected memory_format.
     restrided = torch.empty_strided(
         size=expected_size,
