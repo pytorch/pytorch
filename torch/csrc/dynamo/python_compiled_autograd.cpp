@@ -1205,10 +1205,6 @@ static variable_list compiled_autograd(
     const GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      c10::impl::TorchDispatchModeTLS::stack_len() == 0,
-      "TorchDispatchMode not yet implemented for compiled autograd. " +
-          TURN_OFF_COMPILED_AUTOGRAD_MSG());
   static std::mutex mtx;
   LockGuardWithErrorLogs lock_guard(mtx);
   pybind11::gil_scoped_acquire gil;
@@ -1222,6 +1218,8 @@ static variable_list compiled_autograd(
   THPObjectPtr packed_inputs;
   CacheNode* cache = nullptr;
   try {
+    torch_dispatch_mode::StashTorchDispatchStackGuard stash_stack_guard;
+    TORCH_INTERNAL_ASSERT(c10::impl::TorchDispatchModeTLS::stack_len() == 0);
     cache = _compiled_autograd_impl(
         graph_root,
         graph_task,
@@ -1233,6 +1231,7 @@ static variable_list compiled_autograd(
         &hooks,
         &packed_inputs,
         active_rstate);
+    TORCH_INTERNAL_ASSERT(c10::impl::TorchDispatchModeTLS::stack_len() == 0);
   } catch (const c10::NotImplementedError& e) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false, std::string(e.what()) + " " + TURN_OFF_COMPILED_AUTOGRAD_MSG());
