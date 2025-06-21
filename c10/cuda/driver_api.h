@@ -5,12 +5,6 @@
 
 #include <c10/util/Exception.h>
 
-#if defined(CUDA_VERSION)
-#define DEFAULT_CUDA_VERSION CUDA_VERSION
-#else
-#define DEFAULT_CUDA_VERSION 11080
-#endif
-
 #define C10_CUDA_DRIVER_CHECK(EXPR)                                        \
   do {                                                                     \
     CUresult __err = EXPR;                                                 \
@@ -72,6 +66,6 @@ struct DriverAPI {
 };
 
 /*! \brief Get pointer corresponding to symbol in CUDA driver library */
-void* get_symbol(const char* symbol, int cuda_version = DEFAULT_CUDA_VERSION);
+void* get_symbol(const char* symbol);
 
 } // namespace c10::cuda
