@@ -701,7 +701,7 @@ Examples::
     >>> torch.signal.windows.general_cosine(10, a=[0.46, 0.23, 0.31], sym=True)
     tensor([0.5400, 0.3376, 0.1288, 0.4200, 0.9136, 0.9136, 0.4200, 0.1288, 0.3376, 0.5400])
 
-    >>> # Generates a periodic general cosine window wit 2 coefficients.
+    >>> # Generates a periodic general cosine window with 2 coefficients.
     >>> torch.signal.windows.general_cosine(10, a=[0.5, 1 - 0.5], sym=False)
     tensor([0.0000, 0.0955, 0.3455, 0.6545, 0.9045, 1.0000, 0.9045, 0.6545, 0.3455, 0.0955])
 """.format(
