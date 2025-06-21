@@ -320,7 +320,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@reland-fix-gather-runner-info-script
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false
