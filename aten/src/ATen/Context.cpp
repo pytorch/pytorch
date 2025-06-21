@@ -141,12 +141,13 @@ bool Context::allowTF32OneDNN() const {
   return allow_tf32_onednn;
 }
 
-void Context::setAllowTF32OneDNN(bool b){
-#ifdef USE_XPU
+  // NOLINTNEXTLINE(clang-diagnostic-unused-parameter)
+  void Context::setAllowTF32OneDNN(bool b){
+  #ifdef USE_XPU
   allow_tf32_onednn = b;
-#else
+  #else
   TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
-#endif
+  #endif
 }
 
 bool Context::userEnabledFlashSDP() const {
@@ -535,13 +536,14 @@ at::QEngine Context::qEngine() const {
 #endif
     return qengine;
   }();
-  return quantized_engine.value_or(_quantized_engine);
+  auto qt_engine = quantized_engine.load();
+  return qt_engine == (at::QEngine)0xFF ? _quantized_engine : qt_engine;
 }
 
 void Context::setQEngine(at::QEngine e) {
   const auto& qengines = supportedQEngines();
   if (std::find(qengines.begin(), qengines.end(), e) != qengines.end()) {
-    quantized_engine = e;
+    quantized_engine.store(e);
     return;
   }
   TORCH_CHECK(false, "quantized engine ", toString(e), " is not supported");
@@ -695,6 +697,7 @@ void Context::setAllowFP16ReductionCPU(bool b) {
 #if defined(__aarch64__) && !defined(C10_MOBILE)
     if (!cpuinfo_initialize() || !cpuinfo_has_arm_fp16_arith())
 #else
+    // NOLINTNEXTLINE(facebook-hte-MissingBraces)
     if (true)
 #endif
       TORCH_CHECK(false, "Float16 arithmetic is not supported by the CPU!");
