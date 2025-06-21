@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 #include <cuda_awbarrier_primitives.h>
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
@@ -123,14 +124,19 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
   return input;
 }
 
-void nvshmem_put(at::Tensor& inp, c10::intrusive_ptr<SymmetricMemory> dest, const int64_t peer) {
-  void* buffer_ptr = dest->get_buffer_ptrs()[peer];
+void nvshmem_put(at::Tensor& tensor, int64_t peer) {
+  // TODO: support non-contiguous tensors
+  TORCH_CHECK(tensor.is_contiguous(),
+      "put op currently supports contiguous tensors only");
+  // TODO: rendezvous should remember the group name
+  auto hdl = c10d::symmetric_memory::rendezvous(tensor, "0");
+  auto rank = hdl->get_rank();
+  void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
+  auto buffer_size = tensor.numel() * tensor.element_size();
 
-  c10::cuda::CUDAGuard guard(inp.device());
+  c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
-  // TODO: If the size of the tensor is one of 8, 16, 32, 64, 128
-  // use nvshmemx_putSIZE_on_stream
-  nvshmemx_putmem_on_stream(buffer_ptr, inp.data_ptr(), inp.numel(), 0, stream);
+  nvshmemx_putmem_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, peer, stream);
 }
 
 at::Tensor nvshmem_all_to_all(
