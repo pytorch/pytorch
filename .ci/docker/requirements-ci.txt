@@ -383,6 +383,6 @@ cmake==4.0.0
 tlparse==0.3.30
 #Description: required for log parsing
 
-cuda-bindings>=12.0,<13.0
+cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x"
 #Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. Note "Any fix in the latest bindings would be backported to the prior major version" means that only the newest version of cuda-bindings will get fixes. Depending on the latest version of 12.x is okay because all 12.y versions will be supported via "CUDA minor version compatibility". Pytorch builds against 13.z versions of cuda toolkit work with 12.x versions of cuda-bindings as well because newer drivers work with old toolkits.
 #test that import: test_cuda.py
