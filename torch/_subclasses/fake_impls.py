@@ -12,7 +12,7 @@ import torch._logging
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
-    definitely_contiguous_for_memory_format,
+    contiguous_for_memory_format_or_false,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -1027,13 +1027,13 @@ def make_fast_binary_impl(
                     continue
                 definitely_contiguous = (
                     definitely_contiguous
-                    and definitely_contiguous_for_memory_format(
+                    and contiguous_for_memory_format_or_false(
                         op, memory_format=torch.contiguous_format
                     )
                 )
                 definitely_channels_last = (
                     definitely_channels_last
-                    and definitely_contiguous_for_memory_format(
+                    and contiguous_for_memory_format_or_false(
                         op, memory_format=torch.channels_last
                     )
                 )

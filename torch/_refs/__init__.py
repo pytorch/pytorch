@@ -19,8 +19,8 @@ import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
-    definitely_contiguous,
-    definitely_contiguous_for_memory_format,
+    contiguous_for_memory_format_or_false,
+    contiguous_or_false,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -2980,7 +2980,7 @@ def contiguous(
     )
 
     # TODO: make logic consistent with aten contiguous
-    if definitely_contiguous_for_memory_format(a, memory_format=memory_format):
+    if contiguous_for_memory_format_or_false(a, memory_format=memory_format):
         return a
 
     return torch.clone(a, memory_format=memory_format)
@@ -3848,7 +3848,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return _a
 
-    if definitely_contiguous(a):
+    if contiguous_or_false(a):
         # Special-cases for nd_to_1d
         if len(shape) == 1 and a.ndim > 1:
             return torch.as_strided(a, [a.numel()], [1])

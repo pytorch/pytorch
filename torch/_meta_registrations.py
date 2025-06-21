@@ -24,9 +24,9 @@ from torch._prims import (
 )
 from torch._prims_common import (
     BoolLike,
+    contiguous_or_false,
     corresponding_complex_dtype,
     corresponding_real_dtype,
-    definitely_contiguous,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
@@ -328,7 +328,7 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
     if len(shape) == len(a.shape) and guard_or_false(sym_eq(shape, a.shape)):
         return view_of(a)
 
-    if definitely_contiguous(a) if size_oblivious_enabled else is_contiguous(a):
+    if contiguous_or_false(a) if size_oblivious_enabled else is_contiguous(a):
         strides = utils.make_contiguous_strides_for(shape)
         return a.as_strided(shape, strides)
 
