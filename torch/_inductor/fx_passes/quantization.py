@@ -12,6 +12,7 @@ from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
 
+from .. import config
 from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import (
     Arg,
@@ -1078,6 +1079,8 @@ def _register_quantization_reshape():
 
 def _is_valid_concat_linear_int8_woq_optimization_pattern():
     def fn(match):
+        if not config.cpp.enable_concat_linear:
+            return False
         assert all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales"))
         if not all(
             hasattr(match.kwargs[key], "meta")
@@ -1095,7 +1098,11 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
         w1_cols = match.kwargs["w1"].meta["val"].size()[0]
         w2_cols = match.kwargs["w2"].meta["val"].size()[0]
         w3_cols = match.kwargs["w3"].meta["val"].size()[0]
-        if w1_cols + w2_cols + w3_cols != num_scales:
+        # Technically, the shapes of the three weights need not be equal.
+        # But currently, we only enable replacement in this case.
+        if w1_cols != w2_cols or w2_cols != w3_cols:
+            return False
+        if 3 * w1_cols != num_scales:
             return False
         return (
             # For now, we only support woq mm kernels
