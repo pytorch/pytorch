@@ -13410,6 +13410,97 @@ class TestUtils(TestCase):
         self.assertEqual(list(state_dict.keys()), list(ddp_state_dict.keys()))
         self.assertEqual(list(state_dict._metadata.keys()), list(ddp_state_dict._metadata.keys()))
 
+    def test_rotary_embedding_freqs(self):
+        # Test basic functionality
+        freqs = F.rotary_embedding_freqs(seq_len=10, dim=4)
+        self.assertEqual(freqs.shape, (10, 2, 2))  # (seq_len, dim//2, 2)
+        
+        # Test even dimension requirement
+        with self.assertRaises(ValueError):
+            F.rotary_embedding_freqs(seq_len=10, dim=3)
+        
+        # Test device and dtype
+        if torch.cuda.is_available():
+            freqs_cuda = F.rotary_embedding_freqs(seq_len=10, dim=4, device='cuda')
+            self.assertEqual(freqs_cuda.device.type, 'cuda')
+            
+        freqs_double = F.rotary_embedding_freqs(seq_len=10, dim=4, dtype=torch.float64)
+        self.assertEqual(freqs_double.dtype, torch.float64)
+    
+    def test_apply_rotary_embedding(self):
+        # Test basic functionality
+        x = torch.randn(2, 10, 64)  # (batch, seq_len, dim)
+        freqs = F.rotary_embedding_freqs(seq_len=10, dim=64)
+        rotated = F.apply_rotary_embedding(x, freqs)
+        self.assertEqual(rotated.shape, x.shape)
+        self.assertEqual(rotated.dtype, x.dtype)
+        
+        # Test dimension mismatch error
+        freqs_wrong = F.rotary_embedding_freqs(seq_len=10, dim=32)
+        with self.assertRaises(ValueError):
+            F.apply_rotary_embedding(x, freqs_wrong)
+    
+    def test_rotary_positional_embedding_module(self):
+        # Test basic functionality
+        rope = nn.RotaryPositionalEmbedding(dim=64)
+        x = torch.randn(2, 10, 64)  # (batch, seq_len, dim)
+        output = rope(x)
+        self.assertEqual(output.shape, x.shape)
+        self.assertEqual(output.dtype, x.dtype)
+        
+        # Test even dimension requirement
+        with self.assertRaises(ValueError):
+            nn.RotaryPositionalEmbedding(dim=63)
+        
+        # Test different sequence lengths
+        rope = nn.RotaryPositionalEmbedding(dim=32, max_seq_len=1024)
+        x_short = torch.randn(2, 5, 32)
+        x_long = torch.randn(2, 500, 32)
+        
+        output_short = rope(x_short)
+        output_long = rope(x_long)
+        self.assertEqual(output_short.shape, x_short.shape)
+        self.assertEqual(output_long.shape, x_long.shape)
+        
+        # Test explicit seq_len parameter
+        x = torch.randn(2, 10, 32)
+        output_explicit = rope(x, seq_len=8)  # Use only first 8 positions
+        self.assertEqual(output_explicit.shape, x.shape)
+        
+        # Test different dimension for attention heads
+        rope = nn.RotaryPositionalEmbedding(dim=32)
+        q = torch.randn(2, 8, 50, 32)  # (batch, heads, seq_len, head_dim)
+        q_rot = rope(q, dim=2)  # Apply along seq_len dimension (index 2)
+        self.assertEqual(q_rot.shape, q.shape)
+        
+        # Test string representation
+        rope = nn.RotaryPositionalEmbedding(dim=64, max_seq_len=2048, base=10000.0)
+        self.assertIn('dim=64', str(rope))
+        self.assertIn('max_seq_len=2048', str(rope))
+        self.assertIn('base=10000.0', str(rope))
+    
+    def test_rotary_embedding_rotation_property(self):
+        # Test that applying RoPE twice with different positions gives different results
+        # but maintains the rotation property
+        rope = nn.RotaryPositionalEmbedding(dim=32)
+        x = torch.randn(1, 1, 32)  # Single sequence element
+        
+        # Apply RoPE at position 0
+        freqs_0 = F.rotary_embedding_freqs(seq_len=1, dim=32)
+        rotated_0 = F.apply_rotary_embedding(x, freqs_0)
+        
+        # Apply RoPE at position 5
+        x_pos5 = x.repeat(1, 6, 1)  # Extend sequence to position 5
+        freqs_5 = F.rotary_embedding_freqs(seq_len=6, dim=32)
+        rotated_pos5 = F.apply_rotary_embedding(x_pos5, freqs_5)
+        
+        # Results should be different
+        self.assertFalse(torch.allclose(rotated_0, rotated_pos5[:, :1]))
+        
+        # But both should preserve the norm (approximately due to floating point)
+        self.assertTrue(torch.allclose(torch.norm(x), torch.norm(rotated_0), atol=1e-6))
+        self.assertTrue(torch.allclose(torch.norm(x), torch.norm(rotated_pos5[:, 5:6]), atol=1e-6))
+
 
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)

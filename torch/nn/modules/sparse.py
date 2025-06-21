@@ -9,7 +9,7 @@ from torch.nn.parameter import Parameter
 from .module import Module
 
 
-__all__ = ["Embedding", "EmbeddingBag"]
+__all__ = ["Embedding", "EmbeddingBag", "RotaryPositionalEmbedding"]
 
 
 class Embedding(Module):
@@ -546,3 +546,94 @@ class EmbeddingBag(Module):
         )
         embeddingbag.weight.requires_grad = not freeze
         return embeddingbag
+
+
+class RotaryPositionalEmbedding(Module):
+    r"""Rotary Positional Embedding (RoPE) module.
+    
+    This module implements Rotary Position Embedding as described in "RoFormer: Enhanced 
+    Transformer with Rotary Position Embedding" (Su et al., 2021). RoPE encodes position 
+    information by applying rotary transformations to pairs of elements in the embedding.
+    
+    Args:
+        dim (int): Dimension of the embedding. Must be even.
+        max_seq_len (int, optional): Maximum sequence length to precompute frequencies for.
+                                   If None, frequencies are computed on-the-fly. Default: 2048
+        base (float, optional): Base for the geometric progression. Default: 10000.0
+        
+    Shape:
+        - Input: :math:`(*, L, F)` where :math:`L` is sequence length and :math:`F` is feature dimension
+        - Output: :math:`(*, L, F)` (same shape as input)
+        
+    Examples::
+        >>> rope = torch.nn.RotaryPositionalEmbedding(64)
+        >>> input = torch.randn(2, 10, 64)
+        >>> output = rope(input)
+        >>> output.shape
+        torch.Size([2, 10, 64])
+        
+        >>> # Use with attention heads
+        >>> rope = torch.nn.RotaryPositionalEmbedding(32, max_seq_len=1024)  
+        >>> q = torch.randn(2, 8, 50, 32)  # (batch, heads, seq_len, head_dim)
+        >>> k = torch.randn(2, 8, 50, 32)
+        >>> q_rot = rope(q, dim=2)  # Apply along seq_len dimension (index 2)
+        >>> k_rot = rope(k, dim=2)
+    """
+    
+    def __init__(
+        self, 
+        dim: int, 
+        max_seq_len: int = 2048, 
+        base: float = 10000.0
+    ):
+        super().__init__()
+        if dim % 2 != 0:
+            raise ValueError(f"dim must be even, got {dim}")
+            
+        self.dim = dim
+        self.max_seq_len = max_seq_len
+        self.base = base
+        
+        # Precompute frequencies for efficiency
+        if max_seq_len is not None:
+            freqs = F.rotary_embedding_freqs(max_seq_len, dim, base)
+            self.register_buffer('freqs', freqs, persistent=False)
+        else:
+            self.freqs = None
+    
+    def forward(self, x: Tensor, seq_len: Optional[int] = None, dim: int = -2) -> Tensor:
+        """Apply rotary positional embedding to input tensor.
+        
+        Args:
+            x (Tensor): Input tensor of shape (..., seq_len, ..., dim)
+            seq_len (int, optional): Sequence length. If None, infer from tensor shape
+                                   at the specified dimension. Default: None
+            dim (int, optional): Dimension along which to apply rotary embedding.
+                               Default: -2 (second to last dimension)
+                               
+        Returns:
+            Tensor: Tensor with rotary embeddings applied, same shape as input
+        """
+        if seq_len is None:
+            seq_len = x.size(dim)
+            
+        # Use precomputed frequencies if available and sequence length fits
+        if self.freqs is not None and seq_len <= self.max_seq_len:
+            freqs = self.freqs[:seq_len]
+        else:
+            # Compute frequencies on-the-fly
+            freqs = F.rotary_embedding_freqs(
+                seq_len, self.dim, self.base, device=x.device, dtype=x.dtype
+            )
+        
+        # Calculate unsqueeze dimension for broadcasting
+        # dim is the dimension along which we apply RoPE (seq_len dimension)
+        # We need to unsqueeze freqs to match the tensor structure
+        if dim < 0:
+            dim = x.ndim + dim
+        unsqueeze_dim = dim
+        
+        return F.apply_rotary_embedding(x, freqs, unsqueeze_dim=unsqueeze_dim)
+    
+    def extra_repr(self) -> str:
+        return f'dim={self.dim}, max_seq_len={self.max_seq_len}, base={self.base}'
