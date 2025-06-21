@@ -846,7 +846,7 @@ def check_input_alias_and_mutation_return_outputs(
 
         # Clone the fake args to avoid mutating the original fake args
         with ExitStack() as ctx_stack:
-            # We need to re-use prev_fake_mode's shape env to resolve
+            # We need to reuse prev_fake_mode's shape env to resolve
             # the runtime assertions for unbacked symbols.
             new_fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=_get_shape_env(fake_args),

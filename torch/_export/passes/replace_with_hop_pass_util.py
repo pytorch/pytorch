@@ -46,7 +46,7 @@ def _replace_with_hop_helper(
             enter_block_node.meta.get("nn_module_stack", {})
         )
         output_node = next(iter(reversed(sub_gm.graph.nodes)), None)
-        # Split_module pass intentially doesn't add output node
+        # Split_module pass intentionally doesn't add output node
         # if the graph doesn't return anything.
         # TODO (tmanlaibaatar) Figure out if this is right behaviour
         # for split_module
@@ -97,7 +97,7 @@ def _replace_with_hop_helper(
                 node_replace_(node, get_item_node)
             else:
                 raise NotImplementedError(
-                    f"repalce_with_hop_pass doesnt' support output type {type(output_args)}"
+                    f"replace_with_hop_pass doesn't support output type {type(output_args)}"
                 )
         else:
             # TODO (shangdiy): remove this line, since the export graph can be non-functional

@@ -1516,18 +1516,18 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
         ...     c.add_(1)
         ...     return b
         ...
-        >>> inpt = torch.randn(2)
+        >>> input = torch.randn(2)
         >>>
-        >>> out1 = f(inpt)
-        >>> out2 = functionalize(f)(inpt)
+        >>> out1 = f(input)
+        >>> out2 = functionalize(f)(input)
         >>>
         >>> # semantics are the same (outputs are equivalent)
         >>> print(torch.allclose(out1, out2))
         True
         >>>
-        >>> f_traced = make_fx(f)(inpt)
-        >>> f_no_mutations_traced = make_fx(functionalize(f))(inpt)
-        >>> f_no_mutations_and_views_traced = make_fx(functionalize(f, remove='mutations_and_views'))(inpt)
+        >>> f_traced = make_fx(f)(input)
+        >>> f_no_mutations_traced = make_fx(functionalize(f))(input)
+        >>> f_no_mutations_and_views_traced = make_fx(functionalize(f, remove='mutations_and_views'))(input)
         >>>
         >>> print(f_traced.code)
 
@@ -1568,7 +1568,7 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
         ...     b.add_(1)
         ...     return a
         ...
-        >>> f_no_mutations_and_views_traced = make_fx(functionalize(f, remove='mutations_and_views'))(inpt)
+        >>> f_no_mutations_and_views_traced = make_fx(functionalize(f, remove='mutations_and_views'))(input)
         >>> #
         >>> # All mutations and views have been removed,
         >>> # but there is an extra copy_ in the graph to correctly apply the mutation to the input
