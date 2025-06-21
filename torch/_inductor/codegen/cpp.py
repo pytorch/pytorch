@@ -5502,6 +5502,7 @@ class LoopNest:
                 simd_vec_depth is not None
                 and max_depth > simd_vec_depth
                 and self.loops[max_depth].is_reduction
+                and any(not isinstance(kernel, CppVecKernel) for kernel in self.kernel.kernels)
             )
         ):
             start_depth = max_depth
