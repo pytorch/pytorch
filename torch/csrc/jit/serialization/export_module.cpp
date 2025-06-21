@@ -131,7 +131,7 @@ std::string get_named_tuple_str_or_default(
           // str() return "Tensor" and repr_str() return "Tensor (inferred)". If
           // it's not inferred type, str() return "Tensor[]" and repr_str()
           // return "Tensor". In cpp, repr_str() will always return "Tensor"
-          // regardless inferred type. When exporing custom type in bytecode,
+          // regardless inferred type. When exporting custom type in bytecode,
           // "Tensor" is the preferred way to deserialize Tensor type
           std::string named_tuple_type_str = it->is_inferred_type()
               ? named_tuple_type->str()
@@ -554,7 +554,7 @@ void ScriptModuleSerializer::writeArchive(
     }
     WriteableTensorData writable_td = getWriteableTensorData(td);
     if (use_storage_context && serialized_tensors.count(tensor_name)) {
-      // storage has been serialzed already, skip
+      // storage has been serialized already, skip
       continue;
     }
     writer_.writeRecord(
@@ -698,10 +698,10 @@ void ScriptModuleSerializer::writeByteCode(
     // debug handles.
     // The reason we save debug handles conditionally is so that
     // we dont end up with a model that has debug handles but has not
-    // debug map to correlate debug handels with.
+    // debug map to correlate debug handles with.
     // Once we have a model with both handles and debug map, we can
     // strip off debug map and have a lean model served to production.
-    // If exception ocurrs we have a model with debug map that can be
+    // If exception occurs we have a model with debug map that can be
     // used to symbolicate debug handles
     writeArchive(
         debug_info_telements,
