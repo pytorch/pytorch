@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
     skipIfTorchDynamo,
+    TEST_WITH_ASAN,
     xfailIfS390X,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -524,6 +525,7 @@ LoweringException: AssertionError:
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "LSAN outputs suppression report on stderr")
     def test_invalid_artifact_flag_error_msg(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "not_an_existing_log_artifact_should_error"
