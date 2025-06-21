@@ -238,7 +238,7 @@ def all_gather_tensor_autograd(
     tensor = torch.ops._c10d_functional_autograd.all_gather_into_tensor(
         self, group_size, group_name
     )
-    res = _FromTorchTensor.apply(tensor)
+    res = _maybe_wrap_tensor(tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
         # torch.cat access the data so we already need to wait here, first do wait
@@ -326,7 +326,7 @@ def reduce_scatter_tensor_autograd(
         group_size,
         group_name,  # type: ignore[possibly-undefined]
     )
-    res = _FromTorchTensor.apply(tensor)
+    res = _maybe_wrap_tensor(tensor)
     return res
 
 
@@ -530,7 +530,7 @@ def all_to_all_single_autograd(
         input_split_sizes,
         group_name,
     )
-    return _FromTorchTensor.apply(tensor)
+    return _maybe_wrap_tensor(tensor)
 
 
 def permute_tensor(
