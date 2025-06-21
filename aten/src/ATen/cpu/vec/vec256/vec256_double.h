@@ -198,6 +198,9 @@ class Vectorized<double> {
   Vectorized<double> exp_u20() const {
     return exp();
   }
+  Vectorized<double> fexp_u20() const {
+    return exp();
+  }
   Vectorized<double> fmod(const Vectorized<double>& q) const {
     return Vectorized<double>(Sleef_fmodd4(values, q));
   }
