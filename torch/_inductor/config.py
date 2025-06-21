@@ -797,6 +797,13 @@ def decide_compile_threads() -> int:
 # TODO: Set directly after internal rollout.
 compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
 
+# Whether to quiesce the Triton-compile subprocess pool at the end of each compilation.
+quiesce_async_compile_pool: bool = Config(
+    justknob="pytorch/inductor:quiesce_async_compile_pool",
+    env_name_force="TORCHINDUCTOR_QUIESCE_ASYNC_COMPILE_POOL",
+    default=is_fbcode(),
+)
+
 # Whether or not to enable statically launching CUDA kernels
 # compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
