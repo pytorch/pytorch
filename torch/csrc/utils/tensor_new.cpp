@@ -1786,7 +1786,7 @@ Tensor asarray(
         tensor = tensor.clone();
       }
     } else {
-      // If we are not copying, we have to check whther we have the tensor
+      // If we are not copying, we have to check whether we have the tensor
       // in the right device, with the right dtype.
       TORCH_CHECK_VALUE(
           !wrong_device,

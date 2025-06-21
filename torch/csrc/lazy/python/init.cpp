@@ -44,7 +44,7 @@ static std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
 static std::string GetTensorsDump(
     const std::vector<at::Tensor>& tensors,
     const std::function<std::string(c10::ArrayRef<const torch::lazy::Node*>)>&
-        coverter) {
+        converter) {
   std::vector<const torch::lazy::Node*> nodes;
   std::vector<torch::lazy::Value> values;
   for (auto& tensor : tensors) {
@@ -54,7 +54,7 @@ static std::string GetTensorsDump(
     values.push_back(lazy_tensor->GetIrValue());
     nodes.push_back(values.back().node.get());
   }
-  return coverter(nodes);
+  return converter(nodes);
 }
 
 static std::vector<torch::lazy::LazyTensorPtr> GetLtcTensors(
@@ -146,18 +146,18 @@ void initLazyBindings(PyObject* module) {
   lazy.def(
       "_get_tensors_text",
       [](const std::vector<at::Tensor>& tensors) -> std::string {
-        auto coverter = [](c10::ArrayRef<const torch::lazy::Node*> nodes) {
+        auto converter = [](c10::ArrayRef<const torch::lazy::Node*> nodes) {
           return torch::lazy::DumpUtil::ToText(nodes);
         };
-        return GetTensorsDump(tensors, coverter);
+        return GetTensorsDump(tensors, converter);
       });
   lazy.def(
       "_get_tensors_dot",
       [](const std::vector<at::Tensor>& tensors) -> std::string {
-        auto coverter = [](c10::ArrayRef<const torch::lazy::Node*> nodes) {
+        auto converter = [](c10::ArrayRef<const torch::lazy::Node*> nodes) {
           return torch::lazy::DumpUtil::ToDot(nodes);
         };
-        return GetTensorsDump(tensors, coverter);
+        return GetTensorsDump(tensors, converter);
       });
   lazy.def(
       "_get_tensors_backend",
@@ -325,10 +325,11 @@ void initLazyBindings(PyObject* module) {
 #endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
   });
 
-  // GetPythonFramesFunction() has not ever worked with torchdeploy/multipy
-  // possibly becuase GetPythonFrames resolves to external cpython rather
-  // than embedded cpython. So far this problem has only been observed
-  // internally, so we will just block it off there.
+  // GetPythonFramesFunction() has not ever worked with
+  // torchdeploy/multipy possibly because  // codespell:ignore multipy
+  // GetPythonFrames resolves to external cpython rather than embedded cpython.
+  // So far this problem has only been observed internally, so we will just
+  // block it off there.
 
 #if !(defined(USE_DEPLOY))
 

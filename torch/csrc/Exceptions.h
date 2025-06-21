@@ -329,7 +329,7 @@ struct PyWarningHandler {
 
   /** Call if an exception has been thrown
 
-   *  Necessary to determine if it is safe to throw from the desctructor since
+   *  Necessary to determine if it is safe to throw from the destructor since
    *  std::uncaught_exception is buggy on some platforms and generally
    *  unreliable across dynamic library calls.
    */
