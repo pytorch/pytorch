@@ -1686,7 +1686,7 @@ class trace:
     # Needs to be overridden based on specific environment needs
     upload_tar: Optional[Callable[[str], None]] = None
 
-    log_autotuning_results: bool = False
+    log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
     # Save mapping info from inductor generated triton kernel to post_grad fx nodes
     log_inductor_triton_kernel_to_post_grad_node_info: bool = True
