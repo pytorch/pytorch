@@ -4,13 +4,15 @@ import inspect
 import os
 import warnings
 from concurrent.futures import Future
+from dataclasses import dataclass
 from enum import Enum
 from typing import cast, Optional, Union
-from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
-from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
+from torch.distributed._state_dict_utils import (
+    STATE_DICT_TYPE,
+)
 from torch.distributed.checkpoint._async_executor import (  # noqa: TC001
     _AsyncCheckpointExecutor,
 )
@@ -23,12 +25,17 @@ from torch.distributed.checkpoint._async_thread_executor import (
 from torch.distributed.checkpoint._storage_utils import _storage_setup
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
-from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
+from torch.distributed.checkpoint.metadata import Metadata
 from torch.distributed.checkpoint.planner import SavePlan, SavePlanner
-from torch.distributed.checkpoint.staging import AsyncStager
+from torch.distributed.checkpoint.staging import (
+    AsyncStager,
+    DefaultStager,
+    StagingOptions,
+)
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.checkpoint.storage import StorageWriter
 from torch.distributed.distributed_c10d import _get_default_group
+from typing_extensions import deprecated
 
 from .utils import _api_bc_check, _DistWrapper, _profile
 
@@ -181,7 +188,18 @@ def save(
             planner=planner,
         )
 
-
+@dataclass
+class AsyncSaveResponse:
+    """This class contains futures for staging and upload completion.
+       It is returned by async_save().
+       staging_completion is a future that indicates when local copy
+       of state_dict is complete.
+       upload_completion is a future that indicates when a checkpoint
+       completed saving.
+    """
+    staging_completion: Future[None]
+    upload_completion: Future[None]
+    
 @_dcp_method_logger(log_exceptions=True)
 def async_save(
     state_dict: STATE_DICT_TYPE,
@@ -191,12 +209,15 @@ def async_save(
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     async_checkpointer_type: AsyncCheckpointerType = AsyncCheckpointerType.THREAD,
-) -> Future:
+    async_stager: Optional[AsyncStager] = None,
+    block_on_staging: bool = True,
+) -> Union[Future, AsyncSaveResponse]:
     """Asynchronous version of ``save``. This code first de-stages the state_dict on to the
     staging storage (defaults to CPU memory), and then calls the `save` in a separate thread.
 
     .. warning::
         This feature is experimental and subject to change.
+        MUST CALL CLOSE AFTER LAST CHECKPOINT IS SAVED
 
     Args:
         state_dict (Dict[str, Any]): The state_dict to save.
@@ -216,6 +237,14 @@ def async_save(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
+        async_checkpointer_type (AsyncCheckpointerType):
+            whether to do checkpoint in separate thread or pocess
+            (Default: ``AsyncCheckpointerType.THREAD``)
+        async_stager (AsyncStager):
+            provides staging implementation. If storage_writer implements AsyncStager
+            and async_stager is provided, async_stager will be used for staging
+        block_on_staging (bool): whether to wait until staging is complete before
+            returning. (Default: ``True``)
 
     Returns:
         Future: A future holding the resultant Metadata object from `save`.
@@ -249,6 +278,13 @@ def async_save(
             "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
         )
 
+    if async_stager is None:
+        if (storage_writer is not None and isinstance(storage_writer, AsyncStager)):
+            # bwc with old storage_writers
+            async_stager = storage_writer
+        else:
+            async_stager = DefaultStager(StagingOptions(not block_on_staging, not block_on_staging, not block_on_staging, not block_on_staging))
+
     storage_writer = cast(
         StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
     )
@@ -256,42 +292,47 @@ def async_save(
     state_dict = _stateful_to_state_dict(state_dict)
 
     @_dcp_method_logger(log_exceptions=True)
-    def stage_state_dict():
-        if isinstance(storage_writer, AsyncStager):
-            staged_state_dict = storage_writer.stage(state_dict)
-        else:  # provides bwc for storage_writers not implementing AsyncStager
-            staged_state_dict = _create_cpu_state_dict(state_dict)
-            _copy_state_dict(state_dict, staged_state_dict, type_check=False)
+    def stage_state_dict() -> Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE]:
+        return async_stager.stage(state_dict)
+    staging_future_or_state_dict = stage_state_dict()
 
-        return staged_state_dict
-
-    staged_state_dict = stage_state_dict()
-
-    executor: _AsyncCheckpointExecutor = (
+    upload_executor: _AsyncCheckpointExecutor = (
         _ProcessBasedAsyncCheckpointExecutor()
         if async_checkpointer_type == AsyncCheckpointerType.PROCESS
         else _ThreadBasedAsyncCheckpointExecutor()
     )
 
-    f: Future = executor.execute_save(
-        staged_state_dict,
+    upload_future: Future = upload_executor.execute_save(
+        staging_future_or_state_dict,
         checkpoint_id=checkpoint_id,
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,
     )
 
-    @_dcp_method_logger(log_exceptions=True)
-    def maybe_synchronize_staging():
-        if (
-            isinstance(storage_writer, AsyncStager)
-            and storage_writer.should_synchronize_after_execute
-        ):
+    if block_on_staging:
+        if isinstance(staging_future_or_state_dict, Future):
+            staging_future_or_state_dict.result()
+        # preserve bwc with old implementation
+        if (isinstance(storage_writer, AsyncStager) 
+            and storage_writer._synchronize_after_execute):
             storage_writer.synchronize_staging()
-
-    maybe_synchronize_staging()
-
-    return f
+        return upload_future
+    else:
+        assert isinstance(staging_future_or_state_dict, Future)
+        staging_future = staging_future_or_state_dict
+        return_staging_future = Future()
+       
+        def callback(original_staging_future: Future[STATE_DICT_TYPE], return_staging_future: Future[None] = return_staging_future):
+            try: 
+                original_staging_future.result()
+                return_staging_future.set_result(None)
+            except Exception as e:
+                return_staging_future.set_exception(e)
+        staging_future.add_done_callback(callback)
+       
+        # return new AsyncSaveResponse for users using new ZOC implementation
+        return AsyncSaveResponse(staging_completion=return_staging_future, upload_completion=upload_future)
 
 
 @_dcp_method_logger(log_exceptions=True)
