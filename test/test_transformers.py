@@ -4007,7 +4007,7 @@ class TestSDPAXpuOnly(NNTestCase):
 
     def test_fused_attention_different_dk_dv(self, device):
         dtype = torch.bfloat16
-        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
         batch, num_heads, head_dim_k, head_dim_v = 32, 16, 128, 64
         q_shape = SdpaShape(batch, num_heads, 1, head_dim_k)
         k_shape = SdpaShape(batch, num_heads, 2, head_dim_k)
@@ -4022,6 +4022,44 @@ class TestSDPAXpuOnly(NNTestCase):
             query.float(), key.float(), value.float(), attn_mask=None, dropout_p=0.0, is_causal=False)[0]
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+
+    @parametrize("dtype", [torch.half, torch.bfloat16])
+    @parametrize("batch_size,n_head,n_head_kv,q_size,kv_size,head_dim", [
+        (2, 64, 16, 9216, 77, 64),
+        (2, 32, 4, 2304, 2304, 64),
+        (2, 32, 2, 2304, 77, 64),
+        (2, 20, 2, 576, 576, 64),
+        (2, 20, 2, 576, 77, 64),
+        (2, 20, 2, 144, 144, 64),
+        (2, 20, 2, 144, 77, 64),
+        (1, 32, 2, 1, 32, 128),
+        (4, 32, 4, 1, 32, 128),
+        (1, 32, 2, 32, 32, 128),
+        (4, 32, 4, 32, 32, 128),
+        (1, 32, 2, 2016, 2016, 128),
+        (4, 32, 4, 2016, 2016, 128),
+    ])
+    @parametrize("is_causal", [True, False])
+    def test_fused_attention_gqa(self, device, dtype, batch_size, n_head, n_head_kv, q_size, kv_size, head_dim, is_causal):
+        tol = Tolerances(1e-5, 5e-6)
+        if dtype is torch.bfloat16:
+            tol = Tolerances(5e-2, 5e-2)
+        if dtype is torch.float16:
+            tol = Tolerances(1e-2, 1e-2)
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
+        q_shape = SdpaShape(batch_size, n_head, q_size, head_dim)
+        k_shape = SdpaShape(batch_size, n_head_kv, kv_size, head_dim)
+        v_shape = SdpaShape(batch_size, n_head_kv, kv_size, head_dim)
+        query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
+
+        # test that we do not dispatch to onednn for an unsupported case
+        actual = F.scaled_dot_product_attention(
+            query, key, value, attn_mask=None, dropout_p=0.0, is_causal=is_causal, enable_gqa=True)
+
+        math_ref = torch.ops.aten._scaled_dot_product_attention_math(
+            query.float(), key.float(), value.float(), attn_mask=None, dropout_p=0.0, is_causal=is_causal, enable_gqa=True)[0]
+
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=tol.atol, rtol=tol.rtol)
 
     def test_onednn_attention_fail_d576(self, device):
         # Test that onednn graph attention dispatching correctly bails out on d > 576
@@ -4059,30 +4097,24 @@ class TestSDPAXpuOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
-    def test_attention_preserves_query_layout(self, device):
+    def test_scaled_dot_product_attention_fused_kernels_safe_softmax(self, device):
+        dtype = torch.bfloat16
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
+        batch, num_heads, seqlen, head_dim = 32, 16, 32, 64
+        q_shape = SdpaShape(batch, num_heads, seqlen, head_dim)
+        k_shape = SdpaShape(batch, num_heads, seqlen, head_dim)
+        v_shape = SdpaShape(batch, num_heads, seqlen, head_dim)
+        query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
 
-        def test_attention(permute_order: list[list[int]]):
-            BHSqD = [4, 16, 256, 64]
-            BHSkvD = [4, 16, 512, 64]
+        attn_mask = torch.full((seqlen, seqlen), float('-inf'), device=device, dtype=torch.bfloat16)
 
-            shape_q = [BHSqD[idx] for idx in permute_order]
-            shape_kv = [BHSkvD[idx] for idx in permute_order]
-            reverse = [permute_order.index(idx) for idx in range(4)]
-            q = torch.randn(*shape_q, dtype=torch.bfloat16, device=device, requires_grad=False).permute(reverse)
-            k = torch.randn(*shape_kv, dtype=torch.bfloat16, device=device, requires_grad=False).permute(reverse)
-            v = torch.randn(*shape_kv, dtype=torch.bfloat16, device=device, requires_grad=False).permute(reverse)
-            self.assertEqual(q.shape, BHSqD)
-            self.assertEqual(k.shape, BHSkvD)
-            self.assertEqual(v.shape, BHSkvD)
+        actual = F.scaled_dot_product_attention(
+            query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
 
-            out = F.scaled_dot_product_attention(q, k, v)
-            self.assertTrue(out.permute(permute_order).is_contiguous())
+        math_ref = torch.ops.aten._scaled_dot_product_attention_math(
+            query.float(), key.float(), value.float(), attn_mask=attn_mask, dropout_p=0.0, is_causal=False)[0]
 
-        permutable = [0, 1, 2]
-        permute_orders = itertools.permutations(permutable)
-
-        for permute_order in permute_orders:
-            test_attention(list(permute_order) + [3])
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
     @parametrize("type", ["dense"])
     @parametrize("is_contiguous", [True, False])

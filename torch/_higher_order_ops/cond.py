@@ -36,6 +36,8 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
+from .utils import clone_outputs_aliasing_inputs
+
 
 log = logging.getLogger(__name__)
 
@@ -227,11 +229,17 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
         tangents = args_and_grad_outs[n_primals:]
         grad_args = bw_fn(primals, tangents)[1]
         assert len(args) == len(grad_args)
+        # In order to keep HOPs functional where the backward graph,
+        # would have outputs that are aliasing inputs.
+        # For example in cases where the backward of the function is simply
+        # passing the upstream gradients through.
+        maybe_clone = clone_outputs_aliasing_inputs(args_and_grad_outs)
+
         return [
             (
                 torch.zeros_like(arg)
                 if isinstance(arg, torch.Tensor) and grad is None
-                else grad
+                else maybe_clone(grad)
             )
             for grad, arg in zip(grad_args, primals)
         ]

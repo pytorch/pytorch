@@ -621,7 +621,7 @@ else:
                                     f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
                                     f"in {subgroup_ranks}!"
                                 )
-                            dim_group_names.append(dim_group.group_name)
+                            dim_group_names.append(dim_group.group_name)  # type: ignore[union-attr]
             self._dim_group_names = dim_group_names
 
         def __enter__(self) -> "DeviceMesh":
