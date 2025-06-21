@@ -888,6 +888,8 @@ def preprocessor(
                               "ATen/native/quantized/cuda",
                               "ATen/native/sparse/cuda",
                               "ATen/native/transformers/cuda",
+                              "ATen/miopen",
+                              "ATen/native/miopen",
                               "THC/")) or
                 (f.startswith("THC") and not f.startswith("THCP"))
             ):
