@@ -24,4 +24,4 @@ pull-deps: clone-deps
 	(cd ../../../torchbenchmark && git fetch && git checkout "$$(cat ../pytorch/.github/ci_commit_pins/torchbench.txt)" && git submodule update --init --recursive)
 
 build-deps: clone-deps
-	sh setup.sh $(BENCHMARK) $(MODELS)
+	sh setup.sh $(BENCHMARK) "$(MODELS)"
