@@ -1,46 +1,75 @@
-[project]
-name = "torch"
-requires-python = ">=3.9"
-license = {text = "BSD-3-Clause"}
-dynamic = [
-    "authors",
-    "classifiers",
-    "entry-points",
-    "dependencies",
-    "description",
-    "keywords",
-    "optional-dependencies",
-    "readme",
-    "scripts",
-    "version",
-]
-
-[project.urls]
-Homepage = "https://pytorch.org/"
-Documentation = "https://pytorch.org/docs/"
-Source = "https://github.com/pytorch/pytorch"
-Forum = "https://discuss.pytorch.org/"
-
+# Package ######################################################################
 
 [build-system]
 requires = [
     # After 75.8.2 dropped dep disttools API. Please fix
     # API temporarily restored and shim used. Please fix
     # Setuptools will drop support for setup.py past 80
-    # min version for recursive glob package data support
+    # 62.3.0: min version for recursive glob package data support
+    # 77.0.0: min version for SPDX expression support for project.license
     "setuptools>=62.3.0,<80.0",
     "wheel",
     "astunparse",
-    "numpy",
+    "cmake>=3.27",
     "ninja",
+    "numpy",
     "pyyaml",
-    "cmake",
-    "typing-extensions>=4.10.0",
     "requests",
+    "typing-extensions>=4.10.0",
 ]
-# Use legacy backend to import local packages in setup.py
-build-backend = "setuptools.build_meta:__legacy__"
+build-backend = "setuptools.build_meta"
 
+[project]
+name = "torch"
+description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
+readme = "README.md"
+requires-python = ">=3.9"  # also update classifiers when changing this
+# TODO: change to `license = "BSD-3-Clause"` and enable PEP 639 after pinning setuptools>=77
+# FIXME: As of 2025.06.20, it is hard to ensure the minimum version of setuptools in our CI environment.
+# TOML-table-based license deprecated in setuptools>=77, and the deprecation warning will be changed
+# to an error on 2026.02.18. See also: https://github.com/pypa/setuptools/issues/4903
+license = { text = "BSD-3-Clause" }
+authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
+keywords = ["pytorch", "machine learning"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dynamic = [
+    "entry-points",
+    "dependencies",
+    "scripts",
+    "version",
+]
+
+[project.urls]
+Homepage = "https://pytorch.org"
+Repository = "https://github.com/pytorch/pytorch"
+Documentation = "https://pytorch.org/docs"
+"Issue Tracker" = "https://github.com/pytorch/pytorch/issues"
+Forum = "https://discuss.pytorch.org"
+
+[project.optional-dependencies]
+optree = ["optree>=0.13.0"]
+opt-einsum = ["opt-einsum>=3.3"]
+pyyaml = ["pyyaml"]
+
+# Linter tools #################################################################
 
 [tool.black]
 line-length = 88
@@ -59,11 +88,9 @@ multi_line_output = 3
 include_trailing_comma = true
 combine_as_imports = true
 
-
 [tool.usort.known]
 first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
 standard_library = ["typing_extensions"]
-
 
 [tool.ruff]
 line-length = 88
