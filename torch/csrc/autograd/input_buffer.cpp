@@ -20,6 +20,16 @@
 namespace torch::autograd {
 
 namespace {
+bool autograd_avoid_record_streams() {
+  static bool flag = c10::utils::check_env("TORCH_AUTOGRAD_AVOID_RECORD_STREAMS") == true;
+  if (flag) {
+    TORCH_WARN_ONCE("TORCH_AUTOGRAD_AVOID_RECORD_STREAMS is currently experimental "
+		    "and intended for use with CUDA Graph Captures only. "
+		    "Please report any issues to http://github.com/pytorch/pytorch/issues");
+  }
+  return flag;
+}
+
 // look what you made me do >.<
 // Divergent paths for per-Impl stream recording that leak implementation
 // details of the impls should not be needed here.
@@ -228,6 +238,8 @@ void InputBuffer::add(
 
   TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
 
+  bool record_stream_used = false;
+
   // See Note: [Autograd Producer-Consumer Stream Syncs]
   if (!opt_accum_streams[pos].has_value()) {
     // [ First producer ]
@@ -240,7 +252,10 @@ void InputBuffer::add(
         // We will end up doing record_stream on the accumulation stream
         // (which is the consumer stream) later, but we also need to do
         // it here in case we don't end up accumulating.
-        record_stream_any_impl(var, *opt_consumer_stream);
+	record_stream_used = true;
+	if (!autograd_avoid_record_streams()) {
+          record_stream_any_impl(var, *opt_consumer_stream);
+	}
       }
     } else if (opt_producer_stream->device() == device) {
       // Case B
@@ -257,6 +272,11 @@ void InputBuffer::add(
     event.record(*opt_producer_stream);
     ready_events[pos] = std::move(event);
     ready_streams[pos] = opt_producer_stream;
+    if (autograd_avoid_record_streams() && record_stream_used) {
+      auto event_for_record_stream = c10::Event{device_type};
+      event.record(*opt_consumer_stream);
+      opt_producer_stream->wait(event_for_record_stream);
+    }
   } else {
     // [ Nth producer ]
     auto accum_stream = opt_accum_streams[pos];
@@ -268,12 +288,18 @@ void InputBuffer::add(
       auto event = c10::Event{device_type};
       event.record(*opt_producer_stream);
       accum_stream->wait(event);
-      record_stream_any_impl(var, *accum_stream);
+      record_stream_used = true;
+      if (!autograd_avoid_record_streams()) {
+        record_stream_any_impl(var, *accum_stream);
+      }
     }
     if (*accum_stream != *ready_stream) {
       accum_stream->wait(*ready_event);
       // This is redundant for case A, but needed for case C
-      record_stream_any_impl(buffer[pos], *accum_stream);
+      record_stream_used = true;
+      if (!autograd_avoid_record_streams()) {
+        record_stream_any_impl(buffer[pos], *accum_stream);
+      }
     }
     // 2)
     c10::OptionalStreamGuard stream_guard{accum_stream};
@@ -281,6 +307,11 @@ void InputBuffer::add(
     // 3)
     auto event = c10::Event{device_type};
     event.record(*accum_stream);
+    if (autograd_avoid_record_streams() && record_stream_used) {
+      auto event_for_record_stream = c10::Event{device_type};
+      event_for_record_stream.record(*accum_stream);
+      opt_producer_stream->wait(event_for_record_stream);
+    }
     ready_events[pos] = std::move(event);
     ready_streams[pos] = accum_stream;
   }
