@@ -386,7 +386,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             ``ignored_modules`` soon. For backward compatibility, we keep both
             ``ignored_states`` and `ignored_modules``, but FSDP only allows one
             of them to be specified as not ``None``.
-        device_mesh (Optional[DeviceMesh]): DeviceMesh can be used as an altenative to
+        device_mesh (Optional[DeviceMesh]): DeviceMesh can be used as an alternative to
             process_group. When device_mesh is passed, FSDP will use the underlying process
             groups for all-gather and reduce-scatter collective communications. Therefore,
             these two args need to be mutually exclusive. For hybrid sharding strategies such as

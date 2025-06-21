@@ -278,7 +278,7 @@ class StorageReader(abc.ABC):
     @abc.abstractmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         """
-        Check if the given checkpoint_id is supported by the stroage. This allow
+        Check if the given checkpoint_id is supported by the storage. This allow
         us to enable automatic storage selection.
         """
         ...
