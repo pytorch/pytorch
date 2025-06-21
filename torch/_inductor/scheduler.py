@@ -477,7 +477,7 @@ class BaseSchedulerNode:
             buf_name = buf_to_be_inplaced.get_name()
             # Dedup read/writes with equivalent indices
             # TODO - would be nice if we could just cache accesses on ReadWrites,
-            # and inforce variant that this class & members are functional..
+            # and enforce variant that this class & members are functional..
             deps: OrderedSet[Dep] = OrderedSet()
             for user in buf_to_be_inplaced.users:
                 user_node = user.node
@@ -1079,7 +1079,7 @@ class SchedulerNode(BaseSchedulerNode):
 
             # TODO(shunting) if this cause compilation time increase when
             # enabling LOAF by default, try just clearing the specific cache
-            # entry by using a customized cache implemetation rather than
+            # entry by using a customized cache implementation rather than
             # lru_cache.
             SIMDScheduling.candidate_tilings.cache_clear()
 
@@ -3325,7 +3325,7 @@ class Scheduler:
         Return true if fusing the two nodes can potentially increasing peak memory.
 
         The implementation is more like a heuristic since we don't really know if we are at peak
-        or not when trying to fuse these two ndoes. The order of nodes may change later which makes the
+        or not when trying to fuse these two nodes. The order of nodes may change later which makes the
         peak memory estimation hard.
 
         Here is how we decide the LOWER BOUND of extra memory allocation if we fuse these 2 nodes:
@@ -3365,7 +3365,7 @@ class Scheduler:
             try:
                 memory_overhead += int(key[2])
             except ValueError:
-                # not an interger. Fallback is to fuse
+                # not an integer. Fallback is to fuse
                 return False
 
         bw_saving = self.score_fusion_memory(node1, node2)
@@ -3470,7 +3470,7 @@ class Scheduler:
         """
         Right now just greedily reorder the loop of node1 to be compatible with node2,
         but ideally we should have some heuristics to reorder the loop for node2
-        to be compatibile with node1 if that's more efficient.
+        to be compatible with node1 if that's more efficient.
         """
 
         # TODO Don't do loop reordering for CPU for now.
@@ -3569,7 +3569,7 @@ class Scheduler:
         # potential bad cache behavior and shared memory use.
         # we also want to avoid benchmarking reliably unprofitable fusions like downcasts from fp32 -> fp16 inside kernel.
         # allowing gathers by allowing increasing write_bytes by small factor
-        # TODO - make configurable per input, for insance, bias can fuse fp32 -> fp16 profitably
+        # TODO - make configurable per input, for instance, bias can fuse fp32 -> fp16 profitably
 
         BYTES_THRESHOLD_MULTIPLIER = 1.1
         if read_bytes > (write_bytes * BYTES_THRESHOLD_MULTIPLIER):
@@ -4436,7 +4436,7 @@ class Scheduler:
     ) -> list[BaseSchedulerNode]:
         """
         Reorder nodes to minimize the number of partitions via a bfs
-        topological sort. This is the optimal reodering such that the
+        topological sort. This is the optimal reordering such that the
         number of partitions cannot be reduced further. This may be
         sub-optimal for other metrics such as peak memory. This does not
         change relative orders of two cudagraphable nodes, nor the

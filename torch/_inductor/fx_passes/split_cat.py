@@ -247,7 +247,7 @@ def remove_split_with_size_one(match: Match, *args, **kwargs):
         return
     # remove the dummy split whose split sections size is one
     # theoretically nodes with no users should be removed, but we have seen the corner case
-    # thus we add its uers check to walk around the StopIteration error.
+    # thus we add its users check to walk around the StopIteration error.
     if len(split_sections) == 1 and len(split_node.users.keys()) > 0:
         # find the grand children of the split_node
         next_users = find_next_users(split_node)
@@ -1525,7 +1525,7 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
             # find the index of getitems to be cated/stacked
             # type: ignore[union-attr]
             indices = [arg.args[1] for arg in cat_user.args[0]]  # type: ignore[union-attr]
-            # the gettitems to be merged must be consecutive, otherwise
+            # the getitems to be merged must be consecutive, otherwise
             # returned sliced tensor could be wrong
             if not is_sorted_and_consecutive(indices):  # type: ignore[arg-type]
                 continue
@@ -1627,7 +1627,7 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
             for getitem in cat_user.args[0]:  # type: ignore[union-attr]
                 indices.append(getitem.args[1])  # type: ignore[union-attr]
                 idx_to_getitem[getitem.args[1]] = getitem  # type: ignore[union-attr]
-            # the gettitems to be merged must be consecutive, otherwise
+            # the getitems to be merged must be consecutive, otherwise
             # returned sliced tensor could be wrong
             if not is_sorted_and_consecutive(indices):  # type: ignore[arg-type]
                 continue
@@ -2069,7 +2069,7 @@ def update_args_from_split_getitem(
     threshold_to_cat: int = 2,
 ):
     split_input, split_size, split_dim = _get_split_args_default(parents_seen[-1])
-    # case 1: the number of getitems is the same as the split size, elimiate the split
+    # case 1: the number of getitems is the same as the split size, eliminate the split
     if len(split_size) == len(getitem_indices) and is_sorted_and_consecutive(
         getitem_indices
     ):
@@ -2164,7 +2164,7 @@ def update_args_from_unbind_getitem(
     unbind_input = get_arg_value(parents_seen[-1], 0, "input")  # split or unbind input
     unbind_dim = get_arg_value(parents_seen[-1], 1, "dim")  # split or unbind dim
     cat_dim = get_arg_value(node, 1, "dim")  # cat or stack dim
-    # case 1: the number of getitems is the same as the split size, elimiate the split
+    # case 1: the number of getitems is the same as the split size, eliminate the split
     size = list(unbind_input.meta["example_value"].shape)[unbind_dim]
     if size == len(getitem_indices):
         cat_shape = torch.cat(

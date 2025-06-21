@@ -621,7 +621,7 @@ class FxGraphCachePickler(pickle.Pickler):
         defined triton kernels
         Essentially what we are doing here is a huge hack where user defined
         triton kernel contain a dynamo time side table and the arguments to the
-        call_function are indicies into this side table. These arguments are not
+        call_function are indices into this side table. These arguments are not
         for hashing purposes since we included the source code into the cache
         key and the numbers are prone to give false negatives due to ordering.
         """
@@ -1154,7 +1154,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
       current context to validate that a cached entry can be served.
     - A given graph could have multiple compiled versions, corresponding to
       different sets of guards. Therefore, we store cache entries in the form:
-          <temp dir>/<fx graph hash>/<serialized metatdata>
+          <temp dir>/<fx graph hash>/<serialized metadata>
     - On lookup, we compute the key from the graph details, iterate over all
       leaf files in the corresponding subdirectory, deserialize the entry, and
       evaluate its guards expression. If the evaluation succeeds, we have a
@@ -1836,8 +1836,8 @@ class AotCodeCompiler:
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
-                # Intel compiler failed to compile this manully constructed assembly file.
-                # it is ok to use gcc to compile the .S to a .o and linked with Intel comiler .
+                # Intel compiler failed to compile this manually constructed assembly file.
+                # it is ok to use gcc to compile the .S to a .o and linked with Intel compiler .
                 device_type=device_type if device_type != "xpu" else "cpu",
                 aot_mode=graph.aot_mode,
                 compile_only=True,
@@ -2206,7 +2206,7 @@ class AotCodeCompiler:
 
                     generated_files.append(weight_file)
                 else:
-                    # TODO: unify to alway use mmap_weights
+                    # TODO: unify to always use mmap_weights
                     generated_files.append(consts_o)
                     so_builder.save_src_to_cmake(cmake_path, consts_o)
 
@@ -3164,31 +3164,31 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             base = cache_dir()
         dirpath = Path(base) / f"halide-runtime-{target}-{cls.config_hash()}"
         os.makedirs(dirpath, exist_ok=True)
-        donefile = str(dirpath / "done")
-        lockfile = str(dirpath / "lock")
-        hookfile = str(dirpath / "hooks.cpp")
-        afile = str(dirpath / "standalone_halide_runtime.a")
-        sofile = str(dirpath / libname)
-        if not os.path.exists(donefile):
+        done_file = str(dirpath / "done")
+        lock_file = str(dirpath / "lock")
+        hook_file = str(dirpath / "hooks.cpp")
+        a_file = str(dirpath / "standalone_halide_runtime.a")
+        so_file = str(dirpath / libname)
+        if not os.path.exists(done_file):
             import halide as hl  # type: ignore[import-untyped,import-not-found]
 
             from torch.utils._filelock import FileLock
 
-            with FileLock(lockfile, LOCK_TIMEOUT):
-                if not os.path.exists(donefile):
-                    with open(hookfile, "w") as f:
+            with FileLock(lock_file, LOCK_TIMEOUT):
+                if not os.path.exists(done_file):
+                    with open(hook_file, "w") as f:
                         if device_type == "cuda":
                             f.write(
                                 cls.standalone_runtime_cuda_init.format(
                                     cls.find_header("HalideRuntimeCuda.h")
                                 )
                             )
-                    hl.compile_standalone_runtime(afile, hl.Target(target))
+                    hl.compile_standalone_runtime(a_file, hl.Target(target))
 
-                    name, output_dir = get_name_and_dir_from_output_file_path(sofile)
+                    name, output_dir = get_name_and_dir_from_output_file_path(so_file)
                     halide_cmd_gen = CppBuilder(
                         name=name,
-                        sources=[hookfile, afile],
+                        sources=[hook_file, a_file],
                         output_dir=output_dir,
                         BuildOption=CppTorchDeviceOptions(
                             device_type=device_type,
@@ -3198,10 +3198,10 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                     subprocess.check_call(
                         shlex.split(halide_cmd_gen.get_command_line())
                     )
-                    touch(donefile)
-        assert os.path.exists(sofile)
-        cls._standalone_runtime_path = sofile
-        return sofile
+                    touch(done_file)
+        assert os.path.exists(so_file)
+        cls._standalone_runtime_path = so_file
+        return so_file
 
     @classmethod
     def _get_uncompiled_header(cls, device: str) -> str | None:

@@ -206,7 +206,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
 
 class UniformValueConstantFolder(ConstantFolder):
     """
-    Runs constant folding and replaces tensors that have a unifrom value
+    Runs constant folding and replaces tensors that have a uniform value
     with a tensor constructor call: aten.full([shape], value, ...)
     """
 

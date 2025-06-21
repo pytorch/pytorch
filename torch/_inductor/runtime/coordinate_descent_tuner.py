@@ -208,7 +208,7 @@ class CoordescTuner:
         """
         Check if candidate_config is better than best_config.
 
-        Return a touple of (compare_result, candidate_timing).
+        Return a tuple of (compare_result, candidate_timing).
         compare_result is true iff candidate_config is better.
         """
         log.debug("Try config %s", candidate_config)

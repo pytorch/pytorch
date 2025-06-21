@@ -108,7 +108,7 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     device_tma: bool = False,
 ) -> dict[str, Any]:
     def are_compatible_scales(size_a, size_b) -> bool:
-        # Same sized scales are compatable
+        # Same sized scales are compatible
         if len(size_a) == len(size_b):
             return True
 
