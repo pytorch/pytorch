@@ -84,9 +84,9 @@ ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
   for (const auto i : c10::irange(nGraphInputs_)) {
     auto spec = ArgSpec(graph_->inputs()[i]).supplementTensorInfo(inputs[i]);
     initializedInputIds_.insert(spec.tid());
-    int64_t occurence = tensorIdToOccurence[spec.tid()];
-    inputSpecs.insert(inputSpecs.end(), occurence, spec);
-    runArgsIdx_.insert(runArgsIdx_.end(), occurence, i);
+    int64_t occurrence = tensorIdToOccurence[spec.tid()];
+    inputSpecs.insert(inputSpecs.end(), occurrence, spec);
+    runArgsIdx_.insert(runArgsIdx_.end(), occurrence, i);
   }
   GRAPH_DEBUG("Initializing constant input tensors");
   initializeConstantInputs();
