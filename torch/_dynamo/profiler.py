@@ -11,6 +11,7 @@ This module provides profiling functionality for Dynamo, including:
 The profiler helps measure and optimize the performance of Dynamo-compiled code
 by tracking both captured and total operations, timing, and graph statistics.
 """
+from __future__ import annotations
 
 import dataclasses
 import os
@@ -35,7 +36,7 @@ class ProfileMetrics:
         self.fusions += other.fusions
         return self
 
-    def __add__(self, other: "ProfileMetrics") -> "ProfileMetrics":
+    def __add__(self, other: ProfileMetrics) -> ProfileMetrics:
         assert isinstance(other, ProfileMetrics)
         return ProfileMetrics(
             self.microseconds + other.microseconds,
@@ -43,7 +44,7 @@ class ProfileMetrics:
             self.fusions + other.fusions,
         )
 
-    def __truediv__(self, other: Any) -> "ProfileMetrics":
+    def __truediv__(self, other: Any) -> ProfileMetrics:
         if isinstance(other, int):
             other = ProfileMetrics(other, other, other)
         return ProfileMetrics(
