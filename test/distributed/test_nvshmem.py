@@ -66,6 +66,31 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         symm_mem.rendezvous(out, group=group_name)
 
     @skipIfRocm
+    def test_nvshmem_put(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        symm_mem.rendezvous(tensor, group=group_name)
+
+        if self.rank == 0:
+            torch.ops.symm_mem.nvshmem_put(tensor, 1)
+            # TODO: remove after we have wait_signal
+            dist.barrier()
+        elif self.rank == 1:
+            # handle.wait_signal(src_rank=0)
+            # TODO: remove after we have wait_signal
+            dist.barrier()
+            torch.testing.assert_close(
+                tensor, torch.zeros(numel, dtype=dtype, device=self.device)
+            )
+        else:
+            dist.barrier()
+
+    @skipIfRocm
     def test_nvshmem_all_to_all(self) -> None:
         self._init_device()
 
