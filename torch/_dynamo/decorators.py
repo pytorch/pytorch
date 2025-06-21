@@ -553,7 +553,11 @@ def mark_unbacked(t, index, strict=False, specialize_on=None):
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
 
-        t._specialize_on[index] = specialize_on if specialize_on is not None else []
+        # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
+        # TypeError: 'Attribute' object does not support item assignment
+        if isinstance(t._specialize_on, dict):
+            t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
         t._dynamo_unbacked_indices.add(index)
         return
 
@@ -619,7 +623,12 @@ def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None):
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
-        t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
+        # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
+        # TypeError: 'Attribute' object does not support item assignment
+        if isinstance(t._specialize_on, dict):
+            t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
         return
 
     assert isinstance(index, (list, tuple))
@@ -698,7 +707,7 @@ def mark_static(t, index=None):
 
     if not isinstance(t, torch.Tensor):
         raise TypeError(
-            f"mark_static expects a tensor/nn.Module class but recieved {type(t)}"
+            f"mark_static expects a tensor/nn.Module class but received {type(t)}"
         )
 
     if isinstance(index, int):
@@ -724,7 +733,7 @@ def mark_static_address(t, guard=True):
     Tensors marked in this way will be kept alive until `torch._dynamo.reset()` is called.
     """
     if not isinstance(t, torch.Tensor):
-        raise TypeError(f"mark_static_address expects a tensor but recieved {type(t)}")
+        raise TypeError(f"mark_static_address expects a tensor but received {type(t)}")
 
     if guard:
         t._dynamo_static_input_type = "guarded"  # type: ignore[attr-defined]
@@ -846,7 +855,7 @@ def patch_dynamo_config(
 
     See _allowed_config_patches for the list of allowed config patches.
 
-    Arguments are the same as with torch._dynamo.confing.patch.
+    Arguments are the same as with torch._dynamo.config.patch.
 
     Can be used as a decorator or a context manager.
 
