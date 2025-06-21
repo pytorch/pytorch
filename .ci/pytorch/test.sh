@@ -196,7 +196,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/mpi/latest/env/vars.sh
   # Check XPU status before testing
-  xpu-smi discovery
+  timeout 30 xpu-smi discovery || true
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
@@ -596,7 +596,9 @@ test_perf_for_dashboard() {
 
   local device=cuda
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
-    if [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
+    if [[ "${TEST_CONFIG}" == *zen_cpu_x86* ]]; then
+      device=zen_cpu_x86
+    elif [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
       device=cpu_x86
     elif [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
       device=cpu_aarch64
