@@ -147,6 +147,7 @@ class Metadata:
     planner_data: Any = None
     storage_data: Any = None
     storage_meta: Optional[StorageMeta] = None
+    version: Optional[float] = None
 
 
 @dataclass(frozen=True)
