@@ -1179,7 +1179,6 @@ exclude_patterns = [
     'torch/utils/**',
     'torch/csrc/jit/**',
     'torch/csrc/jit/[a-o]*/**',
-    'torch/csrc/distributed/**',
 ]
 init_command = [
     'python3',
