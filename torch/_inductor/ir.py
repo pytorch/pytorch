@@ -194,6 +194,10 @@ _NodeOrNodes: TypeAlias = Union[
 ]
 
 
+def _is_static(x: object) -> bool:
+    return isinstance(x, (int, Integer))
+
+
 @dataclasses.dataclass(frozen=True)
 class GraphPartitionSignature:
     # symbol inputs that are neccessary for codegen
@@ -1210,9 +1214,6 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
     ) -> tuple[ReductionHint, _IntLike]:
-        def _is_static(x: object) -> bool:
-            return isinstance(x, (int, Integer))
-
         reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
@@ -1507,6 +1508,18 @@ class Reduction(Loops):
             reduction_numel,
             input_node,
         )
+
+        def _maybe_increase_split(split: int) -> int:
+            # don't apply min_num_split constraint for static shape case.
+            if _is_static(reduction_numel):
+                return split
+            if split > 1:
+                return max(split, config.min_num_split)
+            else:
+                return split
+
+        split = _maybe_increase_split(split)
+
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
         # reuse the passed hint if available
