@@ -623,6 +623,10 @@ wrap_top_frame = False
 # record pre-graph bytecode in profile traces
 record_pre_graph_bytecode_in_traces = True
 
+# This is a short-lived flag to control whether invoke_subgraph supports
+# input mutation. It will be turned to True by default.
+does_invoke_subgraph_support_input_mutation = False
+
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
