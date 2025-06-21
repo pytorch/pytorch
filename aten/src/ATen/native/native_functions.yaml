@@ -4052,12 +4052,12 @@
 - func: min.names_dim_min(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
   device_check: NoCheck   # TensorIterator
 
-- func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
+- func: amin(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
   variants: function, method
   structured_delegate: amin.out
   tags: core
 
-- func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: amin.out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU, CUDA: amin_out
