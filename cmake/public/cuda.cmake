@@ -1,9 +1,6 @@
 # ---[ cuda
 
-# Poor man's include guard
-if(TARGET torch::cudart)
-  return()
-endif()
+include_guard(GLOBAL)
 
 # sccache is only supported in CMake master and not in the newest official
 # release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
@@ -127,35 +124,11 @@ endif()
 
 # ---[ CUDA libraries wrapper
 
-# find lbnvrtc.so
-set(CUDA_NVRTC_LIB "${CUDA_nvrtc_LIBRARY}" CACHE FILEPATH "")
-if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
-  find_package(Python COMPONENTS Interpreter)
-  execute_process(
-    COMMAND Python::Interpreter -c
-    "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
-    RESULT_VARIABLE _retval
-    OUTPUT_VARIABLE CUDA_NVRTC_SHORTHASH)
-  if(NOT _retval EQUAL 0)
-    message(WARNING "Failed to compute shorthash for libnvrtc.so")
-    set(CUDA_NVRTC_SHORTHASH "XXXXXXXX")
-  else()
-    string(STRIP "${CUDA_NVRTC_SHORTHASH}" CUDA_NVRTC_SHORTHASH)
-    message(STATUS "${CUDA_NVRTC_LIB} shorthash is ${CUDA_NVRTC_SHORTHASH}")
-  endif()
-endif()
-
 # Create new style imported libraries.
 # Several of these libraries have a hardcoded path if CAFFE2_STATIC_LINK_CUDA
 # is set. This path is where sane CUDA installations have their static
 # libraries installed. This flag should only be used for binary builds, so
 # end-users should never have this flag set.
-
-# cuda
-add_library(caffe2::cuda INTERFACE IMPORTED)
-set_property(
-    TARGET caffe2::cuda PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::cuda_driver)
 
 # cudart
 add_library(torch::cudart INTERFACE IMPORTED)
@@ -257,11 +230,11 @@ if(CAFFE2_USE_CUFILE)
   if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
       set_property(
           TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
-          CUDA::cuFile_static)
+          CUDA::cuFile_static CUDA::culibos)
   else()
       set_property(
           TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
-          CUDA::cuFile)
+          CUDA::cuFile CUDA::culibos)
   endif()
 else()
   message(STATUS "USE_CUFILE is set to 0. Compiling without cuFile support")
@@ -292,10 +265,16 @@ else()
 endif()
 
 # nvrtc
-add_library(caffe2::nvrtc INTERFACE IMPORTED)
-set_property(
-    TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::nvrtc caffe2::cuda)
+add_library(torch::nvrtc INTERFACE IMPORTED)
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
+  set_property(
+      TARGET torch::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
+      CUDA::nvrtc_static CUDA::cuda_driver)
+else()
+  set_property(
+      TARGET torch::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
+      CUDA::nvrtc CUDA::cuda_driver)
+endif()
 
 # Add onnx namespace definition to nvcc
 if(ONNX_NAMESPACE)
