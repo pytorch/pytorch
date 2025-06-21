@@ -7096,12 +7096,14 @@
   variants: function
   dispatch:
     CPU: _scaled_mm_cpu
+    XPU: _scaled_mm_xpu
     CUDA: _scaled_mm_cuda
 
 - func: _scaled_mm.out(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, Tensor? bias=None, Tensor? scale_result=None, ScalarType? out_dtype=None, bool use_fast_accum=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _scaled_mm_out_cpu
+    XPU: _scaled_mm_out_xpu
     CUDA: _scaled_mm_out_cuda
 
 
