@@ -3543,7 +3543,7 @@ if HAS_CUDA:
             f = torch.compile(f, mode="reduce-overhead")
 
             def run(shape):
-                x = torch.randn((shape,5), device="cuda")
+                x = torch.randn((shape, 5), device="cuda")
                 torch._dynamo.mark_dynamic(x, 0)
                 for _ in range(3):
                     f(x)
@@ -3554,12 +3554,17 @@ if HAS_CUDA:
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
         def test_cudagraph_capture_sizes1(self):
-            torch._inductor.config.triton.cudagraph_capture_sizes = [(2,3), (4,5), (6, 2), (7,3)]
+            torch._inductor.config.triton.cudagraph_capture_sizes = [
+                (2, 3),
+                (4, 5),
+                (6, 2),
+                (7, 3),
+            ]
 
             def f(x):
                 return x + 1
 
-            f = torch.compile(f, mode="reduce-overhead", dynamic=False)
+            f = torch.compile(f, mode="reduce-overhead")
 
             def run(batch_size, seq_len, d):
                 x = torch.randn((batch_size, seq_len, d), device="cuda")
@@ -3575,12 +3580,17 @@ if HAS_CUDA:
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
         def test_cudagraph_capture_sizes2(self):
-            torch._inductor.config.triton.cudagraph_capture_sizes = [(2,3,4), (4,4,3), (3, 4, 4), (4,2,3)]
+            torch._inductor.config.triton.cudagraph_capture_sizes = [
+                (2, 3, 4),
+                (4, 4, 3),
+                (3, 4, 4),
+                (4, 2, 3),
+            ]
 
             def f(x):
                 return x + 1
 
-            f = torch.compile(f, mode="reduce-overhead", dynamic=False)
+            f = torch.compile(f, mode="reduce-overhead")
 
             def run(batch_size, seq_len, d):
                 x = torch.randn((batch_size, seq_len, d), device="cuda")
@@ -3596,7 +3606,6 @@ if HAS_CUDA:
                         run(i, j, k)
 
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
-
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):
