@@ -593,7 +593,7 @@ class NativeFunction:
     has_composite_explicit_autograd_non_functional_kernel: bool
 
     # Tags are used to describe semantic information about (groups of) operators,
-    # That aren't easily inferrable directly from the operator's schema.
+    # That aren't easily inferable directly from the operator's schema.
     tags: set[str]
 
     # NB: The benefit of defining a dataclass is that we automatically get
