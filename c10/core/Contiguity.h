@@ -38,8 +38,8 @@ inline static c10::SymBool _compute_contiguous_sym(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides,
     const c10::SymInt& numel) {
-  // This lambda will return true iff contiguity is known to be true. if it
-  // returns false, contiguity can be true or false.
+  // If this return true, the tensor is contiguous indeed. Otherwise it could be
+  // either.
   auto is_contiguous_or_false = [&]() {
     if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
       return true;
@@ -49,8 +49,7 @@ inline static c10::SymBool _compute_contiguous_sym(
     // with max(1, size[d]) or size[d]. Regardless, this is ok for this
     // function. Why?
     // (1) If size[d] == 0, then the tensor is contiguous and if
-    //     we return true or false it won't break the invariance that it returns
-    //     true if the tensor is contiguous.
+    //     we return true or false it won't break this function.
     // (2) If size[d] is not 0, then max(1,size[d]) and size[d] are equal.
     //     Therefore, if we choose to use max(1, size[d]) or size[d] to
     //     calculate the expected stride, the result is the same.
