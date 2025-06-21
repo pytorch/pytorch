@@ -52,6 +52,7 @@ void CacheEntry::invalidate(py::object deleted_guard_manager) {
   this->guard_manager = std::move(deleted_guard_manager);
   this->root_mgr = nullptr;
   this->trace_annotation = "Invalidated";
+  this->backend = py::none();
 }
 
 void CacheEntry::update_diff_guard_root_manager() {
