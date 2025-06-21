@@ -142,6 +142,13 @@ if not IS_WINDOWS:
                     curr_mem = torch.cuda.memory_allocated(device)
                     self.assertEqual(curr_mem, init_mem)
 
+        def test_is_contiguous(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, device=device)
+            self.assertTrue(libtorch_agnostic.ops.is_contiguous(t))
+            self.assertFalse(libtorch_agnostic.ops.is_contiguous(t.transpose(0, 1)))
+
         # TODO: Debug this:
         # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
         # call_function libtorch_agnostic.my_ones_like.default(*(FakeTensor(..., size=(3, 1)), 'cpu'),
