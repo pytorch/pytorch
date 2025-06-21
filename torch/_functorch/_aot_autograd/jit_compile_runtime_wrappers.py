@@ -161,6 +161,7 @@ def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
         static_input_indices=input.static_input_indices,
         pre_dispatch=input.pre_dispatch,
         cache_info=None,
+        precompile_backend_id=input.precompile_backend_id,
     )
 
 
