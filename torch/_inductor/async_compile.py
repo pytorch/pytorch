@@ -297,6 +297,11 @@ class AsyncCompile:
         _compile_end()
 
     @classmethod
+    def wait_pool_ready(cls, timeout=120) -> None:
+        if cls.use_process_pool():
+            cls.process_pool().ready_future.result(timeout=timeout)  # type: ignore[union-attr]
+
+    @classmethod
     def submit(cls, task: Callable[..., Any]) -> Any:
         if get_compile_threads() <= 1:
             return task()
