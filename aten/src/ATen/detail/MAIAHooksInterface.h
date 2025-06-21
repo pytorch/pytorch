@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Device.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
@@ -14,17 +15,33 @@ struct TORCH_API MAIAHooksInterface : AcceleratorHooksInterface {
   ~MAIAHooksInterface() override = default;
 
   void init() const override {
-    TORCH_CHECK(false, "Cannot initialize MAIA without ATen_maia library.");
+    TORCH_CHECK(false, MAIA_HELP);
   }
 
   bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
-    TORCH_CHECK(false, "Cannot initialize MAIA without ATen_maia library.");
+    TORCH_CHECK(false, MAIA_HELP);
     return false;
   }
 
   virtual std::string showConfig() const {
     TORCH_CHECK(false, "Cannot query detailed MAIA version information.");
   }
+
+  virtual bool hasMAIA() const {
+    return false;
+  }
+
+  bool isPinnedPtr(const void* /*data*/) const override {
+    return false;
+  }
+
+  Allocator* getPinnedMemoryAllocator() const override {
+    TORCH_CHECK(false, "Pinned memory requires MAIA.");
+  }
+
+ private:
+  static constexpr const char* MAIA_HELP =
+      "Cannot initialize MAIA without ATen_maia library.";
 };
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
@@ -38,5 +55,4 @@ TORCH_DECLARE_REGISTRY(MAIAHooksRegistry, MAIAHooksInterface, MAIAHooksArgs);
 namespace detail {
 TORCH_API const MAIAHooksInterface& getMAIAHooks();
 } // namespace detail
-
 } // namespace at

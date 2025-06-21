@@ -42,6 +42,7 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
 
   DETECT_AND_ASSIGN_ACCELERATOR_COMP(CUDA)
   DETECT_AND_ASSIGN_ACCELERATOR_COMP(XPU)
+  DETECT_AND_ASSIGN_ACCELERATOR_COMP(MAIA)
   DETECT_AND_ASSIGN_ACCELERATOR_COMP(HIP)
   DETECT_AND_ASSIGN_ACCELERATOR_COMP(MPS)
   DETECT_AND_ASSIGN_ACCELERATOR_COMP(HPU)
@@ -58,6 +59,7 @@ bool isAccelerator(c10::DeviceType device_type) {
   switch (device_type) {
     case at::kCUDA:
     case at::kMTIA:
+    case at::kMAIA:
     case at::kXPU:
     case at::kHIP:
     case at::kMPS:
