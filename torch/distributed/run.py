@@ -531,7 +531,7 @@ def get_args_parser() -> ArgumentParser:
         type=str,
         default=None,
         help="Base directory to use for log files (e.g. /var/log/torch/elastic). The same "
-        "directory is re-used for multiple runs (a unique job-level sub-directory is created with "
+        "directory is reused for multiple runs (a unique job-level sub-directory is created with "
         "rdzv_id as the prefix).",
     )
     parser.add_argument(
@@ -720,7 +720,7 @@ def get_use_env(args) -> bool:
 
 def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
     """
-    Attemps to load `torchrun.logs_spec` entrypoint with key of `logs_specs_name` param.
+    Attempts to load `torchrun.logs_spec` entrypoint with key of `logs_specs_name` param.
     Provides plugin mechanism to provide custom implementation of LogsSpecs.
 
     Returns `DefaultLogsSpecs` when logs_spec_name is None.

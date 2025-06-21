@@ -184,7 +184,7 @@ def barrier(
 
     Optionally, passing rank will enable tracing of missing ranks on timeouts.
     `rank_tracing_decoder` lambda arg can be used to convert rank data
-    into a more meaninful information at an app level (e.g. hostname).
+    into a more meaningful information at an app level (e.g. hostname).
 
     Note: Since the data is not removed from the store, the barrier can be used
         once per unique ``key_prefix``.

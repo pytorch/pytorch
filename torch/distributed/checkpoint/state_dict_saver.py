@@ -125,7 +125,7 @@ def save(
             checkpoint_id. If checkpoint_id is also None, an exception will
             be raised. (Default: ``None``)
         planner (Optional[SavePlanner]):
-            Instance of SavePlanner. If this is not specificed, the default
+            Instance of SavePlanner. If this is not specified, the default
             planner will be used. (Default: ``None``)
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
@@ -211,7 +211,7 @@ def async_save(
             checkpoint_id. If checkpoint_id is also None, an exception will
             be raised. (Default: ``None``)
         planner (Optional[SavePlanner]):
-            Instance of SavePlanner. If this is not specificed, the default
+            Instance of SavePlanner. If this is not specified, the default
             planner will be used. (Default: ``None``)
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.

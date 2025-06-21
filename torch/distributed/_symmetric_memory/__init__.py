@@ -1235,7 +1235,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # To handle case where A is 3D+, reshape to 2D to prepare for mm which requires 2D inputs.
     A_2D_with_scatter_dim_0 = A_with_scatter_dim_0.flatten(0, -2)
 
-    # Parition A along the first dim to prepare for sharding across TP process group.
+    # Partition A along the first dim to prepare for sharding across TP process group.
     A_shards = A_2D_with_scatter_dim_0.chunk(group.size())
 
     # Now that 'A' is sharded along the first dim, we need to update its scale(s) accordingly.

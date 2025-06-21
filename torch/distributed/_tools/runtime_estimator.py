@@ -83,7 +83,7 @@ class RuntimeEstimator(TorchDispatchMode):
     This class provides a ``TorchDispatchMode`` based context manager that can be used to estimate the eager
     runtime of PyTorch functions. It supports two estimation modes, benchmarking (`operator-level-benchmark`) and
     roofline cost modeling (`operator-level-cost-model`).
-    For modules executed under this context manager, it agggregates the forward and backward operation runtimes
+    For modules executed under this context manager, it aggregates the forward and backward operation runtimes
     and also records their execution orders.
 
     Attributes:

@@ -1,7 +1,7 @@
 """
 NOTE: This file must be imported like
 ``import torch.distributed.fsdp._traversal_utils`` and not like
-``from torch.distirbuted.fsdp._traversal_utils import ...`` to avoid circular
+``from torch.distributed.fsdp._traversal_utils import ...`` to avoid circular
 imports. For brevity, we may import the file as ``traversal_utils``.
 """
 
