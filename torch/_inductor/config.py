@@ -1064,6 +1064,9 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_USE_DECOMPOSE_TANH", "0") == "1"
     )
 
+    # Use a small dequant buffer for wgt of woq int4 size as: [q_group_size, Nr]
+    use_small_dequant_buffer = False
+
 
 # config specific to codegen/triton.py
 class triton:
