@@ -30,7 +30,6 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
-from torch._inductor.async_compile import async_compile_pool_manager
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
@@ -2259,6 +2258,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def _backward_impl(ctx, all_args):
+                from torch._inductor.async_compile import async_compile_pool_manager
+
                 # compiled autograd reimplements this function at proxy_call_aot_backward
                 assert (
                     not backward_state_indices
