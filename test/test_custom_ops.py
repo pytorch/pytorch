@@ -1817,7 +1817,8 @@ Dynamic shape operator
   Hint: Enable tracing of dynamic shape operators with `torch._dynamo.config.capture_dynamic_output_shape_ops = True`
 
   Developer debug context: _torch_testing.numpy_nonzero.default
-""",
+
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0036""",
         )
 
     # pre-existing problem: torch.compile(dynamic=True) will, by default,
