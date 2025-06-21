@@ -61,7 +61,7 @@ COPY ci_commit_pins/timm.txt timm.txt
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
 
-# Install XPU Dependencies
+# Install XPU Support Toolchains
 ARG XPU_VERSION
 COPY ./common/install_xpu.sh install_xpu.sh
 RUN bash ./install_xpu.sh && rm install_xpu.sh

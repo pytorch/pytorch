@@ -55,12 +55,12 @@ jobs:
       runner: linux.12xlarge
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
-          { config: "default", shard: 2, num_shards: 6, runner: "linux.idc.xpu" },
-          { config: "default", shard: 3, num_shards: 6, runner: "linux.idc.xpu" },
-          { config: "default", shard: 4, num_shards: 6, runner: "linux.idc.xpu" },
-          { config: "default", shard: 5, num_shards: 6, runner: "linux.idc.xpu" },
-          { config: "default", shard: 6, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.ril.xpu" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.ril.xpu" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.ril.xpu" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.ril.xpu" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.ril.xpu" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.ril.xpu" },
         ]}
     secrets: inherit
 
