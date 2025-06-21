@@ -44,7 +44,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, NoReturn, Optional, Union
+from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import torch
@@ -167,6 +167,9 @@ from .variables.user_defined import (
 )
 
 
+if TYPE_CHECKING:
+    from .package import CompilePackage
+
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
@@ -205,19 +208,28 @@ class SpeculationEntry:
     lineno: int
     instruction_pointer: int
     inst: Instruction  # for debugging only
-    failed: bool = False
+    _failed: bool = False
+    error_on_graph_break: Optional[bool] = None
     reason: Optional[GraphCompileReason] = None
 
-    def fail_and_restart_analysis(self):
+    def fail_and_restart_analysis(self, error_on_graph_break: bool):
         """
         Start tracing of the current frame over again, and don't take this branch.
         """
-        self.failed = True
+        self._failed = True
+        self.error_on_graph_break = error_on_graph_break
         if self.reason is not None:
             restart_reason = self.reason.reason
         else:
             restart_reason = "Unknown fail_and_restart_analysis"
         raise exc.SpeculationRestartAnalysis(restart_reason=restart_reason)
+
+    def failed(self, tx):
+        if self._failed:
+            assert self.error_on_graph_break is not None
+            tx.error_on_graph_break = self.error_on_graph_break
+            return True
+        return False
 
 
 @dataclasses.dataclass
@@ -824,7 +836,7 @@ def break_graph_if_unsupported(*, push):
         @functools.wraps(inner_fn)
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
             speculation = self.speculate()
-            if speculation.failed:
+            if speculation.failed(self):
                 assert speculation.reason is not None
                 return handle_graph_break(self, inst, speculation.reason)
             try:
@@ -869,7 +881,7 @@ def break_graph_if_unsupported(*, push):
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
                 speculation.reason = GraphCompileReason(excp.msg, excp.real_stack)
-            speculation.fail_and_restart_analysis()
+            speculation.fail_and_restart_analysis(self.error_on_graph_break)
 
         def handle_graph_break(
             self: "InstructionTranslatorBase",
@@ -1094,6 +1106,7 @@ class InstructionTranslatorBase(
     is_leaf_tracer: bool
     parent: Optional["InstructionTranslatorBase"]
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
+    package: Optional["CompilePackage"]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1234,6 +1247,8 @@ class InstructionTranslatorBase(
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
+        self.error_on_graph_break = config.error_on_graph_break
+
         ip = self.instruction_pointer
         if ip is None:
             return False
@@ -1249,7 +1264,7 @@ class InstructionTranslatorBase(
             and self.is_non_empty_graph()
         ):
             self.current_speculation = self.speculate()
-            if self.current_speculation.failed:
+            if self.current_speculation.failed(self):
                 return self.step_graph_break(inst)
 
         if self.is_trace_bytecode_log_enabled:
@@ -1275,7 +1290,7 @@ class InstructionTranslatorBase(
                 raise
             log.debug("step triggered compile", exc_info=True)
 
-        self.current_speculation.fail_and_restart_analysis()
+        self.current_speculation.fail_and_restart_analysis(self.error_on_graph_break)
 
     if sys.version_info >= (3, 11):
 
@@ -1554,6 +1569,9 @@ class InstructionTranslatorBase(
         else:
             value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
+
+        if self.package is not None:
+            self.package.add_import_source(alias, module_name)
         f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
@@ -2288,7 +2306,7 @@ class InstructionTranslatorBase(
 
     def STORE_ATTR(self, inst):
         speculation = self.speculate()
-        if speculation.failed:
+        if speculation.failed(self):
             return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
 
@@ -2312,7 +2330,7 @@ class InstructionTranslatorBase(
             log.debug("STORE_ATTR triggered compile", exc_info=True)
             e.remove_from_stats()
             e.add_to_stats("graph_break")
-        speculation.fail_and_restart_analysis()
+        speculation.fail_and_restart_analysis(self.error_on_graph_break)
 
     def store_attr_graph_break(self, inst):
         log_graph_break(self.code_options, reason="STORE_ATTR-caused graph break")
@@ -3017,7 +3035,7 @@ class InstructionTranslatorBase(
             self.popn(2)
 
     def LOAD_FAST_CHECK(self, inst):
-        if isinstance(self.symbolic_locals[inst.argval], NullVariable):
+        if isinstance(self.symbolic_locals.get(inst.argval, None), NullVariable):
             unimplemented_v2(
                 gb_type="LOAD_FAST_CHECK on uninitialized variable",
                 context=inst.argval,
@@ -3187,6 +3205,7 @@ class InstructionTranslatorBase(
         distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
         closure: Optional[tuple[types.CellType]] = None,
+        package: Optional["CompilePackage"] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -3235,7 +3254,14 @@ class InstructionTranslatorBase(
         self.num_calls: dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
+        # NOTE: one_graph is used for export/debugging to always force errors on graph breaks.
+        # To toggle fullgraph during normal compile, self.error_on_graph_break
+        # is used instead. Every step(), its value is updated to config.error_on_graph_break.
+        # We mirror this value since cleanup may (correctly) inadvertently change config.error_on_graph_break.
+        # This assumes that we cannot both trace a change to config.error_on_graph_break and graph break on
+        # the same instruction.
         self.one_graph = False
+        self.error_on_graph_break = False
 
         self.current_speculation = None
 
@@ -3244,6 +3270,8 @@ class InstructionTranslatorBase(
         self.is_leaf_tracer = True
         self.parent = None
         self.debug_locals = []
+
+        self.package = package
 
         if sys.version_info >= (3, 10):
             from .resume_execution import (
@@ -3305,6 +3333,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         speculation_log: SpeculationLog,
         exn_vt_stack: ExceptionStack,
         distributed_state: Optional[DistributedState],
+        package: Optional["CompilePackage"],
     ) -> None:
         _step_logger()(
             logging.INFO,
@@ -3322,6 +3351,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 global_scope=f_globals,
                 f_code=f_code,
                 torch_function_mode_stack=torch_function_mode_stack,
+                package=package,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -3339,6 +3369,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             speculation_log=speculation_log,
             exn_vt_stack=exn_vt_stack,
             distributed_state=distributed_state,
+            package=package,
         )
 
         self._throw_if_in_functorch()
@@ -3494,6 +3525,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return (
             all(b.can_restore() for b in self.block_stack)
             and not self.one_graph
+            and not self.error_on_graph_break
             and not self.active_generic_context_managers
         )
 
@@ -3575,12 +3607,19 @@ class InstructionTranslator(InstructionTranslatorBase):
             # expose code object for debugging purposes
             self.output.install_global_unsafe(name, new_code)
             cg.make_function_with_closure(name, new_code, True, stack_len)
+            package_name = None
         else:
             # This is safe: we pre-generate a unique name
             self.output.install_global_unsafe(
                 name, types.FunctionType(new_code, self.f_globals, name)
             )
             cg.extend_output(cg.load_function_name(name, True, stack_len))
+            package_name = name
+
+        if self.package is not None:
+            self.package.add_resume_function(
+                new_code, self.f_globals["__name__"], package_name
+            )
 
         cg.extend_output([cg.create_load(k) for k in argnames])
         cg.extend_output(create_call_function(nargs, False))
@@ -3621,6 +3660,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.symbolic_locals_contain_module_class()
             and not self.export
             and not self.one_graph
+            and not self.error_on_graph_break
         ):
             raise exc.SkipFrame("because no content in function call")
 
@@ -3891,6 +3931,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except Exception:
             log.debug("FAILED INLINING %s", code)
             raise
+        finally:
+            parent.error_on_graph_break = self.error_on_graph_break
+
         assert self.symbolic_result is not None
 
         if self.f_globals is parent.f_globals:
@@ -3975,6 +4018,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             speculation_log=parent.speculation_log,
             exn_vt_stack=parent.exn_vt_stack,
             distributed_state=parent.distributed_state,
+            package=parent.package,
         )
         self.funcvar = funcvar
         self.parent = parent
