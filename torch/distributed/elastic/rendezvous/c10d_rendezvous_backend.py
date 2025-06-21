@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -112,7 +111,7 @@ class C10dRendezvousBackend(RendezvousBackend):
         # perform a bitwise comparison of our local state and the remote state.
         return new_state, new_token, new_state == state
 
-    def _call_store(self, store_op: str, *args, **kwargs) -> Any:
+    def _call_store(self, store_op: str, *args: Any, **kwargs: Any) -> Any:
         try:
             return getattr(self._store, store_op)(*args, **kwargs)
         except (ValueError, RuntimeError, TimeoutError) as exc:
