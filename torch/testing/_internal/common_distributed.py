@@ -1760,7 +1760,7 @@ class MultiProcContinousTest(TestCase):
                             f"skipping rest of tests in Test class: {self.__class__.__name__}"  # noqa: G004
                         )
                         # Poison rest of tests (because ProcessGroup may be not
-                        # re-usable now)
+                        # reusable now)
                         self.__class__.poison_pill = True
                         raise rv
 

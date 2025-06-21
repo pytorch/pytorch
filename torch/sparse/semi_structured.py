@@ -37,7 +37,7 @@ _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
 
 class SparseSemiStructuredTensor(torch.Tensor):
     """
-    This class implementes semi-structured sparsity as a Tensor subclass.
+    This class implements semi-structured sparsity as a Tensor subclass.
 
     Semi-structured sparsity describes a sparsity pattern where n in every 2n elements are sparse,
     depending on the datatype. It is also referred to as 2:4 sparsity or fine-grained
@@ -46,11 +46,11 @@ class SparseSemiStructuredTensor(torch.Tensor):
     There are two backends available for semi_structred sparsity, either cuSPARSELt or CUTLASS.
     This class is meant to serve as a base class for both implementations. SparseSemiStructuredCUTLASS
     and SparseSemiStructuredCUSPARSELT both inherit from this class and define three backend-specific items.
-    Note that as such, this class cannot be insantiated directly.
+    Note that as such, this class cannot be instantiated directly.
 
     -`_DTYPE_SHAPE_CONSTRAINTS` - A dictionary holding backend specific dense/sparse min shape constraints
     - `def from_dense()` - backend specific compression routines
-    - `def _mm()` - backend specifc mm op (either torch._cslt_sparse_mm or torch._sparse_semi_structured_(mm|addmm))
+    - `def _mm()` - backend specific mm op (either torch._cslt_sparse_mm or torch._sparse_semi_structured_(mm|addmm))
     """
 
     _DEFAULT_ALG_ID: int = 0
@@ -123,7 +123,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             )
             cls._PROTOTYPE_WARNING_SHOWN = True
 
-            # Because this only runs onces, we also load the dispatch table here as well.
+            # Because this only runs once, we also load the dispatch table here as well.
             # We can't define the dispatch table explicitly because of torch.ops import errors, so we do this instead
             # But this is useful since it allows users to overload the dispatch table for debugging / testing.
             cls._load_dispatch_table()
@@ -325,7 +325,7 @@ def to_sparse_semi_structured(
 
     This function will check to ensure the dense tensor has the right dtype, size, dims, and device.
     We currently only support semi-structured sparse tensors for 2d CUDA tensors.
-    Additionally, your tensor must be a positive multiple of the mininum sparse block size, given in
+    Additionally, your tensor must be a positive multiple of the minimum sparse block size, given in
     `_DTYPE_TO_SHAPE_CONSTRAINTS` for each dtype (float32, float16, bfloat16, int8).
 
     Args:
@@ -388,7 +388,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
     This class implements semi-structured sparsity for the CUTLASS backend.
 
 
-    In this implementation, the specified elements and metadata are stored seprately,
+    In this implementation, the specified elements and metadata are stored separately,
     in packed and meta respectively.
 
     When _FORCE_CUTLASS is set, or when cuSPARSELt is not available, this subclass calls into _sparse_semi_structured_(mm|addmm) and
