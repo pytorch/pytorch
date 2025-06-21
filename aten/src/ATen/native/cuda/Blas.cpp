@@ -300,19 +300,19 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
   params.bias = bias;
   params.activation = activation;
   if (transa_ && transb_) {
-    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{&params};
     gemm(&params);
   }
   else if (transa_ && !transb_) {
-    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::N> gemm{};
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::N> gemm{&params};
     gemm(&params);
   }
   else if (!transa_ && transb_) {
-    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::T> gemm{};
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::T> gemm{&params};
     gemm(&params);
   }
   else if (!transa_ && !transb_) {
-    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N> gemm{};
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N> gemm{&params};
     gemm(&params);
   }
   else {
@@ -1345,7 +1345,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   const auto out_dtype_ = args.result->scalar_type();
   TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
 
-#ifdef USE_ROCM
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
