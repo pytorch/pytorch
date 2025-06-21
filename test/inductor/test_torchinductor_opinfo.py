@@ -397,6 +397,9 @@ inductor_override_kwargs["cpu"] = {
     ("nn.functional.interpolate.bicubic", u8): {"atol": 1, "rtol": 0},
     # High atol due to precision loss
     ("nn.functional.interpolate.bicubic", f32): {"atol": 5e-3, "rtol": 0},
+    # reference_in_float can cause erroneous failures in sorting tests
+    "argsort": {"reference_in_float": False},
+    "sort": {"reference_in_float": False},
 }
 
 inductor_override_kwargs["cuda"] = {
@@ -504,6 +507,9 @@ inductor_override_kwargs["cuda"] = {
         "atol": 1e-4,
         "rtol": 7e-1,
     },
+    # reference_in_float can cause erroneous failures in sorting tests
+    "argsort": {"reference_in_float": False},
+    "sort": {"reference_in_float": False},
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -661,6 +667,9 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.unfold", f16): {
         "reference_in_float": True,
     },
+    # reference_in_float can cause erroneous failures in sorting tests
+    "argsort": {"reference_in_float": False},
+    "sort": {"reference_in_float": False},
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
