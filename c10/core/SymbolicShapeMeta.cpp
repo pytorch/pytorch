@@ -83,8 +83,9 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
   auto result = _compute_contiguous_sym(sizes, strides, numel());
 
   // If the result is already determined without guarding, just return it.
-  if (result.maybe_as_bool().has_value()) {
-    return result.maybe_as_bool().value();
+  auto maybe_as_bool = result.maybe_as_bool();
+  if (maybe_as_bool.has_value()) {
+    return maybe_as_bool.value();
   }
 
   auto all_hinted = true;
