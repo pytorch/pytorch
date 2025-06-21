@@ -404,6 +404,62 @@ Example(s):
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])
 
+    def test_schema_comparison(self):
+        import torch._export.serde.schema as schema
+
+        sig = schema.ModuleCallSignature(
+            inputs=[
+                schema.Argument.create(as_none=True),
+                schema.Argument.create(
+                    as_sym_int=schema.SymIntArgument.create(as_name="s0")
+                ),
+            ],
+            outputs=[
+                schema.Argument.create(
+                    as_sym_int=schema.SymIntArgument.create(as_name="s1")
+                )
+            ],
+            in_spec="foo",
+            out_spec="bar",
+            forward_arg_names=["None", "symint"],
+        )
+        # same content as sig
+        sig_same = schema.ModuleCallSignature(
+            inputs=[
+                schema.Argument.create(as_none=True),
+                schema.Argument.create(
+                    as_sym_int=schema.SymIntArgument.create(as_name="s0")
+                ),
+            ],
+            outputs=[
+                schema.Argument.create(
+                    as_sym_int=schema.SymIntArgument.create(as_name="s1")
+                )
+            ],
+            in_spec="foo",
+            out_spec="bar",
+            forward_arg_names=["None", "symint"],
+        )
+        # as_name of symint is different
+        sig_diff = schema.ModuleCallSignature(
+            inputs=[
+                schema.Argument.create(as_none=True),
+                schema.Argument.create(
+                    as_sym_int=schema.SymIntArgument.create(as_name="s0")
+                ),
+            ],
+            outputs=[
+                schema.Argument.create(
+                    as_sym_int=schema.SymIntArgument.create(as_name="s2")
+                )
+            ],
+            in_spec="foo",
+            out_spec="bar",
+            forward_arg_names=["None", "symint"],
+        )
+        self.assertEqual(sig, sig_same)
+        self.assertNotEqual(sig, sig_diff)
+
 
 if __name__ == "__main__":
     run_tests()
