@@ -1045,7 +1045,7 @@ void BlockRunner::set_inputs(IValueList&& args, const KeywordArgs& kwargs) {
     const auto& schema_arg = schema_args[i_arg];
 
     if (i_arg - 1 < args.size()) {
-      check_type(schema_arg, std::forward<IValueList>(args)[i_arg - 1]);
+      check_type(schema_arg, args[i_arg - 1]);
       set_arg(i_arg - 1, std::forward<IValueList>(args));
       continue;
     }
