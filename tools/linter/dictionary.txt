@@ -1,5 +1,3 @@
-ans
-BU
 coo
 Din
 Dout
@@ -9,8 +7,6 @@ fro
 froms
 hsa
 nd
-nin
-nout
 optins
 OT
 rebuild
