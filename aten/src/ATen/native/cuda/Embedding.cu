@@ -317,7 +317,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
       auto count_data = count.mutable_data_ptr<index_t>();
       cuda::cub::inclusive_sum_by_key(
         sorted_data,
-        NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<index_t>(1),
+        ATEN_CUB_CONSTANT_ITERATOR(index_t)(1),
         count_data,
         num_indices
       );
@@ -329,7 +329,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
         thrust::make_reverse_iterator(sorted_data + num_indices),
         thrust::make_reverse_iterator(static_cast<const index_t*>(count_data) + num_indices),
         thrust::make_reverse_iterator(count_data + num_indices),
-        NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::Max(),
+        ATEN_CUB_MAXIMUM(),
         num_indices
       );
     });
