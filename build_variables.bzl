@@ -603,11 +603,13 @@ libtorch_nativert_sources = [
     "torch/nativert/executor/GraphExecutorBase.cpp",
     "torch/nativert/executor/OpKernel.cpp",
     "torch/nativert/executor/PlacementUtils.cpp",
+    "torch/nativert/executor/SerialGraphExecutor.cpp",
     "torch/nativert/executor/Weights.cpp",
     "torch/nativert/executor/memory/FunctionSchema.cpp",
     "torch/nativert/common/FileUtil.cpp",
     "torch/nativert/detail/ITree.cpp",
     "torch/nativert/kernels/C10Kernel.cpp",
+    "torch/nativert/kernels/AutoFunctionalizeKernel.cpp",
 ]
 
 torch_mobile_tracer_sources = [

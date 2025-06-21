@@ -583,11 +583,8 @@ static PyObject* THPModule_getCpuCapability(
   END_HANDLE_TH_ERRORS
 }
 
-namespace {
-
-template <class T>
-void DLPack_Capsule_Destructor(PyObject* data) {
-  if (C10_LIKELY(!PyCapsule_IsValid(data, at::DLPackTraits<T>::capsule))) {
+static void DLPack_Capsule_Destructor(PyObject* data) {
+  if (C10_LIKELY(!PyCapsule_IsValid(data, "dltensor"))) {
     // early out, see DLPack spec: if a consuming library sets the capsule
     // name to something else, they own it and we don't need to do anything
     return;
@@ -597,34 +594,21 @@ void DLPack_Capsule_Destructor(PyObject* data) {
   // since consuming libraries should rename the capsule according to spec.
   // Note that this cannot set a python error (we checked validity above),
   // so we don't need to handle python error state here.
-  T* tensor = (T*)PyCapsule_GetPointer(data, at::DLPackTraits<T>::capsule);
+  DLManagedTensor* dlMTensor =
+      (DLManagedTensor*)PyCapsule_GetPointer(data, "dltensor");
   // the dlMTensor has not been consumed, call deleter ourselves.
   // DLPack spec mentions that deleter may be NULL, but deleter from
   // `at::toDLPack` is never NULL, so no need for an additional check here.
-  tensor->deleter(tensor);
+  dlMTensor->deleter(dlMTensor);
   END_HANDLE_TH_ERRORS_RET()
 }
 
-template <class T>
-PyObject* THPModule_toDLPackImpl(PyObject* _unused, PyObject* data) {
+static PyObject* THPModule_toDLPack(PyObject* _unused, PyObject* data) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPVariable_Check(data), "data must be a Tensor");
-  auto tensor = at::DLPackTraits<T>::toDLPack(THPVariable_Unpack(data));
-  return PyCapsule_New(
-      tensor, at::DLPackTraits<T>::capsule, DLPack_Capsule_Destructor<T>);
+  DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_Unpack(data));
+  return PyCapsule_New(dlMTensor, "dltensor", DLPack_Capsule_Destructor);
   END_HANDLE_TH_ERRORS
-}
-
-} // namespace
-
-static PyObject* THPModule_toDLPack(PyObject* _unused, PyObject* data) {
-  return THPModule_toDLPackImpl<DLManagedTensor>(_unused, data);
-}
-
-static PyObject* THPModule_toDLPackVersioned(
-    PyObject* _unused,
-    PyObject* data) {
-  return THPModule_toDLPackImpl<DLManagedTensorVersioned>(_unused, data);
 }
 
 static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
@@ -1680,7 +1664,6 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
-    {"_to_dlpack_versioned", THPModule_toDLPackVersioned, METH_O, nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",
