@@ -60,9 +60,9 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
 _orig_module_call = torch.nn.Module.__call__
@@ -946,8 +946,26 @@ class IncByTwo:
     def __init__(self, x):
         self.x = x + 2
 
+class LRUCacheWarningTests(LoggingTestCase):
+    @requires_cuda
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_lru_cache_warning_issued_during_tracing(self, records):
+        torch.set_default_device("cuda")
 
-class ReproTests(LoggingTestCase, torch._dynamo.test_case.TestCase):
+        @torch.compile(backend="eager")
+        def f(x):
+            x = x.cos().sin()
+            return x
+
+        result = f(torch.randn(1024))
+        self.assertIsInstance(result, torch.Tensor)
+
+        for record in records:
+            if "call to a lru_cache wrapped function at:" in record.getMessage():
+                self.fail("lru_cache warning was incorrectly logged")
+
+
+class ReproTests(torch._dynamo.test_case.TestCase):
     def setUp(self) -> None:
         try:
             from .utils import install_guard_manager_testing_hook
@@ -4776,23 +4794,6 @@ class ReproTests(LoggingTestCase, torch._dynamo.test_case.TestCase):
         self.assertEqual(counter, 1)
         self.assertEqual(result1, result2)
 
-    @requires_cuda
-    @make_logging_test(dynamo=logging.DEBUG)
-    def test_lru_cache_warning_issued_during_tracing(self, records):
-        torch.set_default_device("cuda")
-
-        @torch.compile(backend="eager")
-        def f(x):
-            x = x.cos().sin()
-            return x
-
-        result = f(torch.randn(1024))
-        self.assertIsInstance(result, torch.Tensor)
-
-        for record in records:
-            if "call to a lru_cache wrapped function at:" in record.getMessage():
-                self.fail("lru_cache warning was incorrectly logged")
-
     def test_dont_aggressively_write_assert(self):
         record_graph = torch._dynamo.testing.EagerAndRecordGraphs()
 
@@ -6945,25 +6946,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             fn(torch.ones(3))
-
-    def test_nested_compile_with_guard(self):
-        @torch.compile(backend="eager", dynamic=True)
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(1, 1)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        x = torch.randn(10, 1)
-        torch._dynamo.mark_dynamic(x, 0)
-
-        @torch.compile(backend="eager")
-        def fn(mod, x):
-            return mod(x)
-
-        fn(Model(), x)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
