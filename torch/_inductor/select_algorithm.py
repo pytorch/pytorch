@@ -2134,6 +2134,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # cache for prescreening results to ensure deterministic candidate selection
         self.prescreening_cache: dict[str, OrderedSet[str]] = {}
 
+        # registers `self.cache_clear(...)` to be called when a fresh Inductor cache is requested
         clear_on_fresh_cache(self)
 
     def cache_clear(self) -> None:
@@ -2206,11 +2207,24 @@ class AlgorithmSelectorCache(PersistentCache):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
-        @functools.cache
-        def make_benchmark_fn():
-            return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
-
         inputs_key = create_inputs_key(input_nodes)
+
+        # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
+        has_autotuned = False
+        
+        def benchmark(choices):
+            global has_autotuned
+            # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
+            has_autotuned = True
+            counters["inductor"]["select_algorithm_autotune"] += 1
+            # TODO(nmacchioni): remove this layer of abstraction
+            # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
+            benchmark_fn = self.make_benchmark_fn(
+                choices, input_nodes, layout, input_gen_fns
+            )
+            # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
+            # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
+            return benchmark_fn(choices)
 
         def autotune(choices):
             log.debug("Starting autotuning")
@@ -2234,7 +2248,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     ),
                 },
             ):
-                return make_benchmark_fn()(choices)
+                return benchmark(choices)
 
         if config.autotune_in_subproc:
             # Initialize the suprocess pool so it will warmup early.
@@ -2285,11 +2299,8 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 raise NoValidChoicesError
 
-            if make_benchmark_fn.cache_info().currsize:
-                counters["inductor"]["select_algorithm_autotune"] += 1
-
             if (
-                make_benchmark_fn.cache_info().currsize
+                has_autotuned
                 or log.getEffectiveLevel() == logging.DEBUG
                 or config.trace.log_autotuning_results
             ):
@@ -2311,9 +2322,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     profile_bandwidth_with_do_bench_using_profiling=True,
                     autotune_in_subproc=False,
                 ):
-                    return self.make_benchmark_fn(
-                        choices, input_nodes, layout, input_gen_fns
-                    )(choices)
+                    return benchmark(choices)
 
             for feedback_fn in self.feedback_saver_fns:
                 # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
