@@ -101,7 +101,7 @@ class TORCH_API InputArchive final {
   std::vector<std::string> keys();
 
   /// Forwards all arguments to `read()`.
-  /// Useful for generic code that can be re-used for both `InputArchive` and
+  /// Useful for generic code that can be reused for both `InputArchive` and
   /// `OutputArchive` (where `operator()` forwards to `write()`).
   template <typename... Ts>
   void operator()(Ts&&... ts) {
