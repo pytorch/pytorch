@@ -1,6 +1,9 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch
 import time
+
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+import torch
+
 
 tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-9b-it")
 model = AutoModelForCausalLM.from_pretrained(
@@ -12,7 +15,9 @@ model = AutoModelForCausalLM.from_pretrained(
 messages = [
     {"role": "user", "content": "Write me a poem about Machine Learning."},
 ]
-input_ids = tokenizer.apply_chat_template(messages, return_tensors="pt", return_dict=True).to("cuda")
+input_ids = tokenizer.apply_chat_template(
+    messages, return_tensors="pt", return_dict=True
+).to("cuda")
 
 with torch.inference_mode():
     outputs = model.generate(**input_ids, max_new_tokens=256)
@@ -24,8 +29,6 @@ t1 = time.perf_counter()
 
 print(tokenizer.decode(outputs[0]))
 print("Time :", t1 - t0)
-
-
 
 
 #     generation = model.generate(**inputs, max_new_tokens=100, do_sample=False)
