@@ -59,8 +59,10 @@ AOTITorchError aoti_torch_get_current_xpu_stream(
 }
 
 AOTITorchError aoti_torch_get_current_xpu_device(int32_t* device_index) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { *device_index = static_cast<int32_t>(c10::xpu::current_device()); });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *device_index =
+        static_cast<int32_t>(static_cast<uint16_t>(c10::xpu::current_device()));
+  });
 }
 
 AOTITorchError aoti_torch_set_current_xpu_device(const int32_t& device_index) {
@@ -70,7 +72,8 @@ AOTITorchError aoti_torch_set_current_xpu_device(const int32_t& device_index) {
 
 AOTITorchError aoti_torch_get_current_sycl_queue(void** ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    int32_t device_index = static_cast<int32_t>(c10::xpu::current_device());
+    int32_t device_index =
+        static_cast<int32_t>(static_cast<uint16_t>(c10::xpu::current_device()));
     *ret = &(at::xpu::getCurrentXPUStream(device_index).queue());
   });
 }
