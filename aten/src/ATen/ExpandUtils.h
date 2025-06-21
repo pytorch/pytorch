@@ -462,7 +462,7 @@ inline Tensor _sum_to(
   }
   for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
     if (TORCH_GUARD_OR_FALSE(sym_eq(shape[i - leading_dims], 1)) &&
-        TORCH_GUARD_OR_FALSE(sym_ne(sizes[i], 1))) {
+        TORCH_GUARD_OR_TRUE(sym_ne(sizes[i], 1))) {
       reduce_dims.push_back(i);
     } else {
       // if we assume no reduction due to unbacked we ensure that at runtime.
