@@ -119,7 +119,8 @@ class OpKernel {
   }
 
   bool hasStaticDispatch() const {
-    return kind() == torch::nativert::OpKernelKind::kStaticDispatchKernel;
+    return kind() == torch::nativert::OpKernelKind::kStaticDispatchKernel ||
+        kind() == torch::nativert::OpKernelKind::kNativeStaticDispatchKernel;
   }
 
   size_t numInputs() const {
