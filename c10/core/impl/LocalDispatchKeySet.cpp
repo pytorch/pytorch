@@ -13,7 +13,8 @@ namespace c10::impl {
 // logic is encapsulated in struct PODLocalDispatchKeySet.
 thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
-#if defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE)
+#if defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE) || \
+defined(_AIX)
 LocalDispatchKeySet tls_local_dispatch_key_set() {
   return raw_local_dispatch_key_set;
 }
