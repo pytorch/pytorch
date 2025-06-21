@@ -1176,11 +1176,15 @@ class CachingAutotuner(KernelInterface):
                     stream=stream,
                 )
         else:
-            return launcher(
-                *args,
-                **kwargs,
-                stream=stream,
-            )
+            try:
+                return launcher(
+                    *args,
+                    **kwargs,
+                    stream=stream,
+                )
+            except Exception as e:
+                import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
+                raise e
 
     def _interpret_args_grid(
         self, args: tuple[Any, ...], cfg: Config

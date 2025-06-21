@@ -2750,7 +2750,16 @@ class Scheduler:
                     min_node_unfused,
                     torch._inductor.ir.TritonTemplateCallerBase,
                 ):
-                    node.node.finalize_as_triton_caller(min_node_unfused)
+                    if config.multi_kernel_hints:
+                        callers = {}
+                        callers[None] = min_node_unfused
+
+                        for hint in config.multi_kernel_hints:
+                            callers[hint] = multi_node.get_min_choice(hint_override=hint)[0]
+
+                        node.node.finalize_as_triton_callers(callers)
+                    else:
+                        node.node.finalize_as_triton_caller(min_node_unfused)
                     continue
 
                 out_tensorbox = min_node_unfused.output_node()
@@ -2898,8 +2907,45 @@ class Scheduler:
             )
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
 
+            hint_override_best_fusion_choice = {}
+            for hint_override in config.multi_node_hints:
+                choice_timings = multi_node.choice_timings(hint_override)
+                for choice, unfused_time in sorted(
+                    choice_timings.items(), key=lambda x: x[1]
+                ):
+                    with multi_node.swap_as_triton_caller(choice):
+                        future_choices.append(
+                            (choice, *compile_kernel(node_list_fused))
+                        )
+
+                min_ms_fused = float("inf")
+                ms_fused_choice = None
+                new_timings = {}
+                for choice, future, mod_fused in future_choices:
+                    try:
+                        if future is not None:
+                            future.result()
+                    except Exception as e:
+                        if fusion_log.isEnabledFor(logging.DEBUG):
+                            fusion_log.debug(
+                                "Exception in compiling %s: %s",
+                                "prologue" if not epilogue_fusion else "epilogue",
+                                str(e),
+                            )
+                        continue
+                    with multi_node.swap_as_triton_caller(choice):
+                        ms_fused, path = self.benchmark_codegened_module(
+                            mod_fused, device
+                        )
+                        new_timings[choice] = ms_fused
+                        if ms_fused < min_ms_fused:
+                            min_ms_fused = ms_fused
+                            ms_fused_choice = choice
+                multi_node._choice_timings[hint_override] = new_timings
+                hint_override_best_fusion_choice[hint_override] = min_ms_fused
+
             # Eagerly compile and benchmark non-template nodes
-            choice_timings = multi_node.choice_timings
+            choice_timings = multi_node.choice_timings()
             _, ms1 = multi_node.get_min_choice()
             ms2, path2 = (
                 self.benchmark_fused_nodes(node_list_2)
@@ -2974,8 +3020,15 @@ class Scheduler:
                 log_fusion(min_ms_fused, ms1, ms2)
 
                 if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
-                    multi_node.finalize_as_triton_caller(ms_fused_choice)
-                    multi_node._choice_timings = new_timings
+                    if config.multi_kernel_hints:
+                        hint_override_best_fusion_choice[None] = ms_fused_choice
+                        multi_node.finalize_as_triton_callers(
+                            hint_override_best_fusion_choice
+                        )
+                    else:
+                        multi_node.finalize_as_triton_caller(ms_fused_choice)
+
+                    multi_node._choice_timings[None] = new_timings
                     return True
                 else:
                     return False
