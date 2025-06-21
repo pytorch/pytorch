@@ -3534,6 +3534,24 @@ if HAS_CUDA:
             self.assertEqual(eager_out, compiled_out)
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
+        def test_cudagraph_capture_sizes(self):
+            torch._inductor.config.triton.cudagraph_capture_sizes = [2, 5, 7]
+
+            def f(x):
+                return x + 1
+
+            f = torch.compile(f, mode="reduce-overhead")
+
+            def run(shape):
+                x = torch.randn((shape, 5), device="cuda")
+                for _ in range(3):
+                    f(x)
+
+            for i in range(1, 10):
+                run(i)
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):
