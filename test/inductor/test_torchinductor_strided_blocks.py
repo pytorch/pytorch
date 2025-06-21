@@ -8,7 +8,7 @@ import unittest
 from typing import Any, Callable, Optional, Union
 
 import torch
-import torch.utils._pytree as pytree
+from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import FixedTritonConfig
@@ -60,8 +60,8 @@ def run_and_compare(
     expected_num_programs: int = 1,
     expected_num_triton_kernels: int = 1,
     config_patches: Optional[dict] = None,
-    rtol: Optional[float] = None,
     atol: Optional[float] = None,
+    rtol: Optional[float] = None,
 ):
     """
     Runs the module through Inductor, comparing to eager reference.
@@ -71,21 +71,14 @@ def run_and_compare(
     if config_patches is None:
         config_patches = {}
 
-    def flatten_tensors(tensors):
-        flat, spec = pytree.tree_flatten(tensors)
-        return flat
-
     with config.patch(config_patches):
         compiled = torch.compile(func, backend="inductor", **compile_kwargs)
         result, code = run_and_get_code(compiled, *args)
 
     # Check numerical accuracy
-    ref_tensors = flatten_tensors(func(*args))
-    actual_tensors = flatten_tensors(result)
-    for ref, actual in zip(ref_tensors, actual_tensors):
-        # Don't clobber the default tolerance values
-        tol = {t: v for t, v in {"rtol": rtol, "atol": atol}.items() if v is not None}
-        self.assertTrue(torch.allclose(ref, actual, **tol))
+    tol = {t: v for t, v in {"rtol": rtol, "atol": atol}.items() if v is not None}
+    ref = func(*args)
+    self.assertTrue(same(ref, result, **tol))
 
     def count_code(substr: str, expected: Optional[int]):
         count = sum(prog.count(substr) for prog in code)
