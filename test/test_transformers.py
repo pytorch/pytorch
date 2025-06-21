@@ -1933,6 +1933,16 @@ class TestSDPAFailureModes(NNTestCase):
 
     @onlyCUDA
     def test_mem_eff_attention_large_seq_len_uniform_attention(self):
+        memory_threshold_gb = 15
+        memory_threshold_bytes = memory_threshold_gb * (1024**3)
+        device_properties = torch.cuda.get_device_properties("cuda")
+
+        if device_properties.total_memory < memory_threshold_bytes:
+            self.skipTest(
+                f"Skipping test: requires at least {memory_threshold_gb} GB of GPU memory, "
+                f"but device only has {device_properties.total_memory / (1024**3):.2f} GB."
+            )
+
         device = torch.device("cuda")
         dtype = torch.bfloat16
 
