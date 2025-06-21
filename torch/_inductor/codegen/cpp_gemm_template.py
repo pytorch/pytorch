@@ -239,9 +239,9 @@ GEMM_TEMPLATE = r"""
 {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
 {%- else %}
     {%- if is_woq_int4 %}
-        {%- set tile_W = kernel.slice_nd(W, [("n_start", "n_start + n_size"), ("k_start * Nr / 2", "k_end * Nr / 2")]) %}
+        {%- set tile_W = kernel.slice_nd(W, [("nci * Nr", "(nci + 1) * Nr"), ("k_start * Nr / 2", "k_end * Nr / 2")]) %}
         {%- set tile_qparam = kernel.slice_nd(
-            qscale_and_zeros, [("k_start // group_size", "k_end // group_size"), ("n_start", "n_start + n_size"), ()]) %}
+            qscale_and_zeros, [("k_start // group_size", "k_end // group_size"), ("nci * Nr", "(nci + 1) * Nr"), ()]) %}
     {%- else %}
         {%- set tile_W = kernel.slice_nd(W, [("k_start", "k_end"), ("n_start", "n_start + n_size")]) %}
         {%- set tile_qparam = None %}

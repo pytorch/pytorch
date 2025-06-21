@@ -292,7 +292,7 @@ def _conv1d_op_with_squeeze(
 
 
 def _transform_conv_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.Node):
-    """Conv specific transformation function."""
+    """Conv specfic transformation function."""
     assert isinstance(node.target, torch._ops.OpOverload)
     opname = node.target._opname
     scale_node, zero_point_node = node.args[2], node.args[3]
@@ -347,7 +347,7 @@ def _transform_conv_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.No
 
 
 def _transform_linear_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.Node):
-    """Linear specific transformation function."""
+    """Linear specfic transformation function."""
     scale_node, zero_point_node = node.args[2], node.args[3]
 
     inp_node, param_node = node.args[0], node.args[1]
