@@ -5489,6 +5489,13 @@ class LoopNest:
 
         simd_vec_depth = get_simd_vec_depth(self.loops)
 
+        def has_scalar_kernel(loop_nest: LoopNest):
+            assert isinstance(loop_nest.kernel, CppKernelProxy)
+            return any(
+                not isinstance(kernel, CppVecKernel)
+                for kernel in loop_nest.kernel.kernels
+            )
+
         # When the number of steps of the first inner loop is much larger than the number of steps of
         # all outer loops, change `start_depth` to the first inner loop and recalculate `max_depth`.
         if (
@@ -5502,6 +5509,7 @@ class LoopNest:
                 simd_vec_depth is not None
                 and max_depth > simd_vec_depth
                 and self.loops[max_depth].is_reduction
+                and has_scalar_kernel(self)
             )
         ):
             start_depth = max_depth
