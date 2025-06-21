@@ -306,7 +306,7 @@ class TestMatmulCuda(TestCase):
                 self.assertEqual(bgrad, b.grad)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
+    @xfailIfSM120OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -345,7 +345,7 @@ class TestMatmulCuda(TestCase):
         self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
+    @xfailIfSM120OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -402,7 +402,7 @@ class TestMatmulCuda(TestCase):
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
+    @xfailIfSM120OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -437,7 +437,7 @@ class TestMatmulCuda(TestCase):
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
+    @xfailIfSM120OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
