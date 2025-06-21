@@ -7768,9 +7768,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("compile", [True, False])
     @parametrize("slice", [True, False])
-    def test__int8_mm(self, device, m, k, n, compile, slice):
+    def test__int8_mm(self, device, m, k, n, dtype, compile, slice):
         torch.manual_seed(1)
         if slice:
             # logits are generated from LLaMA LM head like this -
@@ -7779,14 +7780,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             # but is non-contiguous
             # Using arbitrary batch-size here, since it'd be converted to 2D
             batch_size = 4
-            a = torch.rand((batch_size, m, k), dtype=torch.bfloat16, device=device)
+            a = torch.rand((batch_size, m, k), dtype=dtype, device=device)
             # Make a non-contiguous
             a = a[:, -1:, :]
             a = a.view(-1, a.size(-1))
         else:
-            a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+            a = torch.rand((m, k), dtype=dtype, device=device)
 
-        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((n, k), dtype=dtype, device=device)
 
         def convert_weight_to_int8pack(b):
             b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
@@ -7800,6 +7801,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             )
 
         b_int8pack, b_scales = convert_weight_to_int8pack(b)
+
         if compile:
             mod = torch.compile(weight_int8pack_mm)
         else:
