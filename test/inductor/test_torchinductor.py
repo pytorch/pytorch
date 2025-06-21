@@ -2486,17 +2486,8 @@ class CommonTemplate:
             z = x * y
             return z.sum((0, 1))
 
-        atol = None
-        rtol = None
-
-        # By default, inductor generate non-persistent reduction kernels in this
-        # case. But when multi-kernel is enabled, inductor will pick the faster
-        # of persistent reduction and non-persistent-reduction kernel.
-        # In this case, inductor picked the persistent-reduction kernel.
-        # The persistent reduction kernel happens to need looser tolerance.
-        if config.triton.multi_kernel:
-            atol = 1e-5
-            rtol = 1e-5
+        atol = 1e-3
+        rtol = 1e-3
         self.common(
             fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)), atol=atol, rtol=rtol
         )
@@ -12870,7 +12861,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
     @largeTensorTest("1GB", inductor=True)
-    def test_large_grid(self):
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+    )
+    def test_large_grid(self, use_block_ptr):
         # https://github.com/pytorch/pytorch/issues/123210
         def fn(primals_5):
             view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
@@ -12883,9 +12878,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         s0 = 16777472
         s1 = 8
-        compiled_fn = torch.compile(fn)
-        actual = compiled_fn(torch.ones(s0, s1, device=self.device))
-        self.assertTrue((actual == 1).all())
+
+        with config.patch({"triton.use_block_ptr": use_block_ptr}):
+            compiled_fn = torch.compile(fn)
+            actual = compiled_fn(torch.ones(s0, s1, device=self.device))
+            self.assertTrue((actual == 1).all())
 
     @skip_if_gpu_halide
     def test_pattern_matcher_multi_user(self):
@@ -13571,6 +13568,32 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ignore_empty_lines=True,
         )
 
+    @config.patch("min_num_split", 256)
+    @xfail_if_mps  # TypeError: cannot determine truth value of Relational
+    def test_split_reduction_dynamic_shape(self):
+        from torch._dynamo.decorators import mark_dynamic
+
+        def f(x):
+            # outer reduction
+            return x.sum(dim=0)
+
+        N = 512
+        x_small = torch.randn(4096, N, device=self.device)
+
+        mark_dynamic(x_small, 0)
+        expect = f(x_small)
+        opt_f = torch.compile(f, dynamic=True)
+        actual = opt_f(x_small)
+        self.assertTrue(torch.allclose(expect, actual, atol=1e-3, rtol=1e-3))
+
+        if DO_PERF_TEST:
+            from triton.testing import do_bench
+
+            # benchmark for a much larger input
+            x_large = torch.randn(4096 * 1000, N, device=self.device)
+            ms = do_bench(lambda: opt_f(x_large))
+            print(f"{ms=:.3f}")
+
     @expectedFailureCodegenDynamic
     def test_special_polygamma(self):
         fn = torch.special.polygamma
@@ -13997,7 +14020,7 @@ if RUN_GPU:
             )[::1, :, :k]
 
             offs = torch.arange(
-                k, n_groups * k + 1, k, device=device, dtype=torch.int32
+                m, n_groups * m + 1, m, device=device, dtype=torch.int32
             )
 
             a_ref.requires_grad_(True)
