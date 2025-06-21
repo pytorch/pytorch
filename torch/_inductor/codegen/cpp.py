@@ -2195,11 +2195,11 @@ class CppKernel(Kernel):
         assert self.call_ranges is not None
         if isinstance(loop_nest.kernel, OuterLoopFusedKernel):
             par_depth = loop_nest.kernel.decide_parallel_depth(
-                loop_nest.max_parallel_depth(), threads
+                loop_nest.max_parallel_depth(), threads, loop_nest
             )
         else:
             par_depth = self.decide_parallel_depth(
-                loop_nest.max_parallel_depth(), threads
+                loop_nest.max_parallel_depth(), threads, loop_nest
             )
 
         is_reduction_loop = (
@@ -2345,26 +2345,36 @@ class CppKernel(Kernel):
         else:
             return "TORCH_CHECK"
 
-    def decide_parallel_depth(self, max_parallel_depth, threads):
+    def decide_parallel_depth(self, max_parallel_depth, threads, loop_nest):
         assert self.call_ranges is not None
         ranges = self.call_ranges[
             max_parallel_depth.start_depth : (
                 max_parallel_depth.start_depth + max_parallel_depth.parallel_depth
             )
         ]
-        seq = self.size_hint()
-        par = 1
         depth = 0
-        for expr in ranges:
-            hint = V.graph.sizevars.size_hint(expr, fallback=8192)
-            if par >= 2 * threads or par == threads:
-                break
-            if seq // threads < config.cpp.min_chunk_size:
-                # not enough work
-                break
-            depth += 1
-            par *= hint
-            seq /= hint
+        if len(ranges) > 0:
+            loops = loop_nest.loops[max_parallel_depth.start_depth : (
+                    max_parallel_depth.start_depth + max_parallel_depth.parallel_depth
+                )
+            ]
+            assert len(ranges) == len(loops)
+            total_loop_size = self.size_hint()
+            for loop in loops:
+                total_loop_size = math.ceil(total_loop_size/loop.steps)
+
+            par = 1
+            for expr, loop in zip(ranges, loops):
+                hint = V.graph.sizevars.size_hint(expr, fallback=8192)
+                hint = max(math.ceil(hint/loop.steps), 1)
+                if par >= 2 * threads or par == threads:
+                    break
+                if total_loop_size // par < config.cpp.min_chunk_size:
+                    # not enough work
+                    break
+                depth += 1
+                par *= hint
+
         # if we assume thread number is dynamic, make sure we
         # have at least one parallel scope and let OMP runtime
         # to manage the serial vs. parallel.
@@ -4404,17 +4414,20 @@ class OuterLoopFusedKernel(CppKernel):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.inner: list[LoopNest] = []
 
-    def decide_parallel_depth(self, max_parallel_depth, threads):
+    def decide_parallel_depth(self, max_parallel_depth, threads, outer_loop_nest):
         kernels_parallel_depth = []
         nested_kernels: list[CppKernel] = [
             loop_nest.get_kernel() for loop_nest in self.inner
         ]
         # TODO(leslie-fang-intel): only enable parallel within all outer loop levels.
-        for kernel in nested_kernels:
+        for kernel, loop_nest in zip(nested_kernels, self.inner):
             # For any ScalarKernel, VecKernel, or Tile2DKernel,
             # they should all have the same call_ranges
             call_ranges = kernel.call_ranges
             assert call_ranges is not None
+            total_loop_nest = LoopNest(loops=outer_loop_nest.loops.copy())
+            if loop_nest.loops is not None:
+                total_loop_nest.loops.extend(loop_nest.loops)
             kernels_parallel_depth.append(
                 kernel.decide_parallel_depth(
                     ParallelDepth(
@@ -4424,6 +4437,7 @@ class OuterLoopFusedKernel(CppKernel):
                         start_depth=max_parallel_depth.start_depth,
                     ),
                     threads,
+                    total_loop_nest
                 ).parallel_depth
             )
         return ParallelDepth(
