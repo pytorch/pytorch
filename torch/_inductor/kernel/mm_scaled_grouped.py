@@ -120,7 +120,6 @@ def early_config_prune(g, m, configs, named_args):
     return pruned_configs
 
 
-# Copied from fbgemm grouped_gemm.py
 triton_grouped_mm_source = r"""
 {%- if SCALED %}
 {%- if A_IS_2D or B_IS_2D %}
@@ -463,7 +462,7 @@ aten__grouped_mm = ExternKernelChoice(
     torch._grouped_mm,
     "at::_grouped_mm",
     op_overload=aten._grouped_mm,
-    has_out_variant=True,
+    has_out_variant=False,
 )
 
 
@@ -548,7 +547,7 @@ def _tuned_grouped_mm_common(
     bias: Optional[TensorBox] = None,
     scale_result: Optional[TensorBox] = None,
     out_dtype: Optional[torch.dtype] = None,
-    use_fast_accum: Optional[bool] = False,
+    use_fast_accum: Optional[bool] = None,
     layout: Optional[Layout] = None,
 ) -> TensorBox:
     assert (scale_a is None) == (scale_b is None)
@@ -580,12 +579,21 @@ def _tuned_grouped_mm_common(
     if offs is not None:
         input_nodes.append(realize_inputs(offs))
 
-    aten_choice = extern_kernel_choice.bind(
-        input_nodes,
-        layout,
-        out_dtype=out_dtype,
-        use_fast_accum=use_fast_accum,
-    )
+    if use_fast_accum is None:
+        aten_choice = extern_kernel_choice.bind(
+            input_nodes,
+            layout,
+            out_dtype=out_dtype,
+        )
+    else:
+        aten_choice = extern_kernel_choice.bind(
+            input_nodes,
+            layout,
+            out_dtype=out_dtype,
+            use_fast_accum=use_fast_accum,
+        )
+    if use_fast_accum is None:
+        use_fast_accum = False
 
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
@@ -671,7 +679,7 @@ def _tuned_grouped_mm_common(
     )
 
 
-@register_lowering(aten._grouped_mm, type_promotion_kind=None)
+@register_lowering(aten._grouped_mm.default, type_promotion_kind=None)
 def tuned_grouped_mm(
     mat_a: TensorBox,
     mat_b: TensorBox,
@@ -683,7 +691,7 @@ def tuned_grouped_mm(
     """Auto-tuning for _grouped_mm() operator."""
 
     return _tuned_grouped_mm_common(
-        "aten._grouped_mm",
+        "aten._grouped_mm.default",
         "grouped_mm",
         aten__grouped_mm,
         triton_grouped_mm_template,
@@ -695,7 +703,7 @@ def tuned_grouped_mm(
         bias,
         None,
         out_dtype,
-        False,
+        None,
         layout,
     )
 

@@ -32,15 +32,23 @@ bool allow_overlapping_devices() {
 
 // Query environment variable to get the backend used for CUDA Symmetric Memory.
 std::string getSymmMemBackendCUDA() {
+  // TORCH_SYMMMEM environment variable can be used to indicate the preferred
+  // backend.
   static auto val = c10::utils::get_env("TORCH_SYMMMEM");
-  if (!val.has_value()) {
-    // In-house implementation: `CUDASymmetricMemory`
-    return "CUDA";
-  } else {
-    // Other backends:
-    //   - "NVSHMEM": `NVSHMEMSymmetricMemory`
+  if (val.has_value()) {
+    TORCH_CHECK(
+        val.value() == "CUDA" || val.value() == "NVSHMEM" ||
+            val.value() == "NCCL",
+        "TORCH_SYMMMEM environment variable must be one of 'CUDA', 'NVSHMEM', 'NCCL'.")
     return val.value();
   }
+  // If TORCH_SYMMMEM is not set, check if NVSHMEM is available (for broader
+  // support).
+  // TODO: uncomment this once all single-node tests work with NVSHMEM
+  // if (is_nvshmem_available()) {
+  //   return "NVSHMEM";
+  // }
+  return "CUDA";
 }
 
 IpcChannel::IpcChannel()
