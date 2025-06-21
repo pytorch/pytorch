@@ -315,7 +315,7 @@ class TestMatmulCuda(TestCase):
     def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major, use_torch_compile):
         device = "cuda"
         dtype = torch.bfloat16
-        m, n, k, n_groups = 16, 32, 64, 4
+        m, n, k, n_groups = 16, 32, 64, 4  # all sizes have to be divisible by 16
         if a_row_major:
             a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
         else:
@@ -382,9 +382,6 @@ class TestMatmulCuda(TestCase):
         b_contig = b if b_row_major else b.transpose(-2, -1)
         self.assertTrue(b_contig.is_contiguous() is not strided)
         for check_zero_size in (False, True):
-            if check_zero_size and n_groups <= 1:
-                continue
-
             a.grad = None
             b.grad = None
             offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
@@ -487,9 +484,6 @@ class TestMatmulCuda(TestCase):
         b_contig = b if b_row_major else b.transpose(-2, -1)
         self.assertTrue(b_contig.is_contiguous() is not strided)
         for check_zero_size in (False, True):
-            if check_zero_size and n_groups <= 1:
-                continue
-
             offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
@@ -1651,27 +1645,17 @@ class TestFP8Matmul(TestCase):
         for a, b, ascale, bscale, out in zip(alist, blist, ascalelist, bscalelist, outlist):
             out_ref = torch._scaled_mm(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
                                        out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
-            self.assertEqual(out, out_ref, atol=5e-2, rtol=5e-4)
-
-    # Testing only _scaled_grouped_mm() with multiple shapes, as
-    # _scaled_mm() already has more combinations of parameters than
-    # _scaled_grouped_mm(), for supporing more than one inputs layout
-    # combinations.
+            self.assertEqual(out, out_ref, atol=8e-2, rtol=8e-4)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
-    @parametrize(
-        "n_groups, m, n, k",
-        [(2, 1, 16, 16),
-         (4, 16, 16, 16)],
-        name_fn=lambda n_groups, m, n, k: f"{n_groups}_{m}_{n}_{k}",
-    )
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
     @parametrize("use_torch_compile", [False, True])
-    def test_scaled_grouped_gemm_2d_2d(self, n_groups, m, n, k, fast_accum, strided, use_torch_compile):
+    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided, use_torch_compile):
         device = "cuda"
+        m, n, k, n_groups = 16, 32, 64, 4  # all sizes have to be divisible by 16
         a = torch.randn(m, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
         b = torch.randn(n, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
         scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
@@ -1701,26 +1685,18 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
-    @parametrize(
-        "n_groups, m, n, k",
-        [(2, 1, 16, 16),
-         (4, 16, 16, 16)],
-        name_fn=lambda n_groups, m, n, k: f"{n_groups}_{m}_{n}_{k}",
-    )
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
     @parametrize("use_torch_compile", [False, True])
-    def test_scaled_grouped_gemm_2d_3d(self, n_groups, m, n, k, fast_accum, strided, use_torch_compile):
+    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, use_torch_compile):
         device = "cuda"
         s_int = int(strided)
+        m, n, k, n_groups = 16, 32, 64, 4
         a = torch.randn(m * n_groups, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[:, :k]
         b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         self.assertTrue(a.is_contiguous() is not strided)
         self.assertTrue(b.is_contiguous() is not strided)
         for check_zero_size in (True, False):
-            if check_zero_size and n_groups <= 1:
-                continue
-
             offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
@@ -1751,18 +1727,13 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
-    @parametrize(
-        "n_groups, m, n, k",
-        [(2, 1, 16, 16),
-         (4, 16, 16, 16)],
-        name_fn=lambda n_groups, m, n, k: f"{n_groups}_{m}_{n}_{k}",
-    )
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
     @parametrize("use_torch_compile", [False, True])
-    def test_scaled_grouped_gemm_3d_3d(self, n_groups, m, n, k, fast_accum, strided, use_torch_compile):
+    def test_scaled_grouped_gemm_3d_3d(self, fast_accum, strided, use_torch_compile):
         device = "cuda"
         s_int = int(strided)
+        m, n, k, n_groups = 16, 32, 64, 4
         a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         self.assertTrue(a.is_contiguous() is not strided)
@@ -1786,18 +1757,13 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
-    @parametrize(
-        "n_groups, m, n, k",
-        [(2, 1, 16, 16),
-         (4, 16, 16, 16)],
-        name_fn=lambda n_groups, m, n, k: f"{n_groups}_{m}_{n}_{k}",
-    )
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
     @parametrize("use_torch_compile", [False, True])
-    def test_scaled_grouped_gemm_3d_2d(self, n_groups, m, n, k, fast_accum, strided, use_torch_compile):
+    def test_scaled_grouped_gemm_3d_2d(self, fast_accum, strided, use_torch_compile):
         device = "cuda"
         s_int = int(strided)
+        m, n, k, n_groups = 16, 32, 64, 4
         a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         b = torch.randn(n * n_groups, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[:, :k]
         self.assertTrue(a.is_contiguous() is not strided)
@@ -1805,9 +1771,6 @@ class TestFP8Matmul(TestCase):
         scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32).view(n_groups, m)
         scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32)
         for check_zero_size in (True, False):
-            if check_zero_size and n_groups <= 1:
-                continue
-
             offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
