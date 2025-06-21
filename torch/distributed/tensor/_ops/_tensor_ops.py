@@ -68,6 +68,16 @@ register_op_strategy(
     ]
 )(default_strategy)
 
+
+register_op_strategy(
+    [
+        aten.index_put.default,
+        aten._index_put_impl_.default,
+    ],
+    schema_info=RuntimeSchemaInfo(needs_pytree=True),
+)(default_strategy)
+
+
 register_op_strategy(
     aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
 )(default_strategy)
