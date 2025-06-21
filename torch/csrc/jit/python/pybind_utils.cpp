@@ -809,7 +809,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
 }
 
 // This function is used to check if the schema is valid for the given args and
-// kwargs. It checks script object by checking wether the FakeScriptObject is
+// kwargs. It checks script object by checking whether the FakeScriptObject is
 // an instance of the corresponding fake class for the actual class used in
 // schema.
 bool checkSchemaAllowFakeScriptObject(

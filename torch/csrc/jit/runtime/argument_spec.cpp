@@ -226,11 +226,11 @@ void ArgumentSpecCreator::specializeTypes(
       } break;
       case SPECIALIZE_OPTIONAL: {
         auto is_present = spec.isPresent(optional_arg_spec_offset++);
-        auto ot = (*input_stack.back()++)->expect<OptionalType>();
+        auto o_typ = (*input_stack.back()++)->expect<OptionalType>();
         if (!is_present) {
-          result_stack.back().emplace_back(ot);
+          result_stack.back().emplace_back(o_typ);
         } else {
-          result_stack.back().emplace_back(ot->getElementType());
+          result_stack.back().emplace_back(o_typ->getElementType());
         }
       } break;
       case ENTER_TUPLE: {
@@ -268,7 +268,7 @@ void ArgumentSpecCreator::specializeTypes(
   auto inputs = graph.inputs();
   for (const auto i : c10::irange(inputs.size())) {
     auto t = result_stack.back()[i];
-    if (auto ot = t->cast<OptionalType>()) {
+    if (auto o_typ = t->cast<OptionalType>()) {
       // if an optional input hasn't been specialized above, it is None
       // so we disconnect the input here and replace its uses with
       // a constant
