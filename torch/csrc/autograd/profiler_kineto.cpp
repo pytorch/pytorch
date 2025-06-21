@@ -622,7 +622,7 @@ void prepareProfiler(
     /*
      * Sending a warning and passing the non-standard event to the backend
      * Backend can abort if the event is not supported.
-     * TODO Should we gracefully drop the invalid event if we have atleast one
+     * TODO Should we gracefully drop the invalid event if we have at least one
      * valid?
      */
     auto is_standard_event = [](const std::string& event) -> bool {

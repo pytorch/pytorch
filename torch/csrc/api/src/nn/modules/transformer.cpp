@@ -19,7 +19,7 @@ TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
 
 void TransformerEncoderLayerImpl::reset() {
   // NOTE: reset() is for initializing the model only, calling reset() after the
-  // model is created will throw exceptionss. Call reset_parameter() if the
+  // model is created will throw exceptions. Call reset_parameter() if the
   // created model needs a reset
 
   self_attn = this->register_module(
