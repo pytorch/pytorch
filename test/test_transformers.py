@@ -17,7 +17,7 @@ from unittest.mock import patch, MagicMock, ANY
 import math
 import itertools
 import torch.optim as optim
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU, largeTensorTest
 from typing import Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
@@ -1931,18 +1931,9 @@ class TestSDPAFailureModes(NNTestCase):
                                                           attn_bias=None, compute_log_sumexp=True,
                                                           dropout_p=0.01)
 
+    @largeTensorTest("15GB", "cuda")
     @onlyCUDA
     def test_mem_eff_attention_large_seq_len_uniform_attention(self):
-        memory_threshold_gb = 15
-        memory_threshold_bytes = memory_threshold_gb * (1024**3)
-        device_properties = torch.cuda.get_device_properties("cuda")
-
-        if device_properties.total_memory < memory_threshold_bytes:
-            self.skipTest(
-                f"Skipping test: requires at least {memory_threshold_gb} GB of GPU memory, "
-                f"but device only has {device_properties.total_memory / (1024**3):.2f} GB."
-            )
-
         device = torch.device("cuda")
         dtype = torch.bfloat16
 
