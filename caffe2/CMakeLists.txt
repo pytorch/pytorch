@@ -986,6 +986,12 @@ elseif(USE_CUDA)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
 
+  if(USE_FBGEMM_GENAI)
+    # FBGEMM GenAI is a .so that depends on libtorch_cuda.so so we cannot link FBGEMM GenAI to libtorch_cuda.so.
+    target_link_libraries(torch PRIVATE fbgemm_gpu_gen_ai)
+    install(TARGETS fbgemm_gpu_gen_ai EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  endif()
+
   # Compile with NVSHMEM
   # Default value of `USE_NVSHMEM` is set in CMakeLists.txt under root, to ON.
   # If user has specified NVSHMEM_HOME, we use it;
