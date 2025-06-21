@@ -84,7 +84,7 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
 
   // If the result is already determined without guarding, just return it.
   if (result.maybe_as_bool().has_value()) {
-    return true;
+    return result.maybe_as_bool().value();
   }
 
   auto all_hinted = true;

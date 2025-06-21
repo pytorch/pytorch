@@ -15466,9 +15466,13 @@ def forward(self, x, mask):
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
     le = sym_size_int_1 <= 1188864
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 1188864 on node 'le'");  le = _assert_scalar_default_1 = None
-    mod = sym_size_int_1 % 1548;  sym_size_int_1 = None
+    mod = sym_size_int_1 % 1548
     eq_2 = mod == 0;  mod = None
     _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(Mod(u0, 1548), 0) on node 'eq_2'");  eq_2 = _assert_scalar_default_2 = None
+    floordiv = sym_size_int_1 // 1548
+    mul_2 = 1548 * floordiv;  floordiv = None
+    eq_3 = sym_size_int_1 == mul_2;  sym_size_int_1 = mul_2 = None
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(eq_3, "Runtime assertion failed for expression Eq(u0, 1548*((u0//1548))) on node 'eq_3'");  eq_3 = _assert_scalar_default_3 = None
     view = torch.ops.aten.view.default(masked_select, [-1, 1548]);  masked_select = None
     add = torch.ops.aten.add.Tensor(view, 1);  view = None
     return (add,)""",
