@@ -52,7 +52,9 @@ class OutputMetadata:
 
 class InvokeSubgraphHOP(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("invoke_subgraph")
+        # Invoke subgraph does not have any state, it is just a wrapper over a
+        # subgraph, so we can safely cache the HOP.
+        super().__init__("invoke_subgraph", cacheable=True)
         # This is used by the fake tensor cache key validator to extract the
         # subgraph and iterate over the nodes to find if all nodes are fake
         # tensor cacheable.
@@ -555,9 +557,9 @@ def _(ctx, subgraph, identifier, *operands):
         # We call auto_functionalized_v2 to support input mutation of invoke_subgraph.
         # See NOTE [Support input mutation of hops] for the overall design.
         #
-        # invoke_subgraph is special because of its identifier based caching mechanism.
+        # invoke_subgraph is special because of its identifier based caching machanism.
         # In invoke_subgraph's functionalization key implementation, we create a new
-        # identifier because the subgraph is replaced by FunctionWithNoFreeVars in a
+        # identifer because the subgraph is replaced by FunctionWithNoFreeVars in a
         # functional + epilogue form.
         assert isinstance(identifier, str), identifier
         return do_auto_functionalize_v2(
@@ -630,7 +632,7 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             # with a previously cached identifier, the corresponding graph module might not
             # exist as a submodule in the new tracer's root. Therefore, we register it as a submodule below.
             #
-            # The alternative is to give a new identifier when we re-trace the invoke_subgraph but this will increase
+            # The alternative is to give a new identifer when we re-trace the invoke_subgraph but this will increase
             # the compilatoin time, which defeats the purpose of caching.
             registered_before = False
             for (
