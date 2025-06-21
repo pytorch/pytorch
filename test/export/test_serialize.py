@@ -484,10 +484,12 @@ def forward(self, x):
             self.assertNotIn(name, seen)
             seen.add(name)
 
-    def test_infinity_inputs(self) -> None:
+    def test_nonfinite_inputs(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x):
-                return torch.ops.aten.add.Scalar(x, math.inf)
+                x = torch.ops.aten.add.Scalar(x, math.inf)
+                x = torch.ops.aten.add.Scalar(x, -math.inf)
+                return torch.ops.aten.add.Scalar(x, math.nan)
 
         fn = Module()
         ep = torch.export.export(
