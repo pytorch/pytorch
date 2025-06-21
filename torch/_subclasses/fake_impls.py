@@ -966,17 +966,18 @@ def make_fast_binary_impl(
 
         # Do some extra safety checks to see if the output
         # stride is obvious
-        for op in operands:
-            if (
-                isinstance(op, torch.Tensor)
-                and len(op.shape) == len(final_shape)
-                # take the slow path if result is not determined.
-                and guard_or_false(sym_eq(op.shape, final_shape))
-            ):
-                break
-        else:
-            # if we never break in the for loop above we take the slow path.
-            return slow("both tensors nontrivially broadcast")
+        # for op in operands:
+        #     if (
+        #         isinstance(op, torch.Tensor)
+        #         and len(op.shape) == len(final_shape)
+        #         # take the slow path if result is not determined.
+        #         and guard_or_false(sym_eq(op.shape, final_shape))
+        #     ):
+        #         break
+        # else:
+        #     # if we never break in the for loop above we take the slow path.
+        #     
+        return slow("both tensors nontrivially broadcast")
 
         # compute_types
         cpu = torch.device("cpu")
