@@ -422,7 +422,6 @@ if torch.backends.mps.is_available():
             "nn.functional.adaptive_max_pool3d": None,
             "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
-            "nn.functional.interpolatetrilinear": None,
             "nn.functional.max_unpool1dgrad": None,
             "nn.functional.max_unpool2dgrad": None,
             "nn.functional.max_unpool3dgrad": None,
