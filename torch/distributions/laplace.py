@@ -1,9 +1,10 @@
-# mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 from torch.types import _Number, _size
@@ -28,9 +29,15 @@ class Laplace(Distribution):
         scale (float or Tensor): scale of the distribution
     """
 
-    arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
-    support = constraints.real
-    has_rsample = True
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
+        "loc": constraints.real,
+        "scale": constraints.positive,
+    }
+    support: ClassVar[constraints.Real] = constraints.real
+    has_rsample: bool = True
+
+    loc: Tensor
+    scale: Tensor
 
     @property
     def mean(self) -> Tensor:
@@ -61,7 +68,7 @@ class Laplace(Distribution):
             batch_shape = self.loc.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Laplace, _instance)
         batch_shape = torch.Size(batch_shape)
         new.loc = self.loc.expand(batch_shape)
@@ -84,21 +91,21 @@ class Laplace(Distribution):
         # u = self.loc.new(shape).uniform_(self.loc.nextafter(-.5, 0), .5)
         return self.loc - self.scale * u.sign() * torch.log1p(-u.abs())
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         return -torch.log(2 * self.scale) - torch.abs(value - self.loc) / self.scale
 
-    def cdf(self, value):
+    def cdf(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         return 0.5 - 0.5 * (value - self.loc).sign() * torch.expm1(
             -(value - self.loc).abs() / self.scale
         )
 
-    def icdf(self, value):
+    def icdf(self, value: Tensor) -> Tensor:
         term = value - 0.5
         return self.loc - self.scale * (term).sign() * torch.log1p(-2 * term.abs())
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return 1 + torch.log(2 * self.scale)

@@ -1,21 +1,23 @@
-# mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.uniform import Uniform
 from torch.distributions.utils import broadcast_all, euler_constant
+from torch.types import _size
 
 
 __all__ = ["Kumaraswamy"]
 
 
-def _moments(a, b, n):
+def _moments(a: Tensor, b: Tensor, n: int) -> Tensor:
     """
-    Computes nth moment of Kumaraswamy using using torch.lgamma
+    Computes nth moment of Kumaraswamy using torch.lgamma
     """
     arg1 = 1 + n / a
     log_value = torch.lgamma(arg1) + torch.lgamma(b) - torch.lgamma(arg1 + b)
@@ -40,12 +42,15 @@ class Kumaraswamy(TransformedDistribution):
             (often referred to as beta)
     """
 
-    arg_constraints = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
     }
-    support = constraints.unit_interval
-    has_rsample = True
+    support: ClassVar[constraints.UnitInterval] = constraints.unit_interval  # type: ignore[assignment]
+    has_rsample: bool = True
+
+    concentration0: Tensor
+    concentration1: Tensor
 
     def __init__(
         self,
@@ -68,7 +73,7 @@ class Kumaraswamy(TransformedDistribution):
         ]
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Kumaraswamy, _instance)
         new.concentration1 = self.concentration1.expand(batch_shape)
         new.concentration0 = self.concentration0.expand(batch_shape)
@@ -94,7 +99,7 @@ class Kumaraswamy(TransformedDistribution):
             self.mean, 2
         )
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         t1 = 1 - self.concentration1.reciprocal()
         t0 = 1 - self.concentration0.reciprocal()
         H0 = torch.digamma(self.concentration0 + 1) + euler_constant
