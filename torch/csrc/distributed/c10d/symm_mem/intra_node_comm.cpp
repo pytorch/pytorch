@@ -62,7 +62,7 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
 }
 
 /**
- * Detech topology given a NvlMesh.
+ * Detect topology given a NvlMesh.
  */
 static Topology detectTopology(const NvlMesh nvlMesh, size_t worldSize) {
   if (getCvarBool(TEST_INTRA_NODE_COMM, false)) {

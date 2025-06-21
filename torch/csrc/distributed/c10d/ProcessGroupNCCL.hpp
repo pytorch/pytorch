@@ -1291,7 +1291,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // communication, the key will be "1:2" on both processes. Note: this is for
   // the scenario where there is only 1 GPU per process. When it comes to
   // multiple GPUs per process, this part may need to redesigned.
-  // TODO: we probably need a separte map for P2P comms
+  // TODO: we probably need a separate map for P2P comms
   std::unordered_map<std::string, std::shared_ptr<NCCLComm>> devNCCLCommMap_;
 
   // The NCCL communicators currently in process of being initialized.
@@ -1316,7 +1316,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::atomic<bool> hasPendingHooks_{};
 
   // This is the signal from watchdog threads to indicate whether the monitor
-  // thread should dump. Making it static so that it is accessiable from all the
+  // thread should dump. Making it static so that it is accessible from all the
   // PGs. With this flag, monitor thread would dump debug info under any one of
   // the three conditions:
   //

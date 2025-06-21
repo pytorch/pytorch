@@ -1245,7 +1245,7 @@ void Reducer::initialize_buckets(
       // patterns when copy_ing grad data in and out of its bucket view.
       // However, numerics remain correct, because the bucket view is the same
       // on either end of the raw allreduce.  bucket_view_in.copy(grad)
-      // tranposes
+      // transposes
       // (+ densifies) to the bucket view's layout, the data is allreduced,
       // then grad.copy_(bucket_view_out) transposes it back to grad's layout.
       //
