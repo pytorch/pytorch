@@ -311,13 +311,20 @@ class TestDynamismExpression(TestCase):
             def forward(self, *args):
                 return torch.ops.aten.slice.Tensor(*args)
 
+        m = Slice()
         inp = (torch.rand((10, 3, 224, 224)), 0, 0, 9223372036854775807)
         dynamic_shapes = (({0: Dim("dim")}, None, None, None),)
-        torch.export.export(
-            Slice(),
-            inp,
-            dynamic_shapes=dynamic_shapes,
-        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Expected `dynamic_shapes` to have 4 items (4 `args`, 0 `kwargs`), but got 1 items"
+            ),
+        ):
+            export(m, inp, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = (*dynamic_shapes[0],)
+        epm = export(m, inp, dynamic_shapes=dynamic_shapes).module()
+        self.assertTrue(torch.allclose(m(*inp), epm(*inp)))
 
     def test_export_slice_unbacked_dim1(self):
         class MySlice(torch.nn.Module):
@@ -4431,6 +4438,114 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             torch.export.export(M(), input1, dynamic_shapes=ai)
 
+    def test_dynamic_shapes_kwargs_call_like(self):
+        class Foo(torch.nn.Module):
+            def forward(self, *, x, y, **kwargs):
+                z = kwargs["z"]
+                return x.sum() + y.sum() + z.sum()
+
+        inputs = {"x": torch.randn(4, 4), "y": torch.randn(4, 4), "z": torch.rand(4, 4)}
+        dynamic_shapes = torch.utils._pytree.tree_map_only(
+            torch.Tensor,
+            lambda t: tuple(torch.export.Dim.AUTO for _ in range(len(t.shape))),
+            inputs,
+        )
+        m = Foo()
+        epm = export(m, (), kwargs=inputs, dynamic_shapes=dynamic_shapes).module()
+        self.assertTrue(torch.allclose(m(**inputs), epm(**inputs)))
+
+    def test_dynamic_shapes_kwargs_definition_like(self):
+        class Model(torch.nn.Module):
+            def forward(self, **kwargs):
+                return kwargs["x"] + kwargs["y"]
+
+        x, y = torch.randn(2, 3), torch.randn(2, 3)
+        m = Model()
+        ds = {
+            "kwargs": {
+                "x": {0: torch.export.Dim("batch")},
+                "y": {0: torch.export.Dim("batch")},
+            }
+        }
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Expected `dynamic_shapes` to have 2 items (0 `args`, 2 `kwargs`), but got 1 items"
+            ),
+        ):
+            export(m, (), kwargs={"x": x, "y": y}, dynamic_shapes=ds)
+
+        ds = ds["kwargs"]
+        epm = export(m, (), kwargs={"x": x, "y": y}, dynamic_shapes=ds).module()
+        self.assertTrue(torch.allclose(m(x=x, y=y), epm(x=x, y=y)))
+
+    def test_dynamic_shapes_wrapping_with_variadic_input_signature(self):
+        class AddModel(torch.nn.Module):
+            def __init__(self):
+                super(AddModel, self).__init__()
+
+            def forward(self, x):
+                return torch.sigmoid(x)
+
+        class WrappedModel(torch.nn.Module):
+            def __init__(self, model):
+                super(WrappedModel, self).__init__()
+                self.model = model
+
+            def forward(self, *arga, **kwargs):
+                return self.model(*arga, **kwargs)
+
+        # Instantiate the model
+        model = WrappedModel(AddModel())
+
+        # Set the model to evaluation mode
+        model.eval()
+
+        # Create dynamic input tensors
+        x = torch.randn(2, 3)
+
+        # Define dynamic axes for export
+        dynamic_shapes = ({0: torch.export.Dim.AUTO, 1: torch.export.Dim.AUTO},)
+
+        epm = export(model, (x,), dynamic_shapes=dynamic_shapes).module()
+        self.assertTrue(torch.allclose(model(x), epm(x)))
+
+    def test_dynamic_shapes_naming_args_kwargs(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, *args, z=0, **kwargs):
+                add = x + y - z
+                for arg in args:
+                    add = add + add * arg
+                for arg in kwargs.values():
+                    add = add - add * arg
+                return add
+
+        m = M()
+        args = (torch.randn(4),)
+        kwargs = {"a": torch.randn(4), "z": torch.randn(4), "y": torch.randn(4)}
+        dynamic_shapes = {
+            "X": {0: Dim.AUTO},
+            "a": {0: Dim.AUTO},
+            "z": {0: Dim.AUTO},
+            "y": {0: Dim.AUTO},
+        }
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Expected `dynamic_shapes` to have key 'x' instead of 'X' (name of item #0 in `args`)"
+            ),
+        ):
+            export(M(), args, kwargs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = {
+            "x": {0: Dim.AUTO},
+            "a": {0: Dim.AUTO},
+            "z": {0: Dim.AUTO},
+            "y": {0: Dim.AUTO},
+        }
+        epm = export(M(), args, kwargs, dynamic_shapes=dynamic_shapes).module()
+        self.assertTrue(torch.allclose(m(*args, **kwargs), epm(*args, **kwargs)))
+
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -4447,10 +4562,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             re.escape(
-                "When `dynamic_shapes` is specified as a dict, its top-level keys "
-                "must be the arg names ['x'] of `inputs`, but here they are ['k']. "
-                "Since here `inputs` is a list/tuple enclosing a single dict, "
-                "maybe you just forgot to enclose `dynamic_shapes` in a list/tuple?"
+                "Expected `dynamic_shapes` to have key 'x' instead of 'k' (name of item #0 in `args`)"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -4462,7 +4574,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             torch._dynamo.exc.UserError,
             "Unexpected input tensor shape .*dim.* "
             + re.escape(
-                "specified at `dynamic_shapes[0]['k']['k'][0]` "
+                "specified at `dynamic_shapes['x']['k']['k'][0]` "
                 "(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
                 " where each dimension is an int, a Dim, Dim.AUTO, Dim.STATIC, or Dim.DYNAMIC)"
             ),
@@ -4476,7 +4588,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             torch._dynamo.exc.UserError,
             re.escape(
                 "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
-                "`inputs[0]['k']['k']` is a <class 'list'>, but `dynamic_shapes[0]['k']['k']` is a <class 'tuple'>"
+                "`inputs['x']['k']['k']` is a <class 'list'>, but `dynamic_shapes['x']['k']['k']` is a <class 'tuple'>"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -4491,7 +4603,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             torch._dynamo.exc.UserError,
             re.escape(
                 "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
-                "`inputs[0]['k']['k']` is a <class 'list'>, but `dynamic_shapes[0]['k']['k']` is not"
+                "`inputs['x']['k']['k']` is a <class 'list'>, but `dynamic_shapes['x']['k']['k']` is not"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -4503,10 +4615,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             re.escape(
-                "When `dynamic_shapes` is specified as a dict, its top-level keys "
-                "must be the arg names ['x'] of `inputs`, but here they are ['x', 'k']. "
-                "Alternatively, you could also ignore arg names entirely "
-                "and specify `dynamic_shapes` as a list/tuple matching `inputs`."
+                "Expected `dynamic_shapes` to have 1 items (1 `args`, 0 `kwargs`), but got 2 items"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -4518,7 +4627,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             torch._dynamo.exc.UserError,
             re.escape(
                 "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
-                "`inputs[0]['k']['k']` has 2 elements, but `dynamic_shapes[0]['k']['k']` has 3 elements"
+                "`inputs['x']['k']['k']` has 2 elements, but `dynamic_shapes['x']['k']['k']` has 3 elements"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -4530,7 +4639,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             torch._dynamo.exc.UserError,
             re.escape(
                 "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
-                "`inputs[0]['k']` has keys ['k'], but `dynamic_shapes[0]['k']` has keys ['K']"
+                "`inputs['x']['k']` has keys ['k'], but `dynamic_shapes['x']['k']` has keys ['K']"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -8617,7 +8726,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             {"kw2": torch.ones(4, 4), "kw1": torch.zeros(4, 4)},
             # We are specifying dynamism on the first kwarg even though user passed in
             # different order
-            dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
+            dynamic_shapes=(None, {0: dim}, None, {0: dim_for_kw1}),
         )
 
         test_inp = (torch.randn(4, 4), torch.randn(7, 4))
