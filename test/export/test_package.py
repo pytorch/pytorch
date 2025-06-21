@@ -89,6 +89,92 @@ class TestPackage(TestCase):
         self.assertEqual(len(package.methods), 1)
         self.assertEqual(len(package.methods["fn"].overloads), 3)
 
+    def test_autofallback(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        package = _ExportPackage()
+        exporter = package._exporter("fn", fn, fallback="auto")
+        exporter(torch.randn(3, 2))
+        exporter(torch.randn(2, 3))
+        method = package.methods["fn"]
+        self.assertEqual(len(method.fallbacks), 1)
+        ep, example_inputs = next(iter(method.fallbacks.values()))
+        self.assertEqual(len(example_inputs._examples), 2)
+        self.assertExpectedInline(
+            str(ep.graph_module.graph).strip(),
+            """\
+graph():
+    %args_0 : [num_users=1] = placeholder[target=args_0]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%args_0, 1), kwargs = {})
+    return (add,)""",
+        )
+
+        rand = torch.randn(4, 4)
+        self.assertEqual(ep.module()(rand), fn(rand))
+
+    def test_autofallback_num_elem_change(self):
+        def fn(x: torch.Tensor, **kwargs) -> torch.Tensor:
+            y = kwargs["y"]
+            z = kwargs.get("z", None)
+            if z is None:
+                return x + y
+            return x + y + z
+
+        package = _ExportPackage()
+        exporter = package._exporter("fn", fn, fallback="auto")
+        input = torch.randn(3, 2)
+        out1 = exporter(input, y=input)
+        eager_out1 = fn(input, y=input)
+        self.assertEqual(out1, eager_out1)
+        out2 = exporter(input, y=input, z=input)
+        eager_out2 = fn(input, y=input, z=input)
+        self.assertEqual(out2, eager_out2)
+        method = package.methods["fn"]
+        self.assertEqual(len(method.fallbacks), 2)
+
+    def test_autofallback_dtype_change(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        package = _ExportPackage()
+        exporter = package._exporter("fn", fn, fallback="auto")
+        input1 = torch.randn(3, 2, dtype=torch.float32)
+        out1 = exporter(input1)
+        eager_out1 = fn(input1)
+        self.assertEqual(out1, eager_out1)
+
+        input2 = input1.to(int)
+        out2 = exporter(input2)
+        eager_out2 = fn(input2)
+        self.assertEqual(out2, eager_out2)
+
+        input3 = input1.to("cuda")
+        out3 = exporter(input3)
+        eager_out3 = fn(input3)
+        self.assertEqual(out3, eager_out3)
+        method = package.methods["fn"]
+        self.assertEqual(len(method.fallbacks), 3)
+
+    def test_autofallback_discrete_inputs(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            if x.shape[0] > 3:
+                return x.sin()
+            return x.cos()
+
+        input1 = torch.randn(4, 2, dtype=torch.float32)
+        package = _ExportPackage()
+        exporter = package._exporter("fn", fn, fallback="auto")
+        out1 = exporter(input1)
+        eager_out1 = fn(input1)
+        self.assertEqual(out1, eager_out1)
+
+        input2 = torch.randn(2, 2, dtype=torch.float32)
+        with self.assertRaisesRegex(
+            RuntimeError, r"Expected input at \*args\[0\].shape\[0\] to be <= 3"
+        ):
+            _ = exporter(input2)
+
 
 if __name__ == "__main__":
     run_tests()

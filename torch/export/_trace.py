@@ -76,6 +76,7 @@ from torch.export.dynamic_shapes import (
     _combine_args,
     _DimHintType,
     _IntWrapper,
+    _normalize_dynamic_shapes,
     _process_dynamic_shapes,
 )
 from torch.export.exported_program import OutputKind
@@ -1212,13 +1213,17 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     kwargs = kwargs if kwargs is not None else {}
     _, original_in_spec = pytree.tree_flatten((args, kwargs))
 
+    verify_additional_inputs = lambda ep: None  # noqa: E731
+    if not dynamic_shapes:
+        return args, kwargs, original_in_spec, dynamic_shapes, verify_additional_inputs
+
     if isinstance(dynamic_shapes, torch.export.AdditionalInputs):
         verify_additional_inputs = dynamic_shapes.verify
         dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
+    elif isinstance(dynamic_shapes, torch.export.ShapesCollection):
+        dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
     else:
-        verify_additional_inputs = lambda ep: None  # noqa: E731
-        if isinstance(dynamic_shapes, torch.export.ShapesCollection):
-            dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
+        dynamic_shapes = _normalize_dynamic_shapes(dynamic_shapes, mod, args, kwargs)
 
     return args, kwargs, original_in_spec, dynamic_shapes, verify_additional_inputs
 
@@ -1292,22 +1297,6 @@ def _get_range_constraints(
     combined_args = _combine_args(
         mod, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
     )
-
-    # This is because we trace based on the kewargs passed in from user
-    # not based on the signature. I feel it would be better to just enforce
-    # one ordering at the start of tracing to avoid confusions, but that is
-    # bigger refactor, so do this to unblock for now.
-    if not _is_torch_jit_trace:
-        combined_args_traced_order = {}
-        for arg in combined_args:
-            if arg not in kwargs:
-                combined_args_traced_order[arg] = combined_args[arg]
-
-        for key in kwargs:
-            combined_args_traced_order[key] = kwargs[key]
-
-        combined_args = combined_args_traced_order
-
     range_constraints = make_constraints(
         fake_mode,
         gm,
