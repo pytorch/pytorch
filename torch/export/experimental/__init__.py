@@ -201,7 +201,7 @@ class _ExportPackage:
             - Returns an optional dynamic shape spec.
 
         Exporter will only export an overload when the spec callable successfully returns
-        a result without raising AssertionError.
+        a result without rasing AssertionError.
 
         For example:
         ```
