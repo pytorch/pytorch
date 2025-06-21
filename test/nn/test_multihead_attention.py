@@ -1087,8 +1087,8 @@ class MultiHeadAttentionNested(nn.Module):
 
 if __name__ == "__main__":
     # run_tests()
-    mha = MultiHeadAttentionNested(8, 8, 8, 8, 4).eval().to("cuda")
-    nt = torch.nested.nested_tensor([torch.randn(4, 8), torch.randn(2, 8)], layout=torch.jagged, device="cuda")
+    mha = MultiHeadAttentionNested(128, 128, 128, 128, 8).eval()
+    nt = torch.nested.nested_tensor([torch.randn(4, 128), torch.randn(2, 128)], layout=torch.jagged)
     t = torch.randn(2, 4, 8)
     # mha(nt, nt, nt, need_weights=False)
     # mha(t, t, t, need_weights=False)
