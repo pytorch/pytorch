@@ -4206,10 +4206,10 @@ MemPool::MemPool(
     CUDACachingAllocator::CUDAAllocator* allocator,
     bool is_user_created,
     bool use_on_oom,
-    bool symm_mem)
+    bool symmetric)
     : allocator_(allocator),
       is_user_created_(is_user_created),
-      symm_mem_(symm_mem) {
+      symmetric_(symmetric) {
   if (is_user_created_) {
     id_ = {0, uid_++};
   } else {
@@ -4232,8 +4232,8 @@ MempoolId_t MemPool::id() {
   return id_;
 }
 
-bool MemPool::symm_mem() {
-  return symm_mem_;
+bool MemPool::is_symmetric() {
+  return symmetric_;
 }
 
 CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {

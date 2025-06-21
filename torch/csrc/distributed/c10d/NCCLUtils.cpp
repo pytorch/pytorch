@@ -375,14 +375,15 @@ ncclResult_t NCCLComm::registerSegment(
 #ifdef NCCL_HAS_COMM_WINDOW_REGISTER
   if (window) {
     C10D_NCCL_CHECK(
-    ncclCommWindowRegister(comm, ptr, size, (ncclWindow_t*)&handle, NCCL_WIN_COLL_SYMMETRIC),
-    c10::str(
-        "Failed to window register segment with ptr ",
-        ptr,
-        ", size ",
-        size,
-        " on ncclComm_ ",
-        comm));
+        ncclCommWindowRegister(
+            comm, ptr, size, (ncclWindow_t*)&handle, NCCL_WIN_COLL_SYMMETRIC),
+        c10::str(
+            "Failed to window register segment with ptr ",
+            ptr,
+            ", size ",
+            size,
+            " on ncclComm_ ",
+            comm));
   } else {
     C10D_NCCL_CHECK(
         ncclCommRegister(comm, ptr, size, &handle),
@@ -412,9 +413,7 @@ ncclResult_t NCCLComm::registerSegment(
 #endif
 }
 
-ncclResult_t NCCLComm::deregisterSegment(
-    void* ptr,
-    bool window /*false*/) {
+ncclResult_t NCCLComm::deregisterSegment(void* ptr, bool window /*false*/) {
   LockType lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
   TORCH_CHECK(
@@ -437,7 +436,7 @@ ncclResult_t NCCLComm::deregisterSegment(
             ", with ptr ",
             ptr,
             " on ncclComm_ ",
-            comm));    
+            comm));
   } else {
     C10D_NCCL_CHECK(
         ncclCommDeregister(comm, handle),

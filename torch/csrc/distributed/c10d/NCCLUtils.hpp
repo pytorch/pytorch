@@ -348,9 +348,7 @@ class NCCLComm {
       bool errorOnRereg = true,
       bool window = false);
 
-  ncclResult_t deregisterSegment(
-      void* ptr,
-      bool window = false);
+  ncclResult_t deregisterSegment(void* ptr, bool window = false);
 
   std::string repr() const;
 

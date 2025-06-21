@@ -3137,7 +3137,7 @@ class NcclRegistrationTest(MultiProcessTestCase):
                 )
             else:
                 self.assertRegex(nccl_debug_file_content, "local-registered")
-    
+
     @requires_nccl()
     @requires_nccl_version((2, 27), "Need NCCL 2.27 for window registration")
     @skip_if_lt_x_gpu(4)
