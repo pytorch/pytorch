@@ -68,6 +68,16 @@ std::enable_if_t<std::is_floating_point_v<From>, bool> overflows(
   if (!limit::has_quiet_NaN && (f != f)) {
     return true;
   }
+  // For floating-point types that support infinity, allow finite values
+  // that exceed the representable range to be converted to infinity.
+  // This ensures consistent behavior between CPU and CUDA for operations
+  // like torch.clamp with float16 tensors.
+  if (limit::has_infinity) {
+    // Only reject NaN for types that don't support it (already handled above)
+    // Finite values outside the range will be converted to infinity by convert<>()
+    return false;
+  }
+  // For types without infinity support, keep strict overflow checking
   return f < limit::lowest() || f > limit::max();
 }
 
