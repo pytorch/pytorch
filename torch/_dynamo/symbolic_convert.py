@@ -282,7 +282,7 @@ SpeculationLog diverged at index {self.index} (log had {len(self.entries)} entri
 - Expected: {entry.filename}:{entry.lineno} ({entry.inst.opname} at ip={entry.instruction_pointer})
 - Actual: {filename}:{lineno} ({inst.opname} at ip={instruction_pointer})
 {prev_entry_msg}
-There are two usual reasons why this may have occured:
+There are two usual reasons why this may have occurred:
 - When Dynamo analysis restarted, the second run took a different path than
   the first.  If this occurred, the previous instruction is the critical instruction that
   behaved differently.
@@ -662,7 +662,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                             *graph_break_hints.FUNDAMENTAL,
                             "Use `torch._assert()` to raise a hard AssertionError when the check fails. "
                             "This error will propagate back the user code "
-                            "that called the compiled function (i.e. Dynamo wil not trace any exception handling).",
+                            "that called the compiled function (i.e. Dynamo will not trace any exception handling).",
                             "Remove the assert statement.",
                             "Move the assert statement outside of any context managers in order to graph break with "
                             "partial graph compilation (if fullgraph=False).",
@@ -1783,7 +1783,7 @@ class InstructionTranslatorBase(
     def _raise_exception_variable(self, val) -> NoReturn:
         # User can raise exception in 2 ways
         #   1) raise exception type - raise NotImplementedError
-        #   2) raise execption instance - raise NotImplemetedError("foo")
+        #   2) raise exception instance - raise NotImplemetedError("foo")
 
         # 1) when user raises exception type
         val = self._create_exception_type(val)
@@ -1940,7 +1940,7 @@ class InstructionTranslatorBase(
                 self.jump(exn_tab_entry)
             else:
                 # No handler found. Bubble the exception to the parent
-                # instruction translater. We use special exception for this.
+                # instruction translator. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
                     unimplemented_v2(
@@ -1966,7 +1966,7 @@ class InstructionTranslatorBase(
                     self.exn_vt_stack.pop()
                     if len(self.block_stack) == 0:
                         # No handler found in this frame. Bubble the exception to the parent
-                        # instruction translater.
+                        # instruction translator.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
                             unimplemented_v2(
@@ -2020,7 +2020,7 @@ class InstructionTranslatorBase(
                 self.jump(block_stack_entry)
             else:
                 # No handler found. Bubble the exception to the parent
-                # instruction translater. We use special exception for this.
+                # instruction translator. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
                     unimplemented_v2(
@@ -2127,7 +2127,7 @@ class InstructionTranslatorBase(
                 unimplemented_v2(
                     gb_type="Caught non-Exception value",
                     context=str(exc_instance),
-                    explanation=f"Except expects to recieve an object of Exception type but received {exc_instance}.",
+                    explanation=f"Except expects to receive an object of Exception type but received {exc_instance}.",
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
@@ -4124,7 +4124,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: list[VariableTracker]
-    # Flag wether or not the InlineGenerator should consume the entire iterator
+    # Flag whether or not the InlineGenerator should consume the entire iterator
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)

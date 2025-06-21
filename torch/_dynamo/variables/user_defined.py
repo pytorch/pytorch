@@ -791,7 +791,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.base_cls_vt = base_cls_vt
         self.init_args = init_args
 
-        # This records names of the attributes that were modifed via instance
+        # This records names of the attributes that were modified via instance
         # `__dict__` directly, rather than the normal setattr path.
         #
         # TODO consider emulating `obj.__dict__` as a `ConstDictVariable` to get
