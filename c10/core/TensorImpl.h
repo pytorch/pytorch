@@ -1053,6 +1053,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_;
   }
 
+  /**
+   * Mutable form of storage(). This should only be used with safe operations
+   * such as adding delete hooks.
+   */
+  TENSORIMPL_MAYBE_VIRTUAL Storage& mutable_storage() {
+    if (C10_UNLIKELY(storage_access_should_throw_)) {
+      throw_storage_access_error();
+    }
+    return storage_;
+  }
+
   bool unique_version() const {
     return version_counter_.unique();
   }

@@ -346,6 +346,9 @@ class TORCH_API TensorBase {
   const Storage& storage() const {
     return impl_->storage();
   }
+  Storage& mutable_storage() {
+    return impl_->mutable_storage();
+  }
   bool is_alias_of(const at::TensorBase& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
