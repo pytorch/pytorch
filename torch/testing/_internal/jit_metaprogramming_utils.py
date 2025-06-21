@@ -161,6 +161,7 @@ def get_nn_functional_tests():
         ('tanh', (S, S, S), (), '', (True,)),
         ('sigmoid', (S, S, S), (), '', (True,)),
         ('silu', (S, S, S), (), '', (True,)),
+        ('swiglu', (S - 1, S - 1, S - 1), (),),
         ('log_softmax', (S, S, S), (0,), '', (True,)),
         ('linear', (S, S), ((M, S),), '', (True, ['aten::linear'])),
         ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::linear'])),
