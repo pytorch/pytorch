@@ -222,3 +222,43 @@ jobs:
       docker-image: ${{ needs.verify-cachebench-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.verify-cachebench-cpu-build.outputs.test-matrix }}
     secrets: inherit
+
+  libtorch-linux-focal-cuda12_8-py3_10-gcc11-debug-build:
+    name: libtorch-linux-focal-cuda12.8-py3.10-gcc11-debug
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: libtorch-linux-focal-cuda12.8-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-focal-cuda12.8-cudnn9-py3-gcc11
+      build-generates-artifacts: false
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "linux.4xlarge"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+    secrets: inherit
+
+  linux-focal-cuda12_8-py3_10-gcc11-no-ops-build:
+    name: linux-focal-cuda12.8-py3.10-gcc11-no-ops
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-focal-cuda12.8-py3.10-gcc11-no-ops
+      docker-image-name: ci-image:pytorch-linux-focal-cuda12.8-cudnn9-py3-gcc11
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+    secrets: inherit
+
+  linux-focal-cuda12_8-py3_10-gcc9-inductor-build:
+    name: cuda12.8-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-focal-cuda12.8-py3.10-gcc9-sm80
+      docker-image-name: ci-image:pytorch-linux-focal-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
+      cuda-arch-list: '8.0'
+    secrets: inherit
