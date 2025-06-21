@@ -5693,15 +5693,19 @@ def _in_projection_packed(
         if q is k:
             # self-attention
             proj = linear(q, w, b)
-            # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
-            proj = (
-                proj.unflatten(-1, (3, E))
-                .unsqueeze(0)
-                .transpose(0, -2)
-                .squeeze(-2)
-                .contiguous()
-            )
-            return proj[0], proj[1], proj[2]
+            if q.is_nested:
+                # chunk() for nested tensors
+                return proj.chunk(3, dim=-1)
+            else:    
+                # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
+                proj = (
+                    proj.unflatten(-1, (3, E))
+                    .unsqueeze(0)
+                    .transpose(0, -2)
+                    .squeeze(-2)
+                    .contiguous()
+                )
+                return proj[0], proj[1], proj[2]
         else:
             # encoder-decoder attention
             w_q, w_kv = w.split([E, E * 2])
@@ -5712,14 +5716,18 @@ def _in_projection_packed(
             q_proj = linear(q, w_q, b_q)
             kv_proj = linear(k, w_kv, b_kv)
             # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
-            kv_proj = (
-                kv_proj.unflatten(-1, (2, E))
-                .unsqueeze(0)
-                .transpose(0, -2)
-                .squeeze(-2)
-                .contiguous()
-            )
-            return (q_proj, kv_proj[0], kv_proj[1])
+            if k.is_nested:
+                # chunk() for nested tensors
+                return q_proj, kv_proj.chunk(2, dim=-1)
+            else:   
+                kv_proj = (
+                    kv_proj.unflatten(-1, (2, E))
+                    .unsqueeze(0)
+                    .transpose(0, -2)
+                    .squeeze(-2)
+                    .contiguous()
+                )
+                return (q_proj, kv_proj[0], kv_proj[1])
     else:
         w_q, w_k, w_v = w.chunk(3)
         if b is None:
@@ -6234,8 +6242,13 @@ def multi_head_attention_forward(
             key_padding_mask = key_padding_mask.unsqueeze(0)
 
     # set up shape vars
-    tgt_len, bsz, embed_dim = query.shape
-    src_len, _, _ = key.shape
+    if query.is_nested:
+        bsz, _, embed_dim = query.shape
+    else:
+        tgt_len, bsz, embed_dim = query.shape
+
+    if not key.is_nested:        
+        src_len, _, _ = key.shape
 
     key_padding_mask = _canonical_mask(
         mask=key_padding_mask,
@@ -6327,7 +6340,7 @@ def multi_head_attention_forward(
             b_k,
             b_v,
         )
-
+    print("DEBUG 1:", q.is_contiguous(), k.is_contiguous(), v.is_contiguous())
     # prep attention mask
 
     if attn_mask is not None:
@@ -6367,9 +6380,18 @@ def multi_head_attention_forward(
     #
     # reshape q, k, v for multihead attention and make them batch first
     #
-    q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    if q.is_nested:
+        # reshape query, key, value to separate by head
+        # (N, L_t, E_total) -> (N, L_t, nheads, E_head) -> (N, nheads, L_t, E_head)
+        q = q.unflatten(-1, [num_heads, head_dim]).transpose(1, 2)
+    else:
+        q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
-        k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        if k.is_nested:
+            # (N, L_s, E_total) -> (N, L_s, nheads, E_head) -> (N, nheads, L_s, E_head)
+            k = k.unflatten(-1, [num_heads, head_dim]).transpose(1, 2)
+        else:
+            k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_k.size(0) == bsz * num_heads, (
@@ -6380,7 +6402,11 @@ def multi_head_attention_forward(
         )
         k = static_k
     if static_v is None:
-        v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        if v.is_nested:
+            # (N, L_s, E_total) -> (N, L_s, nheads, E_head) -> (N, nheads, L_s, E_head)
+            v = v.unflatten(-1, [num_heads, head_dim]).transpose(1, 2)
+        else:
+            v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_v.size(0) == bsz * num_heads, (
@@ -6476,20 +6502,28 @@ def multi_head_attention_forward(
                 attn_mask = attn_mask.unsqueeze(0)
             else:
                 attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
-
-        q = q.view(bsz, num_heads, tgt_len, head_dim)
-        k = k.view(bsz, num_heads, src_len, head_dim)
-        v = v.view(bsz, num_heads, src_len, head_dim)
-
+        if not q.is_nested:
+            q = q.view(bsz, num_heads, tgt_len, head_dim)
+        if not k.is_nested:
+            k = k.view(bsz, num_heads, src_len, head_dim)
+        if not v.is_nested:
+            v = v.view(bsz, num_heads, src_len, head_dim)
+        
+        print("DEBUG 2:", q.is_contiguous(), k.is_contiguous(), v.is_contiguous())
+        print("q", q.shape, "k", k.shape, "v", v.shape, "attn_mask", attn_mask.shape if attn_mask else "None")
         attn_output = scaled_dot_product_attention(
-            q, k, v, attn_mask, dropout_p, is_causal
+            q.contiguous(), k.contiguous(), v.contiguous(), attn_mask, dropout_p, is_causal
         )
-        attn_output = (
-            attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
-        )
+        if q.is_nested:
+            attn_output = attn_output.transpose(1, 2).flatten(-2)
+        else:
+            attn_output = (
+                attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
+            )
 
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
-        attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
+        if not q.is_nested:
+            attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
         if not is_batched:
             # squeeze the output if input was unbatched
             attn_output = attn_output.squeeze(1)

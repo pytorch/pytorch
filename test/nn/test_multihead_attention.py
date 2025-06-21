@@ -703,46 +703,48 @@ class TestMultiheadAttentionNN(NNTestCase):
             )
 
     def test_multihead_attn_nested_tensor_outside_fast_path(self):
-        mha = torch.nn.MultiheadAttention(4, 4, batch_first=True).eval()
-        nt = torch.nested.nested_tensor([torch.randn(4, 4)])
+        mha = torch.nn.MultiheadAttention(8, 4, batch_first=True).eval()
+        nt = torch.nested.nested_tensor([torch.randn(4, 8), torch.randn(2, 8)], layout=torch.jagged)
         # One tested platform (linux-bionic-py3.7-clang) has a torch_function for one
         # or more of these. Take advantage of that to test the torch_function bailout.
-        has_torch_func = torch.overrides.has_torch_function(
-            (
-                nt,
-                mha.in_proj_weight,
-                mha.in_proj_bias,
-                mha.out_proj.weight,
-                mha.out_proj.bias,
-            )
-        )
-        if has_torch_func:
-            msg = "MultiheadAttention does not support NestedTensor.*argument has_torch_function"
-        else:
-            msg = (
-                "MultiheadAttention does not support NestedTensor outside of its fast path.*grad is "
-                + "enabled and.*or biases requires_grad"
-            )
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(nt, nt, nt)
+        # has_torch_func = torch.overrides.has_torch_function(
+        #     (
+        #         nt,
+        #         mha.in_proj_weight,
+        #         mha.in_proj_bias,
+        #         mha.out_proj.weight,
+        #         mha.out_proj.bias,
+        #     )
+        # )
+        # if has_torch_func:
+        #     msg = "MultiheadAttention does not support NestedTensor.*argument has_torch_function"
+        # else:
+        #     msg = (
+        #         "MultiheadAttention does not support NestedTensor outside of its fast path.*grad is "
+        #         + "enabled and.*or biases requires_grad"
+        #     )
+        # with self.assertRaisesRegex(AssertionError, msg):
+            # mha(nt, nt, nt)
+        mha(nt, nt, nt, need_weights=False)
 
-        if has_torch_func:
-            # Just give up, they're all going to fail with the same message.
-            return
+        # if has_torch_func:
+        #     # Just give up, they're all going to fail with the same message.
+        #     return
 
         with torch.no_grad():
-            mha(nt, nt, nt)
+            mha(nt, nt, nt, need_weights=False)
         with torch.inference_mode():
-            mha(nt, nt, nt)
-        nt = torch.nested.nested_tensor([torch.randn(4, 4, requires_grad=False)])
+            mha(nt, nt, nt, need_weights=False)
+        nt = torch.nested.nested_tensor([torch.randn(4, 8, requires_grad=False), torch.randn(2, 8, requires_grad=False)], layout=torch.jagged)
         nt.requires_grad = False
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(nt, nt, nt)
+        # with self.assertRaisesRegex(AssertionError, msg):
+            # mha(nt, nt, nt)
+        mha(nt, nt, nt, need_weights=False)
         mha.in_proj_weight.requires_grad = False
         mha.in_proj_bias.requires_grad = False
         mha.out_proj.weight.requires_grad = False
         mha.out_proj.bias.requires_grad = False
-        mha(nt, nt, nt)
+        mha(nt, nt, nt, need_weights=False)
 
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
@@ -963,5 +965,132 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
 instantiate_device_type_tests(TestMultiheadAttentionNNDeviceType, globals())
 instantiate_parametrized_tests(TestMultiheadAttentionNN)
 
+import torch.nn.functional as F
+class MultiHeadAttentionNested(nn.Module):
+    
+    """
+    Computes multi-head attention. Supports nested or padded tensors.
+
+    Args:
+        E_q (int): Size of embedding dim for query
+        E_k (int): Size of embedding dim for key
+        E_v (int): Size of embedding dim for value
+        E_total (int): Total embedding dim of combined heads post input projection. Each head
+            has dim E_total // nheads
+        nheads (int): Number of heads
+        dropout (float, optional): Dropout probability. Default: 0.0
+        bias (bool, optional): Whether to add bias to input projection. Default: True
+    """
+
+    def __init__(
+        self,
+        E_q: int,
+        E_k: int,
+        E_v: int,
+        E_total: int,
+        nheads: int,
+        dropout: float = 0.0,
+        bias=True,
+        device=None,
+        dtype=None,
+    ):
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        self.nheads = nheads
+        self.dropout = dropout
+        self._qkv_same_embed_dim = E_q == E_k and E_q == E_v
+        if self._qkv_same_embed_dim:
+            self.packed_proj = nn.Linear(E_q, E_total * 3, bias=bias, **factory_kwargs)
+        else:
+            self.q_proj = nn.Linear(E_q, E_total, bias=bias, **factory_kwargs)
+            self.k_proj = nn.Linear(E_k, E_total, bias=bias, **factory_kwargs)
+            self.v_proj = nn.Linear(E_v, E_total, bias=bias, **factory_kwargs)
+        E_out = E_q
+        self.out_proj = nn.Linear(E_total, E_out, bias=bias, **factory_kwargs)
+        assert E_total % nheads == 0, "Embedding dim is not divisible by nheads"
+        self.E_head = E_total // nheads
+        self.bias = bias
+
+    def forward(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask=None,
+        is_causal=False,
+    ) -> torch.Tensor:
+        """
+        Forward pass; runs the following process:
+            1. Apply input projection
+            2. Split heads and prepare for SDPA
+            3. Run SDPA
+            4. Apply output projection
+
+        Args:
+            query (torch.Tensor): query of shape (``N``, ``L_q``, ``E_qk``)
+            key (torch.Tensor): key of shape (``N``, ``L_kv``, ``E_qk``)
+            value (torch.Tensor): value of shape (``N``, ``L_kv``, ``E_v``)
+            attn_mask (torch.Tensor, optional): attention mask of shape (``N``, ``L_q``, ``L_kv``) to pass to SDPA. Default: None
+            is_causal (bool, optional): Whether to apply causal mask. Default: False
+
+        Returns:
+            attn_output (torch.Tensor): output of shape (N, L_t, E_q)
+        """
+        # Step 1. Apply input projection
+        if self._qkv_same_embed_dim:
+            if query is key and key is value:
+                result = self.packed_proj(query)
+                query, key, value = torch.chunk(result, 3, dim=-1)
+            else:
+                q_weight, k_weight, v_weight = torch.chunk(
+                    self.packed_proj.weight, 3, dim=0
+                )
+                if self.bias:
+                    q_bias, k_bias, v_bias = torch.chunk(
+                        self.packed_proj.bias, 3, dim=0
+                    )
+                else:
+                    q_bias, k_bias, v_bias = None, None, None
+                query, key, value = (
+                    F.linear(query, q_weight, q_bias),
+                    F.linear(key, k_weight, k_bias),
+                    F.linear(value, v_weight, v_bias),
+                )
+
+        else:
+            query = self.q_proj(query)
+            key = self.k_proj(key)
+            value = self.v_proj(value)
+
+        # Step 2. Split heads and prepare for SDPA
+        # reshape query, key, value to separate by head
+        # (N, L_t, E_total) -> (N, L_t, nheads, E_head) -> (N, nheads, L_t, E_head)
+        query = query.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
+        # (N, L_s, E_total) -> (N, L_s, nheads, E_head) -> (N, nheads, L_s, E_head)
+        key = key.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
+        # (N, L_s, E_total) -> (N, L_s, nheads, E_head) -> (N, nheads, L_s, E_head)
+        value = value.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
+
+        # Step 3. Run SDPA
+        # (N, nheads, L_t, E_head)
+        attn_output = F.scaled_dot_product_attention(
+            query, key, value, dropout_p=self.dropout, is_causal=is_causal
+        )
+        # (N, nheads, L_t, E_head) -> (N, L_t, nheads, E_head) -> (N, L_t, E_total)
+        attn_output = attn_output.transpose(1, 2).flatten(-2)
+
+        # Step 4. Apply output projection
+        # (N, L_t, E_total) -> (N, L_t, E_out)
+        attn_output = self.out_proj(attn_output)
+
+        return attn_output
+
 if __name__ == "__main__":
-    run_tests()
+    # run_tests()
+    mha = MultiHeadAttentionNested(8, 8, 8, 8, 4).eval().to("cuda")
+    nt = torch.nested.nested_tensor([torch.randn(4, 8), torch.randn(2, 8)], layout=torch.jagged, device="cuda")
+    t = torch.randn(2, 4, 8)
+    # mha(nt, nt, nt, need_weights=False)
+    # mha(t, t, t, need_weights=False)
+    
+    mha(nt, nt, nt)

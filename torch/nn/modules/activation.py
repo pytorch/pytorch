@@ -1334,12 +1334,12 @@ class MultiheadAttention(Module):
                     )
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
-        assert not any_nested, (
-            "MultiheadAttention does not support NestedTensor outside of its fast path. "
-            + f"The fast path was not hit because {why_not_fast_path}"
-        )
+        # assert not any_nested, (
+        #     "MultiheadAttention does not support NestedTensor outside of its fast path. "
+        #     + f"The fast path was not hit because {why_not_fast_path}"
+        # )
 
-        if self.batch_first and is_batched:
+        if not any_nested and self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property
             if key is value:
                 if query is key:
