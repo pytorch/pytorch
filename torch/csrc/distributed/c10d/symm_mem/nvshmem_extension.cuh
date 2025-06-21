@@ -11,7 +11,10 @@ void initialize_nvshmem_with_store(
     int rank,
     int world_size);
 
-// Intializes the device state in CUmodule so that it’s able to perform NVSHMEM
+// Check if NVSHMEM is available
+TORCH_API bool is_nvshmem_available();
+
+// Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
 TORCH_API void nvshmemx_cumodule_init(uintptr_t module);
 

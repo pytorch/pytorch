@@ -112,7 +112,7 @@ def freeze_rng_state(*args, **kwargs):
 # Class to keep track of test flags configurable by environment variables.
 # Flags set here are intended to be read-only and should not be modified after
 # definition.
-# TODO: Expand this class to handle abritrary settings in addition to boolean flags?
+# TODO: Expand this class to handle arbitrary settings in addition to boolean flags?
 class TestEnvironment:
     # Set of env vars to set for the repro command that is output on test failure.
     # Specifically, this includes env vars that are set to non-default values and
@@ -4542,7 +4542,7 @@ def find_free_port():
 
     NOTE: If this function is being used to allocate a port to Store (or
     indirectly via init_process_group or init_rpc), it should be used
-    in conjuction with the `retry_on_connect_failures` decorator as there is a potential
+    in conjunction with the `retry_on_connect_failures` decorator as there is a potential
     race condition where the allocated port may become unavailable before it can be used
     """
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
@@ -5587,6 +5587,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n(    .+\n( +[~^]+ *\n)?)+', repl_frame, s)
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
+    s = re.sub(r'https:/([a-zA-Z0-9_.-]+)', r'https://\1', s)
     s = re.sub(file, _as_posix_path(os.path.basename(file)), s)
     s = re.sub(_as_posix_path(os.path.join(os.path.dirname(torch.__file__), "")), "", s)
     if suppress_suffix:
