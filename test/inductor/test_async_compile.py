@@ -29,8 +29,7 @@ class TestAsyncCompile(TestCase):
 
         with config.patch("worker_start_method", method):
             shutdown_compile_workers()
-            AsyncCompile.wakeup()
-            AsyncCompile.process_pool().ready_future.result(timeout=120)
+            AsyncCompile.wait_pool_ready()
 
             with fresh_cache():
                 compiled_fn = torch.compile(fn)
