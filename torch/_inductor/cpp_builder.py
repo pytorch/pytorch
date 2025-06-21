@@ -331,7 +331,7 @@ def get_compiler_version_info(compiler: str) -> str:
             ).decode(*SUBPROCESS_DECODE_ARGS)
         except Exception:
             return ""
-    # Mutiple lines to one line string.
+    # Multiple lines to one line string.
     version_string = version_string.replace("\r", "_")
     version_string = version_string.replace("\n", "_")
     return version_string
@@ -410,7 +410,7 @@ def normalize_path_separator(orig_path: str) -> str:
 class BuildOptionsBase:
     """
     This is the Base class for store cxx build options, as a template.
-    Acturally, to build a cxx shared library. We just need to select a compiler
+    Actually, to build a cxx shared library. We just need to select a compiler
     and maintains the suitable args.
     """
 
@@ -948,7 +948,7 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
         return False
 
     """
-    Intel Compiler implenmented more math libraries than clang, for performance proposal.
+    Intel Compiler implemented more math libraries than clang, for performance proposal.
     We need preload them like openmp library.
     """
     preload_list = [
@@ -1427,7 +1427,7 @@ def get_name_and_dir_from_output_file_path(
         dir = /tmp/tmpof1n5g7t/5c/
 
     put 'name' and 'dir' to CppBuilder's 'name' and 'output_dir'.
-    CppBuilder --> get_target_file_path will format output path accoding OS:
+    CppBuilder --> get_target_file_path will format output path according OS:
     Linux: /tmp/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.so
     Windows: [Windows temp path]/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.dll
     """
@@ -1444,13 +1444,13 @@ class CppBuilder:
     Args:
         name:
             1. Build target name, the final target file will append extension type automatically.
-            2. Due to the CppBuilder is supports mutliple OS, it will maintains ext for OS difference.
+            2. Due to the CppBuilder is supports multiple OS, it will maintains ext for OS difference.
         sources:
             Source code file list to be built.
         BuildOption:
             Build options to the builder.
         output_dir:
-            1. The output_dir the taget file will output to.
+            1. The output_dir the target file will output to.
             2. The default value is empty string, and then the use current dir as output dir.
             3. Final target file: output_dir/name.ext
     """
@@ -1464,7 +1464,7 @@ class CppBuilder:
     @staticmethod
     def __get_object_flags() -> tuple[str, str]:
         extension = ".obj" if _IS_WINDOWS else ".o"
-        output_flags = "/c /Fo" if _IS_WINDOWS else "-c -o"
+        output_flags = "/c /Fo" if _IS_WINDOWS else "-c -o"  # codespell:ignore
         return extension, output_flags
 
     @staticmethod
@@ -1505,7 +1505,7 @@ class CppBuilder:
 
         self._name = name
 
-        # Code start here, initial self internal veriables firstly.
+        # Code start here, initial self internal variables firstly.
         self._build_option = BuildOption
         self._compiler = BuildOption.get_compiler()
         self._use_relative_path = BuildOption.get_use_relative_path()
@@ -1702,8 +1702,8 @@ class CppBuilder:
 
     def build(self) -> None:
         """
-        It is must need a temperary directory to store object files in Windows.
-        After build completed, delete the temperary directory to save disk space.
+        It is must need a temporary directory to store object files in Windows.
+        After build completed, delete the temporary directory to save disk space.
         """
         if self._use_relative_path:
             # remote build uses relative path

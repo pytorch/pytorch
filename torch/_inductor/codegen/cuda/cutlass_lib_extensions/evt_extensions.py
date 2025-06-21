@@ -77,7 +77,7 @@ if try_import_cutlass():
             if not is_row_major and not is_column_major:
                 raise RuntimeError(
                     f"Cannot create example tensor for {buffer.get_name()} with \
-non-contiguous layout, recieved stride: {stride} and shape: {shape}"
+non-contiguous layout, received stride: {stride} and shape: {shape}"
                 )
 
             return CutlassTensor(

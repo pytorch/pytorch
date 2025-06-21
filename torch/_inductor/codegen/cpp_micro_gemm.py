@@ -684,7 +684,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
     // Use 2 implementations for the transposed B:
     // First implementation:
     //   Transpose first and then perform outer product calculation in sub-blocks,
-    //   which introduces an additional tranpose overhead of [K, N] compared to the non-tranpose version.
+    //   which introduces an additional transpose overhead of [K, N] compared to the non-transpose version.
     // Second implementation:
     //   Directly perform inner product calculation in sub-blocks,
     //   which introduces an additional vector reduction of [M, N] compared to the non-tranpose version.
@@ -1001,7 +1001,7 @@ def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
 )
 class CppMicroGemmAMX(CppMicroGemm):
     """
-    This class generates the code for micro gemm using Advanced Matrix eXtention (AMX)
+    This class generates the code for micro gemm using Advanced Matrix extension (AMX)
     instructions available in 4th generation Intel Xeon for compute.
     It supports input types of torch.bfloat16 with fp32 output.
     """

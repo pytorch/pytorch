@@ -228,7 +228,7 @@ class TreeManagerContainer:
                 self.graph = None
 
                 # manager was used again after existing cleanup,
-                # we shouldnt set it to None
+                # we shouldn't set it to None
                 if self.live_cudagraphify_fns == 0:
                     self.tree_manager = None
 
@@ -1231,7 +1231,7 @@ class CUDAGraphNode:
         }
 
         if config.triton.slow_path_cudagraph_asserts:
-            # need to use parent live weakrefs because live_indices isnt set yet
+            # need to use parent live weakrefs because live_indices isn't set yet
             memory = (
                 [] if self.parent is None else list(self.parent.path_live_weakrefs())
             )
@@ -1607,7 +1607,7 @@ class CUDAGraphNode:
 
     def clear_path_state(self) -> None:
         "Clear the path state in this current executing node"
-        # this doesnt actually do anything right now, leaving it as placeholder
+        # this doesn't actually do anything right now, leaving it as placeholder
 
     @staticmethod
     def _tensor_metadata(

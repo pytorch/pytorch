@@ -51,7 +51,7 @@ def _default_custom_combo_kernel_horizontal_partition(
     node_info_map: dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
 ) -> list[list[BaseSchedulerNode]]:
     """Horizontally partition the given list of nodes into a list of list of nodes where each sublist
-    represents a partion. Nodes in different partitions are implemented in different combo kernels.
+    represents a partition. Nodes in different partitions are implemented in different combo kernels.
     Nodes in the same partition are likely to be implemented
     in the same combo kernel, but subject to subsequent restrictions like CUDA limits for number of args.
 

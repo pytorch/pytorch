@@ -1092,7 +1092,7 @@ class CppGemmTemplate(CppTemplate):
         """
         NOTE Weight prep consists of 2 separate steps:
         1. Blocking the weight tensor into a 3D shape: [n//block_n, k, block_n]
-           This is always done if the weight tensor is contant, i.e. for all GEMM and some BMM.
+           This is always done if the weight tensor is constant, i.e. for all GEMM and some BMM.
            For BMM, we also block non-contiguous weight tensors, since they would be reshaped anyway.
            This assumes that blocked, contiguous weights will be more efficient for the GEMM kernel,
            and is worth the overhead of reshape and blocking.

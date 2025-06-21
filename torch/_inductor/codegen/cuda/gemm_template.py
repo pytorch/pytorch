@@ -293,7 +293,7 @@ GEMM_ARGS_SPARSE_CUTLASS_2X = r"""
   };
 """
 
-# Additional includes which are neccessary if the standalone test / debug runner is generated as wel
+# Additional includes which are necessary if the standalone test / debug runner is generated as well
 GEMM_STANDALONE_RUNNER_ADDITIONAL_INCLUDES = r"""
 #ifdef GENERATE_STANDALONE_RUNNER
 #include "cutlass/util/distribution.h"
@@ -375,7 +375,7 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
 
     std::cout << "Calling once to get workspace size" << std::endl;
     {{test_call_statement}};
-    // Allocate workspace if neccessary
+    // Allocate workspace if necessary
     if (workspace_size > 0) {
         workspace_data.reset(workspace_size);
         std::cout << "Allocated workspace size of " << workspace_size << " bytes" << std::endl;
@@ -684,13 +684,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     ) -> bool:
         """
         Helper method to determine whether we should do an explicit transpose by switching the order of the
-        matmul operands. This might be neccessary when we can't otherwise arrive at the right memory
+        matmul operands. This might be necessary when we can't otherwise arrive at the right memory
         layout for the given Bias operand.
 
         Note: This method is a workaround for CUDA Errors that seemingly non-deterministically
         occurred in practice in some CUTLASS GEMM Kernels with Linear epilogues that have a bias term.
         it might make sense to check on newer Cutlass releases whether it makes sense to keep
-        returning True in certain cases or whether it becomes unneccessary.
+        returning True in certain cases or whether it becomes unnecessary.
         """
         # If bias is row major, swap all M and N dimensions
         if (
