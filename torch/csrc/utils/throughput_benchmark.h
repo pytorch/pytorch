@@ -18,7 +18,7 @@ namespace torch::throughput_benchmark {
 
 /**
  * The struct is used to provide results of a benchmark to the caller
- * In the future all additional statics should be added here.
+ * In the future all additional statistics should be added here.
  */
 struct BenchmarkExecutionStats {
   float latency_avg_ms{-1};

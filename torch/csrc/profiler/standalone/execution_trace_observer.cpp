@@ -206,7 +206,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   // All tensors and operators have an unique id assigned. Increment id for each
   // new tensor or operator node.
-  // 0 -> unintialized
+  // 0 -> uninitialized
   // 1 -> root ID
   // 2 ... -> regular node ID
   std::atomic<ID> id_{2};
