@@ -10,12 +10,25 @@
 #include <c10/util/OptionalArrayRef.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <optional>
+#include <string>
+
+inline bool is_sticky_cuda_error(const std::string& errMsg) {
+  if (errMsg.find("illegal memory access") != std::string::npos ||
+      errMsg.find("device-side assert triggered") != std::string::npos) {
+    return true;
+  }
+  return false;
+}
 
 #define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(...)    \
   try {                                                    \
     __VA_ARGS__                                            \
   } catch (const std::exception& e) {                      \
-    LOG(ERROR) << "Exception in aoti_torch: " << e.what(); \
+    const auto& errorMsg = e.what();                       \
+    LOG(ERROR) << "Exception in aoti_torch: " << errorMsg; \
+    if (is_sticky_cuda_error(errorMsg)) {                  \
+      return AOTI_TORCH_CUDA_STICKY_ERROR;                 \
+    }                                                      \
     return AOTI_TORCH_FAILURE;                             \
   } catch (...) {                                          \
     LOG(ERROR) << "Exception in aoti_torch: UNKNOWN";      \
