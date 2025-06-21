@@ -6405,6 +6405,32 @@ class TestMPS(TestCaseMPS):
                 helper((2, 2, 16, 16), (2, 16), return_indices, dtype)
                 helper((2, 16, 16), (4, 4), return_indices, dtype)
 
+    # Test against issue 154882 to verify error is getting raised
+    # https://github.com/pytorch/pytorch/issues/154882
+    def test_max_pool2d_with_indices(self):
+        # ((kernel_h, kernel_w), (stride_h, stride_w), (input_h, input_w)
+        failing_params = [
+            [(1, 1), (2, 2), (4, 6)],
+            [(1, 2), (2, 2), (4, 6)],
+            [(2, 1), (2, 2), (4, 6)],
+            [(1, 1), (3, 3), (4, 6)],
+            [(1, 2), (3, 3), (4, 6)],
+            [(2, 2), (3, 3), (4, 6)],
+            [(3, 3), (5, 5), (10, 15)],
+        ]
+        for params in failing_params:
+            input_tensor = torch.ones(1, 1, params[2][0], params[2][1], dtype=torch.float, device='mps')
+            try:
+                out = torch.ops.aten.max_pool2d_with_indices(
+                    input_tensor,
+                    kernel_size=params[0],
+                    stride=params[1],
+                    padding=0,
+                    ceil_mode=True)
+            except Exception as e:
+                e_string = str(e)
+                self.assertEqual(e_string, "MPSGraph miscomputes the output index shape when ceil_mode=True, see issue: #154882")
+
     def test_gelu_simple(self):
         def helper(shape, dtype=torch.float, contiguous=True):
             cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
