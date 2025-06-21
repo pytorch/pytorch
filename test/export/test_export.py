@@ -4910,6 +4910,19 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 strict=strict,
             )
 
+    def test_contiguous_unbacked_strides(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                return torch.empty(u0, u1, u2).contiguous()
+
+        ep = export(Foo(), (torch.tensor([2, 3, 4]),))
+        node = [node for node in ep.graph.nodes][-2]
+        val = node.meta["val"]
+        u0, u1, u2 = val.shape
+        self.assertEqual(val.stride(0), u1 * u2)
+        self.assertEqual(val.stride(1), u2)
+
     def test_tolist(self):
         class M(torch.nn.Module):
             def forward(self, x):
