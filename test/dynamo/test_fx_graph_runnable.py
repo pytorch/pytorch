@@ -36,7 +36,7 @@ class FxGraphRunnableTest(TestCase):
 
         # Create a custom filter specifically for fx_graph_runnable entries
         self.filter = FxGraphRunnableArtifactFilter()
-        
+
         # Create a separate buffer and handler for capturing fx_graph_runnable entries
         self.buffer = io.StringIO()
         self.handler = logging.StreamHandler(self.buffer)
@@ -52,35 +52,44 @@ class FxGraphRunnableTest(TestCase):
         # Compile and run a simple function to generate fx_graph_runnable entries
         def simple_fn(x):
             return x.add(torch.ones_like(x))
-        
+
         fn_opt = torch.compile(simple_fn)
         fn_opt(torch.ones(10, 10))
-        
+
         # Extract the payload from fx_graph_runnable entries
         fx_graph_runnable_payload = self.buffer.getvalue().strip()
-        
+
         # Verify that we captured fx_graph_runnable payload
-        self.assertTrue(len(fx_graph_runnable_payload) > 0, "Should have captured fx_graph_runnable payload")
-        
+        self.assertTrue(
+            len(fx_graph_runnable_payload) > 0,
+            "Should have captured fx_graph_runnable payload",
+        )
+
         # The payload should contain FX graph code
-        self.assertIn("def forward", fx_graph_runnable_payload, "Payload should contain FX graph forward method")
-        
+        self.assertIn(
+            "def forward",
+            fx_graph_runnable_payload,
+            "Payload should contain FX graph forward method",
+        )
+
         # Run the fx_graph_runnable_payload directly in a subprocess since it's self-contained
         # Write the payload directly to a temporary file and execute it
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py') as temp_file:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py") as temp_file:
             temp_file.write(fx_graph_runnable_payload)
             temp_file.flush()  # Ensure content is written to disk
-            
+
             # Run the payload directly in a subprocess
             result = subprocess.run(
                 [sys.executable, temp_file.name],
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=30,
             )
-            
+
             # Verify the subprocess executed successfully (payload is self-contained)
-            self.assertEqual(result.returncode, 0, f"Subprocess failed with error: {result.stderr}")
+            self.assertEqual(
+                result.returncode, 0, f"Subprocess failed with error: {result.stderr}"
+            )
 
 
 if __name__ == "__main__":
