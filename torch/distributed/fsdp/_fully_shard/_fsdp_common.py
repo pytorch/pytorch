@@ -26,9 +26,9 @@ if torch._running_with_deploy():
 else:
 
     def detect_compiled_autograd():
-        assert not torch.compiler.is_compiling(), (
-            "`detect_compiled_autograd()` is designed to be called in eager mode"
-        )
+        assert (
+            not torch.compiler.is_compiling()
+        ), "`detect_compiled_autograd()` is designed to be called in eager mode"
         global _compiled_autograd_enabled
         import torch._dynamo.compiled_autograd as ca
 
@@ -118,6 +118,13 @@ def _get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Si
     return torch.Size([padded_dim0]) + tensor_size[1:]
 
 
+def _get_2d_dim0_padded_size(
+    tensor_size: torch.Size, dim0_factor: int, dim0_2d_factor: int
+) -> torch.Size:
+    padded_dim0 = math.ceil(tensor_size[0] / dim0_factor / dim0_2d_factor) * dim0_factor
+    return torch.Size([padded_dim0]) + tensor_size[1:]
+
+
 def _chunk_with_empty(
     tensor: torch.Tensor, num_chunks: int, dim: int
 ) -> list[torch.Tensor]:
@@ -127,12 +134,34 @@ def _chunk_with_empty(
     return chunks
 
 
+def _2d_chunk_with_empty(
+    tensor: torch.Tensor, num_1d: int, num_2d: int, dim: int
+) -> list[torch.Tensor]:
+    num_chunks = num_1d * num_2d
+    chunks = list(torch.chunk(tensor, num_chunks, dim=dim))
+    while len(chunks) < num_chunks:
+        chunks.append(chunks[0].new_empty(0))
+    half_shard_chunks = []
+    for i in range(num_1d):
+        half_shard_chunks.append(
+            torch.cat(chunks[i * num_2d : (i + 1) * num_2d], dim=0)
+        )
+    return half_shard_chunks
+
+
 def _get_dim_chunked_size(
     chunk: torch.Tensor, unchunked_size: torch.Size, dim: int
 ) -> torch.Size:
     if chunk.numel() > 0:
         return chunk.size()
     # For 0 numel, we need to preserve nonzero-sized dims for DTensor APIs
+    print(
+        "inside _get_dim_chunked_size: ",
+        torch.distributed.get_rank(),
+        unchunked_size[:dim],
+        torch.Size([0]),
+        unchunked_size[dim + 1 :],
+    )
     return unchunked_size[:dim] + torch.Size([0]) + unchunked_size[dim + 1 :]
 
 

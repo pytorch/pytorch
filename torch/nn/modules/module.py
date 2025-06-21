@@ -8,7 +8,6 @@ import weakref
 from collections import namedtuple, OrderedDict
 from collections.abc import Iterator, Mapping
 from typing import Any, Callable, Optional, overload, TypeVar, Union
-from typing_extensions import Self
 
 import torch
 from torch import device, dtype, Tensor
@@ -16,6 +15,7 @@ from torch._prims_common import DeviceLikeType
 from torch.nn.parameter import Buffer, Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.hooks import BackwardHook, RemovableHandle
+from typing_extensions import Self
 
 
 __all__ = [
@@ -2166,19 +2166,12 @@ class Module:
 
     @overload
     def state_dict(
-        self,
-        *,
-        destination: T_destination,
-        prefix: str = ...,
-        keep_vars: bool = ...,
+        self, *, destination: T_destination, prefix: str = ..., keep_vars: bool = ...
     ) -> T_destination: ...
 
     @overload
     def state_dict(
-        self,
-        *,
-        prefix: str = ...,
-        keep_vars: bool = ...,
+        self, *, prefix: str = ..., keep_vars: bool = ...
     ) -> dict[str, Any]: ...
 
     # TODO: Change `*args` to `*` and remove the corresponding warning in docs when BC allows.

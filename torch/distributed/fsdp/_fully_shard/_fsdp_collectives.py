@@ -336,6 +336,8 @@ def foreach_all_gather_copy_out(
 
     if len(non_inference_outs) > 0:
         with torch.autograd._unsafe_preserve_version_counter(tuple(non_inference_outs)):
+            if all_gather_output.dtype != out[0].dtype:
+                all_gather_output = all_gather_output.to(out[0].dtype)
             torch.ops.fsdp.split_with_sizes_copy(
                 all_gather_output, all_gather_input_split_sizes, dim=1, out=out
             )
@@ -421,16 +423,18 @@ def foreach_reduce(
         )
     )
     world_size = reduce_scatter_group.size()
+    all_reduce_world_size = all_reduce_group.size()
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
             continue
-        assert unsharded_grad.size(shard_dim) % world_size == 0, (
-            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
-        )
+        assert (
+            unsharded_grad.size(shard_dim) % world_size == 0
+        ), f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
         chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
         unsharded_grads[i] = torch.cat(chunks, dim=0)
     padded_unsharded_sizes = tuple(
-        _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
+        _get_dim0_padded_size(grad.size(), world_size * all_reduce_world_size)
+        for grad in unsharded_grads
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
@@ -486,11 +490,37 @@ def foreach_reduce(
             post_reduce_stream = all_reduce_stream
             all_reduce_stream.wait_stream(reduce_scatter_stream)
             with device_handle.stream(all_reduce_stream):
+                """
                 dist.all_reduce(
                     reduce_output,
                     group=all_reduce_group,
                     op=all_reduce_op,
                 )
+                all_reduce_input = reduce_output
+                all_reduce_event = all_reduce_stream.record_event()
+                """
+                all_reduce_input_numel = reduce_scatter_output_numel
+                all_reduce_output_numel = (
+                    all_reduce_input_numel // all_reduce_world_size
+                )
+                all_reduce_input = torch.empty(
+                    (all_reduce_input_numel,), dtype=reduce_dtype, device=device
+                )
+                device_handle = _get_device_handle(device.type)
+                foreach_reduce_scatter_copy_in(
+                    [reduce_output], all_reduce_input, all_reduce_world_size
+                )
+                all_reduce_current_stream = device_handle.current_stream()
+                all_reduce_stream.wait_stream(all_reduce_current_stream)
+                reduce_output_buff = reduce_output.new_empty((all_reduce_output_numel,))
+                _div_if_needed(reduce_output_buff, predivide_factor)
+                dist.reduce_scatter_tensor(
+                    output=reduce_output_buff,  # reduce_output / wolrd_size
+                    input=reduce_output,
+                    group=all_reduce_group,
+                    op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
+                )
+                reduce_output = reduce_output_buff
                 all_reduce_input = reduce_output
                 all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops in reduce_scatter stream
@@ -515,9 +545,19 @@ def foreach_reduce(
         ):
             # Assume even sharding for Shard(i), i > 0; otherwise would require
             # copy-out for contiguous strides
+            """
+            if all_reduce_group is not None:
+                size_dim = len(fsdp_param.sharded_size)
+                size = [fsdp_param.sharded_size[0] // all_reduce_group.size()]
+                for i in range(1, size_dim):
+                    size.append(fsdp_param.sharded_size[i])
+                size = torch.Size(size)
+            else:
+                size = fsdp_param.sharded_size
+            """
             new_sharded_grad = torch.as_strided(
                 reduce_output,
-                size=fsdp_param.sharded_size,
+                size=fsdp_param.fully_sharded_size,
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
             )
@@ -541,17 +581,33 @@ def foreach_reduce(
                 assert isinstance(fsdp_param.sharded_param.grad, DTensor)
                 fsdp_param.sharded_param.grad._local_tensor += new_sharded_grad
             else:
-                new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(
-                    new_sharded_grad
+                from ._fsdp_common import _from_local_no_grad
+
+                new_sharded_dtensor_grad = _from_local_no_grad(
+                    new_sharded_grad, fsdp_param._sharding_spec
                 )
-                fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
+                if (
+                    hasattr(fsdp_param, "sharded_param_fully_shard")
+                    and fsdp_param.sharded_param_fully_shard.dtype
+                    != new_sharded_dtensor_grad.dtype
+                ):
+                    fsdp_param.sharded_param_fully_shard.grad = (
+                        new_sharded_dtensor_grad.to(
+                            fsdp_param.sharded_param_fully_shard.dtype
+                        )
+                    )
+                else:
+                    fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad
+                fsdp_param._setattr_on_modules(fsdp_param.sharded_param_fully_shard)
             if not compiled_autograd_enabled():
                 for hook in (
                     getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
                     or {}
                 ).values():
                     hook(fsdp_param.sharded_param)
-            padded_sharded_numel = padded_unsharded_size.numel() // world_size
+            padded_sharded_numel = (
+                padded_unsharded_size.numel() // world_size // all_reduce_group.size()
+            )
             flat_grad_offset += padded_sharded_numel
         post_reduce_event = post_reduce_stream.record_event()
     # The RS output is allocated in the RS stream and used in the default
