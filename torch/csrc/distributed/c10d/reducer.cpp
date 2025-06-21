@@ -23,6 +23,10 @@
 #include <utility>
 
 namespace c10d {
+
+using ParamIndices = std::vector<size_t>;
+using BucketAssignment = std::vector<ParamIndices>;
+
 namespace {
 
 constexpr int kUnsetDivFactor = -1;
@@ -36,6 +40,12 @@ constexpr int kUnsetDivFactor = -1;
     TORCH_CHECK(false, ##__VA_ARGS__);                \
   }
 
+#define MAYBE_REDUCER_CHECK(cond, logger_, ...)          \
+  if ((logger_).has_value()) {                           \
+    REDUCER_CHECK(cond, (logger_).value(), __VA_ARGS__); \
+  } else {                                               \
+    TORCH_CHECK(cond, ##__VA_ARGS__);                    \
+  }
 } // namespace
 
 C10_DEFINE_TYPED_REGISTRY(
@@ -1080,8 +1090,7 @@ void Reducer::install_futures(
   }
 }
 
-void Reducer::initialize_buckets(
-    std::vector<std::vector<size_t>> bucket_indices) {
+void Reducer::initialize_buckets(BucketAssignment&& _bucket_indices) {
   // If initialize_buckets is called inside DDP constructor, then
   // it does not matter rpc context ptr is nullptr or not, as grad
   // will not be mutated.
@@ -1095,6 +1104,7 @@ void Reducer::initialize_buckets(
   this->rpc_context_.set(ThreadLocalDistAutogradContext::getContextPtr());
 #endif
 
+  auto bucket_indices = std::move(_bucket_indices);
   // This shouldn't be called if we're expecting autograd hooks to fire.
   REDUCER_CHECK(
       !expect_autograd_hooks_,
@@ -1781,8 +1791,7 @@ void Reducer::RpcContext::set(ContextPtr&& new_context_ptr) {
 }
 #endif
 
-void Reducer::sync_bucket_indices(
-    std::vector<std::vector<size_t>>& bucket_indices) {
+void Reducer::sync_bucket_indices(BucketAssignment& bucket_indices) {
   auto num_buckets = bucket_indices.size();
   std::vector<size_t> bucket_sizes;
   bucket_sizes.reserve(num_buckets);
@@ -2161,7 +2170,7 @@ inline bool operator==(const BucketKey& lhs, const BucketKey& rhs) {
 
 } // namespace
 
-std::tuple<std::vector<std::vector<size_t>>, std::vector<size_t>>
+std::tuple<BucketAssignment, std::vector<size_t>>
 compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size_limits,
@@ -2198,11 +2207,7 @@ compute_bucket_assignment_by_size(
   for (const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
     auto msg = std::string("No support for sparse tensors.");
-    if (logger.has_value()) {
-      REDUCER_CHECK(!tensor.is_sparse(), logger.value(), msg);
-    } else {
-      TORCH_CHECK(!tensor.is_sparse(), msg);
-    }
+    MAYBE_REDUCER_CHECK(!tensor.is_sparse(), logger, msg);
 
     // when tensor_indices is empty, the index of tensors[i] assigned to
     // bucket is i, otherwise the tensor index is tensor_indices[i].
@@ -2276,7 +2281,7 @@ compute_bucket_assignment_by_size(
 
   // Return bucket indices and size limits as separate entries in tuple, as some
   // APIs only need to consume bucket indices.
-  std::vector<std::vector<size_t>> bucket_indices;
+  BucketAssignment bucket_indices;
   bucket_indices.reserve(result.size());
   std::vector<size_t> per_bucket_size_limits;
   per_bucket_size_limits.reserve(result.size());
@@ -2377,11 +2382,7 @@ void verify_params_across_processes(
           " with sizes ",
           t.sizes(),
           " appears not to match sizes of the same param in process 0.");
-      if (logger.has_value()) {
-        REDUCER_CHECK(sz == control_accessor[i++], logger.value(), msg)
-      } else {
-        TORCH_CHECK(sz == control_accessor[i++], msg)
-      }
+      MAYBE_REDUCER_CHECK(sz == control_accessor[i++], logger, msg)
     }
     for (const auto& str : t.strides()) {
       auto msg = c10::str(
@@ -2391,11 +2392,7 @@ void verify_params_across_processes(
           " with sizes ",
           t.sizes(),
           " appears not to match strides of the same param in process 0.");
-      if (logger.has_value()) {
-        REDUCER_CHECK(str == control_accessor[i++], logger.value(), msg)
-      } else {
-        TORCH_CHECK(str == control_accessor[i++], msg)
-      }
+      MAYBE_REDUCER_CHECK(str == control_accessor[i++], logger, msg)
     }
   }
 }

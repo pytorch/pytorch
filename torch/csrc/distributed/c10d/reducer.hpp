@@ -67,7 +67,7 @@ class TORCH_API Reducer {
   // which is specified by a list of indices in the bucket's `variables` list.
   // This function performs validation that the variables within a bucket
   // all live on the same device and have the same dimensionality.
-  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
+  void initialize_buckets(std::vector<std::vector<size_t>>&& bucket_indices);
 
   void autograd_hook(size_t index);
 
