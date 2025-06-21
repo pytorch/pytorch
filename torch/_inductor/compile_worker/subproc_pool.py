@@ -23,6 +23,9 @@ from typing_extensions import Never, ParamSpec
 import torch._thread_safe_fork  # noqa: F401
 from torch._inductor import config
 from torch._inductor.codecache import torch_key
+from torch._inductor.compile_worker.tracked_process_pool import (
+    TrackedProcessPoolExecutor,
+)
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.utils import get_ld_library_path
 
@@ -352,7 +355,8 @@ class SubprocMain:
     def _start_pool(self) -> None:
         if self.pool is not None:
             return
-        self.pool = ProcessPoolExecutor(
+
+        self.pool = TrackedProcessPoolExecutor(
             self.nprocs,
             mp_context=multiprocessing.get_context(self.kind.value),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
