@@ -227,3 +227,25 @@ def call_accumulate_grad(
         [grad], variable, variable.grad, has_post_hooks
     )
     variable.grad = updated_grad[0]
+
+
+def wrap_inline_with_set_fullgraph(
+    fn: Callable[_P, _R], fullgraph: bool
+) -> Callable[_P, _R]:
+    # NB: need multiple definitions in order to prevent `fullgraph` from
+    # being a freevar of wrapper
+    if fullgraph:
+
+        @functools.wraps(fn)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with torch._dynamo.set_fullgraph(True):
+                return fn(*args, **kwargs)
+
+    else:
+
+        @functools.wraps(fn)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with torch._dynamo.set_fullgraph(False):
+                return fn(*args, **kwargs)
+
+    return wrapper
