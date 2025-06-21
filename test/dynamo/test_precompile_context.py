@@ -8,7 +8,6 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import (
     BundledAOTAutogradCacheArtifact,
-    BundledAOTAutogradCacheEntry,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_triton
