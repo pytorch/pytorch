@@ -570,7 +570,7 @@ def build_deps():
         report(
             'Finished running cmake. Run "ccmake build" or '
             '"cmake-gui build" to adjust build options and '
-            '"python setup.py install" to build.'
+            '"python -m pip install --no-build-isolation ." to build.'
         )
         sys.exit()
 
@@ -1183,11 +1183,11 @@ build_update_message = """
     It is no longer necessary to use the 'build' or 'rebuild' targets
 
     To install:
-      $ python setup.py install
+      $ python -m pip install --no-build-isolation .
     To develop locally:
-      $ python setup.py develop
+      $ python -m pip install --no-build-isolation -e .
     To force cmake to re-generate native build files (off by default):
-      $ CMAKE_FRESH=1 python setup.py develop
+      $ CMAKE_FRESH=1 python -m pip install --no-build-isolation -e .
 """
 
 
