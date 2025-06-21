@@ -2266,7 +2266,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     candidates,
                     name,
                     inputs_key,
-                    autotune,
+                    lambda choices: autotune(choices, hint_override=hint_override),
                     hint_override=hint_override
                 )
                 choices = self.prune_choices_postscreen(
@@ -2280,9 +2280,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 choices,
                 name,
                 inputs_key,
-                autotune,
+                lambda choices: autotune(choices, hint_override=hint_override),
                 hint_override=hint_override
             )
+            print(f"AUTO TUNING WITH HINT OVERRIDE {hint_override}")
 
             autotune_elapse = time.time() - autotune_start_ts
             log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
@@ -2593,7 +2594,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # de-duplicate args
         unique_example_inputs = {
-            x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
+            x.get_name(): input_gen_fns.get(i, lambda x: cls.benchmark_example_value(x, hint_override=hint_override))(x)
             for i, x in enumerate(input_nodes)
         }
         example_inputs = list(unique_example_inputs.values())
@@ -2736,6 +2737,7 @@ class AlgorithmSelectorCache(PersistentCache):
         inputs = cls.get_inputs(
             choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
         )
+        print([a.shape for a in inputs.triton.input_tensors])
         return cls.benchmark_choices(choices, inputs)
 
     @classmethod
@@ -3046,7 +3048,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
     @staticmethod
-    def benchmark_example_value(node):
+    def benchmark_example_value(node, hint_override: Optional[int] = None):
         """
         Convert an ir.Buffer into a concrete torch.Tensor we can use for
         benchmarking.
@@ -3065,10 +3067,12 @@ class AlgorithmSelectorCache(PersistentCache):
             V.graph.sizevars.size_hints(
                 node.get_size(),
                 fallback=config.unbacked_symint_fallback,
+                hint_override=hint_override,
             ),
             V.graph.sizevars.size_hints(
                 node.get_stride(),
                 fallback=config.unbacked_symint_fallback,
+                hint_override=hint_override,
             ),
             node.get_device(),
             node.get_dtype(),
@@ -3076,6 +3080,7 @@ class AlgorithmSelectorCache(PersistentCache):
             V.graph.sizevars.size_hints(
                 V.graph.get_allocation_size(node),
                 fallback=config.unbacked_symint_fallback,
+                hint_override=hint_override,
             ),
         )
 
