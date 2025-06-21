@@ -203,7 +203,7 @@ def _strip_root(x):
 
 def _rewrite_tracepoint_node(gm: torch.fx.GraphModule):
     """
-    In-place modifiy input graph module by replacing the export tracepoint with a new node
+    In-place modify input graph module by replacing the export tracepoint with a new node
     that has the same target and args, but with the _export_root stripped from path.
     """
     for node in gm.graph.nodes:
@@ -261,7 +261,7 @@ def _extract_fake_inputs(gm, args, kwargs):
 
     # We get both because now we might have a combination of symint and tensor
     # inputs, and we want to check that the shape env is consistent between
-    # both. Unforunately we can't see what fake mode is attached to the shape
+    # both. Unfortunately we can't see what fake mode is attached to the shape
     # env, then we can just compare fake modes.
     detected_fake_mode = detect_fake_mode(fake_inps + fake_vals)
     detected_shape_env = detect_shape_env(fake_inps + fake_vals)
@@ -674,8 +674,8 @@ def _restore_state_dict(
     Restores the state dict of the traced module to that of the original module.
     """
     param_buffer_table = _get_param_buffer_mapping(original_module, traced_module)
-    # Since the graph module is flattened (no module heirarchy), we
-    # need to noramlize the module by replacing "." with "_". If we
+    # Since the graph module is flattened (no module hierarchy), we
+    # need to normalize the module by replacing "." with "_". If we
     # don't, it will try to save the weight to a submodule which no
     # longer exists.
     for name, fqn in param_buffer_table.items():
@@ -1250,7 +1250,7 @@ def _get_module_call_graph(
             outputs=[],
             in_spec=specs["in_spec"],
             out_spec=specs["out_spec"],
-            forward_arg_names=None,  # we only propage forward_arg_names for the top level module
+            forward_arg_names=None,  # we only propagate forward_arg_names for the top level module
         )
 
     if len(preserve_module_call_signature) > 0:

@@ -2003,7 +2003,7 @@ def is_tensor_like(inp):
 class TorchFunctionMode:
     """
     A ``TorchFunctionMode`` allows you to override the meaning of all
-    ``__torch_function__`` overrideable functions within a dynamic scope,
+    ``__torch_function__`` overridable functions within a dynamic scope,
     without having to actually create a tensor subclass or manually
     monkey-patch functions in the PyTorch API.  Some common situations
     where you should use a mode:
