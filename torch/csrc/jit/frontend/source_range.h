@@ -313,6 +313,7 @@ struct TORCH_API StringCordView {
   IteratorImpl end_impl() const {
     return IteratorImpl(this, pieces_.size(), 0, 0);
   }
+  IteratorImpl iter_impl_for_pos(size_t pos) const;
   std::vector<std::string_view> pieces_;
   std::vector<size_t> accumulated_sizes_;
   std::vector<std::shared_ptr<std::string>> owned_strings_;

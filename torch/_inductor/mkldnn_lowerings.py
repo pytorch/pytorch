@@ -6,7 +6,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor.kernel.mm_common import mm_args
 
-from . import ir
+from . import config, ir
 from .codegen.cpp_gemm_template import CppGemmTemplate
 from .codegen.cpp_grouped_gemm_template import CppGroupedGemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
@@ -25,7 +25,7 @@ from .select_algorithm import (
     ChoiceCaller,
     ExternKernelChoice,
 )
-from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotune
+from .utils import use_aten_gemm_kernels, use_cpp_gemm_template
 from .virtualized import ops, OpsValue, V
 
 
@@ -40,7 +40,10 @@ def create_int8_compensation(
     weight_compens = None
     x_w_scale = None
     if all(
-        isinstance(item, ir.TensorBox) and item.get_name() in V.graph.constants
+        isinstance(item, ir.TensorBox)
+        and item.get_name() in V.graph.constants
+        and hasattr(item.data, "data")
+        and isinstance(item.data.data, ir.ConstantBuffer)
         for item in [x_scale, x_zp, w_scale]
     ):
         use_int8_fast_compensation_path = True
@@ -136,7 +139,7 @@ def grouped_gemm_lowering(
         x = view(x, [-1, x_size[-1]])
     num_gemm = len(w)
 
-    assert use_max_autotune()
+    assert config.max_autotune or config.max_autotune_gemm
     b = [bias if bias is None else ir.ExternKernel.realize_input(bias) for bias in b]
 
     choices: list[ChoiceCaller] = []
@@ -146,7 +149,7 @@ def grouped_gemm_lowering(
         has_bias=[bias is not None for bias in b],
         trans_w=True,
         epilogue_creator=None,
-        act_mapping={num: x for num in range(num_gemm)},
+        act_mapping=dict.fromkeys(range(num_gemm), x),
     )
 
     input_nodes = [x, *w]
@@ -338,7 +341,7 @@ def register_onednn_fusion_ops():
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
             choices: list[ChoiceCaller] = []
-            if use_max_autotune():
+            if config.max_autotune or config.max_autotune_gemm:
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w = mm_args(x, transposed_w, layout=layout)
                 if use_cpp_gemm_template(layout, x, transposed_w):
@@ -401,7 +404,7 @@ def register_onednn_fusion_ops():
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
             choices: list[ChoiceCaller] = []
-            if use_max_autotune():
+            if config.max_autotune or config.max_autotune_gemm:
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w, y = mm_args(
                     x, transposed_w, y, layout=layout
@@ -731,7 +734,7 @@ def register_onednn_fusion_ops():
             bias_dtype = None if bias is None else bias.get_dtype()
             choices: list[ChoiceCaller] = []
 
-            if use_max_autotune():
+            if config.max_autotune or config.max_autotune_gemm:
                 *_, layout, x, packed_weight = mm_args(
                     x, packed_weight, layout=layout, out_dtype=output_dtype
                 )
@@ -1049,8 +1052,8 @@ def register_onednn_fusion_ops():
             bias_dtype = bias.get_dtype() if bias is not None else None
             choices: list[ChoiceCaller] = []
             if (
-                use_max_autotune() and binary_attr == "add"
-            ):  # <TODO> Support inplace sum fusion
+                config.max_autotune or config.max_autotune_gemm
+            ) and binary_attr == "add":  # <TODO> Support inplace sum fusion
                 *_, layout, x, packed_weight, x2 = mm_args(
                     x, packed_weight, x2, layout=layout, out_dtype=output_dtype
                 )
@@ -1299,7 +1302,7 @@ def register_onednn_fusion_ops():
                 layout=None,
             ):
                 choices: list[ChoiceCaller] = []
-                if use_max_autotune():
+                if config.max_autotune or config.max_autotune_gemm:
                     transposed_w = permute(orig_w, [1, 0])
                     *_, layout, x, transposed_w = mm_args(
                         x, transposed_w, layout=layout

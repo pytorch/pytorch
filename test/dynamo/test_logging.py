@@ -169,6 +169,22 @@ class LoggingTests(LoggingTestCase):
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
         self.assertEqual(len([r for r in records if ".__output_code" in r.name]), 0)
 
+    @make_logging_test(hierarchical_compile=True)
+    def test_hierarchical_compile(self, records):
+        from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+
+        @mark_compile_region
+        def gn(x):
+            return x * 2
+
+        def fn(x):
+            return gn(x)
+
+        fn_opt = torch.compile(fn, backend="inductor")
+        fn_opt(torch.ones(1000, 1000))
+        fn_opt(torch.ones(1000, 1000))
+        self.assertGreater(len(records), 0)
+
     @make_logging_test()
     def test_dynamo_error(self, records):
         try:
@@ -191,7 +207,7 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 26, inductor=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(3, 28, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 10, inductor=logging.INFO)
 
     @make_logging_test()
@@ -612,7 +628,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         fn_opt = torch.compile(f, backend="eager")
         fn_opt(torch.randn(3, 3))
 
-        self.assertEqual(len(records), 4)
+        self.assertEqual(len(records), 3)
         messages = [
             "\n".join(record.getMessage().split("\n")[-2:]) for record in records
         ]
@@ -636,12 +652,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         #     return g(g(x))
         #            ~^^^^^^""",
         # )
-        self.assertExpectedInline(
-            messages[3],
-            """\
-            return x * 2
-                   ~~^~~""",
-        )
 
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
@@ -716,6 +726,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
+| +- __SHAPE_GUARD__: torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None  # #:# in #
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
 +- __SHAPE_GUARD__: L['y'].size()[0] == L['z'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
 +- __SHAPE_GUARD__: ((2*L['z'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
@@ -734,6 +745,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
+| +- __SHAPE_GUARD__: torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None  # #:# in #
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # #:# in #
 +- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
         )
@@ -753,6 +765,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
+| +- __SHAPE_GUARD__: torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None  # #:# in #
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
 +- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
         )
@@ -785,7 +798,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
     @requires_cuda
     @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
     def test_autotuning(self, records):
-        with torch._inductor.utils.fresh_inductor_cache():
+        with torch._inductor.utils.fresh_cache():
 
             def f(a, b):
                 return torch.mm(a, b)
@@ -931,6 +944,7 @@ exclusions = {
     "aot_graphs_effects",
     "pre_grad_graphs",
     "post_grad_graphs",
+    "inductor_metrics",
     "ir_pre_fusion",
     "ir_post_fusion",
     "compiled_autograd",
@@ -940,6 +954,7 @@ exclusions = {
     "graph_breaks",
     "graph",
     "graph_code",
+    "graph_code_verbose",
     "graph_sizes",
     "ddp_graphs",
     "perf_hints",
@@ -958,8 +973,10 @@ exclusions = {
     "cudagraph_static_inputs",
     "benchmarking",
     "loop_ordering",
+    "loop_tiling",
     "autotuning",
     "graph_region_expansion",
+    "hierarchical_compile",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

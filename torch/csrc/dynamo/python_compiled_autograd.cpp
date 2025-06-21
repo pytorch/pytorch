@@ -286,17 +286,19 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
   void call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
-      const at::Tensor& grad) const override {
+      const at::Tensor& grad,
+      bool has_post_hooks) const override {
     py::handle handle(py_compiler);
-    py::object stuff = handle.attr("accumulate_grad")(variable, grad);
+    py::object stuff =
+        handle.attr("accumulate_grad")(variable, grad, has_post_hooks);
     TORCH_INTERNAL_ASSERT(stuff.is_none());
   }
 };
 
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
-  PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
+  PyObject* pyinput = PyList_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
-    PyTuple_SET_ITEM(pyinput, i, PyLong_FromSsize_t(inputs[i]));
+    PyList_SET_ITEM(pyinput, i, PyLong_FromSsize_t(inputs[i]));
   }
   return pyinput;
 }

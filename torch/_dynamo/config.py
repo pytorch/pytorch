@@ -286,7 +286,7 @@ allow_unspec_int_on_nn_module = False
 
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 3 modes.
-# 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
+# 1. "ddp_optimizer" (or True): with "ddp_optimizer", Dynamo will automatically
 # split model graph into pieces to match DDP bucket sizes to allow DDP
 # comm/compute overlap.
 # 2. "python_reducer" (experimental): this optimization requires the usage
@@ -324,6 +324,11 @@ skip_torchrec = True
 
 # Don't apply most trace_rules.py rules
 dont_skip_tracing = False
+
+# If True, enforce fullgraph=True - raise errors on graph break
+# NOTE: do not set manually - this is modified internally by Dynamo.
+# Use the fullgraph option of torch.compile instead.
+error_on_graph_break = False
 
 # No longer used
 optimize_ddp_lazy_compile = False
@@ -614,6 +619,10 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
 # Takes the function/module decorated with torch.compile and passes it through a
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.
 wrap_top_frame = False
+
+# Flag to record runtime overhead in profile traces. Used for pre-graph bytecode
+# and AOTAutograd runtime wrapper.
+record_runtime_overhead = True
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None

@@ -132,7 +132,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
       "can't convert ",
       c10::str(tensor.layout()).c_str(),
       " layout tensor to numpy. ",
-      "Use Tensor.dense() first.");
+      "Use Tensor.to_dense() first.");
 
   if (!force) {
     TORCH_CHECK_TYPE(
@@ -231,8 +231,13 @@ at::Tensor tensor_from_numpy(
   int ndim = PyArray_NDIM(array);
   auto sizes = to_aten_shape(ndim, PyArray_DIMS(array));
   auto strides = to_aten_shape(ndim, PyArray_STRIDES(array));
+  // This must go before the INCREF and element_size checks
+  // in case the dtype mapping doesn't exist and an exception is thrown
+  auto torch_dtype = numpy_dtype_to_aten(PyArray_TYPE(array));
   // NumPy strides use bytes. Torch strides use element counts.
-  auto element_size_in_bytes = PyArray_ITEMSIZE(array);
+  const auto element_size_in_bytes = PyArray_ITEMSIZE(array);
+  TORCH_CHECK(element_size_in_bytes > 0, "element_size must be 0");
+
   for (auto& stride : strides) {
     TORCH_CHECK_VALUE(
         stride % element_size_in_bytes == 0,
@@ -255,9 +260,6 @@ at::Tensor tensor_from_numpy(
       PyArray_EquivByteorders(PyArray_DESCR(array)->byteorder, NPY_NATIVE),
       "given numpy array has byte order different from the native byte order. "
       "Conversion between byte orders is currently not supported.");
-  // This has to go before the INCREF in case the dtype mapping doesn't
-  // exist and an exception is thrown
-  auto torch_dtype = numpy_dtype_to_aten(PyArray_TYPE(array));
   Py_INCREF(obj);
   return at::lift_fresh(at::from_blob(
       data_ptr,

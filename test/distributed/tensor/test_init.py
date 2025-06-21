@@ -2,7 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard, zeros
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard, zeros
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -94,7 +94,7 @@ class DTensorConstructorTest(DTensorTestBase):
     def test_ones(self):
         self._run_init_op(
             torch.ones,
-            torch.distributed._tensor.ones,
+            torch.distributed.tensor.ones,
             self.assertEqual,
             requires_grad=True,
         )
@@ -103,7 +103,7 @@ class DTensorConstructorTest(DTensorTestBase):
     def test_empty(self):
         self._run_init_op(
             torch.empty,
-            torch.distributed._tensor.empty,
+            torch.distributed.tensor.empty,
             lambda x, y: (x.shape == y.shape)
             and (x.dtype == y.dtype)
             and (x.layout == y.layout),
@@ -114,7 +114,7 @@ class DTensorConstructorTest(DTensorTestBase):
     def test_full(self):
         self._run_init_op(
             torch.full,
-            torch.distributed._tensor.full,
+            torch.distributed.tensor.full,
             self.assertEqual,
             123.4,
             requires_grad=True,
@@ -124,7 +124,7 @@ class DTensorConstructorTest(DTensorTestBase):
     def test_zeros(self):
         self._run_init_op(
             torch.zeros,
-            torch.distributed._tensor.zeros,
+            torch.distributed.tensor.zeros,
             self.assertEqual,
             requires_grad=True,
         )

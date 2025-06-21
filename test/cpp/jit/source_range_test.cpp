@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
 using namespace ::testing;
@@ -33,6 +35,12 @@ TEST(SourceRangeTest, test_substr) {
     auto x = view.substr(4, 10).str();
     EXPECT_EQ(x, view.str().substr(4, 10));
     EXPECT_EQ(view.substr(0, view.size()).str(), view.str());
+    for (const auto start : c10::irange(view.size())) {
+      for (const auto size : c10::irange(view.size())) {
+        EXPECT_EQ(
+            view.substr(start, size).str(), view.str().substr(start, size));
+      }
+    }
   }
 }
 

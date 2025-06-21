@@ -434,21 +434,11 @@ std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
 
 std::string getNcclVersion() {
   static std::string versionString = []() {
-    int version = 0;
+    auto [ncclMajor, ncclMinor, ncclPatch] = getNcclVersionTuple();
     std::string versionString;
-    ncclResult_t status = ncclGetVersion(&version);
-    // can't compute the version if call did not return successfully or version
-    // code < 100 (corresponding to 0.1.0)
-    if (status != ncclSuccess || version < 100) {
+    if (ncclMajor == 0 && ncclMinor == 0 && ncclPatch == 0) {
       versionString = "Unknown NCCL version";
     } else {
-      // NCCL changed version coding starting 2.9
-      const int majorBase = version < 2900 ? 1000 : 10000;
-      const int minorBase = 100;
-      auto ncclMajor = version / majorBase;
-      auto ncclMinor = (version % majorBase) / minorBase;
-      auto ncclPatch =
-          version % (ncclMajor * majorBase + ncclMinor * minorBase);
       versionString = std::to_string(ncclMajor) + "." +
           std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
 #ifdef NCCL_SUFFIX
@@ -462,6 +452,25 @@ std::string getNcclVersion() {
   }();
 
   return versionString;
+}
+
+std::tuple<int, int, int> getNcclVersionTuple() {
+  static std::tuple<int, int, int> versionTuple = []() {
+    int version = getNcclVersionNumber();
+    // can't compute the version if call did not return successfully or version
+    // code < 100 (corresponding to 0.1.0)
+    if (version < 100) {
+      return std::make_tuple(0, 0, 0);
+    }
+    // NCCL changed version coding starting 2.9
+    const int majorBase = version < 2900 ? 1000 : 10000;
+    const int minorBase = 100;
+    auto ncclMajor = version / majorBase;
+    auto ncclMinor = (version % majorBase) / minorBase;
+    auto ncclPatch = version % minorBase;
+    return std::make_tuple(ncclMajor, ncclMinor, ncclPatch);
+  }();
+  return versionTuple;
 }
 
 int getNcclVersionNumber() {
@@ -572,6 +581,17 @@ std::string getNcclErrorDetailStr(
       interpret = "Unknown NCCL error!";
   }
   return interpret + err;
+}
+
+// Helper function that gets the data type and issues error if not supported
+ncclDataType_t getNcclDataType(at::ScalarType type) {
+  auto it = ncclDataType.find(type);
+  TORCH_CHECK_WITH(
+      TypeError,
+      it != ncclDataType.end(),
+      "Input tensor data type is not supported for NCCL process group: ",
+      type);
+  return it->second;
 }
 
 // Dump proxyTrace log to stdout
