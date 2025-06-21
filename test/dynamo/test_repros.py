@@ -6927,6 +6927,18 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             fn(torch.ones(3))
 
+    def test_deleted_compile_wrapper_segfault(self):
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        # This calls cached_backend.clear() which removes any strong references
+        # to the callback
+        torch._dynamo.reset()
+        opt_fn(torch.randn(3))
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(3))  # possible segfault due to first opt_fn deletion
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
