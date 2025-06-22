@@ -1580,6 +1580,10 @@ TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
     env_var="PYTORCH_TEST_WITH_DYNAMO",
     implied_by_fn=lambda: TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER,
 )
+TEST_WITHOUT_COMPILED_AUTOGRAD: bool = TestEnvironment.def_flag(
+    "TEST_WITHOUT_COMPILED_AUTOGRAD",
+    env_var="PYTORCH_TEST_WITHOUT_COMPILED_AUTOGRAD",
+)
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
@@ -1594,7 +1598,7 @@ if TEST_WITH_TORCHDYNAMO:
         torch._inductor.config.fallback_random = True
     else:
         # only dynamo for now
-        torch._dynamo.config.compiled_autograd = True
+        torch._dynamo.config.compiled_autograd = not TEST_WITHOUT_COMPILED_AUTOGRAD
 
 
 # seems like this is only used in test/torch_np
@@ -5587,7 +5591,6 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n(    .+\n( +[~^]+ *\n)?)+', repl_frame, s)
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
-    s = re.sub(r'https:/([a-zA-Z0-9_.-]+)', r'https://\1', s)
     s = re.sub(file, _as_posix_path(os.path.basename(file)), s)
     s = re.sub(_as_posix_path(os.path.join(os.path.dirname(torch.__file__), "")), "", s)
     if suppress_suffix:
