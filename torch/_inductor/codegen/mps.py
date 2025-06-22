@@ -754,7 +754,16 @@ class MetalKernel(SIMDKernel):
                 self.body.splice(self.compute)
             self.body.writeline("}" * len(self.multistage_reduction_entry))
             # Invalidate variables instantiated inside loop
-            self.cse.invalidate(OrderedSet(self.cse.reduction_cache.values()))
+            # But results of reduction alive. Reduction cache values can be
+            # either CSEVariable or tuple of CSEVariables, in which case all
+            # variables in the tuple must be preserved
+            self.cse.invalidate(
+                OrderedSet(
+                    v
+                    for item in self.cse.reduction_cache.values()
+                    for v in (item if isinstance(item, tuple) else (item,))
+                )
+            )
             # And loop codegen
             while self.multistage_reduction_entry:
                 self.multistage_reduction_entry.pop().cache_clear()
