@@ -1,4 +1,7 @@
 coo
+Din
+Dout
+dOut
 fro
 froms
 hsa
@@ -10,4 +13,5 @@ rebuilt
 reenable
 reenabled
 requestor
+supercedes
 te
