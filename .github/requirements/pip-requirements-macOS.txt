@@ -1,5 +1,5 @@
 boto3==1.35.42
-cmake==3.25.*
+cmake==3.27.*
 expecttest==0.3.0
 fbscribelogger==0.1.7
 filelock==3.6.0

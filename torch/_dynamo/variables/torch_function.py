@@ -487,7 +487,7 @@ def _get_subclass_type_var(tx: "InstructionTranslator", var):
         return VariableTracker.build(tx, var.python_type(), source)
 
 
-def _is_attr_overidden(tx: "InstructionTranslator", var, name):
+def _is_attr_overridden(tx: "InstructionTranslator", var, name):
     import torch
 
     overridden = False
@@ -640,11 +640,11 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 ],
             )
 
-        # Handle non-overriden attributes inherited from `torch.Tensor`.
-        attr_is_overriden = _is_attr_overidden(tx, self, name)
+        # Handle non-overridden attributes inherited from `torch.Tensor`.
+        attr_is_overridden = _is_attr_overridden(tx, self, name)
         if (
             hasattr(torch.Tensor, name)
-            and not attr_is_overriden
+            and not attr_is_overridden
             and not inspect.ismethoddescriptor(getattr(torch.Tensor, name))
         ):
             args, kwargs = [self], {}
@@ -694,11 +694,11 @@ class TensorWithTFOverrideVariable(TensorVariable):
                         attr.__func__, self.class_type_var(tx), source=attr_source
                     )
 
-                elif attr_is_overriden:
+                elif attr_is_overridden:
                     unimplemented_v2(
-                        gb_type="Unsupported tensor subclass overriden attribute access",
+                        gb_type="Unsupported tensor subclass overridden attribute access",
                         context=f"{name}",
-                        explanation="`torch.compile` only support tracing certain types of overriden tensor subclass attributes",
+                        explanation="`torch.compile` only support tracing certain types of overridden tensor subclass attributes",
                         hints=[
                             f"Avoid accessing {name} of tensor subclass in torch.compile region",
                             f"Renaming attribute `{name}` of type {self.class_type}",
@@ -735,9 +735,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
         if can_dispatch_torch_function(tx, tf_args, kwargs):
             import torch
 
-            if _is_attr_overidden(tx, self, name):
+            if _is_attr_overridden(tx, self, name):
                 unimplemented_v2(
-                    gb_type="Tensor subclass overriden method call",
+                    gb_type="Tensor subclass overridden method call",
                     context=f"{name}",
                     explanation="`torch.compile` currently can't trace this",
                     hints=[
