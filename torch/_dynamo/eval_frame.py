@@ -904,15 +904,11 @@ class DisableContext(_TorchDynamoContext):
         def _fn(*args, **kwargs):
             prior = set_eval_frame(None)
             try:
-                prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
-                    _is_skip_guard_eval_unsafe_stance()
-                )
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
                 try:
                     return fn(*args, **kwargs)
                 finally:
                     set_eval_frame(None)
-                    set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
             finally:
                 _maybe_set_eval_frame(prior)
 
