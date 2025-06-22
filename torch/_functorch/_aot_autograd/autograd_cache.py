@@ -64,6 +64,7 @@ from torchgen.utils import dataclass_repr
 from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
+    CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     FunctionalizedRngRuntimeWrapper,
     post_compile,
@@ -619,6 +620,28 @@ class BundledCompiledBackward(
         return torch._dynamo.disable(compiled_bw, reason="do not trace generated backwards pass")  # type: ignore[return-value]
 
 
+@dataclass
+class SerializedGraphModule:
+    fn: Callable[[dict[Any, Any], str], torch.nn.Module]
+    args: tuple[Any, ...]
+
+    def __init__(self, gm: torch.fx.GraphModule):
+        self.fn, self.args = gm.__reduce__()
+
+    def deserialize(self) -> torch.fx.GraphModule:
+        gm = self.fn(*self.args)
+        assert isinstance(gm, torch.fx.GraphModule)
+        return gm
+
+
+def serialize_graph_module(gm: torch.fx.GraphModule) -> SerializedGraphModule:
+    # NOTE: mutates the graph module
+    gm.meta = {}
+    for node in gm.graph.nodes:
+        node.meta = {}
+    return SerializedGraphModule(gm)
+
+
 TForward = TypeVar("TForward", bound=InductorOutput)
 TBackward = TypeVar("TBackward", bound=GenericCompiledBackward)
 
@@ -671,6 +694,9 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
     sanitized_aot_config: AOTConfig
 
     guards_expr: Optional[str]
+
+    # Used by Compiled Autograd
+    serialized_bw_module: Optional[SerializedGraphModule]
 
     def pre_save(self):
         """
@@ -813,6 +839,12 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
 
         if needs_autograd:
             assert self.compiled_bw is not None
+
+            cached_lazy_backward = None
+            if self.serialized_bw_module is not None:
+                cached_lazy_backward = CachedAutogradLazyBackwardCompileInfo(
+                    self.serialized_bw_module.deserialize
+                )
             # This function is run on both cache miss and cache hit, either here
             # or in aot_dispatch_autograd. On a cache hit,
             # 1. the bw is already compiled
@@ -826,7 +858,7 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
                 self.compiled_bw.backward_state_indices,
                 disable_amp,
                 self.indices_of_inps_to_detach,
-                None,  # lazy_backward_info
+                cached_lazy_backward,
                 aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
@@ -1285,6 +1317,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
         guards_expr: Optional[str],
         backward_state_indices: Optional[list[int]],
         num_symints_saved_for_bw: Optional[int],
+        serialized_bw_module: Optional[SerializedGraphModule],
     ) -> GenericAOTAutogradCacheEntry:
         if config.bundled_autograd_cache:
             # Helper function to unwrap all the wrappers we added during aotdispatch
@@ -1321,6 +1354,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 backward_time_taken_ns=backward_time_taken_ns,
                 sanitized_aot_config=sanitized_aot_config,
                 guards_expr=guards_expr,
+                serialized_bw_module=serialized_bw_module,
             )
 
         else:
@@ -1365,4 +1399,5 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 backward_time_taken_ns=backward_time_taken_ns,
                 sanitized_aot_config=sanitized_aot_config,
                 guards_expr=guards_expr,
+                serialized_bw_module=serialized_bw_module,
             )
