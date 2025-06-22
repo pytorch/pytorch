@@ -997,6 +997,23 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 
+  // If deterministic mode is enabled, we need to disable the NVLS algorithm in
+  // NCCL.
+  // TODO: remove this once NVLS supports deterministic mode.
+  if (at::globalContext().deterministicAlgorithms()) {
+    // Check if user have already set NCCL_ALGO. If already set, leave it.
+    auto nccl_algo = c10::utils::get_env("NCCL_ALGO");
+    if (!nccl_algo.has_value()) {
+      LOG(INFO)
+          << "torch deterministic mode is enabled, "
+          << "disabling NVLS algorithm in NCCL which can lead to non-deterministic reduction.";
+      // Sorry we have to disable NVLS for all collectives, be it all-reduce
+      // or all-gather, because NCCL does not support per-collective
+      // algorithm selection today.
+      c10::utils::set_env("NCCL_ALGO", "^NVLS");
+    }
+  }
+
   // Initialize the heartbeat monitor/watchdog instance. This has to be done
   // before the corresponding thread is launched to avoid the error.
   heartbeatMonitor_ = std::make_unique<HeartbeatMonitor>(this);
@@ -1165,6 +1182,14 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
   // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
+  // TODO:
+  // if(pool->is_symmetric()) {
+  //   Allgather to verify len(mempool.snapshot.segments) matches across GPUs
+  //   Allgather to verify mempool.alloc_request_counter matches across GPUs
+  //   add alloc_request_counter per mempool (How many allocations a mempool has
+  //   served during its lifetime) this should guarantee pool is used in a
+  //   symmetric/SPMD manner
+  // }
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
@@ -1173,7 +1198,9 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<void*>(segmentInfo.address),
         segmentInfo.total_size,
-        /*errorOnRereg=*/false); // ignores reregistration error
+        /*errorOnRereg=*/false, // ignores reregistration error
+        /*window=*/pool->is_symmetric()); // whether to use NCCL symmetric
+                                          // memory
   }
 }
 
@@ -1204,7 +1231,8 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
+    ncclComm->deregisterSegment(
+        reinterpret_cast<void*>(segmentInfo.address), pool->is_symmetric());
   }
 }
 
