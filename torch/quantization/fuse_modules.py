@@ -18,5 +18,5 @@ from torch.ao.quantization.fuse_modules import (
     get_fuser_method,
 )
 
-# for backward compatibility
+# for backward compatiblity
 from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn, fuse_conv_bn_relu
