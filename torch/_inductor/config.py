@@ -497,7 +497,7 @@ coordinate_descent_search_radius = int(
 )
 
 # AutoHeuristic is a framework that allows one to collect data from autotuning, use the data to learn a heuristic, and
-# generate the learned heursitic to code which is shipped with the compiler
+# generate the learned heuristic to code which is shipped with the compiler
 # Specify a list of comma separated optimizations to collect data for
 autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
 # Specify a list of comma separated optimizations to use learned heuristics for
@@ -595,7 +595,7 @@ max_fusion_size = 64
 # how many nodes to attempt pairwise fusion with in a buffer group
 max_fusion_buffer_group_pairwise_attempts = 64
 
-# max number of inputs to generate cat as a pointwise op with masked laods
+# max number of inputs to generate cat as a pointwise op with masked loads
 max_pointwise_cat_inputs = 8
 
 # force concat to be generated as a pointwise op with masked loads
@@ -713,7 +713,7 @@ worker_suppress_logging: bool = Config(
     default=True,
 )
 
-# Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
+# Flags to turn on all_reduce fusion. These 2 flags should be automatically turned
 # on by DDP and should not be set by the users.
 _fuse_ddp_communication = False
 _fuse_ddp_bucket_size = 25
@@ -858,7 +858,7 @@ padding_alignment_bytes = 128
 # Pad too small stride may also cause perf loss. We may result in many tiny data blocks
 # with gaps in between. That causes less coalesced GPU memory access!
 #
-# Initially we pick 320 as the threshold since for alignement=16,
+# Initially we pick 320 as the threshold since for alignment=16,
 # that results in at most 5% memory cost.
 #
 # But later on we raise the threshold to 1024 to avoid interfere with persistent reduction.
@@ -958,7 +958,7 @@ enable_linear_binary_folding = (
 )
 
 
-# Adds NVTX annotations aroung training phases
+# Adds NVTX annotations around training phases
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
 
 # Enable caching codegen of triton templates.
@@ -1261,7 +1261,7 @@ class triton:
     codegen_upcast_to_fp32 = True
 
     # Whether persistent matmul kernels should be enabled this flag only has effect when on h100
-    # with a verison of triton new enough to support TMA
+    # with a version of triton new enough to support TMA
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
@@ -1321,7 +1321,7 @@ class aot_inductor:
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
 
-    # flag to force weight to be appened to the shared library and mmaped  by the runtime
+    # flag to force weight to be appended to the shared library and mapped by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
 
@@ -1669,7 +1669,7 @@ class trace:
     #    replace records with HTML-like labels"
     # and thus fail to generate a graph. So, let's give the user an option
     # to specify the shape attribute for the dot graph. For example, passing
-    # INDUCTOR_DOT_GRAPH_SHAPE_SVG = "none" would let us generate HTML-like lables
+    # INDUCTOR_DOT_GRAPH_SHAPE_SVG = "none" would let us generate HTML-like labels
     # to workaround the above failure.
     dot_graph_shape = os.environ.get("INDUCTOR_DOT_GRAPH_SHAPE_SVG", None)
 
