@@ -8,8 +8,10 @@ from unittest import skip
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.distributed._tensor.placement_types import (
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
     Partial,
     Placement,
     Replicate,
@@ -192,7 +194,9 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             op=torch.sigmoid,
         )
 
-    @skip("testing RNG based ops is broken: https://github.com/pytorch/tau/issues/494")
+    @skip(
+        "testing RNG based ops is broken: https://github.com/pytorch/PiPPy/issues/494"
+    )
     def test_dropout(self):
         device_mesh = self.build_device_mesh()
 

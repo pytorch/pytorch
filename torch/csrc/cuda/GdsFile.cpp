@@ -1,5 +1,6 @@
 #include <c10/util/error.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/cuda/GdsFile.h>
 #include <torch/csrc/utils/pybind.h>
 
 #if defined(USE_CUFILE)
@@ -90,8 +91,7 @@ void gds_deregister_buffer(const at::Storage& storage) {
 
 int64_t gds_register_handle(int fd) {
   CUfileDescr_t cf_descr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  CUfileHandle_t cf_handle;
+  CUfileHandle_t cf_handle{};
   memset((void*)&cf_descr, 0, sizeof(CUfileDescr_t));
   cf_descr.handle.fd = fd;
   cf_descr.type = CU_FILE_HANDLE_TYPE_OPAQUE_FD;

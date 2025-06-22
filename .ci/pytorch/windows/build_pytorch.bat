@@ -1,7 +1,7 @@
 @echo off
 
-:: This script parses args, installs required libraries (miniconda, MKL,
-:: Magma), and then delegates to cpu.bat, cuda80.bat, etc.
+:: This script parses args, installs required libraries (MKL, Magma, libuv)
+:: and then delegates to cpu.bat, cuda80.bat, etc.
 
 if not "%CUDA_VERSION%" == "" if not "%PYTORCH_BUILD_VERSION%" == "" if not "%PYTORCH_BUILD_NUMBER%" == "" goto env_end
 if "%~1"=="" goto arg_error
@@ -36,28 +36,18 @@ set DESIRED_PYTHON_PREFIX=py%DESIRED_PYTHON_PREFIX:;=;py%
 set SRC_DIR=%~dp0
 pushd %SRC_DIR%
 
-:: Install Miniconda3
-set "CONDA_HOME=%CD%\conda"
-set "tmp_conda=%CONDA_HOME%"
-set "miniconda_exe=%CD%\miniconda.exe"
-rmdir /s /q conda
-del miniconda.exe
-curl --retry 3 -k https://repo.anaconda.com/miniconda/Miniconda3-py311_23.9.0-0-Windows-x86_64.exe -o "%miniconda_exe%"
-start /wait "" "%miniconda_exe%" /S /InstallationType=JustMe /RegisterPython=0 /AddToPath=0 /D=%tmp_conda%
-if ERRORLEVEL 1 exit /b 1
 set "ORIG_PATH=%PATH%"
-set "PATH=%CONDA_HOME%;%CONDA_HOME%\scripts;%CONDA_HOME%\Library\bin;%PATH%"
 
-:: create a new conda environment and install packages
+:: setup build environment
 :try
 SET /A tries=3
 :loop
 IF %tries% LEQ 0 GOTO :exception
-call condaenv.bat
+call setup_build.bat
 IF %ERRORLEVEL% EQU 0 GOTO :done
 SET /A "tries=%tries%-1"
 :exception
-echo "Failed to create conda env"
+echo "Failed to setup build environment"
 exit /B 1
 :done
 
@@ -73,7 +63,7 @@ if "%DEBUG%" == "1" (
 if not "%CUDA_VERSION%" == "cpu" if not "%CUDA_VERSION%" == "xpu" (
     rmdir /s /q magma_%CUDA_PREFIX%_%BUILD_TYPE%
     del magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_%MAGMA_VERSION%_%CUDA_PREFIX%_%BUILD_TYPE%.7z -o magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_%MAGMA_VERSION%_%CUDA_PREFIX%_%BUILD_TYPE%.7z -o magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z %= @lint-ignore =%
     7z x -aoa magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z -omagma_%CUDA_PREFIX%_%BUILD_TYPE%
 )
 
@@ -107,19 +97,20 @@ set TH_BINARY_BUILD=1
 set INSTALL_TEST=0
 
 for %%v in (%DESIRED_PYTHON_PREFIX%) do (
-    :: Activate Python Environment
-    set PYTHON_PREFIX=%%v
-    set "CONDA_LIB_PATH=%CONDA_HOME%\envs\%%v\Library\bin"
+
+    :: Set Environment vars for the build
+    set "CMAKE_PREFIX_PATH=%CD%\Python\Library\;%PATH%"
+    set "PYTHON_LIB_PATH=%CD%\Python\Library\bin"
+
     if not "%ADDITIONAL_PATH%" == "" (
-        set "PATH=%ADDITIONAL_PATH%;%CONDA_HOME%\envs\%%v;%CONDA_HOME%\envs\%%v\scripts;%CONDA_HOME%\envs\%%v\Library\bin;%ORIG_PATH%"
-    ) else (
-        set "PATH=%CONDA_HOME%\envs\%%v;%CONDA_HOME%\envs\%%v\scripts;%CONDA_HOME%\envs\%%v\Library\bin;%ORIG_PATH%"
+        set "PATH=%ADDITIONAL_PATH%;%PATH%"
     )
+
     pip install ninja
     @setlocal
     :: Set Flags
     if not "%CUDA_VERSION%"=="cpu" if not "%CUDA_VERSION%" == "xpu" (
-        set MAGMA_HOME=%cd%\magma_%CUDA_PREFIX%_%BUILD_TYPE%
+        set "MAGMA_HOME=%cd%\magma_%CUDA_PREFIX%_%BUILD_TYPE%"
     )
     echo "Calling arch build script"
     call %CUDA_PREFIX%.bat

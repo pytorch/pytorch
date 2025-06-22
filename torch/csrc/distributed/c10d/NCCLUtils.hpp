@@ -13,6 +13,7 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/util/Exception.h>
 #include <nccl.h>
+#include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
 
@@ -62,8 +63,32 @@ static_assert(
 #define NCCL_HAS_COMM_REGISTER
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COMM_WINDOW_REGISTER
+#endif
+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
 #define NCCL_HAS_MEM_ALLOC
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 26, 0)
+#define NCCL_HAS_QOS
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 24, 0)
+#define NCCL_SUPPORTS_FP8
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COLLNET
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_CTA_POLICY
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_NVLS_CTAS
 #endif
 
 // Macro to throw on a non-successful NCCL return value.
@@ -180,8 +205,35 @@ static_assert(
 
 namespace c10d {
 
+// NCCL type typing
+static std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
+    {at::kChar, ncclInt8},
+    {at::kByte, ncclUint8},
+    {at::kFloat, ncclFloat},
+    {at::kDouble, ncclDouble},
+    {at::kInt, ncclInt32},
+    {at::kLong, ncclInt64},
+    {at::kHalf, ncclHalf},
+    {at::kBool, ncclUint8},
+#ifdef NCCL_SUPPORTS_FP8
+    {at::kFloat8_e5m2, ncclFloat8e5m2},
+    {at::kFloat8_e4m3fn, ncclFloat8e4m3},
+#else
+    {at::kFloat8_e5m2, ncclUint8},
+    {at::kFloat8_e4m3fn, ncclUint8},
+#endif
+    // NVIDIA GPUs does not support the UZ version standing for "no negative
+    // zero".  See https://onnx.ai/onnx/technical/float8.html
+    {at::kFloat8_e4m3fnuz, ncclUint8},
+    {at::kFloat8_e5m2fnuz, ncclUint8},
+#if HAS_NCCL_BF16_DATATYPE
+    {at::kBFloat16, ncclBfloat16},
+#endif // HAS_NCCL_BF16_DATATYPE
+};
+
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 TORCH_API std::string getNcclVersion();
+TORCH_API std::tuple<int, int, int> getNcclVersionTuple();
 TORCH_API int getNcclVersionNumber();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
 int nccl_nonblocking_timeout();
@@ -191,6 +243,9 @@ int nccl_nonblocking_timeout();
 TORCH_API std::string getNcclErrorDetailStr(
     ncclResult_t error,
     std::optional<std::string> processGroupFailureReason = std::nullopt);
+
+// Helper function that gets the data type and issues error if not supported
+ncclDataType_t getNcclDataType(at::ScalarType type);
 
 // RAII wrapper for NCCL communicator
 class NCCLComm {
@@ -290,9 +345,10 @@ class NCCLComm {
   ncclResult_t registerSegment(
       void* ptr,
       size_t size,
-      bool errorOnRereg = true);
+      bool errorOnRereg = true,
+      bool window = false);
 
-  ncclResult_t deregisterSegment(void* ptr);
+  ncclResult_t deregisterSegment(void* ptr, bool window = false);
 
   std::string repr() const;
 

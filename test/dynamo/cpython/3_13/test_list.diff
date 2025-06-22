@@ -1,0 +1,77 @@
+diff --git a/test/dynamo/cpython/3_13/test_list.py b/test/dynamo/cpython/3_13/test_list.py
+index 23ef902aa0b..30e69ff75bd 100644
+--- a/test/dynamo/cpython/3_13/test_list.py
++++ b/test/dynamo/cpython/3_13/test_list.py
+@@ -1,6 +1,57 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import sys
+ import textwrap
+-from test import list_tests
++import list_tests
+ from test.support import cpython_only
+ from test.support.script_helper import assert_python_ok
+ import pickle
+@@ -324,6 +375,7 @@ class ListTest(list_tests.CommonTest):
+             a.append(4)
+             self.assertEqual(list(it), [])
+ 
++    @unittest.skip("Fails on python <=3.13.2 and passes on >=3.13.3")
+     def test_deopt_from_append_list(self):
+         # gh-132011: it used to crash, because
+         # of `CALL_LIST_APPEND` specialization failure.
+@@ -345,4 +397,4 @@ class ListTest(list_tests.CommonTest):
+         self.assertEqual(rc, 0)
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

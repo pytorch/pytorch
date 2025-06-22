@@ -21,7 +21,7 @@
 namespace torch::jit {
 
 std::string typeString(py::handle h) {
-  return py::str(h.get_type().attr("__name__"));
+  return py::str(py::type::handle_of(h).attr("__name__"));
 }
 
 std::optional<StrongFunctionPtr> as_function(const py::object& obj) {

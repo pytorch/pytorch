@@ -201,12 +201,6 @@ num_guards_executed=0)
         finally:
             torch.set_default_device(None)
 
-    def test_data_ptr_match_guard(self):
-        foo = torch.tensor([1, 2, 3])
-        guard = guards.DATA_PTR_MATCH(foo, ["x.data_ptr() == foo.data_ptr()"])
-        self.assertTrue(guard(foo))
-        self.assertFalse(guard(torch.tensor([1, 2, 3])))
-
     def test_length_check_guard(self):
         foo = [1, 2, 3]
         guard = guards.LENGTH_CHECK(len(foo), ["len(x) == len(foo)"])
@@ -295,7 +289,15 @@ num_guards_executed=0)
         x = torch.randn(4, 4)
         size = list(x.size())
         stride = list(x.stride())
-        guard_manager.add_tensor_match_guard(x, size, stride, "x", ["check_tensor(x)"])
+        guard_manager.add_tensor_match_guard(
+            x,
+            size,
+            stride,
+            "x",
+            ["check_tensor(x)"],
+            type(x),
+            torch._C._dispatch_keys(x),
+        )
         self.assertTrue(guard_manager.check(x))
         self.assertTrue(guard_manager.check_verbose(x).result)
         self.assertTrue(guard_manager.check(torch.randn(4, 4)))

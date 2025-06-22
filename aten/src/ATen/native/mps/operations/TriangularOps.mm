@@ -37,7 +37,7 @@ TORCH_IMPL_FUNC(triu_mps_out)
   auto stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "triu_mps_out" + mps::getTensorsStringKey({self}) + ":" + std::to_string(k);
+    std::string key = "triu_mps_out" + mps::getTensorsStringKey({self}) + ":" + std::to_string(k);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* outputTensor = nil;
       auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
@@ -85,7 +85,7 @@ TORCH_IMPL_FUNC(tril_mps_out)
   auto stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "tril_mps_out" + mps::getTensorsStringKey({self}) + ":" + std::to_string(k);
+    std::string key = "tril_mps_out" + mps::getTensorsStringKey({self}) + ":" + std::to_string(k);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* outputTensor = nil;
 

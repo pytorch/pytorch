@@ -1680,7 +1680,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   return x;
 }
 
-/* The next function is taken from http://ab-initio.mit.edu/Faddeev */
+/* The next function is taken from http://ab-initio.mit.edu/faddeeva */
 
 /* Copyright (c) 2012 Massachusetts Institute of Technology
  *
