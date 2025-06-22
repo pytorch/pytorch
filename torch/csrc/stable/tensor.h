@@ -81,6 +81,16 @@ class Tensor {
     return numel;
   }
 
+  // note: this is a subset of the original TensorBase API. It takes no
+  // arguments whereas the original API takes in a kwarg of memory format.
+  // Here, we assume the default contiguous memory format.
+  bool is_contiguous() const {
+    bool is_contiguous;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_is_contiguous(ath_.get(), &is_contiguous));
+    return is_contiguous;
+  }
+
   int64_t stride(int64_t dim) const {
     int64_t stride;
     AOTI_TORCH_ERROR_CODE_CHECK(
