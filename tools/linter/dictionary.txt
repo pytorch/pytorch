@@ -25,5 +25,7 @@ reenable
 reenabled
 requestor
 ser'de
+ser'der
+ser'des
 supercedes
 te
