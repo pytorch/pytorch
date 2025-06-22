@@ -7058,6 +7058,11 @@ register_comm_lowerings()
 def prepare_softmax_online(x, dim):
     """
     Lowering inductor_prims.prepare_softmax_online to compute max/sum in one pass if no split is needed.
+
+    Note:
+        Currently, split reductions for online softmax are not supported. If a split is required,
+        Inductor will fall back to a less efficient path and emit a warning. See
+        https://github.com/pytorch/pytorch/issues/153241 for more details or to contribute.
     """
     kwargs = _make_reduction_inner(
         x, axis=dim, keepdims=True, dtype=None, override_return_dtype=None
@@ -7081,25 +7086,24 @@ def prepare_softmax_online(x, dim):
         return max_tensor, sum_tensor
     else:
         # Note: [Split online_softmax_reduce]
-        # We don't split reduction for online_softmax_reduce for now.
-        # On one hand, supporting split reduction makes things complex since
-        # the split out reuctions requires 2 inputs rather than one.
-        # On the other hand, during training the online_softmax_reduce should
-        # usually don't requires a split due to large batch size
-        # (more specifically batch size times sequence length).
-        # We should support split reduction if we find legit use cases to
-        # motivate the work.
-        #
-        # TODO: does inference need split online_softmax_reduce?
+        # Split reductions for online softmax are currently not implemented.
+        # Supporting this feature would require significant changes as split reductions
+        # require two inputs instead of one. During training, online_softmax_reduce typically
+        # does not require a split due to large batch*sequence sizes.
+        # If you have an inference use case that needs this, please comment on
+        # https://github.com/pytorch/pytorch/issues/153241.
+
+        # TODO: [Contributions Welcome] Support split reduction for online_softmax_reduce.
+        # See https://github.com/pytorch/pytorch/issues/153241 for discussion.
 
         warnings.warn(
             textwrap.dedent(
                 """
-            Online softmax is disabled on the fly since Inductor decides to
-            split the reduction. Cut an issue to PyTorch if this is an
-            important use case and you want to speed it up with online
-            softmax.
-            """
+                Online softmax is currently disabled when Inductor decides to split the reduction.
+                If you need this feature for your workload, please upvote or comment on
+                https://github.com/pytorch/pytorch/issues/153241 to help prioritize support.
+                Contributions are welcome!
+                """
             )
         )
         amax = reduce_amax(x, dim, keepdims=True)
