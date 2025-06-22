@@ -200,7 +200,7 @@ std::vector<uint8_t> HashStore::queuePop(const std::string& key, bool block) {
   }
 
   auto& queue = queues_[key];
-  TORCH_CHECK_WITH(DistQueueEmptyError, queue.size() > 0, "queue is empty");
+  TORCH_CHECK_WITH(DistQueueEmptyError, !queue.empty(), "queue is empty");
 
   auto val = queue.front();
   queue.pop_front();

@@ -184,7 +184,7 @@ def replicate(
                     # so setattr them as non-parameter attributes
                     setattr(replica, key, param_copy)
                     # expose the parameter for DDP
-                    replica._former_parameters[key] = param_copy
+                    replica._former_parameters[key] = param_copy  # type: ignore[operator, index]
         for key, buf in module._buffers.items():  # type: ignore[assignment]
             if buf is None:
                 for j in range(num_replicas):
