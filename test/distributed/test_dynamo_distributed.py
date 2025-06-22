@@ -1243,11 +1243,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "sleep_sec_TESTING_ONLY", 10)
     def test_asymmetric_compilation_with_fx_cache(self):
         from torch._dynamo.utils import counters
-        from torch._inductor.utils import fresh_inductor_cache
+        from torch._inductor.utils import fresh_cache
 
-        with fresh_inductor_cache(), _dynamo_dist_per_rank_init(
-            self.rank, self.world_size
-        ):
+        with fresh_cache(), _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
 
             device = f"cuda:{self.rank}"
@@ -1277,7 +1275,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             torch._dynamo.reset()
 
             if self.rank == 0:
-                with fresh_inductor_cache():
+                with fresh_cache():
                     f(x)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
