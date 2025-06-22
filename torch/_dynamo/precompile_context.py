@@ -108,8 +108,14 @@ class PrecompileContext(CacheArtifactManager):
         "mega" list
         """
         artifact = CacheArtifactFactory.encode_create(artifact_type, key, content)
+        # TODO: although this covers completely same artifacts, it's possible
+        # with AOTAutogradCacheEntries to have multiple artifacts whose keys
+        # (i.e. backend_ids) are different, but whose contents are equal.
+        # In those cases, it would be much better if we only serialize once instead
+        # of N times.
         if artifact in cls._seen_artifacts:
             return
+
         cls._new_cache_artifacts_by_key[key] = artifact
         cls._seen_artifacts.add(artifact)
 
