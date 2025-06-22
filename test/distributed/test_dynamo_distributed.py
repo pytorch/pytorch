@@ -25,6 +25,7 @@ from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import same
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
+from torch.compiler import set_enable_guard_collectives
 from torch.distributed._functional_collectives import _maybe_wrap_tensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import (
