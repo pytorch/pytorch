@@ -1177,7 +1177,6 @@ exclude_patterns = [
     'torch/distributed/tensor/**',
     'torch/[j-o]*/**',
     'torch/utils/**',
-    'torch/csrc/**',
     'torch/csrc/jit/**',
     'torch/csrc/jit/[a-o]*/**',
     'torch/csrc/[a-i]*/**',
