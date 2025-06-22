@@ -12,8 +12,12 @@ fro
 froms
 hsa
 nd
+nin
+nout
+NowNs
 optins
 OT
+overrideable
 ptd
 rebuild
 rebuilt
