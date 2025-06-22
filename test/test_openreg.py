@@ -107,6 +107,8 @@ class TestPrivateUse1(TestCase):
             x = torch.empty(4, 4, dtype=dtype, device="openreg")
             self.assertTrue(x.type() == str)
 
+    # Note that all dtype-d Tensor objects here are only for legacy reasons
+    # and should NOT be used.
     def test_backend_type_methods(self):
         # Tensor
         tensor_cpu = torch.randn([8]).float()

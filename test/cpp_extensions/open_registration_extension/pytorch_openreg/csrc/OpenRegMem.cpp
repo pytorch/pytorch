@@ -278,9 +278,12 @@ void quantize_tensor_per_tensor_affine_privateuse1(
 /* Notes:
  *
  * OpenReg is currently designed to simulate device memory through multiple
- * subprocesses. The data_ptr address of the Tensor in the main process is
- * invalid in the main process address space. All operations related to Tensor
- * memory access must be performed in the subprocess.
+ * subprocesses on purpose to ensure we don't mistakenly poke at the "device's
+ * memory" from the main process. And be able to simulate the same thing that
+ * happens with other accelerators: any metadata-only change is cpu-only
+ * (main process), any data change must go through to the device (other process)
+ * and any data transfer between the two is expensive (serializing the whole
+ * Tensor).
  *
  * Currently, for the efficiency of IPC, most operations are to pass the Tensor
  * metadata, and only a small number of operations involving copy will serialize
