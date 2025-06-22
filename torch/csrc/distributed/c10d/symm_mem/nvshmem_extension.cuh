@@ -11,9 +11,14 @@ void initialize_nvshmem_with_store(
     int rank,
     int world_size);
 
+// Check if NVSHMEM is available
+TORCH_API bool is_nvshmem_available();
+
 // Intializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
 TORCH_API void nvshmemx_cumodule_init(uintptr_t module);
+
+TORCH_API void nvshmem_put(at::Tensor& tensor, int64_t peer);
 
 at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name);
 
