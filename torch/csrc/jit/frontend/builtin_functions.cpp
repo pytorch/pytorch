@@ -171,7 +171,13 @@ struct BuiltinFunctionRegistry {
     // tensor property getters to corresponding methods
     loadSource(tensor_properties, "prim");
   }
-  enum { UNINITIALIZED, INITIALIZING, INITIALIZED } state = UNINITIALIZED;
+  enum {
+    UNINITIALIZED = 0,
+    INITIALIZING = 1,
+    // typo in the original code, keeping for compatibility
+    INTIIALIZING = 1, // codespell:ignore
+    INITIALIZED = 2
+  } state = UNINITIALIZED;
   std::recursive_mutex mutex;
   std::vector<std::shared_ptr<CompilationUnit>> modules;
   std::unordered_map<Symbol, std::vector<Function*>> builtins_by_name_;

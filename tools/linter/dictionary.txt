@@ -10,6 +10,7 @@ ElementE
 followings
 fro
 froms
+Halfs
 hsa
 nd
 nin
@@ -25,6 +26,8 @@ reenable
 reenabled
 requestor
 ser'de
+ser'der
+ser'des
 supercedes
 te
 WONT
