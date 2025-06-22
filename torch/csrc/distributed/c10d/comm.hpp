@@ -67,8 +67,7 @@ class TORCH_API GradBucket {
     return parameters_;
   }
 
-  // Returns whether this bucket is the last bucket to allreduce in an
-  // iteration.
+  // Returns whther this bucket is the last bucket to allreduce in an iteration.
   bool isLast() const {
     return index_ == bucket_count_ - 1;
   }
