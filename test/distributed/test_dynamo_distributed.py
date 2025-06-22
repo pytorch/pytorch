@@ -1143,8 +1143,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 self.assertEqual(res[0], r)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @config.patch(enable_guard_collectives=True)
-    @enable_guard_collectives
+    @enable_guard_collectives()
     def test_guard_collective(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
