@@ -1,0 +1,279 @@
+diff --git a/test/dynamo/cpython/3_13/test_float.py b/test/dynamo/cpython/3_13/test_float.py
+index 97f951f1299..ce2c46777e0 100644
+--- a/test/dynamo/cpython/3_13/test_float.py
++++ b/test/dynamo/cpython/3_13/test_float.py
+@@ -1,3 +1,54 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import fractions
+ import operator
+ import os
+@@ -8,11 +59,84 @@ import time
+ import unittest
+ 
+ from test import support
+-from test.support.testcase import FloatsAreIdenticalMixin
+-from test.support.numbers import (
+-    VALID_UNDERSCORE_LITERALS,
+-    INVALID_UNDERSCORE_LITERALS,
+-)
++
++VALID_UNDERSCORE_LITERALS = [
++    '0_0_0',
++    '4_2',
++    '1_0000_0000',
++    '0b1001_0100',
++    '0xffff_ffff',
++    '0o5_7_7',
++    '1_00_00.5',
++    '1_00_00.5e5',
++    '1_00_00e5_1',
++    '1e1_0',
++    '.1_4',
++    '.1_4e1',
++    '0b_0',
++    '0x_f',
++    '0o_5',
++    '1_00_00j',
++    '1_00_00.5j',
++    '1_00_00e5_1j',
++    '.1_4j',
++    '(1_2.5+3_3j)',
++    '(.5_6j)',
++]
++INVALID_UNDERSCORE_LITERALS = [
++    # Trailing underscores:
++    '0_',
++    '42_',
++    '1.4j_',
++    '0x_',
++    '0b1_',
++    '0xf_',
++    '0o5_',
++    '0 if 1_Else 1',
++    # Underscores in the base selector:
++    '0_b0',
++    '0_xf',
++    '0_o5',
++    # Old-style octal, still disallowed:
++    '0_7',
++    '09_99',
++    # Multiple consecutive underscores:
++    '4_______2',
++    '0.1__4',
++    '0.1__4j',
++    '0b1001__0100',
++    '0xffff__ffff',
++    '0x___',
++    '0o5__77',
++    '1e1__0',
++    '1e1__0j',
++    # Underscore right before a dot:
++    '1_.4',
++    '1_.4j',
++    # Underscore right after a dot:
++    '1._4',
++    '1._4j',
++    '._5',
++    '._5j',
++    # Underscore right after a sign:
++    '1.0e+_1',
++    '1.0e+_1j',
++    # Underscore right before j:
++    '1.4_j',
++    '1.4e5_j',
++    # Underscore right before e:
++    '1_e1',
++    '1.4_e1',
++    '1.4_e1j',
++    # Underscore right after e:
++    '1e_1',
++    '1.4e_1',
++    '1.4e_1j',
++    # Complex cases with parens:
++    '(1+1.5_j_)',
++    '(1+1.5_j)',
++]
++
+ from math import isinf, isnan, copysign, ldexp
+ import math
+ 
+@@ -35,7 +159,7 @@ class FloatSubclass(float):
+ class OtherFloatSubclass(float):
+     pass
+ 
+-class GeneralFloatCases(unittest.TestCase):
++class GeneralFloatCases(__TestCase):
+ 
+     def test_float(self):
+         self.assertEqual(float(3.14), 3.14)
+@@ -620,7 +744,7 @@ class GeneralFloatCases(unittest.TestCase):
+ 
+ 
+ @unittest.skipUnless(hasattr(float, "__getformat__"), "requires __getformat__")
+-class FormatFunctionsTestCase(unittest.TestCase):
++class FormatFunctionsTestCase(__TestCase):
+     def test_getformat(self):
+         self.assertIn(float.__getformat__('double'),
+                       ['unknown', 'IEEE, big-endian', 'IEEE, little-endian'])
+@@ -645,7 +769,7 @@ LE_FLOAT_NAN = bytes(reversed(BE_FLOAT_NAN))
+ # is accident (today).
+ # let's also try to guarantee that -0.0 and 0.0 don't get confused.
+ 
+-class IEEEFormatTestCase(unittest.TestCase):
++class IEEEFormatTestCase(__TestCase):
+ 
+     @support.requires_IEEE_754
+     def test_double_specials_do_unpack(self):
+@@ -670,7 +794,7 @@ class IEEEFormatTestCase(unittest.TestCase):
+         self.assertEqual(struct.pack("<f", 3.40282356e38), struct.pack("<f", FLT_MAX))
+         self.assertEqual(struct.pack("<f", -3.40282356e38), struct.pack("<f", -FLT_MAX))
+ 
+-class FormatTestCase(unittest.TestCase):
++class FormatTestCase(__TestCase):
+ 
+     def test_format(self):
+         # these should be rewritten to use both format(x, spec) and
+@@ -767,7 +891,7 @@ class FormatTestCase(unittest.TestCase):
+         self.assertEqual(format(-123.34, '00.10e'), '-1.2334000000e+02')
+         self.assertEqual(format(-123.34, '00.10g'), '-123.34')
+ 
+-class ReprTestCase(unittest.TestCase):
++class ReprTestCase(__TestCase):
+     def test_repr(self):
+         with open(os.path.join(os.path.split(__file__)[0],
+                   'mathdata',
+@@ -832,7 +956,29 @@ class ReprTestCase(unittest.TestCase):
+             self.assertEqual(repr(float(negs)), str(float(negs)))
+ 
+ @support.requires_IEEE_754
+-class RoundTestCase(unittest.TestCase, FloatsAreIdenticalMixin):
++class RoundTestCase(__TestCase):
++    def assertFloatsAreIdentical(self, x, y):
++        """assert that floats x and y are identical, in the sense that:
++        (1) both x and y are nans, or
++        (2) both x and y are infinities, with the same sign, or
++        (3) both x and y are zeros, with the same sign, or
++        (4) x and y are both finite and nonzero, and x == y
++
++        """
++        msg = 'floats {!r} and {!r} are not identical'
++
++        if isnan(x) or isnan(y):
++            if isnan(x) and isnan(y):
++                return
++        elif x == y:
++            if x != 0.0:
++                return
++            # both zero; check that signs match
++            elif copysign(1.0, x) == copysign(1.0, y):
++                return
++            else:
++                msg += ': zeros have different signs'
++        self.fail(msg.format(x, y))
+ 
+     def test_inf_nan(self):
+         self.assertRaises(OverflowError, round, INF)
+@@ -955,7 +1101,7 @@ class RoundTestCase(unittest.TestCase, FloatsAreIdenticalMixin):
+ 
+ # Beginning with Python 2.6 float has cross platform compatible
+ # ways to create and represent inf and nan
+-class InfNanTest(unittest.TestCase):
++class InfNanTest(__TestCase):
+     def test_inf_from_str(self):
+         self.assertTrue(isinf(float("inf")))
+         self.assertTrue(isinf(float("+inf")))
+@@ -1056,12 +1202,35 @@ class InfNanTest(unittest.TestCase):
+ 
+ fromHex = float.fromhex
+ toHex = float.hex
+-class HexFloatTestCase(FloatsAreIdenticalMixin, unittest.TestCase):
++class HexFloatTestCase(__TestCase):
+     MAX = fromHex('0x.fffffffffffff8p+1024')  # max normal
+     MIN = fromHex('0x1p-1022')                # min normal
+     TINY = fromHex('0x0.0000000000001p-1022') # min subnormal
+     EPS = fromHex('0x0.0000000000001p0') # diff between 1.0 and next float up
+ 
++    def assertFloatsAreIdentical(self, x, y):
++        """assert that floats x and y are identical, in the sense that:
++        (1) both x and y are nans, or
++        (2) both x and y are infinities, with the same sign, or
++        (3) both x and y are zeros, with the same sign, or
++        (4) x and y are both finite and nonzero, and x == y
++
++        """
++        msg = 'floats {!r} and {!r} are not identical'
++
++        if isnan(x) or isnan(y):
++            if isnan(x) and isnan(y):
++                return
++        elif x == y:
++            if x != 0.0:
++                return
++            # both zero; check that signs match
++            elif copysign(1.0, x) == copysign(1.0, y):
++                return
++            else:
++                msg += ': zeros have different signs'
++        self.fail(msg.format(x, y))
++
+     def identical(self, x, y):
+         self.assertFloatsAreIdentical(x, y)
+ 
+@@ -1500,5 +1669,5 @@ class HexFloatTestCase(FloatsAreIdenticalMixin, unittest.TestCase):
+         self.assertEqual(getattr(f, 'foo', 'none'), 'bar')
+ 
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    run_tests()

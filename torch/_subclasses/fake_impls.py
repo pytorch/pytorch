@@ -12,6 +12,7 @@ import torch._logging
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
+    definitely_contiguous_for_memory_format,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -68,6 +69,8 @@ _like_tensor_constructors = ordered_set(
     aten.randn_like.default,
     aten.randn_like.out,
     aten.randint_like.default,
+    aten.randint_like.Tensor,
+    aten.randint_like.Tensor_out,
     aten.randint_like.out,
     aten.randint_like.low_dtype,
     aten.randint_like.low_dtype_out,
@@ -111,7 +114,7 @@ def contains_tensor_types(type):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_tensor_constructor(func: OpOverload):
     assert isinstance(func, OpOverload)
     schema = func._schema
@@ -634,8 +637,11 @@ def has_meta(func):
     return torch._C._dispatch_has_computed_kernel_for_dispatch_key(func.name(), "Meta")
 
 
+# These are for the `torch._foreach_...` ops like `torch._foreach_add`.
 @register_op_impl(
-    lambda func: is_builtin(func) and "foreach" in func.name() and has_meta(func)
+    lambda func: is_builtin(func)
+    and func.name().startswith("aten::_foreach_")
+    and has_meta(func)
 )
 def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     tensor_lists = [
@@ -956,7 +962,7 @@ def make_fast_binary_impl(
             final_shape = infer_size(final_shape, shape)
         assert final_shape is not None
 
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
         # Do some extra safety checks to see if the output
         # stride is obvious
@@ -964,10 +970,12 @@ def make_fast_binary_impl(
             if (
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
-                and guard_size_oblivious(sym_eq(op.shape, final_shape))
+                # take the slow path if result is not determined.
+                and guard_or_false(sym_eq(op.shape, final_shape))
             ):
                 break
         else:
+            # if we never break in the for loop above we take the slow path.
             return slow("both tensors nontrivially broadcast")
 
         # compute_types
@@ -1010,8 +1018,8 @@ def make_fast_binary_impl(
                 return slow("error")
 
         # compute_fast_setup_type
-        is_contiguous = True
-        is_channels_last = True
+        definitely_contiguous = True
+        definitely_channels_last = True
         # TODO: is_non-overlapping_and_dense (not bound from Python
         # no inplace, no out, everything defined
 
@@ -1019,13 +1027,19 @@ def make_fast_binary_impl(
             for op in operands:
                 if not isinstance(op, torch.Tensor):
                     continue
-                is_contiguous = is_contiguous and op.is_contiguous(
-                    memory_format=torch.contiguous_format
+                definitely_contiguous = (
+                    definitely_contiguous
+                    and definitely_contiguous_for_memory_format(
+                        op, memory_format=torch.contiguous_format
+                    )
                 )
-                is_channels_last = is_channels_last and op.is_contiguous(
-                    memory_format=torch.channels_last
+                definitely_channels_last = (
+                    definitely_channels_last
+                    and definitely_contiguous_for_memory_format(
+                        op, memory_format=torch.channels_last
+                    )
                 )
-        if is_contiguous:
+        if definitely_contiguous:
             # do contiguous
             count_label("fast is_contiguous")
             return FakeTensor(
@@ -1038,7 +1052,7 @@ def make_fast_binary_impl(
                 ),
                 device=common_device,
             )
-        if is_channels_last:
+        if definitely_channels_last:
             count_label("fast channels_last")
             # do channels last
             return FakeTensor(
@@ -1059,13 +1073,15 @@ def make_fast_binary_impl(
 
 # disable the python dispatcher to avoid decomposing detach() further
 # (proxy_mode should still decompose detach() though)
-def fast_detach(fake_mode, x):
+def fast_detach(fake_mode, x, include_real=False):
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
-    return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
+    if include_real:
+        return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
+    return FakeTensor(fake_mode, out, x.device)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_fast_op_impls():
     import torch._refs
 

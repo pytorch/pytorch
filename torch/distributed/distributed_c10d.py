@@ -340,7 +340,7 @@ class Backend(str):  # noqa: SLOT000
 
         if devices is not None:
             for device in devices:
-                if device != "cpu" and device != "cuda":
+                if device not in Backend.default_device_backend_map:
                     Backend.default_device_backend_map[device] = name.lower()
         Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
 
@@ -1074,17 +1074,18 @@ def _get_global_rank(group, rank) -> int:
     return get_global_rank(group, rank)
 
 
-def get_process_group_ranks(group: ProcessGroup) -> list[int]:
+def get_process_group_ranks(group: Optional[ProcessGroup]) -> list[int]:
     """
     Get all ranks associated with ``group``.
 
     Args:
-        group (ProcessGroup): ProcessGroup to get all ranks from.
+        group (Optional[ProcessGroup]): ProcessGroup to get all ranks from.
+            If None, the default process group will be used.
 
     Returns:
         List of global ranks ordered by group rank.
     """
-    return list(_world.pg_group_ranks[group].keys())
+    return list(_world.pg_group_ranks[group or _get_default_group()].keys())
 
 
 def _get_group_size(group) -> int:
@@ -1548,7 +1549,7 @@ def init_process_group(
     store: Optional[Store] = None,
     group_name: str = "",
     pg_options: Optional[Any] = None,
-    device_id: Optional[torch.device] = None,
+    device_id: Optional[Union[torch.device, int]] = None,
 ) -> None:
     """
     Initialize the default distributed process group.
@@ -1611,15 +1612,16 @@ def init_process_group(
             the nccl backend can pick up high priority cuda streams when
             there're compute kernels waiting. For other availble options to config nccl,
             See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
-        device_id (torch.device, optional): a single, specific device
-            to "bind" this process to, allowing for backend-specific
+        device_id (torch.device | int, optional): a single, specific device
+            this process will work on, allowing for backend-specific
             optimizations.  Currently this has two effects, only under
             NCCL: the communicator is immediately formed (calling
             ``ncclCommInit*`` immediately rather than the normal lazy
             call) and sub-groups will use ``ncclCommSplit`` when
             possible to avoid unnecessary overhead of group creation. If you
             want to know NCCL initialization error early, you can also use this
-            field.
+            field. If an `int` is provided, the API assumes that the accelerator
+            type at compile time will be used.
 
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.
@@ -1663,6 +1665,39 @@ def init_process_group(
         assert rank >= 0, "rank must be non-negative if using store"
     elif init_method is None:
         init_method = "env://"
+
+    # Get the compile-time accelerator type.
+    # None indicates no accelerator support.
+    acc = torch.accelerator.current_accelerator()
+
+    # Auto complete device id
+    if isinstance(device_id, int):
+        if acc is None:
+            raise ValueError(
+                "device_id is an int, but no accelerator support is found from the current compilation. "
+                "Please use a different compiled version that supports your accelerator."
+            )
+        device_id = torch.device(acc.type, device_id)
+
+    # Sanity check device_id
+    if device_id is not None and device_id.type != "cpu":
+        # Type
+        if acc is None or device_id.type != acc.type:
+            raise ValueError(
+                f"device_id {device_id} does not match the current compilation's accelerator support: {acc}. "
+                "Please use a different compiled version that supports your accelerator."
+            )
+        # Index
+        if device_id.index is None:
+            raise ValueError("Please use a device_id with index.")
+        # Range
+        if device_id.index >= torch.accelerator.device_count():
+            raise ValueError(
+                f"device_id {device_id} is out of range. Please use a device index less than "
+                f"the number of accelerators available: {torch.accelerator.device_count()}."
+            )
+
+    logger.info("Using device: %s", device_id)
 
     # If user did not provide a backend string but provided a device id, e.g.
     # >>> init_process_group(device_id=device)
@@ -1949,9 +1984,13 @@ def _new_process_group_helper(
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
+            if not is_gloo_available():
+                raise RuntimeError("Distributed package doesn't have Gloo built in")
             backend_class = ProcessGroupGloo(
                 backend_prefix_store, group_rank, group_size, timeout=timeout
             )
+            backend_class.options.global_ranks_in_group = global_ranks_in_group
+            backend_class.options.group_name = group_name
             backend_type = ProcessGroup.BackendType.GLOO
         elif backend_str == Backend.NCCL:
             if not is_nccl_available():
@@ -5443,7 +5482,7 @@ def new_subgroups(
         )
 
     # TODO: Use itertools.batched(get_process_group_ranks(group=group), group_size) instead when Python 3.12 is supported.
-    ranks = get_process_group_ranks(group=group or _get_default_group())
+    ranks = get_process_group_ranks(group=group)
     ranks_per_subgroup_list = [
         ranks[i : i + group_size] for i in range(0, len(ranks), group_size)
     ]

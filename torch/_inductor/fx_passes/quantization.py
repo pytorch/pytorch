@@ -12,8 +12,17 @@ from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
 
+from .. import config
 from ..lowering import lowerings as L, require_channels_last
-from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
+from ..pattern_matcher import (
+    Arg,
+    CallFunction,
+    filter_nodes,
+    KeywordArg,
+    ListOf,
+    Match,
+    stable_topological_sort,
+)
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -1068,6 +1077,53 @@ def _register_quantization_reshape():
     )
 
 
+def _is_valid_concat_linear_int8_woq_optimization_pattern():
+    def fn(match):
+        if not config.cpp.enable_concat_linear:
+            return False
+        assert all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales"))
+        if not all(
+            hasattr(match.kwargs[key], "meta")
+            for key in ["x", "w1", "w2", "w3", "scales"]
+        ):
+            return False
+        x = match.kwargs["x"].meta["val"]
+        w1 = match.kwargs["w1"].meta["val"]
+        w2 = match.kwargs["w2"].meta["val"]
+        w3 = match.kwargs["w3"].meta["val"]
+        scales = match.kwargs["scales"].meta["val"]
+        if len(match.kwargs["scales"].meta["val"].size()) > 1:
+            return False
+        num_scales = match.kwargs["scales"].meta["val"].numel()
+        w1_cols = match.kwargs["w1"].meta["val"].size()[0]
+        w2_cols = match.kwargs["w2"].meta["val"].size()[0]
+        w3_cols = match.kwargs["w3"].meta["val"].size()[0]
+        # Technically, the shapes of the three weights need not be equal.
+        # But currently, we only enable replacement in this case.
+        if w1_cols != w2_cols or w2_cols != w3_cols:
+            return False
+        if 3 * w1_cols != num_scales:
+            return False
+        return (
+            # For now, we only support woq mm kernels
+            # with x.type=bfloat16 and w.type=int8
+            x.dtype == torch.bfloat16
+            and w1.dtype == torch.int8
+            and w2.dtype == torch.int8
+            and w3.dtype == torch.int8
+            and scales.dtype == torch.bfloat16
+            # _weight_int8pack_mm kernel only supports cpu now
+            # TODO: add cuda kernel support instead of calling mul+sum
+            and x.device.type == "cpu"
+            and x.device == w1.device
+            and w1.device == w2.device
+            and w2.device == w3.device
+            and x.device == scales.device
+        )
+
+    return fn
+
+
 def _is_valid_woq_optimization_pattern():
     def fn(match):
         assert all(k in match.kwargs for k in ("x", "weight", "scales"))
@@ -1092,6 +1148,73 @@ def _is_valid_woq_optimization_pattern():
         )
 
     return fn
+
+
+def _register_concat_linear_int8_woq_lowering(
+    pattern, computation_woq, computation_reshape
+):
+    @register_freezing_graph_pattern(
+        pattern,
+        extra_check=_is_valid_concat_linear_int8_woq_optimization_pattern(),
+        pass_number=4,
+    )
+    def woq(match: Match, *args, **kwargs):
+        x = kwargs["x"]
+        w1 = kwargs["w1"]
+        w2 = kwargs["w2"]
+        w3 = kwargs["w3"]
+        scales = kwargs["scales"]
+        counters["inductor"]["woq_matcher_count"] += 1
+        counters["inductor"]["woq_matcher_nodes"] += len(match.nodes)
+        out_features = (
+            w1.meta["val"].size()[0]
+            + w2.meta["val"].size()[0]
+            + w3.meta["val"].size()[0]
+        )
+        origin_x_size = tuple(x.meta["val"].size())
+        x_shape = [-1, origin_x_size[-1]]
+        out_shape = list(origin_x_size[:-1] + (out_features,))
+        mm_node_of_x = None
+        for candidate in iter(x.users.keys()):
+            if (
+                candidate.target == aten.mm.default
+                and list(candidate._input_nodes)[1].target == aten.cat.default
+            ):
+                mm_node_of_x = candidate
+                break
+        assert mm_node_of_x is not None, "unable to find mm node"
+        _, cat_wgt_node = mm_node_of_x._input_nodes
+        scaling_node = next(iter(mm_node_of_x.users.keys()))
+        user_of_scaling_node = next(iter(scaling_node.users.keys()))
+        # Some other pass is making some changes that entails
+        # adding a node before it's used, but it can only be found when
+        # lint is run. stable_topological_sort() is being run before lint,
+        # so that error was not being being discovered.
+        # We call stable_topological_sort here as a workaround.
+        stable_topological_sort(match.graph)
+        with match.graph.inserting_before(user_of_scaling_node):
+            new_cat_node = match.graph.call_function(
+                aten.cat.default,
+                args=([w1, w2, w3], 0),
+            )
+            x_reshape_node = match.graph.call_function(
+                computation_reshape, args=(x, x_shape)
+            )
+            new_woq_node = match.graph.call_function(
+                computation_woq,
+                args=(x_reshape_node, new_cat_node, scales),
+            )
+            new_woq_node.meta = copy.copy(x.meta)
+            output_reshape_node = match.graph.call_function(
+                computation_reshape, args=(new_woq_node, out_shape)
+            )
+            scaling_node.replace_all_uses_with(output_reshape_node)
+            match.graph.erase_node(scaling_node)
+            match.graph.erase_node(mm_node_of_x)
+            match.graph.erase_node(cat_wgt_node)
+            match.graph.lint()
+
+    return woq
 
 
 def _register_woq_lowering(pattern, computation_woq, computation_reshape):
@@ -1212,6 +1335,32 @@ def _register_woq_mm_int8_pattern4():
         KeywordArg("scales"),
     )
     _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
+
+
+def _register_int8_woq_concat_linear_pattern():
+    def _create_wgt_node(wgt_node_name: str):
+        return CallFunction(
+            prims.convert_element_type.default,
+            CallFunction(
+                aten.permute.default,
+                KeywordArg(wgt_node_name),
+                Arg(),
+            ),
+            Arg(),
+        )
+
+    cat_wgt = CallFunction(
+        aten.cat.default, [_create_wgt_node(wgt) for wgt in ["w1", "w2", "w3"]], 1
+    )
+
+    _woq_pattern = CallFunction(
+        aten.mul.Tensor,
+        CallFunction(aten.mm.default, KeywordArg("x"), cat_wgt),
+        KeywordArg("scales"),
+    )
+    _register_concat_linear_int8_woq_lowering(
+        _woq_pattern, aten._weight_int8pack_mm.default, aten.reshape
+    )
 
 
 def _register_quantization_lowerings():
@@ -3478,7 +3627,7 @@ def _register_qlinear_binary_fusion():
             )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _register_quantization_weight_pack_pass():
     # Step 1: Dequant promotion for int8-mixed-fp32/bf16
     _register_dequant_promotion()
