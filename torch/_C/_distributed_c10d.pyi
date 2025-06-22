@@ -705,6 +705,9 @@ def _unregister_process_group(group_name: str) -> None: ...
 # Python. At C++ interface, it is converted to a uintptr_t.
 def _nvshmemx_cumodule_init(module: int) -> None: ...
 
+# Check if NVSHMEM is available on current system.
+def _is_nvshmem_available() -> bool: ...
+
 class _SymmetricMemory:
     @staticmethod
     def set_group_info(

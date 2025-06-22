@@ -442,6 +442,27 @@ class AOTAutogradCacheTests(InductorTestCase):
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )
+    def test_invoke_subgraph(self):
+        from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+
+        @mark_compile_region
+        def gn(x, y):
+            return x + y
+
+        @torch.compile
+        def fn(x, y):
+            return gn(x, y) + gn(x, y)
+
+        a = torch.randn(25)
+        b = torch.randn(25)
+
+        fn(a, b)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
     @parametrize("fn_select", ("tag_activation_checkpoint", "allow_in_graph"))
     def test_unsafe_mark_cacheable(self, fn_select):
         if fn_select == "tag_activation_checkpoint":
