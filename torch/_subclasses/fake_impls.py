@@ -962,7 +962,7 @@ def make_fast_binary_impl(
             final_shape = infer_size(final_shape, shape)
         assert final_shape is not None
 
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
         # Do some extra safety checks to see if the output
         # stride is obvious
@@ -970,10 +970,12 @@ def make_fast_binary_impl(
             if (
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
-                and guard_size_oblivious(sym_eq(op.shape, final_shape))
+                # take the slow path if result is not determined.
+                and guard_or_false(sym_eq(op.shape, final_shape))
             ):
                 break
         else:
+            # if we never break in the for loop above we take the slow path.
             return slow("both tensors nontrivially broadcast")
 
         # compute_types

@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
@@ -293,6 +294,7 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
+    @skipIfXpu(msg="Remove this skip after issue #154949 resolved.")
     @requires_gpu
     def test_cond_control_flow_with_precomputed_size(self):
         class TestModel(torch.nn.Module):
