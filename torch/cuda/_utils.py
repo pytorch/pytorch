@@ -294,8 +294,10 @@ class _CudaKernel:
 
         for arg in args:
             if isinstance(arg, torch.Tensor):
-                if not arg.is_cuda:
-                    raise ValueError("All tensor arguments must be CUDA tensors")
+                if not arg.is_cuda and not (arg.is_cpu and arg.is_pinned()):
+                    raise ValueError(
+                        "All tensor arguments must be CUDA tensors or pinned CPU tensors"
+                    )
                 # Get pointer to tensor data
                 ptr = ctypes.c_void_p(arg.data_ptr())
                 processed_args.append(ptr)
@@ -326,23 +328,21 @@ class _CudaKernel:
 
             stream = torch.cuda.current_stream()
 
-        # Launch the kernel with the current stream
-        with stream:
-            _check_cuda(
-                libcuda.cuLaunchKernel(
-                    self.func,
-                    grid[0],
-                    grid[1],
-                    grid[2],
-                    block[0],
-                    block[1],
-                    block[2],
-                    shared_mem,
-                    None,
-                    c_args_array,
-                    None,
-                )
+        _check_cuda(
+            libcuda.cuLaunchKernel(
+                self.func,
+                grid[0],
+                grid[1],
+                grid[2],
+                block[0],
+                block[1],
+                block[2],
+                shared_mem,
+                stream._as_parameter_,
+                c_args_array,
+                None,
             )
+        )
 
 
 def _cuda_load_module(
