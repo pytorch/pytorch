@@ -276,6 +276,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)");
 
+  m.def("nvshmem_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nvshmem_broadcast(Tensor(a!) input, str group_name) -> Tensor(a!)");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
