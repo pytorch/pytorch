@@ -3588,7 +3588,7 @@ def make_dupe_guard(obj_source, dupe_source):
             dupe_source
         ) or is_from_flatten_script_object_source(obj_source):
             raise exc.UnsafeScriptObjectError(
-                f"{obj_source.name()} is alising {dupe_source.name()}. This is not supported."
+                f"{obj_source.name()} is aliasing {dupe_source.name()}. This is not supported."
                 f" Please do a clone for corresponding input."
             )
 
