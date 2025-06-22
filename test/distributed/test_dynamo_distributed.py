@@ -62,6 +62,15 @@ def init_weights(m):
         m.bias.data.fill_(0.01)
 
 
+@contextmanager
+def enable_guard_collectives():
+    old = set_enable_guard_collectives(True)
+    try:
+        yield
+    finally:
+        set_enable_guard_collectives(old)
+
+
 class ToyModel(nn.Module):
     def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
         super().__init__()

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from contextlib import contextmanager
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -358,17 +357,7 @@ def set_enable_guard_collectives(enabled: bool):
         return set_guard_complete_hook(None) is not None
 
 
-@contextmanager
-def enable_guard_collectives():
-    old = set_enable_guard_collectives(True)
-    try:
-        yield
-    finally:
-        set_enable_guard_collectives(old)
-
-
 set_enable_guard_collectives._dynamo_forbidden = True  # type: ignore[attr-defined]
-enable_guard_collectives._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
 def cudagraph_mark_step_begin():
