@@ -1050,7 +1050,7 @@ _vec_logsoftmax(
           max_fvec0 = fVec::blendv(max_fvec0, data_fvec0, data_fvec0 > max_fvec0);
           max_fvec1 = fVec::blendv(max_fvec1, data_fvec1, data_fvec1 > max_fvec1);
           max_fvec0.store(input_max_data + d1);
-          max_fvec0.store(input_max_data + d1 + fVec::size());
+          max_fvec1.store(input_max_data + d1 + fVec::size());
 
           // cache the 'converted' float input
           data_fvec0.store(input_buffer_ptr + d1);

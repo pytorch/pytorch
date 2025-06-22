@@ -1,3 +1,4 @@
+#include <dlfcn.h>
 #include <c10/cuda/CUDAGuard.h>
 
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
@@ -19,6 +20,28 @@ static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
 #define WARP_SIZE 32
 
 constexpr int MiB = 1024 * 1024;
+
+// Check if NVSHMEM is available
+bool is_nvshmem_available() {
+  // Runtime check
+  static std::mutex mutex;
+  static int is_available = -2;
+  std::lock_guard<std::mutex> lock(mutex);
+  if (is_available == -2) {
+    void* handle{};
+    // Open the shared library, RTLD_LAZY defers symbol resolution until needed
+    handle = dlopen("libnvshmem_host.so.3", RTLD_LAZY);
+    if (!handle) {
+      std::cerr << dlerror() << "\n";
+      is_available = 0;
+    } else {
+      is_available = 1;
+      // Close the shared library
+      dlclose(handle);
+    }
+  }
+  return is_available == 1;
+}
 
 // Bootstrap based on user's setting for NCCL
 // Long term, this may be a bit unclean; short term, it improves UX
@@ -71,6 +94,11 @@ void initialize_nvshmem_with_store(
       "nvshmemx_init_attr failed");
 
   is_initialized = true;
+
+  // Print version
+  int major, minor;
+  ::nvshmem_info_get_version(&major, &minor);
+  LOG(INFO) << "NVSHMEM is available, version: " << major << "." << minor;
 }
 
 // Intializes the device state in CUmodule so that it’s able to perform NVSHMEM
@@ -122,6 +150,21 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_broadcastmem_on_stream(team, buffer_ptr, buffer_ptr, input_hdl->get_buffer_size(), 0, stream);
   return input;
+}
+
+void nvshmem_put(at::Tensor& tensor, int64_t peer) {
+  // TODO: support non-contiguous tensors
+  TORCH_CHECK(tensor.is_contiguous(),
+      "put op currently supports contiguous tensors only");
+  // TODO: rendezvous should remember the group name
+  auto hdl = c10d::symmetric_memory::rendezvous(tensor, "0");
+  auto rank = hdl->get_rank();
+  void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
+  auto buffer_size = tensor.numel() * tensor.element_size();
+
+  c10::cuda::CUDAGuard guard(tensor.device());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  nvshmemx_putmem_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, peer, stream);
 }
 
 at::Tensor nvshmem_all_to_all(
@@ -606,6 +649,7 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
+  m.impl("nvshmem_put", c10d::nvshmem_extension::nvshmem_put);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
   m.impl("nvshmem_all_to_all_vdev", c10d::nvshmem_extension::nvshmem_all_to_all_vdev);
   m.impl("nvshmem_all_to_all_vdev_2d", c10d::nvshmem_extension::nvshmem_all_to_all_vdev_2d);
