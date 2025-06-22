@@ -555,7 +555,7 @@ class NNModuleAttrAccessorInfo:
     # Either the actual name or _parameters/_buffers/_modules
     l1_key: Optional[str] = None
 
-    # Actual paramter/buffer/submodule name
+    # Actual parameter/buffer/submodule name
     l2_key: Optional[str] = None
 
 
@@ -603,7 +603,7 @@ def getitem_on_dict_manager(
 def match_on_id_for_tensor(guard):
     source = guard.originating_source
     # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
-    # to a new tensor everytime and therefore id differs.
+    # to a new tensor every time and therefore id differs.
     if isinstance(source, NumpyTensorSource):
         return False
 
