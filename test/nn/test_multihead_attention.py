@@ -966,6 +966,8 @@ instantiate_device_type_tests(TestMultiheadAttentionNNDeviceType, globals())
 instantiate_parametrized_tests(TestMultiheadAttentionNN)
 
 import torch.nn.functional as F
+from  torch.nn.attention import sdpa_kernel
+from torch.nn.attention import SDPBackend
 class MultiHeadAttentionNested(nn.Module):
     
     """
@@ -1040,7 +1042,7 @@ class MultiHeadAttentionNested(nn.Module):
         if self._qkv_same_embed_dim:
             if query is key and key is value:
                 result = self.packed_proj(query)
-                query, key, value = torch.chunk(result, 3, dim=-1)
+                query, key, value = (t.contiguous() for t in torch.chunk(result, 3, dim=-1))
             else:
                 q_weight, k_weight, v_weight = torch.chunk(
                     self.packed_proj.weight, 3, dim=0
@@ -1070,9 +1072,11 @@ class MultiHeadAttentionNested(nn.Module):
         key = key.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
         # (N, L_s, E_total) -> (N, L_s, nheads, E_head) -> (N, nheads, L_s, E_head)
         value = value.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
-
+        print(query.is_contiguous())
+        print(query.transpose(1,2).is_contiguous())
         # Step 3. Run SDPA
         # (N, nheads, L_t, E_head)
+        # with sdpa_kernel(backends=[SDPBackend.MATH]):
         attn_output = F.scaled_dot_product_attention(
             query, key, value, dropout_p=self.dropout, is_causal=is_causal
         )
@@ -1087,10 +1091,11 @@ class MultiHeadAttentionNested(nn.Module):
 
 if __name__ == "__main__":
     # run_tests()
-    mha = MultiHeadAttentionNested(128, 128, 128, 128, 8).eval()
-    nt = torch.nested.nested_tensor([torch.randn(4, 128), torch.randn(2, 128)], layout=torch.jagged)
-    t = torch.randn(2, 4, 8)
-    # mha(nt, nt, nt, need_weights=False)
+    # mha = MultiHeadAttentionNested(128, 128, 128, 128, 8, dtype=torch.half).eval()
+    mha = torch.nn.MultiheadAttention(128, 8, batch_first = True, dtype=torch.half).eval()
+    nt = torch.nested.nested_tensor([torch.randn(4, 128), torch.randn(2, 128)], layout=torch.jagged, dtype=torch.half)
+    # t = torch.randn(2, 4, 8)
+    print(mha(nt, nt, nt, need_weights=False))
     # mha(t, t, t, need_weights=False)
     
-    mha(nt, nt, nt)
+    # print(mha(nt, nt, nt))

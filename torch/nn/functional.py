@@ -5694,8 +5694,8 @@ def _in_projection_packed(
             # self-attention
             proj = linear(q, w, b)
             if q.is_nested:
-                # chunk() for nested tensors
-                return proj.chunk(3, dim=-1)
+                # chunk() for nested tensors and make it contiguous
+                return (t.contiguous() for t in torch.chunk(proj, 3, dim=-1))
             else:    
                 # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
                 proj = (
@@ -5718,7 +5718,9 @@ def _in_projection_packed(
             # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
             if k.is_nested:
                 # chunk() for nested tensors
-                return q_proj, kv_proj.chunk(2, dim=-1)
+                q_proj = q_proj.continuous()
+                k_proj, v_proj = (t.contiguous() for t in kv_proj.chunk(2, dim=-1))
+                return q_proj, k_proj, v_proj
             else:   
                 kv_proj = (
                     kv_proj.unflatten(-1, (2, E))
@@ -5734,7 +5736,10 @@ def _in_projection_packed(
             b_q = b_k = b_v = None
         else:
             b_q, b_k, b_v = b.chunk(3)
-        return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
+        q_proj = linear(q, w_q, b_q).contiguous() if q.is_nested else linear(q, w_q, b_q)
+        k_proj = linear(k, w_k, b_k).contiguous() if k.is_nested else linear(k, w_k, b_k)
+        v_proj = linear(v, w_v, b_v).contiguous() if v.is_nested else linear(v, w_v, b_v)
+        return q_proj, k_proj, v_proj
 
 
 def _in_projection(
@@ -5803,8 +5808,10 @@ def _in_projection(
     assert b_v is None or b_v.shape == (Eq,), (
         f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
     )
-    return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
-
+    q_proj = linear(q, w_q, b_q).contiguous() if q.is_nested else linear(q, w_q, b_q)
+    k_proj = linear(k, w_k, b_k).contiguous() if k.is_nested else linear(k, w_k, b_k)
+    v_proj = linear(v, w_v, b_v).contiguous() if v.is_nested else linear(v, w_v, b_v)
+    return q_proj, k_proj, v_proj
 
 scaled_dot_product_attention = _add_docstr(
     torch._C._nn.scaled_dot_product_attention,
@@ -6195,36 +6202,36 @@ def multi_head_attention_forward(
         out_proj_weight,
         out_proj_bias,
     )
-    if has_torch_function(tens_ops):
-        return handle_torch_function(
-            multi_head_attention_forward,
-            tens_ops,
-            query,
-            key,
-            value,
-            embed_dim_to_check,
-            num_heads,
-            in_proj_weight,
-            in_proj_bias,
-            bias_k,
-            bias_v,
-            add_zero_attn,
-            dropout_p,
-            out_proj_weight,
-            out_proj_bias,
-            training=training,
-            key_padding_mask=key_padding_mask,
-            need_weights=need_weights,
-            attn_mask=attn_mask,
-            is_causal=is_causal,
-            use_separate_proj_weight=use_separate_proj_weight,
-            q_proj_weight=q_proj_weight,
-            k_proj_weight=k_proj_weight,
-            v_proj_weight=v_proj_weight,
-            static_k=static_k,
-            static_v=static_v,
-            average_attn_weights=average_attn_weights,
-        )
+    # if has_torch_function(tens_ops):
+    #     return handle_torch_function(
+    #         multi_head_attention_forward,
+    #         tens_ops,
+    #         query,
+    #         key,
+    #         value,
+    #         embed_dim_to_check,
+    #         num_heads,
+    #         in_proj_weight,
+    #         in_proj_bias,
+    #         bias_k,
+    #         bias_v,
+    #         add_zero_attn,
+    #         dropout_p,
+    #         out_proj_weight,
+    #         out_proj_bias,
+    #         training=training,
+    #         key_padding_mask=key_padding_mask,
+    #         need_weights=need_weights,
+    #         attn_mask=attn_mask,
+    #         is_causal=is_causal,
+    #         use_separate_proj_weight=use_separate_proj_weight,
+    #         q_proj_weight=q_proj_weight,
+    #         k_proj_weight=k_proj_weight,
+    #         v_proj_weight=v_proj_weight,
+    #         static_k=static_k,
+    #         static_v=static_v,
+    #         average_attn_weights=average_attn_weights,
+    #     )
 
     is_batched = _mha_shape_check(
         query, key, value, key_padding_mask, attn_mask, num_heads
@@ -6340,9 +6347,7 @@ def multi_head_attention_forward(
             b_k,
             b_v,
         )
-    print("DEBUG 1:", q.is_contiguous(), k.is_contiguous(), v.is_contiguous())
     # prep attention mask
-
     if attn_mask is not None:
         # ensure attn_mask's dim is 3
         if attn_mask.dim() == 2:
@@ -6384,6 +6389,7 @@ def multi_head_attention_forward(
         # reshape query, key, value to separate by head
         # (N, L_t, E_total) -> (N, L_t, nheads, E_head) -> (N, nheads, L_t, E_head)
         q = q.unflatten(-1, [num_heads, head_dim]).transpose(1, 2)
+        print("Check Transpose Contiguous:", q.transpose(1,2).is_contiguous())
     else:
         q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
@@ -6509,10 +6515,8 @@ def multi_head_attention_forward(
         if not v.is_nested:
             v = v.view(bsz, num_heads, src_len, head_dim)
         
-        print("DEBUG 2:", q.is_contiguous(), k.is_contiguous(), v.is_contiguous())
-        print("q", q.shape, "k", k.shape, "v", v.shape, "attn_mask", attn_mask.shape if attn_mask else "None")
         attn_output = scaled_dot_product_attention(
-            q.contiguous(), k.contiguous(), v.contiguous(), attn_mask, dropout_p, is_causal
+            q, k, v, attn_mask, dropout_p, is_causal
         )
         if q.is_nested:
             attn_output = attn_output.transpose(1, 2).flatten(-2)

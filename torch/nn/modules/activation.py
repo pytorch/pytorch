@@ -1398,7 +1398,7 @@ class MultiheadAttention(Module):
                 average_attn_weights=average_attn_weights,
                 is_causal=is_causal,
             )
-        if self.batch_first and is_batched:
+        if not any_nested and self.batch_first and is_batched:
             return attn_output.transpose(1, 0), attn_output_weights
         else:
             return attn_output, attn_output_weights
