@@ -13,7 +13,7 @@ import contextlib
 import copy
 import itertools
 import pprint
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
@@ -21,6 +21,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
+from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
 from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
 from torch._guards import (
@@ -318,7 +319,30 @@ def _create_runtime_wrapper(
             for info in runtime_metadata.output_info
         )
 
+    def record_runtime_wrapper_prologue_enter() -> Optional[
+        AbstractContextManager[None]
+    ]:
+        if (
+            torch.autograd.profiler._is_profiler_enabled
+            and dynamo_config.record_runtime_overhead
+        ):
+            cm = torch._C._profiler._RecordFunctionFast(
+                "AOTDispatcher Runtime Wrapper Prologue"
+            )
+            cm.__enter__()
+            return cm
+        return None
+
+    def record_runtime_wrapper_prologue_exit(
+        cm: Optional[AbstractContextManager[None]],
+    ) -> None:
+        if cm is not None:
+            cm.__exit__(None, None, None)
+
     def runtime_wrapper(args: list[Any]):
+        # Create context manager for profiler
+        cm = record_runtime_wrapper_prologue_enter()
+
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
@@ -343,6 +367,7 @@ def _create_runtime_wrapper(
                 torch.autograd._force_original_view_tracking(True),
                 torch.enable_grad(),
             ):
+                record_runtime_wrapper_prologue_exit(cm)
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
@@ -356,6 +381,7 @@ def _create_runtime_wrapper(
             try:
                 if grad_enabled:
                     torch._C._set_grad_enabled(False)
+                record_runtime_wrapper_prologue_exit(cm)
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args, disable_amp=disable_amp, steal_args=True
                 )
@@ -1503,6 +1529,14 @@ class AutogradLazyBackwardCompileInfo:
     saved_compile_context: Optional[CompileContext]
 
 
+# On an AOT Autograd cache hit, we already have a lowered backward, so there is usually
+# no need to keep information around for a new lazy compilation. Except for compiled autograd,
+# which wants to retrace this backward into a larger graph, and it needs the graph module to do so.
+@dataclass
+class CachedAutogradLazyBackwardCompileInfo:
+    bw_module_fn: Callable
+
+
 def _raise_if_functorch_active():
     # not ideal but prevent the user from seeing a nasty traceback - See #138422
     stack = torch._C._functorch.peek_interpreter_stack()
@@ -1951,7 +1985,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         backward_state_indices: list[int],
         disable_amp: bool,
         indices_of_inps_to_detach: list[int],
-        lazy_backward_info: Optional[AutogradLazyBackwardCompileInfo],
+        lazy_backward_info: Optional[
+            Union[
+                AutogradLazyBackwardCompileInfo,
+                CachedAutogradLazyBackwardCompileInfo,
+            ]
+        ],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
@@ -2259,6 +2298,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 if CompiledFunction.compiled_bw is None:
                     assert lazy_backward_info is not None
+                    assert isinstance(
+                        lazy_backward_info, AutogradLazyBackwardCompileInfo
+                    )
 
                     if not saved_tensors_use_once:
                         fw_metadata.bw_donated_idxs = []
@@ -2310,6 +2352,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         if try_save_cache_entry is not None:
                             try_save_cache_entry(
                                 CompiledFunction.compiled_bw,
+                                bw_module,
                                 fw_metadata,
                                 aot_config,
                             )
