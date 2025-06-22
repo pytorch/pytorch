@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     run_tests,
     skipIfTorchDynamo,
+    skipIfXpu,
     TestCase,
 )
 
@@ -365,6 +366,7 @@ class TestOpenReg(TestCase):
         self.assertEqual(y.to(device="cpu"), torch.tensor([[1, 1], [2, 2], [3, 3]]))
         self.assertEqual(x.data_ptr(), y.data_ptr())
 
+    @skipIfXpu(msg="missing kernel for openreg")
     def test_quantize(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32, device="openreg")
         quantized_tensor = torch.quantize_per_tensor(x, 0.1, 10, torch.qint8)
