@@ -101,7 +101,7 @@ void initialize_nvshmem_with_store(
   LOG(INFO) << "NVSHMEM is available, version: " << major << "." << minor;
 }
 
-// Intializes the device state in CUmodule so that it’s able to perform NVSHMEM
+// Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
 void nvshmemx_cumodule_init(uintptr_t module) {
   auto cumodule = reinterpret_cast<CUmodule>(module);
@@ -543,7 +543,7 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
                 | c0 | d0 | c1 | d1 | c2 | d2 | c3 | d3 |
         where each `c_i` / `d_i` are slices of the `input` tensor, targeting
         expert `i`, with length indicated by input splits (in
-        `in_out_splits[0]`).  That is, the 2D AllToAllv shuffle achives a
+        `in_out_splits[0]`).  That is, the 2D AllToAllv shuffle achieves a
         transpose from rank-major order at input to expert-major order at
         output.
 
