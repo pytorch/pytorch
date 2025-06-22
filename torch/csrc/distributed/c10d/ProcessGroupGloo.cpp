@@ -965,7 +965,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_sparse(
     const AllreduceOptions& opts) {
   // all reduce sparse calls into default allreduce which
   // implemented with all_gathering indices and values
-  // we do ths we do not have a native cuda implementation
+  // we do this we do not have a native cuda implementation
   return allreduce(inputs, opts);
 }
 
