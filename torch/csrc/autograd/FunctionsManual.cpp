@@ -220,13 +220,12 @@ Tensor amaxamin_jvp(
 
 Tensor aminmax_backward(
     const Tensor& self,
-    c10::optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const Tensor& grad_min,
     const Tensor& grad_max,
     const Tensor& min,
     const Tensor& max) {
-
   auto dims = dim.has_value() ? IntArrayRef{*dim} : IntArrayRef{};
   Tensor result;
   Tensor max_mask;
