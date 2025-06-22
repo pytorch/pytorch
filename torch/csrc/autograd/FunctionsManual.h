@@ -818,7 +818,7 @@ Tensor amaxamin_jvp(
     bool keepdim);
 Tensor aminmax_backward(
     const at::Tensor& self,
-    c10::optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const at::Tensor& grad_min,
     const at::Tensor& grad_max,

@@ -11403,26 +11403,14 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual(x.grad.sum(), 1.0)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
         
-        # 2) Test torch.amin and torch.amax only on the non NaN input:
-        for f in [torch.amin, torch.amax]:
+        amax2 = lambda x: torch.aminmax(x)[1]
+        for f in [torch.amin, torch.amax, amax2]:
             x1 = torch.tensor(
                 [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
                 device=device,
                 requires_grad=True,
             )
-            y = f(x1)   # scalar Tensor
-            y.backward()
-            self.assertEqual(x1.grad.sum(), 1.0)
-            self.assertEqual((x1.grad == 1.0 / 3.0).sum(), 3)
-
-        # 3) Test torch.aminmax (component 0 = min, component 1 = max) on non NaN:
-        for component in (0, 1):
-            x1 = torch.tensor(
-                [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
-                device=device,
-                requires_grad=True,
-            )
-            y = torch.aminmax(x1)[component]  # grab either the "min" or the "max" output
+            y = f(x1)
             y.backward()
             self.assertEqual(x1.grad.sum(), 1.0)
             self.assertEqual((x1.grad == 1.0 / 3.0).sum(), 3)
