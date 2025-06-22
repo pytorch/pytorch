@@ -1814,9 +1814,9 @@ class CudaReproTests(TestCase):
 
         m = ToyModel().to(device="cuda:0")
         input_tensor = torch.randn(32, 3, 64, 64).to(device="cuda:0")
-        from torch._inductor.utils import fresh_inductor_cache
+        from torch._inductor.utils import fresh_cache
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             cm = torch.compile(m, mode="max-autotune")
             out = cm(input_tensor)
             out2 = m(input_tensor)
