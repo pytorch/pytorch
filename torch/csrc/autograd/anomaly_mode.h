@@ -30,7 +30,7 @@ struct TORCH_API AnomalyMode {
 ///
 /// Anomaly detection mode is useful for debugging problems happening
 /// in the backward, such as unexpectedly modified tensors or NaNs
-/// occurring in the backward.
+/// occuring in the backward.
 ///
 /// The enabling of anomaly mode is global - as soon as there is one
 /// such guard, it is enabled for all computation and threads. It also
