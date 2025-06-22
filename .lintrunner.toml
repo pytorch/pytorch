@@ -1172,6 +1172,7 @@ exclude_patterns = [
     'test/distributed/**',
     'torch/**',
     'torch/_*/**',
+    'torch/_inductor/**',
     'torch/_dynamo/**',
     'torch/ao/**',
     'torch/fx/**',
