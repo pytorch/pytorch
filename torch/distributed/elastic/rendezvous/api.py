@@ -157,9 +157,9 @@ class RendezvousHandler(ABC):
     @property
     def use_agent_store(self) -> bool:
         """Indicates that store reference returned by :py:meth:`next_rendezvous` can be shared with user
-        applications and will be available during application lifecycle.
+        applications and will be available during application lifecyle.
 
-        Rendezvous handler impl will share store details as instance of :py:class:`RendezvousStoreInfo`.
+        Rendezous handler impl will share store details as instance of :py:class:`RendezvousStoreInfo`.
         Applications as a convention use `MASTER_ADDR`/`MASTER_PORT` env variables to lookup the store.
         """
         return False
