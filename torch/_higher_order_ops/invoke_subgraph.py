@@ -51,7 +51,9 @@ class OutputMetadata:
 
 class InvokeSubgraphHOP(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("invoke_subgraph")
+        # Invoke subgraph does not have any state, it is just a wrapper over a
+        # subgraph, so we can safely cache the HOP.
+        super().__init__("invoke_subgraph", cacheable=True)
         # This is used by the fake tensor cache key validator to extract the
         # subgraph and iterate over the nodes to find if all nodes are fake
         # tensor cacheable.
@@ -157,7 +159,13 @@ def mark_compile_region(fn=None):
 
     def wrap(func):
         def inner(*args, **kwargs):
-            return invoke_subgraph_placeholder(func, *args, **kwargs)
+            # Get the innermost function to avoid nested compile regions
+            inner_func = func
+            while hasattr(inner_func, "__marked_compile_region_fn__"):
+                inner_func = inner_func.__marked_compile_region_fn__
+            return invoke_subgraph_placeholder(inner_func, *args, **kwargs)
+
+        inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
 
         return inner
 
