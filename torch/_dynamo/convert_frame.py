@@ -39,7 +39,6 @@ import time
 import traceback
 import typing
 import weakref
-from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Optional, TypeVar, Union
@@ -103,7 +102,6 @@ from .exc import (
     InternalTorchDynamoError,
     PackageError,
     RecompileLimitExceeded,
-    ResumePrologueTracingError,
     ShortenTraceback,
     SkipCodeRecursiveException,
     TorchRuntimeError,
@@ -117,7 +115,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .pgo import put_code_state
+from .pgo import log_frame_dynamic_whitelist, put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
@@ -474,17 +472,6 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
     return profile_wrapper
 
 
-@dataclass
-class ConvertFrameBox:
-    error_on_graph_break: Optional[bool] = None
-
-
-def _is_error_on_graph_break(tx: Optional[InstructionTranslator]) -> bool:
-    if tx is None:
-        return config.error_on_graph_break
-    return tx.error_on_graph_break
-
-
 class ConvertFrameAssert:
     def __init__(
         self,
@@ -501,7 +488,6 @@ class ConvertFrameAssert:
         self._export = export
         self._export_constraints = export_constraints
         self._package = package
-        self._box = ConvertFrameBox()
 
     @property
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
@@ -658,7 +644,6 @@ class ConvertFrameAssert:
                 compile_id=compile_id,
                 skip=skip + 1,
                 package=self._package,
-                convert_frame_box=self._box,
             )
 
 
@@ -669,7 +654,7 @@ def convert_frame_assert(
     export_constraints: Optional[typing.Never] = None,
     package: Optional[CompilePackage] = None,
 ) -> ConvertFrameAssert:
-    """Fully convert a frame into an FX graph, raising an exception if we fail."""
+    """Fully convert a frame into an FX graph"""
     return ConvertFrameAssert(
         compiler_fn, one_graph, export, export_constraints, package
     )
@@ -716,9 +701,6 @@ def _compile(
     compile_id: CompileId,
     skip: int = 0,
     package: Optional[CompilePackage] = None,
-    # Can be used to record things for the caller, both
-    # in the case of normal and exception code paths
-    convert_frame_box: Optional[ConvertFrameBox] = None,
 ) -> ConvertFrameReturn:
     from torch.fx.experimental.validator import (
         bisect,
@@ -880,10 +862,8 @@ def _compile(
                     code.co_filename,
                     code.co_firstlineno,
                 )
-                if one_graph or _is_error_on_graph_break(tracer):
-                    log.debug(
-                        "No graph captured with one_graph=True or torch._dynamo.config.error_on_graph_break=True"
-                    )
+                if one_graph:
+                    log.debug("No graph captured with one_graph=True")
                 return ConvertFrameReturn()
 
         assert distributed_state is None or distributed_state.all_states is not None, (  # type: ignore[has-type]
@@ -1049,10 +1029,9 @@ def _compile(
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph or _is_error_on_graph_break(tracer):
+            elif one_graph:
                 raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached with one_graph=True or torch._dynamo.config.error_on_graph_break=True. "
-                    "Excessive recompilations can degrade "
+                    f"{limit_type} reached with one_graph=True. Excessive recompilations can degrade "
                     "performance due to the compilation overhead of each recompilation. To monitor "
                     "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
                     "increasing torch._dynamo.config.cache_size_limit to an appropriate value."
@@ -1141,6 +1120,7 @@ def _compile(
             # to upload for graph break though, because this can prevent
             # extra graph break compilations.)
             put_code_state()
+            log_frame_dynamic_whitelist(code)
 
             return guarded_code
         except Exception as e:
@@ -1162,15 +1142,7 @@ def _compile(
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
                 e, compile_id
             )
-            if tracer and tracer.is_tracing_resume_prologue:
-                # Do not allow any errors to be suppressed if tracer is currently tracing
-                # through resume function.
-                raise ResumePrologueTracingError(
-                    "Error while tracing through a Dynamo-generated resume function prologue. "
-                    "Errors are not allowed when tracing resume function prologues.\n"
-                    f"{type(e).__qualname__}: {str(e)}"
-                ).with_traceback(e.__traceback__) from None
-            elif isinstance(
+            if isinstance(
                 e,
                 (
                     Unsupported,
@@ -1268,17 +1240,6 @@ def _compile(
             metrics_context.update_outer(metrics)
             # === END WARNING WARNING WARNING ===
 
-            # If tracer is available, then tracer.error_on_graph_break reflects value of
-            # config.error_on_graph_break at the time of the graph break -
-            # config.error_on_graph_break may have been (correctly) changed during cleanup.
-            # If tracer is unavailable, then fallback to config.error_on_graph_break.
-            if convert_frame_box:
-                convert_frame_box.error_on_graph_break = (
-                    tracer.error_on_graph_break
-                    if tracer
-                    else config.error_on_graph_break
-                )
-
 
 class ConvertFrame:
     def __init__(
@@ -1295,10 +1256,7 @@ class ConvertFrame:
 
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
-        return lambda backend: convert_frame(
-            backend,
-            self._hooks,
-        )
+        return lambda backend: convert_frame(backend, self._hooks)
 
     def __call__(
         self,
@@ -1317,22 +1275,6 @@ class ConvertFrame:
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:
-            # Do not allow errors to be suppressed if we're tracing a resume function prologue
-            if isinstance(e, ResumePrologueTracingError):
-                raise
-
-            error_on_graph_break = (
-                self._inner_convert._box.error_on_graph_break is not None
-            )
-            assert error_on_graph_break is not None
-            if self._inner_convert._box.error_on_graph_break:
-                # NOTE we _might_ have to wrap the current in a custom exception
-                # in order to correctly bubble up to the top-level compile wrapper in
-                # eval_frame.py. But re-raising seems to work for now because exceptions from tracing
-                # a nested call that results in a top-level frame compile will be handled by the caller
-                # as an observed exception - we don't expect that exception to be suppressed.
-                raise
-
             # These two exception types are "soft" failure, in the sense that
             # we know this is due to something we didn't implement all the
             # way, scare the user less about it.  That being said, if you
@@ -1413,9 +1355,7 @@ class ConvertFrame:
 
 
 def convert_frame(
-    compiler_fn: CompilerFn,
-    hooks: Hooks,
-    package: Optional[CompilePackage] = None,
+    compiler_fn: CompilerFn, hooks: Hooks, package: Optional[CompilePackage] = None
 ) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     return ConvertFrame(compiler_fn, hooks, package=package)
@@ -1431,27 +1371,26 @@ def replay(filename: str) -> None:
         record = ExecutionRecord.load(in_file)
     record.globals = dict(itertools.chain(record.globals.items(), globals().items()))
 
-    with decorators.set_fullgraph(fullgraph=False):
-        try:
-            _compile(
-                record.code,
-                record.globals,
-                record.locals,
-                record.builtins,
-                record.closure,
-                compiler_fn=eager,
-                one_graph=False,
-                export=False,
-                export_constraints=None,
-                hooks=Hooks(),
-                cache_size=CacheSizeRelevantForFrame(0, 0),
-                cache_entry=None,
-                frame=None,
-                frame_state={},
-                compile_id=CompileId(frame_id=42, frame_compile_id=999),
-            )
-        finally:
-            config.replay_record_enabled = original_replay_val
+    try:
+        _compile(
+            record.code,
+            record.globals,
+            record.locals,
+            record.builtins,
+            record.closure,
+            compiler_fn=eager,
+            one_graph=False,
+            export=False,
+            export_constraints=None,
+            hooks=Hooks(),
+            cache_size=CacheSizeRelevantForFrame(0, 0),
+            cache_entry=None,
+            frame=None,
+            frame_state={},
+            compile_id=CompileId(frame_id=42, frame_compile_id=999),
+        )
+    finally:
+        config.replay_record_enabled = original_replay_val
 
 
 def first_real_inst_idx(code: CodeType) -> int:
