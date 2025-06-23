@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
     skipIfTorchDynamo,
+    TEST_WITH_ASAN,
     xfailIfS390X,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -524,6 +525,7 @@ LoweringException: AssertionError:
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "LSAN outputs suppression report on stderr")
     def test_invalid_artifact_flag_error_msg(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "not_an_existing_log_artifact_should_error"
@@ -856,6 +858,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 
     # there are some additional deprecation warnings in stderr, probably due to newer dependencies used on s390x
     @xfailIfS390X
+    @unittest.skipIf(TEST_WITH_ASAN, "LSAN outputs suppression report on stderr")
     def test_logs_out(self):
         import tempfile
 

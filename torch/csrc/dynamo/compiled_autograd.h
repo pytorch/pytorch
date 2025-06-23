@@ -98,7 +98,7 @@ struct TORCH_API PyCompilerGuard {
 // including torch/csrc/autograd/engine.h breaks BC by somehow introducing
 // symbol resolution issues. Instead requiring downstream users to include
 // engine.h to access collect_input_metadata, we provide it here (with a
-// different name to avoid ambigous symbols...)
+// different name to avoid ambiguous symbols...)
 TORCH_API std::vector<std::optional<InputMetadata>> get_input_metadata(
     const edge_list& edges);
 
@@ -1068,7 +1068,7 @@ class SwapSavedVariables {
 // (e.g. MulBackward0_apply_functional). Compiled Autograd's initial graph
 // capture wants to take a variant of this function and proxy it into the graph.
 // Every autograd node defines an apply_with_saved function, that when invoked,
-// proxys a call to a function into the Compiled Autograd graph.
+// proxies a call to a function into the Compiled Autograd graph.
 //
 // Some requirements that we have are:
 // - The proxy'ed function must have inputs that are FX-graphable types.
