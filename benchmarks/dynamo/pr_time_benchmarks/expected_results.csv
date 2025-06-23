@@ -14,7 +14,7 @@ add_loop_inductor_dynamic_gpu,compile_time_instruction_count,39110000000,0.025
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,26180000000,0.015
+add_loop_inductor_gpu,compile_time_instruction_count,25780000000,0.015
 
 
 
@@ -62,7 +62,7 @@ aotdispatcher_partitioner_cpu,compile_time_instruction_count,8844000000,0.015
 
 
 
-aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1963000000,0.015
+aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1917000000,0.015
 
 
 
