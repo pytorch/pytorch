@@ -332,7 +332,17 @@ test_h100_distributed() {
 
 test_cutlass_backend() {
   # cutlass backend tests for H100
-  python test/run_test.py --include inductor/test_cutlass_backend -k 'test_max_autotune_cutlass_backend_regular_mm and not test_max_autotune_cutlass_backend_regular_mm_streamk' $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  folder_name="cutlass"
+  start_dir="."
+  # Find the folder and print its relative path
+  folder_path=$(find "$start_dir" -type d -name "$folder_name" -print -quit)
+  if [ -n "$folder_path" ]; then
+      relative_path=$(realpath --relative-to="$start_dir" "$folder_path")
+      echo "Folder '$folder_name' found at: $relative_path"
+  else
+      echo "Folder '$folder_name' not found."
+  fi
+  TORCHINDUCTOR_CUTLASS_DIR="./third_party/cutlass" python test/run_test.py --include inductor/test_cutlass_backend -k 'test_max_autotune_cutlass_backend_regular_mm and not test_max_autotune_cutlass_backend_regular_mm_streamk' $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
 test_lazy_tensor_meta_reference_disabled() {
