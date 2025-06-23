@@ -473,7 +473,6 @@ class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
             },
             payload_fn=lambda: json.dumps(cache_info),
         )
-        counters["inductor"]["fxgraph_cache_hit"] += 1
         # Run normal post compile
         graph.post_compile(self.example_inputs, constants, fx_config)
         return graph

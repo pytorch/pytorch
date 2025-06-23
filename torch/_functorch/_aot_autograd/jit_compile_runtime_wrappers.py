@@ -260,8 +260,15 @@ def aot_dispatch_base(
         compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
     cache_info = aot_config.cache_info
+
+    def should_save_cache():
+        if torch._functorch.config.bundled_autograd_cache:
+            return True
+        else:
+            return hasattr(compiled_fw, "_fx_graph_cache_key")
+
     if cache_info is not None:
-        if hasattr(compiled_fw, "_fx_graph_cache_key"):
+        if should_save_cache():
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
             guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
             entry = AOTAutogradCache.make_entry(
@@ -1769,10 +1776,17 @@ def aot_dispatch_autograd(
             _fw_metadata: ViewAndMutationMeta,
             aot_config: AOTConfig,
         ):
-            fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
-            bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
             cache_info = aot_config.cache_info
-            if cache_info is not None and fw_key and bw_key:
+
+            def should_save_cache():
+                if torch._functorch.config.bundled_autograd_cache:
+                    return True
+                else:
+                    return hasattr(compiled_fw_func, "_fx_graph_cache_key") and hasattr(
+                        compiled_bw_func, "_fx_graph_cache_key"
+                    )
+
+            if cache_info is not None and should_save_cache():
                 assert forward_time_taken_ns is not None
                 # TODO: technically, AOTAutograd does a *little* bit of post processing work
                 # in the backward that isn't measured here. But it's small enough that it's not worth
