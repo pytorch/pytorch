@@ -111,15 +111,21 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             post_grad_custom_pre_pass
         )
 
-    if (
-        config.cpp.enable_grouped_gemm_template
-        and config.max_autotune
-        and "CPP" in config.max_autotune_gemm_backends
-        and torch._C._has_mkldnn
-    ):
-        from .mkldnn_fusion import grouped_gemm_pass
+    if torch._C._has_mkldnn:
+        if (
+            config.cpp.enable_grouped_gemm_template
+            and config.max_autotune
+            and "CPP" in config.max_autotune_gemm_backends
+        ):
+            from .mkldnn_fusion import grouped_gemm_pass
 
-        grouped_gemm_pass(gm.graph)
+            grouped_gemm_pass(gm.graph)
+
+        if config.cpp.enable_concat_linear:
+            from .quantization import concat_linear_woq_int4
+
+            # Concat linear optimization for WOQ int4
+            concat_linear_woq_int4(gm)
 
     if config.pattern_matcher:
         lazy_init()

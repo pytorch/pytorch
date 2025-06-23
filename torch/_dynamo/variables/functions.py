@@ -27,9 +27,10 @@ import builtins
 import functools
 import inspect
 import itertools
+import logging
 import sys
+import traceback
 import types
-import warnings
 from collections.abc import Sequence
 from types import FunctionType
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
@@ -38,6 +39,7 @@ from unittest.mock import patch
 from weakref import WeakKeyDictionary
 
 import torch
+from torch._dynamo.exc import get_stack_above_dynamo
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -1558,11 +1560,30 @@ class WrapperUserFunctionVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if hasattr(self.wrapper_obj, "cache_info"):
-            warnings.warn(
-                "Dynamo detected a call to a `functools.lru_cache` wrapped function."
-                "Dynamo currently ignores `functools.lru_cache` and directly traces the wrapped function."
-                "`functools.lru_cache` wrapped functions that read outside state may not be traced soundly."
-            )
+            target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
+            module_name = getattr(target_fn, "__module__", "") or ""
+
+            if not module_name.startswith("torch."):
+                msg = (
+                    "Dynamo detected a call to a `functools.lru_cache`-wrapped "
+                    "function. Dynamo ignores the cache wrapper and directly "
+                    "traces the wrapped function. Silent incorrectness is only "
+                    "a *potential* risk, not something we have observed. "
+                    'Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.'
+                )
+
+                torch._dynamo.utils.warn_once(msg)
+
+                dynamo_logger = torch._dynamo.utils.logging.getLogger("torch._dynamo")
+                if dynamo_logger.isEnabledFor(logging.DEBUG):
+                    user_stack = torch._guards.TracingContext.extract_stack()
+                    user_stack = get_stack_above_dynamo() + user_stack
+                    frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+                    user_stack_formatted = "".join(traceback.format_list(user_stack))
+                    user_stack_trace = f"call to a lru_cache wrapped function at: {frame_loc[0]}:{frame_loc[1]}\n"
+                    user_stack_trace += str(user_stack_formatted)
+                    dynamo_logger.debug(user_stack_trace)
+
         all_args = self.self_args() + args
         return variables.UserFunctionVariable(
             polyfills.getattr_and_trace
