@@ -11,6 +11,7 @@ import tempfile
 from base64 import b64decode, b64encode
 from datetime import timedelta
 from typing import Any, cast, Optional
+from typing_extensions import ParamSpec
 
 from torch.distributed import FileStore, Store, TCPStore
 from torch.distributed.elastic.events import construct_and_record_rdzv_event, NodeState
@@ -24,6 +25,8 @@ from .api import (
 from .dynamic_rendezvous import RendezvousBackend, Token
 from .utils import _matches_machine_hostname, parse_rendezvous_endpoint
 
+
+P = ParamSpec("P")
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +114,7 @@ class C10dRendezvousBackend(RendezvousBackend):
         # perform a bitwise comparison of our local state and the remote state.
         return new_state, new_token, new_state == state
 
-    def _call_store(self, store_op: str, *args: Any, **kwargs: Any) -> Any:
+    def _call_store(self, store_op: str, *args: P.args, **kwargs: P.kwargs) -> Any:
         try:
             return getattr(self._store, store_op)(*args, **kwargs)
         except (ValueError, RuntimeError, TimeoutError) as exc:
