@@ -375,7 +375,7 @@ class TritonTemplateKernel(TritonKernel):
         self.template_out: Optional[str] = None
         self.ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
 
-        # Whe caching is enabled, the generated code is not dependent on the input nodes names, or
+        # When caching is enabled, the generated code is not dependent on the input nodes names, or
         # symbolic sizes names.
         # However, some of the variables returned by generate_and_load that are computed during the
         # triton template expansions (code generation) are dependent on those.
@@ -2063,6 +2063,15 @@ def get_num_workers() -> int:
         else os.cpu_count()
     )
     assert cpu_count
+
+    # Divide the number of CPUs by the number of GPUs for distributed workloads
+    if (
+        config.is_fbcode()
+        and torch.cuda.is_available()
+        and torch.cuda.device_count() > 0
+    ):
+        cpu_count = cpu_count // torch.cuda.device_count()
+
     return cpu_count
 
 
@@ -2122,11 +2131,14 @@ class AlgorithmSelectorCache(PersistentCache):
         self.precompile_cache: dict[str, Callable[[], None]] = {}
         # list of callbacks that are called after benchmarking
         self.feedback_saver_fns: list[FeedbackFunction] = []
+        # cache for prescreening results to ensure deterministic candidate selection
+        self.prescreening_cache: dict[str, OrderedSet[str]] = {}
 
         clear_on_fresh_cache(self)
 
     def cache_clear(self) -> None:
         self.precompile_cache.clear()
+        self.prescreening_cache.clear()
 
     def __call__(
         self,
@@ -2239,7 +2251,9 @@ class AlgorithmSelectorCache(PersistentCache):
             precompile_elapse = time.time() - precompile_start_ts
             log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
 
-            candidates = self.prescreen_choices(choices)
+            candidates = self.prescreen_choices(
+                choices, name, inputs_key, self.prescreening_cache
+            )
             prescreening_elapse: Optional[float] = None
             if candidates:
                 prescreening_start_ts = time.time()
@@ -2249,7 +2263,9 @@ class AlgorithmSelectorCache(PersistentCache):
                     inputs_key,
                     autotune,
                 )
-                choices = self.prune_choices_postscreen(choices, timings)
+                choices = self.prune_choices_postscreen(
+                    choices, timings, name, inputs_key, self.prescreening_cache
+                )
                 prescreening_elapse = time.time() - prescreening_start_ts
                 log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
 
@@ -2758,11 +2774,39 @@ class AlgorithmSelectorCache(PersistentCache):
     @staticmethod
     def prescreen_choices(
         choices: list[ChoiceCaller],
+        name: str,
+        inputs_key: str,
+        prescreen_cache: dict[str, OrderedSet[str]],
     ) -> list[ChoiceCaller]:
         """
-        Add prescreening phase. Motivation is to reduce the number of autotuning needed,
-        for example, when there are runtime params.
+        Figure out what choices need to be prescreened before autotuning with runtime
+        params.
+
+        Prescreening is a process of reducing the number of autotuning for choices with
+        runtime params via a two stage autotuning process. First, we fix a set of runtime
+        params (here we use swizzle=2) and run autotuning to get a set of candidates.
+        Then, we run autotuning again with the candidates and the full set of runtime
+        params.
+
+        Since have the concept of runtime params, we need to differentiate between
+        choice's hash_key and choice's kernel_hash_key. The former includes information
+        like runtime params, while the latter does not. prescreen_cache, if exists, stores
+        the set of hash_key that should win the prescreening.
+
+        Right now, only CUTLASS choices have runtime params.
         """
+        # Create a cache key for prescreening results
+        prescreen_key = f"{name}:{inputs_key}"
+
+        # Check if we have cached prescreening results (prescreen_winners)
+        if prescreen_key in prescreen_cache:
+            prescreen_winners = [
+                choice
+                for choice in choices
+                if choice.hash_key() in prescreen_cache[prescreen_key]
+            ]
+            return prescreen_winners
+
         # prescreen cutlass
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -2791,14 +2835,31 @@ class AlgorithmSelectorCache(PersistentCache):
     def prune_choices_postscreen(
         choices: list[ChoiceCaller],
         candidate_timings: dict[ChoiceCaller, float],
+        name: str,
+        inputs_key: str,
+        prescreen_cache: dict[str, OrderedSet[str]],
     ) -> list[ChoiceCaller]:
         """
         Prune the choices after prescreening.
         """
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
-        if len(candidate_timings) < 10:
-            return []
+        prescreen_key = f"{name}:{inputs_key}"
+
+        # Check if we have cached postscreen results
+        if prescreen_key in prescreen_cache:
+            # candidate_timings are from choices that have won prescreening already
+            winner_kernel_hashes = [
+                candidate.kernel_hash_key() for candidate in candidate_timings
+            ]
+
+            pruned_choices = [
+                choice
+                for choice in choices
+                if not isinstance(choice, CUDATemplateCaller)
+                or choice.kernel_hash_key() in winner_kernel_hashes
+            ]
+            return pruned_choices
 
         log.debug("Before pruning using prescreening timings, %d choices", len(choices))
         sorted_candidates = sorted(
@@ -2835,21 +2896,28 @@ class AlgorithmSelectorCache(PersistentCache):
         candidates_to_prune = OrderedSet(
             candidate.kernel_hash_key() for candidate in sorted_candidates[num_to_keep:]
         )
+        winner_hashes: OrderedSet[str] = OrderedSet()
         for candidate in sorted_candidates[:num_to_keep]:
             if candidate_timings[candidate] == float("inf"):
                 candidates_to_prune.add(candidate.kernel_hash_key())
             else:
+                winner_hashes.add(candidate.hash_key())
                 if isinstance(candidate, CUDATemplateCaller):
                     candidate.bmreq.ensure_dll_loaded()
 
-        choices = [
+        pruned_choices = [
             choice
             for choice in choices
             if choice.kernel_hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
         ]
 
-        log.debug("After pruning using prescreening timings, %d choices", len(choices))
-        return choices
+        # Cache the hash_key of winners of prescreening
+        prescreen_cache[prescreen_key] = winner_hashes
+
+        log.debug(
+            "After pruning using prescreening timings, %d choices", len(pruned_choices)
+        )
+        return pruned_choices
 
     @staticmethod
     def log_results(
