@@ -68,7 +68,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
         ErrorReport(loc)
         << kind() << " cannot be used as a value. "
         << "Perhaps it is a closed over global variable? If so, please "
-        << "consider passing it in as an argument or use a local varible "
+        << "consider passing it in as an argument or use a local variable "
         << "instead.");
   }
 
