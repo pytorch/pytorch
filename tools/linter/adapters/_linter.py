@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
 
+__all__ = ["EMPTY_TOKENS", "FileLinter", "LintResult", "ParseError", "PythonFile"]
+
+
 # Python 3.12 and up have two new token types, FSTRING_START and FSTRING_END
 NO_TOKEN = -1
 FSTRING_START: int = getattr(token, "FSTRING_START", NO_TOKEN)

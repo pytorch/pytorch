@@ -14,6 +14,7 @@ from typing_extensions import Self
 
 _FILE = Path(__file__).absolute()
 _PATH = [Path(p).absolute() for p in sys.path]
+_OVERRIDES = {"@override", "@typing_extensions.override", "@typing.override"}
 
 if TYPE_CHECKING or _FILE.parent not in _PATH:
     from . import _linter
@@ -99,11 +100,20 @@ class Block:
 
     @property
     def start_line(self) -> int:
-        return self.tokens[max(self.indent, self.index)].start[0]
+        """The line number for the def or class statement"""
+        return self.tokens[self.begin].start[0]
 
     @property
     def end_line(self) -> int:
-        return self.tokens[max(self.dedent, self.index)].start[0]
+        if 0 <= self.dedent < len(self.tokens):
+            return self.tokens[self.dedent].start[0] - 1
+        else:
+            return self.tokens[-1].start[0]
+            # Only happens in one case so far: a file whose last line was
+            #
+            #    def function(): ...
+            #
+            # and the dedent correctly pointed to one past the end of self.tokens
 
     @property
     def line_count(self) -> int:
@@ -130,9 +140,7 @@ class Block:
 
     @cached_property
     def is_override(self) -> bool:
-        return not self.is_class and any(
-            d.rpartition(".")[2] == "override" for d in self.decorators
-        )
+        return not self.is_class and bool(_OVERRIDES.intersection(self.decorators))
 
     DATA_FIELDS = (
         "category",
@@ -180,16 +188,16 @@ def _get_decorators(tokens: Sequence[TokenInfo], block_start: int) -> list[str]:
     def decorators() -> Iterator[str]:
         rev = reversed(range(block_start))
         newlines = (i for i in rev if tokens[i].type == token.NEWLINE)
-        newlines = itertools.chain(newlines, [-1])  # To account for the first line
+        it = iter(itertools.chain(newlines, [-1]))
+        # The -1 accounts for the very first line in the file
 
-        it = iter(newlines)
         end = next(it, -1)  # Like itertools.pairwise in Python 3.10
         for begin in it:
             for i in range(begin + 1, end):
                 t = tokens[i]
                 if t.type == token.OP and t.string == "@":
                     useful = (t for t in tokens[i:end] if t.type not in _IGNORE)
-                    yield "".join(s.string.strip("\n") for s in useful)
+                    yield "".join(s.string.strip() for s in useful)
                     break
                 elif t.type not in _IGNORE:
                     return  # A statement means no more decorators
@@ -422,7 +430,8 @@ class DocstringLinter(_linter.FileLinter[DocstringFile]):
     def _is_bad_block(self, b: Block, df: DocstringFile) -> bool:
         max_lines = self._max_lines[b.category]
         return (
-            not df.omitted(df.tokens, b.begin, b.dedent)
+            not b.is_override
+            and not df.omitted(df.tokens, b.begin, b.dedent)
             and b.line_count > max_lines
             and len(b.docstring) < self.args.min_docstring
             and (self.args.lint_local or not b.is_local)

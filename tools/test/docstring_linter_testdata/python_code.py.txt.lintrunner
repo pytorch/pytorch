@@ -1,4 +1,4 @@
-tools/test/docstring_linter_testdata/python_code.py.txt:17: No docstring found for class 'LongWithoutDocstring' (4 lines)
+tools/test/docstring_linter_testdata/python_code.py.txt:17: No docstring found for class 'LongWithoutDocstring' (6 lines)
    15 |
    16 |
    17 | class LongWithoutDocstring:
@@ -13,6 +13,14 @@ tools/test/docstring_linter_testdata/python_code.py.txt:24: docstring found for 
         ^
    25 |     """TODO"""
    26 |
+
+tools/test/docstring_linter_testdata/python_code.py.txt:54: No docstring found for function 'long_without_docstring' (7 lines)
+   52 |
+   53 |
+   54 | def long_without_docstring():
+        ^
+   55 |     #
+   56 |     #
 
 tools/test/docstring_linter_testdata/python_code.py.txt:71: No docstring found for function 'needs_docs' (12 lines). If the method overrides a method on a parent class, adding the `@typing_extensions.override` decorator will make this error go away.
    69 |     """This docstring, while short, is enough"""
