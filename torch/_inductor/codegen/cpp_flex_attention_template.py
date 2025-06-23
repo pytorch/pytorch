@@ -311,7 +311,7 @@ extern "C"
   }
   if (need_pack) {
     // When the number of gemm is greater than the number of pack,
-    // the pack overhead can be overlaped.
+    // the pack overhead can be overlapped.
     int64_t thresh_size = 64;
     need_pack = kvSize >= thresh_size && qSize >= thresh_size;
     if (need_pack) {

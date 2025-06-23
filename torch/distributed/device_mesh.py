@@ -102,7 +102,7 @@ else:
             ]
 
             mesh_tensor = device_mesh.mesh
-            # slice_dim_idx could be differnt from submesh_dims, as we may need to flatten out some dims.
+            # slice_dim_idx could be different from submesh_dims, as we may need to flatten out some dims.
             slice_dim_idx = []
             slice_dim_group_name = []
             # keep track of the number of dims that have been flattened so we can get the correct slice_dim_idx in the
@@ -392,7 +392,7 @@ else:
         each dimension of the DeviceMesh separately. DeviceMesh respects the device that user selects
         already (i.e. if user call `torch.cuda.set_device` before the DeviceMesh initialization),
         and will select/set the device for the current process if user does not set the device
-        beforehands. Note that manual device selection should happen BEFORE the DeviceMesh initialization.
+        beforehand. Note that manual device selection should happen BEFORE the DeviceMesh initialization.
 
         DeviceMesh can also be used as a context manager when using together with DTensor APIs.
 
@@ -603,7 +603,7 @@ else:
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
 
-                        # We temporarily revert the re-use subgroup, since it breaks two internal tests.
+                        # We temporarily revert the reuse subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
                         if bound_device_id is None or not has_split_group:
@@ -961,13 +961,13 @@ else:
             """
             Returns a 1D DeviceMesh by flattening the current DeviceMesh.
 
-            If no mesh_dim_name is provided, the default is a string concatentaing the mesh_dim_names of the
+            If no mesh_dim_name is provided, the default is a string concatenating the mesh_dim_names of the
             given submesh with each mesh_dim_name separated by "_". For example, if we have a 3D mesh
             DeviceMesh([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], mesh_dim_names=("dp", "cp", "tp")), calling
             mesh_3d["dp", "cp"]._flatten() will create a 1D submesh DeviceMesh([0, 1, 2, 3], mesh_dim_names=("dp_cp",))
             on rank 0, 1, 2, 3 and a 1D submesh DeviceMesh([4, 5, 6, 7], mesh_dim_names=("dp_cp",)) on rank 4, 5, 6, 7.
 
-            After the flattened dimension is created, to access the flattened dimesnion in mesh_3d, one can use the
+            After the flattened dimension is created, to access the flattened dimension in mesh_3d, one can use the
             existing slicing method to obtain the flattened mesh through calling mesh_3d["dp_cp"].
             """
             if not self.mesh_dim_names:

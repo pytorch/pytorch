@@ -211,9 +211,13 @@ _NodeOrNodes: TypeAlias = Union[
 ]
 
 
+def _is_static(x: object) -> bool:
+    return isinstance(x, (int, Integer))
+
+
 @dataclasses.dataclass(frozen=True)
 class GraphPartitionSignature:
-    # symbol inputs that are neccessary for codegen
+    # symbol inputs that are necessary for codegen
     symbol_inputs: OrderedSet[sympy.Symbol]
 
     # mapping from partition input name to IRNode or Expr. Need the name str since
@@ -441,7 +445,7 @@ def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> b
         (V.graph.sizevars.size_hint_or_throw(x.get_stride()[i]) % alignment) == 0
         for i in range(len(x.get_stride()) - 1)
     )
-    # if the last dim size is <= 1, stride doesnt matter
+    # if the last dim size is <= 1, stride doesn't matter
     aligned_last_dim = (
         V.graph.sizevars.size_hint_or_throw(x.get_stride()[-1]) == 1
         or V.graph.sizevars.size_hint_or_throw(x.get_size()[-1]) <= 1
@@ -1229,9 +1233,6 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
     ) -> tuple[ReductionHint, _IntLike]:
-        def _is_static(x: object) -> bool:
-            return isinstance(x, (int, Integer))
-
         reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
@@ -1526,6 +1527,18 @@ class Reduction(Loops):
             reduction_numel,
             input_node,
         )
+
+        def _maybe_increase_split(split: int) -> int:
+            # don't apply min_num_split constraint for static shape case.
+            if _is_static(reduction_numel):
+                return split
+            if split > 1:
+                return max(split, config.min_num_split)
+            else:
+                return split
+
+        split = _maybe_increase_split(split)
+
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
         # reuse the passed hint if available
@@ -2240,7 +2253,7 @@ class Scan(Loops):
     dtypes: tuple[torch.dtype, ...]
     inner_fns: tuple[Callable[..., Any], ...]
 
-    # HACK we mimick reduction
+    # HACK we mimic reduction
 
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         # TODO: Can combine_fn/reindex close over unbacked symbols? If so, we
@@ -2449,7 +2462,7 @@ class Sort(Loops):
     stable: bool
     descending: bool
 
-    # HACK we mimick reduction
+    # HACK we mimic reduction
 
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         return (
@@ -4714,7 +4727,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         NOTE:[TritonTemplates with multiple outputs]
         We want the ability for TritonTemplates to output multiple tensors. Triton
         kernels have no notion of outputs and this is done by creating tensors that
-        are then mutated by the kernel. Currenlty our STORE_OUTPUT codegen doesn't
+        are then mutated by the kernel. Currently our STORE_OUTPUT codegen doesn't
         support creating multinode outputs for triton templates.
         We work around this by creating an extra input buffer during the lowering
         and we mark them as mutated inputs.
@@ -4991,7 +5004,7 @@ class InputsKernel(OperationBuffer):
             if isinstance(input, Sequence):
                 reads.update(StarDep(x.get_name()) for x in input)
             elif isinstance(input, ShapeAsConstantBuffer):
-                # Skip creating dependncy for symbolics as they're visible globally
+                # Skip creating dependency for symbolics as they're visible globally
                 continue
             else:
                 reads.add(StarDep(input.get_name()))
@@ -5322,7 +5335,7 @@ class ExternKernel(InputsKernel):
             else {}
         )
         # FIXME: self.kwargs does not always match kwargs defined in schema, so sometimes
-        # ordered_kwargs_for_cpp_kernel is explicilty passed in.
+        # ordered_kwargs_for_cpp_kernel is explicitly passed in.
         if isinstance(self.op_overload, torch._ops.OpOverload):
             if not self.ordered_kwargs_for_cpp_kernel:
                 self.ordered_kwargs_for_cpp_kernel = [
@@ -7031,7 +7044,7 @@ class FallbackKernel(ExternKernelAlloc):
     """
     A class that represents a fallback kernel for handling operators that are not
     directly support by inductor. It currently supports functional ops, view ops,
-    implace aten ops, and mutating ops that are auto-functionalizable.
+    inplace aten ops, and mutating ops that are auto-functionalizable.
     """
 
     def __init__(  # type: ignore[no-untyped-def]
@@ -7356,6 +7369,8 @@ class FallbackKernel(ExternKernelAlloc):
 
     @override
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        """Overrides the parent member.
+        See https://github.com/pytorch/pytorch/issues/151692"""
         kernel = self.op_overload
         assert kernel is not None
         if kernel.namespace == "aten":
@@ -8084,10 +8099,10 @@ class Conditional(ExternKernel):
 
         # make sure true and false outputs are structurally equivalent
         assert len(true_outputs) == len(false_outputs), (true_outputs, false_outputs)
-        for i, (to, fo) in enumerate(zip(true_outputs, false_outputs)):
-            assert to.get_device() == fo.get_device(), (i, to, fo)
-            assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
-            assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
+        for i, (t_o, f_o) in enumerate(zip(true_outputs, false_outputs)):
+            assert t_o.get_device() == f_o.get_device(), (i, t_o, f_o)
+            assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
+            assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
         device = next(
             o.get_device()

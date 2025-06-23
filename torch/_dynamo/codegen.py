@@ -253,7 +253,7 @@ class PyCodegen:
             # above, export _wants to_ obtain an identity FX graph (despite it
             # appears unnecessarily expensive for `torch.compile`), so we have
             # the following option to override Dynamo's preference for codegen
-            # from source. Morever, this option applies recursively, for cases
+            # from source. Moreover, this option applies recursively, for cases
             # like input tensor being returned in a new dictionary.
             #
             # And why the `ValueMutationExisting` check? Not sure, so leaving it
@@ -591,7 +591,7 @@ class PyCodegen:
 
         def collect_temp_source(source):
             if source in seen_sources:
-                # This source is used atleast twice, so it can be reused
+                # This source is used at least twice, so it can be reused
                 self.mark_source_temp(source)
                 # Dont trace source further. This prevents us from marking too
                 # many nodes as temp sources.
@@ -615,7 +615,7 @@ class PyCodegen:
                 collect_temp_source(arg.source)
 
         cm_var = None
-        if config.record_pre_graph_bytecode_in_traces:
+        if config.record_runtime_overhead:
             # Record the pregraph bytecode start
             self.add_push_null(
                 lambda: self.load_import_from(
@@ -641,7 +641,7 @@ class PyCodegen:
             else:
                 self.call_reconstruct(arg)
 
-        if config.record_pre_graph_bytecode_in_traces:
+        if config.record_runtime_overhead:
             # Record the pregraph bytecode end
             self.add_push_null(
                 lambda: self.load_import_from(
