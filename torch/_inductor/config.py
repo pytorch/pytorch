@@ -459,6 +459,13 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
 
+# Specify the size of the search space for flex attention autotuning.
+# DEFAULT     - balance between compile time overhead and performance
+# EXHAUSTIVE  - maximize performance
+max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_FLEX_SEARCH_SPACE", "DEFAULT"
+).upper()  # type: ignore[assignment]
+
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
 
@@ -1078,6 +1085,9 @@ class cpp:
     use_decompose_tanh = (
         os.environ.get("TORCHINDUCTOR_CPP_USE_DECOMPOSE_TANH", "0") == "1"
     )
+
+    # Use a small dequant buffer for wgt of woq int4 size as: [q_group_size, Nr]
+    use_small_dequant_buffer = False
 
 
 # config specific to codegen/triton.py
