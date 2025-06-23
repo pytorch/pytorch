@@ -1203,6 +1203,7 @@ class CommonTemplate:
             expected_num_triton_kernels=1,
             expected_num_block_pointers=3,
         )
+
     @config.patch("triton.prefer_nd_tiling", True)
     @config.patch("triton.max_tiles", 3)
     @parametrize(
