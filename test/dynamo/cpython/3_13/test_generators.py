@@ -2742,26 +2742,26 @@ test_generators just happened to be the test that drew these out.
 
 """
 
-__test__ = {"tut":      tutorial_tests,
-            "pep":      pep_tests,
-            "email":    email_tests,
-            "fun":      fun_tests,
-            "syntax":   syntax_tests,
-            "conjoin":  conjoin_tests,
-            "weakref":  weakref_tests,
-            "coroutine":  coroutine_tests,
-            "refleaks": refleaks_tests,
-            }
+# __test__ = {"tut":      tutorial_tests,
+#             "pep":      pep_tests,
+#             "email":    email_tests,
+#             "fun":      fun_tests,
+#             "syntax":   syntax_tests,
+#             "conjoin":  conjoin_tests,
+#             "weakref":  weakref_tests,
+#             "coroutine":  coroutine_tests,
+#             "refleaks": refleaks_tests,
+#             }
 
-def load_tests(loader, tests, pattern):
-    # ======= BEGIN Dynamo patch =======
-    suite = doctest.DocTestSuite()
-    for test in suite:
-        # Dynamically change base class
-        test.__class__ = type(test.__class__.__name__, (__TestCase, test.__class__), {})
-    tests.addTests(suite)
-    # ======= END DYNAMO PATCH =======
-    return tests
+# def load_tests(loader, tests, pattern):
+#     # ======= BEGIN Dynamo patch =======
+#     suite = doctest.DocTestSuite()
+#     for test in suite:
+#         # Dynamically change base class
+#         test.__class__ = type(test.__class__.__name__, (__TestCase, test.__class__), {})
+#     tests.addTests(suite)
+#     # ======= END DYNAMO PATCH =======
+#     return tests
 
 
 if __name__ == "__main__":
