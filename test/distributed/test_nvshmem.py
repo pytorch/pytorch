@@ -91,7 +91,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         torch.testing.assert_close(out, expected)
 
     @skipIfRocm
-    def test_nvshmem_all_to_all_vdev(self) -> None:
+    def test_all_to_all_vdev(self) -> None:
         self._init_device()
 
         group_name = dist.group.WORLD.group_name
@@ -123,7 +123,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         # Row 0 is input splits
         in_out_splits[0].copy_(inp_splits)
 
-        torch.ops.symm_mem.nvshmem_all_to_all_vdev(inp, out, in_out_splits, group_name)
+        torch.ops.symm_mem.all_to_all_vdev(inp, out, in_out_splits, group_name)
 
         # Check input splits (row 0) -- should not change
         torch.testing.assert_close(in_out_splits[0], inp_splits)
@@ -133,7 +133,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
 
         # Check output offsets (row 2)
         out_offsets = torch.cumsum(out_splits, dim=0)  # inclusive scan
-        # output offsets from `nvshmem_all_to_all_vdev` is exclusive scan
+        # output offsets from `all_to_all_vdev` is exclusive scan
         self.assertEqual(in_out_splits[2][0], 0)
         torch.testing.assert_close(in_out_splits[2][1:], out_offsets[:-1])
 
@@ -146,7 +146,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
 
     @skipIfRocm
     @parametrize("align", [1, 8, 16])  # `major_align` of output
-    def test_nvshmem_all_to_all_vdev_2d(self, align: int) -> None:
+    def test_all_to_all_vdev_2d(self, align: int) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
 
@@ -190,7 +190,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         # Row 0 is input splits
         in_out_splits[0].copy_(inp_splits)
 
-        torch.ops.symm_mem.nvshmem_all_to_all_vdev_2d(
+        torch.ops.symm_mem.all_to_all_vdev_2d(
             inp, out, in_out_splits, group_name, major_align=align
         )
         received_out_splits = in_out_splits[1]
@@ -217,7 +217,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
 
         out_splits_padded = torch.tensor(out_split_list, device=self.device).reshape(-1)
         out_offsets = torch.cumsum(out_splits_padded, dim=0)  # inclusive scan
-        # Make it exclusive scan because that's what `nvshmem_all_to_all_vdev_2d` returns
+        # Make it exclusive scan because that's what `all_to_all_vdev_2d` returns
         out_offsets = torch.cat(
             [torch.zeros(1, device=self.device), out_offsets[:-1]]
         ).to(torch.int64)
