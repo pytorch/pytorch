@@ -166,7 +166,7 @@ We can also override a generic setting for a specific backend if the fp32_precis
   torch.backends.cudnn.rnn.fp32_precision = "ieee"
 
 For above 2 cases, both `torch.backends.cudnn.conv.fp32_precision` and `torch.backends.cudnn.rnn.fp32_precision`
-is overrided to `ieee`.
+is overridden to `ieee`.
 
 Old settings are still supported. But we suggest to use the new settings for better control. And we do not support
 to use mix of old and new settings.
