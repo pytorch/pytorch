@@ -1,4 +1,4 @@
-import collections
+from collections import OrderedDict
 from typing import Any
 
 import torch
@@ -13,7 +13,6 @@ __all__ = [
     "memory_allocated",
     "memory_reserved",
     "memory_stats",
-    "memory_stats_as_nested_dict",
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
 ]
@@ -31,21 +30,7 @@ def empty_cache() -> None:
     torch._C._accelerator_emptyCache()
 
 
-def memory_stats_as_nested_dict(device: _device_t = None, /) -> dict[str, Any]:
-    r"""Return the result of :func:`~torch.accelerator.memory_stats` as a nested dictionary.
-
-    Args:
-        device (:class:`torch.device`, str, int, optional): a given device that must match the current
-            :ref:`accelerator<accelerators>` device type. If not given,
-            use :func:`torch.accelerator.current_device_index` by default.
-    """
-    if not torch._C._accelerator_isAllocatorInitialized():
-        return {}
-    device = _get_device_index(device, optional=True)
-    return torch._C._accelerator_getDeviceStats(device)
-
-
-def memory_stats(device: _device_t = None, /) -> dict[str, Any]:
+def memory_stats(device: _device_t = None, /) -> OrderedDict[str, Any]:
     r"""Return a dictionary of accelerator device memory allocator statistics for a given device.
 
     The return value of this function is a dictionary of statistics, each of
@@ -102,7 +87,10 @@ def memory_stats(device: _device_t = None, /) -> dict[str, Any]:
             :ref:`accelerator<accelerators>` device type. If not given,
             use :func:`torch.accelerator.current_device_index` by default.
     """
-    stats = memory_stats_as_nested_dict(device)
+    if not torch._C._accelerator_isAllocatorInitialized():
+        return OrderedDict()
+    device = _get_device_index(device, optional=True)
+    stats = torch._C._accelerator_getDeviceStats(device)
     flat_stats = []
 
     def flatten(prefix: str, value: Any) -> None:
@@ -115,7 +103,7 @@ def memory_stats(device: _device_t = None, /) -> dict[str, Any]:
 
     flatten("", stats)
     flat_stats.sort()
-    return collections.OrderedDict(flat_stats)
+    return OrderedDict(flat_stats)
 
 
 def memory_allocated(device: _device_t = None, /) -> int:
