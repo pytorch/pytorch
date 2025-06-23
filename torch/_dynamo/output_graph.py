@@ -1657,6 +1657,7 @@ class OutputGraph(OutputGraphGuardsState):
             for register_finalizer in self.register_finalizer_fns:
                 register_finalizer(gm)
 
+            gm._backend_id = name
             gm.compile_subgraph_reason = self.compile_subgraph_reason
             gm.meta["dynamo_flat_name_to_original_fqn"] = (
                 self.dynamo_flat_name_to_original_fqn.copy()
