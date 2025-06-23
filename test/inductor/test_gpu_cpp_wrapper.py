@@ -16,6 +16,7 @@ try:
         from . import (
             test_combo_kernels,
             test_foreach,
+            test_mkldnn_pattern_matcher,
             test_pattern_matcher,
             test_select_algorithm,
             test_torchinductor,
@@ -25,10 +26,12 @@ try:
         import test_combo_kernels  # @manual=fbcode//caffe2/test/inductor:combo_kernels-library
 
         import test_foreach  # @manual=fbcode//caffe2/test/inductor:foreach-library
+        import test_mkldnn_pattern_matcher  # @manual=fbcode//caffe2/test/inductor:mkldnn_pattern_matcher-library
         import test_pattern_matcher  # @manual=fbcode//caffe2/test/inductor:pattern_matcher-library
         import test_select_algorithm  # @manual=fbcode//caffe2/test/inductor:select_algorithm-library
         import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
         import test_torchinductor_dynamic_shapes  # @manual=fbcode//caffe2/test/inductor:test_inductor-library_dynamic_shapes
+
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -290,6 +293,16 @@ if RUN_GPU:
             "test_linear_relu",
             device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_qlinear",
+            device="xpu",
+            tests=test_mkldnn_pattern_matcher.TestPatternMatcher(),
+        ),
+        BaseTest(
+            "test_qconv2d",
+            device="xpu",
+            tests=test_mkldnn_pattern_matcher.TestPatternMatcher(),
         ),
     ]:
         if item.device == "xpu" and item.name in XPU_BASE_TEST_SKIP:

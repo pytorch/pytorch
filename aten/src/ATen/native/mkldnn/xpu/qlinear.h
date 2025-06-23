@@ -25,4 +25,3 @@ C10_API Tensor q_linear_pointwise_tensor(
 } // namespace at::native::xpu
 
 #endif // AT_MKLDNN_ENABLED()
-

@@ -20,7 +20,7 @@ static inline c10::ScalarType qlinear_decide_out_dtype(
   return dst_dtype;
 }
 
-static Tensor q_linear_pointwise(
+Tensor q_linear_pointwise(
     Tensor act,
     double act_scale,
     int64_t act_zero_point,

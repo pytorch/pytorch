@@ -16,16 +16,6 @@ using namespace torch::aot_inductor;
 
 #if AT_MKLDNN_ENABLED()
 
-template <typename T>
-static c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
-  c10::List<T> scalars_list;
-  scalars_list.reserve(len);
-  for (int64_t i = 0; i < len; i++) {
-    scalars_list.emplace_back(scalars[i]);
-  }
-  return scalars_list;
-}
-
 AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
     AtenTensorHandle X,
     AtenTensorHandle other,
