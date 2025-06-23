@@ -391,8 +391,8 @@ def lobpcg(
       we do the following symmetrization map: `A -> (A + A.t()) / 2`.
       The map is performed only when the `A` requires gradients.
 
-    .. warning:: LPBPCG algorithm is not applicable when the number of A's rows
-      is smaller than 3x the number of requested eigenpairs n.
+    .. warning:: LPBPCG algorithm is not applicable when the number of `A`'s rows
+      is smaller than 3x the number of requested eigenpairs `n`.
 
     Args:
 
@@ -414,9 +414,9 @@ def lobpcg(
       n (integer, optional): if :math:`X` is not specified then `n`
                   specifies the size of the generated random
                   approximation of eigenvectors. Default value for `n`
-                  is `k`. If X is specified, any provided value of n is
-                  ignored and n is automatically set to the number of
-                  columns in X.
+                  is `k`. If :math:`X` is specified, any provided value of `n` is
+                  ignored and `n` is automatically set to the number of
+                  columns in :math:`X`.
 
       iK (tensor, optional): the input tensor of size :math:`(*, m,
                   m)`. When specified, it will be used as preconditioner.
