@@ -382,6 +382,15 @@ class TestOpenReg(TestCase):
         self.assertEqual(z.device.type, "openreg")
         self.assertEqual(z.shape, torch.Size([0]))
 
+    def test_fake_tensor(self):
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            a = torch.empty(1, device="openreg")
+            b = torch.empty(1, device="openreg:0")
+            result = a + b  # noqa: F841
+
+    def test_named_tensor(self):
+        return torch.empty([2, 3, 4, 5], device="openreg", names=["N", "C", "H", "W"])
+
     def test_printing(self):
         a = torch.ones(20, device="openreg")
         # Does not crash!
@@ -423,6 +432,38 @@ class TestOpenReg(TestCase):
         quantized_tensor = torch.quantize_per_tensor(x, 0.1, 10, torch.qint8)
         self.assertEqual(quantized_tensor.device, torch.device("openreg:0"))
         self.assertEqual(quantized_tensor.dtype, torch.qint8)
+
+    # custom autograd
+    def test_compile_autograd_function_returns_self(self):
+        in_ref = torch.randn(4, device="openreg", requires_grad=True)
+        out_ref = torch.ops.openreg.custom_autograd_fn_returns_self(in_ref)
+        out_ref.sum().backward()
+
+        in_test = in_ref.detach().clone().requires_grad_(True)
+        # TODO(FFFrog): Need to support inductor for OpenReg first.
+        out_test = torch.compile(backend="aot_eager")(
+            torch.ops.openreg.custom_autograd_fn_returns_self
+        )(in_test)
+        out_test.sum().backward()
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(in_ref.grad, in_test.grad)
+
+    @skipIfTorchDynamo("Temporary disabled due to torch._ops.OpOverloadPacket")
+    def test_compile_autograd_function_aliasing(self):
+        in_ref = torch.randn(4, device="openreg", requires_grad=True)
+        out_ref = torch.ops.openreg.custom_autograd_fn_aliasing(in_ref)
+        out_ref.sum().backward()
+
+        in_test = in_ref.detach().clone().requires_grad_(True)
+        # TODO(FFFrog): Need to support inductor for OpenReg first.
+        out_test = torch.compile(backend="aot_eager")(
+            torch.ops.openreg.custom_autograd_fn_aliasing
+        )(in_test)
+        out_test.sum().backward()
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(in_ref.grad, in_test.grad)
 
 
 if __name__ == "__main__":
