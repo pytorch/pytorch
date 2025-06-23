@@ -478,9 +478,9 @@ class MetalKernel(SIMDKernel):
         dtype = V.graph.get_dtype(name)
         line = f"{var}[{self.index_to_str(index)}]"
         if dtype in [torch.float16, torch.bfloat16]:
-            # TODO(NS): Figure out the right balance betwene optype casts
+            # TODO(NS): Figure out the right balance between optype casts
             # op_math_t for half-precision floats should be float32
-            # Otherwise it can lead to a corretness issues with eager
+            # Otherwise it can lead to a correctness issues with eager
             line = f"static_cast<float>({line})"
             dtype = torch.float32
         return self.cse.generate(self.loads, line, dtype=dtype)
@@ -715,7 +715,7 @@ class MetalKernel(SIMDKernel):
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
 
-        if not entry.is_reduction or entry.root.numel < self.max_threadgroup_size:
+        if not entry.is_reduction or entry.root.numel <= self.max_threadgroup_size:
             self.indexing_code.writeline(
                 f"{self.index_dtype} {entry.name} = {index_str};"
             )
@@ -754,7 +754,16 @@ class MetalKernel(SIMDKernel):
                 self.body.splice(self.compute)
             self.body.writeline("}" * len(self.multistage_reduction_entry))
             # Invalidate variables instantiated inside loop
-            self.cse.invalidate(OrderedSet(self.cse.reduction_cache.values()))
+            # But results of reduction alive. Reduction cache values can be
+            # either CSEVariable or tuple of CSEVariables, in which case all
+            # variables in the tuple must be preserved
+            self.cse.invalidate(
+                OrderedSet(
+                    v
+                    for item in self.cse.reduction_cache.values()
+                    for v in (item if isinstance(item, tuple) else (item,))
+                )
+            )
             # And loop codegen
             while self.multistage_reduction_entry:
                 self.multistage_reduction_entry.pop().cache_clear()
@@ -879,7 +888,7 @@ class MetalKernel(SIMDKernel):
             else:
                 return f"{kwarg}=[{', '.join(threads)}]"
 
-        # For reduction kernels, limit the maximum size over reduction dimentions to
+        # For reduction kernels, limit the maximum size over reduction dimensions to
         # a maximum threadgroup size
         if len(self.active_range_trees()) > 0:
             threads = [
