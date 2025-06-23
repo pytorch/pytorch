@@ -522,7 +522,7 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
 }
 
 inline bool check_runtime_disabled_flash(sdp_params const& params, bool debug) {
-  // We check the global context to see if user has explicitly turned of flash
+  // We check the global context to see if user has explicitly turned off flash
   // sdp kernels
   if (!at::globalContext().userEnabledFlashSDP()) {
     if (debug) {
@@ -534,7 +534,7 @@ inline bool check_runtime_disabled_flash(sdp_params const& params, bool debug) {
 }
 
 inline bool check_runtime_disabled_mem_efficient(sdp_params const& params, bool debug) {
-  // We check the global context to see if user has explicitly turned of
+  // We check the global context to see if user has explicitly turned off
   // mem_efficient sdp kernels
   if (!at::globalContext().userEnabledMemEfficientSDP()) {
     if (debug) {
