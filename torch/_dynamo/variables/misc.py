@@ -26,7 +26,7 @@ import re
 import sys
 import types
 import warnings
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch._C
 import torch._numpy as tnp
@@ -1521,7 +1521,7 @@ class StringFormatVariable(VariableTracker):
             for x in itertools.chain(sym_args, sym_kwargs.values())
         ):
 
-            def decode(a: str | bytes) -> str:
+            def decode(a: Union[str, bytes]) -> str:
                 return a.decode("utf-8") if isinstance(a, bytes) else a
 
             return variables.ConstantVariable.create(
