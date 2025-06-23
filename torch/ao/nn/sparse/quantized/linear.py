@@ -1,4 +1,5 @@
-from typing import Any, Optional
+# mypy: allow-untyped-defs
+from typing import Optional
 
 import torch
 from torch.ao.nn.quantized.modules.utils import (
@@ -14,12 +15,7 @@ __all__ = ["LinearPackedParams", "Linear"]
 class LinearPackedParams(torch.nn.Module):
     _version = 1
 
-    def __init__(
-        self,
-        row_block_size: int = 1,
-        col_block_size: int = 4,
-        dtype: torch.dtype = torch.qint8,
-    ) -> None:
+    def __init__(self, row_block_size=1, col_block_size=4, dtype=torch.qint8):
         super().__init__()
 
         if dtype != torch.qint8:
@@ -30,7 +26,7 @@ class LinearPackedParams(torch.nn.Module):
         )
         self.set_weight_bias(wq, None, row_block_size, col_block_size)
 
-    def _get_name(self) -> str:
+    def _get_name(self):
         return "SparseQuantizedLinearPackedParams"
 
     @torch.jit.export
@@ -47,34 +43,32 @@ class LinearPackedParams(torch.nn.Module):
         )
 
     @torch.jit.export
-    def _weight_bias(self) -> tuple[torch.Tensor, Optional[torch.Tensor], int, int]:
+    def _weight_bias(self):
         (weight, bias, block_sizes) = torch.ops.sparse.qlinear_unpack(
             self._packed_params
         )
         return (weight, bias, block_sizes[0], block_sizes[1])
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
         return x
 
-    def _save_to_state_dict(
-        self, destination: dict[str, Any], prefix: str, keep_vars: bool
-    ) -> None:
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + "dtype"] = self.dtype
         destination[prefix + "_packed_params"] = self._weight_bias()
 
     def _load_from_state_dict(
         self,
-        state_dict: dict[str, Any],
-        prefix: str,
-        local_metadata: dict[str, Any],
-        strict: bool,
-        missing_keys: list[str],
-        unexpected_keys: list[str],
-        error_msgs: list[str],
-    ) -> None:
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
         version = local_metadata.get("version", None)
-        assert version is None or version <= self._version
+        assert version <= self._version
 
         self.dtype = state_dict.pop(prefix + "dtype")
         weight, bias, row_block_size, col_block_size = state_dict.pop(
@@ -93,14 +87,14 @@ class LinearPackedParams(torch.nn.Module):
         )
 
     @torch.jit.export
-    def __getstate__(self) -> tuple[Any, bool, torch.dtype]:
+    def __getstate__(self):
         return self._packed_params, self.training, self.dtype
 
     @torch.jit.export
-    def __setstate__(self, state: tuple[Any, bool, torch.dtype]) -> None:
+    def __setstate__(self, state):
         (self._packed_params, self.training, self.dtype) = state
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return self._weight_bias().__repr__()
 
 
@@ -115,13 +109,13 @@ class Linear(torch.nn.Module):
 
     def __init__(
         self,
-        in_features: int,
-        out_features: int,
-        row_block_size: int,
-        col_block_size: int,
-        bias: bool = True,
-        dtype: torch.dtype = torch.qint8,
-    ) -> None:
+        in_features,
+        out_features,
+        row_block_size,
+        col_block_size,
+        bias=True,
+        dtype=torch.qint8,
+    ):
         super().__init__()
 
         if dtype != torch.qint8:
@@ -132,9 +126,10 @@ class Linear(torch.nn.Module):
         self.in_features = in_features
         self.out_features = out_features
 
-        bias_tensor: Optional[torch.Tensor] = None
         if bias:
-            bias_tensor = torch.zeros(self.out_features, dtype=torch.float)
+            bias = torch.zeros(self.out_features, dtype=torch.float)
+        else:
+            bias = None
 
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8
@@ -143,22 +138,22 @@ class Linear(torch.nn.Module):
             row_block_size=row_block_size, col_block_size=col_block_size, dtype=dtype
         )
         self._packed_params.set_weight_bias(
-            qweight, bias_tensor, row_block_size, col_block_size
+            qweight, bias, row_block_size, col_block_size
         )
         self.scale = 1.0
         self.zero_point = 0
 
     @classmethod
-    def _get_name(cls) -> str:
+    def _get_name(cls):
         return "SparseQuantizedLinear"
 
-    def extra_repr(self) -> str:
+    def extra_repr(self):
         return (
             f"in_features={self.in_features}, out_features={self.out_features}, scale={self.scale}, "
             f"zero_point={self.zero_point}, qscheme={self.weight().qscheme()}"
         )
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return _hide_packed_params_repr(self, LinearPackedParams)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -166,23 +161,21 @@ class Linear(torch.nn.Module):
             x, self._packed_params._packed_params, self.scale, self.zero_point
         )
 
-    def _save_to_state_dict(
-        self, destination: dict[str, Any], prefix: str, keep_vars: bool
-    ) -> None:
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + "scale"] = torch.tensor(self.scale)
         destination[prefix + "zero_point"] = torch.tensor(self.zero_point)
 
     def _load_from_state_dict(
         self,
-        state_dict: dict[str, Any],
-        prefix: str,
-        local_metadata: dict[str, Any],
-        strict: bool,
-        missing_keys: list[str],
-        unexpected_keys: list[str],
-        error_msgs: list[str],
-    ) -> None:
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
         self.scale = float(state_dict[prefix + "scale"])
         state_dict.pop(prefix + "scale")
 
@@ -192,7 +185,7 @@ class Linear(torch.nn.Module):
         state_dict.pop(prefix + "op_type")
 
         version = local_metadata.get("version", None)
-        assert version is None or version <= self._version
+        assert version <= self._version
 
         super()._load_from_state_dict(
             state_dict,
@@ -204,13 +197,13 @@ class Linear(torch.nn.Module):
             error_msgs,
         )
 
-    def _weight_bias(self) -> tuple[torch.Tensor, Optional[torch.Tensor], int, int]:
+    def _weight_bias(self):
         return self._packed_params._weight_bias()
 
-    def weight(self) -> torch.Tensor:
+    def weight(self):
         return self._weight_bias()[0]
 
-    def bias(self) -> Optional[torch.Tensor]:
+    def bias(self):
         return self._weight_bias()[1]
 
     def set_weight_bias(
@@ -224,9 +217,7 @@ class Linear(torch.nn.Module):
         self._packed_params.set_weight_bias(w, b, row_block_size, col_block_size)
 
     @classmethod
-    def from_float(
-        cls, mod: torch.nn.Linear, use_precomputed_fake_quant: bool = False
-    ) -> "Linear":
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a quantized sparse module from a float module.
 
         We only care about the convert at this stage, no need for observers just yet.
@@ -264,20 +255,20 @@ class Linear(torch.nn.Module):
             assert w_zp == 0, "Weight zero point must map to 0"
         qweight = _quantize_weight(weight.float(), weight_post_process)
 
-        row_block_size_val = int(mod.sparse_params["sparse_block_shape"][0])  # type: ignore[index]
-        col_block_size_val = int(mod.sparse_params["sparse_block_shape"][1])  # type: ignore[index]
+        row_block_size = mod.sparse_params["sparse_block_shape"][0]  # type: ignore[index]
+        col_block_size = mod.sparse_params["sparse_block_shape"][1]  # type: ignore[index]
         qlinear = cls(
             mod.in_features,
             mod.out_features,
-            row_block_size_val,
-            col_block_size_val,
+            row_block_size,
+            col_block_size,
             dtype=dtype,
         )
         qlinear.set_weight_bias(
             qweight,
             mod.bias,
-            row_block_size_val,
-            col_block_size_val,
+            row_block_size,  # type: ignore[arg-type]
+            col_block_size,  # type: ignore[arg-type]
         )
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)
