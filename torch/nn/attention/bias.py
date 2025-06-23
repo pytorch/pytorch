@@ -269,7 +269,7 @@ class CausalBias(torch.Tensor):
                 )[0].transpose(1, 2)
             else:
                 _raise_kernel_warnings(sdpa_params)
-                # We cant use efficient attention the only support for lower right is via materialization
+                # We can't use efficient attention the only support for lower right is via materialization
                 return F.scaled_dot_product_attention(
                     query,
                     key,

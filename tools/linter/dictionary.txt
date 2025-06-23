@@ -1,4 +1,5 @@
 ans
+belows
 BU
 contiguities
 contiguity
@@ -15,11 +16,16 @@ hsa
 matA
 nd
 nin
+NotIn
 nout
 NowNs
+numer
+oH
 optins
 OT
+oT
 overrideable
+oW
 ptd
 rebuild
 rebuilt
@@ -29,6 +35,7 @@ requestor
 ser'de
 ser'der
 ser'des
+statics
 supercedes
 te
 WONT
