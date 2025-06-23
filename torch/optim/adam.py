@@ -398,7 +398,9 @@ def _single_tensor_adam(
             assert (
                 param.device.type == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            ), (
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
         # update step
         step_t += 1
@@ -433,7 +435,9 @@ def _single_tensor_adam(
             # cast to workaround https://github.com/pytorch/pytorch/issues/140601
             key = (device, dtype)
             if key not in beta1_dict:
-                beta1_dict[key] = beta1.to(device=device, dtype=dtype, non_blocking=True)  # type: ignore[union-attr]
+                beta1_dict[key] = beta1.to(  # type: ignore[union-attr]
+                    device=device, dtype=dtype, non_blocking=True
+                )
 
             device_beta1: Union[float, Tensor] = beta1_dict[key]
         else:
@@ -593,7 +597,9 @@ def _multi_tensor_adam(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        ), (
+            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     assert grad_scale is None and found_inf is None
 
@@ -769,7 +775,10 @@ def _multi_tensor_adam(
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
             torch._foreach_addcdiv_(
-                device_params, device_exp_avgs, exp_avg_sq_sqrt, step_size  # type: ignore[arg-type]
+                device_params,
+                device_exp_avgs,
+                exp_avg_sq_sqrt,
+                step_size,  # type: ignore[arg-type]
             )
 
 
