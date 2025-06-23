@@ -106,6 +106,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
+    SUPPORTED_MKLDNN_DEVICES,
     ValueWithLineMap,
 )
 from .virtualized import NullHandler, V
@@ -217,7 +218,6 @@ def mark_nodes_dislike_padding(
             aten.convolution,
             aten.convolution_backward,
             aten._scaled_mm,
-            aten._scaled_grouped_mm,
         ]
     )
     # what's a better way to collect the reduction ops?
@@ -343,7 +343,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
         self.partition_maps: Optional[list[GraphPartitionMap]] = None
-        self.zero_dim_cpu_tensor_list = OrderedSet[str]()
+        self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
         )
@@ -380,12 +380,12 @@ class GraphLowering(torch.fx.Interpreter):
         ] = {}
         self.seen_subgraphs: dict[str, ir.Subgraph] = {}
         self.constant_reprs: dict[str, str] = {}
-        self.removed_operations = OrderedSet[str]()
-        self.removed_buffers = OrderedSet[str]()
-        self.removed_inplace_buffers = OrderedSet[str]()
-        self.mutated_buffers = OrderedSet[str]()
-        self.never_reuse_buffers = OrderedSet[str]()
-        self.inplaced_to_remove = OrderedSet[str]()
+        self.removed_operations: OrderedSet[str] = OrderedSet()
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
+        self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
+        self.mutated_buffers: OrderedSet[str] = OrderedSet()
+        self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
+        self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
@@ -401,7 +401,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
         self.lists: dict[str, list[str]] = {}
-        self.mutated_inputs = OrderedSet[str]()
+        self.mutated_inputs: OrderedSet[str] = OrderedSet()
         self.mutated_input_idxs: list[int] = []
         self.name_to_buffer: dict[str, ir.Buffer] = {}
         self.name_to_users: defaultdict[str, list[ir.IRNode]] = defaultdict(list)
@@ -466,14 +466,14 @@ class GraphLowering(torch.fx.Interpreter):
         # This can either be a graph input or the output of fallback
         # kernels.
         self.unaligned_buffers: OrderedSet[str] = OrderedSet()
-        self.no_fuse_buffer_names = OrderedSet[str]()
+        self.no_fuse_buffer_names: OrderedSet[str] = OrderedSet()
 
         self.low_precision_codegen_ops: OrderedSet[str] = OrderedSet()
         # more aggressive prologue fusion
         self.invoke_quant_ops: OrderedSet[str] = OrderedSet()
 
         # Below field is related to printing debug intermediate tensor values info for debugging
-        self.all_codegen_kernel_names = OrderedSet[str]()
+        self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
         # state used by for Kernel.workspace
         self.workspace_id = itertools.count()
@@ -615,7 +615,7 @@ class GraphLowering(torch.fx.Interpreter):
             torch.backends.mkldnn.enabled
             and torch.backends.mkldnn.is_available()
             and all(
-                n.args[idx].meta["val"].device == torch.device("cpu")
+                n.args[idx].meta["val"].device.type in SUPPORTED_MKLDNN_DEVICES
                 for n in conv_nodes
                 for idx in [0, 1]
             )
@@ -1067,7 +1067,12 @@ class GraphLowering(torch.fx.Interpreter):
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
-            expr = _get_placeholder_expr(example.node)
+            # TODO fix partitioning issue and re-enable for backward
+            # https://github.com/pytorch/pytorch/issues/155468.
+            if not V.graph.is_backward:
+                expr = _get_placeholder_expr(example.node)
+            else:
+                expr = example.node.expr
             self.graph_inputs[target] = expr
             self.graph_input_names.append(target)
             return expr
@@ -1469,6 +1474,7 @@ class GraphLowering(torch.fx.Interpreter):
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
+                old_kwargs["tma_descriptor_metadata"],
             )
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
@@ -1516,7 +1522,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def run_node(self, n: torch.fx.Node) -> object:
         def debug(msg: str) -> None:
-            log.debug("lowering %s %s", LazyString(n.format_node), msg)
+            log.debug("lowering %s %s", LazyString(n.format_node), msg)  # type: ignore[arg-type]
 
         from torch._inductor.compiler_bisector import CompilerBisector
 
@@ -1536,7 +1542,8 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             if (
                 n.op == "call_function"
-                and n.target is not operator.getitem
+                and n.target
+                not in (operator.getitem, torch._higher_order_ops.invoke_subgraph)
                 and (
                     fallback_node_due_to_unsupported_type(n)
                     or CompilerBisector.disable_subsystem(
@@ -1878,7 +1885,7 @@ class GraphLowering(torch.fx.Interpreter):
         # [NOTE] Codegen runtime asserts in Inductor
         #
         # We need to generate runtime asserts directly in Inductor instead
-        # of just re-using the asserts from input graphs becase we reuse the
+        # of just reusing the asserts from input graphs because we reuse the
         # same ShapeEnv as before. In particular, on subsequent graph passes,
         # we would immediately turn all of these assertions into noops,
         # because when we evaluated their expressions, we would see that
@@ -1894,8 +1901,8 @@ class GraphLowering(torch.fx.Interpreter):
         #         equals = torch.add(ones, c)
         #         return equals
         # torch._dynamo.mark_dynamic(c, 0)
-        # When we re-use the ShapeEnv in Inductor lowering, the check that checks
-        # a and nonzero have the same shape would be evaluted to True after we resolve
+        # When we reuse the ShapeEnv in Inductor lowering, the check that checks
+        # a and nonzero have the same shape would be evaluated to True after we resolve
         # unbacked bindings using the ShapeEnv.
         # See test_unbacked_equals_input_size_runtime_assertion in test_aot_inductor.
         #
@@ -2043,6 +2050,7 @@ class GraphLowering(torch.fx.Interpreter):
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
+                node.kwargs["tma_descriptor_metadata"],
             )
 
             new_kwargs: dict[str, int] = {}
@@ -2245,7 +2253,7 @@ class GraphLowering(torch.fx.Interpreter):
         graph. The parent graph is passed as an argument: the
         intention is to inline codegening of the subgraph in
         the parent graph's wrapper code (including the generated
-        kerenls). The wrapper code is not finalized (via `.generate()`
+        kernels). The wrapper code is not finalized (via `.generate()`
         call), as this will be done in the parent graph's `codegen()`.
         """
         with dynamo_timed("GraphLowering.codegen_subgraph", log_pt2_compile_event=True):

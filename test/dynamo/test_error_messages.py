@@ -59,6 +59,7 @@ Dynamic shape operator
 
   Developer debug context: aten.nonzero.default
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0036
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -80,6 +81,7 @@ Dynamic shape operator (no meta kernel)
 
   Developer debug context: aten.linalg_lstsq.default
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0037
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -96,7 +98,13 @@ from user code:
                 torch.Tensor([1])
             ),
             """\
-Tensor.item
+Unsupported Tensor.item() call with capture_scalar_outputs=False
+  Explanation: Dynamo does not support tracing `Tensor.item()` with config.capture_scalar_outputs=False.
+  Hint: Set `torch._dynamo.config.capture_scalar_outputs = True` or `export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1` to include these operations in the captured graph.
+
+  Developer debug context: call_method TensorVariable() item () {}
+
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0124
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -116,10 +124,11 @@ from user code:
                 """\
 Data dependent operator
   Explanation: Operator `aten.equal.default` has a non-Tensor output whose value is dependent on the data of Tensor inputs.
-  Hint: Consider wrapping the operator into a PyTorch-understood custom operator (see https:/pytorch.org/tutorials/advanced/custom_ops_landing_page.html)
+  Hint: Consider wrapping the operator into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html)
 
   Developer debug context: aten.equal.default
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0033
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -147,6 +156,7 @@ sort with non-constant keys
 
   Developer debug context: TensorVariable()
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0207
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -171,6 +181,7 @@ Unsupported method call
 
   Developer debug context: call_method UserDefinedObjectVariable(zip) __iter__ () {}
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0156
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -198,6 +209,7 @@ Unsupported method call
 
   Developer debug context: call_method UserDefinedObjectVariable(dict_items) __iter__ () {}
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0156
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -221,6 +233,7 @@ Unsupported function call
 
   Developer debug context: call_function UserDefinedObjectVariable(zip) [] {}
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0147
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -244,6 +257,7 @@ Unsupported context manager
 
   Developer debug context: Attempted SETUP_WITH/BEFORE_WITH on ConstantVariable(int: 3)
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0142
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -271,7 +285,10 @@ Backend compiler exception
     Exception:test
     Traceback:
       File "test_error_messages.py", line N, in fn
-        return x + 1""",
+        return x + 1
+
+
+ For more details about this graph break, please visit: None""",
         )
 
     def test_unsupported_builtin(self):
@@ -290,6 +307,7 @@ Failed to trace builtin operator
 
   Developer debug context: builtin print [<class 'torch._dynamo.variables.constant.ConstantVariable'>] False
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0059
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -315,6 +333,7 @@ Attempted to call function marked as skipped
 
   Developer debug context: module: unittest.case, qualname: skip, skip reason: <missing reason>
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0007
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -336,6 +355,7 @@ Attempted to call function marked as skipped
 
   Developer debug context: module: torch._dynamo.decorators, qualname: disable, skip reason: <missing reason>
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0007
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -364,6 +384,7 @@ Attempted to inline function marked as skipped
 
   Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: skipped according trace_rules.lookup unittest
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0008
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -385,6 +406,7 @@ Call to `torch._dynamo.graph_break()`
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0025
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -405,6 +427,7 @@ Call to `torch._dynamo.graph_break()`
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{'msg': ConstantVariable(str: 'test graph break')}`
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0025
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -426,6 +449,7 @@ Attempted to call function marked as skipped
 
   Developer debug context: module: _warnings, qualname: warn, skip reason: <missing reason>
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0007
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -453,7 +477,8 @@ Attempted to call function marked as skipped
   Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
 
   Developer debug context: module: optree._C, qualname: PyCapsule.flatten, skip reason: <missing reason>
-""",
+
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0007""",
         )
 
     @scoped_load_inline
@@ -499,7 +524,8 @@ Attempted to call function marked as skipped
   Hint: If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
 
   Developer debug context: module: mylib, qualname: PyCapsule.foobar, skip reason: <missing reason>
-""",
+
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0007""",
         )
 
         cpp_source = """
@@ -551,6 +577,7 @@ Dynamic slicing with Tensor arguments
 
   Developer debug context: SliceVariable start: ConstantVariable(NoneType: None), stop: TensorVariable(), step: ConstantVariable(NoneType: None)
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0038
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -572,6 +599,7 @@ Observed exception
 
   Developer debug context: raised exception ExceptionVariable(<class 'RuntimeError'>)
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0088
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -597,6 +625,7 @@ Uninitialized nn.Module
 
   Developer debug context: Foo
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0119
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -625,6 +654,7 @@ Unsupported nn.Module attribute type
 
   Developer debug context: nn.Module subclass: Foo, name: attr, attribute type: module
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0161
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -654,6 +684,7 @@ Graph break under GenericContextWrappingVariable
 
   Developer debug context: Active generic context managers: [GenericContextWrappingVariable(GenericCtxMgr), GenericContextWrappingVariable(GenericCtxMgr)]
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0066
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -668,7 +699,8 @@ Call to `torch._dynamo.graph_break()`
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
-""",
+
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0025""",
         )
 
     def test_load_build_class(self):
@@ -689,6 +721,7 @@ LOAD_BUILD_CLASS bytecode not supported
 
   Developer debug context:
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0075
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -717,10 +750,11 @@ from user code:
             """\
 Missing bytecode handler
   Explanation: Dynamo does not know how to handle the bytecode instruction `GET_AITER`.
-  Hint: Do not trace code that produces the `GET_AITER` bytecode instruction (see https:/docs.python.org/3/library/dis.html for bytecode semantics).
+  Hint: Do not trace code that produces the `GET_AITER` bytecode instruction (see https://docs.python.org/3/library/dis.html for bytecode semantics).
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
   Developer debug context: GET_AITER with args (<torch._dynamo.symbolic_convert.InstructionTranslator object at 0xmem_addr>, Instruction(GET_AITER)
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0082
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -751,6 +785,7 @@ Reconstruction failure
 
   Developer debug context: UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0092
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -786,6 +821,7 @@ Graph Break Reason: Call to `torch._dynamo.graph_break()`
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0025
 User code traceback:
   File "test_error_messages.py", line N, in test_reconstruction_failure_gb
     torch.compile(fn, backend="eager")()
@@ -805,6 +841,7 @@ Reconstruction failure
 
   Developer debug context: UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0092
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -833,6 +870,7 @@ NotImplementedError/UnsupportedFakeTensorException when running FX node
 
   Developer debug context:
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0087
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -856,6 +894,7 @@ Data-dependent branching
 
   Developer debug context: attempted to jump with TensorVariable()
 
+ For more details about this graph break, please visit: None
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -916,12 +955,13 @@ Graph break: skip: from user code at:
 Data-dependent assertion failed (cannot compile partial graph)
   Explanation: Dynamo has determined when encountering a data-dependent assert failure that it should not compile the partial graph.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
-  Hint: Use `torch._assert()` to raise a hard AssertionError when the check fails. This error will propagate back the user code that called the compiled function (i.e. Dynamo wil not trace any exception handling).
+  Hint: Use `torch._assert()` to raise a hard AssertionError when the check fails. This error will propagate back the user code that called the compiled function (i.e. Dynamo will not trace any exception handling).
   Hint: Remove the assert statement.
   Hint: Move the assert statement outside of any context managers in order to graph break with partial graph compilation (if fullgraph=False).
 
   Developer debug context: value: ConstantVariable(bool: False)
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0034
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -965,6 +1005,7 @@ torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0025
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -1017,6 +1058,7 @@ torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0025
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -1052,6 +1094,7 @@ Graph Break Reason: Call to `torch._dynamo.graph_break()`
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0025
 User code traceback:
   File "test_error_messages.py", line N, in test_nested_compile_user_frames
     torch.compile(fn, backend="eager")(torch.randn(3))
@@ -1165,6 +1208,7 @@ Graph Break Reason: Call to `torch._dynamo.graph_break()`
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0025
 User code traceback:
   File "test_error_messages.py", line N, in test_graph_break_traceback_collapsed_resume_frames
     f1(torch.randn(3))
@@ -1199,6 +1243,7 @@ Skip calling `torch.compiler.disable()`d function
 
   Developer debug context: <function GraphBreakMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0098
 
 from user code:
    File "test_error_messages.py", line N, in outer
@@ -1220,6 +1265,7 @@ Skip calling `torch.compiler.disable()`d function
 
   Developer debug context: <function GraphBreakMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0098
 
 from user code:
    File "test_error_messages.py", line N, in outer
@@ -1245,6 +1291,7 @@ Unsupported function call (delayed)
 
   Developer debug context: source: LocalSource(local_name='fn', is_input=True, dynamism=None, is_derefed_cell_contents=False)
 
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0148
 
 from user code:
    File "test_error_messages.py", line N, in outer

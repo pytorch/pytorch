@@ -8,6 +8,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <optional>
 
 namespace c10d {
@@ -19,7 +20,7 @@ namespace c10d {
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.7")
+DEFINE_CONSTANT(version_val, "2.8")
 DEFINE_CONSTANT(entries_key, "entries")
 DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state")
 DEFINE_CONSTANT(nccl_version_key, "nccl_version")
@@ -52,6 +53,8 @@ DEFINE_CONSTANT(time_discovered_completed_key, "time_discovered_completed_ns")
 DEFINE_CONSTANT(completed_state, "completed")
 DEFINE_CONSTANT(scheduled_state, "scheduled")
 DEFINE_CONSTANT(started_state, "started")
+DEFINE_CONSTANT(thread_id_key, "thread_id")
+DEFINE_CONSTANT(thread_name_key, "thread_name")
 #undef DEFINE_CONSTANT
 
 // Write NCCL debug info to local disk or any storage users define.
@@ -142,7 +145,7 @@ struct FlightRecorder {
     std::optional<c10::time_t> time_discovered_started_;
 
     // timestamp when our CPU threads discovered that the kernel completed.
-    // will always be _after_ it actually complated, and can be the same time
+    // will always be _after_ it actually completed, and can be the same time
     // as the discovery of the start if the watchdog thread is stuck on CUDA
     // APIs
     std::optional<c10::time_t> time_discovered_completed_;
@@ -153,6 +156,8 @@ struct FlightRecorder {
     c10::SmallVector<int64_t, 4> output_dims_;
     std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
+    std::thread::id thread_id_;
+    std::string thread_name_;
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
 
@@ -161,7 +166,7 @@ struct FlightRecorder {
     // acquire the GIL. If you don't want to block the current thread or take
     // the risk of a GIL deadlock, you can use an asynchronous calling mechanism
     // like std::async.
-    std::string getTraceback();
+    TORCH_API std::string getTraceback();
   };
 
   bool enabled_ = false;
@@ -191,7 +196,7 @@ struct FlightRecorder {
       std::shared_ptr<ProcessGroupStatus> pg_status,
       bool isP2P);
 
-  void record_pg_ranks(
+  TORCH_API void record_pg_ranks(
       const std::tuple<std::string, std::string>& pg_name,
       std::vector<uint64_t> ranks);
 
@@ -203,7 +208,7 @@ struct FlightRecorder {
 
   // Returns the entry with the given id, if it exists. Otherwise, returns
   // std::nullopt.
-  std::optional<Entry> getEntry(std::optional<size_t> id);
+  TORCH_API std::optional<Entry> getEntry(std::optional<size_t> id);
 
   /*
   Mark an Event as completed and free its events.
@@ -215,7 +220,9 @@ struct FlightRecorder {
   never hang. (timing must also be enabled for compute_duration - see
   TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(std::optional<size_t> id, bool compute_duration = true);
+  TORCH_API void retire_id(
+      std::optional<size_t> id,
+      bool compute_duration = true);
 
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
@@ -248,4 +255,18 @@ struct FlightRecorder {
       bool includeStackTraces,
       bool onlyActive);
 };
+
+// Dumps the fr traces and additional information about the Process
+// Group.
+TORCH_API std::string dump_fr_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive);
+
+// Dumps the fr traces and additional information about the Process
+// Group in JSON formatted string.
+// We don't include stack traces in JSON format as it is far too much data.
+TORCH_API std::string dump_fr_trace_json(
+    bool includeCollectives,
+    bool onlyActive);
 } // namespace c10d
