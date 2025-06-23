@@ -9,10 +9,10 @@ from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
-    _get_safetensors_file_metadata,
     _get_dtype,
-    _metadata_fn,
+    _get_safetensors_file_metadata,
     _HFStorageInfo,
+    _metadata_fn,
     CUSTOM_METADATA_KEY,
     DATA_KEY,
     DATA_OFFSETS_KEY,
