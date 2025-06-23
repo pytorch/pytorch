@@ -587,7 +587,7 @@ def _derive_follow_placements_from_tuple_strategy(
 
     follow_placements: Optional[list[Placement]] = None
     mesh = tuple_strategy.child_mesh(0)
-    for arg_strategy in tuple_strategy.childs:  # codespell:ignore childs
+    for arg_strategy in tuple_strategy.children:
         assert isinstance(arg_strategy, OpStrategy)
         if arg_strategy.mesh != mesh:
             raise ValueError(
@@ -629,7 +629,7 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
-    first_input_strategy = input_tuple_strategy.childs[0]  # codespell:ignore childs
+    first_input_strategy = input_tuple_strategy.children[0]
     assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
     common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
@@ -647,7 +647,7 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
 
     input_specs = tuple(
         DTensorSpec(mesh, tuple(follow_placements))
-        for _ in range(len(input_tuple_strategy.childs))  # codespell:ignore childs
+        for _ in range(len(input_tuple_strategy.children))
     )
 
     follow_placements = normalize_shard_for_stack(follow_placements, dim)
@@ -666,7 +666,7 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
-    first_input_strategy = input_tuple_strategy.childs[0]  # codespell:ignore childs
+    first_input_strategy = input_tuple_strategy.children[0]
     assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
     common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
@@ -686,7 +686,7 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
 
     input_specs = tuple(
         DTensorSpec(mesh, tuple(follow_placements))
-        for _ in range(len(input_tuple_strategy.childs))  # codespell:ignore childs
+        for _ in range(len(input_tuple_strategy.children))
     )
     op_strategy.strategies.append(
         OpSpec(
