@@ -824,7 +824,7 @@ class BuiltinVariable(VariableTracker):
 
         if inspect.isclass(fn) and (
             issubclass(fn, Exception)
-            # GeneratorExit doens't inherit from Exception
+            # GeneratorExit doesn't inherit from Exception
             # >>> issubclass(GeneratorExit, Exception)
             # False
             or fn is GeneratorExit
@@ -2244,7 +2244,7 @@ class BuiltinVariable(VariableTracker):
                     # get_fake_val will get the same fake tensor
                     existing_fake_attr = get_fake_value(getattr_var.as_proxy().node, tx)
 
-                    # same tensor identiy, setattr is a no-op
+                    # same tensor identity, setattr is a no-op
                     mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
                     if (
                         existing_fake_attr is assigning_fake_val

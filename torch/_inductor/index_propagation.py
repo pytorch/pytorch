@@ -311,7 +311,7 @@ class IndexPropagation(DefaultHandler):
               If this is an issue, just use guards in `self.axioms`.
 
               The proper way of handling this would be to have a global shape_env that adds
-              runtime_asserts as they happen in the code. Then, it shuld be used in SimplifyIndexing
+              runtime_asserts as they happen in the code. Then, it should be used in SimplifyIndexing
               to perform wrap_expr and in CSEProxy.check_bounds to elide upper / lower bounds also
               for indirect_indexing
         """
