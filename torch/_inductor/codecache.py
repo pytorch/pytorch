@@ -28,7 +28,7 @@ from bisect import bisect_right
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
-from functools import partial
+from functools import lru_cache, partial
 from pathlib import Path
 from time import time, time_ns
 from types import ModuleType
@@ -103,6 +103,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
+from torch.export.pt2_archive._package_weights import TensorProperties, Weights
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
@@ -620,7 +621,7 @@ class FxGraphCachePickler(pickle.Pickler):
         defined triton kernels
         Essentially what we are doing here is a huge hack where user defined
         triton kernel contain a dynamo time side table and the arguments to the
-        call_function are indicies into this side table. These arguments are not
+        call_function are indices into this side table. These arguments are not
         for hashing purposes since we included the source code into the cache
         key and the numbers are prone to give false negatives due to ordering.
         """
@@ -1153,7 +1154,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
       current context to validate that a cached entry can be served.
     - A given graph could have multiple compiled versions, corresponding to
       different sets of guards. Therefore, we store cache entries in the form:
-          <temp dir>/<fx graph hash>/<serialized metatdata>
+          <temp dir>/<fx graph hash>/<serialized metadata>
     - On lookup, we compute the key from the graph details, iterate over all
       leaf files in the corresponding subdirectory, deserialize the entry, and
       evaluate its guards expression. If the evaluation succeeds, we have a
@@ -1684,12 +1685,12 @@ class AotCodeCompiler:
         *,
         device_type: str,
         additional_files: list[str],
-    ) -> Union[list[str], str]:
+    ) -> Union[list[Union[str, Weights]], str]:
         """
         Returns the .so path, or returns a list of files that were generated if
         config.aot_inductor.package=True.
         """
-        generated_files = additional_files
+        generated_files: list[Union[str, Weights]] = additional_files  # type: ignore[assignment]
 
         if sys.platform == "win32":
             raise RuntimeError("AotCodeCompiler not yet supported for inductor")
@@ -1835,8 +1836,8 @@ class AotCodeCompiler:
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
-                # Intel compiler failed to compile this manully constructed assembly file.
-                # it is ok to use gcc to compile the .S to a .o and linked with Intel comiler .
+                # Intel compiler failed to compile this manually constructed assembly file.
+                # it is ok to use gcc to compile the .S to a .o and linked with Intel compiler .
                 device_type=device_type if device_type != "xpu" else "cpu",
                 aot_mode=graph.aot_mode,
                 compile_only=True,
@@ -1964,6 +1965,20 @@ class AotCodeCompiler:
                 )
             else:
                 serialized_weights = b""
+
+            if config.aot_inductor.package_constants_on_disk:
+                # We need to return a storage key here because the original value tensor might be a clone
+                weights_dict = Weights(
+                    {
+                        graph.allocated_constant_name[name]: (
+                            graph.get_original_value_of_constant(name),
+                            TensorProperties(graph.constants[name]),
+                        )
+                        for name in graph.constants.keys()
+                        if name not in graph.folded_constants
+                    }
+                )
+                generated_files.append(weights_dict)
 
             consts_size = len(serialized_weights)
 
@@ -2191,7 +2206,7 @@ class AotCodeCompiler:
 
                     generated_files.append(weight_file)
                 else:
-                    # TODO: unify to alway use mmap_weights
+                    # TODO: unify to always use mmap_weights
                     generated_files.append(consts_o)
                     so_builder.save_src_to_cmake(cmake_path, consts_o)
 
@@ -3149,31 +3164,31 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             base = cache_dir()
         dirpath = Path(base) / f"halide-runtime-{target}-{cls.config_hash()}"
         os.makedirs(dirpath, exist_ok=True)
-        donefile = str(dirpath / "done")
-        lockfile = str(dirpath / "lock")
-        hookfile = str(dirpath / "hooks.cpp")
-        afile = str(dirpath / "standalone_halide_runtime.a")
-        sofile = str(dirpath / libname)
-        if not os.path.exists(donefile):
+        done_file = str(dirpath / "done")
+        lock_file = str(dirpath / "lock")
+        hook_file = str(dirpath / "hooks.cpp")
+        a_file = str(dirpath / "standalone_halide_runtime.a")
+        so_file = str(dirpath / libname)
+        if not os.path.exists(done_file):
             import halide as hl  # type: ignore[import-untyped,import-not-found]
 
             from torch.utils._filelock import FileLock
 
-            with FileLock(lockfile, LOCK_TIMEOUT):
-                if not os.path.exists(donefile):
-                    with open(hookfile, "w") as f:
+            with FileLock(lock_file, LOCK_TIMEOUT):
+                if not os.path.exists(done_file):
+                    with open(hook_file, "w") as f:
                         if device_type == "cuda":
                             f.write(
                                 cls.standalone_runtime_cuda_init.format(
                                     cls.find_header("HalideRuntimeCuda.h")
                                 )
                             )
-                    hl.compile_standalone_runtime(afile, hl.Target(target))
+                    hl.compile_standalone_runtime(a_file, hl.Target(target))
 
-                    name, output_dir = get_name_and_dir_from_output_file_path(sofile)
+                    name, output_dir = get_name_and_dir_from_output_file_path(so_file)
                     halide_cmd_gen = CppBuilder(
                         name=name,
-                        sources=[hookfile, afile],
+                        sources=[hook_file, a_file],
                         output_dir=output_dir,
                         BuildOption=CppTorchDeviceOptions(
                             device_type=device_type,
@@ -3183,10 +3198,10 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                     subprocess.check_call(
                         shlex.split(halide_cmd_gen.get_command_line())
                     )
-                    touch(donefile)
-        assert os.path.exists(sofile)
-        cls._standalone_runtime_path = sofile
-        return sofile
+                    touch(done_file)
+        assert os.path.exists(so_file)
+        cls._standalone_runtime_path = so_file
+        return so_file
 
     @classmethod
     def _get_uncompiled_header(cls, device: str) -> str | None:
@@ -3625,6 +3640,14 @@ class DLLWrapper:
         self.close()
 
 
+@lru_cache
+def binary_error_path(output_path: str) -> str:
+    """
+    standard format for the error path
+    """
+    return output_path + ".error"
+
+
 @clear_on_fresh_cache
 class CUDACodeCache:
     """
@@ -3648,6 +3671,39 @@ class CUDACodeCache:
     def cache_clear() -> None:
         CUDACodeCache.cache.clear()
         CUDACodeCache.aot_kernels_o.clear()
+
+    @staticmethod
+    @lru_cache(maxsize=4)
+    def get_kernel_binary_remote_cache(
+        caching_enabled: bool, caching_available: bool
+    ) -> Optional[Any]:
+        """
+        Get or create the class instance of the CUTLASSKernelBinaryRemoteCache.
+
+        Args:
+            caching_enabled: Whether binary remote caching is enabled
+            caching_available: Whether we're in fbcode environment
+
+        Returns:
+            CUTLASSKernelBinaryRemoteCache: The class instance of the kernel binary remote cache
+        """
+        if not caching_enabled:
+            log.debug("CUTLASSKernelBinaryRemoteCache not requested, skipping")
+            return None
+        if not caching_available:
+            return None
+
+        try:
+            from torch._inductor.fb.kernel_binary_remote_cache import (
+                CUTLASSKernelBinaryRemoteCache,
+            )
+
+            return CUTLASSKernelBinaryRemoteCache()
+        except ImportError:
+            log.debug(
+                "CUTLASSKernelBinaryRemoteCache not available, remote caching disabled"
+            )
+            return None
 
     @classmethod
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
@@ -3697,10 +3753,31 @@ class CUDACodeCache:
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
-                if os.path.exists(output_path + ".error"):
-                    with open(output_path + ".error", encoding="utf-8") as fh:
+                error_path = binary_error_path(output_path)
+                binary_remote_cache = cls.get_kernel_binary_remote_cache(
+                    caching_enabled=config.cuda.use_binary_remote_cache
+                    and not config.force_disable_caches,
+                    caching_available=config.is_fbcode(),
+                )
+                if binary_remote_cache is not None:
+                    # The remote cache implementation will only download if the file does
+                    # not already exist locally
+                    binary_remote_cache.get(output_path, error_path)
+
+                if os.path.exists(error_path):
+                    with open(error_path, encoding="utf-8") as fh:
                         error_json = fh.read()
                     cmd_parts, error_output = json.loads(error_json)
+                    if (
+                        binary_remote_cache is not None
+                        and config.cuda.upload_to_binary_remote_cache
+                    ):
+                        # This ensures that a local error is uploaded to the remote cache,
+                        # as we make no assumptions about the remote cache having the same
+                        # information as the local cache
+                        binary_remote_cache.put(
+                            error_path, config.cuda.binary_remote_cache_force_write
+                        )
                     cls.cache[key] = CUDACodeCache.CacheEntry(
                         input_path, output_path, error_json
                     )
@@ -3735,22 +3812,38 @@ class CUDACodeCache:
                             cmd_parts,
                             input_path,
                             output_path,
+                            binary_remote_cache,
                         )
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
                     except Exception as error:
                         if "COMPILE FAILED WITH" in str(error):
                             cls._record_cuda_compile_error(
-                                str(error), key, cmd_parts, input_path, output_path
+                                str(error),
+                                key,
+                                cmd_parts,
+                                input_path,
+                                output_path,
+                                binary_remote_cache,
                             )
                             raise exc.CUDACompileError(cmd_parts, str(error)) from error
                         raise error
                     end_time = time()
                     log_duration_msg = f"CUDA Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
                     log.info(log_duration_msg)
+
                 else:
                     log.debug(
                         "CUDA Compilation skipped: %s since output already exists",
                         input_path,
+                    )
+                # Upload to remote cache if enabled
+                if (
+                    binary_remote_cache is not None
+                    and config.cuda.upload_to_binary_remote_cache
+                ):
+                    # will log on errors, but not fail out
+                    binary_remote_cache.put(
+                        output_path, config.cuda.binary_remote_cache_force_write
                     )
                 cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path, None)
         cache_entry: CUDACodeCache.CacheEntry = cls.cache[key]
@@ -3785,11 +3878,24 @@ class CUDACodeCache:
         cmd_parts: list[str],
         input_path: str,
         output_path: str,
+        # Any here, as the import and type will only work in fbcode
+        # TODO: Make the typing hint strong here
+        binary_remote_cache: Any = None,
     ) -> None:
         error_json = json.dumps([cmd_parts, error_str])
         cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path, error_json)
-        with open(output_path + ".error", "w", encoding="utf-8") as fh:
+        error_path = binary_error_path(output_path)
+        with open(error_path, "w", encoding="utf-8") as fh:
             fh.write(error_json)
+
+        # Upload to remote cache directly from memory if enabled
+        if (
+            binary_remote_cache is not None
+            and config.cuda.upload_to_binary_remote_cache
+        ):
+            binary_remote_cache.put(
+                error_path, config.cuda.binary_remote_cache_force_write
+            )
 
 
 @clear_on_fresh_cache

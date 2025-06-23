@@ -170,7 +170,7 @@ class FSDPMemTracker(MemTracker):
     def _instrument_fsdp_sharded_params_grads(
         self, fsdp_param_group: FSDPParamGroup
     ) -> None:
-        # Track sharded params and grads after initilization
+        # Track sharded params and grads after initialization
         for fsdp_param in fsdp_param_group.fsdp_params:
             self._update_and_maybe_create_winfos(
                 fsdp_param.sharded_param,
@@ -199,7 +199,7 @@ class FSDPMemTracker(MemTracker):
         #         this module is called for the second time. If it is a root module, that means we are in the next
         #         iteration and we error out. If it is not a root module, that means it's a submodule that is being
         #         used multiple times in the same iteration, which we allow and track.
-        # For Case 1 and 3, we also initialiaze the ``local_peak`` and ``PEAK_FW`` snapshot for the module.
+        # For Case 1 and 3, we also initialize the ``local_peak`` and ``PEAK_FW`` snapshot for the module.
         # For Case 2 we only capture 1 snapshot after ``FSDPState._pre_forward`` runs because it is a no-op.
         @wraps(orig_fsdp_state_pre_fw)
         def inner(
