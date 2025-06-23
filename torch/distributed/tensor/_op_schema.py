@@ -27,7 +27,7 @@ KwargsType = dict[str, object]
 
 PlacementList = list[Optional[Placement]]
 
-# ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
+# ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type should
 # be the same set of possibilities.
 OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
 
@@ -174,18 +174,24 @@ class TupleStrategy(StrategyType):
     then we should return a single OpStrategy instead of a TupleStrategy
     """
 
-    def __init__(self, childs: Sequence[StrategyType]) -> None:
+    def __init__(
+        self,
+        childs: Sequence[StrategyType],  # codespell:ignore childs
+    ) -> None:
         super().__init__()
-        self.childs: Sequence[StrategyType] = childs
+        self.childs: Sequence[StrategyType] = childs  # codespell:ignore childs
 
     def child_mesh(self, index: int) -> DeviceMesh:
-        op_strategy = self.childs[index]
+        op_strategy = self.childs[index]  # codespell:ignore childs
         assert isinstance(op_strategy, OpStrategy)
         return op_strategy.mesh
 
     def __str__(self) -> str:
         child_strategies_str = ", ".join(
-            [f"{str(strat)}" for idx, strat in enumerate(self.childs)]
+            [
+                f"{str(strat)}"
+                for idx, strat in enumerate(self.childs)  # codespell:ignore childs
+            ]
         )
         return f"TupleStrategy({child_strategies_str})"
 
@@ -282,7 +288,7 @@ class OpSchema:
                 args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 mesh_shape = arg.mesh_shape
             elif isinstance(arg, TupleStrategy):
-                first_op_strategy = arg.childs[0]
+                first_op_strategy = arg.childs[0]  # codespell:ignore childs
                 assert isinstance(first_op_strategy, OpStrategy)
                 mesh_shape = first_op_strategy.mesh_shape
                 args_schema.append(str(arg))
@@ -342,7 +348,7 @@ class OpSchema:
             mesh = first_arg.mesh
         elif isinstance(first_arg, (list, tuple, TupleStrategy)):
             first_elem = (
-                first_arg.childs[0]
+                first_arg.childs[0]  # codespell:ignore childs
                 if isinstance(first_arg, TupleStrategy)
                 else first_arg[0]
             )

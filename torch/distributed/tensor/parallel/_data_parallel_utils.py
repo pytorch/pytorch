@@ -30,7 +30,7 @@ def _flatten_tensor(
 
 @no_type_check
 def _unflatten_tensor(tensor, spec, *, device_handle=None, compute_stream=None):
-    # unflatten would mainly be called everytime FSDP allgather parameters.
+    # unflatten would mainly be called every time FSDP allgather parameters.
     result = DTensor.from_local(
         tensor,
         spec.mesh,
