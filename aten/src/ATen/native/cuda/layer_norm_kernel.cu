@@ -884,10 +884,10 @@ void LaunchGammaBetaBackwardCUDAKernel(
     LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true>(
       aligned_grid, blocks, threads, 0, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_blocks_ptr, dbeta_blocks_ptr);
 
-    if (dgamma && dgamma->defined()) {
+    if (dgamma_blocks.defined()) {
       *dgamma = dgamma_blocks.sum(0);
     }
-    if (dbeta && dbeta->defined()) {
+    if (dbeta_blocks.defined()) {
       *dbeta = dbeta_blocks.sum(0);
     }
   } else {
