@@ -151,7 +151,7 @@ class IterationRanges:
 class IterationRangesRoot(IterationRanges):
     """
     Root of a iteration range tree that represents a single
-    tiled dimension in the output kernel. It contains muliple
+    tiled dimension in the output kernel. It contains multiple
     sets of iteration represented with IterationRangesEntry.
     """
 
@@ -1570,7 +1570,7 @@ class SIMDScheduling(BaseScheduling):
                         p_n.can_codegen_without_upcasts() for p_n in prologue_group
                     )
 
-                    # TODO - this doesnt work with libdevice calls, potentially other bugs
+                    # TODO - this doesn't work with libdevice calls, potentially other bugs
                     # upcasting to fp32 and downcasting gives large slowdown
                     with config.patch(
                         "triton.codegen_upcast_to_fp32", not can_codegen_without_upcast
@@ -1908,7 +1908,7 @@ class SIMDScheduling(BaseScheduling):
         reduction_numel,
     ) -> list[dict[str, tuple[sympy.Expr]]]:
         """
-        Creates N-dimensional tiling candidiates, attempting to simplify loads/stores
+        Creates N-dimensional tiling candidates, attempting to simplify loads/stores
         by tiling the kernel into higher dimensions.
 
         Returns a list of tilings ranked by dimensionality.
@@ -2128,7 +2128,7 @@ class SIMDScheduling(BaseScheduling):
                 split_scores.append(prev_var_coalesced_score)
 
             # penalize splits that leave small blocks
-            # where we cant fully utilize full memory transaction
+            # where we can't fully utilize full memory transaction
             # TODO: incorporate exact bitwidth, and read/write
             # coalesced write is 2x more important
             for i in range(len(splits)):
