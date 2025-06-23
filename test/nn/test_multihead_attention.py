@@ -1072,8 +1072,6 @@ class MultiHeadAttentionNested(nn.Module):
         key = key.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
         # (N, L_s, E_total) -> (N, L_s, nheads, E_head) -> (N, nheads, L_s, E_head)
         value = value.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
-        print(query.is_contiguous())
-        print(query.transpose(1,2).is_contiguous())
         # Step 3. Run SDPA
         # (N, nheads, L_t, E_head)
         # with sdpa_kernel(backends=[SDPBackend.MATH]):
@@ -1091,11 +1089,10 @@ class MultiHeadAttentionNested(nn.Module):
 
 if __name__ == "__main__":
     # run_tests()
-    # mha = MultiHeadAttentionNested(128, 128, 128, 128, 8, dtype=torch.half).eval()
-    mha = torch.nn.MultiheadAttention(128, 8, batch_first = True, dtype=torch.half).eval()
-    nt = torch.nested.nested_tensor([torch.randn(4, 128), torch.randn(2, 128)], layout=torch.jagged, dtype=torch.half)
-    # t = torch.randn(2, 4, 8)
-    print(mha(nt, nt, nt, need_weights=False))
-    # mha(t, t, t, need_weights=False)
+    mha = MultiHeadAttentionNested(10, 10, 10, 10, 5, dtype=torch.half).eval()
+    # mha = torch.nn.MultiheadAttention(10, 5, batch_first = True, dtype=torch.half).eval()
+    nt = torch.nested.nested_tensor([torch.randn(4, 10), torch.randn(2, 10)], layout=torch.jagged, dtype=torch.half)
+
+    # print(mha(nt, nt, nt, need_weights=False))
     
-    # print(mha(nt, nt, nt))
+    print(mha(nt, nt, nt))

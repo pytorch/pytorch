@@ -6202,36 +6202,36 @@ def multi_head_attention_forward(
         out_proj_weight,
         out_proj_bias,
     )
-    # if has_torch_function(tens_ops):
-    #     return handle_torch_function(
-    #         multi_head_attention_forward,
-    #         tens_ops,
-    #         query,
-    #         key,
-    #         value,
-    #         embed_dim_to_check,
-    #         num_heads,
-    #         in_proj_weight,
-    #         in_proj_bias,
-    #         bias_k,
-    #         bias_v,
-    #         add_zero_attn,
-    #         dropout_p,
-    #         out_proj_weight,
-    #         out_proj_bias,
-    #         training=training,
-    #         key_padding_mask=key_padding_mask,
-    #         need_weights=need_weights,
-    #         attn_mask=attn_mask,
-    #         is_causal=is_causal,
-    #         use_separate_proj_weight=use_separate_proj_weight,
-    #         q_proj_weight=q_proj_weight,
-    #         k_proj_weight=k_proj_weight,
-    #         v_proj_weight=v_proj_weight,
-    #         static_k=static_k,
-    #         static_v=static_v,
-    #         average_attn_weights=average_attn_weights,
-    #     )
+    if has_torch_function(tens_ops):
+        return handle_torch_function(
+            multi_head_attention_forward,
+            tens_ops,
+            query,
+            key,
+            value,
+            embed_dim_to_check,
+            num_heads,
+            in_proj_weight,
+            in_proj_bias,
+            bias_k,
+            bias_v,
+            add_zero_attn,
+            dropout_p,
+            out_proj_weight,
+            out_proj_bias,
+            training=training,
+            key_padding_mask=key_padding_mask,
+            need_weights=need_weights,
+            attn_mask=attn_mask,
+            is_causal=is_causal,
+            use_separate_proj_weight=use_separate_proj_weight,
+            q_proj_weight=q_proj_weight,
+            k_proj_weight=k_proj_weight,
+            v_proj_weight=v_proj_weight,
+            static_k=static_k,
+            static_v=static_v,
+            average_attn_weights=average_attn_weights,
+        )
 
     is_batched = _mha_shape_check(
         query, key, value, key_padding_mask, attn_mask, num_heads
@@ -6249,13 +6249,8 @@ def multi_head_attention_forward(
             key_padding_mask = key_padding_mask.unsqueeze(0)
 
     # set up shape vars
-    if query.is_nested:
-        bsz, _, embed_dim = query.shape
-    else:
-        tgt_len, bsz, embed_dim = query.shape
-
-    if not key.is_nested:        
-        src_len, _, _ = key.shape
+    tgt_len, bsz, embed_dim = query.shape
+    src_len, _, _ = key.shape
 
     key_padding_mask = _canonical_mask(
         mask=key_padding_mask,
@@ -6347,7 +6342,9 @@ def multi_head_attention_forward(
             b_k,
             b_v,
         )
+
     # prep attention mask
+
     if attn_mask is not None:
         # ensure attn_mask's dim is 3
         if attn_mask.dim() == 2:
@@ -6385,19 +6382,9 @@ def multi_head_attention_forward(
     #
     # reshape q, k, v for multihead attention and make them batch first
     #
-    if q.is_nested:
-        # reshape query, key, value to separate by head
-        # (N, L_t, E_total) -> (N, L_t, nheads, E_head) -> (N, nheads, L_t, E_head)
-        q = q.unflatten(-1, [num_heads, head_dim]).transpose(1, 2)
-        print("Check Transpose Contiguous:", q.transpose(1,2).is_contiguous())
-    else:
-        q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
-        if k.is_nested:
-            # (N, L_s, E_total) -> (N, L_s, nheads, E_head) -> (N, nheads, L_s, E_head)
-            k = k.unflatten(-1, [num_heads, head_dim]).transpose(1, 2)
-        else:
-            k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_k.size(0) == bsz * num_heads, (
@@ -6408,11 +6395,7 @@ def multi_head_attention_forward(
         )
         k = static_k
     if static_v is None:
-        if v.is_nested:
-            # (N, L_s, E_total) -> (N, L_s, nheads, E_head) -> (N, nheads, L_s, E_head)
-            v = v.unflatten(-1, [num_heads, head_dim]).transpose(1, 2)
-        else:
-            v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_v.size(0) == bsz * num_heads, (
@@ -6508,26 +6491,20 @@ def multi_head_attention_forward(
                 attn_mask = attn_mask.unsqueeze(0)
             else:
                 attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
-        if not q.is_nested:
-            q = q.view(bsz, num_heads, tgt_len, head_dim)
-        if not k.is_nested:
-            k = k.view(bsz, num_heads, src_len, head_dim)
-        if not v.is_nested:
-            v = v.view(bsz, num_heads, src_len, head_dim)
-        
+
+        q = q.view(bsz, num_heads, tgt_len, head_dim)
+        k = k.view(bsz, num_heads, src_len, head_dim)
+        v = v.view(bsz, num_heads, src_len, head_dim)
+
         attn_output = scaled_dot_product_attention(
             q, k, v, attn_mask, dropout_p, is_causal
         )
-        if q.is_nested:
-            attn_output = attn_output.transpose(1, 2).flatten(-2)
-        else:
-            attn_output = (
-                attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
-            )
+        attn_output = (
+            attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
+        )
 
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
-        if not q.is_nested:
-            attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
+        attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
         if not is_batched:
             # squeeze the output if input was unbatched
             attn_output = attn_output.squeeze(1)

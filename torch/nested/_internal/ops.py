@@ -4,11 +4,13 @@ import math
 import operator
 from typing import *  # noqa: F403
 from typing import Optional
+import warnings
 
 import torch
 import torch.nn.functional as F
 from torch.fx.operator_schemas import normalize_function
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
+from torch.types import _dtype as DType
 
 from .nested_tensor import NestedTensor
 
@@ -366,12 +368,265 @@ def jagged_binary_pointwise(func, *args, **kwargs):
     # that ragged dim is wrt left-most batch dim
     raise RuntimeError(mismatch_error_msg.format(func.__name__, a.shape, b.shape))
 
+def jagged_multi_head_attention_forward(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    embed_dim_to_check: int,
+    num_heads: int,
+    in_proj_weight: Optional[torch.Tensor],
+    in_proj_bias: Optional[torch.Tensor],
+    bias_k: Optional[torch.Tensor],
+    bias_v: Optional[torch.Tensor],
+    add_zero_attn: bool,
+    dropout_p: float,
+    out_proj_weight: torch.Tensor,
+    out_proj_bias: Optional[torch.Tensor],
+    training: bool = True,
+    key_padding_mask: Optional[torch.Tensor] = None,
+    need_weights: bool = True,
+    attn_mask: Optional[torch.Tensor] = None,
+    use_separate_proj_weight: bool = False,
+    q_proj_weight: Optional[torch.Tensor] = None,
+    k_proj_weight: Optional[torch.Tensor] = None,
+    v_proj_weight: Optional[torch.Tensor] = None,
+    static_k: Optional[torch.Tensor] = None,
+    static_v: Optional[torch.Tensor] = None,
+    average_attn_weights: bool = True,
+    is_causal: bool = False,
+) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    r"""Forward method for MultiHeadAttention.
+
+    See :class:`torch.nn.MultiheadAttention` for details.
+
+    Args:
+        query, key, value: map a query and a set of key-value pairs to an output.
+            See "Attention Is All You Need" for more details.
+        embed_dim_to_check: total dimension of the model.
+        num_heads: parallel attention heads.
+        in_proj_weight, in_proj_bias: input projection weight and bias.
+        bias_k, bias_v: bias of the key and value sequences to be added at dim=0.
+        add_zero_attn: add a new batch of zeros to the key and
+                       value sequences at dim=1.
+        dropout_p: probability of an element to be zeroed.
+        out_proj_weight, out_proj_bias: the output projection weight and bias.
+        training: apply dropout if is ``True``.
+        key_padding_mask: if provided, specified padding elements in the key will
+            be ignored by the attention. This is an binary mask. When the value is True,
+            the corresponding value on the attention layer will be filled with -inf.
+        need_weights: output attn_output_weights.
+            Default: `True`
+            Note: `needs_weight` defaults to `True`, but should be set to `False`
+            For best performance when attention weights are not needed.
+            *Setting needs_weights to `True`
+            leads to a significant performance degradation.*
+        attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
+            the batches while a 3D mask allows to specify a different mask for the entries of each batch.
+        is_causal: If specified, applies a causal mask as attention mask, and ignores
+            attn_mask for computing scaled dot product attention.
+            Default: ``False``.
+            .. warning::
+                is_causal is provides a hint that the attn_mask is the
+                causal mask.Providing incorrect hints can result in
+                incorre_in_projection_packedct execution, including forward and backward
+                compatibility.
+        use_separate_proj_weight: the function accept the proj. weights for query, key,
+            and value in different forms. If false, in_proj_weight will be used, which is
+            a combination of q_proj_weight, k_proj_weight, v_proj_weight.
+        q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
+        static_k, static_v: static key and value used for attention operators.
+        average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across heads.
+            Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an effect
+            when ``need_weights=True.``. Default: True
+
+
+    Shape:
+        Inputs:
+        - query: :math:`(L, E)` or :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key: :math:`(S, E)` or :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - value: :math:`(S, E)` or :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key_padding_mask: :math:`(S)` or :math:`(N, S)` where N is the batch size, S is the source sequence length.
+          If a FloatTensor is provided, it will be directly added to the value.
+          If a BoolTensor is provided, the positions with the
+          value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
+        - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
+          3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
+          S is the source sequence length. attn_mask ensures that position i is allowed to attend the unmasked
+          positions. If a BoolTensor is provided, positions with ``True``
+          are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
+          is provided, it will be added to the attention weight.
+        - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
+          N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
+        - static_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
+          N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
+
+        Outputs:
+        - attn_output: :math:`(L, E)` or :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
+          E is the embedding dimension.
+        - attn_output_weights: Only returned when ``need_weights=True``. If ``average_attn_weights=True``, returns
+          attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
+          :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
+          :math:`S` is the source sequence length. If ``average_attn_weights=False``, returns attention weights per
+          head of shape :math:`(num_heads, L, S)` when input is unbatched or :math:`(N, num_heads, L, S)`.
+    """
+    if key.is_nested and key_padding_mask is not None:
+        raise RuntimeError(
+            "Nested tensors represent jagged sequences and do not use padding, "
+            "so key_padding_mask must be None when using a nested key tensor."
+        )
+    
+    F._mha_shape_check(
+        query, key, value, key_padding_mask, attn_mask, num_heads
+    )
+
+    # set up shape vars
+    bsz, _, embed_dim = query.shape
+
+    if is_causal:
+        raise RuntimeError(
+            "Need attn_mask if specifying the is_causal hint but attn_mask is not supported for nested tensors."
+        )
+
+    assert embed_dim == embed_dim_to_check, (
+        f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
+    )
+    if isinstance(embed_dim, torch.Tensor):
+        # embed_dim can be a tensor when JIT tracing
+        head_dim = embed_dim.div(num_heads, rounding_mode="trunc")
+    else:
+        head_dim = embed_dim // num_heads
+    assert head_dim * num_heads == embed_dim, (
+        f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
+    )
+    if use_separate_proj_weight:
+        # allow MHA to have different embedding dimensions when separate projection weights are used
+        assert key.shape[:2] == value.shape[:2], (
+            f"key's sequence and batch dims {key.shape[:2]} do not match value's {value.shape[:2]}"
+        )
+    else:
+        assert key.shape == value.shape, (
+            f"key shape {key.shape} does not match value shape {value.shape}"
+        )
+
+    #
+    # compute in-projection
+    #
+    if not use_separate_proj_weight:
+        assert in_proj_weight is not None, (
+            "use_separate_proj_weight is False but in_proj_weight is None"
+        )
+        q, k, v = F._in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+    else:
+        assert q_proj_weight is not None, (
+            "use_separate_proj_weight is True but q_proj_weight is None"
+        )
+        assert k_proj_weight is not None, (
+            "use_separate_proj_weight is True but k_proj_weight is None"
+        )
+        assert v_proj_weight is not None, (
+            "use_separate_proj_weight is True but v_proj_weight is None"
+        )
+        if in_proj_bias is None:
+            b_q = b_k = b_v = None
+        else:
+            b_q, b_k, b_v = in_proj_bias.chunk(3)
+        q, k, v = F._in_projection(
+            query,
+            key,
+            value,
+            q_proj_weight,
+            k_proj_weight,
+            v_proj_weight,
+            b_q,
+            b_k,
+            b_v,
+        )
+
+    # add bias along batch dimension
+    if bias_k is not None and bias_v is not None:
+        assert static_k is None, "bias cannot be added to static key."
+        assert static_v is None, "bias cannot be added to static value."
+        k = k.unbind()  # get list of tensors (shape: [L_i, E])
+        updated_values = [torch.cat([k_tensor, bias_k.squeeze(0)], dim=0)
+                            for k_tensor in k]
+        k = torch.nested.nested_tensor(updated_values, dtype=k.dtype, layout=torch.jagged)
+
+        v = v.unbind()  # get list of tensors (shape: [L_i, E])
+        updated_values = [torch.cat([v_tensor, bias_v.squeeze(0)], dim=0)
+                            for v_tensor in v]
+        v = torch.nested.nested_tensor(updated_values, dtype=v.dtype, layout=torch.jagged)
+    else:
+        assert bias_k is None
+        assert bias_v is None
+
+    #
+    # reshape query, key, value for multihead attention and separate by head
+    # (N, L_t, E_total) -> (N, L_t, nheads, E_head) -> (N, nheads, L_t, E_head)
+    q = q.unflatten(-1, [num_heads, head_dim]).transpose(1, 2)
+    
+    if static_k is None:
+        # (N, L_s, E_total) -> (N, L_s, nheads, E_head) -> (N, nheads, L_s, E_head)
+        k = k.unflatten(-1, [num_heads, head_dim]).transpose(1, 2)
+    else:
+        # TODO finish disentangling control flow so we don't do in-projections when statics are passed
+        assert static_k.size(0) == bsz * num_heads, (
+            f"expecting static_k.size(0) of {bsz * num_heads}, but got {static_k.size(0)}"
+        )
+        assert static_k.size(2) == head_dim, (
+            f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
+        )
+        k = static_k
+    if static_v is None:
+        # (N, L_s, E_total) -> (N, L_s, nheads, E_head) -> (N, nheads, L_s, E_head)
+        v = v.unflatten(-1, [num_heads, head_dim]).transpose(1, 2)
+    else:
+        # TODO finish disentangling control flow so we don't do in-projections when statics are passed
+        assert static_v.size(0) == bsz * num_heads, (
+            f"expecting static_v.size(0) of {bsz * num_heads}, but got {static_v.size(0)}"
+        )
+        assert static_v.size(2) == head_dim, (
+            f"expecting static_v.size(2) of {head_dim}, but got {static_v.size(2)}"
+        )
+        v = static_v
+
+    # add zero attention along batch dimension (now first)
+    if add_zero_attn:
+        k = k.unbind()  # get list of tensors (shape: [L_i, E])
+        updated_values = [torch.cat([k_tensor, torch.zeros(1, k_tensor.size(-1), dtype=k_tensor.dtype, device=k_tensor.device)], dim=0)
+                        for k_tensor in k]
+        k = torch.nested.nested_tensor(updated_values, dtype=k.dtype, layout=torch.jagged)
+
+        v = v.unbind()  # get list of tensors (shape: [L_i, E])
+        updated_values = [torch.cat([v_tensor, torch.zeros(1, v_tensor.size(-1), dtype=v_tensor.dtype, device=v_tensor.device)], dim=0)
+                        for v_tensor in v]
+        v = torch.nested.nested_tensor(updated_values, dtype=v.dtype, layout=torch.jagged)
+
+    # update source sequence length after adjustments
+    src_len = k.size(1)
+
+    # adjust dropout probability
+    if not training:
+        dropout_p = 0.0
+    
+    attn_output = jagged_scaled_dot_product_attention(
+        q, k, v, attn_mask, dropout_p, is_causal
+    )
+    attn_output = attn_output.transpose(1, 2).flatten(-2)
+    
+    attn_output = F.linear(attn_output, out_proj_weight, out_proj_bias)
+    return attn_output, None
 
 def jagged_torch_function(func, *args, **kwargs):
     # SDPA has special kernels that handle nested tensors.
     # Dispatch to the correct implementation here
     if func is torch._C._nn.scaled_dot_product_attention:
         return jagged_scaled_dot_product_attention(*args, **kwargs)
+
+    if func.__name__  == "multi_head_attention_forward":
+        return jagged_multi_head_attention_forward(*args, **kwargs)
 
     if func.__name__ == "apply_":
         func(args[0]._values, *args[1:], **kwargs)
