@@ -3,6 +3,8 @@
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/core/IListRef.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/nonzero.h>
 #include <c10/util/irange.h>
 
 namespace at::native {
@@ -39,10 +41,13 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
           }
         }
         // Replace with nonzeros
-        auto nonzero = index.nonzero();
-        if (ensure_same_device && nonzero.device() != self.device()) {
-          bool non_blocking = nonzero.is_cpu() && self.device().is_cuda();
-          nonzero = nonzero.to(self.device(), /*non_blocking=*/non_blocking);
+        at::Tensor nonzero;
+        if (ensure_same_device && index.device() != self.device()) {
+          bool non_blocking = index.is_cpu() && self.device().is_cuda();
+          auto out = at::empty({0}, index.options().dtype(kLong).pinned_memory(non_blocking));
+          nonzero = at::nonzero_out(out, index).to(self.device(), non_blocking);
+        } else {
+            nonzero = index.nonzero();
         }
         for (const auto j : c10::irange(index.dim())) {
           result.emplace_back(nonzero.select(1, j));
