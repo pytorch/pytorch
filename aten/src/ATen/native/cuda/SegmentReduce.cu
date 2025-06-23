@@ -18,8 +18,7 @@
 #endif
 
 #ifdef _WIN32&& __CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 9
-TORCH_CHECK(
-    false,
+TORCH_WARN(
     "SegmentReduce is not supported on CUDA 12.9+ on Windows. Please use CUDA 12.8 or earlier. Please see: https://github.com/pytorch/pytorch/issues/156181");
 #else
 
