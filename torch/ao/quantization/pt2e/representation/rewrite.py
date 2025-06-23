@@ -300,7 +300,7 @@ def _reference_quantized_conv2d(
     # Out_(i, j)_fp32 = ((X_scale * W_scale) * Sum_(over k)[(X_(i, k)_fp32 - X_zp) * (W_(i, k)_fp32 - W_zp)]) + bias_(i)_fp32
     # In order to addition of bias_(i)_fp32 inside, we must do
     # Out_(i, j)_fp32 = (X_scale * W_scale) * (Sum_(over k)[(X_(i, k)_fp32 - X_zp) * (W_(i, k)_fp32 - W_zp)] + (1 / (X_scale * W_scale)) * bias_(i)_fp32)W_scale  # noqa: B950
-    # Note we had to multiply bias_fp32 qith X_scale * W_scale = bias_scale
+    # Note we had to multiply bias_fp32 with X_scale * W_scale = bias_scale
     # Thus bias quantization to int32 must be with X_scale * W_scale
 
     bias_i32 = out_dtype(torch.ops.aten.div.Tensor, torch.int32, bias_fp32, bias_scale)
@@ -436,7 +436,7 @@ def _reference_quantized_add(
         x_fp32 = (x_i8 - x_zero_point) * x_scale         (3)
         y_fp32 = (y_i8 - y_zero_point) * y_scale         (4)
 
-        # applying the above fomula to the out_i8 equation we can get the following:
+        # applying the above formula to the out_i8 equation we can get the following:
         out_i8 = out_fp32 / out_scale + out_zero_point             # (1)
            = (x_f32 + y_f32) / out_scale + out_zero_point      # applying (2) to substitute out_fp32 with x_fp32 + y_fp32
            = ((x_i8 - x_zero_point) * x_scale + (y_i8 - y_zero_point) * y_scale) / out_scale + out_zero_point  # apply (3) and (4)

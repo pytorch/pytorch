@@ -1124,7 +1124,7 @@ def create_a_shadows_b(
                 # (prev_node_c+) -> (logger_c_input)? -> node_start_c -> ... -> node_end_c -> logger_c
                 #
                 # Note: node_start_c may be the same node as node_end_c, or they
-                # may have nodes inbetween.
+                # may have nodes in between.
 
         else:
             env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
