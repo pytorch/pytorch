@@ -703,48 +703,36 @@ class TestMultiheadAttentionNN(NNTestCase):
             )
 
     def test_multihead_attn_nested_tensor_outside_fast_path(self):
-        mha = torch.nn.MultiheadAttention(8, 4, batch_first=True).eval()
-        nt = torch.nested.nested_tensor([torch.randn(4, 8), torch.randn(2, 8)], layout=torch.jagged)
+        mha = torch.nn.MultiheadAttention(10, 5, batch_first=True).eval()
+        nt = torch.nested.nested_tensor([torch.randn(4, 10), torch.randn(6, 10)], layout=torch.jagged)
         # One tested platform (linux-bionic-py3.7-clang) has a torch_function for one
         # or more of these. Take advantage of that to test the torch_function bailout.
-        # has_torch_func = torch.overrides.has_torch_function(
-        #     (
-        #         nt,
-        #         mha.in_proj_weight,
-        #         mha.in_proj_bias,
-        #         mha.out_proj.weight,
-        #         mha.out_proj.bias,
-        #     )
-        # )
-        # if has_torch_func:
-        #     msg = "MultiheadAttention does not support NestedTensor.*argument has_torch_function"
-        # else:
-        #     msg = (
-        #         "MultiheadAttention does not support NestedTensor outside of its fast path.*grad is "
-        #         + "enabled and.*or biases requires_grad"
-        #     )
-        # with self.assertRaisesRegex(AssertionError, msg):
-            # mha(nt, nt, nt)
-        mha(nt, nt, nt, need_weights=False)
+        
+        mha(nt, nt, nt)
 
-        # if has_torch_func:
-        #     # Just give up, they're all going to fail with the same message.
-        #     return
+        # test with add_zero_attn
+        mha = torch.nn.MultiheadAttention(10, 5, batch_first=True, add_bias_kv = True).eval()
+        mha(nt, nt, nt)
+
+        # test with add_bias_kv
+        mha = torch.nn.MultiheadAttention(10, 5, batch_first=True, add_zero_attn = True).eval()
+        mha(nt, nt, nt)
+
+        # test with add_bias_kv and add_zero_attn
+        mha = torch.nn.MultiheadAttention(10, 5, batch_first=True, add_bias_kv = True, add_zero_attn = True).eval()
+        mha(nt, nt, nt)
 
         with torch.no_grad():
-            mha(nt, nt, nt, need_weights=False)
+            mha(nt, nt, nt)
         with torch.inference_mode():
-            mha(nt, nt, nt, need_weights=False)
-        nt = torch.nested.nested_tensor([torch.randn(4, 8, requires_grad=False), torch.randn(2, 8, requires_grad=False)], layout=torch.jagged)
+            mha(nt, nt, nt)
+
         nt.requires_grad = False
-        # with self.assertRaisesRegex(AssertionError, msg):
-            # mha(nt, nt, nt)
-        mha(nt, nt, nt, need_weights=False)
         mha.in_proj_weight.requires_grad = False
         mha.in_proj_bias.requires_grad = False
         mha.out_proj.weight.requires_grad = False
         mha.out_proj.bias.requires_grad = False
-        mha(nt, nt, nt, need_weights=False)
+        mha(nt, nt, nt)
 
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
@@ -1088,11 +1076,11 @@ class MultiHeadAttentionNested(nn.Module):
         return attn_output
 
 if __name__ == "__main__":
-    # run_tests()
-    mha = MultiHeadAttentionNested(10, 10, 10, 10, 5, dtype=torch.half).eval()
-    # mha = torch.nn.MultiheadAttention(10, 5, batch_first = True, dtype=torch.half).eval()
-    nt = torch.nested.nested_tensor([torch.randn(4, 10), torch.randn(2, 10)], layout=torch.jagged, dtype=torch.half)
+    run_tests()
+    # mha = MultiHeadAttentionNested(10, 10, 10, 10, 5, dtype=torch.half).eval()
+    # # mha = torch.nn.MultiheadAttention(10, 5, batch_first = True, dtype=torch.half).eval()
+    # nt = torch.nested.nested_tensor([torch.randn(4, 10), torch.randn(2, 10)], layout=torch.jagged, dtype=torch.half)
 
-    # print(mha(nt, nt, nt, need_weights=False))
+    # # print(mha(nt, nt, nt, need_weights=False))
     
-    print(mha(nt, nt, nt))
+    # print(mha(nt, nt, nt))

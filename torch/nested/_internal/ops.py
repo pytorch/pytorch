@@ -552,15 +552,27 @@ def jagged_multi_head_attention_forward(
         k = k.unbind()  # get list of tensors (shape: [L_i, E])
         updated_values = [torch.cat([k_tensor, bias_k.squeeze(0)], dim=0)
                             for k_tensor in k]
-        k = torch.nested.nested_tensor(updated_values, dtype=k.dtype, layout=torch.jagged)
+        k = torch.nested.nested_tensor(updated_values, dtype=k[0].dtype, layout=torch.jagged)
 
         v = v.unbind()  # get list of tensors (shape: [L_i, E])
         updated_values = [torch.cat([v_tensor, bias_v.squeeze(0)], dim=0)
                             for v_tensor in v]
-        v = torch.nested.nested_tensor(updated_values, dtype=v.dtype, layout=torch.jagged)
+        v = torch.nested.nested_tensor(updated_values, dtype=v[0].dtype, layout=torch.jagged)
     else:
         assert bias_k is None
         assert bias_v is None
+
+    # add zero attention along batch dimension (now first)
+    if add_zero_attn:
+        k = k.unbind()  # get list of tensors (shape: [L_i, E])
+        updated_values = [torch.cat([k_tensor, torch.zeros((1, k_tensor.size(-1)), dtype=k_tensor.dtype, device=k_tensor.device)])
+                        for k_tensor in k]
+        k = torch.nested.nested_tensor(updated_values, dtype=k[0].dtype, layout=torch.jagged)
+
+        v = v.unbind()  # get list of tensors (shape: [L_i, E])
+        updated_values = [torch.cat([v_tensor, torch.zeros((1, v_tensor.size(-1)), dtype=v_tensor.dtype, device=v_tensor.device)], dim=0)
+                        for v_tensor in v]
+        v = torch.nested.nested_tensor(updated_values, dtype=v[0].dtype, layout=torch.jagged)
 
     #
     # reshape query, key, value for multihead attention and separate by head
@@ -592,18 +604,7 @@ def jagged_multi_head_attention_forward(
         )
         v = static_v
 
-    # add zero attention along batch dimension (now first)
-    if add_zero_attn:
-        k = k.unbind()  # get list of tensors (shape: [L_i, E])
-        updated_values = [torch.cat([k_tensor, torch.zeros(1, k_tensor.size(-1), dtype=k_tensor.dtype, device=k_tensor.device)], dim=0)
-                        for k_tensor in k]
-        k = torch.nested.nested_tensor(updated_values, dtype=k.dtype, layout=torch.jagged)
-
-        v = v.unbind()  # get list of tensors (shape: [L_i, E])
-        updated_values = [torch.cat([v_tensor, torch.zeros(1, v_tensor.size(-1), dtype=v_tensor.dtype, device=v_tensor.device)], dim=0)
-                        for v_tensor in v]
-        v = torch.nested.nested_tensor(updated_values, dtype=v.dtype, layout=torch.jagged)
-
+    
     # update source sequence length after adjustments
     src_len = k.size(1)
 
