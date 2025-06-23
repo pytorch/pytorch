@@ -2753,7 +2753,7 @@ make_fallback(torch._prims.rng_prims.run_with_rng_state)
 make_fallback(torch._prims.rng_prims.graphsafe_run_with_rng_state)
 
 
-# Implmented / Half implemented
+# Implemented / Half implemented
 # Scans. Implemented for CUDA, missing CPU
 make_fallback(aten.masked_scatter)
 make_fallback(aten.masked_scatter_backward)
@@ -7083,7 +7083,7 @@ def prepare_softmax_online(x, dim):
         # Note: [Split online_softmax_reduce]
         # We don't split reduction for online_softmax_reduce for now.
         # On one hand, supporting split reduction makes things complex since
-        # the splitted out reuctions requires 2 inputs rather than one.
+        # the split out reuctions requires 2 inputs rather than one.
         # On the other hand, during training the online_softmax_reduce should
         # usually don't requires a split due to large batch size
         # (more specifically batch size times sequence length).
