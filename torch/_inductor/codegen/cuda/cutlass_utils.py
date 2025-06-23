@@ -146,7 +146,7 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass  # noqa: F401
+            import cutlass  # noqa: F401, F811
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
