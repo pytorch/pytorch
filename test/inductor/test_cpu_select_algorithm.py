@@ -45,6 +45,7 @@ except unittest.SkipTest:
 
 check_model = test_torchinductor.check_model
 set_num_threads = test_cpu_repro.set_num_threads
+run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 
 aten = torch.ops.aten
 
@@ -1723,6 +1724,50 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.use_small_dequant_buffer": True})
+    @patches
+    @torch.no_grad
+    @dtypes(torch.bfloat16)
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (14336,))
+    @parametrize("out_features", (96,))
+    @parametrize("group_size", (128,))
+    @set_num_threads(1)
+    def test_int4_woq_mm_with_small_buffer_config(
+        self, dtype, batch_size, in_features, out_features, group_size
+    ):
+        class M1(torch.nn.Module):
+            def __init__(self, K, N, group_size):
+                super().__init__()
+                self.linear_weight = torch.randint(
+                    0, 255, (N, K // 2), dtype=torch.uint8
+                )
+                self.qscale_and_zeros = torch.rand(K // group_size, N, 2, dtype=dtype)
+                self.group_size = group_size
+
+            def forward(self, x):
+                x_shape = x.shape
+                x = x.reshape(-1, x_shape[-1])
+                y = torch._weight_int4pack_mm_for_cpu(
+                    x, self.linear_weight, self.group_size, self.qscale_and_zeros
+                )
+                return y.reshape(*x_shape[:-1], out_features)
+
+        counters.clear()
+        seq_len = 1
+        x = torch.rand((batch_size, seq_len, in_features), dtype=dtype)
+        mod = M1(in_features, out_features, group_size).eval()
+        with patch.object(select_algorithm, "VERIFY", None):
+            m = torch.compile(mod)
+            _, code = run_and_get_cpp_code(m, x)
+            kr = 32  # only kr=32 supported in woq int4 amx kernel
+            _target_code_check = f"constexpr int64_t Kc_blocks = {group_size // kr};"
+            torch._C.FileCheck().check(_target_code_check).run(code)
+
+    @unittest.skipIf(
+        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+    )
+    @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
@@ -1787,6 +1832,94 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 atol=1e-2,
                 rtol=1e-2,
             )
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @unittest.skipIf(
+        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+    )
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.enable_concat_linear": True})
+    @patches
+    @torch.no_grad
+    @dtypes(torch.bfloat16)
+    @parametrize("batch_size", (4,))
+    @parametrize("in_features", (256,))
+    @parametrize("out_features", ((512, 256, 256), (512, 512)))
+    @parametrize("group_size", (32, 128))
+    def test_int4_concat_woq_mm(
+        self, dtype, batch_size, in_features, out_features, group_size
+    ):
+        class M1(torch.nn.Module):
+            def __init__(self, K, out_features, group_size):
+                super().__init__()
+                self.linear_weight = [
+                    torch.randint(0, 255, (N, K // 2), dtype=torch.uint8)
+                    for N in out_features
+                ]
+                self.qscale_and_zeros = [
+                    torch.rand(K // group_size, N, 2, dtype=dtype) for N in out_features
+                ]
+                self.group_size = group_size
+                self.out_features = out_features
+
+            def forward(self, x):
+                x_shape = x.shape
+                x = x.reshape(-1, x_shape[-1])
+                y = [
+                    torch._weight_int4pack_mm_for_cpu(
+                        x,
+                        self.linear_weight[idx],
+                        self.group_size,
+                        self.qscale_and_zeros[idx],
+                    )
+                    for idx in range(len(self.out_features))
+                ]
+                return [
+                    y[idx].reshape(*x_shape[:-1], self.out_features[idx])
+                    for idx in range(len(self.out_features))
+                ]
+
+        class M2(torch.nn.Module):
+            def __init__(self, mod: M1):
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                x_eye = torch.eye(x.shape[-1], device=x.device, dtype=x.dtype)
+                dq_w_list = []
+                for idx in range(len(self.mod.out_features)):
+                    x_shape = x_eye.shape
+                    dq_w = torch._weight_int4pack_mm_for_cpu(
+                        x_eye,
+                        self.mod.linear_weight[idx],
+                        self.mod.group_size,
+                        self.mod.qscale_and_zeros[idx],
+                    )
+                    dq_w_list.append(
+                        dq_w.reshape(
+                            *x_shape[:-1], self.mod.out_features[idx]
+                        ).T.contiguous()
+                    )
+
+                return [torch.nn.functional.linear(x, dq_w) for dq_w in dq_w_list]
+
+        counters.clear()
+        seq_len = 8
+        x = torch.rand((batch_size, seq_len, in_features), dtype=dtype)
+        mod = M1(in_features, out_features, group_size).eval()
+        mod2 = M2(mod)
+        # Skip VERIFY during torch.compile and don't use self.common. See explanation above.
+        with patch.object(select_algorithm, "VERIFY", None):
+            y_ref = mod2(x)
+            m = torch.compile(mod)
+            y = m(x)
+            self.assertEqual(
+                y,
+                y_ref,
+                atol=1e-2,
+                rtol=1e-2,
+            )
+            # Only do once tuning, since the wgt has been concat
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
