@@ -168,7 +168,7 @@ EOL
 # nproc doesn't exist on darwin
 if [[ "$(uname)" != Darwin ]]; then
   # This was lowered from 18 to 12 to avoid OOMs when compiling FlashAttentionV2
-  MEMORY_LIMIT_MAX_JOBS=6
+  MEMORY_LIMIT_MAX_JOBS=12
   NUM_CPUS=$(( $(nproc) - 2 ))
 
   # Defaults here for **binary** linux builds so they can be changed in one place
