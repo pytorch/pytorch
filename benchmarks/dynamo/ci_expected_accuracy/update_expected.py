@@ -1,5 +1,5 @@
 """
-Update commited CSV files used as reference points by dynamo/inductor CI.
+Update committed CSV files used as reference points by dynamo/inductor CI.
 
 Currently only cares about graph breaks, so only saves those columns.
 
