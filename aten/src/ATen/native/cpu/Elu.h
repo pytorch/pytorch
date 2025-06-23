@@ -11,6 +11,7 @@
 #include <c10/util/BFloat16.h> // For c10::is_reduced_floating_point_v.
 
 namespace at::native {
+inline namespace CPU_CAPABILITY {
 /**
  * Return a function object that calculates ELU with the given
  * parameters on its input element.  ParamT is the type of the input
@@ -24,7 +25,7 @@ auto get_scalar_elu_elementwise_func(MathT alpha, MathT scale, MathT input_scale
   const auto poscoef = scale;
   const auto negiptcoef = input_scale;
   return [negcoef, negiptcoef, poscoef](ParamT a) -> ParamT {
-    return MathT(a) <= MathT(0)
+    return MathT(a) < MathT(0)
       ? std::expm1(MathT(a) * negiptcoef) * negcoef
       : MathT(a) * poscoef;
   };
@@ -42,7 +43,7 @@ auto get_vectorized_elu_elementwise_func(T alpha, T scale, T input_scale) {
   const vec::Vectorized<T> negiptcoef_vec(input_scale);
   const vec::Vectorized<T> zero_vec(static_cast<T>(0));
   return [negcoef_vec, poscoef_vec, negiptcoef_vec, zero_vec](vec::Vectorized<T> a) -> vec::Vectorized<T> {
-    const auto cmp = a > zero_vec;
+    const auto cmp = a >= zero_vec;
     if (!cmp.zero_mask()) {
       return a * poscoef_vec;
     } else {
@@ -69,4 +70,5 @@ auto get_vectorized_elu_elementwise_func(float alpha, float scale, float input_s
     return vec::convert_from_float<T>(res0, res1);
   };
 }
+} // namespace CPU_CAPABILITY
 } // namespace at::native
