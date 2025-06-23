@@ -246,7 +246,7 @@ def run_single_experiment_group(
 
     for config in group_config.experiments:
         torch._dynamo.reset()
-        torch._inductor.utils.clear_inductor_caches()
+        torch._inductor.utils.clear_caches()
         compiled_op = torch.compile(
             op,
             options=config.to_options(),
