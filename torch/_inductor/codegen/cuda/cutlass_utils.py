@@ -34,14 +34,14 @@ def move_cutlass_compiled_cache() -> None:
     if "cutlass" not in sys.modules:
         return
 
-    import cutlass  # type: ignore[import-not-found]
+    import python_cutlass  # type: ignore[import-not-found]
 
-    if not os.path.exists(cutlass.CACHE_FILE):
+    if not os.path.exists(python_cutlass.CACHE_FILE):
         return
 
     try:
-        filename = os.path.basename(cutlass.CACHE_FILE)
-        shutil.move(cutlass.CACHE_FILE, os.path.join(cache_dir(), filename))
+        filename = os.path.basename(python_cutlass.CACHE_FILE)
+        shutil.move(python_cutlass.CACHE_FILE, os.path.join(cache_dir(), filename))
         log.debug("Moved CUTLASS compiled cache file to %s", cache_dir())
     except OSError as e:
         log.warning("Failed to move CUTLASS compiled cache file: %s", str(e))
@@ -68,7 +68,7 @@ def try_import_cutlass() -> bool:
     """
     if config.is_fbcode():
         try:
-            import cutlass  # type: ignore[import-not-found]
+            import python_cutlass  # type: ignore[import-not-found]
             import cutlass_library  # type: ignore[import-not-found]
         except ImportError as e:
             log.warning(
@@ -108,7 +108,7 @@ def try_import_cutlass() -> bool:
     tmp_cutlass_full_path = os.path.abspath(os.path.join(cache_dir(), "torch_cutlass"))
 
     dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
-    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass")
+    dst_link_cutlass = path_join(tmp_cutlass_full_path, "python_cutlass")
     dst_link_pycute = path_join(tmp_cutlass_full_path, "pycute")
 
     # mock modules to import cutlass
@@ -146,7 +146,7 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass  # noqa: F401
+            import python_cutlass  # noqa: F401
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
