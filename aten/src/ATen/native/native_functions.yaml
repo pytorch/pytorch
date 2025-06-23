@@ -3720,6 +3720,7 @@
   dispatch:
     CPU: log_softmax_cpu_out
     CUDA: log_softmax_cuda_out
+    MTIA: log_softmax_mtia_out
     MPS: log_softmax_mps_out
 
 - func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
@@ -3730,6 +3731,7 @@
   dispatch:
     CPU: log_softmax_backward_cpu_out
     CUDA: log_softmax_backward_cuda_out
+    MTIA: log_softmax_backward_mtia_out
     MPS: log_softmax_backward_mps_out
 
 - func: _logcumsumexp(Tensor self, int dim) -> Tensor
