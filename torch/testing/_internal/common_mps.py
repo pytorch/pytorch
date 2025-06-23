@@ -304,7 +304,7 @@ if torch.backends.mps.is_available():
             ],
             # test blow pass on macOS 12 as it falls back to cpu
             # Argsort case using duplicate indices (undefined behaviour):
-            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
             #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
             # Elements from index 30 and 5133 are both equal.
             # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
@@ -339,7 +339,7 @@ if torch.backends.mps.is_available():
             # 'nn.functional.pairwise_distance': [torch.float16],
             # test blow pass on macOS 12 as it falls back to cpu
             # Argsort case using duplicate indices (undefined behaviour):
-            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
             #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
             # Elements from index 30 and 5133 are both equal.
             # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
@@ -830,7 +830,6 @@ if torch.backends.mps.is_available():
             "aminmax": [torch.float32, torch.float16],
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
             "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
-            "nn.functional.interpolatetrilinear": None,
             # Correctness issues
             "atanh": [torch.float32],
             # Random output

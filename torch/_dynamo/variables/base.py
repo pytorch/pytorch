@@ -210,7 +210,7 @@ class AsPythonConstantNotImplementedError(NotImplementedError):
     vt: "VariableTracker"
 
     def __init__(self, vt: "VariableTracker"):
-        super().__init__(self, f"{vt} is not a constant")
+        super().__init__(f"{vt} is not a constant")
         self.vt = vt
 
 
