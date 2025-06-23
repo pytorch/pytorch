@@ -40,7 +40,7 @@ __all__ = ["PackageImporter"]
 # This is a list of imports that are implicitly allowed even if they haven't
 # been marked as extern. This is to work around the fact that Torch implicitly
 # depends on numpy and package can't track it.
-# https://github.com/pytorch/MultiPy/issues/46
+# https://github.com/pytorch/multipy/issues/46  # codespell:ignore multipy
 IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
     "numpy",
     "numpy.core",
@@ -386,13 +386,13 @@ class PackageImporter(Importer):
         assert module.__name__ not in _package_imported_modules
         _package_imported_modules[module.__name__] = module
 
-        # pre-emptively install on the parent to prevent IMPORT_FROM from trying to
+        # preemptively install on the parent to prevent IMPORT_FROM from trying to
         # access sys.modules
         self._install_on_parent(parent, name, module)
 
         if filename is not None:
             assert mangled_filename is not None
-            # pre-emptively install the source in `linecache` so that stack traces,
+            # preemptively install the source in `linecache` so that stack traces,
             # `inspect`, etc. work.
             assert filename not in linecache.cache  # type: ignore[attr-defined]
             linecache.lazycache(mangled_filename, ns)
