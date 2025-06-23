@@ -1,5 +1,3 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
-
 # pyre-strict
 
 import concurrent.futures
@@ -10,16 +8,16 @@ import struct
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-import fsspec
+import fsspec # type: ignore[no-untyped-def]
+from fsspec.core import url_to_fs # type: ignore[no-untyped-def]
 import torch
 
-from fsspec.core import url_to_fs
 from torch.distributed.checkpoint._hf_utils import (
-    _metadata_fn,
     _gen_file_name,
     _get_dcp_custom_metadata,
     _get_dtype,
     _get_safetensors_file_metadata,
+    _metadata_fn,
     DATA_OFFSETS_KEY,
     DEFAULT_EXTRA_METADATA_KEY,
     DTYPE_KEY,
@@ -125,7 +123,7 @@ def _parse_input_metadata(
     for fqn, tensor_info in fqn_to_size_mapping.items():
         tensor_size = tensor_info[0]
         dtype_str = tensor_info[1]
-        for _, output_data in output_files_data.items():
+        for output_data in output_files_data.values():
             # Add this tensor to the output file if it's already assigned there or if we're using a single output file
             if fqn in output_data.fqn_data or len(output_files_data) == 1:
                 output_data.fqn_data[fqn] = _FqnData(
@@ -237,7 +235,7 @@ def _process_output_file(
                 # Get the offsets of this tensor shard within the full tensor
                 offsets_of_tensor_being_read = _get_dcp_custom_metadata(file_metadata)[
                     fqn
-                ][SAVED_OFFSETS_KEY]
+                ][SAVED_OFFSETS_KEY] # type: ignore[index]
 
                 # Get metadata for this tensor in the output file
                 fqn_data = output_data.fqn_data[fqn]
@@ -321,7 +319,7 @@ def _write_row_wise_tensor(
     sub_tensor_shape: list[int],
     output_file_path: str,
     output_start_byte: int,
-):
+) -> None:
     """
     Writes a row-wise sharded tensor to the output file.
 
@@ -377,7 +375,7 @@ def _write_column_wise_tensor(
     sub_tensor_shape: list[int],
     output_file_path: str,
     output_start_byte: int,
-):
+) -> None:
     """
     Writes a column-wise sharded 2D tensor to the output file.
 
@@ -433,7 +431,7 @@ def _write_element_by_element(
     sub_tensor_shape: list[int],
     output_file_path: str,
     output_start_byte: int,
-):
+) -> None:
     """
     Writes a sub-tensor to the output file using a general element-by-element approach.
 
@@ -503,7 +501,7 @@ def _write_sub_tensor_to_file(
     sub_tensor_shape: list[int],
     output_file_path: str,
     output_start_byte: int,
-):
+) -> None:
     """
     Writes a sub-tensor from a byte array into a file representing the full tensor at specified offsets.
 
@@ -615,7 +613,7 @@ def _write_overall_metadata_file(
             total_size += math.prod(fqn_data.shape_in_file) * fqn_data.dtype_size
             weight_map[fqn] = os.path.basename(output_path)
 
-    metadata_to_write = {}
+    metadata_to_write : dict[str, Any] = {}
     metadata_to_write["metadata"] = {"total_size": total_size}
     metadata_to_write["weight_map"] = weight_map
 

@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: distributed_checkpointing"]
+# Owner(s): ["oncall: distributed checkpointing"]
 
 import importlib
 import json
