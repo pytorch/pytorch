@@ -218,7 +218,9 @@ class TestPatternMatcherBase(TestCase):
                 expected = mod(*inputs)
                 actual = torch.compile(mod, **compile_options)(*clone_inputs)
                 if self.precision != 0:
-                    torch.testing.assert_close(actual, expected, atol=self.precision, rtol=self.precision)
+                    torch.testing.assert_close(
+                        actual, expected, atol=self.precision, rtol=self.precision
+                    )
                 else:
                     torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
                 matcher_check_fn()
