@@ -382,7 +382,7 @@ class ModuleCallSignature:
     out_spec: Annotated[str, 40]
 
     # This field is used to prettify the graph placeholders
-    # after we ser/der and retrace
+    # after we ser'der and retrace
     forward_arg_names: Annotated[Optional[list[str]], 50] = None
 
 
@@ -413,7 +413,7 @@ class GraphModule:
 
 
 # Invariant: Every time a change is made to the schema, one of the versions
-#            should be upadted.
+#            should be updated.
 @dataclass
 class SchemaVersion:
     major: Annotated[

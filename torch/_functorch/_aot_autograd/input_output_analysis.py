@@ -155,7 +155,7 @@ def create_synthetic_base_metadata(
             m.input_info[x].mutation_inductor_storage_resize for x in outer_indices
         )
 
-        inpt_info = InputAliasInfo(
+        input_info = InputAliasInfo(
             # If len(outer_indices) > 1, then this input is a synthetic base.
             # The invariant is that to the rest of aot autograd, synthetic bases only show up if
             # one of their aliases gets a data mutation. And if any of their aliases get metadata
@@ -176,7 +176,7 @@ def create_synthetic_base_metadata(
             requires_grad=requires_grad,
             keep_input_mutations=m.keep_input_mutations,
         )
-        input_infos.append(inpt_info)
+        input_infos.append(input_info)
 
     # Find any inputs that fulfill the following criteria:
     # (1) They are part of a synthetic base (because they alias another input,
@@ -184,8 +184,8 @@ def create_synthetic_base_metadata(
     # (2) They experience a metadata mutation
     outer_aliased_arg_idx_with_metadata_mutations = [
         outer_idx
-        for outer_idx, inpt_info in enumerate(m.input_info)
-        if inpt_info.mutates_metadata
+        for outer_idx, input_info in enumerate(m.input_info)
+        if input_info.mutates_metadata
         and not isinstance(synthetic_base_info[outer_idx], int)
     ]
 

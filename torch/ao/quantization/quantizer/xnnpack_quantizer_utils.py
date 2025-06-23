@@ -422,7 +422,7 @@ def _annotate_conv_bn(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[list[list[Node]]]:
     """
-    Find conv + batchnorm parititions
+    Find conv + batchnorm partitions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
     return _do_annotate_conv_bn(gm, quantization_config, filter_fn, has_relu=False)
@@ -435,7 +435,7 @@ def _annotate_conv_bn_relu(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[list[list[Node]]]:
     """
-    Find conv + batchnorm + relu parititions
+    Find conv + batchnorm + relu partitions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
     return _do_annotate_conv_bn(gm, quantization_config, filter_fn, has_relu=True)
@@ -448,7 +448,7 @@ def _annotate_conv_transpose_bn(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[list[list[Node]]]:
     """
-    Find conv_transpose + batchnorm parititions
+    Find conv_transpose + batchnorm partitions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
     return _do_annotate_conv_bn(
@@ -463,7 +463,7 @@ def _annotate_conv_transpose_bn_relu(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[list[list[Node]]]:
     """
-    Find conv_transpose + batchnorm + relu parititions
+    Find conv_transpose + batchnorm + relu partitions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
     return _do_annotate_conv_bn(

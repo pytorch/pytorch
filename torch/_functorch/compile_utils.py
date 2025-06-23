@@ -179,7 +179,7 @@ def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
     )
 
     # loop through getitem nodes in the graph and raise them to the parent node
-    # in reverse order to perserve their original relative order
+    # in reverse order to preserve their original relative order
     for node in reversed(getitem_nodes):
         assert len(node.all_input_nodes) == 1
         parent = node.all_input_nodes[0]

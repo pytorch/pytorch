@@ -199,7 +199,7 @@ class TestTrainingAwareCallback(TestCase):
                    do not want as the config of each layer changes after
                    .step()
 
-        Hence, we need to dump and restore the state_dict() everytime because we're
+        Hence, we need to dump and restore the state_dict() every time because we're
         copying the model after each epoch.
         Hence, it is essential to make sure that the sparsifier's state_dict() is being
         correctly dumped and restored.

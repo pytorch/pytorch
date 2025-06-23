@@ -15,7 +15,7 @@ def _is_valid_linear_block_sparse_pattern(
 
 # This is a stop-gap measure as current flow does not allow module
 # specific block sparse pattern.
-# Infact there is no way to convey sparse pattern via module config
+# In fact there is no way to convey sparse pattern via module config
 # of quantization flow. Thus using the global context to convey
 # sparsity pattern.
 # Once the flow supports it, this should be removed.

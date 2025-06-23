@@ -632,12 +632,12 @@ def list_pointwise_strategy(
     def args_tuple_strategies(args_schema: tuple[object, ...]) -> list[TupleStrategy]:
         first_arg = args_schema[0]
         assert isinstance(first_arg, TupleStrategy)
-        strategy_len = len(first_arg.childs)
+        strategy_len = len(first_arg.childs)  # codespell:ignore childs
         tuple_strategies: list[TupleStrategy] = []
         for arg_idx, arg in enumerate(args_schema):
             if isinstance(arg, TupleStrategy):
                 # every tuple strategy should have the same length
-                assert len(arg.childs) == strategy_len
+                assert len(arg.childs) == strategy_len  # codespell:ignore childs
                 tuple_strategies.append(arg)
             elif isinstance(arg, OpStrategy):
                 if arg_idx > 0:  # implicitly broadcast
@@ -653,10 +653,12 @@ def list_pointwise_strategy(
     args_strategies = args_tuple_strategies(op_schema.args_schema)
     follow_strategy: TupleStrategy = args_strategies[0]
     list_strategy: list[OpStrategy] = []
-    for child_idx, child_strtgy in enumerate(follow_strategy.childs):
+    for child_idx, child_strtgy in enumerate(
+        follow_strategy.childs  # codespell:ignore childs
+    ):
         assert isinstance(child_strtgy, OpStrategy)
         args_schema: list[OpStrategy] = [
-            cast(OpStrategy, arg_strategy.childs[child_idx])
+            cast(OpStrategy, arg_strategy.childs[child_idx])  # codespell:ignore childs
             for arg_strategy in args_strategies
         ]
         pointwise_strategy: OpStrategy = common_pointwise_strategy(

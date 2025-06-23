@@ -325,7 +325,7 @@ def redistribute_cost(
 
     NOTE:
     1. Only consider communication cost here, since computation costs for redistribute
-       are quite trival (i.e. we only need to narrow or simple division)
+       are quite trivial (i.e. we only need to narrow or simple division)
     2. Only consider redistribute cost on same mesh, cross mesh communication cost is
        not quite needed for operator strategy estimation/selection.
     """
