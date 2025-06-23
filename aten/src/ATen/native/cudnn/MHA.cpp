@@ -92,7 +92,7 @@ void run_cudnn_SDP_bprop(
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
 #include <ATen/native/cudnn/MHA.h>
-#include <ATen/native/cudnn/MHAUtils.h>
+#include <ATen/native/transformers/sdp_utils.h>
 
 #include <ATen/cuda/Exceptions.h>
 #include <cudnn_frontend.h>

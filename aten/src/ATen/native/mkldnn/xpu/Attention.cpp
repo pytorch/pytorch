@@ -1,6 +1,6 @@
-#include <ATen/native/cudnn/MHAUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/transformers/attention.h>
+#include <ATen/native/transformers/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/util/Array.h>
 #include <torch/library.h>
