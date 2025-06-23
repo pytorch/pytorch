@@ -21,12 +21,8 @@ pull-deps: clone-deps
 	(cd ../../../torchbenchmark && git fetch && git checkout "$$(cat ../pytorch/.github/ci_commit_pins/torchbench.txt)" && git submodule update --init --recursive)
 
 build-deps: clone-deps
-	# Install uv with
-	curl -LsSf https://astral.sh/uv/install.sh | sh
-	# and create the virtual env
-	uv venv pt-benchmark-py3.12 --python 3.12 && source pt-benchmark-py3.12/bin/activate
 	uv pip install astunparse numpy scipy ninja pyyaml mkl mkl-include setuptools cmake \
-		typing-extensions requests protobuf numba cython scikit-learn torch librosa
+		typing-extensions requests protobuf numba cython scikit-learn librosa
 	(cd ../../../torchvision && uv pip install -e .)
 	(cd ../../../torchdata && uv pip install -e .)
 	(cd ../../../torchaudio && uv pip install -e . --no-build-isolation)
