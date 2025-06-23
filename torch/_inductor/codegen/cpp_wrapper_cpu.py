@@ -1499,7 +1499,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # This is why writeline needs to explicitly passed in as a parameter.
         var = f"int_array_{next(self.int_array_id)}"
         ctype = "int64_t"
-        if int_array=="{}":
+        if int_array == "{}":
             #  An array of unknown bound cannot be initialized with {}.
             if known_statically:
                 writeline(f"static constexpr {ctype} *{var}=nullptr;")
