@@ -769,7 +769,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     return;
   }
 
-  auto interpreter_threads = interpreterThreads(); 
+  auto interpreter_threads = interpreterThreads();
 
   // Register the tracer in each thread.
   for (const auto thread_state : interpreter_threads) {
@@ -815,10 +815,11 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
 
   for (size_t i = 0; i < interpreter_threads.size(); i++) {
     PyThreadState_Swap(interpreter_threads[i]);
+    auto* ctx = thread_local_results_[i].ctx_;
     // Note:
     //   This profile will not compose with other CPython profilers, and
     //   cannot be round tripped via `sys.settrace(sys.gettrace())`
-    PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)thread_local_results_[i].ctx_);
+    PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
   }
 }
 
