@@ -397,7 +397,7 @@ class SizeVarAllocator:
             assert bool(static_expr)
             return left
 
-        assert self.shape_env.defer_runtime_assert(expr, "guard_equals")
+        assert self.shape_env.guard_or_defer_runtime_assert(expr, "guard_equals")
         return left
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
@@ -411,7 +411,7 @@ class SizeVarAllocator:
             assert bool(static_expr)
             return
 
-        assert self.shape_env.defer_runtime_assert(expr, "guard_lt")
+        assert self.shape_env.guard_or_defer_runtime_assert(expr, "guard_lt")
 
     def guarded_order(self, seq):
         """
@@ -774,11 +774,11 @@ class SizeVarAllocator:
                 return False
 
             if is_first:
-                # first ModularIndexing should conatins a nested ModularIndex
+                # first ModularIndexing should contains a nested ModularIndex
                 if not isinstance(x, ModularIndexing):
                     return False
             else:
-                # second ModularIndexing should constains a non-negative
+                # second ModularIndexing should contains a non-negative
                 # symbol
                 if not isinstance(x, sympy.Symbol) or not self.statically_known_geq(
                     x, 0
@@ -809,7 +809,7 @@ class SizeVarAllocator:
     ) -> Union[bool, tuple[sympy.Expr, sympy.Expr]]:
         """
         Expand the FloorDiv to the entire expression so that the expression may
-        be simplfied.
+        be simplified.
 
         E.g., for a 2D contiguous tensor with shape [a, 2 * b], and index variables
         x1, x2, index expression 'x1 * 2b + x2' can be easily combined.
