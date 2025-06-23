@@ -2488,7 +2488,7 @@ class Module:
                         f"whose dimensions in the checkpoint are {input_param.size()}, "
                         f"an exception occurred : {ex.args}."
                     )
-            elif strict:
+            else:
                 missing_keys.append(key)
 
         extra_state_key = prefix + _EXTRA_STATE_KEY_SUFFIX
@@ -2498,21 +2498,20 @@ class Module:
         ):
             if extra_state_key in state_dict:
                 self.set_extra_state(state_dict[extra_state_key])
-            elif strict:
+            else:
                 missing_keys.append(extra_state_key)
-        elif strict and (extra_state_key in state_dict):
+        elif extra_state_key in state_dict:
             unexpected_keys.append(extra_state_key)
 
-        if strict:
-            for key in state_dict.keys():
-                if key.startswith(prefix) and key != extra_state_key:
-                    input_name = key[len(prefix) :].split(".", 1)
-                    # Must be Module if it have attributes
-                    if len(input_name) > 1:
-                        if input_name[0] not in self._modules:
-                            unexpected_keys.append(key)
-                    elif input_name[0] not in local_state:
+        for key in state_dict.keys():
+            if key.startswith(prefix) and key != extra_state_key:
+                input_name = key[len(prefix) :].split(".", 1)
+                # Must be Module if it have attributes
+                if len(input_name) > 1:
+                    if input_name[0] not in self._modules:
                         unexpected_keys.append(key)
+                elif input_name[0] not in local_state:
+                    unexpected_keys.append(key)
 
     def load_state_dict(
         self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
@@ -2576,7 +2575,7 @@ class Module:
                 local_state_dict,
                 prefix,
                 local_metadata,
-                True,
+                strict,
                 missing_keys,
                 unexpected_keys,
                 error_msgs,

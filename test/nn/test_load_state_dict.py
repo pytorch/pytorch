@@ -189,21 +189,24 @@ class TestLoadStateDict(NNTestCase):
         for _ in range(3):
             model = nn.Sequential(*[deepcopy(model) for _ in range(10)])
 
-        def hook_fn(
-            module,
-            state_dict,
-            prefix,
-            local_metadata,
-            strict,
-            missing_keys,
-            unexpected_keys,
-            error_msgs,
-        ):
-            module_state_dict = module.state_dict()
-            self.assertEqual(len(module_state_dict.keys()), len(state_dict.keys()))
+        for strict_arg in [True, False]:
 
-        model[0][0].register_load_state_dict_pre_hook(hook_fn)
-        model.load_state_dict(model.state_dict(), strict=True)
+            def hook_fn(
+                module,
+                state_dict,
+                prefix,
+                local_metadata,
+                strict,
+                missing_keys,
+                unexpected_keys,
+                error_msgs,
+            ):
+                self.assertEqual(strict_arg, strict)
+                module_state_dict = module.state_dict()
+                self.assertEqual(len(module_state_dict.keys()), len(state_dict.keys()))
+
+            model[0][0].register_load_state_dict_pre_hook(hook_fn)
+            model.load_state_dict(model.state_dict(), strict=strict_arg)
 
     # fails swapping as LSTM installs weak references on the parameters
     @swap([False])
