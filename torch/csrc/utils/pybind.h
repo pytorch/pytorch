@@ -339,7 +339,7 @@ struct type_caster<c10::complex<T>> {
   bool load(handle src, bool) {
     PyObject* obj = src.ptr();
 
-    // Refered from `THPUtils_unpackComplexDouble`
+    // Referred from `THPUtils_unpackComplexDouble`
     Py_complex py_complex = PyComplex_AsCComplex(obj);
     if (py_complex.real == -1.0 && PyErr_Occurred()) {
       return false;

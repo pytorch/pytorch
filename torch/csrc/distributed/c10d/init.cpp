@@ -1006,7 +1006,7 @@ This class does not support ``__members__`` property.)");
   });
 
 #ifdef USE_NVSHMEM
-  // Intializes the device state in CUmodule so that it’s able to perform
+  // Initializes the device state in CUmodule so that it’s able to perform
   // NVSHMEM operations.
   module.def(
       "_nvshmemx_cumodule_init",
@@ -3297,7 +3297,7 @@ Arguments:
             Default is False.
 
 Attributes:
-    config (NCCLConfig): configures NCCL communicators (only avaiable for
+    config (NCCLConfig): configures NCCL communicators (only available for
             builds using NCCL 2.17+). This can be used to improve
             communication-computation overlap for NCCL kernels by tuning
             available parameters in the config. See
