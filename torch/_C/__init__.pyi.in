@@ -1299,7 +1299,6 @@ def _group_tensors_by_device_and_dtype(
 # NB: There is no Capsule type in typing, see
 # https://github.com/python/cpython/issues/109562
 def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
-def _to_dlpack_versioned(data: Tensor) -> Any: ...  # THPModule_toDLPackVersioned
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
 def _get_cpp_backtrace(
     frames_to_skip: _int,
@@ -2301,9 +2300,12 @@ class _MemPool:
         allocator: _cuda_CUDAAllocator | None = None,
         is_user_created: _bool = True,
         use_on_oom: _bool = False,
+        symmetric: _bool = False,
     ) -> None: ...
     @property
     def id(self) -> tuple[_int, _int]: ...
+    @property
+    def is_symmetric(self) -> _bool: ...
     @property
     def allocator(self) -> _cuda_CUDAAllocator | None: ...
     def use_count(self) -> _int: ...
