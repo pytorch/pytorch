@@ -6,20 +6,23 @@ from contextlib import nullcontext
 from typing import Any, Callable, Optional, Union
 
 import torch
-from torch._higher_order_ops.map import _unstack_pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
+from torch._higher_order_ops.map import _unstack_pytree
 from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import traceback as fx_traceback
 from torch.fx.experimental.proxy_tensor import PythonKeyTracer
+from torch.fx.experimental.symbolic_shapes import (
+    compute_unbacked_bindings,
+    PropagateUnbackedSymInts,
+)
 from torch.fx.graph import CodeGen
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
-from torch.fx.experimental.symbolic_shapes import PropagateUnbackedSymInts, compute_unbacked_bindings
 
 
 __all__ = ["_ExportPassBaseDeprecatedDoNotUse"]
@@ -56,9 +59,10 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     def _create_dummy_node_metadata():
         return NodeMetadata({"stack_trace": "".join(traceback.format_stack(limit=1))})
 
-
     class ExportTracer(PythonKeyTracer):
-        def __init__(self, callback: "_ExportPassBaseDeprecatedDoNotUse", codegen: CodeGen) -> None:
+        def __init__(
+            self, callback: "_ExportPassBaseDeprecatedDoNotUse", codegen: CodeGen
+        ) -> None:
             super().__init__()
             self.callback = callback
             self.root = torch.nn.Module()
@@ -92,12 +96,24 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             return node
 
         def set_metadata(
-            self, node: torch.fx.Node, value: Argument,
+            self,
+            node: torch.fx.Node,
+            value: Argument,
         ) -> None:
             # propagate the fake tensor or sym nodes
             def make_val(
                 x: Argument,
-            ) -> Union[FakeTensor, torch.SymInt, torch.SymFloat, torch.SymBool, int, float, bool, str, None]:
+            ) -> Union[
+                FakeTensor,
+                torch.SymInt,
+                torch.SymFloat,
+                torch.SymBool,
+                int,
+                float,
+                bool,
+                str,
+                None,
+            ]:
                 if isinstance(x, FakeTensor):
                     return x
                 elif isinstance(x, torch.Tensor):
@@ -124,7 +140,18 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                         )
                         fake_tensor = None
                     return fake_tensor
-                elif isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool, int, float, bool, str)):
+                elif isinstance(
+                    x,
+                    (
+                        torch.SymInt,
+                        torch.SymFloat,
+                        torch.SymBool,
+                        int,
+                        float,
+                        bool,
+                        str,
+                    ),
+                ):
                     return x
                 else:
                     return None
@@ -153,7 +180,9 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             node.meta["tensor_meta"] = pytree.tree_map(make_tensor_meta, value)
 
     class ExportInterpreter(fx.Interpreter):
-        def __init__(self, callback: "_ExportPassBaseDeprecatedDoNotUse", gm: fx.GraphModule) -> None:
+        def __init__(
+            self, callback: "_ExportPassBaseDeprecatedDoNotUse", gm: fx.GraphModule
+        ) -> None:
             super().__init__(gm)
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
@@ -186,13 +215,19 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             if target == operator.getitem:
                 value, key = args
                 return self.callback.call_getitem(value, key, meta)
-            elif getattr(target, "__module__", None) in {"_operator", "builtins", "math"}:
+            elif getattr(target, "__module__", None) in {
+                "_operator",
+                "builtins",
+                "math",
+            }:
                 assert callable(target)
                 return self.callback.call_sym(target, args, meta)
             elif target in _TORCH_SYM_OPS:
                 assert callable(target)
                 return self.callback.call_sym(target, args, meta)
-            elif isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
+            elif isinstance(
+                target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+            ):
                 return self.callback.call_operator(
                     target,
                     args,
@@ -269,7 +304,9 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         if isinstance(target, torch._ops.OpOverload):
             name = self.tracer.graph._target_to_str(target.overloadpacket.__name__)
 
-        res_proxy = self.tracer.create_proxy(kind, target, args_proxy, kwargs_proxy, name=name)
+        res_proxy = self.tracer.create_proxy(
+            kind, target, args_proxy, kwargs_proxy, name=name
+        )
         res_proxy.node.meta.update(meta.data)
         if self.fake_tensor_mode and (shape_env := self.fake_tensor_mode.shape_env):
             if symbol_to_path := compute_unbacked_bindings(shape_env, res_data):

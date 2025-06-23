@@ -35,6 +35,9 @@ if torch.backends.mps.is_available():
             "as_strided",
             "as_strided_copy",
             "as_strided_scatter",
+            "asin",
+            "acos",
+            "atan",
             "broadcast_tensors",
             "broadcast_to",
             "chalf",
@@ -45,6 +48,7 @@ if torch.backends.mps.is_available():
             "conj_physical",
             "contiguous",
             "cos",
+            "cosh",
             "diag",
             "diag_embed",
             "diagflat",
@@ -57,6 +61,7 @@ if torch.backends.mps.is_available():
             "empty_permuted",
             "empty_strided",
             "exp",
+            "expm1",
             "exp2",
             "expand",
             "expand_as",
@@ -64,6 +69,7 @@ if torch.backends.mps.is_available():
             "flatten",
             "fill",
             "full",
+            "full_like",
             "H",
             "hsplit",
             "imag",
@@ -128,6 +134,7 @@ if torch.backends.mps.is_available():
             "sigmoid",
             "sin",
             "sinc",
+            "sinh",
             "slice",
             "special.spherical_bessel_j0",
             "special.entr",
@@ -175,7 +182,6 @@ if torch.backends.mps.is_available():
             "__rdiv__",
             "__rmatmul__",
             "_chunk_cat",
-            "acos",
             "acosh",
             "all",
             "allclose",
@@ -185,8 +191,6 @@ if torch.backends.mps.is_available():
             "addcmul",
             "addmmdecomposed",
             "addmv",
-            "asin",
-            "atan",
             "atanh",
             "bfloat16",
             "bmm",
@@ -198,7 +202,6 @@ if torch.backends.mps.is_available():
             "combinations",
             "corrcoef",
             "constant_pad_nd",
-            "cosh",
             "cov",
             "count_nonzero",
             "diff",
@@ -208,7 +211,6 @@ if torch.backends.mps.is_available():
             "einsum",
             "eq",
             "equal",
-            "expm1",
             "eye",
             "fft.fft",
             "fft.fft2",
@@ -302,7 +304,7 @@ if torch.backends.mps.is_available():
             ],
             # test blow pass on macOS 12 as it falls back to cpu
             # Argsort case using duplicate indices (undefined behaviour):
-            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
             #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
             # Elements from index 30 and 5133 are both equal.
             # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
@@ -311,13 +313,6 @@ if torch.backends.mps.is_available():
             # The values of the sorted tensor match the CPU,
             # but in case of the returned indices this results in undefined behaviour.
             "sort": [torch.int8, torch.uint8, torch.bool, torch.float16],
-            # Unsupported dtypes
-            "cumsum": [torch.int64],
-            "cumprod": [torch.int64],
-            "cumulative_trapezoid": [torch.int64],
-            "masked.cumsum": [torch.int64],
-            "masked.cumprod": [torch.int64],
-            "linalg.vander": [torch.int64],
             # Fail with `Expected 1.0 but got nan.` for empty tensors
             # Caused by sample input at index 23: SampleInput(
             #     input=Tensor[size=(), device="mps:0", dtype=torch.float32],
@@ -344,7 +339,7 @@ if torch.backends.mps.is_available():
             # 'nn.functional.pairwise_distance': [torch.float16],
             # test blow pass on macOS 12 as it falls back to cpu
             # Argsort case using duplicate indices (undefined behaviour):
-            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
             #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
             # Elements from index 30 and 5133 are both equal.
             # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
@@ -375,7 +370,6 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST = {
             # Failures due to lack of op implementation on MPS backend
-            "login": None,
             "logspace": None,
             "logspacetensor_overload": None,
             "linalg.eig": None,
@@ -385,8 +379,6 @@ if torch.backends.mps.is_available():
             "cauchy": None,
             "cholesky_inverse": None,
             "cholesky_solve": None,
-            "cummax": None,
-            "cummin": None,
             "frexp": None,
             "gcd": None,
             "geqrf": None,
@@ -430,14 +422,12 @@ if torch.backends.mps.is_available():
             "nn.functional.adaptive_max_pool3d": None,
             "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
-            "nn.functional.interpolatetrilinear": None,
             "nn.functional.max_unpool1dgrad": None,
             "nn.functional.max_unpool2dgrad": None,
             "nn.functional.max_unpool3dgrad": None,
             "nn.functional.avg_pool3d": None,
             "nn.functional.ctc_loss": None,
             "nn.functional.embedding_bag": None,
-            "nn.functional.hardshrink": None,
             "nn.functional.max_pool3d": None,
             "nn.functional.max_unpool1d": None,
             "nn.functional.max_unpool2d": None,
@@ -492,7 +482,6 @@ if torch.backends.mps.is_available():
             "log_softmaxwith_dtype": None,
             "softmaxwith_dtype": None,
             "float_power": None,
-            "full_like": None,
             "linalg.matrix_rankhermitian": None,
             "linalg.pinvhermitian": None,
             "nonzero_static": None,
