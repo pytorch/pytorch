@@ -45,7 +45,6 @@
      memory_allocated
      memory_reserved
      memory_stats
-     memory_stats_as_nested_dict
      reset_accumulated_memory_stats
      reset_peak_memory_stats
 ```
