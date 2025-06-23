@@ -2,14 +2,16 @@
 
 import json
 import os
-import pathlib
 import sys
 import tempfile
 from unittest.mock import MagicMock
 
 import torch
 from torch.distributed.checkpoint import DefaultLoadPlanner
-from torch.distributed.checkpoint._hf_utils import _HFStorageInfo, NUM_BYTES_FOR_HEADER_LEN
+from torch.distributed.checkpoint._hf_utils import (
+    _HFStorageInfo, 
+    NUM_BYTES_FOR_HEADER_LEN,
+)
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.filesystem import _StorageInfo, FileSystem
 from torch.distributed.checkpoint.hf_storage import (
@@ -183,7 +185,11 @@ class TestHfStorage(TestCase):
                 )
                 metadata_bytes = metadata_contents.encode("utf-8")
 
-                f.write(len(metadata_bytes).to_bytes(NUM_BYTES_FOR_HEADER_LEN, byteorder="little"))
+                f.write(
+                    len(metadata_bytes).to_bytes(
+                        NUM_BYTES_FOR_HEADER_LEN, byteorder="little"
+                        )
+                    )
                 f.write(metadata_bytes)
 
                 f.write(tensor_0.numpy().tobytes())
@@ -325,7 +331,11 @@ class TestHfStorage(TestCase):
                 )
                 metadata_bytes = metadata_contents.encode("utf-8")
 
-                f.write(len(metadata_bytes).to_bytes(NUM_BYTES_FOR_HEADER_LEN, byteorder="little"))
+                f.write(
+                    len(metadata_bytes).to_bytes(
+                        NUM_BYTES_FOR_HEADER_LEN, byteorder="little"
+                    )
+                )
                 f.write(metadata_bytes)
 
                 tensor = torch.rand(5, 10)
