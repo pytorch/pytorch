@@ -52,7 +52,9 @@ class OutputMetadata:
 
 class InvokeSubgraphHOP(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("invoke_subgraph")
+        # Invoke subgraph does not have any state, it is just a wrapper over a
+        # subgraph, so we can safely cache the HOP.
+        super().__init__("invoke_subgraph", cacheable=True)
         # This is used by the fake tensor cache key validator to extract the
         # subgraph and iterate over the nodes to find if all nodes are fake
         # tensor cacheable.

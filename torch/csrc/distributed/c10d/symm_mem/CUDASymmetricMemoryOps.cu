@@ -56,7 +56,7 @@
     INT_SWITCH_CASE(k_alignment, 8, __VA_ARGS__);                     \
     INT_SWITCH_CASE(k_alignment, 4, __VA_ARGS__);                     \
     default: {                                                        \
-      TORCH_CHECK(false, "Not implemented for aligment=", alignment); \
+      TORCH_CHECK(false, "Not implemented for alignment=", alignment); \
     }                                                                 \
   }
 
