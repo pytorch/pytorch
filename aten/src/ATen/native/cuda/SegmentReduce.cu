@@ -18,10 +18,7 @@
 #include <ATen/ops/cumsum.h>
 #endif
 
-#if defined(_WIN32) && defined(CUDART_VERSION) && CUDART_VERSION >= 12090
-TORCH_WARN(
-    "SegmentReduce is not supported on CUDA 12.9+ on Windows. Please use CUDA 12.8 or earlier. Please see: https://github.com/pytorch/pytorch/issues/156181");
-#else
+#if !defined(_WIN32) || CUDART_VERSION < 12090
 
 namespace at::native {
 
