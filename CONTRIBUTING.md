@@ -228,6 +228,8 @@ dependencies as well as the nightly binaries into the repo directory.
           details.
         * [cuda](aten/src/ATen/native/cuda) - CUDA implementations of
           operators.
+        * [mps](aten/src/ATen/native/mps) - MPS implementations of
+          operators for Apple's Metal GPU family.
         * [sparse](aten/src/ATen/native/sparse) - CPU and CUDA
           implementations of COO sparse tensor operations
         * [mkl](aten/src/ATen/native/mkl) [mkldnn](aten/src/ATen/native/mkldnn)
@@ -343,13 +345,7 @@ command runs tests such as `TestNN.test_BCELoss` and
 
 ### Local linting
 
-Install all prerequisites by running
-
-```bash
-make setup-lint
-```
-
-You can now run the same linting steps that are used in CI locally via `make`:
+You can run the same linting steps that are used in CI locally via `make`:
 
 ```bash
 make lint

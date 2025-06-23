@@ -368,6 +368,7 @@ class OutputGraph(OutputGraphGuardsState):
         global_scope: Scope,
         f_code,
         torch_function_mode_stack,
+        package,
     ):
         super().__init__(
             local_scope,
@@ -471,6 +472,7 @@ class OutputGraph(OutputGraphGuardsState):
         self.compiler_fn: Optional[CompilerFn] = compiler_fn
         self.root_tx = root_tx
 
+        self.package = package
         # Given a source, what are the user stacks of all locations that
         # accessed it?
         #
@@ -1111,7 +1113,7 @@ class OutputGraph(OutputGraphGuardsState):
 
                 # A small codegen optimization because we might have different
                 # VariableTrackers that share the same source.
-                list_idx = x.source.index
+                list_idx = x.source.index  # type: ignore[attr-defined]
                 if list_idx not in visited:
                     alias_name = self.new_var(
                         f"{list_name}_ref"
@@ -1715,6 +1717,9 @@ class OutputGraph(OutputGraphGuardsState):
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
 
+            if self.package is not None:
+                self.package.add_backend_id(name, compiled_fn)
+
             compiled_fn = disable(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"
             )
@@ -2313,11 +2318,16 @@ class SubgraphTracer(fx.Tracer):
         # True if this tracer is currently tracing into torch.utils.checkpoint
         # as part of speculate_subgraph.
         self.under_activation_checkpoint = False
-        # True if we want to allow side-effects (doesn't throw error on their existence)
+        # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
         # during this tracer's tracing of torch.utils.checkpoint (via speculate_subgraph).
         # Only safe if we know for sure that *NOT* replaying these side-effects during
         # backward recomputation of the checkpoint region doesn't affect its correctness.
         self.allow_side_effects_under_checkpoint = False
+        # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
+        # during this tracer's tracing. This is currently only used by experimental AC out-of-tree
+        # via torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer.
+        # Note: Externally visible side-effects are allowed if this flag OR the above flag is True.
+        self.unsafe_allow_externally_visible_side_effects = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
         self.is_reconstructing_generator = False
