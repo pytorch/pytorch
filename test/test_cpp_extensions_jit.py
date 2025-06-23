@@ -118,47 +118,81 @@ class TestCppExtensionJIT(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
-    def _test_jit_xpu_extension(self):
-        name = "torch_test_xpu_extension_"
-        # randomizing name for the case when we test building few extensions
-        # in a row using this function
-        name += "".join(random.sample(string.ascii_letters, 5))
-        module = torch.utils.cpp_extension.load(
-            name=name,
-            sources=[
-                "cpp_extensions/xpu_extension.sycl",
-            ],
-            verbose=True,
-            keep_intermediates=False,
-        )
+    def _test_jit_xpu_extension(self, extra_sycl_cflags):
+        # randomizing extension name and names of extension methods
+        # for the case when we test building few extensions in a row
+        # using this function
+        rand = "".join(random.sample(string.ascii_letters, 5))
+        name = f"torch_test_xpu_extension_{rand}"
+        temp_dir = tempfile.mkdtemp()
+        try:
+            with open("cpp_extensions/xpu_extension.sycl") as f:
+                text = f.read()
+                for fn in ["sigmoid_add", "SigmoidAddKernel"]:
+                    text = text.replace(fn, f"{fn}_{rand}")
 
-        x = torch.zeros(100, device="xpu", dtype=torch.float32)
-        y = torch.zeros(100, device="xpu", dtype=torch.float32)
+            sycl_file = f"{temp_dir}/xpu_extension.sycl"
+            with open(sycl_file, "w") as f:
+                f.write(text)
 
-        z = module.sigmoid_add(x, y).cpu()
+            module = torch.utils.cpp_extension.load(
+                name=name,
+                sources=[sycl_file],
+                extra_sycl_cflags=extra_sycl_cflags,
+                verbose=True,
+                keep_intermediates=True,
+                build_directory=temp_dir,
+            )
 
-        # 2 * sigmoid(0) = 2 * 0.5 = 1
-        self.assertEqual(z, torch.ones_like(z))
+            x = torch.zeros(100, device="xpu", dtype=torch.float32)
+            y = torch.zeros(100, device="xpu", dtype=torch.float32)
+
+            method = f"sigmoid_add_{rand}"
+            self.assertTrue(hasattr(module, method))
+            z = getattr(module, method)(x, y).cpu()
+
+            # 2 * sigmoid(0) = 2 * 0.5 = 1
+            self.assertEqual(z, torch.ones_like(z))
+        finally:
+            shutil.rmtree(temp_dir)
 
     @unittest.skipIf(not (TEST_XPU), "XPU not found")
     def test_jit_xpu_extension(self):
         # NOTE: this test can be affected by setting TORCH_XPU_ARCH_LIST
-        self._test_jit_xpu_extension()
+        self._test_jit_xpu_extension(extra_sycl_cflags=[])
 
     @unittest.skipIf(not (TEST_XPU), "XPU not found")
     def test_jit_xpu_archlists(self):
         # NOTE: in this test we explicitly test few different options
         # for TORCH_XPU_ARCH_LIST. Setting TORCH_XPU_ARCH_LIST in the
         # environment before the test won't affect it.
-        archlists = [
-            "",  # expecting JIT compilation
-            ",".join(torch.xpu.get_arch_list()),
+        cases = [
+            {
+                # Testing JIT compilation
+                "archlist": "",
+                "extra_sycl_cflags": [],
+            },
+            {
+                # Testing JIT + AOT (full torch AOT arch list)
+                # NOTE: default cpp extension AOT arch list might be reduced
+                # from the full list
+                "archlist": ",".join(torch.xpu.get_arch_list()),
+                "extra_sycl_cflags": [],
+            },
+            {
+                # Testing AOT (full torch AOT arch list)
+                # NOTE: default cpp extension AOT arch list might be reduced
+                # from the full list
+                "archlist": ",".join(torch.xpu.get_arch_list()),
+                # below excludes spir64 target responsible for JIT
+                "extra_sycl_cflags": ["-fsycl-targets=spir64_gen"],
+            },
         ]
         old_envvar = os.environ.get("TORCH_XPU_ARCH_LIST", None)
         try:
-            for al in archlists:
-                os.environ["TORCH_XPU_ARCH_LIST"] = al
-                self._test_jit_xpu_extension()
+            for c in cases:
+                os.environ["TORCH_XPU_ARCH_LIST"] = c["archlist"]
+                self._test_jit_xpu_extension(extra_sycl_cflags=c["extra_sycl_cflags"])
         finally:
             if old_envvar is None:
                 os.environ.pop("TORCH_XPU_ARCH_LIST")
