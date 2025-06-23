@@ -954,7 +954,7 @@ class VariableBuilder:
                 unimplemented_v2(
                     gb_type="Attempted to wrap torch._higher_order_ops.invoke_subgraph",
                     context="",
-                    explanation="Directly using invoke_subgraph is not supported. Use mark_compile_region",
+                    explanation="Directly using invoke_subgraph is not supported. Use nested_compile_region",
                     hints=[],
                 )
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
