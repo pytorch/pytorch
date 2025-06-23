@@ -233,7 +233,7 @@ class DataLoader(Generic[_T_co]):
     drop_last: bool
     timeout: float
     sampler: Union[Sampler, Iterable]
-    pin_memory_device: Optional[str]
+    pin_memory_device: str
     prefetch_factor: Optional[int]
     _iterator: Optional[_BaseDataLoaderIter]
     __initialized = False
@@ -304,17 +304,14 @@ class DataLoader(Generic[_T_co]):
             acc.type
             if self.pin_memory
             and (acc := torch.accelerator.current_accelerator()) is not None
-            else None
+            else ""
         )
 
         # Currently, pin_memory would raise error on the MPS backend (see
         # https://github.com/pytorch/pytorch/issues/86060), so forcibly
         # disable pin_memory on MPS. Remove this restriction once pinned
         # memory allocation for MPS is fixed.
-        if (
-            self.pin_memory_device is not None 
-            and self.pin_memory_device == "mps"
-        ):
+        if self.pin_memory_device == "mps":
             self._pin_memory = False
             warn_msg = (
                 "'pin_memory' argument is set as true but not supported on MPS now, "
@@ -688,7 +685,9 @@ class _BaseDataLoaderIter:
         self._world_size = ws
         self._rank = rank
         self._pin_memory = loader.pin_memory
-        self._pin_memory_device = loader.pin_memory_device
+        self._pin_memory_device = (
+            None if len(loader.pin_memory_device) == 0 else loader.pin_memory_device
+        )
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
