@@ -700,7 +700,7 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 }
 
 // Print the traceback of the collective at call time
-void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
+std::string ProcessGroupNCCL::WorkNCCL::getTraceback() const {
   // First step we get the corresponding record entry from FR, based on work's
   // trace_id_
   std::optional<FlightRecorderCUDA::Entry> entry =
@@ -716,10 +716,19 @@ void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
     // Wait for the future to complete or timeout
     auto status = future.wait_for(std::chrono::seconds(8));
     if (status == std::future_status::ready) {
-      std::string tracebackStr = future.get();
-      LOG(ERROR) << "Stack trace of the failed collective: \n" << tracebackStr;
-    } // else, symbolizer probably timed out, we skip logging the stack trace.
-  } else {
+      return future.get();
+    }
+  }
+  return "";
+}
+
+// Print the traceback of the collective at call time
+void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
+  std::string tracebackStr = getTraceback();
+  if (!tracebackStr.empty()) {
+    LOG(ERROR) << "Stack trace of the failed collective: \n" << tracebackStr;
+  } // else, symbolizer probably timed out, we skip logging the stack trace.
+  else {
     LOG(ERROR)
         << "Stack trace of the failed collective not found, "
         << "potentially because FlightRecorder is disabled. "
@@ -988,6 +997,23 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 
+  // If deterministic mode is enabled, we need to disable the NVLS algorithm in
+  // NCCL.
+  // TODO: remove this once NVLS supports deterministic mode.
+  if (at::globalContext().deterministicAlgorithms()) {
+    // Check if user have already set NCCL_ALGO. If already set, leave it.
+    auto nccl_algo = c10::utils::get_env("NCCL_ALGO");
+    if (!nccl_algo.has_value()) {
+      LOG(INFO)
+          << "torch deterministic mode is enabled, "
+          << "disabling NVLS algorithm in NCCL which can lead to non-deterministic reduction.";
+      // Sorry we have to disable NVLS for all collectives, be it all-reduce
+      // or all-gather, because NCCL does not support per-collective
+      // algorithm selection today.
+      c10::utils::set_env("NCCL_ALGO", "^NVLS");
+    }
+  }
+
   // Initialize the heartbeat monitor/watchdog instance. This has to be done
   // before the corresponding thread is launched to avoid the error.
   heartbeatMonitor_ = std::make_unique<HeartbeatMonitor>(this);
@@ -1156,6 +1182,14 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
   // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
+  // TODO:
+  // if(pool->is_symmetric()) {
+  //   Allgather to verify len(mempool.snapshot.segments) matches across GPUs
+  //   Allgather to verify mempool.alloc_request_counter matches across GPUs
+  //   add alloc_request_counter per mempool (How many allocations a mempool has
+  //   served during its lifetime) this should guarantee pool is used in a
+  //   symmetric/SPMD manner
+  // }
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
@@ -1164,7 +1198,9 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<void*>(segmentInfo.address),
         segmentInfo.total_size,
-        /*errorOnRereg=*/false); // ignores reregistration error
+        /*errorOnRereg=*/false, // ignores reregistration error
+        /*window=*/pool->is_symmetric()); // whether to use NCCL symmetric
+                                          // memory
   }
 }
 
@@ -1195,7 +1231,8 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
+    ncclComm->deregisterSegment(
+        reinterpret_cast<void*>(segmentInfo.address), pool->is_symmetric());
   }
 }
 
@@ -2288,6 +2325,25 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
           // We are just pushing back a shared_ptr here, so the cost should be
           // minimal
           pg_->shelvesToUnstash_.push_back(work.stashed_for_allocator_safety_);
+        }
+
+        if (pg_->enableTiming_ && logger) {
+          ::c10d::C10dLoggingData data;
+          // logging integers
+          data.strings["collective_duration"] =
+              std::to_string(work.getDuration());
+          data.integers["global_rank"] = pg_->globalRank();
+          data.integers["pg_id"] = static_cast<int64_t>(pg_->local_id_);
+          data.strings["pg_name"] = pg_->pg_uid_;
+          data.strings["pg_desc"] = pg_->pg_desc_;
+          data.integers["pg_rank"] = pg_->rank_;
+          data.integers["world_size"] = pg_->size_;
+          data.strings["comm_backend"] = "nccl";
+          data.strings["comm_backend_version"] = getNcclVersion();
+          // TODO: We see errors for this line, revert it for now.
+          data.strings["collective_stack"] = "";
+          data.strings["collective_name"] = opTypeToString(work.opType_);
+          logger->log(data);
         }
 
         // Work status logging for desync debug
