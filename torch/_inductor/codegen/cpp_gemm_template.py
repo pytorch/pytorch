@@ -578,6 +578,10 @@ def gen_2d_view_of_epilogue_buf(
 
 
 class CppGemmTemplate(CppTemplate):
+    """
+    GEMM Template for Inductor CPP Backend.
+    """
+
     def __init__(
         self,
         input_nodes,
@@ -801,6 +805,17 @@ class CppGemmTemplate(CppTemplate):
             Kc_blocks = Kt_blocks
             if size_cache_B > L1:
                 Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
+
+            if (
+                config.cpp.use_small_dequant_buffer
+                and dtype_A is torch.bfloat16
+                and dtype_B is torch.uint8
+                and Mt_blocks == 1
+            ):
+                # Make a small dequant_B buffer for woq int4 [q_group_size, Nr]
+                # Since when Mt_blocks == 1, L1-reside B block can't be reused by A.
+                if Kc_blocks * Kr >= self.q_group_size():
+                    Kc_blocks = self.q_group_size() // Kr
 
             # Step 2: Decide Mc assuming A block is L2-reside.
             min_Mc_ratio = 2  # TODO(jgong5): something to tune?

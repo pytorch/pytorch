@@ -107,6 +107,44 @@ class TestPrivateUse1(TestCase):
             x = torch.empty(4, 4, dtype=dtype, device="openreg")
             self.assertTrue(x.type() == str)
 
+    # Note that all dtype-d Tensor objects here are only for legacy reasons
+    # and should NOT be used.
+    def test_backend_type_methods(self):
+        # Tensor
+        tensor_cpu = torch.randn([8]).float()
+        self.assertEqual(tensor_cpu.type(), "torch.FloatTensor")
+
+        tensor_openreg = tensor_cpu.openreg()
+        self.assertEqual(tensor_openreg.type(), "torch.openreg.FloatTensor")
+
+        # Storage
+        storage_cpu = tensor_cpu.storage()
+        self.assertEqual(storage_cpu.type(), "torch.FloatStorage")
+
+        tensor_openreg = tensor_cpu.openreg()
+        storage_openreg = tensor_openreg.storage()
+        self.assertEqual(storage_openreg.type(), "torch.storage.TypedStorage")
+
+        class CustomFloatStorage:
+            @property
+            def __module__(self):
+                return "torch." + torch._C._get_privateuse1_backend_name()
+
+            @property
+            def __name__(self):
+                return "FloatStorage"
+
+        try:
+            torch.openreg.FloatStorage = CustomFloatStorage()
+            self.assertEqual(storage_openreg.type(), "torch.openreg.FloatStorage")
+
+            # test custom int storage after defining FloatStorage
+            tensor_openreg = tensor_cpu.int().openreg()
+            storage_openreg = tensor_openreg.storage()
+            self.assertEqual(storage_openreg.type(), "torch.storage.TypedStorage")
+        finally:
+            torch.openreg.FloatStorage = None
+
     def test_backend_tensor_methods(self):
         x = torch.empty(4, 4)
         self.assertFalse(x.is_openreg)  # type: ignore[misc]
@@ -158,9 +196,6 @@ class TestPrivateUse1(TestCase):
 
         z_openreg = z_cpu.openreg()  # type: ignore[misc]
         self.assertTrue(z_openreg.is_openreg)  # type: ignore[misc]
-
-    def test_backend_fallback(self):
-        pass
 
 
 class TestOpenReg(TestCase):
@@ -366,6 +401,22 @@ class TestOpenReg(TestCase):
         self.assertEqual(y.to(device="cpu"), torch.tensor([[1, 1], [2, 2], [3, 3]]))
         self.assertEqual(x.data_ptr(), y.data_ptr())
 
+    def test_resize(self):
+        tensor_cpu = torch.randn([4, 4])
+
+        tensor_openreg = tensor_cpu.openreg()
+        self.assertTrue(tensor_openreg.size() == torch.Size([4, 4]))
+
+        storage_openreg = tensor_openreg.storage()
+        self.assertTrue(storage_openreg.size() == 16)
+
+        tensor_openreg.resize_(2, 2, 2, 2)
+        self.assertTrue(tensor_openreg.size() == torch.Size([2, 2, 2, 2]))
+
+        storage_openreg = tensor_openreg.storage()
+        self.assertTrue(storage_openreg.size() == 16)
+
+    # Quantize
     @skipIfXpu(msg="missing kernel for openreg")
     def test_quantize(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32, device="openreg")
