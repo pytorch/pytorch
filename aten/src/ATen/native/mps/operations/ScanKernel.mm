@@ -21,21 +21,51 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/ScanKernel_metallib.h>
 #endif
 
-// Utility function to get 2D grid dimensions for dispatch
+// Utility function to get 2D grid dimensions for dispatch based on MLX implementation
 static std::pair<uint32_t, uint32_t> get_2d_grid_dims(const IntArrayRef& shape,
                                                       const IntArrayRef& strides,
                                                       size_t divisor) {
-  size_t total_elements = 1;
-  for (auto s : shape) {
-    total_elements *= s;
+  // Compute the 2d grid dimensions such that the total size of the grid is
+  // divided by divisor.
+  size_t grid_x = 1;
+  size_t grid_y = 1;
+
+  for (int i = 0; i < shape.size(); ++i) {
+    if (strides[i] == 0) {
+      continue; // Skip broadcasted dimensions
+    }
+
+    // No need to add this shape we can just remove it from the divisor.
+    if (divisor % shape[i] == 0) {
+      divisor /= shape[i];
+      continue;
+    }
+
+    if (grid_x * shape[i] < UINT32_MAX) {
+      grid_x *= shape[i];
+    } else {
+      grid_y *= shape[i];
+    }
+
+    if (divisor > 1) {
+      if (grid_x % divisor == 0) {
+        grid_x /= divisor;
+        divisor = 1;
+      } else if (grid_y % divisor == 0) {
+        grid_y /= divisor;
+        divisor = 1;
+      }
+    }
   }
 
-  size_t grid_size = total_elements / divisor;
+  TORCH_CHECK(grid_y <= UINT32_MAX && grid_x <= UINT32_MAX && divisor <= 1,
+              "Unable to safely factor shape for grid dimensions.");
 
-  // Simple 2D grid layout
-  uint32_t width = std::min(grid_size, static_cast<size_t>(65535));
-  uint32_t height = (grid_size + width - 1) / width;
-  return std::make_pair(width, height);
+  if (grid_y > grid_x) {
+    std::swap(grid_x, grid_y);
+  }
+
+  return std::make_pair(static_cast<uint32_t>(grid_x), static_cast<uint32_t>(grid_y));
 }
 
 static void scan_mps_impl(const Tensor& self, const Tensor& output, int64_t dim, const std::string& op_name) {
@@ -121,7 +151,7 @@ static void scan_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
       } else {
         // Strided scan dispatch (scanning non-innermost dimension)
         size_t stride = input_tensor.strides()[wrapped_dim];
-        int bn = 32;
+        constexpr int bn = 32;
         size_t stride_blocks = (stride + bn - 1) / bn;
 
         mtl_setBytes(computeEncoder, axis_size, 2);
@@ -130,7 +160,8 @@ static void scan_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
 
         int n_reads = (input_tensor.element_size() <= 4) ? 4 : 2;
         int n_simdgroups = bn / n_reads;
-        int thread_group_size = n_simdgroups * 32;
+        constexpr int simd_size = 32;
+        int thread_group_size = n_simdgroups * simd_size;
 
         auto tmp_grid_dims = get_2d_grid_dims(input_tensor.sizes(), input_tensor.strides(), axis_size * stride);
         if (tmp_grid_dims.first * stride_blocks <= UINT_MAX) {
