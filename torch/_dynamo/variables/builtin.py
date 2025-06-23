@@ -2157,7 +2157,7 @@ class BuiltinVariable(VariableTracker):
                                 "the mutation out of `torch.compile` region",
                             ],
                         )
-                    elif obj.dtype != val.dtype:
+                    elif obj.dtype != val.dtype:  # type: ignore[attr-defined]
                         unimplemented_v2(
                             gb_type="Failed to mutate tensor data attribute",
                             context=f"setattr({obj}, {name}, {val})",
