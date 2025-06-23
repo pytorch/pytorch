@@ -381,17 +381,17 @@ def unique(it: Iterable[_T]) -> ValuesView[_T]:
 
 
 def ceildiv(
-    numer: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
+    number: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
 ) -> Union[int, sympy.Expr]:
-    if isinstance(numer, sympy.Expr) or isinstance(denom, sympy.Expr):
-        return CeilDiv(sympy.sympify(numer), sympy.sympify(denom))
+    if isinstance(number, sympy.Expr) or isinstance(denom, sympy.Expr):
+        return CeilDiv(sympy.sympify(number), sympy.sympify(denom))
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
-    assert isinstance(numer, int) and isinstance(denom, int), (
-        f"{numer}: {type(numer)}, {denom}: {type(denom)}"
+    assert isinstance(number, int) and isinstance(denom, int), (
+        f"{number}: {type(number)}, {denom}: {type(denom)}"
     )
-    return runtime_ceildiv(numer, denom)
+    return runtime_ceildiv(number, denom)
 
 
 def _type_of(key: Optional[torch.dtype]) -> str:
@@ -980,7 +980,7 @@ def get_first_incompatible_cudagraph_node(
             and torch._C.Tag.cudagraph_unsafe in node.target.tags
         ):
             # skip cudagraph if a cudagraph_unsafe op is detected.
-            # graph_partition helps by spliting on this cudagraph_unsafe
+            # graph_partition helps by splitting on this cudagraph_unsafe
             # op and cudagraphifying the subgraphs.
             return node
 
