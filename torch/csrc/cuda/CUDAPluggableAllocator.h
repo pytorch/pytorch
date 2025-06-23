@@ -116,7 +116,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override;
   void* getBaseAllocation(void* ptr, size_t* size) override;
 
-  void recordStream(const c10::DataPtr&, c10::cuda::CUDAStream stream) override;
+  void recordStream(const c10::DataPtr&, c10::Stream stream) override;
 
   c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
       c10::DeviceIndex device) override;
@@ -180,7 +180,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   std::function<void(int, c10::cuda::MempoolId_t)> end_allocate_to_pool_fn_;
   std::function<void(int, c10::cuda::MempoolId_t)> relase_pool_fn_;
   std::mutex allocator_mutex_;
-  // We do the bookeeping here in order to simplify custom allocators
+  // We do the bookkeeping here in order to simplify custom allocators
   std::unordered_map<void*, _AllocationMetadata> allocation_metadata_;
 
   bool initialized_ = false;
