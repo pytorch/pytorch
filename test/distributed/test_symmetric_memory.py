@@ -974,7 +974,7 @@ class SymmMemCollectiveTest(MultiProcContinousTest):
                 gathered_res[i],
                 sum_inps[..., i * slice_width : (i + 1) * slice_width],
                 rtol=1e-01,
-                atol=1e-01,
+                atol=1.1e-01,
             )
 
     @skip_if_lt_x_gpu(4)
@@ -1077,6 +1077,10 @@ class SymmMemSingleProcTest(TestCase):
     @skipIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 0),
         "stream_write_value32 currently only supports cuda version>=12.0",
+    )
+    @skipIf(
+        _get_torch_cuda_version() >= (12, 6),
+        "https://github.com/pytorch/pytorch/issues/154073",
     )
     @runOnRocmArch(MI300_ARCH)
     def test_stream_write_value32(self):

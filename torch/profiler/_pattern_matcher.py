@@ -150,7 +150,7 @@ class ExtraCUDACopyPattern(Pattern):
     example: torch.zeros((100, 100)).to("cuda")
 
     Pattern:
-    build-in method                 |build-in method
+    built-in method                 |built-in method
         ...                         |    aten::to
             aten::fill_/aten::zero_ |        aten::_to_copy
 
@@ -209,7 +209,7 @@ class ExtraCUDACopyPattern(Pattern):
             return False
         while event.children:
             event = event.children[-1]
-            # aten::zero_ is a special optimzation case where fill_ is not called
+            # aten::zero_ is a special optimization case where fill_ is not called
             if event.name in self.init_ops:
                 return True
         return event.name in self.init_ops
@@ -367,7 +367,7 @@ class OptimizerSingleTensorPattern(Pattern):
         self.name = "Optimizer Single Tensor Pattern"
         self.optimizers_with_foreach = ["adam", "sgd", "adamw"]
         self.description = (
-            "Deteced optimizer running with single tensor implementation. "
+            "Detected optimizer running with single tensor implementation. "
             "Please enable multi tensor implementation by passing 'foreach=True' into optimizer."
         )
         self.url = ""

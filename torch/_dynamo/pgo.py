@@ -602,30 +602,47 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
     )
 
 
-def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
-    terms: list[str] = []
+def _collect_dynamic_sources(code_state: CodeState) -> OrderedSet[str]:
     dynamic_sources: OrderedSet[str] = OrderedSet()
-    for k, v in cs.items():
-        cs_terms: list[str] = []
-        for src, fs in v.automatic_dynamic.items():
-            cs_terms.append(f"  {src}: {fs.render()}")
-            if (
-                (isinstance(fs.size, tuple) and auto_dynamic in fs.size)  # type: ignore[operator]
-                or fs.size == auto_dynamic
-            ):
-                dynamic_sources.add(src)
-        terms.append(f"{k}:\n" + "\n".join(cs_terms))
-    code_state_str = "\n".join(terms)
+    for src, fs in code_state.automatic_dynamic.items():
+        dynamic = False
+        if isinstance(fs.size, tuple):
+            dynamic = auto_dynamic in fs.size  # type: ignore[operator]
+        elif fs.scalar == auto_dynamic:
+            dynamic = True
+        if dynamic:
+            dynamic_sources.add(src)
+    return dynamic_sources
+
+
+def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
+    code_id = CodeId.make(f_code)
+    frame_state = get_code_state()[code_id]
+    frame_whitelist = ",".join(_collect_dynamic_sources(frame_state))
+    if frame_whitelist:
+        with dynamo_timed(name := "pgo.dynamic_whitelist", log_pt2_compile_event=True):
+            CompileEventLogger.pt2_compile(
+                name, recompile_dynamic_whitelist=frame_whitelist
+            )
+
+
+def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
+    code_state_str = "\n".join(
+        f"{k}:\n"
+        + "\n".join(
+            f"  {src}: {fs.render()}" for src, fs in v.automatic_dynamic.items()
+        )
+        for k, v in cs.items()
+    )
+    dynamic_sources: OrderedSet[str] = OrderedSet()
+    for state in cs.values():
+        dynamic_sources.update(_collect_dynamic_sources(state))
     if dynamic_sources:
         code_state_str += (
-            "\n\nPGO detected a recompilation due to tensor sizes. "
+            "\n\nPGO detected a recompilation due to dynamic shapes. "
             "To reduce shape recompilations by compiling dynamically to start, "
             f'set environment variable TORCH_COMPILE_DYNAMIC_SOURCES="{",".join(dynamic_sources)}"'
         )
-        with dynamo_timed(name := "pgo.dynamic_whitelist", log_pt2_compile_event=True):
-            CompileEventLogger.pt2_compile(
-                name, recompile_dynamic_whitelist=",".join(dynamic_sources)
-            )
     return code_state_str
 
 
