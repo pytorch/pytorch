@@ -1005,13 +1005,17 @@ This class does not support ``__members__`` property.)");
     return ::c10d::unregister_all_process_groups();
   });
 
-  // Intializes the device state in CUmodule so that it’s able to perform
-  // NVSHMEM operations.
 #ifdef USE_NVSHMEM
+  // Initializes the device state in CUmodule so that it’s able to perform
+  // NVSHMEM operations.
   module.def(
       "_nvshmemx_cumodule_init",
       ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
       py::arg("module"));
+
+  // Check if NVSHMEM is available on current system.
+  module.def(
+      "_is_nvshmem_available", ::c10d::nvshmem_extension::is_nvshmem_available);
 #endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
@@ -3213,7 +3217,15 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                 self->setEnableNanCheck(enable_nan_check);
               },
               py::arg("enable_nan_check"),
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def_static(
+              "get_build_nccl_version",
+              [] {
+                return std::make_tuple(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH);
+              })
+          .def_static("get_runtime_nccl_version", [] {
+            return ::c10d::getNcclVersionTuple();
+          });
 
   module.def(
       "_get_intra_node_comm_usage_counter",
@@ -3285,7 +3297,7 @@ Arguments:
             Default is False.
 
 Attributes:
-    config (NCCLConfig): configures NCCL communicators (only avaiable for
+    config (NCCLConfig): configures NCCL communicators (only available for
             builds using NCCL 2.17+). This can be used to improve
             communication-computation overlap for NCCL kernels by tuning
             available parameters in the config. See

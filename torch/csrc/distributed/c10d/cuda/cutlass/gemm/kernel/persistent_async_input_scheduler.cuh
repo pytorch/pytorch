@@ -3,7 +3,7 @@
  * that supports consuming asynchronous input. This tile scheduler introduces the following arguments:
  *
  * - tiles_per_chunk_m – Specifies the size of an M chunk. Chunks are the granularity at which the
- *   asynchronous input becomes ready. It must be an interger multiple of the size of an M tile.
+ *   asynchronous input becomes ready. It must be an integer multiple of the size of an M tile.
  *
  * - chunk_signals – chunk_signals[i] == 1 indicates that chunk i is ready. Before returning a work
  *   tile, get_current_work() waits for the signal to ensure that the corresponding chunk is ready.
@@ -327,7 +327,7 @@ public:
         wait_signal(scheduler_params.chunk_signals + chunk_idx);
       }
 
-      // An arbirary, non-default id
+      // An arbitrary, non-default id
       constexpr int barrier_id = 8;
       arch::NamedBarrier barrier(NumThreadsPerWarp, barrier_id);
       barrier.arrive_and_wait();
