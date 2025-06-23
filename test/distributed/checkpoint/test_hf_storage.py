@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import torch
 from torch.distributed.checkpoint import DefaultLoadPlanner
 from torch.distributed.checkpoint._hf_utils import (
-    _HFStorageInfo, 
+    _HFStorageInfo,
     NUM_BYTES_FOR_HEADER_LEN,
 )
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
@@ -188,8 +188,8 @@ class TestHfStorage(TestCase):
                 f.write(
                     len(metadata_bytes).to_bytes(
                         NUM_BYTES_FOR_HEADER_LEN, byteorder="little"
-                        )
                     )
+                )
                 f.write(metadata_bytes)
 
                 f.write(tensor_0.numpy().tobytes())
