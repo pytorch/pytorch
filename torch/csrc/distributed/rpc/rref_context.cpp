@@ -348,7 +348,7 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // here is a plain TensorType, they are not equal relationship:
     // specialized TensorType <: plain TensorType
     //
-    // In RPC we don't care the difference as we ser/de with just the
+    // In RPC we don't care the difference as we ser'de with just the
     // plain TensorType. This is not a issue for UserRRef creation either,
     // since Tensor can only get specialized with a previous run of local
     // JIT function, and we shouldn't preserve the specialized SubTensorType
