@@ -9,7 +9,7 @@
 namespace at::native::xpu {
 class QConvoneDNNXPU final {
  public:
- C10_API static at::Tensor run_pointwise(
+  C10_API static at::Tensor run_pointwise(
       at::Tensor act,
       double act_scale,
       int64_t act_zero_point,
@@ -28,7 +28,7 @@ class QConvoneDNNXPU final {
       torch::List<std::optional<at::Scalar>> scalars,
       std::optional<std::string_view> algorithm);
 
-C10_API static at::Tensor run_pointwise_tensor(
+  C10_API static at::Tensor run_pointwise_tensor(
       at::Tensor act,
       at::Tensor act_scale,
       at::Tensor act_zero_point,
@@ -45,9 +45,9 @@ C10_API static at::Tensor run_pointwise_tensor(
       std::optional<c10::ScalarType> output_dtype,
       std::string_view attr,
       torch::List<std::optional<at::Scalar>> scalars,
-      std::optional<std::string_view> algorithm); 
+      std::optional<std::string_view> algorithm);
 
-C10_API static at::Tensor run_pointwise_binary(
+  C10_API static at::Tensor run_pointwise_binary(
       at::Tensor act,
       double act_scale,
       int64_t act_zero_point,
@@ -69,10 +69,9 @@ C10_API static at::Tensor run_pointwise_binary(
       std::optional<at::Scalar> alpha,
       std::optional<std::string_view> unary_attr,
       torch::List<std::optional<at::Scalar>> unary_scalars,
-      std::optional<std::string_view> unary_algorithm); 
+      std::optional<std::string_view> unary_algorithm);
 };
 
 } // namespace at::native::xpu
 
 #endif // AT_MKLDNN_ENABLED()
-
