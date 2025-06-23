@@ -2238,7 +2238,7 @@ def _reduction(
     return result
 
 
-def _make_copy_from_view(fn):
+def _make_copy_from_view(fn, return_none=False):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
@@ -2249,6 +2249,8 @@ def _make_copy_from_view(fn):
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
         result = fn(*args, out=out, **kwargs)
+        if return_none:
+            return None
         if out is not None:
             return result
 
@@ -6631,7 +6633,7 @@ squeeze_copy = _make_copy_from_view(aten.squeeze)
 permute_copy = _make_copy_from_view(aten.permute)
 t_copy = _make_copy_from_view(aten.t)
 transpose_copy = _make_copy_from_view(aten.transpose)
-unbind_copy = _make_copy_from_view(aten.unbind)
+unbind_copy = _make_copy_from_view(aten.unbind, return_none=True)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 
