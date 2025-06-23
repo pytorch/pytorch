@@ -63,8 +63,7 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
     }
     bool success{true};
     for (uint64_t i = 0; i < 10; ++i) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      bool validation_success;
+      bool validation_success = false;
       {
         c10::WithValidateAllocationPlanGuard
           validation_guard(&plan, &validation_success);
