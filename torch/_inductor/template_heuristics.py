@@ -365,6 +365,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scale: float,
         has_int8_tensor: bool,
         exclude: Callable[[int, int, int], bool],
+        hint_override: Optional[int] = None,
     ) -> list[BaseConfig]:
         """
         Scales and filters matrix multiplication configs based on input size.
@@ -374,47 +375,51 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         min_block_size = 16
         min_block_size_k = 32 if has_int8_tensor else 16
 
-        m = max(
-            next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    m,
-                    fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                )
-            ),
-            min_block_size,
-        )
-        n = max(
-            next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    n,
-                    fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                )
-            ),
-            min_block_size,
-        )
-        k = max(
-            next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    k,
-                    fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                )
-            ),
-            min_block_size_k,
-        )
-
         scaled_configs = []
-        for c in configs:
-            scaled_config = dataclasses.replace(
-                c,
-                block_m=max(min(int(c.block_m * scale), m), min_block_size),
-                block_n=max(min(int(c.block_n * scale), n), min_block_size),
-                block_k=max(min(int(c.block_k * scale), k), min_block_size_k),
+        for hint_override in [None] + config.multi_kernel_hints:
+            m_hint = max(
+                next_power_of_2(
+                    V.graph.sizevars.size_hint(
+                        m,
+                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
+                        hint_override=hint_override,
+                    )
+                ),
+                min_block_size,
+            )
+            n_hint = max(
+                next_power_of_2(
+                    V.graph.sizevars.size_hint(
+                        n,
+                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
+                        hint_override=hint_override,
+                    )
+                ),
+                min_block_size,
+            )
+            k_hint = max(
+                next_power_of_2(
+                    V.graph.sizevars.size_hint(
+                        k,
+                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
+                        hint_override=hint_override,
+                    )
+                ),
+                min_block_size_k,
             )
 
-            if not exclude(
-                scaled_config.block_m, scaled_config.block_n, scaled_config.block_k
-            ):
-                scaled_configs.append(scaled_config)
+            for c in configs:
+                scaled_config = dataclasses.replace(
+                    c,
+                    block_m=max(min(int(c.block_m * scale), m_hint), min_block_size),
+                    block_n=max(min(int(c.block_n * scale), n_hint), min_block_size),
+                    block_k=max(min(int(c.block_k * scale), k_hint), min_block_size_k),
+                )
+
+                if not exclude(
+                    scaled_config.block_m, scaled_config.block_n, scaled_config.block_k
+                ):
+                    scaled_configs.append(scaled_config)
 
         return scaled_configs
 

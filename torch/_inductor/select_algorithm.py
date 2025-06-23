@@ -2308,6 +2308,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     autotune_elapse,
                     precompile_elapse,
                     prescreening_elapse,
+                    hint_override=hint_override
                 )
 
             def profiler_bench_function():
@@ -2623,7 +2624,7 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             for input_node in input_nodes
         ]
-        out = cls.benchmark_example_value(layout)
+        out = cls.benchmark_example_value(layout, hint_override=hint_override)
         out_extern = torch.as_strided(
             out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
         )
@@ -2648,6 +2649,8 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
         inpts, output = benchmark_tensors.unpack()
         output.zero_()
+        if autotune_args.triton.input_tensors[0].shape[0] == 4096 and choice.description == "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=8":
+            import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
         result = choice.benchmark(*inpts, out=output)
         device_type = next(
             (tensor.device.type for tensor in inpts if is_gpu(tensor.device.type)),
@@ -2947,6 +2950,7 @@ class AlgorithmSelectorCache(PersistentCache):
         elapse: float,
         precompile_elapse: float,
         prescreening_elapse: Optional[float] = None,
+        hint_override: Optional[int] = None,
     ):
         V.debug.log_autotuning_results(
             name, input_nodes, timings, elapse, precompile_elapse
@@ -2961,6 +2965,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         V.graph.sizevars.size_hints(
                             n.get_size(),
                             fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
+                            hint_override=hint_override
                         ),
                     )
                 )
