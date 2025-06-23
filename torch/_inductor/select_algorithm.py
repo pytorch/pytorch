@@ -1090,21 +1090,26 @@ class TritonTemplateKernel(TritonKernel):
             grid_args = self.grid_fn(*map(int, self.call_sizes), self.meta)
             assert len(grid_args) in (0, 3), "grid_fn should return 3 values"
             return (grid_args, map(type, grid_args))
-        else:
-            assert not V.graph.cpp_wrapper, "cpp_wrapper requires SymbolicGridFn"
-            wrapper.add_import_once(f"import {self.grid_fn.__module__}")
-            meta = wrapper.add_meta_once(self.meta)
-            fn_name = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}"
-            return(
-                f"*{fn_name}({', '.join(map(pexpr, self.call_sizes))}, {meta})",
-                None
-            )
+        return ()
 
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
 
-        additional_call_args, additional_arg_types = self.additional_call_args_and_types()
+        additional_call_args, additional_arg_types = (
+            self.additional_call_args_and_types()
+        )
+
+        if not additional_call_args:
+            assert not V.graph.cpp_wrapper, "cpp_wrapper requires SymbolicGridFn"
+            wrapper.add_import_once(f"import {self.grid_fn.__module__}")
+            meta = wrapper.add_meta_once(self.meta)
+            fn_name = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}"
+            return (
+                f"*{fn_name}({', '.join(map(pexpr, self.call_sizes))}, {meta})",
+                None,
+            )
+
         call_args.extend(additional_call_args)
         arg_types.extend(additional_arg_types)
 
@@ -1603,6 +1608,7 @@ class TritonTemplate(KernelTemplate):
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, result.kernel_args_sizevars_keys),
             fallback=config.unbacked_symint_fallback,
+            hint_override=hint_override,
         )
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
@@ -2218,7 +2224,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         @functools.cache
         def make_benchmark_fn(hint_override: Optional[int] = None):
-            return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns, hint_override=hint_override)
+            return self.make_benchmark_fn(
+                choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
+            )
 
         inputs_key = create_inputs_key(input_nodes)
 
@@ -2272,7 +2280,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     name,
                     inputs_key,
                     lambda choices: autotune(choices, hint_override=hint_override),
-                    hint_override=hint_override
+                    hint_override=hint_override,
                 )
                 choices = self.prune_choices_postscreen(
                     choices, timings, name, inputs_key, self.prescreening_cache
@@ -2286,7 +2294,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 name,
                 inputs_key,
                 lambda choices: autotune(choices, hint_override=hint_override),
-                hint_override=hint_override
+                hint_override=hint_override,
             )
             print(f"AUTO TUNING WITH HINT OVERRIDE {hint_override}")
 
@@ -2313,7 +2321,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     autotune_elapse,
                     precompile_elapse,
                     prescreening_elapse,
-                    hint_override=hint_override
+                    hint_override=hint_override,
                 )
 
             def profiler_bench_function():
@@ -2351,8 +2359,12 @@ class AlgorithmSelectorCache(PersistentCache):
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
             def get_timings(hint_override: Optional[int] = None):
-                filterd_choices = [c for c in choices if c.hint_override == hint_override]
-                timings = do_autotuning(filterd_choices, precompile_fn, hint_override=hint_override)
+                filterd_choices = [
+                    c for c in choices if c.hint_override == hint_override
+                ]
+                timings = do_autotuning(
+                    filterd_choices, precompile_fn, hint_override=hint_override
+                )
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
                     if isinstance(choice, ExternKernelCaller):
@@ -2601,7 +2613,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # de-duplicate args
         unique_example_inputs = {
-            x.get_name(): input_gen_fns.get(i, lambda x: cls.benchmark_example_value(x, hint_override=hint_override))(x)
+            x.get_name(): input_gen_fns.get(
+                i, lambda x: cls.benchmark_example_value(x, hint_override=hint_override)
+            )(x)
             for i, x in enumerate(input_nodes)
         }
         example_inputs = list(unique_example_inputs.values())
@@ -2655,8 +2669,6 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
         inpts, output = benchmark_tensors.unpack()
         output.zero_()
-        if autotune_args.triton.input_tensors[0].shape[0] == 4096 and choice.description == "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=8":
-            import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
         result = choice.benchmark(*inpts, out=output)
         device_type = next(
             (tensor.device.type for tensor in inpts if is_gpu(tensor.device.type)),
@@ -2970,7 +2982,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         V.graph.sizevars.size_hints(
                             n.get_size(),
                             fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                            hint_override=hint_override
+                            hint_override=hint_override,
                         ),
                     )
                 )

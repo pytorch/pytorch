@@ -4809,7 +4809,6 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         min_choice = min(timings, key=timings.get)  # type: ignore[arg-type]
         return (min_choice, timings[min_choice])
 
-
     def finalize_as_triton_callers(
         self, callers: dict[Optional[int], TritonTemplateCallerBase]
     ) -> None:

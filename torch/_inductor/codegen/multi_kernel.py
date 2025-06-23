@@ -217,7 +217,9 @@ class MultiKernel:
         multi_call_args = []
         if isinstance(self.kernels[0], TritonTemplateKernel):
             for kernel in self.kernels:
-                additional_call_args, additional_arg_types = kernel.additional_call_args_and_types()
+                additional_call_args, additional_arg_types = (
+                    kernel.additional_call_args_and_types()
+                )
                 multi_call_args.extend(call_args + list(additional_call_args))
         else:
             # numels for all subkernels should be the same. Use kernels[0] here
@@ -359,7 +361,10 @@ class MultiKernelCall:
 
         def wrap_fn(kernel, index):
             def inner():
-                filtered_args = args[index * (len(args) // len(self.kernels)):(index + 1) * (len(args) // len(self.kernels))]
+                filtered_args = args[
+                    index * (len(args) // len(self.kernels)) : (index + 1)
+                    * (len(args) // len(self.kernels))
+                ]
                 args_clone, kwargs_clone = kernel.clone_args(*filtered_args, **kwargs)
                 return kernel.run(*args_clone, **kwargs_clone)
 
@@ -448,7 +453,12 @@ class MultiKernelCall:
             self.record_choice(self.multi_kernel_name, picked_kernel_name)
 
         run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
-        filtered_args = args[self.picked_kernel * (len(args) // len(self.kernels)):(self.picked_kernel + 1) * (len(args) // len(self.kernels))]
+        filtered_args = args[
+            self.picked_kernel * (len(args) // len(self.kernels)) : (
+                self.picked_kernel + 1
+            )
+            * (len(args) // len(self.kernels))
+        ]
         run(*filtered_args, **kwargs)
 
     def _get_shape_cache_key(self, *args, **kwargs):
@@ -457,7 +467,7 @@ class MultiKernelCall:
         """
         shapes = []
         for arg in args:
-            if hasattr(arg, 'shape'):
+            if hasattr(arg, "shape"):
                 shapes.append(tuple(arg.shape))
         return tuple(shapes)
 

@@ -1520,7 +1520,14 @@ class SIMDScheduling(BaseScheduling):
                     node.codegen(index_vars)
 
     def _codegen_single_template(
-        self, kernel, render, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
+        self,
+        kernel,
+        render,
+        template_node,
+        epilogue_nodes,
+        prologue_nodes,
+        *,
+        only_gen_src_code=False,
     ) -> Optional[str]:
         """
         Helper method to codegen a single template kernel variant
@@ -1621,7 +1628,9 @@ class SIMDScheduling(BaseScheduling):
             kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
 
             if config.trace.enabled:
-                set_kernel_post_grad_provenance_tracing(node_schedule, kernel.kernel_name)
+                set_kernel_post_grad_provenance_tracing(
+                    node_schedule, kernel.kernel_name
+                )
 
             return kernel
 
@@ -1638,23 +1647,34 @@ class SIMDScheduling(BaseScheduling):
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
 
-        if hasattr(template_node.node, '_make_kernel_renders') and template_node.node._make_kernel_renders:
+        if (
+            hasattr(template_node.node, "_make_kernel_renders")
+            and template_node.node._make_kernel_renders
+        ):
             kernels = []
             src_codes = []
 
-            for hint_override, make_kernel_render in template_node.node._make_kernel_renders.items():
+            for make_kernel_render in template_node.node._make_kernel_renders.values():
                 kernel, render = make_kernel_render(template_node.node)
 
                 if only_gen_src_code:
                     src_code = self._codegen_single_template(
-                        kernel, render, template_node, epilogue_nodes, prologue_nodes,
-                        only_gen_src_code=True
+                        kernel,
+                        render,
+                        template_node,
+                        epilogue_nodes,
+                        prologue_nodes,
+                        only_gen_src_code=True,
                     )
                     src_codes.append(src_code)
                 else:
                     kernel = self._codegen_single_template(
-                        kernel, render, template_node, epilogue_nodes, prologue_nodes,
-                        only_gen_src_code=False
+                        kernel,
+                        render,
+                        template_node,
+                        epilogue_nodes,
+                        prologue_nodes,
+                        only_gen_src_code=False,
                     )
                     kernels.append(kernel)
 
@@ -1672,13 +1692,21 @@ class SIMDScheduling(BaseScheduling):
 
             if only_gen_src_code:
                 return self._codegen_single_template(
-                    kernel, render, template_node, epilogue_nodes, prologue_nodes,
-                    only_gen_src_code=True
+                    kernel,
+                    render,
+                    template_node,
+                    epilogue_nodes,
+                    prologue_nodes,
+                    only_gen_src_code=True,
                 )
             else:
                 kernel = self._codegen_single_template(
-                    kernel, render, template_node, epilogue_nodes, prologue_nodes,
-                    only_gen_src_code=False
+                    kernel,
+                    render,
+                    template_node,
+                    epilogue_nodes,
+                    prologue_nodes,
+                    only_gen_src_code=False,
                 )
 
                 node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
@@ -1689,7 +1717,6 @@ class SIMDScheduling(BaseScheduling):
                 V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
                 self.free_buffers_in_scheduler()
                 return None
-
 
     def codegen_sync(self):
         V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())

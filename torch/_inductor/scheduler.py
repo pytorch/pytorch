@@ -2755,7 +2755,9 @@ class Scheduler:
                         callers[None] = min_node_unfused
 
                         for hint in config.multi_kernel_hints:
-                            callers[hint] = multi_node.get_min_choice(hint_override=hint)[0]
+                            callers[hint] = multi_node.get_min_choice(
+                                hint_override=hint
+                            )[0]
 
                         node.node.finalize_as_triton_callers(callers)
                     else:
@@ -2908,6 +2910,7 @@ class Scheduler:
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
 
             hint_override_best_fusion_choice = {}
+            future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             for hint_override in config.multi_node_hints:
                 choice_timings = multi_node.choice_timings(hint_override)
                 for choice, unfused_time in sorted(
@@ -2942,7 +2945,7 @@ class Scheduler:
                             min_ms_fused = ms_fused
                             ms_fused_choice = choice
                 multi_node._choice_timings[hint_override] = new_timings
-                hint_override_best_fusion_choice[hint_override] = min_ms_fused
+                hint_override_best_fusion_choice[hint_override] = ms_fused_choice
 
             # Eagerly compile and benchmark non-template nodes
             choice_timings = multi_node.choice_timings()

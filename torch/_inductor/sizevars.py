@@ -513,7 +513,9 @@ class SizeVarAllocator:
             return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         return expr
 
-    def symbolic_hint(self, expr: Union[Expr, int], hint_override: Optional[int] = None) -> Union[Expr, int]:
+    def symbolic_hint(
+        self, expr: Union[Expr, int], hint_override: Optional[int] = None
+    ) -> Union[Expr, int]:
         if isinstance(expr, int):
             return expr
         # Substitute all hints into expr, but leave unbacked symints alone

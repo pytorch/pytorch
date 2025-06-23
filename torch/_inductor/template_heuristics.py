@@ -4,7 +4,7 @@ import dataclasses
 import itertools
 from functools import partial
 from threading import Lock
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
 
