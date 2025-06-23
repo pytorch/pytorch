@@ -98,10 +98,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation = False
         super().generate_extern_kernel_out(*args, **kwargs)
 
-    def generate_fallback_kernel(self, *args, **kwargs):
+    def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
         # Disable stack allocation for extern kernels.
         self.allow_stack_allocation = False
-        super().generate_fallback_kernel(*args, **kwargs)
+        super().generate_fallback_kernel(node)
 
     def _generate_kernel_call_helper(
         self,
@@ -728,7 +728,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
-        # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
+        # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the corresponding
         # tensor prematurely deallocated, thus the temporary array trick here.
         indices_str = self._generate_temporary_array_pointer(
             "AtenTensorHandle",
@@ -750,7 +750,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self,
         buf_name: str,
         python_kernel_name: str,
-        codegen_args: Sequence[str],
+        get_args: Callable[[], Sequence[str]],
         op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
@@ -758,7 +758,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
         super().generate_fallback_kernel_with_runtime_lookup(
-            buf_name, python_kernel_name, codegen_args, op_overload, raw_args, outputs
+            buf_name, python_kernel_name, get_args, op_overload, raw_args, outputs
         )
 
     def codegen_device_copy(self, src, dst, non_blocking: bool):

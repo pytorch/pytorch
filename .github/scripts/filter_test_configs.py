@@ -80,7 +80,7 @@ def parse_args() -> Any:
     parser.add_argument(
         "--job-name",
         type=str,
-        help="the name of the current job, i.e. linux-focal-py3.8-gcc7 / build",
+        help="the name of the current job, i.e. linux-jammy-py3.8-gcc7 / build",
     )
     parser.add_argument("--pr-number", type=str, help="the pull request number")
     parser.add_argument("--tag", type=str, help="the associated tag if it exists")

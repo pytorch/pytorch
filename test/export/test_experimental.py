@@ -140,8 +140,8 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     sum_1 = torch.ops.aten.sum.dim_IntList(mul, []);  mul = None
     neg = torch.ops.aten.neg.default(sum_1);  sum_1 = None
     div = torch.ops.aten.div.Scalar(neg, 1);  neg = None
-    full_like = torch.ops.aten.full_like.default(div, 1, pin_memory = False, memory_format = torch.preserve_format)
-    div_1 = torch.ops.aten.div.Scalar(full_like, 1);  full_like = None
+    full = torch.ops.aten.full.default([], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    div_1 = torch.ops.aten.div.Scalar(full, 1);  full = None
     neg_1 = torch.ops.aten.neg.default(div_1);  div_1 = None
     expand = torch.ops.aten.expand.default(neg_1, [3]);  neg_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(expand, clone);  expand = clone = None
@@ -186,8 +186,8 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     sum_1 = torch.ops.aten.sum.dim_IntList(mul, []);  mul = None
     neg = torch.ops.aten.neg.default(sum_1);  sum_1 = None
     div = torch.ops.aten.div.Scalar(neg, 1);  neg = None
-    full_like = torch.ops.aten.full_like.default(div, 1, pin_memory = False, memory_format = torch.preserve_format)
-    div_1 = torch.ops.aten.div.Scalar(full_like, 1);  full_like = None
+    full = torch.ops.aten.full.default([], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    div_1 = torch.ops.aten.div.Scalar(full, 1);  full = None
     neg_1 = torch.ops.aten.neg.default(div_1);  div_1 = None
     expand = torch.ops.aten.expand.default(neg_1, [3]);  neg_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(expand, clone);  expand = clone = None
@@ -409,7 +409,7 @@ def forward(self, x):
     sym_size_int_2 = torch.ops.aten.sym_size.int(x, 1)
     linear = torch.ops.aten.linear.default(x, linear_weight, linear_bias);  x = linear_weight = linear_bias = None
     eq = sym_size_int_2 == 4;  sym_size_int_2 = None
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s16, 4) on node 'eq'");  eq = _assert_scalar_default = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s27, 4) on node 'eq'");  eq = _assert_scalar_default = None
     return pytree.tree_unflatten((linear,), self._out_spec)""",
         )
 
