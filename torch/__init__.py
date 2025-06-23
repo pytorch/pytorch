@@ -206,20 +206,6 @@ if sys.platform == "win32":
             if os.path.exists(p)
         ]
 
-        if not builtins.any(
-            os.path.exists(os.path.join(p, "nvToolsExt64_1.dll")) for p in dll_paths
-        ):
-            nvtoolsext_dll_path = os.path.join(
-                os.getenv(
-                    "NVTOOLSEXT_PATH",
-                    os.path.join(pfiles_path, "NVIDIA Corporation", "NvToolsExt"),
-                ),
-                "bin",
-                "x64",
-            )
-        else:
-            nvtoolsext_dll_path = ""
-
         if cuda_version and builtins.all(
             not glob.glob(os.path.join(p, "cudart64*.dll")) for p in dll_paths
         ):
@@ -232,9 +218,7 @@ if sys.platform == "win32":
         else:
             cuda_path = ""
 
-        dll_paths.extend(
-            p for p in (nvtoolsext_dll_path, cuda_path) if os.path.exists(p)
-        )
+        dll_paths.extend(p for p in (cuda_path,) if os.path.exists(p))
 
         kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
         with_load_library_flags = hasattr(kernel32, "AddDllDirectory")
@@ -371,7 +355,6 @@ def _load_global_deps() -> None:
             "cusparselt": "libcusparseLt.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
-            "nvtx": "libnvToolsExt.so.*[0-9]",
             "nvshmem": "libnvshmem_host.so.*[0-9]",
         }
         # cufiile is only available on cuda 12+
@@ -2570,6 +2553,14 @@ def compile(
         - `trace.enabled` which is the most useful debugging flag to turn on
 
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
+
+        - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
+          This is an unsafe feature and there is no backward compatibility guarantee provided
+          for dynamo guards as data types.
+          For stable helper functions to use, see the documentations in `torch.compiler`, for example:
+          - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
+          - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
+          - `torch.compiler.keep_tensor_guards_unsafe`
 
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing

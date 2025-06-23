@@ -42,6 +42,18 @@
 TORCH_SDT_DEFINE_SEMAPHORE(malloc)
 TORCH_SDT_DEFINE_SEMAPHORE(free)
 
+// add these definitions so that we can compile with CUDA < 12.3
+// borrowed from
+// https://github.com/NVIDIA/nccl/blob/3ea7eedf3b9b94f1d9f99f4e55536dfcbd23c1ca/src/include/p2p.h#L20
+#if CUDA_VERSION < 12030
+#define CU_MEM_HANDLE_TYPE_FABRIC ((CUmemAllocationHandleType)0x8ULL)
+#define CU_IPC_HANDLE_SIZE 64
+typedef struct CUmemFabricHandle_st {
+  unsigned char data[CU_IPC_HANDLE_SIZE];
+} CUmemFabricHandle_v1;
+typedef CUmemFabricHandle_v1 CUmemFabricHandle;
+#endif
+
 namespace c10 {
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
@@ -3683,7 +3695,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[block->device]->shareIpcHandle(block);
   }
 
-  void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {
+  void recordStream(const DataPtr& ptr, c10::Stream stream) override {
     // Empty tensor's storage().data() might be a null ptr. As there is no
     // blocks associated with those tensors, it is fine to do nothing here.
     if (!ptr.get()) {
@@ -3701,7 +3713,8 @@ class NativeCachingAllocator : public CUDAAllocator {
     Block* block = get_allocated_block(ptr.get());
     // block must not be null reaching here
     TORCH_INTERNAL_ASSERT(block != nullptr, "No allocated block can be found");
-    device_allocator[block->device]->recordStream(block, stream);
+    c10::cuda::CUDAStream cuda_stream{stream};
+    device_allocator[block->device]->recordStream(block, cuda_stream);
   }
 
   SnapshotInfo snapshot(MempoolId_t mempool_id) override {
@@ -4166,6 +4179,7 @@ struct BackendStaticInitializer {
 
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
+    at::SetAllocator(kCUDA, r, 0);
     allocator.store(r);
   }
 };
@@ -4193,8 +4207,11 @@ std::atomic<CaptureId_t> MemPool::uuid_{1};
 MemPool::MemPool(
     CUDACachingAllocator::CUDAAllocator* allocator,
     bool is_user_created,
-    bool use_on_oom)
-    : allocator_(allocator), is_user_created_(is_user_created) {
+    bool use_on_oom,
+    bool symmetric)
+    : allocator_(allocator),
+      is_user_created_(is_user_created),
+      symmetric_(symmetric) {
   if (is_user_created_) {
     id_ = {0, uid_++};
   } else {
@@ -4215,6 +4232,10 @@ MemPool::~MemPool() {
 
 MempoolId_t MemPool::id() {
   return id_;
+}
+
+bool MemPool::is_symmetric() {
+  return symmetric_;
 }
 
 CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {
