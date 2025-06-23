@@ -760,7 +760,19 @@ class CPUReproTests(TestCase):
             else "aten.set_.source_Tensor",
             code,
         )
-        self.assertEqual(model(inp), result)
+        expected = model(inp)
+        self.assertEqual(expected, result)
+
+        # test cpp_wrapper_build_separate
+        with config.patch(cpp_wrapper=True, cpp_wrapper_build_separate=True):
+            result, code = run_and_get_cpp_code(fn_opt, inp)
+            self.assertIn("kernel_src", code)
+            self.assertEqual(expected, result)
+
+        with config.patch(cpp_wrapper=True, cpp_wrapper_build_separate=False):
+            result, code = run_and_get_cpp_code(fn_opt, inp)
+            self.assertNotIn("kernel_src", code)
+            self.assertEqual(expected, result)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
@@ -1418,9 +1430,20 @@ class CPUReproTests(TestCase):
         use_quant_list = [False, True]
         use_tensor_overload_list = [False, True]
 
-        assert dtype in [torch.uint8, torch.int8]
+        assert dtype in [
+            torch.uint8,
+            torch.int8,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+        ]
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
+        if dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
+            quant_min = int(torch.finfo(dtype).min)
+            quant_max = int(torch.finfo(dtype).max)
+            use_tensor_overload_list = [
+                False,
+            ]
 
         for (
             use_dequant,
@@ -1475,6 +1498,14 @@ class CPUReproTests(TestCase):
         self._test_dequant_quant_lowering_helper(
             torch.int8, dequant_out_dtype=torch.bfloat16
         )
+
+    @requires_vectorization
+    def test_dequant_quant_lowering_fp8_e4m3(self):
+        self._test_dequant_quant_lowering_helper(torch.float8_e4m3fn)
+
+    @requires_vectorization
+    def test_dequant_quant_lowering_fp8_e5m2(self):
+        self._test_dequant_quant_lowering_helper(torch.float8_e5m2)
 
     def _test_dequant_maxpool2d_lowering_helper(self, dtype):
         def fn(x, scale, zero_point, quant_min, quant_max, dtype):
@@ -3493,7 +3524,7 @@ class CPUReproTests(TestCase):
                     metrics.reset()
                     m = Model().eval() if eval_mode else Model()
                     self.common(m, (x,))
-                    check_metrics_vec_kernel_count(8)
+                    check_metrics_vec_kernel_count(6)
 
     @requires_vectorization
     @config.patch("cpp.enable_tiling_heuristics", False)

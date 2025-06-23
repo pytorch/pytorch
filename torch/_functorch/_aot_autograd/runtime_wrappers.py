@@ -8,10 +8,11 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 import builtins
 import collections
+import contextlib
 import copy
 import itertools
 import pprint
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
@@ -19,6 +20,8 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
+from torch._dynamo import config as dynamo_config
+from torch._dynamo.callback import callback_handler, CallbackTrigger
 from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
 from torch._guards import (
     compile_context,
@@ -256,6 +259,23 @@ def maybe_mark_dynamic_helper(t: torch.Tensor, dims: set[int]):
         t._dynamo_weak_dynamic_indices = dims.copy()  # type: ignore[attr-defined]
 
 
+def _should_disable_saved_tensors_hooks():
+    # Compiled autograd is not supported yet, to be added in future.
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        return False
+
+    get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
+    are_inline_hooks = (
+        torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
+    )
+
+    hooks = get_hooks()
+    if are_inline_hooks(hooks):
+        return True
+
+    return False
+
+
 def _create_runtime_wrapper(
     compiled_fn,
     *,
@@ -298,7 +318,30 @@ def _create_runtime_wrapper(
             for info in runtime_metadata.output_info
         )
 
+    def record_runtime_wrapper_prologue_enter() -> (
+        Optional[AbstractContextManager[None]]
+    ):
+        if (
+            torch.autograd.profiler._is_profiler_enabled
+            and dynamo_config.record_runtime_overhead
+        ):
+            cm = torch._C._profiler._RecordFunctionFast(
+                "AOTDispatcher Runtime Wrapper Prologue"
+            )
+            cm.__enter__()
+            return cm
+        return None
+
+    def record_runtime_wrapper_prologue_exit(
+        cm: Optional[AbstractContextManager[None]],
+    ) -> None:
+        if cm is not None:
+            cm.__exit__(None, None, None)
+
     def runtime_wrapper(args: list[Any]):
+        # Create context manager for profiler
+        cm = record_runtime_wrapper_prologue_enter()
+
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
@@ -319,9 +362,11 @@ def _create_runtime_wrapper(
             # It's possible to have trace_joint inside user specified with no_grad() region,
             # if there is a nested with enable_grad(), that forces some outputs to require gradients.
             # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
-            with torch.autograd._force_original_view_tracking(
-                True
-            ), torch.enable_grad():
+            with (
+                torch.autograd._force_original_view_tracking(True),
+                torch.enable_grad(),
+            ):
+                record_runtime_wrapper_prologue_exit(cm)
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
@@ -335,6 +380,7 @@ def _create_runtime_wrapper(
             try:
                 if grad_enabled:
                     torch._C._set_grad_enabled(False)
+                record_runtime_wrapper_prologue_exit(cm)
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args, disable_amp=disable_amp, steal_args=True
                 )
@@ -446,7 +492,15 @@ def _create_runtime_wrapper(
             torch._C._set_grad_enabled(runtime_metadata.grad_enabled_mutation)
         return ret_outs
 
-    return runtime_wrapper
+    if not (trace_joint and _should_disable_saved_tensors_hooks()):
+        return runtime_wrapper
+
+    # Disabling saved tensors hooks
+    def _runtime_wrapper(*args, **kwargs):
+        with _disable_saved_tensors_hooks():
+            return runtime_wrapper(*args, **kwargs)
+
+    return _runtime_wrapper
 
 
 @dataclass
@@ -857,42 +911,26 @@ class AOTDedupeWrapper(CompilerWrapper):
             """
             )
 
-        # Strategy 2: Duplicate specialize.
+        # Strategy 2: Duplicate specialization
         #
-        # In Haskell types, suppose you have:
+        # When we have duplicate arguments in a function call, we need to handle them specially.
+        # For example, if we have a function call f(a, b, a, c), we need to:
         #
-        #   add_dupe_args :: DedupedArgs -> Args
-        #   remove_dupe_args :: Args -> DedupedArgs
+        # 1. Remove duplicates to get a deduplicated list [a, b, c]
+        # 2. Compile our function to work with this deduplicated list
+        # 3. At runtime, convert incoming arguments with duplicates to the deduplicated form
+        # 4. Pass the deduplicated arguments to our compiled function
         #
-        #   compiler_fn
-        #       :: (DedupedArgs -> R) -> DedupedArgs -> AOTConfig -> (DedupedArgs -> R)
-        #   deped_compiler_fn
-        #       :: (Args -> R) -> Args -> AOTConfig -> (Args -> R)
+        # To do this, we need two helper functions:
         #
-        # Then the code below can be written in point-free style as:
+        # - remove_dupe_args: Converts [a, b, a, c] -> [a, b, c]
+        # - add_dupe_args: Converts [a, b, c] -> [a, b, a, c]
         #
-        #   deduped_compiler_fn f a c =
-        #       compiler_fn (f . add_dupe_args) (remove_dupe_args a) c . remove_dupe_args
+        # For our example [a, b, a, c], we track:
         #
-        # Suppose you have:
-        #
-        #   [a, b, a, c]
-        #
-        # We want:
-        #
-        #   remove_dupe_args([a, b, a, c]) == [a, b, c]
-        #   add_dupe_args([a, b, c]) == [a, b, a, c]
-        #
-        # This is done via (respectively):
-        #
-        #   seen_args = {a: 0, b: 1, c: 2}
-        #   enumerate(add_dupe_map) = [  # how to get args from the deduped list
-        #       (0, 0),
-        #       (1, 1),
-        #       (2, 0),
-        #       (3, 2),
-        #   ]
-        #   keep_arg_mask = [True, True, False, True]
+        # - seen_args = {a: 0, b: 1, c: 2} (maps each unique arg to its first position)
+        # - add_dupe_map = [0, 1, 0, 2] (tells us how to reconstruct the original list)
+        # - keep_arg_mask = [True, True, False, True] (tells us which args to keep when deduplicating)
 
         seen_args: dict[Tensor, int] = {}
         # Implicitly map duped arg position (list index) to de-duped arg position
@@ -1490,6 +1528,14 @@ class AutogradLazyBackwardCompileInfo:
     saved_compile_context: Optional[CompileContext]
 
 
+# On an AOT Autograd cache hit, we already have a lowered backward, so there is usually
+# no need to keep information around for a new lazy compilation. Except for compiled autograd,
+# which wants to retrace this backward into a larger graph, and it needs the graph module to do so.
+@dataclass
+class CachedAutogradLazyBackwardCompileInfo:
+    bw_module_fn: Callable
+
+
 def _raise_if_functorch_active():
     # not ideal but prevent the user from seeing a nasty traceback - See #138422
     stack = torch._C._functorch.peek_interpreter_stack()
@@ -1809,6 +1855,35 @@ def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryForma
     return restrided
 
 
+@contextlib.contextmanager
+def _disable_saved_tensors_hooks():
+    error_message = (
+        "Saved tensors hooks were specialized as GraphModules."
+        "In this case aot_autograd inlines them in forward and backward graph "
+        "and disables them during runtime of aot_autograd compiled region."
+        "If you see this error, that means that there is some unexpected push or pop manipulation "
+        "during aot_autograd compiled region runtime."
+        "Compilation with different hooks must result in recompilation."
+    )
+    fail_if_non_empty = False
+    maybe_prev_message = None
+    try:
+        maybe_prev_message = (
+            torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
+        )
+        torch._C._autograd._saved_tensors_hooks_disable(
+            error_message, fail_if_non_empty
+        )
+        yield
+    finally:
+        if maybe_prev_message is None:
+            torch._C._autograd._saved_tensors_hooks_enable()
+        else:
+            torch._C._autograd._saved_tensors_hooks_disable(
+                maybe_prev_message, fail_if_non_empty
+            )
+
+
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
@@ -1909,7 +1984,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         backward_state_indices: list[int],
         disable_amp: bool,
         indices_of_inps_to_detach: list[int],
-        lazy_backward_info: Optional[AutogradLazyBackwardCompileInfo],
+        lazy_backward_info: Optional[
+            Union[
+                AutogradLazyBackwardCompileInfo,
+                CachedAutogradLazyBackwardCompileInfo,
+            ]
+        ],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
@@ -2217,6 +2297,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 if CompiledFunction.compiled_bw is None:
                     assert lazy_backward_info is not None
+                    assert isinstance(
+                        lazy_backward_info, AutogradLazyBackwardCompileInfo
+                    )
 
                     if not saved_tensors_use_once:
                         fw_metadata.bw_donated_idxs = []
@@ -2240,17 +2323,24 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
                     metrics_context = get_metrics_context()
-                    with tracing(saved_context), compile_context(
-                        saved_compile_context
-                    ), context(), track_graph_compiling(
-                        aot_config, "backward"
-                    ), metrics_context, dynamo_timed(
-                        "backward._backward_impl",
-                        phase_name="entire_backward_compile",
-                        log_pt2_compile_event=True,
-                        dynamo_compile_column_us="backward_cumulative_compile_time_us",
-                        log_waitcounter=True,
-                        waitcounter_name_override="entire_backward_compile",
+                    with (
+                        tracing(saved_context),
+                        compile_context(saved_compile_context),
+                        context(),
+                        track_graph_compiling(aot_config, "backward"),
+                        metrics_context,
+                        dynamo_timed(
+                            "backward._backward_impl",
+                            phase_name="entire_backward_compile",
+                            log_pt2_compile_event=True,
+                            dynamo_compile_column_us="backward_cumulative_compile_time_us",
+                            log_waitcounter=True,
+                            waitcounter_name_override="entire_backward_compile",
+                        ),
+                        callback_handler.install_callbacks(
+                            CallbackTrigger.LAZY_BACKWARD,
+                            str(CompileContext.current_compile_id()),
+                        ),
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
                         # See Note: [Backward graph lazy lowering]
@@ -2261,6 +2351,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         if try_save_cache_entry is not None:
                             try_save_cache_entry(
                                 CompiledFunction.compiled_bw,
+                                bw_module,
                                 fw_metadata,
                                 aot_config,
                             )

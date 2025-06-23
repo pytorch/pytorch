@@ -12,30 +12,11 @@ from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import _IntLike, ChoiceCaller, Layout, TensorBox
-from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE, use_aten_gemm_kernels
+from ..ir import _IntLike, Layout, TensorBox
+from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE
 
 
 log = logging.getLogger(__name__)
-
-
-def should_fallback_to_aten(choices: list[ChoiceCaller]) -> bool:
-    if len(choices) == 0 and not use_aten_gemm_kernels():
-        if inductor_config.autotune_fallback_to_aten:
-            log.warning(
-                "No choices for GEMM, using ATen backend as fallback. "
-                "This behavior is being deprecated. Please add include Aten in max_autotune_gemm_backends."
-            )
-            return True
-        else:
-            log.warning(
-                "No choices for GEMM, chose not to fallback to ATen backend. "
-                "To temporarily change this behavior, set autotune_fallback_to_aten to True "
-                "via TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN=1, but this knob is being deprecated. "
-                "The long term fix is to include Aten in max_autotune_gemm_backends."
-            )
-            return False
-    return False
 
 
 @SymbolicGridFn
@@ -57,7 +38,8 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
 
 
 @SymbolicGridFn
-def persistent_grouped_mm_grid(m, n, meta):
+def persistent_grouped_mm_grid(*args):
+    meta = args[-1]
     return (meta["NUM_SMS"], 1, 1)
 
 
@@ -97,13 +79,21 @@ def mm_options(config, sym_m, sym_n, sym_k, layout):
     return options_dict
 
 
+def tma_options() -> dict[str, Any]:
+    from torch.utils._triton import has_triton_stable_tma_api
+
+    return {"TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api()}
+
+
 def persistent_mm_options(mat1, mat2):
-    return dict(
+    res = dict(
         A_ROW_MAJOR=not mat1.layout.is_transposed(),
         B_ROW_MAJOR=not mat2.layout.is_transposed(),
         NUM_SMS=get_num_sms(),
         TMA_SIZE=TMA_DESCRIPTOR_SIZE,
     )
+    res.update(tma_options())
+    return res
 
 
 def scaled_mm_options(  # type: ignore[no-untyped-def]
@@ -118,7 +108,7 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     device_tma: bool = False,
 ) -> dict[str, Any]:
     def are_compatible_scales(size_a, size_b) -> bool:
-        # Same sized scales are compatable
+        # Same sized scales are compatible
         if len(size_a) == len(size_b):
             return True
 
@@ -143,6 +133,8 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     if device_tma:
         mm_template_options["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE
         mm_template_options["NUM_SMS"] = get_num_sms()
+
+    mm_template_options.update(tma_options())
 
     return mm_template_options
 

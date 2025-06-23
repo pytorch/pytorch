@@ -878,8 +878,8 @@ class TensorLikePair(Pair):
                 if rtol != 0.0 or atol != 0.0:
                     raise ErrorMeta(
                         AssertionError,
-                        f"Rtol={rtol} and atol={atol} are not supported for bitwise comparison of low \
-                            dimensional floats. Please use rtol=0.0 and atol=0.0",
+                        f"Rtol={rtol} and atol={atol} are not supported for bitwise comparison of low"
+                        " dimensional floats. Please use rtol=0.0 and atol=0.0.",
                     )
 
                 return self._compare_regular_values_close(

@@ -45,6 +45,7 @@ class Func:
 
 
 def bench(shape, layer_id, p, fusion_types=None):
+    torch._logging.set_logs(inductor_metrics=True)
     if fusion_types is None:
         fusion_types = [""]
     dtype = torch.float16
@@ -88,6 +89,7 @@ def bench(shape, layer_id, p, fusion_types=None):
         row.extend([tflops(torch_mm_ms), tflops(triton_mm_ms)])
 
     p.add_row(row)
+    torch._logging.set_logs()
 
 
 fusion_types = ["", "add", "relu", "add_relu"]

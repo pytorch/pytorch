@@ -35,14 +35,15 @@ static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const
                                                                                 shape:getMPSShape(weight.sizes())];
       weightDesc.preferPackedRows = YES;
       [weightDesc transposeDimension:0 withDimension:1];
-      MPSNDArray* weightNDArray = [[MPSNDArray alloc] initWithBuffer:weightBuf
-                                                              offset:weight.storage_offset() * weight.element_size()
-                                                          descriptor:weightDesc];
+      MPSNDArray* weightNDArray = [[[MPSNDArray alloc] initWithBuffer:weightBuf
+                                                               offset:weight.storage_offset() * weight.element_size()
+                                                           descriptor:weightDesc] autorelease];
 
       if (is_bias_defined) {
         auto biasNDArray = getMPSNDArray(bias, bias.sizes(), bias.strides());
-        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(
-            key, [&]() { return [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:3]; });
+        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(key, [&]() {
+          return [[[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:3] autorelease];
+        });
         auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
 
         getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias});
@@ -52,8 +53,9 @@ static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const
                       destinationArray:outNDArray];
         getMPSProfiler().endProfileKernel(kernel);
       } else {
-        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(
-            key, [&]() { return [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2]; });
+        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(key, [&]() {
+          return [[[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2] autorelease];
+        });
         auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
         getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias});
         [kernel encodeToCommandEncoder:computeEncoder

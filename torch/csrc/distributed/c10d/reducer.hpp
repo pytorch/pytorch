@@ -145,7 +145,7 @@ class TORCH_API Reducer {
   // buckets once after the first iteration and never rebuild them if
   // find_unused_parameters_.
   inline bool should_rebuild_buckets() const {
-    return !has_rebuilt_bucket_;
+    return (static_graph_ || !find_unused_parameters_) && !has_rebuilt_bucket_;
   }
 
   // Pushes all parameters to be rebuilt.
@@ -564,7 +564,7 @@ class TORCH_API Reducer {
   // Retrieves parameter corresponding to the given VariableIndex.
   at::Tensor& get_param_from_index(size_t index);
   // Python reducer keeps C++ reducer initialized. To remove this flag,
-  // we need to refactor the DDP wrapper's initilization.
+  // we need to refactor the DDP wrapper's initialization.
   bool use_python_reducer_;
 
   // Cached bucket index to model parameter mapping. Populated after buckets
