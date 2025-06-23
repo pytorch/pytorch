@@ -76,7 +76,7 @@ def prepare_pt2e(
 
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
-        # result shoud mostly stay the same
+        # result should mostly stay the same
         m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
@@ -153,7 +153,7 @@ def prepare_qat_pt2e(
 
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
-        # result shoud mostly stay the same
+        # result should mostly stay the same
         m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
@@ -218,7 +218,7 @@ def convert_pt2e(
 
     Args:
       * `model` (torch.fx.GraphModule): calibrated/trained model
-      * `use_reference_representation` (bool): boolean flag to indicate whether to produce referece representation or not
+      * `use_reference_representation` (bool): boolean flag to indicate whether to produce reference representation or not
       * `fold_quantize` (bool): boolean flag for whether fold the quantize op or not
 
     Returns:

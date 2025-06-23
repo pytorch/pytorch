@@ -557,7 +557,7 @@ void TracingState::setValue(const IValue& v, Value* value) {
 
     // If the value comes from a CallFunction or CallMethod, it may not have
     // shape information attached. For debuggability, we enhance the type
-    // information by assigning the concrete value's tupe to the jit::Value.
+    // information by assigning the concrete value's type to the jit::Value.
     if (auto tensor_type = value->type()->cast<TensorType>()) {
       if (!tensor_type->isComplete()) {
         value->inferTypeFrom(var);

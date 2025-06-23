@@ -28,7 +28,7 @@ class TensorProperties:
 
     def is_complete(self) -> bool:
         """
-        Whehter the tensor completely overlaps with its underlying storage
+        Whether the tensor completely overlaps with its underlying storage
         """
         return (
             self.start == self.storage_ptr
@@ -39,7 +39,7 @@ class TensorProperties:
 class Weights(dict):
     """
     A dictionary mapping from weight name to a tuple of (tensor, TensorProperties).
-    tensor represents the actual intial value of the weight.
+    tensor represents the actual initial value of the weight.
     TensorProperties represents the properties of the weight that are needed to recover the weight.
 
     We use two separate entries because `tensor` could be a clone of the original weight tensor,

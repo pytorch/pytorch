@@ -438,36 +438,36 @@ def create_functionalized_fn(
                 # Only look at mutations that happened to forward inputs (e.g. fw buffers that were saved for bw)
                 primals_before = args[0]
                 primals_after = pytree.tree_map(from_fun, f_args[0])
-                for idx, (f_inpt, before, after, inpt_info) in enumerate(
+                for idx, (f_input, before, after, input_info) in enumerate(
                     zip(f_args[0], primals_before, primals_after, meta.input_info)
                 ):
                     # Store information about mutations in joint(for backward analysis)
-                    joint_mutates_data = has_data_mutation(f_inpt)
+                    joint_mutates_data = has_data_mutation(f_input)
 
                     joint_mutates_metadata = has_metadata_mutation(
-                        f_inpt, before, check_only_storage_mutation=False
+                        f_input, before, check_only_storage_mutation=False
                     )
 
                     # Ban metadata mutations on fw inputs during the bw
-                    if not inpt_info.mutates_metadata:
+                    if not input_info.mutates_metadata:
                         assert (
                             not joint_mutates_metadata
                         ), "Found a graph input that had its metadata mutated in the backward. This is not supported"
 
                     # Ban storage resizing on fw inputs during the bw
-                    if not inpt_info.mutation_inductor_storage_resize:
+                    if not input_info.mutation_inductor_storage_resize:
                         assert not was_inductor_storage_resized(
-                            f_inpt
+                            f_input
                         ), "Found a graph input that had storage resizing in the backward. This is not supported"
 
                     # Allow data mutations on fw inputs during the bw, but only if they do not require grad
                     # So we can guarantee that we can keep the mutations in the graph
                     if (
                         joint_mutates_data
-                        and not inpt_info.mutates_data
-                        and not inpt_info.mutates_storage_metadata
+                        and not input_info.mutates_data
+                        and not input_info.mutates_storage_metadata
                     ):
-                        # Not banning here mutations on inpt_info.requires_grad -
+                        # Not banning here mutations on input_info.requires_grad -
                         # we'll check at runtime and fail only when backward is under torch.is_grad_enabled (create_graph)
                         # Add node meta for copy_ for partitioner that this node should be in backward graph.
                         with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag_must_be_in_backward():
@@ -480,28 +480,28 @@ def create_functionalized_fn(
                 # Today, we will just error in all cases of this happening unless someone needs us to support it.
                 tangents_before = args[1]
                 tangents_after = pytree.tree_map(from_fun, f_args[1])
-                for f_inpt, before, after in zip(
+                for f_input, before, after in zip(
                     f_args[1], tangents_before, tangents_after
                 ):
                     assert not has_metadata_mutation(
-                        f_inpt, before, check_only_storage_mutation=False
+                        f_input, before, check_only_storage_mutation=False
                     ), "Found an input to the backward that had metadata mutated during the backward pass. This is not supported"
-                    if has_data_mutation(f_inpt):
+                    if has_data_mutation(f_input):
                         can_be_in_graph = _check_if_mutation_can_be_in_graph(
                             keep_input_mutations=True,
                             mutates_data=True,
                             mutates_metadata=False,
                             mutations_hidden_from_autograd=are_all_mutations_hidden_from_autograd(
-                                f_inpt
+                                f_input
                             ),
                             mutations_under_no_grad_or_inference_mode=are_all_mutations_under_no_grad_or_inference_mode(
-                                f_inpt
+                                f_input
                             ),
                             mutates_storage_metadata=False,
                             mutation_inductor_storage_resize=was_inductor_storage_resized(
-                                f_inpt
+                                f_input
                             ),
-                            requires_grad=f_inpt.requires_grad,
+                            requires_grad=f_input.requires_grad,
                         )
                         assert (
                             can_be_in_graph
@@ -535,13 +535,13 @@ def create_functionalized_fn(
                 # we will materialize an "updated" synthetic base, and copy it back to the synthetic input base.
                 # This allows us to factor aot autograd much more nicely, since only one area of the code needs to worry
                 # about synthetic bases.
-                for i, (inpt_old, inpt_f) in enumerate(
+                for i, (input_old, input_f) in enumerate(
                     zip(args, f_args) if not trace_joint else zip(args[0], f_args[0])
                 ):
-                    if not isinstance(inpt_f, torch.Tensor):
+                    if not isinstance(input_f, torch.Tensor):
                         continue
-                    assert is_fun(inpt_f)
-                    inpt_new = from_fun(inpt_f)
+                    assert is_fun(input_f)
+                    input_new = from_fun(input_f)
                     if (
                         meta.input_info[i].mutation_type
                         == MutationType.MUTATED_IN_GRAPH
@@ -562,7 +562,7 @@ def create_functionalized_fn(
                         #     This case is *not* currently handled.
                         if meta.input_info[i].mutates_storage_metadata:
                             with torch.no_grad():
-                                inpt_old.set_(inpt_new)
+                                input_old.set_(input_new)
 
                         # Note [Ordering of resize_() and set_()]
                         # Importantly: the common usage in FSDP is that we have a dummy parameter
@@ -577,12 +577,12 @@ def create_functionalized_fn(
                                 FunctionalTensor,
                             )
 
-                            assert isinstance(inpt_f, FunctionalTensor)
+                            assert isinstance(input_f, FunctionalTensor)
                             old_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
-                                inpt_f.elem, before=True
+                                input_f.elem, before=True
                             )
                             new_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
-                                inpt_f.elem, before=False
+                                input_f.elem, before=False
                             )
                             if old_storage_size != new_storage_size:
                                 assert (
@@ -592,7 +592,7 @@ def create_functionalized_fn(
     We only support storage resizing on graph inputs as long as the input either starts or ends with a storage size of 0
     (the case for FSDP)"""
                                 torch.ops.inductor.resize_storage_bytes_(
-                                    inpt_old, new_storage_size
+                                    input_old, new_storage_size
                                 )
                             if new_storage_size == 0:
                                 # Even if we marked the input as having a data mutation (thus needing a copy_()),
@@ -605,7 +605,7 @@ def create_functionalized_fn(
                         # param.copy_(param), where param is a zero-storage-size tensor,
                         # and running this op in eager mode (using the aot_eager backend) will result in a segfault.
                         # So we may as well optimize it away here.
-                        if inpt_old is inpt_new:
+                        if input_old is input_new:
                             # (This check needs to be done after putting resize_() in the graph,
                             # since a resize_(0) doesn't actually change the FunctionalTensor's inner tensor)
                             continue
@@ -618,14 +618,14 @@ def create_functionalized_fn(
                         ):
                             # Hidden from autograd = run under no_grad, **and** don't bump VC
                             # (although if the tensor was created in inference mode, it has no VC)
-                            if inpt_old.is_inference():
+                            if input_old.is_inference():
                                 maybe_preserve_vc = nullcontext()
                             else:
                                 maybe_preserve_vc = torch.autograd._unsafe_preserve_version_counter(
-                                    inpt_old  # type: ignore[assignment]
+                                    input_old  # type: ignore[assignment]
                                 )
                             with torch.no_grad(), maybe_preserve_vc:
-                                inpt_old.copy_(inpt_new)
+                                input_old.copy_(input_new)
                         elif (
                             meta.input_info[i].mutates_data
                             and meta.input_info[
@@ -636,9 +636,9 @@ def create_functionalized_fn(
                             # (inference_mode will also bump the VC, as long as the tensor in question
                             # was created outside of inference_mode)
                             with torch.no_grad():
-                                inpt_old.copy_(inpt_new)
+                                input_old.copy_(input_new)
                         elif meta.input_info[i].mutates_data:
-                            inpt_old.copy_(inpt_new)
+                            input_old.copy_(input_new)
 
                 # When an output tensor is a functionalized mutated input, and we
                 # were able to move the mutation in to the graph then we can return

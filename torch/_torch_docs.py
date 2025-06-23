@@ -10015,7 +10015,7 @@ Args:
         subtracted by the number before it denotes the number of
         elements or blocks in a given compressed dimension.
     plain_indices (array_like): Plain dimension (column or row)
-        co-ordinates of each element or block in values. (B+1)-dimensional
+        coordinates of each element or block in values. (B+1)-dimensional
         tensor with the same length as values.
 
     values (array_list): Initial values for the tensor. Can be a list,
@@ -10083,7 +10083,7 @@ Args:
         starts. Each successive number in the tensor subtracted by the
         number before it denotes the number of elements in a given
         row.
-    col_indices (array_like): Column co-ordinates of each element in
+    col_indices (array_like): Column coordinates of each element in
         values. (B+1)-dimensional tensor with the same length
         as values.
     values (array_list): Initial values for the tensor. Can be a list,
@@ -10146,7 +10146,7 @@ Args:
         starts. Each successive number in the tensor subtracted by the
         number before it denotes the number of elements in a given
         column.
-    row_indices (array_like): Row co-ordinates of each element in
+    row_indices (array_like): Row coordinates of each element in
         values. (B+1)-dimensional tensor with the same length as
         values.
     values (array_list): Initial values for the tensor. Can be a list,
@@ -10209,7 +10209,7 @@ Args:
         given row block starts. Each successive number in the tensor
         subtracted by the number before it denotes the number of
         blocks in a given row.
-    col_indices (array_like): Column block co-ordinates of each block
+    col_indices (array_like): Column block coordinates of each block
         in values. (B+1)-dimensional tensor with the same length as
         values.
     values (array_list): Initial values for the tensor. Can be a list,
@@ -10277,7 +10277,7 @@ Args:
         column starts. Each successive number in the tensor subtracted
         by the number before it denotes the number of elements in a
         given column.
-    row_indices (array_like): Row block co-ordinates of each block in
+    row_indices (array_like): Row block coordinates of each block in
         values. (B+1)-dimensional tensor with the same length
         as values.
     values (array_list): Initial blocks for the tensor. Can be a list,

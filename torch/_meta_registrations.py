@@ -2572,7 +2572,7 @@ def meta_miopen_batch_norm(
     out_shape = input_tensor.shape
 
     # If tensor is provided for running_mean and running_var then use this. If these are not
-    # provded then we return the shape of weight tensor. Similar to how this is handled in the decomposition
+    # provided then we return the shape of weight tensor. Similar to how this is handled in the decomposition
     save_mean_shape = running_mean.shape if running_mean is not None else weight.shape
     save_var_shape = running_var.shape if running_var is not None else weight.shape
 
@@ -3936,7 +3936,7 @@ def get_kai_packed_weight_size(n_bits, N, K, groupsize):
                     + kai_num_bytes_bias
                 )
 
-            # This funtion retuns size of these datatypes stored as enum. We modify it to just return bf16 datatype
+            # This function returns size of these datatypes stored as enum. We modify it to just return bf16 datatype
             # https://gitlab.arm.com/kleidi/kleidiai/-/blob/main/kai/kai_common.h?ref_type=heads#L55
             def kai_get_bf16_datatype_size_in_bytes():
                 return 2  # 2 bytes
@@ -4899,7 +4899,7 @@ def max_pool2d_checks_and_compute_shape(
     else:
         torch._check(
             False,
-            lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
+            lambda: "Unsupported memory format. Supports only ChannelsLast, Contiguous",
         )
 
     outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, dilationH, ceil_mode)
@@ -5021,7 +5021,7 @@ def meta_fractional_max_pool2d(self, kernel_size, output_size, random_samples):
         torch._check(
             self.size(d) > 0,
             f"fractional_max_pool2d: Expected input to have non-zero "
-            f" size for non-batch dimenions, but got {self.size()} with dimension {d} empty",
+            f" size for non-batch dimensions, but got {self.size()} with dimension {d} empty",
         )
 
     # the check and message are out of sync, but this matches the structured meta
@@ -5812,7 +5812,7 @@ def meta__scaled_dot_product_flash_attention(
     # it's possible we'll need to have some special handling in inductor for sdpa
     # See [Note] BC breaking change to flash seed/offset
     if torch.version.hip and torch.cuda.is_available():
-        # Maintian old path on AMD
+        # Maintain old path on AMD
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
     else:
@@ -6236,7 +6236,7 @@ def meta__flash_attention_forward(
     # See [Note] BC breaking change to flash seed/offset
     seed, offset = None, None
     if torch.version.hip and torch.cuda.is_available():
-        # Maintian old path on AMD
+        # Maintain old path on AMD
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
     else:
@@ -6448,7 +6448,7 @@ def meta_scaled_mm(
         )
         torch._check(
             mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
-            lambda: f"Expected both dimensions of mat2 to be divisble by 16 but got {mat2.shape}",
+            lambda: f"Expected both dimensions of mat2 to be divisible by 16 but got {mat2.shape}",
         )
 
         # determine scaling type and check input dimensions (refer to Blas.cpp op)
@@ -6575,7 +6575,7 @@ def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
 def meta_multinomial(input, num_samples, replacement=False, *, generator=None):
     torch._check(
         0 < input.dim() <= 2,
-        lambda: f"The probabilty distributions dimensions must be 1 or 2, but got {input.dim()}",
+        lambda: f"The probability distributions dimensions must be 1 or 2, but got {input.dim()}",
     )
     if input.dim() == 1:
         return torch.empty(num_samples, dtype=torch.long, device=input.device)

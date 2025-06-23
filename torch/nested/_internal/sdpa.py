@@ -369,7 +369,7 @@ def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor):
     # use with the flash-attention and efficient_attention kernels without
     # needing to call contiguous on the nested tensor input.
     # It checks that the storage offsets' adjacent_differences are a constant
-    # mutiple of the previous tensor in the nested tensor and that the strides
+    # multiple of the previous tensor in the nested tensor and that the strides
     # are monitonically decreasing. This check is done after calling transpose on
     # the nested tensor resulting in a Nt of shape [bsz, {seq_len}, num_heads, dim]
 
