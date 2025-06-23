@@ -96,14 +96,19 @@ void serial_vec_log_softmax_lastdim_range(
   }
 }
 
-template <typename scalar_t>
+// Can't include ATen/Parallel.h.
+// TODO: find a way to have only one copy of divup.
+inline int64_t divup(int64_t x, int64_t y) {
+  return (x + y - 1) / y;
+}
+
+template <typename scalar_t, int64_t BLOCK_SIZE = 128 * 1024>
 std::pair<int64_t,int64_t> vec_logsoftmax_chunk_size_and_num_chunks(int64_t inner_size, int64_t dim_size) {
   using Vec = vec::Vectorized<scalar_t>;
-  int64_t BLOCK_SIZE = 128 * 1024;
   int64_t MAX_CHUNK_SIZE = std::max<int64_t>(BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
   MAX_CHUNK_SIZE = MAX_CHUNK_SIZE / Vec::size() * Vec::size();
   int64_t CHUNK_SIZE = std::min<int64_t>(MAX_CHUNK_SIZE, inner_size);
-  int64_t num_chunks = (inner_size + CHUNK_SIZE - 1) / CHUNK_SIZE;
+  int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
   return {CHUNK_SIZE, num_chunks};
 }
 
@@ -263,7 +268,7 @@ serial_vec_logsoftmax_range(
         max_fvec0 = fVec::blendv(max_fvec0, data_fvec0, data_fvec0 > max_fvec0);
         max_fvec1 = fVec::blendv(max_fvec1, data_fvec1, data_fvec1 > max_fvec1);
         max_fvec0.store(input_max_data + d1);
-        max_fvec0.store(input_max_data + d1 + fVec::size());
+        max_fvec1.store(input_max_data + d1 + fVec::size());
 
         // cache the 'converted' float input
         data_fvec0.store(input_buffer_ptr + d1);
