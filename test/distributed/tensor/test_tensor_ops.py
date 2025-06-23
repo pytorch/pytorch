@@ -6,13 +6,19 @@ from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
+    init_device_mesh,
     Partial,
     Replicate,
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skipIfRocm,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorTestBase,
@@ -20,6 +26,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+@instantiate_parametrized_tests
 class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_aten_contiguous(self):
@@ -440,7 +447,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
         # case 1 all replicate: input replicated, index replicated, output replicated
         global_input = torch.randn(12, 8, 16)
-        global_index = torch.randint(self.world_size, (4, 4, 8))
+        global_index = torch.randint(8, (4, 4, 8))
         input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
         index_dt = distribute_tensor(global_index, device_mesh, [Replicate()])
         for gather_dim in [0, 1, 2]:
@@ -458,7 +465,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
         gather_dim = 1
         global_input = torch.randn(12, 8, 16)
-        global_index = torch.randint(self.world_size, (4, 1, 8))
+        global_index = torch.randint(8, (4, 1, 8))
         global_output = torch.gather(global_input, gather_dim, global_index)
         input_dt = distribute_tensor(global_input, device_mesh, [Shard(gather_dim)])
         index_dt = distribute_tensor(global_index, device_mesh, [Replicate()])
@@ -471,7 +478,7 @@ class DistTensorOpsTest(DTensorTestBase):
         # case 3 index sharding: input replicated, index sharded, output sharded
         # only works when the sharding dimension is the gather dimension
         global_input = torch.randn(12, 8, 16)
-        global_index = torch.randint(self.world_size, (4, 4, 8))
+        global_index = torch.randint(8, (4, 4, 8))
         for gather_dim in range(len(global_index.shape)):
             input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
             index_dt = distribute_tensor(global_index, device_mesh, [Shard(gather_dim)])
@@ -593,16 +600,37 @@ class DistTensorOpsTest(DTensorTestBase):
             )
 
     @with_comms
-    def test_index_put(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        global_input = torch.randn(2, 2)
-        global_index = [
-            i.detach().clone()
-            for i in torch.randperm(global_input.ndim)[: min(global_input.ndim, 2)]
-        ]
-        input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
-        output_dt = torch.index_put(input_dt, global_index, torch.tensor(1.0))
-        ref = torch.index_put(global_input, global_index, torch.tensor(1.0))
+    @parametrize("is_shard", [True, False])
+    def test_index_put(self, is_shard):
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(2, 4, device=self.device_type)
+        global_index = []
+        for i in range(global_input.ndim):
+            global_index.append(
+                torch.randint(global_input.shape[i], (1,), device=self.device_type)
+            )
+        if is_shard:
+            input_dt = distribute_tensor(
+                global_input,
+                device_mesh,
+                [
+                    Shard(0),
+                ],
+            )
+        else:
+            input_dt = distribute_tensor(
+                global_input,
+                device_mesh,
+                [
+                    Replicate(),
+                ],
+            )
+        output_dt = torch.index_put(
+            input_dt, global_index, torch.tensor(1.0, device=self.device_type)
+        )
+        ref = torch.index_put(
+            global_input, global_index, torch.tensor(1.0, device=self.device_type)
+        )
         self.assertEqual(output_dt.full_tensor(), ref)
 
     @with_comms

@@ -70,15 +70,6 @@ register_op_strategy(
 
 
 register_op_strategy(
-    [
-        aten.index_put.default,
-        aten._index_put_impl_.default,
-    ],
-    schema_info=RuntimeSchemaInfo(needs_pytree=True),
-)(default_strategy)
-
-
-register_op_strategy(
     aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
 )(default_strategy)
 
@@ -478,6 +469,13 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 @register_op_strategy(aten._local_scalar_dense.default)
+@register_op_strategy(
+    [
+        aten.index_put.default,
+        aten._index_put_impl_.default,
+    ],
+    schema_info=RuntimeSchemaInfo(needs_pytree=True),
+)
 def replica_only_strategy(op_schema: OpSchema) -> StrategyType:
     """Only allow replication on the input/output."""
     input_strategy = op_schema.args_schema[0]
