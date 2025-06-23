@@ -1,5 +1,4 @@
 (cuda_environment_variables)=
-```
 
 # CUDA Environment Variables
 
