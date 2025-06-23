@@ -40,7 +40,7 @@ def triton_op(
 
     Note that ``fn`` must only consist of calls to PyTorch-understood
     operators and triton kernels. Any triton kernels called inside ``fn``
-    must be wrapped in a call to :func:`torch._library.wrap_triton``.
+    must be wrapped in a call to :func:`torch.library.wrap_triton`.
 
     Args:
         name (str): A name for the custom op that looks like "{namespace}::{name}",
@@ -146,7 +146,7 @@ def triton_op(
             #   backend (GPU), which is probably at a wrong level of abstraction.
             # - changes to triton or the serialization logic for triton arguments can be BC breaking
             #
-            # In the short term, we expect users to have a seperate aot_compile stage that compiles the exported program
+            # In the short term, we expect users to have a separate aot_compile stage that compiles the exported program
             # into a Cubin file on the same machine that users call export, which does autotuning and removes triton
             # dependency and serve the model with Cubin. This guarantees that triton changes won't break BC.
             # In the long term, we may export multiple cubins for the triton op directly

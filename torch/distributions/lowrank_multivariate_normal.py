@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import math
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -61,7 +62,9 @@ class LowRankMultivariateNormal(Distribution):
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
-        >>> m = LowRankMultivariateNormal(torch.zeros(2), torch.tensor([[1.], [0.]]), torch.ones(2))
+        >>> m = LowRankMultivariateNormal(
+        ...     torch.zeros(2), torch.tensor([[1.0], [0.0]]), torch.ones(2)
+        ... )
         >>> m.sample()  # normally distributed with mean=`[0,0]`, cov_factor=`[[1],[0]]`, cov_diag=`[1,1]`
         tensor([-0.2102, -0.5429])
 
@@ -82,6 +85,7 @@ class LowRankMultivariateNormal(Distribution):
 
             capacitance = I + cov_factor.T @ inv(cov_diag) @ cov_factor
     """
+
     arg_constraints = {
         "loc": constraints.real_vector,
         "cov_factor": constraints.independent(constraints.real, 2),
@@ -90,7 +94,13 @@ class LowRankMultivariateNormal(Distribution):
     support = constraints.real_vector
     has_rsample = True
 
-    def __init__(self, loc, cov_factor, cov_diag, validate_args=None):
+    def __init__(
+        self,
+        loc: Tensor,
+        cov_factor: Tensor,
+        cov_diag: Tensor,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if loc.dim() < 1:
             raise ValueError("loc must be at least one-dimensional.")
         event_shape = loc.shape[-1:]

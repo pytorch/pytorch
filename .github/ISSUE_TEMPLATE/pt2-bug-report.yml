@@ -20,7 +20,7 @@ body:
 
         - Don't compare indices of max/min etc, because that avoids the above requirement
 
-        - If comparing eager and torch.compile at fp16/bf16, you should use fp32 as baseline
+        - When comparing eager and torch.compile, use a higher precision result as a baseline. `torch._dynamo.utils.same` with fp64_ref will handle this comparison.
 
         - Ensure rng state used to compare results is equivalent. Use `torch._inductor.config.fallback_random=True` and reset the torch rng seed between comparisons
 

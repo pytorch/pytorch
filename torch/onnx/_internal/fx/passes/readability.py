@@ -1,14 +1,18 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 import torch
-from torch.onnx._internal.fx import _pass, diagnostics
+from torch.onnx._internal.fx import _pass
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+
+logger = logging.getLogger(__name__)
 
 
 class RestoreParameterAndBufferNames(_pass.Transform):
@@ -26,24 +30,22 @@ class RestoreParameterAndBufferNames(_pass.Transform):
 
     def __init__(
         self,
-        diagnostic_context: diagnostics.DiagnosticContext,
         fx_module: torch.fx.GraphModule,
         original_nn_module: torch.nn.Module,
     ):
-        super().__init__(diagnostic_context, fx_module)
+        super().__init__(fx_module)
         self.original_nn_module = original_nn_module
 
     def _rename_param_and_buffer(
         self,
-        diagnostic: diagnostics.Diagnostic,
         nodes: Sequence[torch.fx.Node],
         new_name: str,
     ) -> None:
         """Rename the parameter/buffer and replace corresponding nodes with new nodes of updated target."""
         assert len(nodes) > 0, "`nodes` cannot be empty"
-        assert (
-            len({node.target for node in nodes}) == 1
-        ), "`nodes` must all have same `target`"
+        assert len({node.target for node in nodes}) == 1, (
+            "`nodes` must all have same `target`"
+        )
         old_name = nodes[0].target
         assert isinstance(old_name, str), f"Expected str, got type({old_name})"
         # Parameter/buffer name cannot contain "."
@@ -57,7 +59,7 @@ class RestoreParameterAndBufferNames(_pass.Transform):
                 new_node.meta = node.meta
                 node.replace_all_uses_with(new_node)
                 self.module.graph.erase_node(node)
-        diagnostic.info(
+        logger.info(
             "Renamed 'self.%s' to 'self.%s', "
             "normalized from original parameter name '%s'.",
             old_name,
@@ -74,9 +76,9 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         to the same objects, allowing us to use it as key to retrieve the original name.
         """
         assert len(args) == 0, "RestoreParameterAndBufferNames does not take any args"
-        assert (
-            len(kwargs) == 0
-        ), "RestoreParameterAndBufferNames does not take any kwargs"
+        assert len(kwargs) == 0, (
+            "RestoreParameterAndBufferNames does not take any kwargs"
+        )
         # state_to_readable_name[parameter/buffer] returns the original readable name of
         # the parameter/buffer. E.g., "self.linear.weight".
         state_to_readable_name: dict[torch.nn.Parameter | torch.Tensor, str] = {}
@@ -86,7 +88,6 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         state_to_readable_name.update(
             {v: k for k, v in self.original_nn_module.named_buffers()}
         )
-        diagnostic = self.diagnostic_context.inflight_diagnostic()
 
         # old_name_to_nodes[old_name] returns a tuple of (nodes, new_name)
         # where `nodes` is a list of `get_attr` nodes with `old_name` as `target` and
@@ -95,9 +96,9 @@ class RestoreParameterAndBufferNames(_pass.Transform):
 
         for node in self.module.graph.nodes:
             if node.op == "get_attr":
-                assert isinstance(
-                    node.target, str
-                ), f"Expected str, got type({node.target})"
+                assert isinstance(node.target, str), (
+                    f"Expected str, got type({node.target})"
+                )
                 if node.target.find(".") != -1:
                     raise RuntimeError(
                         f"Unexpected target {node.target} in get_attr, found '.' in target. "
@@ -117,18 +118,13 @@ class RestoreParameterAndBufferNames(_pass.Transform):
                     old_name_to_nodes[node.target] = ([node], readable_name)
                     continue
 
-                diagnostic.info(
+                logger.info(
                     "Cannot find readable name for self.%s: %s. The name is unchanged.",
                     node.target,
                     type(attr_value),
                 )
-                if isinstance(attr_value, torch.nn.Parameter):
-                    # If it is a parameter we treat it more seriously.
-                    diagnostic.level = diagnostics.levels.WARNING
-                else:
-                    diagnostic.level = diagnostics.levels.NONE
 
         for nodes, new_name in old_name_to_nodes.values():
-            self._rename_param_and_buffer(diagnostic, nodes, new_name)
+            self._rename_param_and_buffer(nodes, new_name)
 
         return self.module

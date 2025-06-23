@@ -13,18 +13,18 @@ value {
         size: 3
       }
     }
-    float_val: 1.0
-    float_val: 1.0
-    float_val: 1.0
-    float_val: -1.0
-    float_val: -1.0
-    float_val: 1.0
-    float_val: 1.0
-    float_val: -1.0
-    float_val: -1.0
-    float_val: -1.0
-    float_val: 1.0
-    float_val: -1.0
+    float_val: 1
+    float_val: 1
+    float_val: 1
+    float_val: -1
+    float_val: -1
+    float_val: 1
+    float_val: 1
+    float_val: -1
+    float_val: -1
+    float_val: -1
+    float_val: 1
+    float_val: -1
   }
   metadata {
     plugin_data {
@@ -48,18 +48,18 @@ value {
         size: 3
       }
     }
-    float_val: 0.0
-    float_val: 2.0
-    float_val: 3.0
-    float_val: 0.0
-    float_val: 3.0
-    float_val: 1.0
-    float_val: 0.0
-    float_val: 1.0
-    float_val: 2.0
-    float_val: 1.0
-    float_val: 3.0
-    float_val: 2.0
+    float_val: 0
+    float_val: 2
+    float_val: 3
+    float_val: 0
+    float_val: 3
+    float_val: 1
+    float_val: 0
+    float_val: 1
+    float_val: 2
+    float_val: 1
+    float_val: 3
+    float_val: 2
   }
   metadata {
     plugin_data {
@@ -83,18 +83,18 @@ value {
         size: 3
       }
     }
-    float_val: 255.0
-    float_val: 0.0
-    float_val: 0.0
-    float_val: 0.0
-    float_val: 255.0
-    float_val: 0.0
-    float_val: 0.0
-    float_val: 0.0
-    float_val: 255.0
-    float_val: 255.0
-    float_val: 0.0
-    float_val: 255.0
+    float_val: 255
+    float_val: 0
+    float_val: 0
+    float_val: 0
+    float_val: 255
+    float_val: 0
+    float_val: 0
+    float_val: 0
+    float_val: 255
+    float_val: 255
+    float_val: 0
+    float_val: 255
   }
   metadata {
     plugin_data {

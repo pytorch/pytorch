@@ -59,7 +59,7 @@ void clear_registered_instances(void* ptr) {
 // SymIntList is in fact only ints, and if so, you called this with T=int64_t.
 // This precondition is NOT checked at runtime.
 template <typename T>
-IValue listToIValue(py::handle obj) {
+static IValue listToIValue(py::handle obj) {
   c10::List<T> rs;
   for (auto it = obj.begin(); it != obj.end(); it++) {
     auto elm = *it;
@@ -468,8 +468,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       } else {
         // We inspect the value to found the compiled TorchScript class
         // and then create a ivalue::Object from that class type.
-        py::str qualified_name = py::module::import("torch._jit_internal")
-                                     .attr("_qualified_name")(obj.get_type());
+        py::str qualified_name =
+            py::module::import("torch._jit_internal")
+                .attr("_qualified_name")(py::type::handle_of(obj));
         auto pyCu = get_python_cu();
         classType = pyCu->get_class(c10::QualifiedName(qualified_name));
         if (!classType) {
@@ -641,7 +642,11 @@ py::object toPyObject(IValue ivalue) {
     for (const auto i : c10::irange(list.size())) {
       t[i] = toPyObject(IValue{list.get(i)});
     }
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(t);
+#else
+    return t;
+#endif
   } else if (ivalue.isTuple()) {
     auto tuple = std::move(ivalue).toTuple();
     const auto& elements = tuple->elements();
@@ -676,7 +681,11 @@ py::object toPyObject(IValue ivalue) {
           .attr("_create_named_tuple")(
               t, unqualName, fieldNames, py::make_tuple(defaults));
     } else {
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
       return std::move(t);
+#else
+      return t;
+#endif
     }
   } else if (ivalue.isDevice()) {
     return py::cast(std::move(ivalue).toDevice());
@@ -689,7 +698,11 @@ py::object toPyObject(IValue ivalue) {
       py_dict[toPyObject(IValue{pair.key()})] =
           toPyObject(IValue{pair.value()});
     }
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(py_dict);
+#else
+    return py_dict;
+#endif
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
     auto RRefPtr =

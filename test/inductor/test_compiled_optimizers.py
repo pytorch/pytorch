@@ -108,7 +108,7 @@ def foreach_map_adam(
     with torch.no_grad():
         grads = [param.grad for param in params]
         # update step
-        updated_steps = foreach_map(lambda x: x + 1, (steps,))
+        updated_steps = foreach_map(lambda x: x + 1, steps)
         torch._foreach_copy_(steps, updated_steps)
 
         if weight_decay != 0:
@@ -116,22 +116,18 @@ def foreach_map_adam(
 
         # HOPS cannot have multiple outputs at the moment
         # need to call foreach_map once for each output
-        exp_avgs_updated = foreach_map(torch.lerp, (exp_avgs, grads, 1 - beta1))
-        exp_avgs_sq_updated = foreach_map(
-            update_exp_avg_sq, (exp_avg_sqs, grads, beta2)
-        )
+        exp_avgs_updated = foreach_map(torch.lerp, exp_avgs, grads, 1 - beta1)
+        exp_avgs_sq_updated = foreach_map(update_exp_avg_sq, exp_avg_sqs, grads, beta2)
         params_updated = foreach_map(
             update_param,
-            (
-                params,
-                steps,
-                exp_avgs_updated,
-                exp_avgs_sq_updated,
-                beta1,
-                beta2,
-                lr,
-                eps,
-            ),
+            params,
+            steps,
+            exp_avgs_updated,
+            exp_avgs_sq_updated,
+            beta1,
+            beta2,
+            lr,
+            eps,
         )
         # No input mutation for HOPS
         torch._foreach_copy_(exp_avgs, exp_avgs_updated)
@@ -923,9 +919,9 @@ class CompiledOptimizerTests(TestCase):
         import torch._dynamo
         import torch._inductor
         from torch._dynamo.debug_utils import aot_graph_input_parser
-        from torch._inductor.utils import fresh_inductor_cache
+        from torch._inductor.utils import fresh_cache
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             kwargs = aot_graph_input_parser(forward)
             torch.compile(forward)(**kwargs)
 

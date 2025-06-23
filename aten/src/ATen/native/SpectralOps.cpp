@@ -756,7 +756,7 @@ static DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim
     IntArrayRef dim_unwrapped = *dim_opt;
     dim.resize(dim_unwrapped.size());
     for (const auto i : c10::irange(dim.size())) {
-      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim(), /*wrap_scalars=*/false);
+      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim(), /*wrap_scalar=*/false);
     }
   } else {
     dim.resize(self.dim());
@@ -837,7 +837,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
         "A window was not provided. A rectangular window will be applied,"
         "which is known to cause spectral leakage. "
         "Other windows such as torch.hann_window or torch.hamming_window "
-        "can are recommended to reduce spectral leakage."
+        "are recommended to reduce spectral leakage."
         "To suppress this warning and use a rectangular window, explicitly set "
         "`window=torch.ones(n_fft, device=<device>)`.");
   }

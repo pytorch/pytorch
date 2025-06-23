@@ -43,8 +43,12 @@ class _StorageBase:
     is_sparse: _bool = False
     is_sparse_csr: _bool = False
     device: torch.device
-    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
+    # Used when
+    # (1) stashing FakeTensor device onto storage in torch.serialization.skip_data
+    # (2) stashing device onto storage to propagate to FakeTensor when torch.load under FakeTensorMode
     _fake_device: _Optional[torch.device] = None
+    # Used when loading with FakeTensorMode to give information about offset of storage in torch.saved-file
+    _checkpoint_offset: _Optional[int] = None
 
     def __init__(self, *args, **kwargs):
         pass
@@ -149,6 +153,10 @@ class _StorageBase:
         dtype=None,
     ) -> Self:
         raise NotImplementedError
+
+    @classmethod
+    def _release_ipc_counter(cls, *args, device=None, **kwargs):
+        return cls._release_ipc_counter_cuda(*args, **kwargs)
 
     @classmethod
     def _release_ipc_counter_cuda(cls, *args, **kwargs) -> Self:
@@ -535,6 +543,8 @@ def _new_dtypes():
         torch.float8_e4m3fn,
         torch.float8_e5m2fnuz,
         torch.float8_e4m3fnuz,
+        torch.float8_e8m0fnu,
+        torch.float4_e2m1fn_x2,
         torch.bits8,
         torch.bits16,
         torch.bits1x8,
@@ -1513,7 +1523,7 @@ class _LegacyStorageMeta(type):
 
 class _LegacyStorage(TypedStorage, metaclass=_LegacyStorageMeta):
     @classmethod
-    def _new_shared(cls, size):
+    def _new_shared(cls, size):  # type: ignore[override]
         """Create a new storage in shared memory with the same data type."""
         untyped_storage = torch.UntypedStorage._new_shared(size * cls()._element_size())
         return cls(wrap_storage=untyped_storage)

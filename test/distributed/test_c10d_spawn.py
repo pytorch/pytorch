@@ -8,7 +8,7 @@ import torch
 import torch.distributed as c10d
 import torch.multiprocessing as mp
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import load_tests, NO_MULTIPROCESSING_SPAWN
+from torch.testing._internal.common_utils import load_tests, run_tests
 
 
 # Torch distributed.nn is not available in windows
@@ -25,10 +25,6 @@ load_tests = load_tests
 
 if not c10d.is_available():
     print("c10d not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
-
-if NO_MULTIPROCESSING_SPAWN:
-    print("spawn not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 
@@ -250,3 +246,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         z.backward()
         x_s = ((self.rank + 1) * torch.ones(int(row), 5, device=device)).cos()
         self.assertEqual(x.grad, x_s)
+
+
+if __name__ == "__main__":
+    run_tests()

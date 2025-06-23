@@ -9,6 +9,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/resize_as_native.h>
+#include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/resize.h>
 #include <ATen/ops/_resize_output.h>
@@ -21,7 +22,7 @@ namespace at::native {
 
 // Returns true if resize is necessary
 template <typename T>
-bool _resize_output_check(const Tensor& output, ArrayRef<T> shape) {
+static bool _resize_output_check(const Tensor& output, ArrayRef<T> shape) {
   // Tests for resizing of tensors with one or more elements
   if (at::symint::sizes<T>(output).equals(shape)) {
     return false;
@@ -56,7 +57,7 @@ static void native_resize_(const Tensor& output, SymIntArrayRef shape) {
 }
 
 template <typename T>
-bool _resize_output(const Tensor& output, ArrayRef<T> shape) {
+static bool _resize_output(const Tensor& output, ArrayRef<T> shape) {
   if (_resize_output_check<T>(output, shape)) {
     // avoid a redispatch for cpu and cuda.
     // TODO: when resize_cuda_ is re-written to be unified with resize_,
@@ -196,7 +197,7 @@ static void _maybe_resize_storage(TensorImpl* self, c10::SymInt new_size_bytes) 
 }
 
 template <typename T>
-TensorImpl* _resize_impl_(
+static TensorImpl* _resize_impl_(
     TensorImpl* self,
     ArrayRef<T> size,
     at::OptionalArrayRef<T> stride,
@@ -234,7 +235,7 @@ TensorImpl* resize_impl_cpu_(
 }
 
 template <typename T>
-const Tensor& _resize_(
+static const Tensor& _resize_(
     const Tensor& self,
     ArrayRef<T> size,
     std::optional<MemoryFormat> optional_memory_format) {

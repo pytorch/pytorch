@@ -46,7 +46,7 @@ namespace torch::autograd {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* THPVariableFunctionsModule = nullptr;
 
-inline Tensor dispatch_range(
+inline static Tensor dispatch_range(
     const Scalar& start,
     const Scalar& end,
     const Scalar& step,
@@ -56,7 +56,7 @@ inline Tensor dispatch_range(
   return at::range_out(result, start, end, step);
 }
 
-inline Tensor dispatch_range(
+inline static Tensor dispatch_range(
     const Scalar& start,
     const Scalar& end,
     const Scalar& step,
@@ -221,7 +221,7 @@ static PyObject* THPVariable_sparse_coo_tensor(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)",
+      "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None, bool is_coalesced=None)",
       "sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None, bool is_coalesced=None)",
       "sparse_coo_tensor(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False, bool check_invariants=None)",
   });
@@ -486,11 +486,14 @@ static PyObject* THPVariable_numel(
 }
 
 // Sharded function definitions
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void gatherTorchFunctions_0(std::vector<PyMethodDef>& torch_functions);
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void gatherTorchFunctions_1(std::vector<PyMethodDef>& torch_functions);
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void gatherTorchFunctions_2(std::vector<PyMethodDef>& torch_functions);
 
-void gatherTorchFunctions(std::vector<PyMethodDef>& torch_functions) {
+static void gatherTorchFunctions(std::vector<PyMethodDef>& torch_functions) {
   constexpr size_t num_functions =
       sizeof(torch_functions_manual) / sizeof(torch_functions_manual[0]);
   torch_functions.assign(
@@ -734,7 +737,8 @@ void initTorchFunctions(PyObject* module) {
             src.storage(),
             dst.sym_storage_offset(),
             dst.sym_sizes(),
-            dst.sym_strides());
+            dst.sym_strides(),
+            /*check_offset_in_bounds=*/false);
       });
   py_module.def("_is_functional_tensor", [](const at::Tensor& t) {
     return at::functionalization::impl::isFunctionalTensor(t);

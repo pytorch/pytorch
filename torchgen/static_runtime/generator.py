@@ -324,6 +324,7 @@ def ivalue_type_conversion_method(
         BaseTy.str: (
             (False, "toStringView()"),
             (False, "toOptional<c10::string_view>()"),
+            (False, "toOptional<::std::string_view>()"),
         ),
     }
 
@@ -534,7 +535,7 @@ def generate_non_out_variant_call(
     kernel_name = get_kernel_name(g, backend_index)
     arg_names = (arg.name for arg in schema.schema_order_arguments())
     namespace_name = "cpu" if g.structured else "native"
-    return f'at::{namespace_name}::{kernel_name}({",".join(arg_names)})'
+    return f"at::{namespace_name}::{kernel_name}({','.join(arg_names)})"
 
 
 def generate_call_to_view_ops(
@@ -547,7 +548,7 @@ def generate_call_to_view_ops(
         kernel_name = kernel.kernel
     arg_names = (arg.name for arg in schema.schema_order_arguments())
     namespace_name = "native"
-    return f'at::{namespace_name}::{kernel_name}({",".join(arg_names)})'
+    return f"at::{namespace_name}::{kernel_name}({','.join(arg_names)})"
 
 
 def generate_out_variant_call(

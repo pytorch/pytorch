@@ -2,7 +2,7 @@
 #
 # NOTE: If any changes are being made to the ADInplaceOrView codegen please also check
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
-# The fallback is expected to mimick this codegen, so we should keep the two in sync.
+# The fallback is expected to mimic this codegen, so we should keep the two in sync.
 
 from __future__ import annotations
 
@@ -575,7 +575,7 @@ def gen_formals(f: NativeFunction) -> str:
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
         + [
-            f'{cpp.argument_type(a, binds="__placeholder__", symint=True).cpp_type()} {a.name}'
+            f"{cpp.argument_type(a, binds='__placeholder__', symint=True).cpp_type()} {a.name}"
             for a in f.func.schema_order_arguments()
         ]
     )

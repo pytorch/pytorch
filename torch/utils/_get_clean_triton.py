@@ -2,6 +2,7 @@
 import argparse
 import os
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -45,23 +46,23 @@ def rename_kernels(source_code: str) -> str:
 
 
 def merge_params(original_params: list[str], new_params: list[str]) -> list[str]:
-    assert len(new_params) >= len(original_params)
     for idx in range(len(new_params)):
         if new_params[idx] == "T":
             new_params[idx] = original_params[idx]
     return new_params
 
 
-def add_launch_params(original: str, kernel_to_params: dict[str, str]) -> str:
+def add_launch_params(
+    original: str, kernel_to_params: dict[str, tuple[str, str]]
+) -> str:
     # Regex to match the function call in the original string
-    pattern = r"(\w+)\.run\((.*), grid=(.*\)), [^)]*\)"
+    pattern = r"(\w+)\.run\((.*)\)"
 
     def replace(match) -> str:
         # Extract parts from the regex match
         func_name = match.group(1)
         params = match.group(2)
-        grid = match.group(3)
-        new_params = kernel_to_params[func_name]
+        new_params, grid = kernel_to_params[func_name]
         new_params = merge_params(params.split(", "), new_params.split(", "))
 
         # Format the new function call
@@ -80,7 +81,9 @@ def add_launch_params(original: str, kernel_to_params: dict[str, str]) -> str:
     return remove_inductor_wrappers
 
 
-def process_file(input_filename: str, output_filename: str) -> str:
+def process_file(
+    input_filename: str, output_filename: str, auto_generate_params: bool = True
+) -> str:
     with open(input_filename) as file:
         source_code = file.read()
 
@@ -94,40 +97,78 @@ def process_file(input_filename: str, output_filename: str) -> str:
     transformed_code = remove_async_compile(transformed_code)
 
     launch_params_filename = f"{input_filename}.launch_params"
+
+    # Auto-generate launch_params if they don't exist and auto_generate_params is True
+    if not os.path.exists(launch_params_filename) and auto_generate_params:
+        print(f"Launch params file {launch_params_filename} not found. Generating...")
+        try:
+            # Set environment variable and run the input file
+            env = os.environ.copy()
+            env["TORCHINDUCTOR_DUMP_LAUNCH_PARAMS"] = "1"
+
+            result = subprocess.run(
+                ["python", input_filename],
+                env=env,
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(input_filename) or ".",
+            )
+
+            if result.returncode != 0:
+                print(f"Error running {input_filename}:")
+                print(f"stdout: {result.stdout}")
+                print(f"stderr: {result.stderr}")
+                raise RuntimeError(
+                    f"Failed to generate launch params. Command failed with return code {result.returncode}"
+                )
+
+            print(f"Successfully generated {launch_params_filename}")
+
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to generate launch params by running {input_filename}: {str(e)}"
+            ) from e
+
     if not os.path.exists(launch_params_filename):
         raise RuntimeError(
-            f"Missing {launch_params_filename}. Run `TORCHINDUCTOR_DUMP_LAUNCH_PARAMS=1 python {input_filename} first."
+            f"Missing {launch_params_filename}. Run `TORCHINDUCTOR_DUMP_LAUNCH_PARAMS=1 python {input_filename}` first."
         )
 
     with open(launch_params_filename) as f:
         launch_params_meta = f.readlines()
 
     split_params = [i.split("|") for i in launch_params_meta]
-    strip_params = [[a.strip(), b.strip()] for a, b in split_params]
-    kernel_to_args: dict[str, str] = dict(strip_params)
-    transformed_code = add_launch_params(transformed_code, kernel_to_args)
+    kernel_args_grid = {a.strip(): (b.strip(), c.strip()) for a, b, c in split_params}
+    transformed_code = add_launch_params(transformed_code, kernel_args_grid)
 
     with open(output_filename, "w") as file:
         file.write(transformed_code)
+    print(f"Successfully generated {output_filename}")
     return transformed_code
 
 
 def get_clean_triton(
-    input_path: Path, output_path: Path = Path("triton_only_repro.py")
+    input_path: Path,
+    output_path: Path = Path("triton_only_repro.py"),
+    auto_generate_params: bool = True,
 ):
     """Run experiments and output results to file
 
     Args:
         input_path (Optional[Path]): Path to inductor generated output codede
         output_path (Optional[Path]): Path to write out the new python file
+        auto_generate_params (bool): Whether to automatically generate launch_params if missing
     """
-    return process_file(str(input_path), str(output_path))
+    return process_file(str(input_path), str(output_path), auto_generate_params)
 
 
 if __name__ == "__main__":
     """Sample usage:
     # Running sweep
-    python inputcode.py
+    python _get_clean_triton.py output_code.py
+
+    # To disable auto-generation of launch params:
+    python _get_clean_triton.py output_code.py --no-auto-generate
     """
     parser = argparse.ArgumentParser(
         description="Clean Inductor generated code to remove Inductor dependencies"
@@ -143,9 +184,16 @@ if __name__ == "__main__":
         default=Path("triton_only_repro.py"),
         help="Path to write out the clean triton output",
     )
+    parser.add_argument(
+        "--no-auto-generate",
+        action="store_true",
+        help="Disable automatic generation of launch_params file",
+    )
 
     # Parse the arguments
     args = parser.parse_args()
 
     # Call the function with parsed arguments
-    result = get_clean_triton(args.input_path, args.output_path)
+    result = get_clean_triton(
+        args.input_path, args.output_path, not args.no_auto_generate
+    )

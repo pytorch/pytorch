@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Optional, Union
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -31,6 +33,7 @@ class Gamma(ExponentialFamily):
         rate (float or Tensor): rate parameter of the distribution
             (often referred to as beta), rate = 1 / scale
     """
+
     arg_constraints = {
         "concentration": constraints.positive,
         "rate": constraints.positive,
@@ -51,7 +54,12 @@ class Gamma(ExponentialFamily):
     def variance(self) -> Tensor:
         return self.concentration / self.rate.pow(2)
 
-    def __init__(self, concentration, rate, validate_args=None):
+    def __init__(
+        self,
+        concentration: Union[Tensor, float],
+        rate: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.concentration, self.rate = broadcast_all(concentration, rate)
         if isinstance(concentration, _Number) and isinstance(rate, _Number):
             batch_shape = torch.Size()

@@ -23,6 +23,7 @@ from torch._C._profiler import (
     _remove_execution_trace_observer,
 )
 from torch._environment import is_fbcode
+from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
@@ -156,6 +157,7 @@ class _KinetoProfile:
         self.acc_events = acc_events
         self.custom_trace_id_callback = custom_trace_id_callback
         self.profiler: Optional[prof.profile] = None
+        self.has_cudagraphs = False
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
         if ProfilerActivity.CUDA in self.activities:
@@ -164,6 +166,8 @@ class _KinetoProfile:
             self.use_device = "xpu"
         elif ProfilerActivity.MTIA in self.activities:
             self.use_device = "mtia"
+        elif ProfilerActivity.HPU in self.activities:
+            self.use_device = "hpu"
         elif ProfilerActivity.PrivateUse1 in self.activities:
             self.use_device = _get_privateuse1_backend_name()
 
@@ -178,6 +182,10 @@ class _KinetoProfile:
         self.stop_trace()
 
     def prepare_trace(self):
+        if hasattr(torch, "_inductor"):
+            import torch._inductor.config as inductor_config
+
+            self.has_cudagraphs = inductor_config.triton.cudagraphs
         if (self.profiler is None) or (not self.acc_events):
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
@@ -218,17 +226,23 @@ class _KinetoProfile:
                     "distributedInfo", json.dumps(dist_info, cls=_NumpyEncoder)
                 )
 
-            if hasattr(torch, "_inductor"):
-                import torch._inductor.config as inductor_config
+            cuda_version = None
+            if hasattr(torch, "version"):
+                from torch.torch_version import TorchVersion
 
-                if inductor_config.triton.cudagraphs:
-                    os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
-                    self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
-                    # FIXME: CUDA Graph does not work well with CUPTI teardown.
-                    #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
-                    #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
-                    # Workaround: turn off CUPTI teardown when using CUDA Graphs.
-                    os.environ["TEARDOWN_CUPTI"] = "0"
+                cuda_version = TorchVersion(getattr(torch.version, "cuda", "0.0"))
+
+            if self.has_cudagraphs and (
+                (cuda_version and cuda_version < "12.6")
+                or not profiler_allow_cudagraph_cupti_lazy_reinit_cuda12()
+            ):
+                os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+                self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
+                # FIXME: CUDA Graph does not work well with CUPTI teardown.
+                #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
+                #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
+                # Workaround: turn off CUPTI teardown when using CUDA Graphs.
+                os.environ["TEARDOWN_CUPTI"] = "0"
 
             # Insert the preset user metadata to the trace
             for k, v in self.preset_metadata.items():
@@ -302,17 +316,22 @@ class _KinetoProfile:
         self.profiler.toggle_collection_dynamic(enable, activities)
 
     def key_averages(
-        self, group_by_input_shape: bool = False, group_by_stack_n: int = 0
+        self,
+        group_by_input_shape: bool = False,
+        group_by_stack_n: int = 0,
+        group_by_overload_name: bool = False,
     ):
-        """Averages events, grouping them by operator name and (optionally) input shapes and
-        stack.
+        """Averages events, grouping them by operator name and (optionally) input shapes, stack
+        and overload name.
 
         .. note::
             To use shape/stack functionality make sure to set record_shapes/with_stack
             when creating profiler context manager.
         """
         assert self.profiler
-        return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
+        return self.profiler.key_averages(
+            group_by_input_shape, group_by_stack_n, group_by_overload_name
+        )
 
     def events(self):
         """

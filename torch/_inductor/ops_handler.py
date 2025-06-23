@@ -681,40 +681,6 @@ class OpsHandler(Generic[T]):
     ) -> None:
         raise NotImplementedError
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # In CUDA, optimized implementations of other mathematical operations are
-    # offered separately via libdevice for double precision computation (in
-    # Triton, these go to tl.math rather than tl).  We lower to these
-    # operators when doing FP64 on CUDA.  Note that some operators
-    # unconditional go to tl.math.
-    #
-    # TODO(ezyang): Is this really the best way to do this?  What if we have
-    # abs internally route to tl.math automatically when given a double
-    # precision input?  One reason is that when doing codegen, we often don't
-    # know what the dtype of the inputs are!  (In principle we do know, but
-    # for many analyses it's not conveniently available.)
-
-    def libdevice_abs(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_exp(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_sqrt(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_cos(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_sin(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_sigmoid(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_log(self, x0: T) -> T:
-        raise NotImplementedError
-
     # halide-only
     def halide_clamp(self, value: T, size: sympy.Expr, check: bool) -> T:
         raise NotImplementedError
@@ -806,8 +772,8 @@ class DefaultHandler(OpsHandler[Any]):
                 assert self_arg == "self"
                 code.write(
                     f"""
-                    def {target}(self, {', '.join(args)}):
-                        return self._default({target!r}, ({', '.join(args)}, ), {{}})
+                    def {target}(self, {", ".join(args)}):
+                        return self._default({target!r}, ({", ".join(args)}, ), {{}})
                     """.strip()
                 )
                 code.write("\n\n")
@@ -994,8 +960,9 @@ class KernelFormatterHandler(DefaultHandler):
                 )
                 formatter._output.writeline(f"{lhs} = {name}")
 
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
+        with (
+            V.set_ops_handler(formatter),
+            patch.object(FlexibleLayout, "allow_indexing", True),
         ):
             result = ir_fn(*args)
             return formatter.getvalue(result)

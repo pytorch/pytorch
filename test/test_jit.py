@@ -458,6 +458,13 @@ class TestJit(JitTestCase):
 
             pkl_fn = pickle.dumps(fn, protocol=0)
 
+    def test_script_fn_valid_name(self):
+        @torch.jit.script
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x
+        self.assertIsNotNone(fn.__name__)
+        self.assertIsNotNone(fn.__qualname__)
+
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, cpu_device_str):
@@ -1754,8 +1761,7 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             n_ = g2.createClone(node, lambda x: g_to_g2[x])
             g2.appendNode(n_)
-            for o, no in zip(node.outputs(), n_.outputs()):
-                g_to_g2[o] = no
+            g_to_g2.update(zip(node.outputs(), n_.outputs()))
 
         for node in g.outputs():
             g2.registerOutput(g_to_g2[node])

@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -39,11 +41,17 @@ class OneHotCategorical(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities (unnormalized)
     """
+
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = constraints.one_hot
     has_enumerate_support = True
 
-    def __init__(self, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        probs: Optional[Tensor] = None,
+        logits: Optional[Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self._categorical = Categorical(probs, logits)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
@@ -125,6 +133,7 @@ class OneHotCategoricalStraightThrough(OneHotCategorical):
     [1] Estimating or Propagating Gradients Through Stochastic Neurons for Conditional Computation
     (Bengio et al., 2013)
     """
+
     has_rsample = True
 
     def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:

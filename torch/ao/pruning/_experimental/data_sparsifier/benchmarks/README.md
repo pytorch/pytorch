@@ -8,7 +8,7 @@ The objective of this exercise is to use the data sparsifier to prune the embedd
 3. **Model forward time**: Can we speed up the model forward time by utilizing the sparsity? Specifically, can we introduce torch.sparse interim to reduce number of computations.
 
 ## Scope
-The [DataNormSparsifier](https://github.com/pytorch/pytorch/blob/master/torch/ao/sparsity/_experimental/data_sparsifier/data_norm_sparsifier.py) is used to sparsify the embeddings of the DLRM model. The model is sparsified for all the combinations of -
+The [DataNormSparsifier](https://github.com/pytorch/pytorch/blob/main/torch/ao/pruning/_experimental/data_sparsifier/data_norm_sparsifier.py) is used to sparsify the embeddings of the DLRM model. The model is sparsified for all the combinations of -
 1. Sparsity Levels: [0.0, 0.1, 0.2, ... 0.9, 0.91, 0.92, ... 0.99, 1.0]
 2. Sparse Block shapes: (1,1) and (1,4)
 3. Norm: L1 and L2

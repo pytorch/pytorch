@@ -109,9 +109,9 @@ assert_type(INT % TENSOR, Tensor)
 assert_type(INT**TENSOR, Tensor)
 assert_type(INT << TENSOR, Tensor)
 assert_type(INT >> TENSOR, Tensor)
-assert_type(INT & TENSOR, Any)  # type: ignore[operator]
-assert_type(INT | TENSOR, Any)  # type: ignore[operator]
-assert_type(INT ^ TENSOR, Any)  # type: ignore[operator]
+assert_type(INT & TENSOR, Tensor)
+assert_type(INT | TENSOR, Tensor)
+assert_type(INT ^ TENSOR, Tensor)
 
 assert_type(TENSOR == FLOAT, Tensor)
 assert_type(TENSOR != FLOAT, Tensor)

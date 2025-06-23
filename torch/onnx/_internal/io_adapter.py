@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Any, Callable, Protocol, runtime_checkable, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
+from typing_extensions import Protocol, runtime_checkable
 
 import torch
 import torch.export as torch_export
@@ -11,8 +12,6 @@ from torch.utils import _pytree as pytree
 if TYPE_CHECKING:
     import inspect
     from collections.abc import Mapping, Sequence
-
-# TODO(bowbao): Add diagnostics for IO adapters.
 
 
 @runtime_checkable
@@ -176,7 +175,6 @@ def _assert_identical_pytree_spec(
     Raises:
         ValueError: If the two `TreeSpec` objects are not identical.
     """
-    # TODO(bowbao): Turn this check into diagnostic. Consider warning instead of error.
     pass_if_any_checks: Sequence[Callable[[], bool]] = [
         lambda: spec1 == spec2,
         # FIXME: Bug in `dynamo.export`. Sometimes outputs returned in 'list' instead of 'tuple'.
@@ -639,9 +637,9 @@ class PrependParamsAndBuffersAotAutogradOutputStep(OutputAdaptStep):
             flattened_outputs: The flattened model outputs.
         """
 
-        assert isinstance(
-            model, torch_export.ExportedProgram
-        ), "'model' must be torch_export.ExportedProgram"
+        assert isinstance(model, torch_export.ExportedProgram), (
+            "'model' must be torch_export.ExportedProgram"
+        )
         ordered_buffers = tuple(
             model.state_dict[name]
             if name in model.state_dict
