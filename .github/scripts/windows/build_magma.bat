@@ -17,7 +17,6 @@ if errorlevel 1 exit /b 1
 
 set "PATH=C:\Tools;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUVER%\bin;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUVER%\libnvvp;%PATH%"
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUVER%
-set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
 
 mkdir magma_cuda%CUVER_NODOT%
 cd magma_cuda%CUVER_NODOT%
@@ -41,7 +40,7 @@ if "%CUVER_NODOT%" == "129" (
 if "%CUVER_NODOT%" == "128" (
   set CUDA_ARCH_LIST=-gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120
 )
-if "%CUVER_NODOT:~0,2%" == "12" if NOT "%CUVER_NODOT%" == "128" (
+if "%CUVER_NODOT%" == "126" (
   set CUDA_ARCH_LIST=-gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90
 )
 

@@ -112,12 +112,12 @@ def find_unimplemented_v2_calls(path):
 
                 for node in ast.walk(tree):
                     if isinstance(node, ast.FunctionDef):
-                        if node.name == "unimplemented_v2":
+                        if node.name in ["unimplemented_v2", "unimplemented_v2_with_warning"]:
                             continue
                     if (
                         isinstance(node, ast.Call)
                         and isinstance(node.func, ast.Name)
-                        and node.func.id == "unimplemented_v2"
+                        and node.func.id in ["unimplemented_v2", "unimplemented_v2_with_warning"]
                     ):
                         info = {
                             "gb_type": None,

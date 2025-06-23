@@ -1,9 +1,11 @@
 # Owner(s): ["module: dynamo"]
 
+import logging
 import re
 import traceback
 import unittest
 import warnings
+from functools import lru_cache
 
 import torch
 import torch._dynamo
@@ -288,7 +290,7 @@ Backend compiler exception
         return x + 1
 
 
- For more details about this graph break, please visit: None""",
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0219""",
         )
 
     def test_unsupported_builtin(self):
@@ -955,7 +957,7 @@ Graph break: skip: from user code at:
 Data-dependent assertion failed (cannot compile partial graph)
   Explanation: Dynamo has determined when encountering a data-dependent assert failure that it should not compile the partial graph.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
-  Hint: Use `torch._assert()` to raise a hard AssertionError when the check fails. This error will propagate back the user code that called the compiled function (i.e. Dynamo wil not trace any exception handling).
+  Hint: Use `torch._assert()` to raise a hard AssertionError when the check fails. This error will propagate back the user code that called the compiled function (i.e. Dynamo will not trace any exception handling).
   Hint: Remove the assert statement.
   Hint: Move the assert statement outside of any context managers in order to graph break with partial graph compilation (if fullgraph=False).
 
@@ -1218,6 +1220,61 @@ User code traceback:
     f3(x)
   File "test_error_messages.py", line N, in f3
     torch._dynamo.graph_break()  # correct
+""",
+        )
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_lru_cache_warning_logs_user_stack_trace(self, records):
+        @lru_cache
+        def foo(x):
+            return x + 1
+
+        torch.compile(foo, backend="eager")(torch.randn(4))
+
+        lru_cache_log = None
+        for record in records:
+            if "call to a lru_cache wrapped function at:" in record.getMessage():
+                lru_cache_log = record.getMessage()
+                break
+
+        self.assertIsNotNone(lru_cache_log, "No lru_cache warning was logged")
+
+        self.assertExpectedInline(
+            munge_exc(lru_cache_log),
+            """\
+call to a lru_cache wrapped function at: _dynamo/external_utils.py:N
+  File "test_error_messages.py", line N, in test_lru_cache_warning_logs_user_stack_trace
+    torch.compile(foo, backend="eager")(torch.randn(4))
+""",
+        )
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_lru_cache_warning_logs_nested_call(self, records):
+        @lru_cache
+        def foo(x):
+            return x + 1
+
+        def nested(x):
+            return foo(x)
+
+        torch.compile(nested, backend="eager")(torch.randn(4))
+
+        lru_cache_log = None
+        for record in records:
+            if "call to a lru_cache wrapped function at:" in record.getMessage():
+                lru_cache_log = record.getMessage()
+                break
+
+        self.assertIsNotNone(lru_cache_log, "No lru_cache warning was logged")
+
+        self.assertExpectedInline(
+            munge_exc(lru_cache_log),
+            """\
+call to a lru_cache wrapped function at: test_error_messages.py:N
+  File "test_error_messages.py", line N, in test_lru_cache_warning_logs_nested_call
+    torch.compile(nested, backend="eager")(torch.randn(4))
+  File "test_error_messages.py", line N, in nested
+    return foo(x)
 """,
         )
 
