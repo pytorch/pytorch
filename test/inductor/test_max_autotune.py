@@ -1073,10 +1073,10 @@ class TestMaxAutotune(TestCase):
             out, code = run_and_get_code(compiled_func, a, b)
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_0.run"
-            ).check("decompose_k").check_regex("s[0-9]+ = primals_1").check_regex(
-                "2*s[0-9]+"
-            ).check(
-                "primals_1 = 32"
+            ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
+                r"2\*s[0-9]+"
+            ).check_regex(
+                "s[0-9]+ = 32"
             ).run(
                 code[0]
             )
@@ -1085,6 +1085,51 @@ class TestMaxAutotune(TestCase):
                 f(a, b),
                 atol=1e-2,
                 rtol=1e-2,
+            )
+
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+    )
+    def test_max_autotune_decompose_k_dynamic_input_bwd(self):
+        def f(a, b):
+            # 256 * s0
+            a_in = torch.cat([a for _ in range(256)], dim=0)
+            return (a_in @ b).relu().sum()
+
+        a = torch.randn(8, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True)
+        b = torch.randn(
+            64, 32768, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+
+        torch._dynamo.reset()
+        torch._dynamo.maybe_mark_dynamic(a, 0)
+        compiled_func = torch.compile(f)
+        res = compiled_func(a, b)
+        res.backward()
+
+        with mock.patch(
+            "torch._inductor.kernel.mm.use_decompose_k_choice"
+        ) as decomp_mock:
+            decomp_mock.return_value = True
+
+            out, code = run_and_get_code(compiled_func, a, b)
+            out.backward()
+
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_0.run"
+            ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
+                r"256\*s[0-9]+"
+            ).check_regex(
+                "s[0-9]+ = 8"
+            ).run(
+                # code[1] in this case given backwards
+                code[1]
             )
 
     @skipIfXpu
