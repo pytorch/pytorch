@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -28,10 +28,10 @@ class TestPackage(torch._inductor.test_case.TestCase):
         return path
 
     @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", "cuda"))
+    @parametrize("device", ("cpu", GPU_TYPE))
     def test_basic_fn(self, backend, device):
-        if device == "cuda" and not HAS_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == GPU_TYPE and not HAS_TRITON:
+            raise unittest.SkipTest("Requires GPU/Triton")
         ctx = DynamoStore()
 
         def fn(x):
@@ -69,10 +69,10 @@ class TestPackage(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, compiled_fn(*args))
 
     @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", "cuda"))
+    @parametrize("device", ("cpu", GPU_TYPE))
     def test_graph_break_bomb(self, backend, device):
-        if device == "cuda" and not HAS_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == GPU_TYPE and not HAS_TRITON:
+            raise unittest.SkipTest("Requires GPU/Triton")
 
         ctx = DynamoStore()
 
@@ -131,10 +131,10 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 compiled_fn(torch.tensor(N), 0, N - 1)
 
     @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", "cuda"))
+    @parametrize("device", ("cpu", GPU_TYPE))
     def test_dynamic_shape(self, backend, device):
-        if device == "cuda" and not HAS_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == GPU_TYPE and not HAS_TRITON:
+            raise unittest.SkipTest("Requires GPU/Triton")
         ctx = DynamoStore()
 
         def fn(x):
