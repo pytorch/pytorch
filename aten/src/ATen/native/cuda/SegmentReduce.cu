@@ -629,4 +629,4 @@ REGISTER_DISPATCH(
 
 } // namespace at::native
 
-#endif // _WIN32 && __CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 9
+#endif // _WIN32 && defined(CUDART_VERSION) && CUDART_VERSION >= 12090
