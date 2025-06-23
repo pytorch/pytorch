@@ -7,22 +7,21 @@ from typing import Any, Optional
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
-from torch.distributed.checkpoint.filesystem import SerializationFormat
-from torch.distributed.checkpoint.hf_utils import (
-    _metadata_fn,
+from torch.distributed.checkpoint._hf_utils import (
+    _gen_file_name,
+    _get_dtype,
+    _get_safetensors_file_metadata,
     _HFStorageInfo,
+    _metadata_fn,
     CUSTOM_METADATA_KEY,
-    DATA_KEY,
     DATA_OFFSETS_KEY,
     DEFAULT_EXTRA_METADATA_KEY,
     DTYPE_KEY,
     SAVED_OFFSETS_KEY,
     SHAPE_KEY,
     SUFFIX,
-    _gen_file_name,
-    _get_safetensors_file_metadata,
-    _get_dtype,
 )
+from torch.distributed.checkpoint.filesystem import SerializationFormat
 from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
     Metadata,
@@ -202,8 +201,6 @@ class HuggingFaceStorageReader(FsspecReader):
             super().__init__(path=path)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
-        from safetensors import deserialize  # type: ignore[import-not-found]
-
         per_file: dict[str, list[ReadItem]] = {}
 
         for read_item in plan.items:
@@ -214,7 +211,7 @@ class HuggingFaceStorageReader(FsspecReader):
         for file_name, reqs in per_file.items():
             with self.fs.create_stream(file_name, "rb") as stream:
                 for req in reqs:
-                    item_md: _HFStorageInfo = self.storage_data[req.storage_index]
+                    item_md = self.storage_data[req.storage_index]
 
                     stream.seek(item_md.offset)
                     tensor_bytes = stream.read(item_md.length)
