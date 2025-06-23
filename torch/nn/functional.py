@@ -5696,7 +5696,7 @@ def _in_projection_packed(
             if q.is_nested:
                 # chunk() for nested tensors and make it contiguous
                 return (t.contiguous() for t in torch.chunk(proj, 3, dim=-1))
-            else:    
+            else:
                 # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
                 proj = (
                     proj.unflatten(-1, (3, E))
@@ -5721,7 +5721,7 @@ def _in_projection_packed(
                 q_proj = q_proj.continuous()
                 k_proj, v_proj = (t.contiguous() for t in kv_proj.chunk(2, dim=-1))
                 return q_proj, k_proj, v_proj
-            else:   
+            else:
                 kv_proj = (
                     kv_proj.unflatten(-1, (2, E))
                     .unsqueeze(0)
@@ -5736,9 +5736,15 @@ def _in_projection_packed(
             b_q = b_k = b_v = None
         else:
             b_q, b_k, b_v = b.chunk(3)
-        q_proj = linear(q, w_q, b_q).contiguous() if q.is_nested else linear(q, w_q, b_q)
-        k_proj = linear(k, w_k, b_k).contiguous() if k.is_nested else linear(k, w_k, b_k)
-        v_proj = linear(v, w_v, b_v).contiguous() if v.is_nested else linear(v, w_v, b_v)
+        q_proj = (
+            linear(q, w_q, b_q).contiguous() if q.is_nested else linear(q, w_q, b_q)
+        )
+        k_proj = (
+            linear(k, w_k, b_k).contiguous() if k.is_nested else linear(k, w_k, b_k)
+        )
+        v_proj = (
+            linear(v, w_v, b_v).contiguous() if v.is_nested else linear(v, w_v, b_v)
+        )
         return q_proj, k_proj, v_proj
 
 
@@ -5812,6 +5818,7 @@ def _in_projection(
     k_proj = linear(k, w_k, b_k).contiguous() if k.is_nested else linear(k, w_k, b_k)
     v_proj = linear(v, w_v, b_v).contiguous() if v.is_nested else linear(v, w_v, b_v)
     return q_proj, k_proj, v_proj
+
 
 scaled_dot_product_attention = _add_docstr(
     torch._C._nn.scaled_dot_product_attention,
@@ -6161,12 +6168,12 @@ def multi_head_attention_forward(
 
     Shape:
         Inputs:
-        - query: :math:`(L, E)` or :math:`(L, N, E)` or :math:`(N, J, E)` if using nested jagged tensors, where L is the target sequence length, N is the batch size, E is
-          the embedding dimension, J is variable target sequence length.
-        - key: :math:`(S, E)` or :math:`(S, N, E)` or :math:`(N, J, E)` if using nested jagged tensors, where S is the source sequence length, N is the batch size, E is
-          the embedding dimension, J is variable source sequence length.
-        - value: :math:`(S, E)` or :math:`(S, N, E)` or :math:`(N, J, E)` where S is the source sequence length, N is the batch size, E is
-          the embedding dimension, J is variable source sequence length.
+        - query: :math:`(L, E)` or :math:`(L, N, E)` or :math:`(N, J, E)` if using nested jagged tensors, where L is
+          the target sequence length, N is the batch size, E is the embedding dimension, J is variable target sequence length.
+        - key: :math:`(S, E)` or :math:`(S, N, E)` or :math:`(N, J, E)` if using nested jagged tensors, where S is the source
+          sequence length, N is the batch size, E is the embedding dimension, J is variable source sequence length.
+        - value: :math:`(S, E)` or :math:`(S, N, E)` or :math:`(N, J, E)` where S is the source sequence length, N is the
+          batch size, E is the embedding dimension, J is variable source sequence length.
         - key_padding_mask: :math:`(S)` or :math:`(N, S)` where N is the batch size, S is the source sequence length.
           If a FloatTensor is provided, it will be directly added to the value.
           If a BoolTensor is provided, the positions with the
@@ -6183,8 +6190,8 @@ def multi_head_attention_forward(
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
 
         Outputs:
-        - attn_output: :math:`(L, E)` or :math:`(L, N, E)` or :math:`(N, J, E)` if using nested jagged tensors, where L is the target sequence length, N is the batch size,
-          E is the embedding dimension, J is variable target sequence length.
+        - attn_output: :math:`(L, E)` or :math:`(L, N, E)` or :math:`(N, J, E)` if using nested jagged tensors, where L is the
+          target sequence length, N is the batch size, E is the embedding dimension, J is variable target sequence length.
         - attn_output_weights: Only returned when ``need_weights=True``. If ``average_attn_weights=True``, returns
           attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
           :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
