@@ -216,7 +216,7 @@ using qnormalize_nhwc_fn = void (*)(
 using qprelu_fn = void (*)(Tensor& /*out*/, const Tensor& /*qx*/,
                            const Tensor& /*qw*/);
 
-using qmul_tensor_cpu_fn = void (*)(
+using qbinary_eltwise_cpu_fn = void (*)(
     Tensor& /*out*/,
     const Tensor& /*qx*/,
     double /*qx_scale*/,
@@ -226,6 +226,17 @@ using qmul_tensor_cpu_fn = void (*)(
     int64_t /*qy_zero_point*/,
     double /*output_scale*/,
     int64_t /*output_zero_point*/);
+
+using qbatch_norm_cpu_fn = void(*)(
+    int64_t /*N*/,
+    int64_t /*C*/,
+    int64_t /*H * W*/,
+    int64_t /*in_zero_point*/,
+    int64_t /*out_zero_point*/,
+    const Tensor& /*input*/,
+    const Tensor& /*a*/,
+    const Tensor& /*b*/,
+    Tensor& /*output*/);
 
 DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub)
 DECLARE_DISPATCH(qadaptive_avg_pool3d_fn, qadaptive_avg_pool3d_ndhwc_stub)
@@ -263,6 +274,9 @@ DECLARE_DISPATCH(qupsample_bilinear2d_fn, qupsample_bilinear2d_nhwc_stub)
 DECLARE_DISPATCH(qmean_inner_dim_fn, qmean_inner_dim_stub)
 DECLARE_DISPATCH(qstd_inner_dim_fn, qstd_inner_dim_stub)
 DECLARE_DISPATCH(qprelu_fn, qprelu_stub)
-DECLARE_DISPATCH(qmul_tensor_cpu_fn, qmul_tensor_cpu_stub)
+DECLARE_DISPATCH(qbinary_eltwise_cpu_fn, qmul_tensor_cpu_stub)
+DECLARE_DISPATCH(qbinary_eltwise_cpu_fn, qadd_tensor_cpu_stub)
+DECLARE_DISPATCH(qbinary_eltwise_cpu_fn, qadd_relu_tensor_cpu_stub)
+DECLARE_DISPATCH(qbatch_norm_cpu_fn, qbatch_norm_cpu_stub)
 
 } // namespace at::native

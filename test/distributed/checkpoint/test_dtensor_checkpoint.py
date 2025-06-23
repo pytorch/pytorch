@@ -4,7 +4,7 @@ from typing import Union
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
-from torch.distributed._tensor import (
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,

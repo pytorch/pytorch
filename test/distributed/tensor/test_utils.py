@@ -9,6 +9,7 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._utils import (
     _compute_local_shape_and_global_offset,
     _explicit_order_placements,
+    compute_global_tensor_shape,
     compute_local_shape_and_global_offset,
 )
 from torch.distributed.tensor.debug import CommDebugMode
@@ -140,6 +141,75 @@ class UtilTest(DTensorTestBase):
         for i in range(n_dim):
             offset.append(((global_offset[i]), (global_offset[i] + local_size[i])))
         return offset
+
+    @with_comms
+    def test_compute_global_tensor_shape_1D(self):
+        one_d_placements = [[Shard(1)], [Shard(0)], [Replicate()]]
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        for placements in one_d_placements:
+            if isinstance(placements[0], Shard):
+                uneven_dim = list(range(self.world_size))
+                local_shape = (
+                    torch.Size([5, uneven_dim[self.rank]])
+                    if placements[0].dim == 1
+                    else torch.Size([uneven_dim[self.rank], 5])
+                )
+                expected_global_shape = (
+                    torch.Size([5, sum(uneven_dim)])
+                    if placements[0].dim == 1
+                    else torch.Size([sum(uneven_dim), 5])
+                )
+            else:
+                expected_global_shape = torch.Size([5, 5])
+                local_shape = torch.Size([5, 5])
+            global_shape = compute_global_tensor_shape(
+                local_shape, device_mesh, placements
+            )
+            self.assertEqual(global_shape, expected_global_shape)
+
+    @with_comms
+    def test_compute_global_tensor_shape_1D_invalid_shape(self):
+        one_d_placement = [Shard(1)]
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        uneven_dim = list(range(self.world_size))
+        local_shape = (
+            torch.Size([5, uneven_dim[self.rank]])
+            if self.rank % 2 == 0
+            else torch.Size([6, uneven_dim[self.rank]])
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Non-sharded dimentions should have identical size across ranks.",
+        ):
+            _ = compute_global_tensor_shape(
+                local_shape,
+                device_mesh,
+                one_d_placement,
+            )
+
+    @with_comms
+    def test_compute_global_tensor_shape_failure_2D(self):
+        placement_2D = [Shard(0), Shard(1)]
+        device_mesh_2D = init_device_mesh(self.device_type, (2, 2))
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "compute_global_tensor_shape only supports 1 placement for now.",
+        ):
+            _ = compute_global_tensor_shape(
+                torch.Size([2, 2]),
+                device_mesh_2D,
+                placement_2D,
+            )
+        placement_1D = [Shard(0)]
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected one placement per mesh dim",
+        ):
+            _ = compute_global_tensor_shape(
+                torch.Size([2, 2]),
+                device_mesh_2D,
+                placement_1D,
+            )
 
     @with_comms
     def test_compute_local_shape_and_global_offset_1D(self):

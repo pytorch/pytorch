@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 
 import numpy as np
@@ -47,6 +48,11 @@ class NestedModelForDynamicShapes(torch.nn.Module):
             return x + w, x + y, c
         else:
             return x - w, x - y, c
+
+
+class SampleModelForDimOne(torch.nn.Module):
+    def forward(self, x, y, z):
+        return torch.cat((x, y), axis=1) + z
 
 
 class TestExportAPIDynamo(common_utils.TestCase):
@@ -287,6 +293,17 @@ class TestExportAPIDynamo(common_utils.TestCase):
         input = torch.randn(2)
         self.assert_export(Model(), (input))
 
+    def test_export_successful_when_dynamic_dimension_is_one(self):
+        self.assert_export(
+            SampleModelForDimOne(),
+            (torch.randn(1, 3), torch.randn(1, 5), torch.randn(1, 8)),
+            dynamic_shapes=(
+                {0: "batch", 1: "sequence"},
+                {0: "batch", 1: "sequence"},
+                {0: "batch", 1: "sequence"},
+            ),
+        )
+
 
 class TestCustomTranslationTable(common_utils.TestCase):
     def test_custom_translation_table_overrides_ops(self):
@@ -372,6 +389,51 @@ class TestCustomTranslationTable(common_utils.TestCase):
         all_nodes = [n.op_type for n in onnx_program.model.graph]
         self.assertIn("Sub", all_nodes)
         self.assertNotIn("Add", all_nodes)
+
+    def test_custom_translation_table_supports_custom_op_with_its_decomp(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            @torch.library.register_fake("mylib::foo")
+            def foo_impl(a, b):
+                return a + b
+
+            class M(torch.nn.Module):
+                def forward(self, x, y):
+                    return torch.ops.mylib.foo(x, y)
+
+            def onnx_add(self: FLOAT, other: FLOAT) -> FLOAT:
+                # Replace add with Sub
+                return op.Sub(self, other)
+
+            # With the custom op defined, we can use it in the model
+            # and replace it with a custom translation table
+            custom_translation_table = {
+                torch.ops.mylib.foo.default: onnx_add,
+            }
+            onnx_program = torch.onnx.export(
+                M(),
+                (torch.ones(3, 3), torch.ones(3, 3)),
+                custom_translation_table=custom_translation_table,
+                dynamo=True,
+            )
+            all_nodes = [n.op_type for n in onnx_program.model.graph]
+            self.assertIn("Sub", all_nodes)
+            self.assertNotIn("Add", all_nodes)
+
+            # Without the custom op defined, it's going to be decomposed
+            onnx_program_decomp = torch.onnx.export(
+                M(), (torch.ones(3, 3), torch.ones(3, 3)), dynamo=True
+            )
+            all_nodes_decomp = [n.op_type for n in onnx_program_decomp.model.graph]
+            self.assertIn("Add", all_nodes_decomp)
+            self.assertNotIn("Sub", all_nodes_decomp)
 
 
 class TestFakeTensorExport(common_utils.TestCase):
@@ -493,6 +555,15 @@ class TestFakeTensorExport(common_utils.TestCase):
 
         node_names = [n.op_type for n in onnx_program.model.graph]
         self.assertIn("Sin", node_names)
+
+    def test_torchscript_exporter_raises_deprecation_warning(self):
+        # Test that the deprecation warning is raised when using torchscript exporter
+        with self.assertWarnsRegex(
+            DeprecationWarning, "You are using the legacy TorchScript-based ONNX export"
+        ):
+            torch.onnx.export(
+                SampleModel(), (torch.randn(1, 1, 2),), io.BytesIO(), dynamo=False
+            )
 
 
 if __name__ == "__main__":

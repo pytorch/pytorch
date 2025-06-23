@@ -16,6 +16,18 @@ META_TAG = "MODULE_TYPE"
 MODULE_TAG = "_MAIN_MODULE"
 CONST_MODULE_TAG = "_CONST_MODULE"
 
+_dont_constant_fold: list[torch.fx.node.Target] = []
+
+
+def add_dont_constant_fold(op: torch.fx.node.Target) -> None:
+    global _dont_constant_fold
+    _dont_constant_fold.append(op)
+
+
+def clear_dont_constant_fold() -> None:
+    global _dont_constant_fold
+    _dont_constant_fold.clear()
+
 
 def replace_node_with_constant(
     gm: torch.fx.GraphModule,
@@ -145,6 +157,9 @@ class ConstantFolder(torch.fx.Interpreter):
             # For the pattern fp32_weight -> q -> dq
             # We only folding fp32_weight -> q
             # int8_weight and leave dq in graph to be fused
+            return True
+
+        if node.target in _dont_constant_fold:
             return True
         return False
 
