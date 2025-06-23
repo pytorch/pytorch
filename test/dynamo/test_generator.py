@@ -352,7 +352,7 @@ class GraphModule(torch.nn.Module):
         ctx = whoo()
         next(ctx)
         with self.assertRaisesRegex(
-            Unsupported, "Generator as graph argument is not supported"
+            Unsupported, "Attempted to trace a generator object as a graph argument."
         ):
             fn(t, ctx)
 
@@ -371,7 +371,7 @@ class GraphModule(torch.nn.Module):
         ctx = whoo(t)
         next(ctx)
         with self.assertRaisesRegex(
-            Unsupported, "Generator as graph argument is not supported"
+            Unsupported, "Attempted to trace a generator object as a graph argument."
         ):
             fn(t, ctx)
 
@@ -392,7 +392,7 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo()
         with self.assertRaisesRegex(
-            Unsupported, "Generator as graph argument is not supported"
+            Unsupported, "Attempted to trace a generator object as a graph argument."
         ):
             fn(t, ctx)
 
@@ -410,7 +410,7 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo(t)
         with self.assertRaisesRegex(
-            Unsupported, "Generator as graph argument is not supported"
+            Unsupported, "Attempted to trace a generator object as a graph argument."
         ):
             fn(t, ctx)
 

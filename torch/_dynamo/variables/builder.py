@@ -1495,6 +1495,16 @@ class VariableBuilder:
                 return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
             else:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
+        elif isinstance(value, types.GeneratorType):
+            # This will be tricky to support as the generator can be already advanced
+            unimplemented_v2(
+                gb_type="Generator object as graph argument",
+                context="",
+                explanation="Attempted to trace a generator object as a graph argument.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
         else:
             return self.wrap_user_defined(value)
 
