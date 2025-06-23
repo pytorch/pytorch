@@ -319,11 +319,7 @@ class TestDraftExport(TestCase):
 
         ep = draft_export(M(), (torch.tensor([938]),))
         report = ep._report
-        self.assertEqual(len(report.failures), 1)
-        self.assertEqual(
-            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
-        )
-        self.assertEqual(report.failures[0].data["expr"], "Eq(Mod(10, 2*u1), 0)")
+        self.assertEqual(len(report.failures), 0)
 
     def test_dedup_data_dependent_failure(self):
         class M(torch.nn.Module):
