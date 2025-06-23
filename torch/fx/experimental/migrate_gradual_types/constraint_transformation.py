@@ -823,7 +823,7 @@ def calc_last_two_dims(constraint, d: list[DVar]):
         [BinConstraintD(d[3], Dyn, op_neq), BinConstraintD(b4, Dyn, op_neq)]
     )
 
-    # transform parameters into tuples incase they are not already
+    # transform parameters into tuples in case they are not already
     padding = (
         (constraint.padding, constraint.padding)
         if isinstance(constraint.padding, int)

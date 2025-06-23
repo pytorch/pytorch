@@ -95,7 +95,7 @@ class _MinimizerBase:
 
     Currently we provides two ways to traverse the graph and generate submodules.
         1. Sequential traversal: this will traverse the graph node by node and generate
-           one submodule with one sigle node.
+           one submodule with one single node.
         2. Binary searching: this will do a binary search style traversal on the graph.
 
     For internal Users, a guide can be found here https://fb.quip.com/HDtuAgiKGfkP.
@@ -648,7 +648,7 @@ class _MinimizerBase:
     ) -> NodeSet:
         """
         Traverse topologically sorted node list
-        Find minimium block (start_idx, end_idx) which contains the culprit
+        Find minimum block (start_idx, end_idx) which contains the culprit
         1st pass: search for end_idx by finding the last node in culprit block
         where Numerical accuracy (0, end_idx) > threshold
         2nd pass: search for start_idx by finding the first node in culprit block

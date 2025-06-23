@@ -37,6 +37,7 @@ ser'de
 ser'der
 ser'des
 statics
+supercede
 supercedes
 te
 WONT
