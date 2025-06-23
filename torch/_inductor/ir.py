@@ -7282,8 +7282,8 @@ class FallbackKernel(ExternKernelAlloc):
             return_type: Union[torch.TensorType, torch.ListType, torch.JitType],
             output: Union[IRNode, Sequence[IRNode]],
         ) -> export_schema.Argument:
-            if isinstance(return_type, torch.TensorType):
-                # For single Tensor
+            if isinstance(return_type, (torch.TensorType, torch.NoneType)):
+                # For single Tensor or None
                 out = output
                 if isinstance(output, (list, tuple)):
                     assert len(output) == 1
