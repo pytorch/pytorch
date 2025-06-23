@@ -83,12 +83,6 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
         If ``None``, all dimensions are reduced.
 """
     },
-    {
-        "opt_dim_all_reduce_without_none": """
-    dim (int or tuple of ints, optional): the dimension to reduce.
-        If omitted, all dimensions are reduced. Explicit ``None`` is not supported.
-"""
-    },
 )
 
 single_dim_common = merge_dicts(
@@ -107,6 +101,11 @@ single_dim_common = merge_dicts(
         "opt_dim_all_reduce": """
     dim (int, optional): the dimension to reduce.
         If ``None``, all dimensions are reduced.
+"""
+    },
+    {
+        "opt_dim_without_none": """
+    dim (int, optional): the dimension to reduce. If omitted, all dimensions are reduced. Explicit ``None`` is not supported.
 """
     },
     {
@@ -6549,7 +6548,7 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
-    {opt_dim_all_reduce_without_none}
+    {opt_dim_without_none}
     {opt_keepdim}
 
 Keyword args:
@@ -6580,7 +6579,7 @@ Example::
 
 See :func:`torch.maximum`.
 
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
@@ -7167,7 +7166,7 @@ the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {opt_dim_all_reduce}
+    {opt_dim_without_none}
     {opt_keepdim}
 
 Keyword args:
