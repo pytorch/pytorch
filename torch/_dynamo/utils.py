@@ -4441,9 +4441,11 @@ def is_parameter_freezing():
 
 
 def get_torch_function_mode_stack():
-    return [
+    TF_list = [
         get_torch_function_mode_stack_at(i) for i in range(_len_torch_function_stack())
     ]
+    print(f"get_torch_function_mode_stack: {TF_list}")
+    return TF_list
 
 
 def get_torch_function_mode_stack_at(ind):

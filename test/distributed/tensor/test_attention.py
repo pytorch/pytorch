@@ -452,7 +452,7 @@ class RingFlexAttentionTest(DTensorTestBase):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         # Compile the flex_attention function
-        flex_attention = torch.compile(flex_attention, dynamic=False)
+        flex_attention = torch.compile(flex_attention, dynamic=False, fullgraph=True)
         Q_BLOCK_SIZE_DEFAULT = 128
         KV_BLOCK_SIZE_DEFAULT = Q_BLOCK_SIZE_DEFAULT
 
@@ -464,122 +464,125 @@ class RingFlexAttentionTest(DTensorTestBase):
         dim = 32
         nheads = 8
 
-        q = torch.rand(
-            (bs, nheads, query_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        k = torch.rand(
-            (bs, nheads, context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        v = torch.rand(
-            (bs, nheads, context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-
-        block_mask = create_block_mask(
-            causal_mask,
-            B=1,
-            H=1,
-            Q_LEN=query_tokens,
-            KV_LEN=context_tokens,
-            device=self.device_type,
-        )
-
-        expect_out, expect_lse = flex_attention(
-            q, k, v, block_mask=block_mask, return_lse=True
-        )
-        expect_out.sum().backward()
-
-        # test flex attention on DTensor
         device_mesh = init_device_mesh(
             device_type=self.device_type,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
 
-        q_local_size = list(q.shape)
-        q_local_size[2] //= self.world_size
-        k_local_size = list(k.shape)
-        k_local_size[2] //= self.world_size
+        for i in range(10):
+            print(i)
+            q = torch.rand(
+                (bs, nheads, query_tokens, dim),
+                device=self.device_type,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            k = torch.rand(
+                (bs, nheads, context_tokens, dim),
+                device=self.device_type,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            v = torch.rand(
+                (bs, nheads, context_tokens, dim),
+                device=self.device_type,
+                dtype=dtype,
+                requires_grad=True,
+            )
 
-        # this is the block_mask created within the training step
-        # NOTE: flex_attention checks block_mask shape and input shape before
-        # calling into flex_attention_hop.
-        block_mask_post_sharding = create_block_mask(
-            causal_mask,
-            B=1,
-            H=1,
-            Q_LEN=q_local_size[2],
-            KV_LEN=k_local_size[2],
-            device=self.device_type,
-        )
+            block_mask = create_block_mask(
+                causal_mask,
+                B=1,
+                H=1,
+                Q_LEN=query_tokens,
+                KV_LEN=context_tokens,
+                device=self.device_type,
+            )
 
-        # NOTE: we do not test load balance here
-        _cp_options.enable_load_balance = False
+            expect_out, expect_lse = flex_attention(
+                q, k, v, block_mask=block_mask, return_lse=True
+            )
+            expect_out.sum().backward()
 
-        # set CP context dispatch mode to use TorchDispatchMode for flex_attention
-        torch.distributed.tensor.experimental._attention._dispatch_mode = (
-            _DispatchMode.TORCH_FUNCTION
-        )
+            q_local_size = list(q.shape)
+            q_local_size[2] //= self.world_size
+            k_local_size = list(k.shape)
+            k_local_size[2] //= self.world_size
 
-        # prepare input buffer
-        cp_q = q.detach().clone()
-        cp_k = k.detach().clone()
-        cp_v = v.detach().clone()
+            # this is the block_mask created within the training step
+            # NOTE: flex_attention checks block_mask shape and input shape before
+            # calling into flex_attention_hop.
+            block_mask_post_sharding = create_block_mask(
+                causal_mask,
+                B=1,
+                H=1,
+                Q_LEN=q_local_size[2],
+                KV_LEN=k_local_size[2],
+                device=self.device_type,
+            )
 
-        with CommDebugMode() as comm_mode:
-            with context_parallel(
+            # NOTE: we do not test load balance here
+            _cp_options.enable_load_balance = False
+
+            # set CP context dispatch mode to use TorchDispatchMode for flex_attention
+            torch.distributed.tensor.experimental._attention._dispatch_mode = (
+                _DispatchMode.TORCH_FUNCTION
+            )
+
+            # prepare input buffer
+            cp_q = q.detach().clone()
+            cp_k = k.detach().clone()
+            cp_v = v.detach().clone()
+
+            with CommDebugMode() as comm_mode:
+                with context_parallel(
+                    device_mesh,
+                    buffers=[cp_q, cp_k, cp_v],
+                    buffer_seq_dims=[2, 2, 2],
+                ):
+                    cp_q.requires_grad = True
+                    cp_k.requires_grad = True
+                    cp_v.requires_grad = True
+
+                    cp_out, cp_lse = flex_attention(
+                        cp_q,
+                        cp_k,
+                        cp_v,
+                        block_mask=block_mask_post_sharding,
+                        return_lse=True,
+                    )
+
+                    cp_out.sum().backward()
+
+                    cp_q.requires_grad = False
+                    cp_k.requires_grad = False
+                    cp_v.requires_grad = False
+
+            self.assertDictEqual(
+                comm_mode.get_comm_counts(),
+                {
+                    c10d_functional.all_gather_into_tensor: 2,
+                    c10d_functional.reduce_scatter_tensor: 2,  # backward
+                },  # currently we have k and v all-gather separate
+            )
+
+            # unshard the output
+            cp_out, cp_lse = context_parallel_unshard(
+                device_mesh, [cp_out, cp_lse], [2, 2]
+            )
+            torch.testing.assert_close(cp_out, expect_out, atol=1e-6, rtol=1e-2)
+            torch.testing.assert_close(cp_lse, expect_lse, atol=1e-6, rtol=1e-2)
+
+            # unshard the gradient
+            cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(
                 device_mesh,
-                buffers=[cp_q, cp_k, cp_v],
-                buffer_seq_dims=[2, 2, 2],
-            ):
-                cp_q.requires_grad = True
-                cp_k.requires_grad = True
-                cp_v.requires_grad = True
-
-                cp_out, cp_lse = flex_attention(
-                    cp_q,
-                    cp_k,
-                    cp_v,
-                    block_mask=block_mask_post_sharding,
-                    return_lse=True,
-                )
-
-                cp_out.sum().backward()
-
-                cp_q.requires_grad = False
-                cp_k.requires_grad = False
-                cp_v.requires_grad = False
-
-        self.assertDictEqual(
-            comm_mode.get_comm_counts(),
-            {
-                c10d_functional.all_gather_into_tensor: 2,
-                c10d_functional.reduce_scatter_tensor: 2,  # backward
-            },  # currently we have k and v all-gather separate
-        )
-
-        # unshard the output
-        cp_out, cp_lse = context_parallel_unshard(device_mesh, [cp_out, cp_lse], [2, 2])
-        torch.testing.assert_close(cp_out, expect_out, atol=1e-6, rtol=1e-2)
-        torch.testing.assert_close(cp_lse, expect_lse, atol=1e-6, rtol=1e-2)
-
-        # unshard the gradient
-        cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(
-            device_mesh,
-            [cp_q.grad, cp_k.grad, cp_v.grad],
-            [2, 2, 2],
-        )
-        torch.testing.assert_close(cp_q_grad, q.grad, atol=1e-6, rtol=1e-2)
-        torch.testing.assert_close(cp_k_grad, k.grad, atol=1e-6, rtol=1e-2)
-        torch.testing.assert_close(cp_v_grad, v.grad, atol=1e-6, rtol=1e-2)
+                [cp_q.grad, cp_k.grad, cp_v.grad],
+                [2, 2, 2],
+            )
+            torch.testing.assert_close(cp_q_grad, q.grad, atol=1e-6, rtol=1e-2)
+            torch.testing.assert_close(cp_k_grad, k.grad, atol=1e-6, rtol=1e-2)
+            torch.testing.assert_close(cp_v_grad, v.grad, atol=1e-6, rtol=1e-2)
 
         # reset CP context dispatch mode to default
         torch.distributed.tensor.experimental._attention._dispatch_mode = (

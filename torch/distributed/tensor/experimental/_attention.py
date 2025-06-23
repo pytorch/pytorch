@@ -1151,6 +1151,83 @@ class _AttentionContextParallel(ParallelStyle):
         return tuple(out)
 
 
+_tf_mode: Optional[TorchFunctionMode] = None
+_block_mask: Optional[BlockMask] = None
+_cp_block_mask: Optional[BlockMask] = None
+_cp_rank: int = 0
+_cp_group_size: int = 0
+_device_type: str = ""
+
+
+def rewrite_context_parallel_block_mask(
+    block_mask: BlockMask, cp_rank, cp_group_size, device_type
+) -> BlockMask:
+    def _rewrite_mask_mod(
+        mask_mod: _mask_mod_signature,
+        rank: int,
+        world_size: int,
+        block_size: int,
+        local_q_size: int,
+    ) -> _mask_mod_signature:
+        def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
+            # calculate local block_idx and block_offset
+            local_blk_idx, local_blk_offset = (
+                local_q_idx // block_size,
+                local_q_idx % block_size,
+            )
+            # NOTE: load balancing is not used
+            local_num_blocks = local_q_size // block_size
+            blk_idx = local_num_blocks * rank + local_blk_idx
+            return blk_idx * block_size + local_blk_offset
+
+        return lambda b, h, q_idx, kv_idx: mask_mod(
+            b,
+            h,
+            local_q_idx_to_q_idx(q_idx),
+            kv_idx,
+        )
+
+    def _create_block_mask(
+        mask_mod: _mask_mod_signature,
+        B: int,
+        H: int,
+        M: int,
+        N: int,
+        device: DeviceLikeType,
+        BLOCK_SIZE: Union[int, tuple[int, int]],
+    ) -> BlockMask:
+        return create_block_mask(
+            mask_mod, B, H, M, N, device=device, BLOCK_SIZE=BLOCK_SIZE
+        )
+
+    Q_LEN, KV_LEN = block_mask.seq_lengths
+    Q_BLOCK_SIZE, KV_BLOCK_SIZE = block_mask.BLOCK_SIZE
+    # TODO: support other KV block sizes
+    assert Q_BLOCK_SIZE == KV_BLOCK_SIZE
+    mask_mod = block_mask.mask_mod
+
+    # resolve CP device mesh info
+    # assert device_mesh.ndim == 1
+    # cp_rank = device_mesh.get_local_rank()
+    # cp_group_size = device_mesh.size()
+    # device_type = device_mesh.device_type
+
+    # rewrite block_mask's mask_mod
+    cp_mask_mod = _rewrite_mask_mod(
+        mask_mod, cp_rank, cp_group_size, Q_BLOCK_SIZE, Q_LEN
+    )
+
+    return _create_block_mask(
+        cp_mask_mod,
+        B=1,
+        H=1,
+        M=Q_LEN // cp_group_size,
+        N=KV_LEN,
+        device=device_type,
+        BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
+    )
+
+
 @contextlib.contextmanager
 def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, None]:
     """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
@@ -1189,7 +1266,7 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
         return torch.cat(all_xs, dim=shard_dim)
 
     def rewrite_context_parallel_block_mask(
-        block_mask: BlockMask, device_mesh: DeviceMesh
+        block_mask: BlockMask, cp_rank, cp_group_size, device_type
     ) -> BlockMask:
         def _rewrite_mask_mod(
             mask_mod: _mask_mod_signature,
@@ -1210,7 +1287,10 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
                 return blk_idx * block_size + local_blk_offset
 
             return lambda b, h, q_idx, kv_idx: mask_mod(
-                b, h, local_q_idx_to_q_idx(q_idx), kv_idx
+                b,
+                h,
+                q_idx,  # local_q_idx_to_q_idx(q_idx),
+                kv_idx,
             )
 
         def _create_block_mask(
@@ -1233,10 +1313,10 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
         mask_mod = block_mask.mask_mod
 
         # resolve CP device mesh info
-        assert device_mesh.ndim == 1
-        cp_rank = device_mesh.get_local_rank()
-        cp_group_size = device_mesh.size()
-        device_type = device_mesh.device_type
+        # assert device_mesh.ndim == 1
+        # cp_rank = device_mesh.get_local_rank()
+        # cp_group_size = device_mesh.size()
+        # device_type = device_mesh.device_type
 
         # rewrite block_mask's mask_mod
         cp_mask_mod = _rewrite_mask_mod(
@@ -1260,15 +1340,19 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             query: torch.Tensor,
             key: torch.Tensor,
             value: torch.Tensor,
-            score_mod: Callable,
-            block_mask_t: tuple[Any, ...],
             device_mesh: DeviceMesh,
         ) -> tuple[Any, ...]:
+            """
+            device_mesh = (
+                torch.distributed.tensor.experimental._attention._cp_device_mesh
+            )
+            """
             ctx.device_mesh = device_mesh
 
             # all-gather KV
             global_key = unshard(key, device_mesh, 2)  # TODO: change the shard_dim
             global_value = unshard(value, device_mesh, 2)
+            """
             q_len, kv_len = block_mask_t[0], block_mask_t[1]
             block_size_q, block_size_kv = block_mask_t[-3], block_mask_t[-2]
             block_mask = BlockMask(
@@ -1278,8 +1362,9 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
                 block_mask_t[-1],
             )
             cp_block_mask = rewrite_context_parallel_block_mask(block_mask, device_mesh)
+            """
 
-            return query, global_key, global_value, cp_block_mask
+            return query, global_key, global_value
 
         @staticmethod
         def backward(
@@ -1287,19 +1372,18 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             grad_query: torch.Tensor,
             grad_key: torch.Tensor,
             grad_value: torch.Tensor,
-            *none_grads,
         ) -> tuple[Optional[torch.Tensor], ...]:
             device_mesh = ctx.device_mesh
 
             # reduce-scatter KV grads
             grad_key = ft_c.reduce_scatter_tensor(
-                grad_key, reduceOp="sum", scatter_dim=seq_dim, group=device_mesh
+                grad_key, reduceOp="sum", scatter_dim=2, group=device_mesh
             )
             grad_value = ft_c.reduce_scatter_tensor(
-                grad_value, reduceOp="sum", scatter_dim=seq_dim, group=device_mesh
+                grad_value, reduceOp="sum", scatter_dim=2, group=device_mesh
             )
 
-            return grad_query, grad_key, grad_value, None, None, None
+            return grad_query, grad_key, grad_value, None
 
     class DistributeFunction(TorchFunctionMode):
         def __init__(
@@ -1321,10 +1405,12 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             args: tuple[Any, ...] = (),
             kwargs: Optional[dict[str, Any]] = None,
         ) -> Any:
+            # raise NotImplementedError("flex_attention is not supported yet.")
             kwargs = kwargs or {}
 
             # special handler for flex_attention
             if func == torch._higher_order_ops.flex_attention:
+                # raise NotImplementedError("flex_attention is not supported yet.")
                 query, key, value, score_mod, block_mask = args[:5]
                 assert isinstance(query, torch.Tensor)
                 assert isinstance(key, torch.Tensor)
@@ -1332,22 +1418,33 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
                 assert isinstance(score_mod, Callable)
                 assert isinstance(block_mask, tuple)
 
-                query, global_key, global_value, cp_block_mask = (
-                    CPFlexAttentionPreOp.apply(
-                        query,
-                        key,
-                        value,
-                        score_mod,
-                        block_mask,
-                        self._device_mesh,
-                    )
+                torch.distributed.tensor.experimental._attention._cp_device_mesh = (
+                    self._device_mesh
                 )
+                device_mesh = self._device_mesh
+
+                global _block_mask, _cp_rank, _cp_group_size, _device_type, _cp_block_mask
+                assert _block_mask is not None
+                """
+                _cp_block_mask = rewrite_context_parallel_block_mask(
+                    _block_mask, _cp_rank, _cp_group_size, _device_type
+                )
+                """
+
+                query, global_key, global_value = CPFlexAttentionPreOp.apply(
+                    query,
+                    key,
+                    value,
+                    self._device_mesh,
+                )
+
                 return func(
                     query,
                     global_key,
                     global_value,
                     score_mod,
-                    cp_block_mask.as_tuple(),
+                    _cp_block_mask.as_tuple(),
+                    # block_mask,
                     *args[5:],
                     **kwargs,
                 )
@@ -1374,12 +1471,16 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             yield
         _restore_function(F.scaled_dot_product_attention, F)
     elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
-        with DistributeFunction(
-            F.scaled_dot_product_attention,
-            mesh,
-            attention_input_fn,
-            attention_output_fn,
-        ):
+        global _tf_mode
+        if _tf_mode is None:
+            _tf_mode = DistributeFunction(
+                F.scaled_dot_product_attention,
+                mesh,
+                attention_input_fn,
+                attention_output_fn,
+            )
+
+        with _tf_mode:
             with _enable_cp_dispatcher():
                 yield
     else:

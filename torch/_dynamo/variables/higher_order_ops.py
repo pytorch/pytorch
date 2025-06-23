@@ -236,9 +236,9 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     output_tensor_ids = {
         id(t) for t in pytree.tree_leaves(outputs) if isinstance(t, torch.Tensor)
     }
-    assert input_tensor_ids.isdisjoint(output_tensor_ids), (
-        "inputs to function body cannot alias outputs"
-    )
+    assert input_tensor_ids.isdisjoint(
+        output_tensor_ids
+    ), "inputs to function body cannot alias outputs"
 
 
 def _check_all_tensorvariable(args):
@@ -805,9 +805,9 @@ def speculate_subgraph(
                     ][-len(lifted_freevars) :]
                     assert len(after_phs) == len(lifted_freevars)
                     for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
-                        assert child_proxy.node is ph, (
-                            "The order of placeholders is different from the order of lifted_freevars"
-                        )
+                        assert (
+                            child_proxy.node is ph
+                        ), "The order of placeholders is different from the order of lifted_freevars"
 
                     graph.lint()
 
@@ -993,9 +993,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
             if v := kwargs.pop(k, None):
-                assert i == len(args), (
-                    "did not provide the right number of non-keyword args"
-                )
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
                 args.append(v)
 
         if kwargs:
@@ -1232,9 +1232,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Input checks
         for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
             if v := kwargs.pop(k, None):
-                assert i == len(args), (
-                    "did not provide the right number of non-keyword args"
-                )
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
                 args.append(v)
 
         if kwargs:
@@ -1612,9 +1612,11 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         with tx.fake_mode:
             sub_args_fake = [
-                leaf.node.meta["example_value"].clone()
-                if hasattr(leaf.node.meta["example_value"], "clone")
-                else leaf.node.meta["example_value"]
+                (
+                    leaf.node.meta["example_value"].clone()
+                    if hasattr(leaf.node.meta["example_value"], "clone")
+                    else leaf.node.meta["example_value"]
+                )
                 for leaf in pytree.tree_leaves(proxy_vars_inputcheck)
             ]
             pre_dispatch = False
@@ -2702,6 +2704,11 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
+        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
+        if can_dispatch_torch_function(tx, args, kwargs):
+            return dispatch_torch_function(tx, self, args, kwargs)
+
         try:
             p_args = tuple(self.to_proxy(tx, arg) for arg in args)
             p_kwargs = {key: self.to_proxy(tx, arg) for key, arg in kwargs.items()}
@@ -2826,6 +2833,11 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
+        if can_dispatch_torch_function(tx, args, kwargs):
+            return dispatch_torch_function(tx, self, args, kwargs)
+
         from torch._higher_order_ops.flex_attention import flex_attention_fake_impl
 
         from .builder import wrap_fx_proxy
@@ -3138,9 +3150,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
             if isinstance(x, torch.fx.Proxy):
                 return x.node
             else:
-                assert variables.ConstantVariable.is_literal(x), (
-                    f"Only constant is allowed. Got {x}"
-                )
+                assert variables.ConstantVariable.is_literal(
+                    x
+                ), f"Only constant is allowed. Got {x}"
                 return x
 
         new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)
