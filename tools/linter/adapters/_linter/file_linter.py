@@ -103,7 +103,7 @@ class FileLinter:
         return not results or self.args.fix and all(r.is_edit for r in results)
 
     def _error(self, pf: PythonFile, result: LintResult) -> None:
-        """Called on files that are unparseable"""
+        """Called on files that are unparsable"""
 
     def _replace(self, pf: PythonFile) -> tuple[str, list[LintResult]]:
         # Because of recursive replacements, we need to repeat replacing and reparsing

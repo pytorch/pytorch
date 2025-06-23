@@ -2007,8 +2007,6 @@
     "cast_symbool_to_symint_guardless",
     "constrain_range",
     "constrain_unify",
-    "definitely_false",
-    "definitely_true",
     "guard_or_true",
     "guard_or_false",
     "error",
@@ -2386,15 +2384,6 @@
   "torch.utils.collect_env": [
     "namedtuple"
   ],
-  "torch.utils.data.datapipes.gen_pyi": [
-    "Any",
-    "Dict",
-    "List",
-    "Set",
-    "Tuple",
-    "Union",
-    "defaultdict"
-  ],
   "torch.utils.data.datapipes.utils.snapshot": [
     "IterDataPipe",
     "apply_random_seed"
@@ -2660,6 +2649,11 @@
   ],
   "torch.export.graph_signature": [
     "TokenArgument"
+  ],
+  "torch.export.pt2_archive": [
+    "PT2ArchiveWriter",
+    "PT2ArchiveReader",
+    "is_pt2_package"
   ],
   "torch.fx.experimental.shape_inference.infer_shape": [
     "DimDynamic",

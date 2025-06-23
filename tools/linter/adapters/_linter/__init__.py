@@ -14,7 +14,6 @@ __all__ = (
     "Block",
     "EMPTY_TOKENS",
     "FileLinter",
-    "file_summary",
     "LineWithSets",
     "LintResult",
     "ParseError",
@@ -41,6 +40,5 @@ class ParseError(ValueError):
 
 from .block import Block
 from .file_linter import FileLinter
-from .file_summary import file_summary
 from .messages import LintResult
 from .python_file import PythonFile

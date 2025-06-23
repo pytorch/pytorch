@@ -1388,7 +1388,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
     case FastSetupType::NON_OVERLAPPING_DENSE:
       {
         // find the index of a defined tensor in operands_ start from input tensor
-        int i_defined; // NOLINT(cppcoreguidelines-init-variables)
+        int i_defined = -1;
         for (i_defined = ntensors() - 1; i_defined >= 0; --i_defined) {
           if (tensor(i_defined).defined()) break;
         }
@@ -1535,7 +1535,6 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
   // Extend the condition to MAIA tesnors as MAIA tensors also don't have storage.
   if (privateuse1_without_storage  ||
-      common_device_.type() == DeviceType::MTIA ||
       common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::IPU  ||
       common_device_.type() == DeviceType::Lazy ||

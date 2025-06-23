@@ -117,6 +117,14 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     size_t idx,
     int32_t* dtype);
 
+// Retrieves a constant's data size.
+// idx is the index of the internal's constants.
+// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
+AOTIRuntimeError AOTInductorModelContainerGetConstantDataSize(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    size_t* data_size);
+
 // Extract the constants that is being used in the container.
 AOTIRuntimeError AOTInductorModelContainerExtractConstantsMap(
     AOTInductorModelContainerHandle container_handle,

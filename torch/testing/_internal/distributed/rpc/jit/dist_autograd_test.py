@@ -32,9 +32,8 @@ def fork_add(t1, t2, dst: str):
 class JitDistAutogradTest(RpcAgentTestFixture):
     @dist_init
     def test_get_gradients(self):
-
         @torch.jit.script
-        def dist_get_gradients(context_id: int) -> (dict[Tensor, Tensor]):
+        def dist_get_gradients(context_id: int) -> dict[Tensor, Tensor]:
             return dist_autograd.get_gradients(context_id)
 
         FileCheck().check("get_gradients").run(str(dist_get_gradients.graph))
