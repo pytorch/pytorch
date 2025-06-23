@@ -373,8 +373,8 @@ RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE = str2bool(os.getenv("CMAKE_FRESH"))
-CMAKE_ONLY = str2bool(os.getenv("CMAKE_ONLY"))
+RERUN_CMAKE = str2bool(os.environ.pop("CMAKE_FRESH", None))
+CMAKE_ONLY = str2bool(os.environ.pop("CMAKE_ONLY", None))
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == "--cmake":
