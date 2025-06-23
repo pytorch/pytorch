@@ -9,7 +9,7 @@ performance of operations several times. For example, for large tensor
 shapes, the usage of a bsr tensor as mat1 argument in addmm-based
 operations typically outperforms the corresponding operation with
 strided-only inputs when the blocked representation of a tensor
-provides a better alignement with memory access than what the strided
+provides a better alignment with memory access than what the strided
 representation would provide.
 
 Pre-computed kernel parameters
@@ -57,7 +57,7 @@ Computing optimal kernel parameters
 If the approximations listed above are unacceptable, e.g. when one
 seeks a maximal performance possible, the optimal kernel parameters
 for a particular GPU can be computed by simply running this script in
-the pytorch developement tree::
+the pytorch development tree::
 
   cd /path/to/pytorch
   python setup.py develop
@@ -91,7 +91,7 @@ torch.nn.functional.linear will benefit from using the computed
 optimal set of kernel parameters.
 
 Note that running tune_bsr_dense_addmm can take several minutes. So,
-use it wisely, e.g. by implementing persisten storage of optimized
+use it wisely, e.g. by implementing persistent storage of optimized
 kernel parameters. See the source code of get_meta and
 tune_bsr_dense_addmm to learn how to register a custom set of optimal
 kernel parameters for addmm-based operations.
@@ -852,7 +852,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
 
     if 0:
         # Check performance dependence on sparsity and apply
-        # adjustments when differences are noticable (more than 10%).
+        # adjustments when differences are noticeable (more than 10%).
         #
         # When using NVIDIA A100 GPU, the performance dependence on
         # sparsity is insignificant (0 % ... 10 %) for majority of

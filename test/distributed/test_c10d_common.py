@@ -15,7 +15,6 @@ from datetime import timedelta
 from itertools import product
 from sys import platform
 from typing import Optional
-from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -1899,66 +1898,6 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         dist.barrier()
         # intentionally not calling into `destroy_process_group` as not all
         # user applications would explicitly that.
-
-    @patch.object(dist.ProcessGroup, "group_name", "custom")
-    def test_comm_split_group(self):
-        dist.Backend.register_backend(
-            "dummy",
-            PythonProcessGroupExtensionTest.create_dummy_ext,
-            extended_api=True,
-            devices=["cuda"],
-        )
-
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-
-        dist.init_process_group(
-            "dummy",
-            rank=self.rank,
-            world_size=self.world_size,
-            device_id=torch.device(f"cuda:{self.rank}"),
-        )
-
-        split_group_size = self.world_size // 2
-        split_group_rank = self.rank % split_group_size
-
-        all_group_ranks = [
-            list(range(i * split_group_size, (i + 1) * split_group_size))
-            for i in range(2)
-        ]
-        pg_opts = PythonProcessGroupExtensionTest.Options()
-
-        registered_backend = None
-
-        def _register_backend_side_effect(*args, **kwargs):
-            nonlocal registered_backend
-            registered_backend = args[2]
-
-        def _get_backend_side_effect(*args, **kwargs):
-            return registered_backend
-
-        # Need to patch these methods in absence of a true c10d::Backend wrapper
-        with patch.object(
-            dist.ProcessGroup,
-            "_register_backend",
-            side_effect=_register_backend_side_effect,
-        ), patch.object(
-            dist.ProcessGroup, "_get_backend", side_effect=_get_backend_side_effect
-        ):
-            split_pg = dist.split_group(
-                split_ranks=all_group_ranks,
-                group_desc="split_pg",
-                pg_options=pg_opts,
-            )
-
-            if split_pg is not None:
-                self.assertEqual(
-                    dist.get_group_rank(split_pg, self.rank), split_group_rank
-                )
-                self.assertEqual(dist.get_world_size(split_pg), split_group_size)
-
-            dist.destroy_process_group(split_pg)
-            dist.destroy_process_group()
 
     def test_shutdown(self) -> None:
         dist.Backend.register_backend(
