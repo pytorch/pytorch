@@ -104,3 +104,15 @@ def divide_neg_exp(t) -> Tensor:
     Returns: divide(neg(t), exp(t))
     """
     return torch.ops.libtorch_agnostic.divide_neg_exp.default(t)
+
+
+def is_contiguous(t) -> bool:
+    """
+    Returns a bool indicating if the input tensor is contiguous
+
+    Args:
+        t: Tensor
+
+    Returns: is_contiguous(t)
+    """
+    return torch.ops.libtorch_agnostic.is_contiguous.default(t)

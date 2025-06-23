@@ -23,7 +23,7 @@ from .ir import (
     NoneLayout,
     TensorBox,
 )
-from .utils import convert_shape_to_inductor, pad_listlike
+from .utils import convert_shape_to_inductor, pad_listlike, SUPPORTED_MKLDNN_DEVICES
 from .virtualized import V
 
 
@@ -164,7 +164,7 @@ def _prepare_convolution_fusion_create(
 
     x = cls.require_stride_order(x, req_stride_order)
 
-    # We won't do weight prepack for Conv if dynamic_shapes.
+    # We won't do weight prepack for Conv if dynamic_shapes or if is xpu.
     # In static shape cases, since weight is prepacked, we'll always force output to be channels last in the Conv kernel.
     # In dynamic shape cases, for input with channels = 1, like tensor of size (s0, 1, 28, 28) and stride (784, 784, 28, 1),
     # x = cls.require_stride_order(x, req_stride_order) where req_stride_order is in the channels last order
@@ -172,13 +172,23 @@ def _prepare_convolution_fusion_create(
     # this tensor is considered as channels first and the output will be in contiguous format.
     # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
     dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
-    if dynamic_shapes and is_contiguous_storage_and_layout(x):
+    if (
+        dynamic_shapes or get_device_type(x) == "xpu"
+    ) and is_contiguous_storage_and_layout(x):
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
+    # Currently we don't support channel last for the situation that stride of input's batch dim is 0,
+    # eg. input_size = (1, 1280, 64, 64), but input_stride=(0, 1, 81920, 1280).
+    # So we use NCHW hear instead.
+    # Different with cpu, cpu conv always use channels_last for convolution when weight is prepacked,
+    # but xpu does not do the prepack, so the problem exposed here is only for xpu.
+    # TODO support channels_last for such zero stride input.
+    elif get_device_type(x) == "xpu" and x.get_stride()[0] == 0:
         output_stride = FlexibleLayout.contiguous_strides(output_size)
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
     assert get_device_type(x) == get_device_type(weight)
-    assert get_device_type(x) in ["cpu", "xpu"]
+    assert get_device_type(x) in SUPPORTED_MKLDNN_DEVICES
     inputs = [x]
 
     if quantize_args is not None:
@@ -242,7 +252,7 @@ def _prepare_linear_fusion_create(
 
     x = cls.require_stride_order(x, req_stride_order)
     assert get_device_type(x) == get_device_type(weight)
-    assert get_device_type(x) in ["cpu", "xpu"]
+    assert get_device_type(x) in SUPPORTED_MKLDNN_DEVICES
     inputs = [x]
 
     if quantize_args is not None:
@@ -294,17 +304,20 @@ class ConvolutionUnary(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ) -> None:
+        self.device_type = get_device_type(inputs[0])
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._convolution_pointwise.default,
-            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}_mkldnn__convolution_pointwise",
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
     @classmethod
@@ -351,18 +364,21 @@ class ConvolutionBinary(ExternKernelAlloc):
         constant_args=(),
         cpp_constant_args=(),
     ) -> None:
+        self.device_type = get_device_type(inputs[0])
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._convolution_pointwise.binary,
-            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise_binary",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}_mkldnn__convolution_pointwise_binary",
         )
         self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
     @classmethod
@@ -416,6 +432,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         constant_args=(),
     ) -> None:
         # Due to constrain of op.call, other (Tensor&) should be at input[0]
+        self.device_type = get_device_type(inputs[0])
         reordered_inputs = [inputs[1], inputs[0]] + inputs[2:]
 
         super().__init__(
@@ -424,7 +441,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._convolution_pointwise_.binary,
-            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise_binary_",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}_mkldnn__convolution_pointwise_binary_",
         )
 
         self.mutation_outputs = [
@@ -433,7 +450,9 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         ]
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -667,11 +686,11 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         if bias is not None
             - inputs = [x, x_scale, x_zp, w,  w_scale, w_zp, accum, b]
             - const_args = [stride, padding, dilation, groups, o_scale, o_zp,
-            output_dtype, accum_scale, accum_zp, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+            output_dtype, accum_scale, accum_zp, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
         else
             - inputs = [x, x_scale, x_zp, w,  w_scale, w_zp, accum]
             - const_args [b, stride, padding, dilation, groups, o_scale, o_zp,
-             output_dtype, accum_scale, accum_zp, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+             output_dtype, accum_scale, accum_zp, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = len(inputs) == 8
         self.idx_for_inplace_sum = 6
@@ -1022,11 +1041,11 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         if bias is not None
             - inputs = [x, w, x_scale, x_zp, weight_scale, weight_zp, x2, bias]
             - const_args is: [o_scale, o_zp,
-              fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+              fp32_output, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
         else
             - inputs = [x, w, x_scale, x_zp, weight_scale, weight_zp, x2]
             - const_args is: [bias, o_scale, o_zp,
-              fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+              fp32_output, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = has_bias
         self.idx_for_inplace_sum = 6
