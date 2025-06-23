@@ -47,10 +47,10 @@ import uuid
 import warnings
 import weakref
 from collections import Counter, OrderedDict
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
-from types import MethodWrapperType
+from types import CodeType, MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -62,7 +62,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Literal, TypeIs
+from typing_extensions import Literal, TypeAlias, TypeGuard, TypeIs
 
 import torch
 import torch._functorch.config
@@ -1046,19 +1046,45 @@ def is_numpy_float_type(value):
     )
 
 
-def is_lru_cache_wrapped_function(value):
+@overload
+def is_lru_cache_wrapped_function(
+    value: Callable[..., T],
+) -> TypeGuard[functools._lru_cache_wrapper[T]]: ...
+
+
+@overload
+def is_lru_cache_wrapped_function(
+    value: Any,
+) -> TypeGuard[functools._lru_cache_wrapper[Any]]: ...
+
+
+def is_lru_cache_wrapped_function(
+    value: Any,
+) -> bool:
     return isinstance(value, functools._lru_cache_wrapper) and is_function(
         inspect.getattr_static(value, "__wrapped__")
     )
 
 
-def is_function_or_wrapper(value):
+_FuncTypes: TypeAlias = Union[
+    types.FunctionType,
+    types.BuiltinFunctionType,
+    types.MethodDescriptorType,
+    types.WrapperDescriptorType,
+]
+
+
+def is_function_or_wrapper(
+    value: Any,
+) -> TypeIs[Union[_FuncTypes, torch._ops.OpOverloadPacket, torch._ops.OpOverload]]:
     return is_function(value) or isinstance(
         value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
     )
 
 
-def is_function(value):
+def is_function(
+    value: Any,
+) -> TypeIs[_FuncTypes]:
     return isinstance(
         value,
         (
@@ -1090,7 +1116,17 @@ cmp_name_to_op_str_mapping = {
 }
 
 
-def is_wrapper_or_member_descriptor(value):
+def is_wrapper_or_member_descriptor(
+    value: Any,
+) -> TypeIs[
+    Union[
+        types.GetSetDescriptorType,
+        types.MethodDescriptorType,
+        types.WrapperDescriptorType,
+        types.MemberDescriptorType,
+        types.MethodWrapperType,
+    ]
+]:
     return isinstance(
         value,
         (
@@ -2127,7 +2163,9 @@ def preserve_rng_state():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
 
 
-def is_jit_model(model0):
+def is_jit_model(
+    model0,
+):
     return isinstance(
         model0,
         (
@@ -2331,7 +2369,7 @@ def is_safe_constant(v):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def common_constants():
     return {
         # We zero-one specialize shapes, so specialize these constants
@@ -2341,7 +2379,7 @@ def common_constants():
     }
 
 
-def is_torch_sym(value):
+def is_torch_sym(value: Any) -> TypeGuard[Union[torch.SymBool, torch.SymInt]]:
     return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
         value.node, torch.nested._internal.nested_int.NestedIntNode
     )
@@ -2362,6 +2400,10 @@ def is_int_specialization_case(value, source):
         )
         or (
             source.guard_source().is_unspecialized_builtin_nn_module()
+            and not config.allow_unspec_int_on_nn_module
+        )
+        or (
+            source.guard_source().is_unspecialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or is_from_defaults(source)
@@ -2614,7 +2656,9 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def key_is_id(k):
+def key_is_id(
+    k: Any,
+) -> TypeIs[Union[torch.Tensor, torch.nn.Module, MethodWrapperType]]:
     """Returns whether it indexes dictionaries using its id"""
     return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
 
@@ -2670,7 +2714,7 @@ from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 def get_safe_global_name(tx, root, obj):
     # The global_mangled_class_name should be different for different
     # invocations of torch.compile. Otherwise, we can run into a situation
-    # where multiple torch.compile invocations re-use the same global name,
+    # where multiple torch.compile invocations reuse the same global name,
     # but the global's lifetime is tied to the first invocation (and
     # may be deleted when the first torch.compile invocation is deleted)
     # We mangle it based off of the output_graph's id.
@@ -2933,7 +2977,7 @@ def same(
                     ):
                         # In the presence of noise, noise might dominate our error
                         # metric for smaller tensors.
-                        # Similary, for 1x1 kernels, there seems to be high noise with amp.
+                        # Similarly, for 1x1 kernels, there seems to be high noise with amp.
                         multiplier = 3.0
                     return multiplier
 
@@ -3067,7 +3111,7 @@ seen_code_map = ExactWeakKeyDictionary()
 
 
 # return same dir unless user changes config between calls
-@functools.lru_cache(None)
+@functools.cache
 def _get_debug_dir(root_dir):
     dir_name = (
         "run_"
@@ -3505,6 +3549,12 @@ def object_has_getattribute(value: Any):
     return class_has_getattribute(type(value))
 
 
+def object_setattr_ignore_descriptor(obj, name, value):
+    # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
+    d = object.__getattribute__(obj, "__dict__")
+    d[name] = value
+
+
 def class_has_getattribute(cls: type):
     try:
         if isinstance(
@@ -3791,6 +3841,10 @@ def defake(x):
     )
     y.zero_()
     return y
+
+
+def _disable_side_effect_safety_checks_for_current_subtracer(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
 
 
 def is_utils_checkpoint(obj):
@@ -4445,38 +4499,22 @@ def does_not_override_dict_iter_methods(user_cls):
     )
 
 
-# Helper functions below are to prevent __torch_function__
-# calls from happening in the middle of __torch_function__
-# compiled bytecode
-# They will be skipped which is the desired result
+# Helper functions below are to prevent TorchDynamo to prevent tracing of
+# __torch_function__ calls triggered on tensor properties in the pre graph
+# bytecode.
+@torch._disable_dynamo
 def call_size(x, i):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x, i):
-        return x.size(i)
-
-    return fn(x, i)
+    return x.size(i)
 
 
+@torch._disable_dynamo
 def call_stride(x, i):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x, i):
-        return x.stride(i)
-
-    return fn(x, i)
+    return x.stride(i)
 
 
+@torch._disable_dynamo
 def call_storage_offset(x):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x):
-        return x.storage_offset()
-
-    return fn(x)
+    return x.storage_offset()
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
@@ -4624,3 +4662,27 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
     return node is None or "example_value" in node.meta or "val" in node.meta
+
+
+@torch._disable_dynamo
+def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
+    cm: AbstractContextManager[None] = (
+        torch._C._profiler._RecordFunctionFast("Pregraph bytecode")
+        if torch.autograd.profiler._is_profiler_enabled
+        else contextlib.nullcontext()
+    )
+    cm.__enter__()
+    return cm
+
+
+@torch._disable_dynamo
+def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
+    cm.__exit__(None, None, None)
+
+
+# Returns a set of code objects present traced in the current TracingContext, or None
+# if there is no current TracingContext.
+def get_traced_code() -> list[CodeType]:
+    from torch._guards import TracingContext
+
+    return TracingContext.get_traced_code()

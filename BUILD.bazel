@@ -290,6 +290,7 @@ header_template_rule(
     substitutions = {
         "@AT_CUDNN_ENABLED@": "1",
         "@AT_CUSPARSELT_ENABLED@": "0",
+        "@AT_HIPSPARSELT_ENABLED@": "0",
         "@AT_ROCM_ENABLED@": "0",
         "@AT_MAGMA_ENABLED@": "0",
         "@NVCC_FLAGS_EXTRA@": "",
@@ -499,7 +500,7 @@ filegroup(
 # To achieve finer granularity and make debug easier, caffe2 is split into three libraries:
 # ATen, caffe2 and caffe2_for_aten_headers. ATen lib group up source codes under
 # aten/ directory and caffe2 contains most files under `caffe2/` directory. Since the
-# ATen lib and the caffe2 lib would depend on each other, `caffe2_for_aten_headers` is splitted
+# ATen lib and the caffe2 lib would depend on each other, `caffe2_for_aten_headers` is split
 # out from `caffe2` to avoid dependency cycle.
 cc_library(
     name = "caffe2_for_aten_headers",
@@ -581,9 +582,9 @@ cc_library(
 cu_library(
     name = "torch_cuda",
     srcs = [
-        "torch/csrc/distributed/c10d/intra_node_comm.cu",
         "torch/csrc/distributed/c10d/NanCheck.cu",
         "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
+        "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
     ],
     copts = torch_cuda_half_options,
     visibility = ["//visibility:public"],
@@ -671,6 +672,14 @@ flatbuffer_cc_library(
 )
 
 cc_library(
+    name = "torch_standalone_headers",
+    hdrs = glob([
+        "torch/standalone/**/*.h"
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "torch_headers",
     hdrs = if_cuda(
         torch_cuda_headers,
@@ -736,15 +745,15 @@ cc_library(
     srcs = if_cuda(glob(
         libtorch_cuda_sources,
         exclude = [
-            "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/cuda/nccl.cpp",
-            "torch/csrc/distributed/c10d/intra_node_comm.cu",
-            "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
-            "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
-            "torch/csrc/distributed/c10d/CUDASymmetricMemoryUtils.cpp",
-            "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
+            "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/distributed/c10d/NanCheck.cu",
+            "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
+            "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu",
+            "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu",
+            "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
+            "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
         ],
     )) + torch_sources,
     copts = TORCH_COPTS,

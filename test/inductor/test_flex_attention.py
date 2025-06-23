@@ -14,6 +14,7 @@ from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
 import torch
+import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import metrics
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
@@ -30,6 +31,7 @@ from torch.nn.attention.flex_attention import (
     BlockMask,
     create_block_mask,
     flex_attention,
+    flex_attention_hop,
     noop_mask,
     or_masks,
 )
@@ -3804,6 +3806,145 @@ class GraphModule(torch.nn.Module):
         )
 
     @supported_platform
+    def test_tensor_subclass_dispatch_order(self, device):
+        """Test that tensor subclasses get proper dispatch priority over modes.
+
+        This test verifies the fix that allows tensor subclasses' pyimpl to run before
+        FakeTensorMode/FunctionalTensorMode implementations, preventing issues
+        where subclasses that error on as_strided would fail in flex_attention.
+        """
+        import torch.utils._pytree as pytree
+        from torch.utils._python_dispatch import return_and_correct_aliasing
+
+        class AsStridedErrorTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                assert isinstance(elem, torch.Tensor)
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.shape,
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                )
+
+            def __init__(self, elem):
+                self.elem = elem
+
+            def __repr__(self):
+                return f"AsStridedErrorTensor({self.elem})"
+
+            def __tensor_flatten__(self):
+                return ["elem"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                assert meta is None
+                elem = inner_tensors["elem"]
+                return AsStridedErrorTensor(elem)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs=None):
+                # Error if as_strided is called
+                if func is torch.ops.aten.as_strided.default:
+                    raise RuntimeError("as_strided was called on AsStridedErrorTensor!")
+
+                if kwargs is None:
+                    kwargs = {}
+                args_elem = pytree.tree_map_only(
+                    AsStridedErrorTensor, lambda x: x.elem, args
+                )
+                kwargs_elem = pytree.tree_map_only(
+                    AsStridedErrorTensor, lambda x: x.elem, kwargs
+                )
+
+                out = func(*args_elem, **kwargs_elem)
+
+                def wrap_output(x):
+                    if isinstance(x, torch.Tensor):
+                        return AsStridedErrorTensor(x)
+                    return x
+
+                out_wrapped = pytree.tree_map(wrap_output, out)
+                return return_and_correct_aliasing(func, args, kwargs, out_wrapped)
+
+        from torch._higher_order_ops.flex_attention import (
+            flex_attention as flex_attention_hop,
+        )
+
+        @flex_attention_hop.py_impl(AsStridedErrorTensor)
+        def flex_attention_as_strided_error_tensor(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            score_mod,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers=(),
+            mask_mod_other_buffers=(),
+        ):
+            inner_q, inner_k, inner_v = query.elem, key.elem, value.elem
+            out, lse = flex_attention_hop(
+                inner_q,
+                inner_k,
+                inner_v,
+                score_mod,
+                block_mask,
+                scale,
+                kernel_options,
+                score_mod_other_buffers,
+                mask_mod_other_buffers,
+            )
+            return AsStridedErrorTensor(out), AsStridedErrorTensor(lse)
+
+        # Test setup
+        B, H, S, D = 2, 1, 128, 16
+        dtype = torch.float32
+
+        # Create regular tensors
+        query_elem = torch.randn(B, H, S, D, device=device, dtype=dtype)
+        key_elem = torch.randn(B, H, S, D, device=device, dtype=dtype)
+        value_elem = torch.randn(B, H, S, D, device=device, dtype=dtype)
+
+        # Test 1: Verify as_strided raises error when called directly on AsStridedErrorTensor
+        test_tensor = AsStridedErrorTensor(query_elem)
+        with self.assertRaisesRegex(
+            RuntimeError, "as_strided was called on AsStridedErrorTensor!"
+        ):
+            torch.as_strided(
+                test_tensor, size=(B, H, S, D), stride=test_tensor.stride()
+            )
+
+        # Test 2: Run flex_attention with normal tensors first
+        compiled_fn = torch.compile(flex_attention, backend="aot_eager", fullgraph=True)
+        normal_out, normal_lse = compiled_fn(
+            query_elem, key_elem, value_elem, return_lse=True
+        )
+
+        # Test 3: Wrap in our subclass
+        query = AsStridedErrorTensor(query_elem)
+        key = AsStridedErrorTensor(key_elem)
+        value = AsStridedErrorTensor(value_elem)
+
+        # This should NOT error with as_strided after the fix
+        # Before the fix, it would error because FakeTensorMode would directly
+        # call flex_attention_fake_impl which uses as_strided
+        out, lse = compiled_fn(query, key, value, return_lse=True)
+        # Verify we got valid output
+        self.assertIsInstance(out, AsStridedErrorTensor)
+        self.assertIsInstance(lse, AsStridedErrorTensor)
+        self.assertEqual(out.shape, (B, H, S, D))
+        self.assertEqual(lse.shape, (B, H, S))
+
+        # Test 4: Compare outputs between normal tensors and subclassed tensors
+        torch.testing.assert_close(out.elem, normal_out, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(lse.elem, normal_lse, rtol=1e-5, atol=1e-5)
+
+    @supported_platform
     @skip_on_cuda
     def test_cpu_error_message_return_lse(self, device):
         make_tensor = functools.partial(
@@ -3841,6 +3982,132 @@ class GraphModule(torch.nn.Module):
         mod = torch.compile(TestModule())
         attn_output = mod(q, k, v, mask)
         self.assertEqual(attn_output.device, torch.device("cuda:1"))
+
+    @supported_platform
+    @skip_on_cpu
+    @common_utils.parametrize(
+        "ops_to_save",
+        [
+            [
+                torch.ops.aten.mm.default,
+            ],
+            [
+                flex_attention_hop,
+            ],
+            [torch.ops.aten.mm.default, flex_attention_hop],
+        ],
+    )
+    def test_selective_ac(self, device, ops_to_save):
+        class FlexAttentionModule(nn.Module):
+            def __init__(self, hidden_size, num_heads):
+                super().__init__()
+                self.hidden_size = hidden_size
+                self.num_heads = num_heads
+                self.head_dim = hidden_size // num_heads
+
+                # In-projections (query, key, value)
+                self.q_proj = nn.Linear(hidden_size, hidden_size)
+                self.k_proj = nn.Linear(hidden_size, hidden_size)
+                self.v_proj = nn.Linear(hidden_size, hidden_size)
+
+                # Out-projection
+                self.out_proj = nn.Linear(hidden_size, hidden_size)
+
+            def forward(self, x):
+                batch_size, seq_len, _ = x.size()
+
+                # Project queries, keys, and values
+                q = (
+                    self.q_proj(x)
+                    .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                    .transpose(1, 2)
+                )
+                k = (
+                    self.k_proj(x)
+                    .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                    .transpose(1, 2)
+                )
+                v = (
+                    self.v_proj(x)
+                    .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                    .transpose(1, 2)
+                )
+
+                # Apply flex attention
+                attn_output = flex_attention(
+                    q,
+                    k,
+                    v,
+                )
+
+                # Reshape output
+                attn_output = (
+                    attn_output.transpose(1, 2)
+                    .contiguous()
+                    .view(batch_size, seq_len, self.hidden_size)
+                )
+
+                # Out projection
+                output = self.out_proj(attn_output)
+
+                return output
+
+        from torch.utils.checkpoint import (
+            checkpoint,
+            create_selective_checkpoint_contexts,
+        )
+
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts, ops_to_save
+        )
+
+        # Define a model that uses FlexAttention with selective activation checkpointing
+        class SacModule(nn.Module):
+            def __init__(self, hidden_size, num_heads, context_fn):
+                super().__init__()
+                self.flex_attn = FlexAttentionModule(hidden_size, num_heads)
+                self.context_fn = context_fn
+
+            def forward(self, x):
+                def flex_attn_fn(x):
+                    return self.flex_attn(x)
+
+                output = checkpoint(
+                    flex_attn_fn,
+                    x,
+                    use_reentrant=False,
+                    context_fn=self.context_fn,
+                )
+
+                return output
+
+        flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
+            "cuda", dtype=torch.bfloat16
+        )
+        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
+
+        # Run without compilation
+        output_module = flex_module(x)
+        compiled_module = torch.compile(flex_module)
+        output_compiled = compiled_module(x)
+
+        torch.testing.assert_close(output_module, output_compiled, rtol=1e-2, atol=1e-2)
+
+        # Calculate gradients and compare them
+        x.requires_grad_(True)
+        output_module = flex_module(x)
+        output_compiled = compiled_module(x)
+        grad_output = torch.ones_like(output_module)
+
+        grad_module = torch.autograd.grad(
+            outputs=output_module, inputs=x, grad_outputs=grad_output, retain_graph=True
+        )[0]
+
+        grad_compiled = torch.autograd.grad(
+            outputs=output_compiled, inputs=x, grad_outputs=grad_output
+        )[0]
+
+        torch.testing.assert_close(grad_module, grad_compiled, rtol=1e-2, atol=1e-2)
 
     @supported_platform
     @skip_on_cpu

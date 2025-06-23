@@ -10,7 +10,7 @@ import os
 import os.path
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
@@ -49,7 +49,7 @@ from ._activation_checkpointing.knapsack import (
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
-from .compile_utils import fx_graph_cse, get_aten_target
+from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 
 if TYPE_CHECKING:
@@ -1049,10 +1049,10 @@ def _count_ops(graph: fx.Graph):
     for node in graph.nodes:
         if node.op == "call_function":
             cnt[node.target.__name__] += 1
-    log.info("%s", sorted(cnt.items(), key=lambda x: x[1], reverse=True))
+    log.info("%s", sorted(cnt.items(), key=operator.itemgetter(1), reverse=True))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def pointwise_ops():
     ops = []
     for attr_name in dir(torch.ops.aten):
@@ -1074,7 +1074,7 @@ def sort_depths(args, depth_map: dict[fx.Node, int]) -> list[tuple[fx.Node, int]
     arg_depths = {
         arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)
     }
-    return sorted(arg_depths.items(), key=lambda x: x[1], reverse=True)
+    return sorted(arg_depths.items(), key=operator.itemgetter(1), reverse=True)
 
 
 def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
@@ -1141,6 +1141,11 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
         return gm
 
     # Build the graph op-by-op by starting from the node all the way to the end
+    # copy_ can be not using tangents at all, we must copy it.
+    for node in list(gm.graph.nodes)[: order[first_node_in_bwd]]:
+        if node.op == "call_function" and node.target == torch.ops.aten.copy_.default:
+            insert_node_in_graph(node)
+
     for node in list(gm.graph.nodes)[order[first_node_in_bwd] :]:
         insert_node_in_graph(node)
 
@@ -2009,6 +2014,7 @@ def get_default_op_list() -> OpTypes:
         aten.as_strided,
         aten.permute,
         aten.select,
+        aten.split,
     ]
     view_ops = recomputable_view_ops
     default_recomputable_ops += [
@@ -2061,7 +2067,9 @@ def get_default_op_list() -> OpTypes:
     default_recomputable_ops += [method_to_operator(m) for m in magic_methods]
     recomputable_ops = OrderedSet(default_recomputable_ops)
 
-    random_ops = OrderedSet([aten.native_dropout, aten.rand_like, aten.randn_like])
+    random_ops = OrderedSet[Callable[..., Any]](
+        [aten.native_dropout, aten.rand_like, aten.randn_like]
+    )
     compute_intensive_ops = [
         aten.mm,
         aten.convolution,
@@ -2641,6 +2649,11 @@ def min_cut_rematerialization_partition(
             )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
+    # raise all getitem ops to as early as possible
+    # this is helpful for memory, especially in the case of aot_eager backend
+    fw_module = raise_getitems(fw_module)
+    bw_module = raise_getitems(bw_module)
+
     if AOT_PARTITIONER_DEBUG:
         # Calculate sorted sizes of saved values
         sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
@@ -2669,7 +2682,9 @@ def min_cut_rematerialization_partition(
             len(fw_module_nodes),
             len(bw_module_nodes),
         )
-        rematerialized_ops = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+        rematerialized_ops = sorted(
+            counts.items(), key=operator.itemgetter(1), reverse=True
+        )
         log.info("Count of Ops Rematerialized: %s", rematerialized_ops)
     return fw_module, bw_module
 

@@ -2517,7 +2517,8 @@ def forward(self, x):
         dynamic_shapes = {"x": (dim0,)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            "You marked.*but your code specialized it to be a constant.*"
+            "If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
         ):
             torch.export.export(bar, (t,), dynamic_shapes=dynamic_shapes, strict=True)
 
@@ -4576,6 +4577,20 @@ def forward(self, x, b, y):
         graph, _ = torch._dynamo.export(m)(x)
         out = graph(x)
         self.assertEqual(ref_out, out)
+
+    def test_strict_fake_tensor_prop_real_tensors(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return bool(x.eq(0.1).any().item())
+
+        model = Foo()
+        inputs = (torch.randn(64),)
+        ref = model(*inputs)
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = torch.export.export(model, inputs, strict=True)
+            res = ep.module()(*inputs)
+
+        self.assertEqual(ref, res)
 
 
 class ExportTestsDevice(torch._dynamo.test_case.TestCase):
