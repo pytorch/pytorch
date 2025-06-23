@@ -951,19 +951,33 @@ class TestAssertCloseErrorMessage(TestCase):
             torch.float8_e5m2fnuz,
             torch.float8_e8m0fnu,
         ]:
-            w = torch.tensor([3.14, 1.0], dtype=dtype)
-            x = torch.tensor([1.0, 3.14], dtype=dtype)
-            y = torch.tensor([3.14, 3.14], dtype=dtype)
-            z = torch.tensor([1.0, 3.14], dtype=dtype)
-            for fn in assert_close_with_inputs(x, y):
-                with self.assertRaisesRegex(AssertionError, re.escape("The first mismatched element is at index 0")):
-                    fn()
+            w_vector = torch.tensor([3.14, 1.0], dtype=dtype)
+            x_vector = torch.tensor([1.0, 3.14], dtype=dtype)
+            y_vector = torch.tensor([3.14, 3.14], dtype=dtype)
+            z_vector = torch.tensor([1.0, 3.14], dtype=dtype)
 
-            for fn in assert_close_with_inputs(w, y):
-                with self.assertRaisesRegex(AssertionError, re.escape("The first mismatched element is at index 1")):
+            for additional_dims in range(4):
+                new_shape = list(w_vector.shape) + ([1] * additional_dims)
+                w_tensor = w_vector.reshape(new_shape)
+                x_tensor = x_vector.reshape(new_shape)
+                y_tensor = y_vector.reshape(new_shape)
+                z_tensor = z_vector.reshape(new_shape)
+
+                for fn in assert_close_with_inputs(x_tensor, y_tensor):
+                    expected_shape = (0,) + (0,) * (additional_dims)
+                    with self.assertRaisesRegex(
+                        AssertionError, re.escape(f"The first mismatched element is at index {expected_shape}")
+                    ):
+                        fn()
+
+                for fn in assert_close_with_inputs(w_tensor, y_tensor):
+                    expected_shape = (1,) + (0,) * (additional_dims)
+                    with self.assertRaisesRegex(
+                        AssertionError, re.escape(f"The first mismatched element is at index {expected_shape}")
+                    ):
+                        fn()
+                for fn in assert_close_with_inputs(x_tensor, z_tensor):
                     fn()
-            for fn in assert_close_with_inputs(x, z):
-                fn()
 
     def test_abs_diff_scalar(self):
         actual = 3
@@ -2352,6 +2366,11 @@ class TestImports(TestCase):
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
+                           "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
+                           "torch.distributed.examples",  # requires CUDA and torchvision
+                           "torch.distributed.tensor.examples",  # example scripts
+                           "torch.csrc",  # files here are devtools, not part of torch
+                           "torch.include",  # torch include files after install
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac

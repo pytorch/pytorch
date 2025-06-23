@@ -7,6 +7,11 @@ TORCH_DECLARE_bool(torch_jit_static_then_dynamic);
 
 TORCH_DECLARE_bool(torch_jit_always_dynamic);
 
+C10_DECLARE_bool(torch_jit_release_profiling_graph_after_optimization);
+C10_DECLARE_int32(torch_jit_release_profiling_graph_delay_in_seconds);
+C10_DECLARE_int64(torch_jit_num_profiled_runs);
+C10_DECLARE_int64(torch_jit_bailout_depth);
+
 namespace torch::jit {
 
 TORCH_API void runNooptPassPipeline(std::shared_ptr<Graph>& graph);

@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import logging
+import pickle
 import sys
 import tempfile
 import unittest
@@ -225,6 +226,20 @@ class TestPythonRegistration(TestCase):
             with torch._C._IncludeDispatchKeyGuard(torch.DispatchKey.Meta):
                 torch.ops.custom.sum.default(a)
                 self.assertTrue(meta_is_called)
+
+    def test_dispatchkeyset_pickle(self) -> None:
+        keyset = torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
+        serialized = pickle.dumps(keyset)
+        new_keyset = pickle.loads(serialized)
+        self.assertEqual(new_keyset, keyset)
+
+    def test_dispatchkeyset_eq(self) -> None:
+        a = torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
+        b = torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
+        c = torch._C.DispatchKeySet(torch._C.DispatchKey.CPU)
+        self.assertTrue(a == b)
+        self.assertFalse(a != b)
+        self.assertTrue(a != c)
 
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])

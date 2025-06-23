@@ -46,6 +46,7 @@
 #include <ATen/ops/_triton_multi_head_attention_native.h>
 #include <ATen/ops/_triton_scaled_dot_attention.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/linear.h>
 #include <ATen/ops/narrow_native.h>
@@ -963,33 +964,112 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     std::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
-  // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
-  // Key   -> Key(Batch x KV_seq_len x Num_heads x Dim_per_head)
-  // Value -> Value(Batch x KV_seq_len x  Num_heads x Dim_per_head)
-  Tensor q_t = query.transpose(1, 2);
-  Tensor k_t = key.transpose(1, 2);
-  Tensor v_t = value.transpose(1, 2);
+  constexpr int64_t MAX_BATCH_SIZE = (1LL << 16) - 1;
+  int64_t batch_size = query.size(0);
 
-  sdp::CustomMaskType custom_mask_type = is_causal
-      ? sdp::CustomMaskType::CausalFromTopLeft
-      : sdp::CustomMaskType::NoCustomMask;
+  if (batch_size > MAX_BATCH_SIZE) {
+    TORCH_CHECK(dropout_p == 0.0,
+                "Efficient attention cannot produce valid seed and offset outputs when "
+                "the batch size exceeds (", MAX_BATCH_SIZE, ").");
+  }
+  auto process_chunk = [&](const Tensor& q_chunk,
+                           const Tensor& k_chunk,
+                           const Tensor& v_chunk,
+                           const std::optional<Tensor>& bias_chunk)
+      -> std::tuple<Tensor, Tensor, Tensor, Tensor> {
+    Tensor q_t = q_chunk.transpose(1, 2);
+    Tensor k_t = k_chunk.transpose(1, 2);
+    Tensor v_t = v_chunk.transpose(1, 2);
 
-  auto [attention, log_sumexp, seed, offset, max_seqlen_batch_q, max_seqlen_batch_kv] = at::_efficient_attention_forward(
-      q_t,
-      k_t,
-      v_t,
-      attn_bias,
-      std::nullopt,
-      std::nullopt,
-      std::nullopt,
-      std::nullopt,
-      dropout_p,
-      static_cast<int64_t>(custom_mask_type),
-      compute_log_sumexp,
-      scale);
+    sdp::CustomMaskType custom_mask_type = is_causal
+        ? sdp::CustomMaskType::CausalFromTopLeft
+        : sdp::CustomMaskType::NoCustomMask;
 
-  attention = attention.transpose(1, 2);
-  return std::make_tuple(std::move(attention), std::move(log_sumexp), std::move(seed), std::move(offset));
+    auto [attention, log_sumexp, seed, offset, max_seqlen_batch_q, max_seqlen_batch_kv] =
+        at::_efficient_attention_forward(
+            q_t,
+            k_t,
+            v_t,
+            bias_chunk,
+            std::nullopt,
+            std::nullopt,
+            std::nullopt,
+            std::nullopt,
+            dropout_p,
+            static_cast<int64_t>(custom_mask_type),
+            compute_log_sumexp,
+            scale);
+    attention = attention.transpose(1, 2);
+
+    return std::make_tuple(std::move(attention),
+                           std::move(log_sumexp),
+                           std::move(seed),
+                           std::move(offset));
+  };
+
+  // when bs is larger than allowed maximum, process in chunks
+  if (batch_size > MAX_BATCH_SIZE) {
+    int64_t start = 0;
+    int64_t end = std::min(start + MAX_BATCH_SIZE, batch_size);
+
+    Tensor query_chunk = query.slice(0, start, end);
+    Tensor key_chunk = key.slice(0, start, end);
+    Tensor value_chunk = value.slice(0, start, end);
+    std::optional<Tensor> bias_chunk;
+    if (attn_bias.has_value()) {
+      bias_chunk = attn_bias.value().slice(0, start, end);
+    }
+    auto [attn, log_sumexp, seed, offset] =
+        process_chunk(query_chunk, key_chunk, value_chunk, bias_chunk);
+    int dim = attn.dim();
+    std::vector<int64_t> sizes;
+    sizes.reserve(dim);
+    sizes.push_back(batch_size);
+    for (int i = 1; i < dim; i++) {
+        sizes.push_back(attn.size(i));
+    }
+    Tensor final_attention = at::empty_strided(sizes, attn.strides(), attn.options());
+    final_attention.slice(0, start, end).copy_(attn);
+    Tensor final_log_sumexp;
+    if (compute_log_sumexp && log_sumexp.numel() > 0) {
+      std::vector<int64_t> lse_sizes;
+      lse_sizes.reserve(log_sumexp.dim());
+      lse_sizes.push_back(batch_size);
+      for (int i = 1; i < log_sumexp.dim(); i++) {
+        lse_sizes.push_back(log_sumexp.size(i));
+      }
+      final_log_sumexp = at::empty(std::move(lse_sizes), log_sumexp.options());
+      final_log_sumexp.slice(0, start, end).copy_(log_sumexp);
+    }
+
+    for (start = end; start < batch_size; start += MAX_BATCH_SIZE) {
+      end = std::min(start + MAX_BATCH_SIZE, batch_size);
+      query_chunk = query.slice(0, start, end);
+      key_chunk = key.slice(0, start, end);
+      value_chunk = value.slice(0, start, end);
+      if (attn_bias.has_value()) {
+        bias_chunk = attn_bias.value().slice(0, start, end);
+      } else {
+        bias_chunk.reset();
+      }
+
+      auto [chunk_attn, chunk_log_sumexp, chunk_seed, chunk_offset] =
+          process_chunk(query_chunk, key_chunk, value_chunk, bias_chunk);
+      final_attention.slice(0, start, end).copy_(chunk_attn);
+      if (compute_log_sumexp && chunk_log_sumexp.numel() > 0) {
+        final_log_sumexp.slice(0, start, end).copy_(chunk_log_sumexp);
+      }
+    }
+
+    return std::make_tuple(std::move(final_attention),
+              std::move(final_log_sumexp),
+              std::move(seed),
+              std::move(offset));
+  }
+  // when bs is within the allowed size, no need to chunk it
+  else {
+    return process_chunk(query, key, value, attn_bias);
+  }
 }
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
@@ -1393,7 +1473,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
 #else
   // CUDA Implementation
   cudaDeviceProp* p = at::cuda::getDeviceProperties(query.device().index());
-  const int computeCapability = p->major * 10 + p->minor;
+  int computeCapability = p->major * 10 + p->minor;
+  if (computeCapability == 121) {
+    computeCapability = 120;
+  }
 
   bool kernel_launched = false;
   const auto maxShmem = p->sharedMemPerBlockOptin;

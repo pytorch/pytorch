@@ -68,7 +68,10 @@ class AotAutograd:
 
         def wrap_bw_compiler(bw_compiler_fn):
             def _wrapped_bw_compiler(*args, **kwargs):
-                # stop TorchDynamo from trying to compile our generated backwards pass
+                # Note [Wrapping bw_compiler in disable]
+                # The two disables here:
+                # - stop TorchDynamo from trying to compile the bw_compiler function itself
+                # - stop TorchDynamo from trying to compile our the generated backwards pass bw_compiler produces
                 return disable(
                     disable(
                         bw_compiler_fn, reason="do not trace backward compiler function"

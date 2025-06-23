@@ -55,6 +55,18 @@ on:
         required: false
         type: boolean
         default: false
+      monitor-log-interval:
+        description: |
+          Set the interval for the monitor script to log utilization.
+        required: false
+        type: number
+        default: 5
+      monitor-data-collect-interval:
+        description: |
+          Set the interval for the monitor script to collect data.
+        required: false
+        type: number
+        default: 1
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -119,7 +131,7 @@ jobs:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
         run: |
-          tag=${ECR_DOCKER_IMAGE##*/}
+          tag=${ECR_DOCKER_IMAGE##*:}
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
@@ -172,9 +184,11 @@ jobs:
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           WORKFLOW_NAME: ${{ github.workflow }}
           WORKFLOW_RUN_ID: ${{github.run_id}}
+          MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
+          MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84 dataclasses_json==0.6.7
-          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
+          python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
@@ -193,7 +207,7 @@ jobs:
         run: .github/scripts/parse_ref.py
 
       - name: Check for keep-going label and re-enabled test issues
-        # This uses the filter-test-configs action because it conviniently
+        # This uses the filter-test-configs action because it conveniently
         # checks for labels and re-enabled test issues.  It does not actually do
         # any filtering.  All filtering is done in the build step.
         id: keep-going
@@ -362,7 +376,7 @@ jobs:
       - name: Upload pytest cache if tests failed
         uses: ./.github/actions/pytest-cache-upload
         continue-on-error: true
-        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure' && inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           cache_dir: .pytest_cache
           shard: ${{ matrix.shard }}
@@ -372,6 +386,7 @@ jobs:
 
       - name: Upload the benchmark results
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false
@@ -417,7 +432,7 @@ jobs:
           path: ./**/core.[1-9]*
 
       - name: Upload utilization stats
-        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
+        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
