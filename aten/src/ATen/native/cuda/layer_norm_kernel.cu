@@ -871,12 +871,12 @@ void LaunchGammaBetaBackwardCUDAKernel(
     Tensor dbeta_blocks;
     T * dgamma_blocks_ptr = nullptr;
     T * dbeta_blocks_ptr = nullptr;
-    if (dgamma && dgamma->defined()) {
+    if (dgamma->defined()) {
       auto options = dgamma->options();
       dgamma_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
       dgamma_blocks_ptr = dgamma_blocks.data_ptr<T>();
     }
-    if (dbeta && dbeta->defined()) {
+    if (dbeta->defined()) {
       auto options = dbeta->options();
       dbeta_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
       dbeta_blocks_ptr = dbeta_blocks.data_ptr<T>();
