@@ -6609,11 +6609,17 @@ class TestCompileKernel(TestCase):
             from torch.cuda import _compile_kernel
 
             # Validate that tensors are 1-dimensional and have the same size
-            torch._check(a.dim() == 1, lambda: f"Expected tensor 'a' to be 1-dimensional, but got {a.dim()} dimensions")
-            torch._check(b.dim() == 1, lambda: f"Expected tensor 'b' to be 1-dimensional, but got {b.dim()} dimensions")
+            torch._check(
+                a.dim() == 1,
+                lambda: f"Expected tensor 'a' to be 1-dimensional, but got {a.dim()} dimensions",
+            )
+            torch._check(
+                b.dim() == 1,
+                lambda: f"Expected tensor 'b' to be 1-dimensional, but got {b.dim()} dimensions",
+            )
             torch._check(
                 a.size() == b.size(),
-                lambda: f"Expected tensors to have the same size, but got a.size()={a.size()} and b.size()={b.size()}"
+                lambda: f"Expected tensors to have the same size, but got a.size()={a.size()} and b.size()={b.size()}",
             )
             compiled_kernel = _compile_kernel(kernel_source, "vector_add")
 
