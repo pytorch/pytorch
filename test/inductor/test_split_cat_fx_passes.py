@@ -115,6 +115,33 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_cat_normalization(self):
+        def caoncat_only(x):
+            return torch.concat(list(torch.split(x, 2, 1)), dim=1)
+
+        args = [
+            torch.randn(2, 32),
+        ]
+        for fn, dynamic, expected_cat_norm_count in [
+            (caoncat_only, False, 2),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn, dynamic=dynamic)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["normalization_pass"],
+                expected_cat_norm_count,
+                msg=f"for {fn}",
+            )
+            counters.clear()
+
     @patch
     def test_consecutive_split_merge(self):
         def multi_split(x):
