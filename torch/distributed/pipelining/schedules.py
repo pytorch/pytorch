@@ -782,7 +782,7 @@ class Schedule1F1B(PipelineScheduleSingle):
                 # Safe to fire
                 send_work = _batch_p2p(fwd_sends, desc="fwd_send")
             # otherwise:
-            #   The last foward send is left for fuse with first 1B in 1B1F below
+            #   The last forward send is left for fuse with first 1B in 1B1F below
 
             # Compute loss
             self._maybe_compute_loss(self._stage, output, target_mbs, fwd_mb_index)
@@ -943,7 +943,7 @@ def _add_unshard_reshard(
     """Given a basic schedule involving only compute actions (F,B,W), add UNSHARD/RESHARD actions for FSDP.
 
     UNSHARD refers to fetching the full contents of an FSDP-sharded layer, requiring an all-gather operation.
-    RESHARD does the opposite, releasing memory (but doing no commmunication)
+    RESHARD does the opposite, releasing memory (but doing no communication)
 
     We abandon the "timestep lock"  during lowering
 
@@ -1604,7 +1604,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             raise NotImplementedError(f"{format=} is not implemented")
 
     def _load_csv(self, filename: str, format: str = "compute_only"):
-        """Loads a csv in simple format and then lowers it to include comunication actions
+        """Loads a csv in simple format and then lowers it to include communication actions
 
         format must be either "compute_only" or "compute_comms".  If compute_only, the lowering passes
         will automatically be run to generate a compute_comms schedule.
@@ -1674,7 +1674,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         bwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
         fwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
 
-        # send ops should be waited on before step() exists, mainly for hygeine
+        # send ops should be waited on before step() exists, mainly for hygiene
         send_ops: list[list[dist.Work]] = []
 
         # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
@@ -1890,7 +1890,7 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
     """
     Breadth-First Pipeline Parallelism.
     See https://arxiv.org/abs/2211.05953 for details.
-    Simliar to Interleaved 1F1B, Looped BFS supports multiple stages per rank.
+    Similar to Interleaved 1F1B, Looped BFS supports multiple stages per rank.
     What is different is that when microbatches are ready for multiple local
     stages, Loops BFS will prioritizes the earlier stage, running all available
     microbatches at once.
