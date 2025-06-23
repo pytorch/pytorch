@@ -176,6 +176,43 @@ inline T ceildiv(T N, U M) {
   return (N + M - 1) / M;
 }
 
+// Optimized Hillis-Steele Scan using shared memory for better performance
+template <typename T, typename Op, typename acc_t = accum_t<T>>
+kernel void scan_hillis_steele_shared(
+    const device T* in [[buffer(0)]],
+    device T* out [[buffer(1)]],
+    const constant size_t& total_size [[buffer(2)]],
+    uint tid [[thread_position_in_grid]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]]) {
+  Op op;
+
+  // Shared memory for the threadgroup
+  threadgroup acc_t shared_data[1024]; // Adjust size as needed
+
+  if (tid >= total_size) {
+    return;
+  }
+
+  // Load input data into shared memory
+  shared_data[lid] = static_cast<acc_t>(in[tid]);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // Hillis-Steele scan within threadgroup
+  for (uint stride = 1; stride < lsize; stride *= 2) {
+    acc_t temp = shared_data[lid];
+    if (lid >= stride) {
+      temp = op(shared_data[lid - stride], temp);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    shared_data[lid] = temp;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  // Write result back to global memory
+  out[tid] = static_cast<T>(shared_data[lid]);
+}
+
 // Inclusive scan along innermost dimension for contiguous tensors
 template <typename T, typename Op, int N_READS, typename acc_t = accum_t<T>>
 kernel void scan_innermost_dim(
@@ -534,6 +571,15 @@ kernel void scan_with_indices_strided(
 }
 
 #define REGISTER_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS)              \
+  template [[host_name(#OP_NAME "_1d_" #DTYPE)]] [[kernel]] void        \
+  scan_hillis_steele_shared<DTYPE, OP_CLASS<DTYPE>>(                    \
+      const device DTYPE* in [[buffer(0)]],                             \
+      device DTYPE* out [[buffer(1)]],                                  \
+      const constant size_t& total_size [[buffer(2)]],                  \
+      uint tid [[thread_position_in_grid]],                             \
+      uint lid [[thread_position_in_threadgroup]],                      \
+      uint lsize [[threads_per_threadgroup]]);                          \
+                                                                        \
   template [[host_name(#OP_NAME "_innermost_" #DTYPE)]] [[kernel]] void \
   scan_innermost_dim<DTYPE, OP_CLASS<DTYPE>, NREADS>(                   \
       const device DTYPE* in [[buffer(0)]],                             \

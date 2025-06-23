@@ -96,6 +96,8 @@ static void scan_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
     output_tensor = temp_output;
   }
 
+  // Check if this is a 1D tensor scan (optimized case)
+  bool is_1d_scan = (self.numel() == axis_size);
   // Determine which kernel to use based on scan dimension position
   bool is_innermost_scan = (wrapped_dim == ndim - 1);
 
@@ -104,11 +106,13 @@ static void scan_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      // Build kernel name based on scan dimension position
+      // Build kernel name based on scan type
       std::string kernel_name;
       std::string type_str = scalarToMetalTypeString(input_tensor);
 
-      if (is_innermost_scan) {
+      if (is_1d_scan) {
+        kernel_name = op_name + "_1d_" + type_str;
+      } else if (is_innermost_scan) {
         kernel_name = op_name + "_innermost_" + type_str;
       } else {
         kernel_name = op_name + "_outer_" + type_str;
@@ -128,7 +132,20 @@ static void scan_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
       mtl_setBuffer(computeEncoder, input_tensor, 0);
       mtl_setBuffer(computeEncoder, output_tensor, 1);
 
-      if (is_innermost_scan) {
+      if (is_1d_scan) {
+        // Hillis-Steele algorithm dispatch
+        size_t total_size = input_tensor.numel();
+        mtl_setBytes(computeEncoder, total_size, 2);
+
+        // Hillis-Steele with shared memory: use threadgroups
+        int thread_group_size = std::min(static_cast<int>(total_size), 1024);
+        thread_group_size = std::min(thread_group_size, static_cast<int>(scanPSO.maxTotalThreadsPerThreadgroup));
+
+        int num_threadgroups = (total_size + thread_group_size - 1) / thread_group_size;
+
+        [computeEncoder dispatchThreads:MTLSizeMake(total_size, 1, 1)
+                  threadsPerThreadgroup:MTLSizeMake(thread_group_size, 1, 1)];
+      } else if (is_innermost_scan) {
         // Contiguous scan dispatch (scanning innermost dimension)
         mtl_setBytes(computeEncoder, axis_size, 2);
 
