@@ -30,7 +30,7 @@ For Intel Client GPU
 ||                                    || Intel® Core™ Ultra Desktop Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
 ||                                    || Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)|
 +-------------------------------------+----------------------------------------------------------------------------------------------------+
-|| Ubuntu 24.04 & WSL2 (Ubuntu 24.04) || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                                |
+|| Ubuntu 24.04                       || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                                |
 ||                                    || Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)                 |
 ||                                    || Intel® Core™ Ultra Desktop Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
 ||                                    || Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)|
