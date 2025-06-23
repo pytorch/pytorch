@@ -235,7 +235,7 @@ static PyObject* THPModule_initExtension(
   END_HANDLE_TH_ERRORS
 }
 
-// The idea behind these two functions is to make it easy to test if we are
+// The idea behind these functions is to make it easy to test if we are
 // built with ASAN: they're designed not to crash if ASAN is not enabled, but
 // to trigger ASAN if it is enabled.  This lets us run a "canary" tests which
 // checks if our build environment is misconfigured.
@@ -2010,6 +2010,12 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_cached_tensor", [](const at::Tensor& t) {
     return at::caching::is_cached_tensor(t);
+  });
+
+  py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
   });
 
   ASSERT_TRUE(

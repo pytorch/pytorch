@@ -561,7 +561,7 @@ if(USE_CUDA)
     set(DELAY_LOAD_FLAGS "")
   endif()
 
-  target_link_libraries(caffe2_nvrtc PRIVATE caffe2::nvrtc ${DELAY_LOAD_FLAGS})
+  target_link_libraries(caffe2_nvrtc PRIVATE torch::nvrtc ${DELAY_LOAD_FLAGS})
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   if(USE_NCCL)
     list(APPEND Caffe2_GPU_SRCS
@@ -572,13 +572,14 @@ if(USE_CUDA)
     if(NOT WIN32)
       append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_GPU_SRCS)
       set_source_files_properties(
-        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CudaDMAConnectivity.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupNCCL.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CudaDMAConnectivity.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
     endif()
@@ -709,10 +710,11 @@ list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_mps.cpp)
+  list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_mps.mm)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_mps.cpp)
   if(CAN_COMPILE_METAL)
-      file(TOUCH ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
-      list(APPEND Caffe2_CPU_SRCS ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
+      file(TOUCH ${CMAKE_BINARY_DIR}/caffe2/aten/src/ATen/metallib_dummy.cpp)
+      list(APPEND Caffe2_CPU_SRCS ${CMAKE_BINARY_DIR}/caffe2/aten/src/ATen/metallib_dummy.cpp)
   endif()
 endif()
 
@@ -993,7 +995,13 @@ elseif(USE_CUDA)
     set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
   endif()
 
-  if(USE_NVSHMEM AND DEFINED NVSHMEM_HOME)
+  if(NOT DEFINED NVSHMEM_HOME)
+    message(WARNING "NVSHMEM_HOME not found. Please run `pip install nvidia-nvshmem-<version>`, or set NVSHMEM_HOME to its location.")
+    # Disable nvshmem if NVSHMEM_HOME is not found
+    set(USE_NVSHMEM FALSE)
+  endif()
+
+  if(USE_NVSHMEM)
     message(STATUS "Building with NVSHMEM support:  '${NVSHMEM_HOME}'")
     set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/include")
     set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/lib")
@@ -1019,6 +1027,8 @@ elseif(USE_CUDA)
         ${NVSHMEM_LIB_DIR}/libnvshmem_host.so.3
         nvshmem_device
     )
+    target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
+    target_compile_definitions(nvshmem_extension PUBLIC USE_NVSHMEM)
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
   endif()
@@ -1035,8 +1045,13 @@ elseif(USE_CUDA)
         FLASH_NAMESPACE=pytorch_flash
         UNFUSE_FMA                      # Addressing issue #121558
       )
-    target_include_directories(torch_cuda PRIVATE
-        ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/
+    target_sources(torch_cuda PRIVATE $<TARGET_OBJECTS:flash_attention>)
+    target_include_directories(torch_cuda PUBLIC
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc>
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/include>
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/cutlass/include>
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src>
+      $<INSTALL_INTERFACE:include>
     )
   endif()
   if(USE_MEM_EFF_ATTENTION)
@@ -1061,26 +1076,9 @@ elseif(USE_CUDA)
         torch_cuda
     )
     if($ENV{ATEN_STATIC_CUDA})
-      if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
-        target_link_libraries(torch_cuda_linalg PRIVATE
-            CUDA::cusolver_static
-            ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
-        )
-      elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
-        target_link_libraries(torch_cuda_linalg PRIVATE
-            CUDA::cusolver_static
-            ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
-        )
-      endif()
+      target_link_libraries(torch_cuda_linalg PRIVATE CUDA::cusolver_static)
     else()
-      target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::cusolver
-      )
-    endif()
-    # NS: TODO, is this really necessary?
-    if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
-      target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::culibos ${CMAKE_DL_LIBS})
+      target_link_libraries(torch_cuda_linalg PRIVATE CUDA::cusolver)
     endif()
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
     install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -1159,15 +1157,7 @@ if(USE_XPU)
     if(USE_C10D_XCCL)
       target_compile_definitions(torch_xpu PUBLIC USE_C10D_XCCL)
     endif()
-    if(MSVC)
-      # Windows
-      target_link_options(torch_xpu PRIVATE
-      "-WHOLEARCHIVE:$<TARGET_FILE:torch_xpu_ops>")
-    else()
-      # Linux
-      target_link_options(torch_xpu PRIVATE
-          "-Wl,--whole-archive,$<TARGET_FILE:torch_xpu_ops>,--no-whole-archive")
-    endif()
+    target_link_libraries(torch_xpu PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,torch_xpu_ops>)
 
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
     include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})
@@ -1618,11 +1608,7 @@ if(USE_CUDA)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
   target_link_libraries(torch_cuda PUBLIC c10_cuda)
-  if(TARGET torch::nvtx3)
-    target_link_libraries(torch_cuda PRIVATE torch::nvtx3)
-  else()
-    target_link_libraries(torch_cuda PUBLIC torch::nvtoolsext)
-  endif()
+  target_link_libraries(torch_cuda PRIVATE CUDA::nvtx3)
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1714,9 +1700,6 @@ if(BUILD_SHARED_LIBS)
   if(USE_CUDA)
     target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
     target_link_libraries(torch_global_deps torch::cudart)
-    if(TARGET torch::nvtoolsext)
-      target_link_libraries(torch_global_deps torch::nvtoolsext)
-    endif()
   endif()
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()

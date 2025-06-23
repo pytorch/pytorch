@@ -3726,6 +3726,18 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Attribute 'name' is invalid"):
             f.name()
         with self.assertRaisesRegex(
+            RuntimeError, "Attribute '_sequence_nr' is invalid"
+        ):
+            f._sequence_nr()
+        with self.assertRaisesRegex(
+            RuntimeError, "Attribute '_set_sequence_nr' is invalid"
+        ):
+            f._set_sequence_nr(2)
+        with self.assertRaisesRegex(
+            RuntimeError, "Attribute '_input_metadata' is invalid"
+        ):
+            f._input_metadata
+        with self.assertRaisesRegex(
             RuntimeError, "underlying PyNode has already been deallocated"
         ):
             f.metadata

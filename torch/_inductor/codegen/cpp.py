@@ -86,7 +86,7 @@ from .cpp_utils import (
 _IS_WINDOWS = sys.platform == "win32"
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_export_declaration():
     return "__declspec(dllexport)" if _IS_WINDOWS else ""
 
@@ -327,7 +327,7 @@ def reduction_prefix_array(
     Ref: https://stackoverflow.com/questions/56555406/creating-dynamic-sized-array-using-msvc-c-compiler
     MSVC is the only one compiler without VLA. support. Since MSVC can't get good performance here.
     We just use unique_ptr make it works on MSVC.
-    For other compilers, we continue to use VLA to get best performence.
+    For other compilers, we continue to use VLA to get best performance.
     """
     code_buffer = IndentedBuffer()
     acc_decl = (
@@ -4986,7 +4986,7 @@ class CppScheduling(BaseScheduling):
                                 layout=local_buffer_layout,
                             )
                             local_buffers.append(local_buffer_used)
-                            local_to_global_buffers[local_buffer_used.name] = []
+                            local_to_global_buffers[local_buffer_used.name] = []  # type: ignore[index]
                         local_to_global_buffers[local_buffer_used.name].append(
                             global_buffer,
                         )

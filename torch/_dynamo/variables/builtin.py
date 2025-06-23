@@ -169,7 +169,7 @@ class BuiltinVariable(VariableTracker):
         return cls(value, source=source)
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _constant_fold_functions():
         fns = {
             abs,
@@ -239,7 +239,7 @@ class BuiltinVariable(VariableTracker):
         return self.fn in self._constant_fold_functions()
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _fx_graph_functions():
         fns = {
             operator.abs,
@@ -285,7 +285,7 @@ class BuiltinVariable(VariableTracker):
         return fns
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _binops() -> dict[
         Callable[..., object], tuple[list[str], Callable[..., object]]
     ]:
@@ -324,7 +324,7 @@ class BuiltinVariable(VariableTracker):
         return fns
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _binop_handlers():
         # Multiple dispatch mechanism defining custom binop behavior for certain type
         # combinations. Handlers are attempted in order, and will be used if the type checks
@@ -824,7 +824,7 @@ class BuiltinVariable(VariableTracker):
 
         if inspect.isclass(fn) and (
             issubclass(fn, Exception)
-            # GeneratorExit doens't inherit from Exception
+            # GeneratorExit doesn't inherit from Exception
             # >>> issubclass(GeneratorExit, Exception)
             # False
             or fn is GeneratorExit
@@ -2244,7 +2244,7 @@ class BuiltinVariable(VariableTracker):
                     # get_fake_val will get the same fake tensor
                     existing_fake_attr = get_fake_value(getattr_var.as_proxy().node, tx)
 
-                    # same tensor identiy, setattr is a no-op
+                    # same tensor identity, setattr is a no-op
                     mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
                     if (
                         existing_fake_attr is assigning_fake_val
