@@ -30,8 +30,8 @@ def empty_cache() -> None:
     torch._C._accelerator_emptyCache()
 
 
-def memory_stats(device: _device_t = None, /) -> OrderedDict[str, Any]:
-    r"""Return a dictionary of accelerator device memory allocator statistics for a given device.
+def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
+    r"""Return a dictionary of accelerator device memory allocator statistics for a given device index.
 
     The return value of this function is a dictionary of statistics, each of
     which is a non-negative integer.
@@ -83,14 +83,15 @@ def memory_stats(device: _device_t = None, /) -> OrderedDict[str, Any]:
     - ``"num_device_free"``: number of device memory free calls.
 
     Args:
-        device (:class:`torch.device`, str, int, optional): a given device that must match the current
-            :ref:`accelerator<accelerators>` device type. If not given,
-            use :func:`torch.accelerator.current_device_index` by default.
+        device_index (:class:`torch.device`, str, int, optional): the index of the device to target.
+            If not given, use :func:`torch.accelerator.current_device_index` by default.
+            If a :class:`torch.device` or str is provided, its type must match the current
+            :ref:`accelerator<accelerators>` device type.
     """
     if not torch._C._accelerator_isAllocatorInitialized():
         return OrderedDict()
-    device = _get_device_index(device, optional=True)
-    stats = torch._C._accelerator_getDeviceStats(device)
+    device_index = _get_device_index(device_index, optional=True)
+    stats = torch._C._accelerator_getDeviceStats(device_index)
     flat_stats = []
 
     def flatten(prefix: str, value: Any) -> None:
@@ -106,87 +107,95 @@ def memory_stats(device: _device_t = None, /) -> OrderedDict[str, Any]:
     return OrderedDict(flat_stats)
 
 
-def memory_allocated(device: _device_t = None, /) -> int:
+def memory_allocated(device_index: _device_t = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` device memory occupied by tensors
-    in bytes for a given device.
+    in bytes for a given device index.
 
     Args:
-        device (:class:`torch.device`, str, int, optional): a given device that must match the current
-            :ref:`accelerator<accelerators>` device type. If not given,
-            use :func:`torch.accelerator.current_device_index` by default.
+        device_index (:class:`torch.device`, str, int, optional): the index of the device to target.
+            If not given, use :func:`torch.accelerator.current_device_index` by default.
+            If a :class:`torch.device` or str is provided, its type must match the current
+            :ref:`accelerator<accelerators>` device type.
     """
-    return memory_stats(device).get("allocated_bytes.all.current", 0)
+    return memory_stats(device_index).get("allocated_bytes.all.current", 0)
 
 
-def max_memory_allocated(device: _device_t = None, /) -> int:
+def max_memory_allocated(device_index: _device_t = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` maximum device memory occupied by tensors
-    in bytes for a given device.
+    in bytes for a given device index.
 
     By default, this returns the peak allocated memory since the beginning of
     this program. :func:`~torch.accelerator.reset_peak_memory_stats` can be used to
     reset the starting point in tracking this metric.
 
     Args:
-        device (:class:`torch.device`, str, int, optional): a given device that must match the current
-            :ref:`accelerator<accelerators>` device type. If not given,
-            use :func:`torch.accelerator.current_device_index` by default.
+        device_index (:class:`torch.device`, str, int, optional): the index of the device to target.
+            If not given, use :func:`torch.accelerator.current_device_index` by default.
+            If a :class:`torch.device` or str is provided, its type must match the current
+            :ref:`accelerator<accelerators>` device type.
     """
-    return memory_stats(device).get("allocated_bytes.all.peak", 0)
+    return memory_stats(device_index).get("allocated_bytes.all.peak", 0)
 
 
-def memory_reserved(device: _device_t = None, /) -> int:
+def memory_reserved(device_index: _device_t = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` device memory managed by the caching allocator
-    in bytes for a given device.
+    in bytes for a given device index.
 
     Args:
-        device (:class:`torch.device`, str, int, optional): a given device that must match the current
-            :ref:`accelerator<accelerators>` device type. If not given,
-            use :func:`torch.accelerator.current_device_index` by default.
+        device_index (:class:`torch.device`, str, int, optional): the index of the device to target.
+            If not given, use :func:`torch.accelerator.current_device_index` by default.
+            If a :class:`torch.device` or str is provided, its type must match the current
+            :ref:`accelerator<accelerators>` device type.
     """
-    return memory_stats(device).get("reserved_bytes.all.current", 0)
+    return memory_stats(device_index).get("reserved_bytes.all.current", 0)
 
 
-def max_memory_reserved(device: _device_t = None, /) -> int:
+def max_memory_reserved(device_index: _device_t = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` maximum device memory managed by the caching allocator
-    in bytes for a given device.
+    in bytes for a given device index.
 
     By default, this returns the peak cached memory since the beginning of this
     program. :func:`~torch.accelerator.reset_peak_memory_stats` can be used to reset
     the starting point in tracking this metric.
 
     Args:
-        device (:class:`torch.device`, str, int, optional): a given device that must match the current
-            :ref:`accelerator<accelerators>` device type. If not given,
-            use :func:`torch.accelerator.current_device_index` by default.
+        device_index (:class:`torch.device`, str, int, optional): the index of the device to target.
+            If not given, use :func:`torch.accelerator.current_device_index` by default.
+            If a :class:`torch.device` or str is provided, its type must match the current
+            :ref:`accelerator<accelerators>` device type.
     """
-    return memory_stats(device).get("reserved_bytes.all.peak", 0)
+    return memory_stats(device_index).get("reserved_bytes.all.peak", 0)
 
 
-def reset_accumulated_memory_stats(device: _device_t = None, /) -> None:
-    r"""Reset the "accumulated" (historical) stats tracked by the current :ref:`accelerator<accelerators>` memory allocator.
+def reset_accumulated_memory_stats(device_index: _device_t = None, /) -> None:
+    r"""Reset the "accumulated" (historical) stats tracked by the current :ref:`accelerator<accelerators>`
+    memory allocator for a given device index.
 
     Args:
-        device (:class:`torch.device`, str, int, optional): a given device that must match the current
-            :ref:`accelerator<accelerators>` device type. If not given,
-            use :func:`torch.accelerator.current_device_index` by default.
+        device_index (:class:`torch.device`, str, int, optional): the index of the device to target.
+            If not given, use :func:`torch.accelerator.current_device_index` by default.
+            If a :class:`torch.device` or str is provided, its type must match the current
+            :ref:`accelerator<accelerators>` device type.
 
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
     """
-    device = _get_device_index(device, optional=True)
-    return torch._C._accelerator_resetAccumulatedStats(device)
+    device_index = _get_device_index(device_index, optional=True)
+    return torch._C._accelerator_resetAccumulatedStats(device_index)
 
 
-def reset_peak_memory_stats(device: _device_t = None, /) -> None:
-    r"""Reset the "peak" stats tracked by the current :ref:`accelerator<accelerators>` memory allocator.
+def reset_peak_memory_stats(device_index: _device_t = None, /) -> None:
+    r"""Reset the "peak" stats tracked by the current :ref:`accelerator<accelerators>`
+    memory allocator for a given device index.
 
     Args:
-        device (:class:`torch.device`, str, int, optional): a given device that must match the current
-            :ref:`accelerator<accelerators>` device type. If not given,
-            use :func:`torch.accelerator.current_device_index` by default.
+        device_index (:class:`torch.device`, str, int, optional): the index of the device to target.
+            If not given, use :func:`torch.accelerator.current_device_index` by default.
+            If a :class:`torch.device` or str is provided, its type must match the current
+            :ref:`accelerator<accelerators>` device type.
 
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
     """
-    device = _get_device_index(device, optional=True)
-    return torch._C._accelerator_resetPeakStats(device)
+    device_index = _get_device_index(device_index, optional=True)
+    return torch._C._accelerator_resetPeakStats(device_index)
