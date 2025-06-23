@@ -375,7 +375,7 @@ class TritonTemplateKernel(TritonKernel):
         self.template_out: Optional[str] = None
         self.ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
 
-        # Whe caching is enabled, the generated code is not dependent on the input nodes names, or
+        # When caching is enabled, the generated code is not dependent on the input nodes names, or
         # symbolic sizes names.
         # However, some of the variables returned by generate_and_load that are computed during the
         # triton template expansions (code generation) are dependent on those.
@@ -2063,6 +2063,15 @@ def get_num_workers() -> int:
         else os.cpu_count()
     )
     assert cpu_count
+
+    # Divide the number of CPUs by the number of GPUs for distributed workloads
+    if (
+        config.is_fbcode()
+        and torch.cuda.is_available()
+        and torch.cuda.device_count() > 0
+    ):
+        cpu_count = cpu_count // torch.cuda.device_count()
+
     return cpu_count
 
 
