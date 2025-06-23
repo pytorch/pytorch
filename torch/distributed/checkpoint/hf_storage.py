@@ -7,10 +7,12 @@ from typing import Any, Optional
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
-from torch.distributed.checkpoint.filesystem import SerializationFormat
-from torch.distributed.checkpoint.hf_utils import (
-    _metadata_fn,
+from torch.distributed.checkpoint._hf_utils import (
+    _gen_file_name,
+    _get_dtype,
+    _get_safetensors_file_metadata,
     _HFStorageInfo,
+    _metadata_fn,
     CUSTOM_METADATA_KEY,
     DATA_KEY,
     DATA_OFFSETS_KEY,
@@ -19,10 +21,8 @@ from torch.distributed.checkpoint.hf_utils import (
     SAVED_OFFSETS_KEY,
     SHAPE_KEY,
     SUFFIX,
-    _gen_file_name,
-    _get_safetensors_file_metadata,
-    _get_dtype,
 )
+from torch.distributed.checkpoint.filesystem import SerializationFormat
 from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
     Metadata,
@@ -221,7 +221,7 @@ class HuggingFaceStorageReader(FsspecReader):
                 }
 
                 for req in reqs:
-                    item_md: _HFStorageInfo = self.storage_data[req.storage_index]
+                    item_md = self.storage_data[req.storage_index]
 
                     tensor_bytes = deserialized_dict[req.dest_index.fqn][DATA_KEY]
 
