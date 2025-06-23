@@ -1500,7 +1500,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         var = f"int_array_{next(self.int_array_id)}"
         ctype = "int64_t"
         if int_array=="{}":
-            #  An array of unknown bound cannot be initialized with {}. 
+            #  An array of unknown bound cannot be initialized with {}.
             if known_statically:
                 writeline(f"static constexpr {ctype} *{var}=nullptr;")
             else:
