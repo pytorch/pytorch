@@ -12736,7 +12736,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
     def test_torch_device_is_available(self, device):
         def fn(x):
-            if TEST_HPU or TEST_CUDA or TEST_XPU:
+            if torch.accelerator.is_available():
                 return x + 1
             else:
                 return x - 1
@@ -12858,10 +12858,8 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             ("xpu:0", "xpu", 0),
         ]:
             if (
-                (device == "cuda:0" and not TEST_CUDA)
-                or (device == "xpu:0" and not TEST_XPU)
-                or (device == "hpu:0" and not TEST_HPU)
-            ):
+                device == "cuda:0" or device == "xpu:0" or device == "hpu:0"
+            ) and not torch.accelerator.is_available():
                 continue
 
             def fn(target):
