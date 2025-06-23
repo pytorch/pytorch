@@ -1046,8 +1046,8 @@ def tuned_sparse_semi_structured_mm(
     m1, k1 = mat1.get_size()
     m2, _ = mat1_meta.get_size()
     k2, n = mat2.get_size()
-    m = V.graph.sizevars.guard_equals(m1, m2)
-    k = V.graph.sizevars.guard_equals(2 * k1, k2)
+    m = V.graph.sizevars.check_equals_and_simplify(m1, m2)
+    k = V.graph.sizevars.check_equals_and_simplify(2 * k1, k2)
 
     if layout is None:
         from torch._inductor.ir import FixedLayout
