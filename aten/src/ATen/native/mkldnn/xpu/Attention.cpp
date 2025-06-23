@@ -1,3 +1,4 @@
+#include <ATen/native/cudnn/MHAUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
@@ -119,38 +120,6 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   use_overrideable_xpu(kernel_params, print_debug);
   TORCH_CHECK(!print_debug, "No available kernel. Aborting execution.")
   return sdp::SDPBackend::error;
-}
-
-void alloc_with_matching_layout(
-    const at::Tensor& q,
-    at::Tensor& output,
-    const std::vector<int64_t>& shape) {
-  TORCH_INTERNAL_ASSERT(
-      shape.size() == q.sizes().size(),
-      "SDPA alloc_with_matching_layout got requested shape ndim != q ndim");
-
-  if (std::equal(q.sizes().begin(), q.sizes().end(), shape.begin())) {
-    output = at::empty_like(q);
-    return;
-  }
-
-  // get the "fill order," which is just an argsort on the strides
-  std::vector<int> fill_order(shape.size());
-  std::iota(fill_order.begin(), fill_order.end(), 0);
-  const auto q_strides = q.strides();
-  std::stable_sort(
-      fill_order.begin(), fill_order.end(), [&q_strides](int idx1, int idx2) {
-        return q_strides[idx1] < q_strides[idx2];
-      });
-  std::vector<int64_t> ordered_strides(shape.size());
-  int64_t current_stride = 1;
-  for (const int dim_idx : fill_order) {
-    ordered_strides[dim_idx] = current_stride;
-    current_stride *= shape[dim_idx];
-  }
-  output = at::empty(at::IntArrayRef(shape), q.options())
-               .as_strided(
-                   at::IntArrayRef(shape), at::IntArrayRef(ordered_strides), 0);
 }
 } // namespace
 
