@@ -78,7 +78,8 @@ struct TORCH_API PyCompilerInterface {
   virtual void call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
-      const at::Tensor& grad) const {
+      const at::Tensor& grad,
+      bool has_post_hooks) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 };
@@ -97,7 +98,7 @@ struct TORCH_API PyCompilerGuard {
 // including torch/csrc/autograd/engine.h breaks BC by somehow introducing
 // symbol resolution issues. Instead requiring downstream users to include
 // engine.h to access collect_input_metadata, we provide it here (with a
-// different name to avoid ambigous symbols...)
+// different name to avoid ambiguous symbols...)
 TORCH_API std::vector<std::optional<InputMetadata>> get_input_metadata(
     const edge_list& edges);
 
@@ -571,7 +572,8 @@ class CompiledNodeArgs {
     }
   }
   void collect(const InputMetadata& t) {
-    TORCH_CHECK(!t.is_nested_tensor(), "NestedTensor not implemented");
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        !t.is_nested_tensor(), "NestedTensor support not implemented. ");
     collect(t.options());
     collect(t.is_tensor_subclass());
     collect(t.shape_as_dim_vector());
@@ -1066,7 +1068,7 @@ class SwapSavedVariables {
 // (e.g. MulBackward0_apply_functional). Compiled Autograd's initial graph
 // capture wants to take a variant of this function and proxy it into the graph.
 // Every autograd node defines an apply_with_saved function, that when invoked,
-// proxys a call to a function into the Compiled Autograd graph.
+// proxies a call to a function into the Compiled Autograd graph.
 //
 // Some requirements that we have are:
 // - The proxy'ed function must have inputs that are FX-graphable types.
@@ -1109,7 +1111,8 @@ struct IValuePacker {
     // with certain compiler settings
     // (see https://github.com/pytorch/pytorch/pull/144707 for examples).
     // It's not clear what the problem is, so we're going to ignore it for now.
-    TORCH_INTERNAL_ASSERT(false, "torch.compile not supported on Windows");
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "torch.compile not supported on Windows");
 #else
     if constexpr (::std::is_same_v<T, at::Tensor>) {
       return at::TensorType::get();
@@ -1146,7 +1149,8 @@ struct IValuePacker {
       // define how to pack and unpack an object of this time into an IValue
       // by creating a specialization of IValuePacker for this type.
       // See NOTE: [Compiled Autograd and backward functions] for context.
-      TORCH_INTERNAL_ASSERT(false, "IValuePacker not implemented for type");
+      TORCH_CHECK_NOT_IMPLEMENTED(
+          false, "IValuePacker not implemented for type");
       return at::NoneType::get();
     }
 #endif
