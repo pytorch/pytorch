@@ -704,35 +704,39 @@ class TestMultiheadAttentionNN(NNTestCase):
 
     def test_multihead_attn_nested_tensor_outside_fast_path(self):
         mha = torch.nn.MultiheadAttention(10, 5, batch_first=True).eval()
-        nt = torch.nested.nested_tensor([torch.randn(4, 10), torch.randn(6, 10)], layout=torch.jagged)
+        nt1 = torch.nested.nested_tensor([torch.randn(4, 10), torch.randn(6, 10)], layout=torch.jagged)
         # One tested platform (linux-bionic-py3.7-clang) has a torch_function for one
         # or more of these. Take advantage of that to test the torch_function bailout.
-        
-        mha(nt, nt, nt)
+        print(mha(nt1, nt1, nt1))
+
+        # Test with different query, key and value
+        nt2 = torch.nested.nested_tensor([torch.randn(7, 10), torch.randn(16, 10)], layout=torch.jagged)
+        nt3 = torch.nested.nested_tensor([torch.randn(7, 10), torch.randn(16, 10)], layout=torch.jagged)
+        mha(nt1, nt2, nt3)
 
         # test with add_zero_attn
         mha = torch.nn.MultiheadAttention(10, 5, batch_first=True, add_bias_kv = True).eval()
-        mha(nt, nt, nt)
+        mha(nt1, nt1, nt1)
 
         # test with add_bias_kv
         mha = torch.nn.MultiheadAttention(10, 5, batch_first=True, add_zero_attn = True).eval()
-        mha(nt, nt, nt)
+        mha(nt1, nt1, nt1)
 
         # test with add_bias_kv and add_zero_attn
         mha = torch.nn.MultiheadAttention(10, 5, batch_first=True, add_bias_kv = True, add_zero_attn = True).eval()
-        mha(nt, nt, nt)
+        mha(nt1, nt1, nt1)
 
         with torch.no_grad():
-            mha(nt, nt, nt)
+            mha(nt1, nt1, nt1)
         with torch.inference_mode():
-            mha(nt, nt, nt)
+            mha(nt1, nt1, nt1)
 
-        nt.requires_grad = False
+        nt1.requires_grad = False
         mha.in_proj_weight.requires_grad = False
         mha.in_proj_bias.requires_grad = False
         mha.out_proj.weight.requires_grad = False
         mha.out_proj.bias.requires_grad = False
-        mha(nt, nt, nt)
+        mha(nt1, nt1, nt1)
 
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):

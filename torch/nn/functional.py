@@ -6161,12 +6161,12 @@ def multi_head_attention_forward(
 
     Shape:
         Inputs:
-        - query: :math:`(L, E)` or :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
-          the embedding dimension.
-        - key: :math:`(S, E)` or :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
-          the embedding dimension.
-        - value: :math:`(S, E)` or :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
-          the embedding dimension.
+        - query: :math:`(L, E)` or :math:`(L, N, E)` or :math:`(N, J, E)` if using nested jagged tensors, where L is the target sequence length, N is the batch size, E is
+          the embedding dimension, J is variable target sequence length.
+        - key: :math:`(S, E)` or :math:`(S, N, E)` or :math:`(N, J, E)` if using nested jagged tensors, where S is the source sequence length, N is the batch size, E is
+          the embedding dimension, J is variable source sequence length.
+        - value: :math:`(S, E)` or :math:`(S, N, E)` or :math:`(N, J, E)` where S is the source sequence length, N is the batch size, E is
+          the embedding dimension, J is variable source sequence length.
         - key_padding_mask: :math:`(S)` or :math:`(N, S)` where N is the batch size, S is the source sequence length.
           If a FloatTensor is provided, it will be directly added to the value.
           If a BoolTensor is provided, the positions with the
@@ -6183,8 +6183,8 @@ def multi_head_attention_forward(
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
 
         Outputs:
-        - attn_output: :math:`(L, E)` or :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
-          E is the embedding dimension.
+        - attn_output: :math:`(L, E)` or :math:`(L, N, E)` or :math:`(N, J, E)` if using nested jagged tensors, where L is the target sequence length, N is the batch size,
+          E is the embedding dimension, J is variable target sequence length.
         - attn_output_weights: Only returned when ``need_weights=True``. If ``average_attn_weights=True``, returns
           attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
           :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and

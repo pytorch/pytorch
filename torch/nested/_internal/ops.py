@@ -384,7 +384,7 @@ def jagged_multi_head_attention_forward(
     out_proj_bias: Optional[torch.Tensor],
     training: bool = True,
     key_padding_mask: Optional[torch.Tensor] = None,
-    need_weights: bool = True,
+    need_weights: bool = False,
     attn_mask: Optional[torch.Tensor] = None,
     use_separate_proj_weight: bool = False,
     q_proj_weight: Optional[torch.Tensor] = None,
@@ -395,84 +395,15 @@ def jagged_multi_head_attention_forward(
     average_attn_weights: bool = True,
     is_causal: bool = False,
 ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
-    r"""Forward method for MultiHeadAttention.
-
-    See :class:`torch.nn.MultiheadAttention` for details.
-
-    Args:
-        query, key, value: map a query and a set of key-value pairs to an output.
-            See "Attention Is All You Need" for more details.
-        embed_dim_to_check: total dimension of the model.
-        num_heads: parallel attention heads.
-        in_proj_weight, in_proj_bias: input projection weight and bias.
-        bias_k, bias_v: bias of the key and value sequences to be added at dim=0.
-        add_zero_attn: add a new batch of zeros to the key and
-                       value sequences at dim=1.
-        dropout_p: probability of an element to be zeroed.
-        out_proj_weight, out_proj_bias: the output projection weight and bias.
-        training: apply dropout if is ``True``.
-        key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention. This is an binary mask. When the value is True,
-            the corresponding value on the attention layer will be filled with -inf.
-        need_weights: output attn_output_weights.
-            Default: `True`
-            Note: `needs_weight` defaults to `True`, but should be set to `False`
-            For best performance when attention weights are not needed.
-            *Setting needs_weights to `True`
-            leads to a significant performance degradation.*
-        attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
-            the batches while a 3D mask allows to specify a different mask for the entries of each batch.
-        is_causal: If specified, applies a causal mask as attention mask, and ignores
-            attn_mask for computing scaled dot product attention.
-            Default: ``False``.
-            .. warning::
-                is_causal is provides a hint that the attn_mask is the
-                causal mask.Providing incorrect hints can result in
-                incorre_in_projection_packedct execution, including forward and backward
-                compatibility.
-        use_separate_proj_weight: the function accept the proj. weights for query, key,
-            and value in different forms. If false, in_proj_weight will be used, which is
-            a combination of q_proj_weight, k_proj_weight, v_proj_weight.
-        q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
-        static_k, static_v: static key and value used for attention operators.
-        average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across heads.
-            Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an effect
-            when ``need_weights=True.``. Default: True
-
-
-    Shape:
-        Inputs:
-        - query: :math:`(L, E)` or :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
-          the embedding dimension.
-        - key: :math:`(S, E)` or :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
-          the embedding dimension.
-        - value: :math:`(S, E)` or :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
-          the embedding dimension.
-        - key_padding_mask: :math:`(S)` or :math:`(N, S)` where N is the batch size, S is the source sequence length.
-          If a FloatTensor is provided, it will be directly added to the value.
-          If a BoolTensor is provided, the positions with the
-          value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
-        - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
-          3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
-          S is the source sequence length. attn_mask ensures that position i is allowed to attend the unmasked
-          positions. If a BoolTensor is provided, positions with ``True``
-          are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
-          is provided, it will be added to the attention weight.
-        - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
-          N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
-        - static_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
-          N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
-
-        Outputs:
-        - attn_output: :math:`(L, E)` or :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
-          E is the embedding dimension.
-        - attn_output_weights: Only returned when ``need_weights=True``. If ``average_attn_weights=True``, returns
-          attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
-          :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
-          :math:`S` is the source sequence length. If ``average_attn_weights=False``, returns attention weights per
-          head of shape :math:`(num_heads, L, S)` when input is unbatched or :math:`(N, num_heads, L, S)`.
+    r"""Forward method for MultiHeadAttention (for nested jagged tensors).
     """
-    if key.is_nested and key_padding_mask is not None:
+    assert (
+        isinstance(query, NestedTensor)
+        and isinstance(key, NestedTensor)
+        and isinstance(value, NestedTensor)
+    )
+
+    if key_padding_mask is not None:
         raise RuntimeError(
             "Nested tensors represent jagged sequences and do not use padding, "
             "so key_padding_mask must be None when using a nested key tensor."
@@ -484,11 +415,6 @@ def jagged_multi_head_attention_forward(
 
     # set up shape vars
     bsz, _, embed_dim = query.shape
-
-    if is_causal:
-        raise RuntimeError(
-            "Need attn_mask if specifying the is_causal hint but attn_mask is not supported for nested tensors."
-        )
 
     assert embed_dim == embed_dim_to_check, (
         f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
@@ -503,11 +429,12 @@ def jagged_multi_head_attention_forward(
     )
     if use_separate_proj_weight:
         # allow MHA to have different embedding dimensions when separate projection weights are used
-        assert key.shape[:2] == value.shape[:2], (
+        assert key.shape[0] == value.shape[0] and all(key[i].size(0) == value[i].size(0) for i in range(len(key))), (
             f"key's sequence and batch dims {key.shape[:2]} do not match value's {value.shape[:2]}"
         )
     else:
-        assert key.shape == value.shape, (
+        # Check whether the two nested tensors have the same dimensions
+        assert (key.shape[0], key.shape[2]) == (value.shape[0], value.shape[2]) and all(key[i].size(0) == value[i].size(0) for i in range(len(key))), (
             f"key shape {key.shape} does not match value shape {value.shape}"
         )
 
@@ -603,10 +530,6 @@ def jagged_multi_head_attention_forward(
             f"expecting static_v.size(2) of {head_dim}, but got {static_v.size(2)}"
         )
         v = static_v
-
-    
-    # update source sequence length after adjustments
-    src_len = k.size(1)
 
     # adjust dropout probability
     if not training:
