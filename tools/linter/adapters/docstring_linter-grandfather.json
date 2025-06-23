@@ -1,6 +1,6 @@
 {
   "torch/_inductor/async_compile.py": {
-    "class AsyncCompile": 297
+    "class AsyncCompile": 300
   },
   "torch/_inductor/autoheuristic/artifacts/_MMRankingA100.py": {
     "class MMRankingA100": 279,
@@ -22,9 +22,9 @@
     "class ValueRangeAnalysis": 107
   },
   "torch/_inductor/codecache.py": {
-    "class AotCodeCompiler": 566,
     "class CppPythonBindingsCodeCache": 179,
-    "class HalideCodeCache": 355
+    "class HalideCodeCache": 355,
+    "class PyCodeCache": 102
   },
   "torch/_inductor/codegen/common.py": {
     "class CSE": 167,
@@ -55,7 +55,6 @@
     "def CppFlexAttentionTemplate.modification()": 94
   },
   "torch/_inductor/codegen/cpp_gemm_template.py": {
-    "class CppGemmTemplate": 1087,
     "def CppGemmTemplate.get_options()": 249
   },
   "torch/_inductor/codegen/cpp_grouped_gemm_template.py": {
@@ -76,12 +75,8 @@
     "def CppWrapperCpuArrayRef.generate_return()": 127,
     "def CppWrapperCpuArrayRef.write_wrapper_decl()": 208
   },
-  "torch/_inductor/codegen/cuda/device_op_overrides.py": {
-    "class CUDADeviceOpOverrides": 237,
-    "def CUDADeviceOpOverrides.tma_descriptor_helpers()": 102
-  },
   "torch/_inductor/codegen/cuda/gemm_template.py": {
-    "class CUTLASS2xGemmTemplate": 266
+    "class CUTLASS2xGemmTemplate": 267
   },
   "torch/_inductor/codegen/debug_utils.py": {
     "class DebugPrinterManager": 229
@@ -104,20 +99,19 @@
     "class ROCmBenchmarkRequest": 117
   },
   "torch/_inductor/codegen/simd.py": {
-    "class SIMDScheduling": 1057,
     "def SIMDScheduling.candidate_tilings()": 126,
     "def SIMDScheduling.generate_node_schedule()": 95
   },
   "torch/_inductor/codegen/triton.py": {
-    "class BlockPtrOptions": 270,
-    "class TritonKernel": 2468,
+    "class BlockPtrOptions": 293,
+    "class TritonKernel": 2478,
     "class TritonOverrides": 465,
     "class TritonPrinter": 172,
     "class TritonScheduling": 396,
-    "def TritonKernel.codegen_kernel()": 222,
+    "def TritonKernel.codegen_kernel()": 225,
     "def TritonKernel.codegen_kernel_benchmark()": 89,
     "def TritonKernel.load()": 134,
-    "def TritonKernel.reduction()": 389,
+    "def TritonKernel.reduction()": 395,
     "def TritonKernel.scan()": 110,
     "def TritonScheduling.benchmark_codegened_module()": 85,
     "def TritonScheduling.benchmark_combo_kernel()": 91
@@ -131,7 +125,7 @@
   },
   "torch/_inductor/codegen/wrapper.py": {
     "def PythonWrapperCodegen.benchmark_compiled_module()": 92,
-    "def PythonWrapperCodegen.define_user_defined_triton_kernel()": 257,
+    "def PythonWrapperCodegen.define_user_defined_triton_kernel()": 265,
     "def PythonWrapperCodegen.generate_example_arg_value()": 84,
     "def user_defined_kernel_grid_fn_code()": 102
   },
@@ -140,18 +134,17 @@
   },
   "torch/_inductor/comms.py": {
     "def enforce_comm_ordering_for_fsdp()": 174,
-    "def reinplace_fsdp_all_gather()": 110
+    "def reinplace_fsdp_all_gather()": 114
   },
   "torch/_inductor/compile_fx.py": {
     "def fw_compiler_freezing()": 101
   },
   "torch/_inductor/config.py": {
-    "class aot_inductor": 106,
-    "class cpp": 114,
-    "class triton": 182
+    "class cpp": 117,
+    "class triton": 193
   },
   "torch/_inductor/constant_folding.py": {
-    "class ConstantFolder": 223,
+    "class ConstantFolder": 226,
     "def ConstantFolder.run_node()": 94
   },
   "torch/_inductor/cpp_builder.py": {
@@ -162,8 +155,8 @@
   },
   "torch/_inductor/debug.py": {
     "class DebugContext": 158,
-    "class DebugFormatter": 189,
-    "def DebugFormatter.log_autotuning_results()": 88,
+    "class DebugFormatter": 191,
+    "def DebugFormatter.log_autotuning_results()": 90,
     "def aot_inductor_minifier_wrapper()": 81
   },
   "torch/_inductor/dependencies.py": {
@@ -174,9 +167,6 @@
   },
   "torch/_inductor/fx_passes/binary_folding.py": {
     "def binary_folding_init()": 416
-  },
-  "torch/_inductor/fx_passes/freezing_patterns.py": {
-    "def addmm_patterns_init()": 94
   },
   "torch/_inductor/fx_passes/group_batch_fusion.py": {
     "def BatchLayernormFusion.fuse()": 131,
@@ -201,29 +191,28 @@
     "def FakeTensorUpdater.incremental_update()": 100
   },
   "torch/_inductor/graph.py": {
-    "class GraphLowering": 2110,
+    "class GraphLowering": 2118,
     "def GraphLowering.call_function()": 108,
     "def GraphLowering.create_deferred_runtime_asserts()": 84,
-    "def GraphLowering.extract_autotune_inputs()": 92,
+    "def GraphLowering.extract_autotune_inputs()": 93,
     "def GraphLowering.output()": 92,
-    "def GraphLowering.placeholder()": 97,
-    "def GraphLowering.run_node()": 357
+    "def GraphLowering.placeholder()": 102,
+    "def GraphLowering.run_node()": 358
   },
   "torch/_inductor/ir.py": {
     "class Buffer": 129,
     "class ComputedBuffer": 329,
     "class Conditional": 138,
-    "class ExternKernel": 813,
-    "class FallbackKernel": 471,
+    "class ExternKernel": 847,
     "class FlexibleLayout": 139,
     "class IRNode": 250,
     "class Layout": 211,
     "class Loops": 128,
-    "class Reduction": 737,
+    "class Reduction": 747,
     "class Scan": 199,
     "class Sort": 151,
     "class UserDefinedTritonKernel": 183,
-    "class View": 174,
+    "class View": 172,
     "class WelfordReduction": 221,
     "class WhileLoop": 203,
     "def ConcatKernel.create()": 95,
@@ -231,8 +220,8 @@
     "def ExternKernel.process_kernel()": 118,
     "def ExternKernel.require_strides()": 155,
     "def FallbackKernel.create()": 87,
-    "def Reduction.create()": 147,
-    "def Reduction.num_splits()": 162,
+    "def Reduction.create()": 159,
+    "def Reduction.num_splits()": 159,
     "def Scan.create()": 96,
     "def WelfordReduction.create()": 119,
     "def WhileLoop.create()": 167
@@ -244,19 +233,15 @@
     "def convolution()": 241
   },
   "torch/_inductor/kernel/flex_attention.py": {
-    "def flex_attention()": 342,
-    "def flex_attention_backward()": 354,
+    "def flex_attention()": 321,
+    "def flex_attention_backward()": 346,
     "def lower_cpu()": 297
   },
   "torch/_inductor/kernel/flex_decoding.py": {
-    "def create_flex_decoding_kernel()": 309
+    "def create_flex_decoding_kernel()": 304
   },
   "torch/_inductor/kernel/mm.py": {
-    "def tuned_addmm()": 135,
-    "def tuned_scaled_mm()": 150
-  },
-  "torch/_inductor/kernel/mm_scaled_grouped.py": {
-    "def tuned_scaled_grouped_mm()": 85
+    "def tuned_addmm()": 142
   },
   "torch/_inductor/loop_body.py": {
     "class CaptureIndexing": 174
@@ -296,6 +281,9 @@
   "torch/_inductor/runtime/benchmarking.py": {
     "class InductorBenchmarker": 111
   },
+  "torch/_inductor/runtime/triton_heuristics.py": {
+    "def CachingAutotuner.run()": 82
+  },
   "torch/_inductor/scheduler.py": {
     "class BaseSchedulerNode": 695,
     "class BaseScheduling": 139,
@@ -303,14 +291,11 @@
     "class SchedulerNode": 256
   },
   "torch/_inductor/select_algorithm.py": {
-    "class TritonTemplateKernel": 829,
-    "def AlgorithmSelectorCache.log_results()": 98
+    "class TritonTemplateKernel": 832,
+    "def AlgorithmSelectorCache.log_results()": 106
   },
   "torch/_inductor/sizevars.py": {
-    "class SizeVarAllocator": 838
-  },
-  "torch/_inductor/template_heuristics.py": {
-    "class ROCmConfigHeuristic": 212
+    "class SizeVarAllocator": 831
   },
   "torch/_inductor/utils.py": {
     "class IndentedBuffer": 145
