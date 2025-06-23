@@ -10,7 +10,7 @@ import os
 import os.path
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
@@ -49,7 +49,7 @@ from ._activation_checkpointing.knapsack import (
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
-from .compile_utils import fx_graph_cse, get_aten_target
+from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 
 if TYPE_CHECKING:
@@ -201,6 +201,10 @@ def _extract_graph_with_inputs_outputs(
             env[node] = InvalidNode  # type: ignore[assignment]
             continue
 
+        if _must_be_in_forward(node) and subgraph != "forward":
+            env[node] = InvalidNode  # type: ignore[assignment]
+            continue
+
         if node in env:
             # Node must be one of our inputs. (Any member of env which wasn't an
             # input to start must have been created by this loop and won't be in
@@ -274,8 +278,16 @@ def _has_tag_is_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "is_backward"
 
 
+def _has_tag_must_be_in_forward(node: fx.Node) -> bool:
+    return node.meta.get("partitioner_tag", None) == "must_be_in_forward"
+
+
 def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "must_be_in_backward"
+
+
+def _must_be_in_forward(node: fx.Node) -> bool:
+    return _has_tag_must_be_in_forward(node)
 
 
 def _must_be_in_backward(node: fx.Node) -> bool:
@@ -1465,6 +1477,25 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
             node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
 
+def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
+    # If we have mutations of the same primal in forward and backward,
+    # We must not recompute the source of mutation to not apply twice.
+    has_mutation_in_bw: OrderedSet[torch.fx.Node] = OrderedSet()
+    for node in reversed(joint_module.graph.nodes):
+        if (
+            node.target == torch.ops.aten.copy_.default
+            and _has_tag_must_be_in_backward(node)
+        ):
+            has_mutation_in_bw.add(node.args[0])
+
+        if (
+            node.target == torch.ops.aten.copy_.default
+            and _has_tag_must_be_in_forward(node)
+            and node.args[0] in has_mutation_in_bw
+        ):
+            node.args[1].meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
+
 def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
     """
     If there are two consecutive checkpointed blocks with no operator in
@@ -2067,7 +2098,9 @@ def get_default_op_list() -> OpTypes:
     default_recomputable_ops += [method_to_operator(m) for m in magic_methods]
     recomputable_ops = OrderedSet(default_recomputable_ops)
 
-    random_ops = OrderedSet([aten.native_dropout, aten.rand_like, aten.randn_like])
+    random_ops = OrderedSet[Callable[..., Any]](
+        [aten.native_dropout, aten.rand_like, aten.randn_like]
+    )
     compute_intensive_ops = [
         aten.mm,
         aten.convolution,
@@ -2535,6 +2568,7 @@ def min_cut_rematerialization_partition(
         joint_module = cleanup_recompute_tags(joint_module)
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(joint_module)
+    force_save_bw_mutation_src(joint_module)
 
     def classify_nodes(joint_module, static_lifetime_input_indices):
         name_to_node = get_name_to_node(joint_module.graph)
@@ -2646,6 +2680,11 @@ def min_cut_rematerialization_partition(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
+
+    # raise all getitem ops to as early as possible
+    # this is helpful for memory, especially in the case of aot_eager backend
+    fw_module = raise_getitems(fw_module)
+    bw_module = raise_getitems(bw_module)
 
     if AOT_PARTITIONER_DEBUG:
         # Calculate sorted sizes of saved values
