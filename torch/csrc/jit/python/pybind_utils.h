@@ -649,7 +649,7 @@ inline InferredType tryToInferContainerType(
           "."));
     } else {
       // TODO: this message is not correct anymore, since this InferredType is
-      // used from a bunch of circumstances unrelated to tracing. We can re-use
+      // used from a bunch of circumstances unrelated to tracing. We can reuse
       // this instead of the attribute_failure stuff in concreteType
       return InferredType(c10::str(
           "Only tensors and (possibly nested) tuples of tensors, lists, or dicts ",

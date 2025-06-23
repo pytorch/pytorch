@@ -365,7 +365,7 @@ AOT_COUNTER = itertools.count()
 #
 # We view every forward output when creating out tangent tensors to handle the problematic
 # case in which a subclass does extra aliasing between graph outputs/inputs in a way that
-# is not visible above the sublass.
+# is not visible above the subclass.
 #
 # Ordinarily, when constructing the joint function that we want to trace in AOTAutograd,
 # we're guaranteed that the tangent tensors that we pass
@@ -872,7 +872,7 @@ def aot_function(
         This API is experimental and likely to change.
 
     Args:
-        fn (Callable): A Python function that takes one ore more arguments. Must
+        fn (Callable): A Python function that takes one or more arguments. Must
             return one or more Tensors.
         fw_compiler (Callable): A Python function that accepts an Fx graph with
             Aten ops and input args, and returns a Callable that semantically is
@@ -1260,7 +1260,7 @@ def aot_export_module(
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
     pre_dispatch: bool = False,
-    # If None, will be infered from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
+    # If None, will be inferred from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, GraphSignature]:
@@ -1461,7 +1461,7 @@ def aot_export_joint_simple(
     *,
     trace_joint: bool,
     # It looks like the main consequence of this API is that for dynamic shapes,
-    # it will assume that parms/buffers are static.
+    # it will assume that params/buffers are static.
     # With the new inferred dynamic shapes API, maybe this doesn't matter?
     num_params_buffers: int = 0,
     decompositions: Optional[dict] = None,
@@ -1570,7 +1570,7 @@ def _aot_export_function(
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
     pre_dispatch: bool = False,
-    # If None, `dynamic_shapes` will be infered from inputs, but the inferred result might be wrong.
+    # If None, `dynamic_shapes` will be inferred from inputs, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:

@@ -1107,7 +1107,7 @@ def _maybe_insert_output_observer_for_node(
         )
     target_dtype, target_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq)
     # uncomment after we support reuse_input_obs_or_fq properly by having separate
-    # implemntations for this key instead of reusing the input_output_share_observers
+    # implementations for this key instead of reusing the input_output_share_observers
     # code
     # reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
     # for now we set this to False since reuse_input_obs_or_fq for
@@ -1117,7 +1117,7 @@ def _maybe_insert_output_observer_for_node(
     reuse_input_obs_or_fq = False
 
     # Note: prev_output_dtype = torch.float and prev_output_is_dynamic=False
-    # because the prev_output is the output of an fp32 op, althought technically
+    # because the prev_output is the output of an fp32 op, although technically
     # we should get the dtype of the output from node.meta["val"] in the future
     # if we deprecate fx graph mode quantization
     needs_obs_or_fq = _needs_obs_or_fq(
@@ -2002,7 +2002,7 @@ def prepare(
                 same as input_quantized_idxs configuration provided
                 for the standalone module
             standalone_module_output_quantized_idxs(List[Int]): a list of
-                indexs for the graph output that is quantized
+                indices for the graph output that is quantized
                 same as input_quantized_idxs configuration provided
                 for the standalone module
     """

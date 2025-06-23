@@ -1386,7 +1386,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         kwargs = kwargs or {}
         if func in _side_effectful_need_to_be_preserved_pre_dispatch:
             # It's for passing the export verifier which needs to verify the meta['val']
-            # TODO(tmanlaibaatar): we should systematically couple it with expoert verifier,
+            # TODO(tmanlaibaatar): we should systematically couple it with export verifier,
             # instead of hardcoding it here.
             # T203648563
             if func == torch.amp.autocast_mode._exit_autocast:
@@ -1403,7 +1403,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 node.meta["val"] = None
             return node
             # Don't actually run the function! We just want to trace the calls
-            # into a graph. We don't actualy want to change global autograd state.
+            # into a graph. We don't actually want to change global autograd state.
         return func(*args, **kwargs)
 
 

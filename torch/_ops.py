@@ -85,7 +85,7 @@ class OperatorBase:
 
         # This table allows you to override the behavior of a particular
         # dispatch key to call a custom Python function, rather than the
-        # ordinary C++ configured behavior.  This is the raison d'etre of
+        # ordinary C++ configured behavior.  This is the raison d'etre of  # codespell:ignore
         # Python dispatcher: to let you program the dispatcher from Python
         # in case you need something unusual, and don't want to clobber
         # the existing registrations using the Python operator registration
@@ -297,7 +297,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             self.fallthrough(dispatch_key)
 
         # [NOTE] We have to register pre-dispatch key implementation
-        # because sometimes HOP use aot-dispatch tracing to detect certaion
+        # because sometimes HOP use aot-dispatch tracing to detect certain
         # mutations. This is problematic when we are functionalizing HOP
         # during pre-dispatch because when the inner tracer starts, it will see
         # that PreDispatch key is still active. In that case, we just redispatch
@@ -1104,7 +1104,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
                 f" but no python implementation is found."
                 f" Please file an issue on this when you encounter this error."
                 f" This error can happen when you export or compile the model."
-                f" It can still happpen even if a C++ implementation for {dispatch_key}. "
+                f" It can still happen even if a C++ implementation for {dispatch_key}. "
                 f" has been registered. That's because FakeScriptObject purely lives in python and cannot work "
                 f" with a C++ implementation."
             )
@@ -1252,7 +1252,7 @@ class OpOverloadPacket(Generic[_P, _T]):
 def _call_overload_packet_from_python(
     op: OpOverloadPacket[_P, _T], *args: _P.args, **kwargs: _P.kwargs
 ) -> _T:
-    # Re-use the torch function handling logic in cpp
+    # Reuse the torch function handling logic in cpp
     torch_function_called, ret = torch._C._maybe_call_torch_function_for_op_packet(
         op, *args, **kwargs
     )
