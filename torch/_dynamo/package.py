@@ -165,7 +165,6 @@ class CompilePackage:
         self._cached_backends: dict[_BackendId, Any] = {}
 
         self._initialize(fn, dynamo)
-        # Always go back to a clean state after initialization.
         self.uninstall()
         self.validate()
 
@@ -383,9 +382,12 @@ class DynamoStore:
         backend_content = {}
         cache_entry = package.cache_entry()
         for backend_id in cache_entry.backend_ids:
-            backend_content[backend_id] = PrecompileContext.serialize_artifact_by_key(
-                backend_id
-            )
+            serialized_backend = PrecompileContext.serialize_artifact_by_key(backend_id)
+            if serialized_backend is None:
+                raise RuntimeError(
+                    f"Backend {backend_id} is not found in the given backends"
+                )
+            backend_content[backend_id] = serialized_backend
         try:
             with open(os.path.join(path, "dynamo"), "wb") as dynamo_path:
                 pickle.dump(cache_entry, dynamo_path)
