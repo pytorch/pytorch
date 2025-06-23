@@ -79,6 +79,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     os.system(f"unzip {wheel_path} -d {folder}/tmp")
     libs_to_copy = [
         "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12",
+        "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so",
         "/usr/local/cuda/lib64/libcudnn.so.9",
         "/usr/local/cuda/lib64/libcublas.so.12",
         "/usr/local/cuda/lib64/libcublasLt.so.12",
@@ -88,7 +89,6 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
         "/usr/local/cuda/lib64/libcusparseLt.so.0",
         "/usr/local/cuda/lib64/libcusolver.so.11",
         "/usr/local/cuda/lib64/libcurand.so.10",
-        "/usr/local/cuda/lib64/libnvToolsExt.so.1",
         "/usr/local/cuda/lib64/libnvJitLink.so.12",
         "/usr/local/cuda/lib64/libnvrtc.so.12",
         "/usr/local/cuda/lib64/libcudnn_adv.so.9",
@@ -108,9 +108,9 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
         "/usr/local/lib/libnvpl_blas_core.so.0",
     ]
 
-    if "128" in desired_cuda:
+    if "129" in desired_cuda:
         libs_to_copy += [
-            "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.8",
+            "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.9",
             "/usr/local/cuda/lib64/libcufile.so.0",
             "/usr/local/cuda/lib64/libcufile_rdma.so.1",
         ]

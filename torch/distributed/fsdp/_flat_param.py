@@ -2749,7 +2749,7 @@ def _construct_padding_tensor(
 
 
 # Use `lru_cache(1)` to only log the warning once (assuming the fixed warning
-# messasge is passed in)
+# message is passed in)
 @functools.lru_cache(1)
 def _warn_skip_writeback_check(log: logging.Logger, warning: str):
     logger.warning(warning)

@@ -119,7 +119,7 @@ class _DistWrapper:
             dist.broadcast_object_list(
                 object_list=object_list,
                 group=self.group,
-                src=self.coordinator_rank,
+                src=self.global_coordinator_rank,
             )
         return cast(T, object_list[0])
 
@@ -436,7 +436,7 @@ ENABLE_PROFILE = False
 @contextmanager
 def _profile():
     # Only log the profiling when it is enable and is on rank0  or dist is not
-    # avaiable.
+    # available.
     if ENABLE_PROFILE and (not dist.is_available() or dist.get_rank() == 0):
         profiler = cProfile.Profile()
         profiler.enable()

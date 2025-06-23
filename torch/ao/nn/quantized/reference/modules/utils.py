@@ -25,7 +25,9 @@ class ReferenceQuantizedModule(torch.nn.Module):
             torch.per_tensor_affine,
             torch.per_channel_affine,
             torch.per_channel_affine_float_qparams,
-        ], f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}"
+        ], (
+            f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}"
+        )
         if self.weight_dtype in [
             torch.quint8,
             torch.qint8,
