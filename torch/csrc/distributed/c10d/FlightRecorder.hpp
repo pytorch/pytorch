@@ -145,7 +145,7 @@ struct FlightRecorder {
     std::optional<c10::time_t> time_discovered_started_;
 
     // timestamp when our CPU threads discovered that the kernel completed.
-    // will always be _after_ it actually complated, and can be the same time
+    // will always be _after_ it actually completed, and can be the same time
     // as the discovery of the start if the watchdog thread is stuck on CUDA
     // APIs
     std::optional<c10::time_t> time_discovered_completed_;
