@@ -33,9 +33,8 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
             try:
                 data = pin_memory(data, device)
             except Exception:
-                current_device_index = torch.accelerator.current_device_index()
                 data = ExceptionWrapper(
-                    where=f"in pin memory thread for device {current_device_index}"
+                    where=f"in pin memory thread for device {device_id}"
                 )
             r = (idx, data)
         while not done_event.is_set():
