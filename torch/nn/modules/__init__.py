@@ -157,6 +157,7 @@ from .pooling import (
 from .rnn import GRU, GRUCell, LSTM, LSTMCell, RNN, RNNBase, RNNCell, RNNCellBase
 from .sparse import Embedding, EmbeddingBag
 from .transformer import (
+    RotaryPositionalEmbedding,
     Transformer,
     TransformerDecoder,
     TransformerDecoderLayer,
@@ -297,6 +298,7 @@ __all__ = [
     "ReplicationPad1d",
     "ReplicationPad2d",
     "ReplicationPad3d",
+    "RotaryPositionalEmbedding",
     "SELU",
     "Sequential",
     "SiLU",

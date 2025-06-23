@@ -2764,6 +2764,140 @@ if embedding_bag.__doc__:
     embedding_bag.__doc__ = embedding_bag.__doc__.format(**reproducibility_notes)
 
 
+def rotary_position_embedding_freqs(
+    seq_len: int, 
+    dim: int, 
+    base: float = 10000.0, 
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype] = None
+) -> Tensor:
+    r"""Generate frequency matrix for Rotary Position Embedding (RoPE).
+    
+    Rotary Position Embedding (RoPE) is a position encoding method that applies rotary 
+    transformations to encode relative positions. This function generates the frequency 
+    matrix used to apply the rotary embeddings.
+    
+    Args:
+        seq_len (int): Maximum sequence length.
+        dim (int): Dimension of the embeddings. Must be even.
+        base (float, optional): Base value for frequency computation. Default: 10000.0
+        device (torch.device, optional): Device to place the output tensor. Default: None
+        dtype (torch.dtype, optional): Data type of the output tensor. Default: None
+        
+    Returns:
+        Tensor: Frequency matrix of shape (seq_len, dim // 2, 2) where the last dimension
+                contains [cos, sin] values for each position and frequency.
+                
+    Examples::
+    
+        >>> freqs = torch.nn.functional.rotary_position_embedding_freqs(4, 8)
+        >>> freqs.shape
+        torch.Size([4, 4, 2])
+        
+        >>> # Use with rotary_position_embedding
+        >>> q = torch.randn(2, 4, 8)  # (batch, seq_len, dim)
+        >>> k = torch.randn(2, 4, 8)
+        >>> q_rot = torch.nn.functional.rotary_position_embedding(q, freqs)
+        >>> k_rot = torch.nn.functional.rotary_position_embedding(k, freqs)
+    """
+    if dim % 2 != 0:
+        raise ValueError(f"dim must be even, got {dim}")
+        
+    # This function doesn't operate on tensors, so no torch_function handling needed
+        
+    # Create frequency matrix: 1 / (base^(2i/dim)) for i in [0, dim//2)
+    freqs = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim))
+    
+    # Create position indices
+    positions = torch.arange(seq_len, dtype=torch.float32)
+    
+    # Outer product to get position-frequency matrix
+    freqs = torch.outer(positions, freqs)
+    
+    # Create cos/sin matrix
+    freqs_cos_sin = torch.stack([torch.cos(freqs), torch.sin(freqs)], dim=-1)
+    
+    # Move to specified device and dtype
+    if device is not None:
+        freqs_cos_sin = freqs_cos_sin.to(device)
+    if dtype is not None:
+        freqs_cos_sin = freqs_cos_sin.to(dtype)
+        
+    return freqs_cos_sin
+
+
+def rotary_position_embedding(input: Tensor, freqs: Tensor) -> Tensor:
+    r"""Apply Rotary Position Embedding (RoPE) to input tensor.
+    
+    Rotary Position Embedding applies rotary transformations to encode relative positions
+    in the input tensor. The input tensor is reshaped to pairs of consecutive elements
+    and rotated according to the frequency matrix.
+    
+    Args:
+        input (Tensor): Input tensor of shape (..., seq_len, dim) where dim must be even.
+        freqs (Tensor): Frequency matrix from rotary_position_embedding_freqs of shape
+                       (seq_len, dim // 2, 2).
+                       
+    Returns:
+        Tensor: Rotated tensor with the same shape as input.
+        
+    Examples::
+    
+        >>> seq_len, dim = 4, 8
+        >>> freqs = torch.nn.functional.rotary_position_embedding_freqs(seq_len, dim)
+        >>> x = torch.randn(2, seq_len, dim)  # (batch, seq_len, dim)
+        >>> x_rot = torch.nn.functional.rotary_position_embedding(x, freqs)
+        >>> x_rot.shape
+        torch.Size([2, 4, 8])
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            rotary_position_embedding, (input,), input, freqs
+        )
+        
+    if input.size(-1) % 2 != 0:
+        raise ValueError(f"Last dimension of input must be even, got {input.size(-1)}")
+        
+    # Get dimensions
+    *batch_dims, seq_len, dim = input.shape
+    
+    if freqs.size(0) < seq_len:
+        raise ValueError(
+            f"Frequency matrix sequence length ({freqs.size(0)}) must be >= "
+            f"input sequence length ({seq_len})"
+        )
+        
+    if freqs.size(1) != dim // 2:
+        raise ValueError(
+            f"Frequency matrix second dimension ({freqs.size(1)}) must equal "
+            f"input dim // 2 ({dim // 2})"
+        )
+    
+    # Reshape input to (..., seq_len, dim//2, 2) for rotation
+    x_reshaped = input.float().view(*batch_dims, seq_len, -1, 2)
+    
+    # Extract cos and sin from frequency matrix
+    freqs_subset = freqs[:seq_len]  # Take only needed sequence length
+    cos_freqs = freqs_subset[..., 0]  # (seq_len, dim//2)
+    sin_freqs = freqs_subset[..., 1]  # (seq_len, dim//2)
+    
+    # Broadcast frequency matrices to match input dimensions
+    cos_freqs = cos_freqs.view(1, seq_len, -1, 1).expand(*batch_dims, seq_len, -1, 1)
+    sin_freqs = sin_freqs.view(1, seq_len, -1, 1).expand(*batch_dims, seq_len, -1, 1)
+    
+    # Apply rotation: [x0, x1] -> [x0*cos - x1*sin, x1*cos + x0*sin]
+    x0, x1 = x_reshaped.unbind(-1)
+    x_rot = torch.stack([
+        x0 * cos_freqs.squeeze(-1) - x1 * sin_freqs.squeeze(-1),
+        x1 * cos_freqs.squeeze(-1) + x0 * sin_freqs.squeeze(-1)
+    ], dim=-1)
+    
+    # Reshape back to original shape
+    x_rot = x_rot.view(*batch_dims, seq_len, dim)
+    
+    return x_rot.type_as(input)
+
+
 def _verify_batch_size(size: list[int]) -> None:
     # XXX: JIT script does not support the reduce from functools, and mul op is a
     # builtin, which cannot be used as a value to a func yet, so rewrite this size

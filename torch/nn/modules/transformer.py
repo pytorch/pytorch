@@ -22,6 +22,7 @@ __all__ = [
     "TransformerDecoder",
     "TransformerEncoderLayer",
     "TransformerDecoderLayer",
+    "RotaryPositionalEmbedding",
 ]
 
 
@@ -1232,3 +1233,92 @@ def _detect_is_causal_mask(
             make_causal = False
 
     return make_causal
+
+
+class RotaryPositionalEmbedding(Module):
+    r"""Rotary Position Embedding (RoPE) module.
+    
+    This module provides a learnable-free position embedding that applies rotary 
+    transformations to encode relative positions in input sequences. It's commonly 
+    used in transformer models to replace absolute position embeddings.
+    
+    The rotary embedding applies different rotation angles to different dimensions
+    of the input, allowing the model to naturally handle relative positions.
+    
+    Args:
+        dim (int): Dimension of the embeddings. Must be even.
+        max_seq_len (int, optional): Maximum sequence length for precomputed frequencies.
+                                   If None, frequencies are computed on-the-fly. Default: None
+        base (float, optional): Base value for frequency computation. Default: 10000.0
+        
+    Shape:
+        - Input: (..., seq_len, dim) where dim must be even
+        - Output: (..., seq_len, dim)
+        
+    Examples::
+    
+        >>> rope = nn.RotaryPositionalEmbedding(dim=64)
+        >>> x = torch.randn(2, 10, 64)  # (batch, seq_len, dim)
+        >>> x_with_rope = rope(x)
+        >>> x_with_rope.shape
+        torch.Size([2, 10, 64])
+        
+        >>> # Pre-compute frequencies for efficiency
+        >>> rope = nn.RotaryPositionalEmbedding(dim=64, max_seq_len=512)
+        >>> x = torch.randn(2, 256, 64)
+        >>> x_with_rope = rope(x)
+    """
+    
+    def __init__(
+        self, 
+        dim: int, 
+        max_seq_len: Optional[int] = None, 
+        base: float = 10000.0
+    ) -> None:
+        super().__init__()
+        
+        if dim % 2 != 0:
+            raise ValueError(f"dim must be even, got {dim}")
+            
+        self.dim = dim
+        self.max_seq_len = max_seq_len
+        self.base = base
+        
+        # Pre-compute frequencies if max_seq_len is provided
+        if max_seq_len is not None:
+            freqs = F.rotary_position_embedding_freqs(max_seq_len, dim, base)
+            self.register_buffer('freqs', freqs, persistent=False)
+        else:
+            self.freqs = None
+    
+    def forward(self, input: Tensor) -> Tensor:
+        r"""Apply rotary position embedding to input.
+        
+        Args:
+            input (Tensor): Input tensor of shape (..., seq_len, dim)
+            
+        Returns:
+            Tensor: Input with rotary position embedding applied
+        """
+        *batch_dims, seq_len, dim = input.shape
+        
+        if dim != self.dim:
+            raise ValueError(f"Input dimension {dim} doesn't match module dimension {self.dim}")
+        
+        # Use pre-computed frequencies if available, otherwise compute on-the-fly
+        if self.freqs is not None:
+            if seq_len > self.max_seq_len:
+                raise ValueError(
+                    f"Input sequence length {seq_len} exceeds maximum "
+                    f"sequence length {self.max_seq_len}"
+                )
+            freqs = self.freqs
+        else:
+            freqs = F.rotary_position_embedding_freqs(
+                seq_len, dim, self.base, device=input.device, dtype=input.dtype
+            )
+        
+        return F.rotary_position_embedding(input, freqs)
+    
+    def extra_repr(self) -> str:
+        return f'dim={self.dim}, max_seq_len={self.max_seq_len}, base={self.base}'
