@@ -1,9 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/SegmentReduce.h>
+#include <cuda_runtime.h>
 
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/cub.cuh>
@@ -11,13 +12,13 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/empty.h>
-#include <ATen/ops/zeros.h>
 #include <ATen/ops/cat.h>
 #include <ATen/ops/cumsum.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
 #endif
 
-#ifdef _WIN32&& __CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 9
+#if _WIN32 && defined(CUDART_VERSION) && CUDART_VERSION >= 12090
 TORCH_WARN(
     "SegmentReduce is not supported on CUDA 12.9+ on Windows. Please use CUDA 12.8 or earlier. Please see: https://github.com/pytorch/pytorch/issues/156181");
 #else
