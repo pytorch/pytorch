@@ -14,8 +14,12 @@ from ..cutlass_utils import torch_dtype_to_cutlass_type, try_import_cutlass
 
 EpilogueFunctor = Any  # EpilogueFunctor local class defined in _trace
 Buffer = Union[ComputedBuffer, InputBuffer]
-CutlassTupleType = Any  # python_cutlass.backend.c_types.tuple_factory_.<locals>.TupleType
-CutlassVisitorType = Any  # python_cutlass.backend.c_types.visitor_factory.<locals>.VisitorType
+CutlassTupleType = (
+    Any  # python_cutlass.backend.c_types.tuple_factory_.<locals>.TupleType
+)
+CutlassVisitorType = (
+    Any  # python_cutlass.backend.c_types.visitor_factory.<locals>.VisitorType
+)
 CutlassArgType = (
     Any  # Can be a CutlassTupleType, CutlassVisitorType, EmptyByte, or ctype.c_void_p
 )
@@ -27,6 +31,12 @@ if try_import_cutlass():
     import textwrap
     from typing import Union
 
+    from cutlass_library import (
+        DataType,
+        EpilogueScheduleType,
+        LayoutType,
+        TileDescription,
+    )
     from python_cutlass.backend.c_types import (  # type: ignore[import-untyped, import-not-found]
         EmptyByte,
     )
@@ -47,12 +57,6 @@ if try_import_cutlass():
     )
     from python_cutlass.backend.evt.ir.tensor import (  # type: ignore[import-untyped, import-not-found]
         Tensor as CutlassTensor,
-    )
-    from cutlass_library import (
-        DataType,
-        EpilogueScheduleType,
-        LayoutType,
-        TileDescription,
     )
 
     from torch._inductor.codegen.cuda import cuda_env

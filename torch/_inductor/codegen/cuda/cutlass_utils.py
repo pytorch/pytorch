@@ -31,7 +31,7 @@ CUTLASS_OPERATION_KIND: str = "gemm"
 @atexit.register
 def move_cutlass_compiled_cache() -> None:
     """Move CUTLASS compiled cache file to the cache directory if it exists."""
-    if "cutlass" not in sys.modules:
+    if "python_cutlass" not in sys.modules:
         return
 
     import python_cutlass  # type: ignore[import-not-found]
@@ -68,8 +68,8 @@ def try_import_cutlass() -> bool:
     """
     if config.is_fbcode():
         try:
-            import python_cutlass  # type: ignore[import-not-found]
             import cutlass_library  # type: ignore[import-not-found]
+            import python_cutlass  # type: ignore[import-not-found]
         except ImportError as e:
             log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
@@ -146,11 +146,11 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import python_cutlass  # noqa: F401
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
             import pycute  # type: ignore[import-not-found]  # noqa: F401
+            import python_cutlass  # noqa: F401, F811
 
             return True
         except ImportError as e:
