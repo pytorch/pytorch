@@ -324,3 +324,26 @@ class _ExportPackage:
         _exporter_context._define_overload = _define_overload  # type: ignore[attr-defined]
 
         return _exporter_context
+
+    @property
+    def _method_overloads(self):
+        for method, method_data in self.methods.items():
+            for overload, ep in method_data.overloads.items():
+                yield f"{method}:{overload}", ep
+
+    def _compiled_and_package(self, name, f: torch.types.FileLike):
+        options = {
+            "aot_inductor.package": True,
+            "aot_inductor.package_cpp_only": True,
+            "always_keep_tensor_constants": True,
+            "aot_inductor.package_constants_in_so": False,
+        }
+        weights_map = {}
+        for name, ep in self._method_overloads:
+            weights = torch._inductor.aot_compile(ep.module(), (), options=options)
+            weights_map[name] = weights
+        torch._inductor.package.package.package_aoti(
+            f,
+            weights_map,
+            package_weights_to_disk=True,
+        )
