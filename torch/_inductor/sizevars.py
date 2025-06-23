@@ -774,11 +774,11 @@ class SizeVarAllocator:
                 return False
 
             if is_first:
-                # first ModularIndexing should conatins a nested ModularIndex
+                # first ModularIndexing should contains a nested ModularIndex
                 if not isinstance(x, ModularIndexing):
                     return False
             else:
-                # second ModularIndexing should constains a non-negative
+                # second ModularIndexing should contains a non-negative
                 # symbol
                 if not isinstance(x, sympy.Symbol) or not self.statically_known_geq(
                     x, 0
@@ -809,7 +809,7 @@ class SizeVarAllocator:
     ) -> Union[bool, tuple[sympy.Expr, sympy.Expr]]:
         """
         Expand the FloorDiv to the entire expression so that the expression may
-        be simplfied.
+        be simplified.
 
         E.g., for a 2D contiguous tensor with shape [a, 2 * b], and index variables
         x1, x2, index expression 'x1 * 2b + x2' can be easily combined.

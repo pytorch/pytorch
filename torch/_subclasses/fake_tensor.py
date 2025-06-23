@@ -1645,6 +1645,9 @@ class FakeTensorMode(TorchDispatchMode):
         convert FakeTensors into metadata. Raises _BypassDispatchCache to signal
         unsupported cases that should bypass caching.
         """
+        from torch._higher_order_ops.auto_functionalize import (
+            FunctionalCallableWithEpilogue,
+        )
         from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
 
         if isinstance(args, dict):
@@ -1685,6 +1688,10 @@ class FakeTensorMode(TorchDispatchMode):
                 # functional wrapper is destroyed after fake tensor prop. We
                 # need to put the finalizer on the subgraph.
                 id_hashed_objects.append(arg.subgraph)
+            elif isinstance(arg, FunctionalCallableWithEpilogue):
+                result.append(type(arg))
+                result.append(hash(arg))
+                id_hashed_objects.append(arg.orig_callable)
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
