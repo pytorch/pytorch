@@ -13,6 +13,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    _use_cutlass_for_op,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_bmm_template,
@@ -179,9 +180,11 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     )
 
     # below is for getting an overview logging info of inductor mms
-    counters["aten_mm_info"][f"aten.bmm_{m}_{n}_{k}"] += 1
+    batch_size = mat1.get_size()[0]  # Extract batch dimension
+    counters["aten_mm_info"][f"aten.bmm_{batch_size}_{m}_{n}_{k}"] += 1
     log.info(
-        "Tuned aten.bmm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        "Tuned aten.bmm: batch=%s, m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        batch_size,
         m,
         n,
         k,
@@ -216,7 +219,12 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest = is_batch_stride_largest(mat1, mat2, layout)
-    if batch_stride_largest and is_nonzero and use_cutlass_template(layout, m, n, k):
+    if (
+        batch_stride_largest
+        and is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("bmm")
+    ):
         from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])  # type: ignore[arg-type]
@@ -241,9 +249,11 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 
     # below is for getting an overview logging info of inductor mms
-    counters["aten_mm_info"][f"aten.baddbmm_{m}_{n}_{k}"] += 1
+    batch_size = mat1.get_size()[0]
+    counters["aten_mm_info"][f"aten.baddbmm_{batch_size}_{m}_{n}_{k}"] += 1
     log.info(
-        "Tuned aten.baddbmm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, inp=%s, output_layout=%s",
+        "Tuned aten.baddbmm: batch_size=%s, m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, inp=%s, output_layout=%s",
+        batch_size,
         m,
         n,
         k,

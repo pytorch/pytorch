@@ -121,12 +121,13 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code) {
 static bool backend_match(PyObject* saved_backend, PyObject* backend) {
   // Pointer equality check for common case
   if (saved_backend != backend) {
-    // The Py_TYPE check should not be required but there is a pre-existing
-    // issue where backend is possibly deallocated (or nullptr) and causes
-    // segfaults. Check test - test_inplace_custom_op_intermediate
-    return (
-        Py_TYPE(saved_backend) == Py_TYPE(backend) &&
-        PyObject_RichCompareBool(saved_backend, backend, Py_EQ));
+    int result = PyObject_RichCompareBool(saved_backend, backend, Py_EQ);
+    // Check for exception
+    if (result == -1) {
+      PyErr_Clear();
+      return false;
+    }
+    return (result == 1);
   }
   return true;
 }
@@ -140,6 +141,14 @@ void lookup(
     bool is_skip_guard_eval_unsafe) {
   size_t index = 0;
   CacheEntry* found = nullptr;
+
+  for (const auto& entry : extra_state->precompile_entries) {
+    if (torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
+      *maybe_cached_code = entry.code.ptr();
+      return;
+    }
+  }
+
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
 
@@ -219,4 +228,43 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
     }
   }
   return result;
+}
+
+PrecompileEntry::PrecompileEntry(py::object gm, py::object c)
+    : guard_manager(std::move(gm)), code(std::move(c)) {
+  if (!PyCode_Check(code.ptr())) {
+    throw std::runtime_error("Expecting CodeType from PrecompileEntry.");
+  }
+  root_mgr =
+      torch::dynamo::convert_to_root_guard_manager(guard_manager.attr("root"));
+}
+
+void _reset_precompile_entries(const py::handle& code_obj) {
+  if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
+    throw py::type_error("expected a code object!");
+  }
+  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  ExtraState* extra = get_extra_state(code);
+  py::list result;
+  if (extra != nullptr) {
+    extra->precompile_entries.clear();
+  }
+}
+
+void _load_precompile_entry(
+    const py::handle& code_obj,
+    py::object guard_manager,
+    py::object dynamo_code) {
+  if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
+    throw py::type_error("expected a code object!");
+  }
+  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  ExtraState* extra = get_extra_state(code);
+  py::list result;
+  if (extra == nullptr) {
+    extra = init_and_set_extra_state(code);
+  }
+  auto entry =
+      PrecompileEntry(std::move(guard_manager), std::move(dynamo_code));
+  extra->precompile_entries.push_back(std::move(entry));
 }

@@ -244,7 +244,7 @@ def stage_backward_weight(
         # Break a reference cycle caused inside stage_backward_input->get_hook->hook
         # The summarized cycle is:
         # `hook` -> cell -> param_group -> intermediates -> `hook`
-        # becuase we install the hook function onto each of the intermediate autograd nodes.
+        # because we install the hook function onto each of the intermediate autograd nodes.
         # We need to keep intermediates alive up until backward_weight, but we can free it now.
         del param_group["intermediates"]
 
