@@ -258,7 +258,7 @@ class TestCutlassBackend(TestCase):
         M, N, K = 4096, 2048, 25728
 
         a = torch.randn(M, K).cuda().half()
-        b = torch.randn(K, N).cuda().half()
+        b = torch.randn(N, K).cuda().half().t()
 
         with config.patch(
             {
@@ -286,7 +286,7 @@ class TestCutlassBackend(TestCase):
         M, N, K = 4096, 2048, 25728
 
         a = torch.randn(M, K).cuda().half()
-        b = torch.randn(K, N).cuda().half()
+        b = torch.randn(N, K).cuda().half().t()
 
         x_shapes = [
             (M, N),
@@ -323,7 +323,7 @@ class TestCutlassBackend(TestCase):
         B, M, N, K = 10, 4096, 2048, 25728
 
         a = torch.randn(B, M, K).cuda().half()
-        b = torch.randn(B, K, N).cuda().half()
+        b = torch.randn(B, N, K).cuda().half().permute(0, 2, 1)
 
         with config.patch(
             {
@@ -355,8 +355,8 @@ class TestCutlassBackend(TestCase):
 
         model = MyModel()
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
-        c = torch.randn(16, 512).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
+        c = torch.randn(512, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -397,8 +397,8 @@ class TestCutlassBackend(TestCase):
 
         model = MyModel()
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
-        c = torch.randn(16, 512).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
+        c = torch.randn(512, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -462,7 +462,7 @@ class TestCutlassBackend(TestCase):
         model = MyModel().cuda()
 
         inputs = [
-            (torch.randn(M, K).cuda().to(dtype), torch.randn(K, N).cuda().to(dtype))
+            (torch.randn(M, K).cuda().to(dtype), torch.randn(N, K).cuda().to(dtype).t())
             for (M, N, K) in shapes
         ]
 
@@ -624,7 +624,7 @@ class TestCutlassBackend(TestCase):
                 (
                     torch.randn(x_shape(M, N)).cuda().to(dtype),
                     torch.randn(M, K).cuda().to(dtype),
-                    torch.randn(K, N).cuda().to(dtype),
+                    torch.randn(N, K).cuda().to(dtype).t(),
                 )
                 for (M, N, K) in shapes
             ]
@@ -732,7 +732,7 @@ class TestCutlassBackend(TestCase):
             return a @ b
 
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -758,7 +758,7 @@ class TestCutlassBackend(TestCase):
                 ),
             ):
                 a = torch.randn(M, K).cuda().half()
-                b = torch.randn(K, N).cuda().half()
+                b = torch.randn(N, K).cuda().half().t()
                 Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
                 Y = mm(a, b)
                 # we need relaxed numerical limits due to the sheer size of the
@@ -923,7 +923,7 @@ class TestCutlassBackend(TestCase):
             }
 
             x = torch.randn(M, K).cuda().half()
-            w = torch.randn(K, N).cuda().half()
+            w = torch.randn(N, K).cuda().half().t()
 
             actual = AOTIRunnerUtil.run(
                 model,
@@ -961,7 +961,7 @@ class TestCutlassBackend(TestCase):
             }
 
             x = torch.randn(M, K).cuda().half()
-            w = torch.randn(K, N).cuda().half()
+            w = torch.randn(N, K).cuda().half().t()
 
             actual = AOTIRunnerUtil.run(
                 model,
@@ -991,7 +991,7 @@ class TestCutlassBackend(TestCase):
             M, N, K = 200, 5216, 10_432
 
             x = torch.randn(M, K).cuda().half()
-            w = torch.randn(K, N).cuda().half()
+            w = torch.randn(N, K).cuda().half().t()
 
             actual = AOTIRunnerUtil.run(
                 model,
@@ -1020,7 +1020,7 @@ class TestCutlassBackend(TestCase):
         mask = torch.tensor([0, 0, 1, 1]).tile(m, k // 4).cuda().half()
         a = torch.rand(m, k).cuda().half() * mask
         a_sparse = to_sparse_semi_structured(a)
-        b = torch.rand(k, n).cuda().half()
+        b = torch.rand(n, k).cuda().half().t()
 
         with config.patch(
             {
@@ -1319,7 +1319,7 @@ class TestCutlassBackend(TestCase):
 
         M, N, K = (128, 128, 16)
         A = torch.randn(M, K).cuda().half()
-        B = torch.randn(K, N).cuda().half()
+        B = torch.randn(N, K).cuda().half().t()
 
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
