@@ -373,8 +373,8 @@ RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE = str2bool(os.getenv("CMAKE_FRESH"))
-CMAKE_ONLY = str2bool(os.getenv("CMAKE_ONLY"))
+RERUN_CMAKE = str2bool(os.environ.pop("CMAKE_FRESH", None))
+CMAKE_ONLY = str2bool(os.environ.pop("CMAKE_ONLY", None))
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == "--cmake":
@@ -1125,12 +1125,14 @@ def configure_extension_build():
     ################################################################################
 
     extensions = []
+    # packages that we want to install into site-packages and include them in wheels
     includes = ["torch", "torch.*", "torchgen", "torchgen.*"]
+    # exclude folders that they look like Python packages but are not wanted in wheels
     excludes = ["tools", "tools.*", "caffe2", "caffe2.*"]
-    if not cmake_cache_vars["BUILD_FUNCTORCH"]:
-        excludes.extend(["functorch", "functorch.*"])
-    else:
+    if cmake_cache_vars["BUILD_FUNCTORCH"]:
         includes.extend(["functorch", "functorch.*"])
+    else:
+        excludes.extend(["functorch", "functorch.*"])
     packages = find_packages(include=includes, exclude=excludes)
     C = Extension(
         "torch._C",
@@ -1300,6 +1302,7 @@ def main():
         "utils/model_dump/skeleton.html",
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
+        "_dynamo/graph_break_registry.json",
     ]
 
     if not BUILD_LIBTORCH_WHL:
