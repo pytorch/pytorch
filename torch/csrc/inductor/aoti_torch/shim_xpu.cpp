@@ -77,6 +77,7 @@ AOTITorchError aoti_torch_get_current_sycl_queue(void** ret) {
 
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/xpu/Conv.h>
+#include <ATen/native/mkldnn/xpu/qlinear.h>
 
 AOTITorchError aoti_torch_xpu_mkldnn__convolution_pointwise_binary(
     AtenTensorHandle X,
@@ -197,6 +198,47 @@ AOTITorchError aoti_torch_xpu_mkldnn__convolution_pointwise(
         attr,
         scalars_list,
         pointer_to_optional<std::string_view>(algorithm));
+    *ret0 = new_tensor_handle(std::move(tmp_result));
+  });
+}
+
+AOTITorchError aoti_torch_xpu__qlinear_pointwise_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle act_scale,
+    AtenTensorHandle act_zero_point,
+    AtenTensorHandle onednn_weight,
+    AtenTensorHandle weight_scales,
+    AtenTensorHandle weight_zero_points,
+    AtenTensorHandle* B,
+    double output_scale,
+    int64_t output_zero_point,
+    const int32_t* output_dtype,
+    const char* post_op_name,
+    const double** post_op_args,
+    int64_t post_op_args_len_,
+    const char* post_op_algorithm,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::List<std::optional<c10::Scalar>> scalars_list;
+    scalars_list.reserve(post_op_args_len_);
+    for (int64_t i = 0; i < post_op_args_len_; i++) {
+      scalars_list.emplace_back(pointer_to_optional(post_op_args[i]));
+    }
+
+    auto tmp_result = at::native::xpu::q_linear_pointwise_tensor(
+        *tensor_handle_to_tensor_pointer(X),
+        *tensor_handle_to_tensor_pointer(act_scale),
+        *tensor_handle_to_tensor_pointer(act_zero_point),
+        *tensor_handle_to_tensor_pointer(onednn_weight),
+        *tensor_handle_to_tensor_pointer(weight_scales),
+        *tensor_handle_to_tensor_pointer(weight_zero_points),
+        pointer_to_optional<at::Tensor>(B),
+        output_scale,
+        output_zero_point,
+        pointer_to_optional<at::ScalarType>(output_dtype),
+        post_op_name,
+        scalars_list,
+        post_op_algorithm);
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
