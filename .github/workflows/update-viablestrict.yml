@@ -15,7 +15,7 @@ jobs:
       id-token: write
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-24.04
-    environment: ${{ (github.event_name == 'schedule') && 'mergebot' || '' }}
+    environment: ${{ 'mergebot' }}
     steps:
       - name: Update viable/strict
         uses: pytorch/test-infra/.github/actions/update-viablestrict@main
