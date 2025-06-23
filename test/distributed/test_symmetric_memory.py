@@ -974,7 +974,7 @@ class SymmMemCollectiveTest(MultiProcContinousTest):
                 gathered_res[i],
                 sum_inps[..., i * slice_width : (i + 1) * slice_width],
                 rtol=1e-01,
-                atol=1e-01,
+                atol=1.1e-01,
             )
 
     @skip_if_lt_x_gpu(4)

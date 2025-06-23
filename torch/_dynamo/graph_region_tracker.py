@@ -432,7 +432,7 @@ def fully_expand_region_group(
 
         if add_to_all_regions:
             assert len(region_wrappers) == len(nodes_to_add), (
-                "Numer of nodes to add must equal the number of regions"
+                "Number of nodes to add must equal the number of regions"
             )
             for region_wrapper, node in zip(region_wrappers, nodes_to_add):
                 region_wrapper.add(node)
