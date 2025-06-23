@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.5)
 find_package(ATen REQUIRED)
 include_directories(${ATEN_INCLUDE_DIR})
 

@@ -140,7 +140,7 @@ def replace_pattern(
 
 
         def pattern(w1, w2):
-            return torch.cat([w1, w2]).sum()
+            return torch.cat([w1, w2])
 
 
         def replacement(w1, w2):
@@ -307,9 +307,9 @@ def _replace_pattern(
     elif callable(replacement):
         common_replacement_graph = symbolic_trace(replacement).graph
     else:
-        assert (
-            replacement_callback is not None
-        ), "Must provide either a replacement GraphModule or a replacement callback"
+        assert replacement_callback is not None, (
+            "Must provide either a replacement GraphModule or a replacement callback"
+        )
         common_replacement_graph = None
 
     # As we progressively replace nodes, we'll need to keep track of how the match results should change
@@ -322,9 +322,9 @@ def _replace_pattern(
                 match, original_graph, pattern_graph
             )
         else:
-            assert (
-                common_replacement_graph is not None
-            ), "Must provide either a replacement GraphModule or a replacement callback"
+            assert common_replacement_graph is not None, (
+                "Must provide either a replacement GraphModule or a replacement callback"
+            )
             replacement_graph = common_replacement_graph
         replacement_placeholders = [
             n for n in replacement_graph.nodes if n.op == "placeholder"

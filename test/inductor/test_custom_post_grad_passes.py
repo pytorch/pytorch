@@ -8,12 +8,17 @@ import torch._inductor.pattern_matcher as pattern_matcher
 import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
+from torch._inductor.codegen.common import get_custom_backend_pass_for_device
+from torch._inductor.custom_graph_pass import (
+    CustomGraphModulePass,
+    CustomGraphPass,
+    get_hash_for_files,
+)
 from torch._inductor.lowering import lowerings as L
 from torch._inductor.pattern_matcher import Arg, CallFunction, PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU, patch_inductor_backend
 
 
 @config.patch({"freezing": True})
@@ -219,9 +224,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             for m in matmuls:
                 rhs_vals[m.args[1]].add(m)
 
-            order = {}
-            for idx, n in enumerate(graph.nodes):
-                order[n] = idx
+            order = {n: idx for idx, n in enumerate(graph.nodes)}
 
             for rhs, matmuls in rhs_vals.items():
                 if len(matmuls) == 1:
@@ -265,6 +268,35 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             assert len(matmuls) == 1
 
         inner_test()
+
+    def test_custom_backend_pass(self):
+        class CustomBackendPass(CustomGraphModulePass):
+            def __init__(self, existing_pass: CustomGraphModulePass = None):
+                super().__init__()
+                self.existing_pass = existing_pass
+
+            def __call__(self, gm: fx.GraphModule) -> None:
+                if self.existing_pass:
+                    self.existing_pass(gm)
+
+                change_cos_pass(gm.graph)
+
+            def uuid(self) -> bytes:
+                return get_hash_for_files((__file__,))
+
+        custom_backend_pass = CustomBackendPass(
+            get_custom_backend_pass_for_device("cpu")
+        )
+        with patch_inductor_backend("cpu", custom_pass=custom_backend_pass):
+
+            def g(x):
+                return x.sin().sin().sin()
+
+            def f(x):
+                return x.cos().cos().cos()
+
+            x = torch.randn(8, dtype=torch.float32)
+            torch.testing.assert_close(torch.compile(f)(x), g(x))
 
 
 if __name__ == "__main__":

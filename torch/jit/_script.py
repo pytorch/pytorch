@@ -63,6 +63,8 @@ ScriptFunction.__doc__ = """
 Functionally equivalent to a :class:`ScriptModule`, but represents a single
 function and does not have any attributes or Parameters.
 """
+ScriptFunction.__name__ = "ScriptFunction"
+ScriptFunction.__qualname__ = "torch.jit.ScriptFunction"
 set_module(ScriptFunction, "torch.jit")
 
 
@@ -316,10 +318,10 @@ class ScriptMeta(type):
                     else:
                         return infer_methods_to_compile(module)
 
-                self.__dict__[
-                    "_actual_script_module"
-                ] = torch.jit._recursive.create_script_module(
-                    self, make_stubs, share_types=not added_methods_in_init
+                self.__dict__["_actual_script_module"] = (
+                    torch.jit._recursive.create_script_module(
+                        self, make_stubs, share_types=not added_methods_in_init
+                    )
                 )
 
                 # Delete the Python attributes that now shadow the ScriptModule
@@ -1214,6 +1216,8 @@ def _script_impl(
         )
         # Forward docstrings
         fn.__doc__ = obj.__doc__
+        fn.__name__ = "ScriptFunction"
+        fn.__qualname__ = "torch.jit.ScriptFunction"
         # Allow torch.compile() to inline
         fn._torchdynamo_inline = obj  # type: ignore[attr-defined]
         _set_jit_function_cache(obj, fn)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import typing
-from typing import Any, Generator, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -23,6 +23,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from functools import partial
 
     from triton import Config as TritonConfig
@@ -36,8 +37,7 @@ if TYPE_CHECKING:
 class Sortable(typing.Protocol):
     """Anything that can be used as a list.sort() key (int/tuple/etc)"""
 
-    def __lt__(self, other: typing.Self) -> bool:
-        ...
+    def __lt__(self, other: typing.Self) -> bool: ...
 
 
 class InductorChoices:
@@ -127,6 +127,25 @@ class InductorChoices:
         conv_heuristics = self.get_config_heuristics(device_type)
         return conv_heuristics.get_conv_configs()
 
+    # Flex attention configs
+    def get_flex_attention_fwd_configs(
+        self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
+    ) -> list[Any]:
+        flex_heuristics = self.get_config_heuristics(device_type)
+        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, dtype)
+
+    def get_flex_attention_bwd_configs(
+        self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
+    ) -> list[Any]:
+        flex_heuristics = self.get_config_heuristics(device_type)
+        return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype)
+
+    def get_flex_decode_configs(
+        self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
+    ) -> list[Any]:
+        flex_heuristics = self.get_config_heuristics(device_type)
+        return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
+
     def triton_kernel_kwargs(
         self,
         kernel_cls: type[TritonKernel],
@@ -186,7 +205,9 @@ class InductorChoices:
         # to pick the faster one.
         if config.triton.multi_kernel:
             threshold *= 16
-        return V.graph.sizevars.statically_known_leq(features.reduction_numel, threshold)  # type: ignore[arg-types]
+        return V.graph.sizevars.statically_known_leq(
+            features.reduction_numel, threshold
+        )  # type: ignore[arg-types]
 
     @staticmethod
     def want_no_x_dim(features: SIMDKernelFeatures) -> bool:

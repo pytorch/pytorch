@@ -1341,6 +1341,7 @@ Please take a look at `Limitations of Symbolic Tracing <https://pytorch.org/docs
 .. py:module:: torch.ao.quantization.pt2e.qat_utils
 .. py:module:: torch.ao.quantization.pt2e.representation.rewrite
 .. py:module:: torch.ao.quantization.pt2e.utils
+.. py:module:: torch.ao.quantization.pt2e.lowering
 .. py:module:: torch.ao.quantization.qconfig
 .. py:module:: torch.ao.quantization.qconfig_mapping
 .. py:module:: torch.ao.quantization.quant_type

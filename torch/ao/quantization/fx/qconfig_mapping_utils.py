@@ -229,7 +229,9 @@ def _compare_prepare_convert_qconfig_mappings(
     """
     assert qconfig_equals(
         prepare_qconfig_mapping.global_qconfig, convert_qconfig_mapping.global_qconfig
-    ), "Expected global qconfigs to be the same in the prepare and convert quantization configs"
+    ), (
+        "Expected global qconfigs to be the same in the prepare and convert quantization configs"
+    )
     prepare_dicts: list[OrderedDict] = [
         prepare_qconfig_mapping.object_type_qconfigs,
         prepare_qconfig_mapping.module_name_qconfigs,
@@ -247,14 +249,16 @@ def _compare_prepare_convert_qconfig_mappings(
     ]
     for i in range(len(prepare_dicts)):
         for name in prepare_dicts[i].keys():
-            assert (
-                name in convert_dicts[i]
-            ), f"Missing key {dict_names[i]} {name} in convert QConfigMapping \
+            assert name in convert_dicts[i], (
+                f"Missing key {dict_names[i]} {name} in convert QConfigMapping \
                 when it was present in prepare"
+            )
             assert convert_dicts[i][name] is None or qconfig_equals(
                 prepare_dicts[i][name], convert_dicts[i][name]
-            ), f"Expected convert QConfigMapping to have the same qconfig as prepare for key {dict_names[i]} {name}; \
+            ), (
+                f"Expected convert QConfigMapping to have the same qconfig as prepare for key {dict_names[i]} {name}; \
                 prepare: {prepare_dicts[i][name]}; convert: {convert_dicts[i][name]}"
+            )
 
 
 def _is_qconfig_supported_by_dtype_configs(
@@ -376,10 +380,8 @@ def _get_flattened_qconfig_dict(
     flattened: dict[Union[Callable, str], QConfigAny] = {
         "": qconfig_mapping.global_qconfig
     }
-    for obj, qconfig in qconfig_mapping.object_type_qconfigs.items():
-        flattened[obj] = qconfig
-    for obj, qconfig in qconfig_mapping.module_name_qconfigs.items():
-        flattened[obj] = qconfig
+    flattened.update(qconfig_mapping.object_type_qconfigs)
+    flattened.update(qconfig_mapping.module_name_qconfigs)  # type: ignore[arg-type]
     return flattened
 
 

@@ -89,14 +89,13 @@ class _MaskPartial(Partial):
         # override parent logic to perform partial mask for embedding
         num_chunks = mesh.size(mesh_dim)
         # get local shard size and offset on the embedding_dim
-        assert (
-            self.offset_shape is not None
-        ), "offset_shape needs to be set for _MaskPartial"
-        local_shard_size, local_offset_on_dim = Shard._local_shard_size_on_dim(
+        assert self.offset_shape is not None, (
+            "offset_shape needs to be set for _MaskPartial"
+        )
+        local_shard_size, local_offset_on_dim = Shard._local_shard_size_and_offset(
             self.offset_shape[self.offset_dim],
             num_chunks,
             mesh.get_local_rank(mesh_dim),
-            return_offset=True,
         )
         # Build the input mask and save it for the current partial placement
         # this is so that the output of embedding op can reuse the same partial
@@ -186,13 +185,14 @@ class _MaskPartial(Partial):
 
 
 @register_op_strategy(aten.embedding.default)
-def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+def embedding_strategy(op_schema: OpSchema) -> StrategyType:
     """
     This strategy handles embedding op. We have two possible embedding shardings:
     rowwise and colwise
     """
     weight_strategy = cast(OpStrategy, op_schema.args_schema[0])
     indices_strategy = cast(OpStrategy, op_schema.args_schema[1])
+    mesh = op_schema.get_mesh_from_args()
 
     weight_shape = weight_strategy.shape
     indices_shape = indices_strategy.shape
@@ -234,15 +234,14 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
 
 @register_op_strategy(aten.embedding_dense_backward.default)
-def embedding_dense_backward_strategy(
-    mesh: DeviceMesh, op_schema: OpSchema
-) -> StrategyType:
+def embedding_dense_backward_strategy(op_schema: OpSchema) -> StrategyType:
     """
     This strategy handles embedding op. We have two possible embedding shardings:
     rowwise and colwise
     """
     grad_out_strategy = cast(OpStrategy, op_schema.args_schema[0])
     indices_strategy = cast(OpStrategy, op_schema.args_schema[1])
+    mesh = op_schema.get_mesh_from_args()
 
     grad_out_shape = grad_out_strategy.shape
     indices_shape = indices_strategy.shape

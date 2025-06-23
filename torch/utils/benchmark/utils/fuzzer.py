@@ -290,7 +290,7 @@ class FuzzedTensor:
             raw_tensor = raw_tensor.permute(tuple(np.argsort(order)))
 
         slices = [slice(0, size * step, step) for size, step in zip(size, steps)]
-        tensor = raw_tensor[slices]
+        tensor = raw_tensor[tuple(slices)]
 
         properties = {
             "numel": int(tensor.numel()),
@@ -390,8 +390,8 @@ class Fuzzer:
 
     @staticmethod
     def _unpack(values, cls):
-        return tuple(it.chain(
-            *[[i] if isinstance(i, cls) else i for i in values]
+        return tuple(it.chain.from_iterable(
+            [[i] if isinstance(i, cls) else i for i in values]
         ))
 
     def take(self, n):

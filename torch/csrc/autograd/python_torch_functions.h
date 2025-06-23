@@ -20,6 +20,6 @@ inline PyObject* TypeError_to_NotImplemented_(
   return ret;
 }
 
-void initTorchFunctions();
+void initTorchFunctions(PyObject* module);
 
 } // namespace torch::autograd

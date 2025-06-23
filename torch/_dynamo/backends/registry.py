@@ -75,8 +75,7 @@ log = logging.getLogger(__name__)
 
 
 class CompiledFn(Protocol):
-    def __call__(self, *args: torch.Tensor) -> tuple[torch.Tensor, ...]:
-        ...
+    def __call__(self, *args: torch.Tensor) -> tuple[torch.Tensor, ...]: ...
 
 
 CompilerFn = Callable[[fx.GraphModule, list[torch.Tensor]], CompiledFn]
@@ -155,7 +154,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
     return sorted(backends)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _lazy_import():
     from .. import backends
     from ..utils import import_submodule
@@ -169,7 +168,7 @@ def _lazy_import():
     _discover_entrypoint_backends()
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _discover_entrypoint_backends():
     # importing here so it will pick up the mocked version in test_backends.py
     from importlib.metadata import entry_points

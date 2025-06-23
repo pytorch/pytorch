@@ -6,8 +6,7 @@ from pathlib import Path
 from token import NAME
 from tokenize import TokenInfo
 
-from tools.linter.adapters._linter import PythonFile
-from tools.linter.adapters.set_linter import PythonLines, SetLinter
+from tools.linter.adapters.set_linter import SetLinter
 
 
 _PARENT = Path(__file__).parent.absolute()
@@ -27,21 +26,16 @@ INCLUDES_FILE2 = TESTDATA / "includes_doesnt_change.py.txt"
 FILES = TESTFILE, INCLUDES_FILE, INCLUDES_FILE2
 
 
-def python_lines(p: str | Path) -> PythonLines:
-    pf = PythonFile.make(SetLinter.linter_name, p)
-    return PythonLines(pf)
-
-
 class TestSetLinter(LinterTestCase):
     maxDiff = 10000000
     LinterClass = SetLinter
 
     def test_get_all_tokens(self) -> None:
-        self.assertEqual(EXPECTED_SETS, python_lines(TESTFILE).sets)
+        self.assertEqual(EXPECTED_SETS, SetLinter.make_file(TESTFILE).sets)
 
     def test_omitted_lines(self) -> None:
-        actual = sorted(python_lines(TESTFILE).omitted.omitted)
-        expected = [3, 13]
+        actual = sorted(SetLinter.make_file(TESTFILE).omitted.omitted)
+        expected = [6, 16]
         self.assertEqual(expected, actual)
 
     def test_linting(self) -> None:
@@ -62,13 +56,14 @@ class TestSetLinter(LinterTestCase):
                 "{One({1: [2], 2: {3}, 3: {4: 5}})}",
                 {0: 25, 2: 24, 3: 23, 6: 8, 12: 14, 18: 22},
             ),
+            ("f'{a}'", {}),
         )
         for s, expected in TESTS:
-            pl = python_lines(s)
+            pf = SetLinter.make_file(s)
             if s:
-                actual = pl.token_lines[0].bracket_pairs
+                actual = pf._lines_with_sets[0].bracket_pairs
             else:
-                self.assertEqual(pl.token_lines, [])
+                self.assertEqual(pf._lines_with_sets, [])
                 actual = {}
             self.assertEqual(actual, expected)
 
@@ -84,13 +79,13 @@ class TestSetLinter(LinterTestCase):
             ("{One({'a': 1}), Two([{}, {2}, {1, 2}])}", 3),
         )
         for s, expected in TESTS:
-            pl = python_lines(s)
-            actual = pl.token_lines and pl.token_lines[0].braced_sets
+            pf = SetLinter.make_file(s)
+            actual = pf._lines_with_sets and pf._lines_with_sets[0].braced_sets
             self.assertEqual(len(actual), expected)
 
 
 EXPECTED_SETS = [
-    TokenInfo(NAME, "set", (4, 4), (4, 7), "a = set()\n"),
-    TokenInfo(NAME, "set", (6, 4), (6, 7), "c = set\n"),
-    TokenInfo(NAME, "set", (9, 3), (9, 6), "   set(\n"),
+    TokenInfo(NAME, "set", (7, 4), (7, 7), "a = set()\n"),
+    TokenInfo(NAME, "set", (9, 4), (9, 7), "c = set\n"),
+    TokenInfo(NAME, "set", (12, 3), (12, 6), "   set(\n"),
 ]

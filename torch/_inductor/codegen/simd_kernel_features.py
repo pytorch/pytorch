@@ -5,7 +5,7 @@ import dataclasses
 import functools
 import itertools
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -19,6 +19,12 @@ from ..runtime.hints import ReductionHint
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self
 from ..virtualized import V
+
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
+    from torch._inductor.tiling_utils import CoalesceVarAnalysis
 
 
 class NodeScheduleMarker:
@@ -76,12 +82,14 @@ class SIMDKernelFeatures:
         node_schedule: list[NodeScheduleEntry],
         numel: sympy.Expr,
         reduction_numel: sympy.Expr = sympy.S.One,
+        coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
     ):
         self.node_schedule = node_schedule
         # numel excludes reduction_numel
         self.numel: sympy.Expr = V.graph.sizevars.simplify(numel)
         self.reduction_numel: sympy.Expr = V.graph.sizevars.simplify(reduction_numel)
-        self._stats_cache: Dict[Tuple[sympy.Expr, ...], MemoryStats] = {}
+        self._stats_cache: dict[tuple[sympy.Expr, ...], MemoryStats] = {}
+        self.coalesce_analysis = coalesce_analysis
 
     @cache_on_self
     def is_reduction(self) -> bool:
@@ -115,7 +123,7 @@ class SIMDKernelFeatures:
         return bool(self.op_counts().get(op_name))
 
     def get_mutations(self) -> OrderedSet[str]:
-        mutations = OrderedSet[str]()
+        mutations: OrderedSet[str] = OrderedSet()
         for node in self.scheduler_nodes():
             for buf in node.get_outputs():
                 mutations.update(buf.get_mutations())
@@ -124,7 +132,7 @@ class SIMDKernelFeatures:
     @cache_on_self
     def select_index_dtype(self) -> torch.dtype:
         # Gather all used buffer names
-        buffer_names = OrderedSet[str]()
+        buffer_names: OrderedSet[str] = OrderedSet()
         for node in self.scheduler_nodes():
             buffer_names.update(node.get_buffer_names())
             buffer_names.update(node.used_buffer_names())
@@ -205,7 +213,7 @@ class SIMDKernelFeatures:
             return node.node.data.reduction_hint
 
     def memory_stats(
-        self, groups_dict: Optional[Dict[str, sympy.Expr]] = None
+        self, groups_dict: Optional[dict[str, sympy.Expr]] = None
     ) -> MemoryStats:
         """Analysis to generate features that can be used in heuristics"""
         if groups_dict is None:
@@ -228,11 +236,11 @@ class MemoryEstimator:
     We simulate the memory effects of CSE/buffer elimination in codegen.
     """
 
-    kernel_sizes: Tuple[sympy.Expr, ...]
+    kernel_sizes: tuple[sympy.Expr, ...]
     outside_loop: MemoryEstimate
-    loops: List[MemoryEstimate]
+    loops: list[MemoryEstimate]
     persistent: MemoryEstimate
-    symbols: List[sympy.Symbol]
+    symbols: list[sympy.Symbol]
 
     def __init__(self, features: SIMDKernelFeatures, groups: Sequence[sympy.Expr]):
         self.features = features
@@ -341,7 +349,7 @@ class MemoryEstimator:
                 return True
         return False
 
-    def set_ranges(self, *lengths: List[List[sympy.Expr]]) -> List[List[sympy.Expr]]:
+    def set_ranges(self, *lengths: list[list[sympy.Expr]]) -> list[list[sympy.Expr]]:
         assert len(self.kernel_sizes) == len(lengths)
         return [
             self.make_flat_range(sym, numel, length)
@@ -350,8 +358,8 @@ class MemoryEstimator:
 
     @staticmethod
     def make_flat_range(
-        sym: sympy.Symbol, numel: sympy.Expr, lengths: List[sympy.Expr]
-    ) -> List[sympy.Expr]:
+        sym: sympy.Symbol, numel: sympy.Expr, lengths: list[sympy.Expr]
+    ) -> list[sympy.Expr]:
         if len(lengths) == 1 and numel == lengths[0]:
             return [sym]
         divisor = sympy.S.One
@@ -370,10 +378,10 @@ class MemoryEstimator:
 class MemoryEstimate:
     """Tracks the memory usage of a single loop in the generated kernel"""
 
-    reads: Dict[str, OrderedSet[MemoryDep]] = dataclasses.field(
+    reads: dict[str, OrderedSet[MemoryDep]] = dataclasses.field(
         default_factory=functools.partial(collections.defaultdict, OrderedSet)
     )
-    writes: Dict[str, OrderedSet[MemoryDep]] = dataclasses.field(
+    writes: dict[str, OrderedSet[MemoryDep]] = dataclasses.field(
         default_factory=functools.partial(collections.defaultdict, OrderedSet)
     )
 
@@ -386,8 +394,8 @@ class MemoryEstimate:
 
     def __repr__(self) -> str:
         return f"""MemoryEstimate(
-            reads={[*itertools.chain(*self.reads.values())]!r},
-            writes={[*itertools.chain(*self.writes.values())]!r}
+            reads={[*itertools.chain.from_iterable(self.reads.values())]!r},
+            writes={[*itertools.chain.from_iterable(self.writes.values())]!r}
         )"""
 
 
@@ -474,8 +482,8 @@ class StatsForLoop:
 class StatsForReadsOrWrites:
     """Memory usage stats that are collected for reads/writes/both"""
 
-    dim: List[StatsForDim]
-    loop: List[StatsForLoop]
+    dim: list[StatsForDim]
+    loop: list[StatsForLoop]
     # total bytes contiguous in any dimension
     bytes_contiguous_or_broadcast: sympy.Expr = sympy.S.Zero
     bytes_non_contiguous: sympy.Expr = sympy.S.Zero
@@ -506,8 +514,8 @@ class StatsForReadsOrWrites:
     @classmethod
     def compute(
         cls,
-        loop_deps: List[Dict[str, OrderedSet[MemoryDep]]],
-        index_symbols: List[sympy.Symbol],
+        loop_deps: list[dict[str, OrderedSet[MemoryDep]]],
+        index_symbols: list[sympy.Symbol],
     ) -> typing.Self:
         ndim = len(index_symbols)
         result = cls(dim := [StatsForDim() for _ in range(ndim)], [])
@@ -521,7 +529,7 @@ class StatsForReadsOrWrites:
                 loop_stats.count_per_thread += len(deps)
                 loop_stats.bytes_per_thread += itemsize * len(deps)
                 for dep in deps:
-                    strides: List[sympy.Expr] = V.graph.sizevars.stride_vars(
+                    strides: list[sympy.Expr] = V.graph.sizevars.stride_vars(
                         dep.index, index_symbols
                     )
                     for i in range(ndim):
@@ -568,7 +576,7 @@ class StatsForKernelType:
 
     @classmethod
     def compute(
-        cls, loops: List[MemoryEstimate], estimator: MemoryEstimator
+        cls, loops: list[MemoryEstimate], estimator: MemoryEstimator
     ) -> typing.Self:
         reads = StatsForReadsOrWrites.compute(
             [loop.reads for loop in loops], estimator.symbols

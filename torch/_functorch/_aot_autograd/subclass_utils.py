@@ -14,6 +14,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._subclasses.fake_tensor import get_plain_tensors
+from torch.types import IntLikeType
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .schemas import (
@@ -46,16 +47,16 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     return any_subclass_args or any_subclass_outputs
 
 
-suggest_memory_format = torch._prims_common.suggest_memory_format
+from .schemas import MemoryFormatMeta
 
 
 def maybe_suggest_memory_format(
     t, with_memory_format: bool
-) -> Optional[torch.memory_format]:
+) -> Optional[MemoryFormatMeta]:
     if not with_memory_format:
         return None
 
-    return suggest_memory_format(t)
+    return MemoryFormatMeta.from_tensor(t)
 
 
 def get_subclass_typing_container(
@@ -166,9 +167,9 @@ def create_subclass_meta(
     return infos
 
 
-def filter_symints(lst: Iterable[Union[int, SymInt]]):
+def filter_symints(lst: Iterable[IntLikeType]):
     # Capture all SymInts from the iterable.
-    def symint_check(s: Union[int, SymInt]) -> bool:
+    def symint_check(s: IntLikeType) -> bool:
         return isinstance(s, SymInt) and not s.node.is_nested_int()
 
     return [s for s in lst if symint_check(s)]

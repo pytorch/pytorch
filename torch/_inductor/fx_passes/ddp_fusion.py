@@ -73,7 +73,7 @@ class CommBlock:
 def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
     """
     Given a collective node (e.g., allreduce), find out all the nodes belong to
-    this communcation.
+    this communication.
 
     Args:
         comm_node(fx.Node): The target communication/collective node.
@@ -304,7 +304,7 @@ def _scatter_fused_allreduce_waits(
     """
 
     # Before we mass up the order, we need to get the index of the last wait node
-    # in orig_comm_blocks. This index will be later used to determinee what users
+    # in orig_comm_blocks. This index will be later used to determine what users
     # nodes need to be move to maintain a correct topological sort order.
     last_wait_node_idx = 0
     for node in graph.nodes:
@@ -545,9 +545,9 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
     node_indices = {node: i for i, node in enumerate(graph.nodes)}
     for allreduce in comm_blocks:
         # Find the earliest/first user -- target_node.
-        assert (
-            len(allreduce.outputs) >= 1
-        ), f"Found a allreduce that has zero outputs/users -- {allreduce}."
+        assert len(allreduce.outputs) >= 1, (
+            f"Found a allreduce that has zero outputs/users -- {allreduce}."
+        )
         # Initialize the target node to avoid typing issues.
         target_node = next(iter(next(iter(allreduce.outputs)).users))
         target_node_index = 2**31

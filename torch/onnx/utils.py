@@ -23,7 +23,7 @@ import torch.serialization
 from torch import _C
 from torch.onnx import _constants, errors, symbolic_helper  # noqa: F401
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import diagnostics, jit_utils, onnx_proto_utils, registration
+from torch.onnx._internal import jit_utils, onnx_proto_utils, registration
 
 
 if typing.TYPE_CHECKING:
@@ -31,7 +31,6 @@ if typing.TYPE_CHECKING:
 
 
 __all__ = [
-    "is_in_onnx_export",
     "select_model_mode_for_export",
     "disable_apex_o2_state_dict_hook",
     "setup_onnx_logging",
@@ -44,11 +43,6 @@ __all__ = [
     "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
 ]
-
-
-def is_in_onnx_export() -> bool:
-    """Returns whether it is in the middle of ONNX export."""
-    return GLOBALS.in_onnx_export
 
 
 # TODO(justinchuby): Remove dependency to this global variable from constant_fold.cpp
@@ -179,14 +173,12 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
     .. deprecated:: 2.7
         Please set training mode before exporting the model.
     """
-    with select_model_mode_for_export(
-        model, mode
-    ) as mode_ctx, disable_apex_o2_state_dict_hook(
-        model
-    ) as apex_ctx, setup_onnx_logging(
-        verbose
-    ) as log_ctx, diagnostics.create_export_diagnostic_context() as diagnostic_ctx:
-        yield (mode_ctx, apex_ctx, log_ctx, diagnostic_ctx)
+    with (
+        select_model_mode_for_export(model, mode) as mode_ctx,
+        disable_apex_o2_state_dict_hook(model) as apex_ctx,
+        setup_onnx_logging(verbose) as log_ctx,
+    ):
+        yield (mode_ctx, apex_ctx, log_ctx)
 
 
 def _get_torch_export_args(
@@ -361,9 +353,9 @@ def export(
 
                     Models exported this way are probably runnable only by Caffe2.
 
-        opset_version (int, default 17): The version of the
+        opset_version (int, default 18): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
-            to target. Must be >= 7 and <= 17.
+            to target. Must be >= 7.
         do_constant_folding: Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
@@ -1401,10 +1393,7 @@ def _export(
     if opset_version is None:
         opset_version = _constants.ONNX_DEFAULT_OPSET
 
-    # torch.onnx.export does not support opset versions >=18
     if opset_version > _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET:
-        # We do not want to fail because we should still allow users to create
-        # custom symbolic functions for opset>17
         warnings.warn(
             f"Exporting to ONNX opset version {opset_version} is not supported. "
             f"by 'torch.onnx.export()'. "

@@ -7,7 +7,7 @@ import signal
 import string
 import sys
 import traceback
-from collections.abc import KeysView
+from collections.abc import KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
@@ -18,7 +18,6 @@ from typing import (
     get_origin,
     Literal,
     Optional,
-    Sequence,
     TypeVar,
     Union,
 )
@@ -175,6 +174,7 @@ TYPE_OVERRIDES: dict[str, list[Any]] = {
     "autoheuristic_collect": ["pad_mm", "mixed_mm"],
     "autoheuristic_use": ["pad_mm", "mixed_mm"],
     "traceable_tensor_subclasses": [OrderedSet()],
+    "nontraceable_tensor_subclasses": [OrderedSet()],
 }
 SamplingType = Callable[[str, type[Any], Any], Any]
 
@@ -220,9 +220,9 @@ class SamplingMethod(Enum):
             elem_type = getattr(
                 type_hint,
                 "__args__",
-                [type(default[0])] if len(default) else [type(None)],
+                [type(default[0])] if default and len(default) else [type(None)],
             )[0]
-            new_default = default[0] if len(default) > 0 else None
+            new_default = default[0] if default and len(default) > 0 else None
             return [
                 SamplingMethod._generate_value_for_type(
                     random_sample, field_name, elem_type, new_default
@@ -234,9 +234,9 @@ class SamplingMethod(Enum):
             elem_type = getattr(
                 type_hint,
                 "__args__",
-                [type(indexable[0])] if len(default) else [type(None)],
+                [type(indexable[0])] if default and len(default) else [type(None)],
             )[0]
-            new_default = indexable[0] if len(default) > 0 else None
+            new_default = indexable[0] if default and len(default) > 0 else None
             return {  # noqa: set_linter
                 SamplingMethod._generate_value_for_type(
                     random_sample, field_name, elem_type, new_default
@@ -248,9 +248,9 @@ class SamplingMethod(Enum):
             elem_type = getattr(
                 type_hint,
                 "__args__",
-                [type(indexable[0])] if len(default) else [type(None)],
+                [type(indexable[0])] if default and len(default) else [type(None)],
             )[0]
-            new_default = indexable[0] if len(default) > 0 else None
+            new_default = indexable[0] if default and len(default) > 0 else None
             return OrderedSet(
                 [
                     SamplingMethod._generate_value_for_type(
@@ -363,6 +363,8 @@ class SamplingMethod(Enum):
                 )
 
             return dummy_function
+        elif type_hint == torch._ops.OpOverload:
+            return torch.ops.aten.add.default
         elif TypeExemplars.contains(type_hint):
             return TypeExemplars.example(type_hint)
         elif type_hint == Any:
@@ -500,6 +502,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
     },
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing
+        "nontraceable_tensor_subclasses": DEFAULT,  # Typing
         "compiled_autograd_kwargs_override": DEFAULT,  # Typing
         "fail_on_recompile_limit_hit": DEFAULT,  # fails in combo with suppress_errors
         "suppress_errors": DEFAULT,
@@ -527,6 +530,7 @@ class ConfigFuzzer:
     ```python
     import torch._inductor.config as cfg
 
+
     def create_simple_test_model_gpu() -> FactoryOutputType:
         batch_size = 32
         seq_length = 50
@@ -540,6 +544,8 @@ class ConfigFuzzer:
             return True
 
         return test_fn
+
+
     fuzzer = ConfigFuzzer(cfg, create_simple_test_model_gpu, seed=2)
 
     # Test every pair of configs:
@@ -551,7 +557,9 @@ class ConfigFuzzer:
     ret = fuzzer.bisect(num_attempts=10)
 
     # reproduce a failing config
-    fuzzer.reproduce([{"triton.autotune_pointwise": ..., "coordinate_descent_tuning": ...}])
+    fuzzer.reproduce(
+        [{"triton.autotune_pointwise": ..., "coordinate_descent_tuning": ...}]
+    )
     ```
 
     The list of known failures on inductor config are:
@@ -807,6 +815,7 @@ class ConfigFuzzer:
                 if (
                     field_name not in config
                     and not field_name.startswith("_")
+                    and "TESTING_ONLY" not in field_name
                     and random.random() < p
                 ):
                     value = self.sample(

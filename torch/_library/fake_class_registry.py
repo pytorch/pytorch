@@ -155,7 +155,7 @@ def maybe_to_fake_obj(
 
     for name in x._method_names():  # type: ignore[attr-defined]
         attr = getattr(fake_x, name, None)
-        if attr:
+        if attr is not None:
             if not callable(attr):
                 raise RuntimeError(f"Expect {name} to be a callable but got {attr}.")
 
@@ -287,6 +287,14 @@ def find_fake_class(full_qualname) -> Optional[Any]:
 def _full_qual_class_name(qualname: str) -> str:
     ns, name = parse_namespace(qualname)
     return "__torch__.torch.classes." + ns + "." + name
+
+
+def _is_script_object(obj: Any) -> bool:
+    return isinstance(
+        obj, torch.ScriptObject
+    ) and obj._type().qualified_name().startswith(  # type: ignore[attr-defined]
+        "__torch__.torch.classes"
+    )
 
 
 # Return the namespace and class name from fully qualified name.

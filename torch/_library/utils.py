@@ -373,6 +373,31 @@ def check_aliasing_constraint(name, prev, result, get_module=lambda: "???"):
         storages.add(key)
 
 
+def _c_check_aliasing_constraint(name, args, kwargs, result, get_module=lambda: "???"):
+    """
+    custom operators' outputs must not have any aliases
+    This version uses C++ implementation for perf.
+    Only List container is supported.
+    Tensors in Lists with not only Tensors are checked.
+    """
+    tuple_result = result
+    if not isinstance(result, tuple):
+        tuple_result = (result,)
+    if _C._any_output_is_alias_to_input_or_output(args, kwargs, tuple_result):
+        raise RuntimeError(
+            f"{name} (with implementation in {get_module()}): "
+            f"The output of this custom operator (1) must not "
+            f"also be an input to this custom operator and "
+            f"(2) may not alias any inputs to this custom operator "
+            f"or other returns. "
+            f"The most common way to trigger this error is if "
+            f"we have y = custom_op(x) and y and x are the same Tensor. "
+            f"Please instead return a clone of the offending output "
+            f"tensor(s) (e.g. return x.clone()) or refactor the custom "
+            f"operator to not return y."
+        )
+
+
 class MutationChecker:
     """
     Check if an operator mutated its arguments.
@@ -476,3 +501,25 @@ def mutated_args_kwargs(schema: _C.FunctionSchema) -> tuple[list[int], list[str]
             else:
                 idxs.append(i)
     return idxs, keys
+
+
+tags_by_priority = [
+    _C.Tag.needs_exact_strides,
+    _C.Tag.needs_contiguous_strides,
+    _C.Tag.needs_fixed_stride_order,
+    _C.Tag.flexible_layout,
+]
+
+
+def get_layout_constraint_tag(fn, *, with_default=True):
+    for tag in tags_by_priority:
+        if tag in fn.tags:
+            return tag
+    if with_default:
+        if is_builtin(fn):
+            return _C.Tag.flexible_layout
+        import torch._functorch
+        from torch._functorch import config
+
+        return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
+    return None

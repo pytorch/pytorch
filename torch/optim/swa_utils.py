@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Weight Averaging implementation."""
+
 import itertools
 import math
 import warnings
@@ -225,9 +226,9 @@ class AveragedModel(Module):
         use_buffers=False,
     ):  # noqa: D107
         super().__init__()
-        assert (
-            avg_fn is None or multi_avg_fn is None
-        ), "Only one of avg_fn and multi_avg_fn should be provided"
+        assert avg_fn is None or multi_avg_fn is None, (
+            "Only one of avg_fn and multi_avg_fn should be provided"
+        )
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
@@ -274,7 +275,9 @@ class AveragedModel(Module):
                 ) in grouped_tensors.items():
                     if self.multi_avg_fn:
                         self.multi_avg_fn(
-                            self_params, model_params, self.n_averaged.to(device)  # type: ignore[arg-type]
+                            self_params,  # type: ignore[arg-type]
+                            model_params,  # type: ignore[arg-type]
+                            self.n_averaged.to(device),
                         )
                     elif (
                         device is not None
