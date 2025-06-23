@@ -4150,6 +4150,7 @@
   dispatch:
     CPU: mm_out_cpu
     CUDA: mm_out_cuda
+    MTIA: mm_out_mtia
     MPS: mm_out_mps
     XPU: mm_out_xpu
     SparseCPU, SparseCUDA: _sparse_mm_out

@@ -49,7 +49,7 @@ from ._activation_checkpointing.knapsack import (
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
-from .compile_utils import fx_graph_cse, get_aten_target
+from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 
 if TYPE_CHECKING:
@@ -2646,6 +2646,11 @@ def min_cut_rematerialization_partition(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
+
+    # raise all getitem ops to as early as possible
+    # this is helpful for memory, especially in the case of aot_eager backend
+    fw_module = raise_getitems(fw_module)
+    bw_module = raise_getitems(bw_module)
 
     if AOT_PARTITIONER_DEBUG:
         # Calculate sorted sizes of saved values
