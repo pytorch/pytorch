@@ -40,6 +40,7 @@ jobs:
       test-matrix: |
         { include: [
           { config: "smoke", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "cutlass_backend", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
         ]}
     secrets: inherit
 
