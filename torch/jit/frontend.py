@@ -7,7 +7,6 @@ import re
 import string
 from collections import namedtuple
 from textwrap import dedent
-from typing import Any, Optional, Union
 
 import torch
 import torch.jit.annotations
@@ -435,11 +434,13 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=No
     if getattr(py_def, "returns", None) is not None:
         return_type = build_expr(ctx, py_def.returns)
 
-    decl: Any = Decl(r, param_list, return_type)
+    decl = Decl(r, param_list, return_type)
     is_method = self_name is not None
     if type_line is not None:
         type_comment_decl = torch._C.parse_type_comment(type_line)
-        decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl, is_method)
+        decl = torch._C.merge_type_from_type_comment(
+            decl, type_comment_decl, is_method   # type: ignore[assignment, arg-type]
+            )
 
     return Def(Ident(r, def_name), decl, build_stmts(ctx, body))
 
@@ -1040,7 +1041,7 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_Compare(ctx, expr):
         operands = [build_expr(ctx, e) for e in [expr.left] + list(expr.comparators)]
-        result: Optional[Union[BinOp, UnaryOp]] = None
+        result = None
         for lhs, op_, rhs in zip(operands, expr.ops, operands[1:]):
             op = type(op_)
             op_token = ExprBuilder.cmpop_map.get(op)
@@ -1054,14 +1055,14 @@ class ExprBuilder(Builder):
                 # NB: `not in` is just `not( in )`, so we don't introduce new tree view
                 # but just make it a nested call in our tree view structure
                 in_expr = BinOp("in", lhs, rhs)
-                cmp_expr: Union[BinOp, UnaryOp] = UnaryOp(r, "not", in_expr)
+                cmp_expr= UnaryOp(r, "not", in_expr)
             else:
-                cmp_expr = BinOp(op_token, lhs, rhs)
+                cmp_expr = BinOp(op_token, lhs, rhs)  # type: ignore[assignment]
 
             if result is None:
                 result = cmp_expr
             else:
-                result = BinOp("and", result, cmp_expr)
+                result = BinOp("and", result, cmp_expr)  # type: ignore[assignment]
         return result
 
     @staticmethod
