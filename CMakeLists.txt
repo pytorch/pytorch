@@ -17,8 +17,6 @@ cmake_policy(SET CMP0069 NEW)
 # we do this (and we don't if cmake is old), but it's nice when it's possible,
 # and it's possible on our Windows configs.
 cmake_policy(SET CMP0092 NEW)
-# Don't remove the FindCUDA module
-cmake_policy(SET CMP0146 OLD)
 
 # Prohibit in-source builds
 if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})

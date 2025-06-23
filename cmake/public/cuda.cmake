@@ -56,10 +56,6 @@ message(STATUS "PyTorch: CUDA detected: " ${CUDAToolkit_VERSION})
 message(STATUS "PyTorch: CUDA nvcc is: " ${CUDAToolkit_NVCC_EXECUTABLE})
 message(STATUS "PyTorch: CUDA toolkit directory: " ${CUDAToolkit_ROOT})
 
-# cuda_select_nvcc_arch_flags is required
-cmake_policy(SET CMP0146 OLD)
-find_package(CUDA)
-
 # ---[ CUDA libraries wrapper
 
 # Create new style imported libraries.
@@ -71,6 +67,8 @@ find_package(CUDA)
 # cudart
 add_library(torch::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
+  target_link_libraries(torch::cudart INTERFACE CUDA::cudart_static)
+elseif($ENV{ATEN_STATIC_CUDA})
   target_link_libraries(torch::cudart INTERFACE CUDA::cudart_static)
 else()
   target_link_libraries(torch::cudart INTERFACE CUDA::cudart)
