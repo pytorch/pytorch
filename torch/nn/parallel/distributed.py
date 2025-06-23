@@ -371,6 +371,10 @@ class DistributedDataParallel(Module, Joinable):
         >>> )
         >>> model = DistributedDataParallel(model, device_ids=[i], output_device=i)
 
+    Or you can use the latest API for initialization:
+
+        >>> torch.distributed.init_process_group(device_id=i)
+
     In order to spawn up multiple processes per node, you can use either
     ``torch.distributed.launch`` or ``torch.multiprocessing.spawn``.
 
