@@ -5530,6 +5530,13 @@ class CommonTemplate:
                 (torch.randn([1, 2, 4, 8]),),
             )
 
+    def test_var_mean_div_by(self):
+        def fn(x):
+            var, mean = torch.var_mean(x, dim=2, keepdim=True)
+            return x / var, var, mean
+
+        self.common(fn, (torch.rand([1, 17, 2048]),))
+
     def test_var_correction(self):
         def fn(x):
             dim = -1
