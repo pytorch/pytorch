@@ -151,7 +151,7 @@ void set_group_info(
   group_info_map.emplace(group_name, std::move(group_info));
 }
 
-const GroupInfo& get_group_info(const std::string& group_name) {
+GroupInfo& get_group_info(const std::string& group_name) {
   TORCH_CHECK(
       group_info_map.find(group_name) != group_info_map.end(),
       "get_group_info: no group info associated with the group name ",
@@ -276,6 +276,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)");
 
+  m.def("nvshmem_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nvshmem_broadcast(Tensor(a!) input, str group_name) -> Tensor(a!)");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
