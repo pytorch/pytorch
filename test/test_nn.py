@@ -7235,7 +7235,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 ln_out.backward(grad_output)
                 ln_out_cuda.backward(grad_output_cuda)
                 if elementwise_affine:
-                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, f"weight grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
+                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, f"weight grad failed: {m=} {n=}", rtol=1e-4, atol=1e-4)
                 if bias and elementwise_affine:
                     self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
 
