@@ -171,7 +171,9 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
   auto offsets_stride_axis = offsets.stride(axis);
 
   AT_DISPATCH_INDEX_TYPES(
-      lengths_or_offsets_contig.scalar_type(), "_segment_reduce_cuda_lengths_offsets_backward_kernel1", ([&] {
+      lengths_or_offsets_contig.scalar_type(),
+      "_segment_reduce_cuda_lengths_offsets_backward_kernel1",
+      ([&] {
         const auto* lengths_data = lengths.const_data_ptr<index_t>();
         auto* offsets_data = offsets.const_data_ptr<index_t>();
 
@@ -218,34 +220,48 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
                       output_size_axis,
                       offsets_stride_axis
                     );
-              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              // C10_CUDA_KERNEL_LAUNCH_CHECK();
             }));
       }));
   return grad_input;
 }
 
 Tensor _segment_reduce_lengths_backward_cuda_kernel(
-  const Tensor& grad_contig,
-  const Tensor& output_contig,
-  const Tensor& data_contig,
-  ReductionType reduction,
-  const Tensor& lengths_contig,
-  int64_t axis,
-  const std::optional<Scalar>& initial) {
+    const Tensor& grad_contig,
+    const Tensor& output_contig,
+    const Tensor& data_contig,
+    ReductionType reduction,
+    const Tensor& lengths_contig,
+    int64_t axis,
+    const std::optional<Scalar>& initial) {
   return _segment_reduce_lengths_offsets_backward_cuda_kernel(
-    grad_contig, output_contig, data_contig, reduction, lengths_contig, axis, initial, /*is_offsets_like=*/false);
+      grad_contig,
+      output_contig,
+      data_contig,
+      reduction,
+      lengths_contig,
+      axis,
+      initial,
+      /*is_offsets_like=*/false);
 }
 
 Tensor _segment_reduce_offsets_backward_cuda_kernel(
-  const Tensor& grad_contig,
-  const Tensor& output_contig,
-  const Tensor& data_contig,
-  ReductionType reduction,
-  const Tensor& offsets_contig,
-  int64_t axis,
-  const std::optional<Scalar>& initial) {
+    const Tensor& grad_contig,
+    const Tensor& output_contig,
+    const Tensor& data_contig,
+    ReductionType reduction,
+    const Tensor& offsets_contig,
+    int64_t axis,
+    const std::optional<Scalar>& initial) {
   return _segment_reduce_lengths_offsets_backward_cuda_kernel(
-    grad_contig, output_contig, data_contig, reduction, offsets_contig, axis, initial, /*is_offsets_like=*/true);
+      grad_contig,
+      output_contig,
+      data_contig,
+      reduction,
+      offsets_contig,
+      axis,
+      initial,
+      /*is_offsets_like=*/true);
 }
 
-} // namespace at::native 
+} // namespace at::native

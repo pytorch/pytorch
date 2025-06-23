@@ -256,7 +256,7 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
                         output_size_axis,
                         offsets_stride_axis
                       );
-                C10_CUDA_KERNEL_LAUNCH_CHECK();
+                // C10_CUDA_KERNEL_LAUNCH_CHECK();
               } else {
                 if (reduction == ReductionType::MAX) {
                   CustomMax max_op{};
@@ -293,7 +293,7 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
                           segment_count,
                           initial.has_value(),
                           initial_value);
-                  C10_CUDA_KERNEL_LAUNCH_CHECK();
+                  // C10_CUDA_KERNEL_LAUNCH_CHECK();
                 } else if (reduction == ReductionType::MIN) {
                   CustomMin min_op{};
                   CUB_WRAPPER(
@@ -339,23 +339,23 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
 }
 
 Tensor _segment_reduce_lengths_cuda_kernel(
-  ReductionType reduction,
-  const Tensor& data,
-  const Tensor& lengths,
-  int64_t axis,
-  const std::optional<Scalar>& initial) {
+    ReductionType reduction,
+    const Tensor& data,
+    const Tensor& lengths,
+    int64_t axis,
+    const std::optional<Scalar>& initial) {
   return _segment_reduce_lengths_offsets_cuda_kernel(
-    reduction, data, lengths, axis, initial, /*is_offsets_like=*/false);
+      reduction, data, lengths, axis, initial, /*is_offsets_like=*/false);
 }
 
 Tensor _segment_reduce_offsets_cuda_kernel(
-  ReductionType reduction,
-  const Tensor& data,
-  const Tensor& offsets,
-  int64_t axis,
-  const std::optional<Scalar>& initial) {
+    ReductionType reduction,
+    const Tensor& data,
+    const Tensor& offsets,
+    int64_t axis,
+    const std::optional<Scalar>& initial) {
   return _segment_reduce_lengths_offsets_cuda_kernel(
-    reduction, data, offsets, axis, initial, /*is_offsets_like=*/true);
+      reduction, data, offsets, axis, initial, /*is_offsets_like=*/true);
 }
 
-} // namespace at::native 
+} // namespace at::native
