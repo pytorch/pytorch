@@ -982,6 +982,15 @@ class FakeTensorTest(TestCase):
         y = fast_div(mode, x, 2)
         self.assertEqual(y.dtype, torch.float32)
 
+    def test_nanmean_out(self):
+        # Regression test to ensure we don't error out.
+        with torch._subclasses.fake_tensor.FakeTensorMode() as mode:
+            x = torch.randn(10)
+            out = torch.empty(())
+            torch.nanmean(x, out=out)
+
+        self.assertEqual(out.dtype, x.dtype)
+
 
 instantiate_parametrized_tests(FakeTensorTest)
 
