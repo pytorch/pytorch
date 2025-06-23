@@ -399,7 +399,7 @@ class profile:
         )
 
         # If we plan to accumulate events we should post process the function events
-        # right away to retain the state across mulitple start/stop calls
+        # right away to retain the state across multiple start/stop calls
         if self.acc_events:
             self._ensure_function_events()
         return False
@@ -849,7 +849,7 @@ class emit_itt:
     The Instrumentation and Tracing Technology (ITT) API enables your application to generate and
     control the collection of trace data during its execution across different Intel tools.
     This context manager is to annotate Intel(R) VTune Profiling trace. With help of this context manager,
-    you will be able to see labled ranges in Intel(R) VTune Profiler GUI.
+    you will be able to see labeled ranges in Intel(R) VTune Profiler GUI.
 
     .. warning:
         This context manager should not be called recursively, i.e. at most one

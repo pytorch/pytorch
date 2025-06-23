@@ -370,7 +370,7 @@ def wrap_tensor_subclasses(
     # we computed subclass metadata on every forward output, but this did **not** include activations
     # created by the partitioner.
     # as a result, `unwrapped_args` here will correspond to (*unwrapped_user_fw_outs, *activations),
-    # but `subclass_metas` will only correspond to subclass metatadata on `user_fw_outs`.
+    # but `subclass_metas` will only correspond to subclass metadata on `user_fw_outs`.
     # We then need to make sure that we return (*wrapped_user_fw_outs, *activations).
     if num_fw_outs_saved_for_bw is not None:
         assert len(unwrapped_args) == num_args_tallied + num_fw_outs_saved_for_bw, (
@@ -396,7 +396,7 @@ def wrap_tensor_subclasses(
 def wrap_tensor_subclasses_maybe_joint(
     unwrapped_args, *, is_joint_structure: bool, meta: ViewAndMutationMeta
 ) -> Union[tuple[Any, ...], list[Any]]:
-    # Since this function is re-used for both inference and joint graphs,
+    # Since this function is reused for both inference and joint graphs,
     if is_joint_structure:
         assert isinstance(unwrapped_args, tuple) and len(unwrapped_args) == 2
         assert isinstance(unwrapped_args[0], (tuple, list)) and isinstance(

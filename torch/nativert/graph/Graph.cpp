@@ -40,7 +40,7 @@ size_t expectImpl(
   TORCH_CHECK(
       expected == actual,
       fmt::format(
-          "Parser error: expected '{}' at postition {}, but found '{}'.",
+          "Parser error: expected '{}' at position {}, but found '{}'.",
           expected,
           curPos,
           actual));
@@ -55,7 +55,7 @@ size_t expectImpl(std::string_view source, char expected, size_t curPos) {
   }
   TORCH_CHECK(
       expected == source[curPos],
-      "Parser error: expected '{}' at postition {}, but found '{}'.",
+      "Parser error: expected '{}' at position {}, but found '{}'.",
       expected,
       curPos,
       source[curPos]);
@@ -1370,7 +1370,7 @@ std::string_view Parser::parseUntil(
   return source_.substr(start, curPos_ - start);
 }
 
-// Parse a strng, including the outer quotes
+// Parse a string, including the outer quotes
 std::string_view Parser::parseString() {
   size_t start = curPos_;
   expect('"');

@@ -111,7 +111,7 @@ class DerivedQuantizationSpec(QuantizationSpecBase):
 
 @dataclass
 class QuantizationAnnotation:
-    """How are input arguemnt or output should be quantized,
+    """How are input argument or output should be quantized,
     expressed as QuantizationSpec, this corresponds to how a Tensor in the
     operator Graph is observed (PTQ) or fake quantized (QAT)
     """

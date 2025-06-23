@@ -740,7 +740,7 @@ def _generate_wrapped_number(g: jit_utils.GraphContext, scalar):
     return g.op("Constant", value_t=torch.tensor(scalar))
 
 
-def _sort_helper(g: jit_utils.GraphContext, input, dim, decending=True, out=None):
+def _sort_helper(g: jit_utils.GraphContext, input, dim, descending=True, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported")
     shape_ = g.op("Shape", input)
@@ -750,12 +750,12 @@ def _sort_helper(g: jit_utils.GraphContext, input, dim, decending=True, out=None
         g.op("Constant", value_t=torch.tensor([dim], dtype=torch.int64)),
     )
     if g.opset <= 10:
-        if not decending:
+        if not descending:
             _unimplemented("Sort", "Ascending is not supported")
         return g.op("TopK", input, dim_size_, axis_i=dim, outputs=2)
     else:
         return g.op(
-            "TopK", input, dim_size_, axis_i=dim, largest_i=decending, outputs=2
+            "TopK", input, dim_size_, axis_i=dim, largest_i=descending, outputs=2
         )
 
 

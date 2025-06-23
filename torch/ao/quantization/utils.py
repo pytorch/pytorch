@@ -616,7 +616,7 @@ def validate_qmin_qmax(quant_min: int, quant_max: int) -> None:
 
 # Functionally equivalent to '_calculate_qparams' in observer.py. Observers must be torchscriptable however and qscheme
 # as far as I can tell is not allowed to passed as a parameter in torchscript functions. This makes refactoring observer
-# to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code seems unlikey to change
+# to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code seems unlikely to change
 # (last update over 1 year ago) and when torchscript is fully deprecated we can refactor. TODO(jakeszwe, jerryzh168)
 def determine_qparams(
     min_val: torch.Tensor,

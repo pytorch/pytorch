@@ -480,7 +480,7 @@ class DataLoader(Generic[_T_co]):
 
     def __iter__(self) -> _BaseDataLoaderIter:
         # When using a single worker the returned iterator should be
-        # created everytime to avoid resetting its state
+        # created every time to avoid resetting its state
         # However, in the case of a multiple workers iterator
         # the iterator is only created once in the lifetime of the
         # DataLoader object so that workers can be reused
@@ -556,10 +556,10 @@ class DataLoader(Generic[_T_co]):
         #     necessary.
         #
         #
-        # [Note] Please note that this function repects `cpuset` only when os.sched_getaffinity is
+        # [Note] Please note that this function respects `cpuset` only when os.sched_getaffinity is
         #        available (available in most of Linux system, but not OSX and Windows).
         #        When os.sched_getaffinity is not available, os.cpu_count() is called instead, but
-        #        it doesn't repect cpuset.
+        #        it doesn't respect cpuset.
         #        We don't take threading into account since each worker process is single threaded
         #        at this time.
         #
@@ -886,7 +886,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #        2. A similar issue araises when a `DataLoader` is used in a subprocess.
     #           When a process ends, it shuts the all its daemonic children
     #           down with a SIGTERM (instead of joining them without a timeout).
-    #           Simiarly for threads, but by a different mechanism. This fact,
+    #           Similarly for threads, but by a different mechanism. This fact,
     #           together with a few implementation details of multiprocessing, forces
     #           us to make workers daemonic. All of our problems arise when a
     #           DataLoader is used in a subprocess, and are caused by multiprocessing
@@ -1017,7 +1017,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #   `cancel_join_thread` on that queue if its `IterableDataset` iterator
     #   happens to exhaust coincidentally, which is out of the control of the
     #   main process). Thus, since we will exit `pin_memory_thread` before the
-    #   workers (see below), two separete events are used.
+    #   workers (see below), two separate events are used.
     #
     # NOTE: In short, the protocol is that the main process will set these
     #       `done_event`s and then the corresponding processes/threads a `None`,
@@ -1571,7 +1571,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # (2) since we don't join, the worker may still raise error, and we
         # prefer capturing those, rather than ignoring them, even though they
         # are raised after the worker has finished its job.
-        # Joinning is deferred to `_shutdown_workers`, which it is called when
+        # Joining is deferred to `_shutdown_workers`, which it is called when
         # all workers finish their jobs (e.g., `IterableDataset` replicas) or
         # when this iterator is garbage collected.
 

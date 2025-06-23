@@ -326,7 +326,7 @@ class DTensorExtensions(FSDPExtensions):
         super().__init__()
         self.compute_stream = None
         self.device_handle = device_handle
-        # we have to use the dynamo disable this way to disable dynamo as the decorater way would
+        # we have to use the dynamo disable this way to disable dynamo as the decorator way would
         # trigger build failure with torch deploy...
         self.post_unflatten_transform = torch._dynamo.disable(  # type: ignore[method-assign]
             self.post_unflatten_transform

@@ -150,7 +150,7 @@ def run_frozen_optimizations(
         None
 
     Note:
-        In rare occassions, this can result in slower execution.
+        In rare occasions, this can result in slower execution.
 
     Example (Freezing a module with Conv->Batchnorm)
     .. code-block:: python

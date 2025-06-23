@@ -45,7 +45,7 @@ def _prepare_video(V):
     Convesrion is done from [batchsize, time(frame), channel(color), height, width]  (5D tensor)
     to [time(frame), new_width, new_height, channel] (4D tensor).
 
-    A batch of images are spreaded to a grid, which forms a frame.
+    A batch of images are spread to a grid, which forms a frame.
     e.g. Video with batchsize 16 will have a 4x4 grid.
     """
     b, t, c, h, w = V.shape

@@ -395,7 +395,7 @@ class CommDebugMode(TorchDispatchMode):
         json_dict: dict[str, Any] = {}
         add_json_information(json_dict, "Global")
 
-        # converts dictonary into json file
+        # converts dictionary into json file
         with open(file_name, "w") as json_file:
             json.dump(json_dict, json_file, indent=4)
 
