@@ -781,7 +781,6 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
 
     std::vector<THPFrameObjectPtr> current_stack;
     auto frame = PyThreadState_GetFrame(thread_state);
-    Py_XINCREF(frame);
 
     size_t depth = 0; // Make sure we can't infinite loop.
     while (frame != nullptr) {
