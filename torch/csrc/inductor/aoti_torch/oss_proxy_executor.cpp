@@ -872,7 +872,7 @@ void OSSProxyExecutor::call_function(
       auto serialized_int_value = flatten_int_args[int_id++];
       TORCH_CHECK(
           returned_int_value == serialized_int_value,
-          "Expect returned int value to match the serialized int value, but got retured int value: ",
+          "Expect returned int value to match the serialized int value, but got returned int value: ",
           returned_int_value,
           " and serialized int value: ",
           serialized_int_value);
