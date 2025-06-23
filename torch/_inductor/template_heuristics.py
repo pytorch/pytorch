@@ -39,6 +39,7 @@ class GemmConfig(BaseConfig):
     """
 
     group_m: int = 8
+    hint_override: Optional[int] = None
 
 
 ConvConfig = BaseConfig
@@ -333,6 +334,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 conf.block_n,
                 conf.block_k,
                 conf.num_stages,
+                conf.hint_override,
                 num_warps,
             )
 
@@ -351,6 +353,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     "BLOCK_K": conf.block_k,
                     "num_stages": conf.num_stages,
                     "num_warps": num_warps,
+                    "hint_override": conf.hint_override,
                 }
                 if group_m is not None:
                     kwargs["GROUP_M"] = group_m
@@ -414,6 +417,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     block_m=max(min(int(c.block_m * scale), m_hint), min_block_size),
                     block_n=max(min(int(c.block_n * scale), n_hint), min_block_size),
                     block_k=max(min(int(c.block_k * scale), k_hint), min_block_size_k),
+                    hint_override=hint_override,
                 )
 
                 if not exclude(

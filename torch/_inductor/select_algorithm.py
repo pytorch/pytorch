@@ -1104,7 +1104,7 @@ class TritonTemplateKernel(TritonKernel):
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
 
-        additional_call_args, additional_arg_types = self.additional_call_args()
+        additional_call_args, additional_arg_types = self.additional_call_args_and_types()
         call_args.extend(additional_call_args)
         arg_types.extend(additional_arg_types)
 
@@ -1537,6 +1537,7 @@ class TritonTemplate(KernelTemplate):
         call_sizes: Optional[list[sympy.core.symbol.Symbol]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
         generate_with_caching=False,
+        hint_override: Optional[int] = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -1647,6 +1648,7 @@ class TritonTemplate(KernelTemplate):
             *V.graph.sizevars.size_hints(
                 call_sizes,
                 fallback=config.unbacked_symint_fallback,
+                hint_override=hint_override,
             ),
             kwargs,
         )
@@ -1698,6 +1700,7 @@ class TritonTemplate(KernelTemplate):
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
             allowed_prologue_inps=result.prologue_supported_inputs,
+            hint_override=hint_override,
         )
 
 
@@ -1773,6 +1776,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         mutated_inputs=None,
         workspace_arg: Optional[WorkspaceArg] = None,
         allowed_prologue_inps: Optional[OrderedSet[str]] = None,
+        hint_override: Optional[int] = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
@@ -1792,6 +1796,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.allowed_prologue_inps = (
             allowed_prologue_inps if allowed_prologue_inps is not None else OrderedSet()
         )
+        self.hint_override = hint_override
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
@@ -2346,7 +2351,8 @@ class AlgorithmSelectorCache(PersistentCache):
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
             def get_timings(hint_override: Optional[int] = None):
-                timings = do_autotuning(choices, precompile_fn, hint_override=hint_override)
+                filterd_choices = [c for c in choices if c.hint_override == hint_override]
+                timings = do_autotuning(filterd_choices, precompile_fn, hint_override=hint_override)
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
                     if isinstance(choice, ExternKernelCaller):
@@ -2740,7 +2746,6 @@ class AlgorithmSelectorCache(PersistentCache):
         inputs = cls.get_inputs(
             choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
         )
-        print([a.shape for a in inputs.triton.input_tensors])
         return cls.benchmark_choices(choices, inputs)
 
     @classmethod
