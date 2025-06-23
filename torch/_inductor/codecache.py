@@ -899,6 +899,8 @@ class FxGraphHashDetails:
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
             config.post_grad_custom_pre_pass
         )
+        # TODO: change to more holistic config rather than bundled_autograd_cache
+        self.precompile_enabled = torch._functorch.config.bundled_autograd_cache
         self.post_grad_custom_post_pass = self._get_custom_pass_detail(
             config.post_grad_custom_post_pass
         )

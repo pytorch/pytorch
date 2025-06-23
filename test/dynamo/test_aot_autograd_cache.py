@@ -417,6 +417,35 @@ class AOTAutogradCacheTests(InductorTestCase):
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"strict_autograd_cache": True})
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_non_bundled_to_bundled_config_change(self):
+        if functorch_config.bundled_autograd_cache:
+            raise unittest.SkipTest("BundledAutogradCache is already enabled")
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25, device="cuda")
+        b = torch.rand(5, 5, device="cuda")
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # Now turn on bundled autograd cache, see that we successfully save again
+        with functorch_config.patch({"bundled_autograd_cache": True}):
+            torch._dynamo.reset()
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch(
         {"enable_autograd_cache": True, "view_replay_for_aliased_outputs": True}
     )
