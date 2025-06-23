@@ -325,11 +325,6 @@ skip_torchrec = True
 # Don't apply most trace_rules.py rules
 dont_skip_tracing = False
 
-# If True, enforce fullgraph=True - raise errors on graph break
-# NOTE: do not set manually - this is modified internally by Dynamo.
-# Use the fullgraph option of torch.compile instead.
-error_on_graph_break = False
-
 # No longer used
 optimize_ddp_lazy_compile = False
 
@@ -620,8 +615,9 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.
 wrap_top_frame = False
 
-# record pre-graph bytecode in profile traces
-record_pre_graph_bytecode_in_traces = True
+# Flag to record runtime overhead in profile traces. Used for pre-graph bytecode
+# and AOTAutograd runtime wrapper.
+record_runtime_overhead = True
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None

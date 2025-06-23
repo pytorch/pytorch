@@ -24,4 +24,13 @@ pull-deps: clone-deps
 	(cd ../../../torchbenchmark && git fetch && git checkout "$$(cat ../pytorch/.github/ci_commit_pins/torchbench.txt)" && git submodule update --init --recursive)
 
 build-deps: clone-deps
-	sh setup.sh $(BENCHMARK) "$(MODELS)"
+	uv pip install astunparse numpy scipy ninja pyyaml mkl mkl-include setuptools cmake \
+		typing-extensions requests protobuf numba cython scikit-learn librosa
+	(cd ../../../torchvision && uv pip install -e .)
+	(cd ../../../torchdata && uv pip install -e .)
+	(cd ../../../torchaudio && uv pip install -e . --no-build-isolation)
+	(cd ../../../FBGEMM/fbgemm_gpu && uv pip install -r requirements.txt && uv pip install -e . --no-build-isolation)
+	(cd ../../../torchrec && uv pip install -e .)
+	(cd ../../../detectron2 && uv pip install -e . --no-build-isolation)
+	(cd ../../../torchbenchmark && python install.py --continue_on_fail)
+	uv pip uninstall torchrec-nightly fbgemm-gpu-nightly

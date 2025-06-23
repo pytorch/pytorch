@@ -166,7 +166,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for warning in w:
             warning_message = str(warning.message)
             if (
-                "Dynamo detected a call to a `functools.lru_cache` wrapped function"
+                "Dynamo detected a call to a `functools.lru_cache`-wrapped"
                 in warning_message
             ):
                 break
