@@ -1063,12 +1063,6 @@ if torch._C._has_mkldnn:
             if weight_meta is None or bias_meta is None:
                 return False
 
-            bf32_matmul_enabled = torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
-            use_bf16_for_fp32_weight = (
-                bf32_matmul_enabled and weight_meta.dtype == torch.float32
-            )
-            assert (use_bf16_for_fp32_weight)
-
             if bias_meta.dtype != weight_meta.dtype:
                 return False
             return (
@@ -1455,7 +1449,9 @@ if torch._C._has_mkldnn:
                     torch.bfloat16,
                     torch.float16,
                 )
-                bf32_matmul_enabled = torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
+                bf32_matmul_enabled = (
+                    torch.backends.mkldnn.matmul.fp32_precision == "bf16"
+                )  # type: ignore[attr-defined]
                 use_bf16_for_fp32_weight = (
                     bf32_matmul_enabled and weight_dtype == torch.float32
                 )
