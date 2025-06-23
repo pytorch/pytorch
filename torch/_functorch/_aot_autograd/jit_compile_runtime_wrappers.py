@@ -1040,7 +1040,7 @@ def maybe_inline_graph_saved_tensors_hooks(
                 fw_outs_bw_ins_node_names.append(new_node_name)
             else:
                 # We can not specify desired name in node_copy.
-                # Copying node manually to set specifc name,
+                # Copying node manually to set specific name,
                 # to have matching fw_outs, bw_inputs names.
                 new_node_name = _gen_unused_name(f"{saved.name}_hook_{out_idx}")
                 with fw_g.inserting_before(_n):
@@ -1448,7 +1448,7 @@ def aot_dispatch_autograd(
         # It's possible to construct a case where eager may or may not have have tried to autograd through y,
         # depending on the actual grad_outputs that were passed in during the backward.
         # There is no easy fix for this: the simplest fix would be to run with `retain_graph=True`,
-        # allowing autograd to re-use the graph.
+        # allowing autograd to reuse the graph.
         #
         # An example of this case is:
         # def f(x):

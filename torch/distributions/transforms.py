@@ -840,7 +840,7 @@ class AffineTransform(Transform):
 
 class CorrCholeskyTransform(Transform):
     r"""
-    Transforms an uncontrained real vector :math:`x` with length :math:`D*(D-1)/2` into the
+    Transforms an unconstrained real vector :math:`x` with length :math:`D*(D-1)/2` into the
     Cholesky factor of a D-dimension correlation matrix. This Cholesky factor is a lower
     triangular matrix with positive diagonals and unit Euclidean norm for each row.
     The transform is processed as follows:
@@ -907,7 +907,7 @@ class CorrCholeskyTransform(Transform):
         N = shape[-1]
         D = round((0.25 + 2 * N) ** 0.5 + 0.5)
         if D * (D - 1) // 2 != N:
-            raise ValueError("Input is not a flattend lower-diagonal number")
+            raise ValueError("Input is not a flattened lower-diagonal number")
         return shape[:-1] + (D, D)
 
     def inverse_shape(self, shape):

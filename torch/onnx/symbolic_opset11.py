@@ -565,15 +565,15 @@ def topk(g: jit_utils.GraphContext, self, k, dim, largest, sorted, out=None):
 
 @_onnx_symbolic("aten::sort")
 @symbolic_helper.parse_args("v", "i", "i", "none")
-def sort(g: jit_utils.GraphContext, self, dim, decending, out=None):
-    return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
+def sort(g: jit_utils.GraphContext, self, dim, descending, out=None):
+    return symbolic_helper._sort_helper(g, self, dim, descending=descending, out=out)
 
 
 @_onnx_symbolic("aten::argsort")
 @symbolic_helper.parse_args("v", "i", "i", "none")
-def argsort(g: jit_utils.GraphContext, self, dim, decending, out=None):
+def argsort(g: jit_utils.GraphContext, self, dim, descending, out=None):
     _, indices = symbolic_helper._sort_helper(
-        g, self, dim, decending=decending, out=out
+        g, self, dim, descending=descending, out=out
     )
     return indices
 
