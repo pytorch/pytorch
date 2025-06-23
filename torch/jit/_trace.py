@@ -1205,7 +1205,10 @@ def trace_module(
 
         # Trace specific methods on a module (specified in `inputs`), constructs
         # a `ScriptModule` with `forward` and `weighted_kernel_sum` methods
-        inputs = {"forward": example_forward_input, "weighted_kernel_sum": example_weight}
+        inputs = {
+            "forward": example_forward_input,
+            "weighted_kernel_sum": example_weight,
+        }
         module = torch.jit.trace_module(n, inputs)
 
     """

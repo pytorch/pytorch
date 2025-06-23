@@ -35,9 +35,9 @@ def topo_sort(nodes: NodeList) -> NodeList:
                 if indegree_map[n] == 0:
                     candidates.put(n)
 
-    assert len(nodes) == len(
-        sorted_nodes
-    ), "topological sorted nodes doesn't have same length as input nodes"
+    assert len(nodes) == len(sorted_nodes), (
+        "topological sorted nodes doesn't have same length as input nodes"
+    )
 
     return sorted_nodes
 
@@ -126,13 +126,13 @@ def fuse_as_graphmodule(
     # assumption: nodes are already sorted in topo order
 
     for node in nodes:
-        assert (
-            node.graph.owning_module is gm
-        ), f"{node} doesn't belong to passed in graph module {gm._get_name()}"  # type: ignore[no-untyped-call]
+        assert node.graph.owning_module is gm, (
+            f"{node} doesn't belong to passed in graph module {gm._get_name()}"
+        )
         assert not node._erased, f"{node} has been removed from owning graph"
-        assert (
-            node in gm.graph._find_nodes_lookup_table
-        ), f"{node} is not found in graph module {gm._get_name()}"  # type: ignore[no-untyped-call]
+        assert node in gm.graph._find_nodes_lookup_table, (
+            f"{node} is not found in graph module {gm._get_name()}"
+        )
 
     # validates partition doesn't introduce dependency circles in the graph
     assert validate_partition(nodes), "Invalid partition, found dependency cycles"
