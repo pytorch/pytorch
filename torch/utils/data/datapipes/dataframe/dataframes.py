@@ -51,7 +51,7 @@ class DataFrameTracedOps(DFIterDataPipe):
             yield self.output_var.apply_ops(item)
 
 
-#  TODO(VitalyFedyunin): Extract this list from the DFIterDataPipe registred functions
+#  TODO(VitalyFedyunin): Extract this list from the DFIterDataPipe registered functions
 DATAPIPES_OPS = [
     "_dataframes_as_tuples",
     "groupby",
@@ -201,7 +201,7 @@ class CaptureLikeMock:
     def __init__(self, name):
         import unittest.mock as mock
 
-        # TODO(VitalyFedyunin): Do not use provate function here, copy own implementation instead.
+        # TODO(VitalyFedyunin): Do not use private function here, copy own implementation instead.
         get_target, attribute = mock._get_target(name)  # type: ignore[attr-defined]
         self.get_target = get_target
         self.attribute = attribute

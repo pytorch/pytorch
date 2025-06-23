@@ -858,7 +858,7 @@ class _CheckpointFrame:
         if not len(self.weak_holders) == self.recomp_counter[gid]:
             # 2. During recompute, fewer tensors were saved
             #
-            # We know that everytime we save something do original forward
+            # We know that every time we save something do original forward
             # we append to weak_holder, and every time we save a tensor
             # during recompute we increment recompute_counter.
             raise CheckpointError(
@@ -1270,7 +1270,7 @@ class CheckpointPolicy(enum.Enum):
 
 
 def _policy_from_bool(b):
-    # For backward compatability
+    # For backward compatibility
     return CheckpointPolicy.MUST_SAVE if b else CheckpointPolicy.PREFER_RECOMPUTE
 
 

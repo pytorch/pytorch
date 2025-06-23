@@ -127,7 +127,7 @@ if HAS_TABULATE:
         This is a simple utility that can be used to benchmark torch.compile
         In particular it ensures that your GPU is setup to use tensor cores if it supports its
         It also tries out all the main backends and prints a table of results so you can easily compare them all
-        Many of the backendds have their own optional dependencies so please pip install them seperately
+        Many of the backendds have their own optional dependencies so please pip install them separately
 
         You will get one table for inference and another for training
         If you'd like to leverage this utility for training make sure to pass in a torch.optim.Optimizer
