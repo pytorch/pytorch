@@ -2,6 +2,7 @@
 import collections
 import dataclasses
 import io
+import json
 import operator
 import os
 import pickle
@@ -374,7 +375,7 @@ def _write_files_from_queue(
             custom_device_mod = getattr(torch, custom_backend_name, None)
 
             # TODO: Using the OverlappingCpuLoader with multiple threads creates significant
-            # performance degredation, observed as being related to cuda stream syncs. We
+            # performance degradation, observed as being related to cuda stream syncs. We
             # should try to fix this and use _OverlappingCpuLoader for all threaded cases
             if (
                 thread_count == 1
@@ -416,6 +417,7 @@ def _write_files_from_queue(
                     )
 
                 tensor_dict = {}
+                metadata_dict = {}
                 for tensor, write_item in loader.values():
                     assert tensor.is_cpu
                     write_results.append(
@@ -423,17 +425,28 @@ def _write_files_from_queue(
                             transforms,
                             stream,
                             tensor,
-                            write_item,
+                            write_item,  # type: ignore[arg-type]
                             storage_key,
                             serialization_format,
                         )
                     )
-                    tensor_dict[write_item.index.fqn] = tensor
+                    tensor_dict[write_item.index.fqn] = tensor  # type: ignore[attr-defined]
+                    metadata_dict[write_item.index.fqn] = {  # type: ignore[attr-defined]
+                        "saved_offsets": write_item.tensor_data.chunk.offsets  # type: ignore[attr-defined]
+                    }
 
                 if serialization_format == SerializationFormat.SAFETENSORS:
                     from safetensors.torch import save  # type: ignore[import-not-found]
 
-                    stream.write(save(tensor_dict))
+                    stream.write(
+                        save(
+                            tensor_dict,
+                            metadata={
+                                "DCP_SHARDING_INFO": json.dumps(metadata_dict),
+                                "DCP_VERSION": "1.0",
+                            },
+                        )
+                    )
 
                 if use_fsync:
                     try:
@@ -925,7 +938,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
                 at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
-                that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
+                that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
