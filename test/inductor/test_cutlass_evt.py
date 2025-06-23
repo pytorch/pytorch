@@ -107,7 +107,6 @@ class MockGraphHandler(GraphLowering):
         self.name_to_buffer = name_to_buffer
         self.graph_inputs = dict()
         self.mutated_buffers = OrderedSet()
-        self.constants = dict()
 
 
 class TestCutlassEVT(TestCase):
