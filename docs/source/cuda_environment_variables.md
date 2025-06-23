@@ -1,4 +1,3 @@
-```{eval-rst}
 .. _cuda_environment_variables:
 ```
 
