@@ -3843,6 +3843,10 @@ def defake(x):
     return y
 
 
+def _disable_side_effect_safety_checks_for_current_subtracer(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
+
+
 def is_utils_checkpoint(obj):
     # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
@@ -4660,6 +4664,7 @@ def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
     return node is None or "example_value" in node.meta or "val" in node.meta
 
 
+@torch._disable_dynamo
 def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     cm: AbstractContextManager[None] = (
         torch._C._profiler._RecordFunctionFast("Pregraph bytecode")
@@ -4670,6 +4675,7 @@ def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     return cm
 
 
+@torch._disable_dynamo
 def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
     cm.__exit__(None, None, None)
 

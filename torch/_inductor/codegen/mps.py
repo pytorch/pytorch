@@ -15,7 +15,7 @@ from sympy.printing.precedence import PRECEDENCE
 import torch
 from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
+from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
@@ -211,24 +211,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> str:
-        if (
-            isinstance(b, CSEVariable)
-            and b.dtype is not None
-            and not b.dtype.is_floating_point
-        ):
-            return f"{a} % {b}"
-        # Upcast to float otherwise results of remainder op are wrong for half
-        float_a = (
-            f"static_cast<float>({a})"
-            if isinstance(a, CSEVariable) and a.dtype != torch.float
-            else a
-        )
-        float_b = (
-            f"static_cast<float>({b})"
-            if isinstance(b, CSEVariable) and b.dtype != torch.float
-            else b
-        )
-        return f"{float_a} - {float_b} * metal::floor({float_a} / {float_b})"
+        return f"c10::metal::remainder({a}, {b})"
 
     @staticmethod
     def maximum(a: CSEVariable, b: CSEVariable) -> str:
@@ -471,6 +454,7 @@ class MetalKernel(SIMDKernel):
     max_threadgroup_size = 1024
     simd_group_size = 32
     pexpr = PythonPrinter().doprint
+    cexpr = CppPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
     headers: OrderedSet[str] = OrderedSet(["utils"])
@@ -582,6 +566,12 @@ class MetalKernel(SIMDKernel):
         assert self.inside_reduction
         assert not self._load_mask
 
+        def _unwrap_helper(res3: CSEVariable) -> tuple[CSEVariable, ...]:
+            # Uwraps vec3 dtype into individual components
+            return OpsWrapper._unwrap(
+                [CSEVariable(f"{res3}.{t}", res3.bounds, res3.dtype) for t in "xyz"]
+            )
+
         # Establish reduction buffer size and index expression
         reduction_idx = ""
         acc_buf_size = 1
@@ -685,8 +675,9 @@ class MetalKernel(SIMDKernel):
                 wf_res = self.cse.generate(
                     self.compute,
                     f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
+                    dtype=torch.float32,
                 )
-                return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
+                return _unwrap_helper(wf_res)
             acc_buf = self._new_idxvar("float3", acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
@@ -696,8 +687,9 @@ class MetalKernel(SIMDKernel):
             wf_res = self.cse.generate(
                 self.stores,
                 f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size})",
+                dtype=torch.float32,
             )
-            return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
+            return _unwrap_helper(wf_res)
         if reduction_type == "welford_combine":
             assert isinstance(value, tuple), "Input to welford combine must be tuple"
             acc_buf = self._new_idxvar("float3", acc_buf_size)
@@ -714,8 +706,9 @@ class MetalKernel(SIMDKernel):
             wf_res = self.cse.generate(
                 self.stores if self.multistage_reduction_entry else self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
+                dtype=torch.float32,
             )
-            return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
+            return _unwrap_helper(wf_res)
         raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
@@ -867,14 +860,30 @@ class MetalKernel(SIMDKernel):
         for v in self.args.sizevars.keys():
             wrapper.ensure_size_computed(v)
 
+        _, call_args, _, arg_types = self.args.python_argdefs()
+        arg_name_to_type = {
+            str(call_arg): arg_type for call_arg, arg_type in zip(call_args, arg_types)
+        }
+
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
         args += [str(v) for v in self.args.sizevars.keys()]
+
+        arg_types = [arg_name_to_type[arg] for arg in args]
+        expr_printer = self.cexpr if V.graph.cpp_wrapper else self.pexpr
+
+        def format_threads(threads: list[str], kwarg: str) -> str:
+            if V.graph.cpp_wrapper:
+                threads = [f"static_cast<uint64_t>({t})" for t in threads]
+                return f"{{{', '.join(threads)}}}"
+            else:
+                return f"{kwarg}=[{', '.join(threads)}]"
+
         # For reduction kernels, limit the maximum size over reduction dimentions to
         # a maximum threadgroup size
         if len(self.active_range_trees()) > 0:
             threads = [
-                self.pexpr(
+                expr_printer(
                     sympy.Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
                     if v.is_reduction
                     else v.numel
@@ -882,36 +891,34 @@ class MetalKernel(SIMDKernel):
                 for v in self.active_range_trees()
             ]
 
-            if V.graph.cpp_wrapper:
-                args.append(f"{{{', '.join(threads)}}}")
-            else:
-                args.append(f"threads=[{', '.join(threads)}]")
+            args.append(format_threads(threads, "threads"))
+            arg_types.append(list)
         else:
             if V.graph.cpp_wrapper:
                 raise RuntimeError("We should always have threads?")
 
         if self.inside_reduction:
             threads = [
-                self.pexpr(sympy.Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
+                expr_printer(sympy.Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
                 if v.is_reduction
                 else "1"
                 for v in self.active_range_trees()
             ]
-            if V.graph.cpp_wrapper:
-                args.append(f"{{{', '.join(threads)}}}")
-            else:
-                args.append(f"group_size=[{', '.join(threads)}]")
+            args.append(format_threads(threads, "group_size"))
+            arg_types.append(list)
         else:
             if V.graph.cpp_wrapper:
                 # Add a None so that we always have a group_size in the
                 # arguments. We won't use it if the value is None.
                 args += [None]  # type: ignore[list-item]
+                arg_types.append(None)
 
         wrapper.generate_kernel_call(
             name,
             args,
             device=torch.device("cpu"),  # TODO: Fix me, MPS does not expose streams now
             triton=False,
+            arg_types=arg_types,
         )
 
     def check_bounds(
