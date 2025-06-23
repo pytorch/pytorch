@@ -64,7 +64,7 @@ test_failures = {
 }
 if not torch._inductor.config.cpp_wrapper:
     test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
-        ("cuda", "xpu")
+        ("cuda",)
     )
 
 if TEST_WITH_ROCM:
