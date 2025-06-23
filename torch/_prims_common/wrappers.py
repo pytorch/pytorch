@@ -307,6 +307,8 @@ def out_wrapper(
                 result = fn(*args, is_out=(out is not None), **kwargs)  # type: ignore[arg-type]
             else:
                 result = fn(*args, **kwargs)
+            if result is NotImplemented:
+                return NotImplemented
             assert (
                 (isinstance(result, TensorLike) and is_tensor)
                 or (
@@ -368,7 +370,9 @@ def out_wrapper(
             annotation=out_type,
         )
         # Mark that the function now returns a tuple
-        assert isinstance(sig.return_annotation, str) or sig.return_annotation in (
+        assert isinstance(
+            sig.return_annotation, (str, TypeVar)
+        ) or sig.return_annotation in (
             sig.empty,
             out_type,
             bc_out_type,

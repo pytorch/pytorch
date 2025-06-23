@@ -1569,6 +1569,19 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(o1, o2)
 
+    def test_sorted_masks(self):
+        @torch.compile()
+        def foo(x, y):
+            return (x + y).sum(dim=1)
+
+        x = torch.rand([255, 255], device="cuda")
+        y = torch.rand([255, 255], device="cuda")
+
+        _, code = run_and_get_code(foo, x, y)
+        FileCheck().check("tl.load").check_same("r0_mask").check_same("xmask").run(
+            code[0]
+        )
+
     def test_cat_int8_one_kernel(self):
         @torch.compile()
         def cat(inps):
@@ -1626,6 +1639,24 @@ class CudaReproTests(TestCase):
         ]
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
+
+    def test_mutated_aligned_tensor(self):
+        t = torch.rand(4096, device="cuda", dtype=torch.float16)
+
+        def foo(x):
+            return x.add_(1)
+
+        foo_c = torch.compile(dynamic=False)(foo)
+
+        t_orig = t.clone()
+
+        # First invocation, assume alignment, second invocation,
+        # copy to alignment and then mutate after fn invocation
+        self.assertEqual(foo_c(t[:-1]), foo(t_orig[:-1]))
+        self.assertEqual(t, t_orig)
+
+        self.assertEqual(foo_c(t[1:]), foo(t_orig[1:]))
+        self.assertEqual(t, t_orig)
 
     def test_non_commutative_scan_op(self):
         from torch._higher_order_ops.associative_scan import associative_scan
@@ -1783,9 +1814,9 @@ class CudaReproTests(TestCase):
 
         m = ToyModel().to(device="cuda:0")
         input_tensor = torch.randn(32, 3, 64, 64).to(device="cuda:0")
-        from torch._inductor.utils import fresh_inductor_cache
+        from torch._inductor.utils import fresh_cache
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             cm = torch.compile(m, mode="max-autotune")
             out = cm(input_tensor)
             out2 = m(input_tensor)
@@ -1931,16 +1962,19 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         def foo(x0):
             x1 = x0 + 1
-            x2 = x1.view(dtype)
+            x2 = x1.view(dtype).view([16 * 16])
             return x2
 
         x0 = torch.randint(0, 255, (16, 16), device=device, dtype=torch.uint8)
         foo_c = torch.compile(foo, backend="inductor", fullgraph=True)
 
         with torch.no_grad():
-            y_c = foo_c(x0)
+            result, code = run_and_get_code(foo_c, x0)
 
-        self.assertEqual(foo(x0), y_c)
+        FileCheck().check("call").check_not("torch.ops.aten.reshape.default(").run(
+            code[0]
+        )
+        self.assertEqual(foo(x0), result)
 
     @unittest.skipIf(
         not config.is_fbcode(),
@@ -2089,6 +2123,49 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         out_eager = interpolate_chunked(x)
         out_compiled = torch.compile(interpolate_chunked)(x)
         self.assertEqual(out_eager, out_compiled)
+
+    def test_max_autotune_nograd(self):
+        """
+        https://github.com/pytorch/pytorch/issues/155688
+        Smallest repro for max-autotune not working with no_grad
+        Before adding __int__ function to torch.utils._sympy.functions.Identity,
+        running the max_autotune mode would raise an error:
+        TypeError: Expected a number but got Identity
+        """
+
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.linear_layers = nn.ModuleList(
+                    [
+                        nn.Linear(4, 1, bias=True),
+                        nn.Linear(5, 1, bias=True),
+                        nn.Linear(6, 1, bias=True),
+                        nn.Linear(7, 1, bias=True),
+                        nn.Linear(8, 1, bias=True),
+                    ]
+                )
+
+            def forward(self, x):
+                for layer in self.linear_layers:
+                    x2 = layer(x)
+                    x2 = F.relu(x2)
+                    x = torch.cat((x, x2), dim=1)
+
+                return x
+
+        model = ToyModel().to("cuda")
+        input_tensor = torch.randn((2, 4)).to("cuda")
+
+        compile_default = torch.compile(model, mode="default")
+        compile_max_autotune = torch.compile(model, mode="max-autotune")
+
+        with torch.no_grad():
+            default_output = compile_default(input_tensor)
+            max_autotune_output = compile_max_autotune(input_tensor)
+
+        self.assertEqual(default_output, max_autotune_output)
 
 
 if __name__ == "__main__":

@@ -563,7 +563,12 @@ class profile:
             return (
                 mem_record.nbytes()
                 if mem_record.device_type()
-                in [DeviceType.CUDA, DeviceType.PrivateUse1, DeviceType.HIP]
+                in [
+                    DeviceType.CUDA,
+                    DeviceType.PrivateUse1,
+                    DeviceType.HIP,
+                    DeviceType.XPU,
+                ]
                 else 0
             )
 

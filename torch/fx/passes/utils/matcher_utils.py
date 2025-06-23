@@ -96,9 +96,9 @@ class SubgraphMatcher:
 
         for node in pattern.nodes:
             if node.op != "output":
-                assert (
-                    len(node.users) > 0
-                ), "SubgraphMatcher cannot be initialized with an pattern with dead code"
+                assert len(node.users) > 0, (
+                    "SubgraphMatcher cannot be initialized with an pattern with dead code"
+                )
 
         # TODO: assert pattern is a connected graph
 
@@ -192,9 +192,9 @@ class SubgraphMatcher:
         return non_overlapping_matches
 
     def _match_literals(self, pn: Any, gn: Any, match: InternalMatch) -> bool:
-        assert not (
-            isinstance(pn, Node) and isinstance(gn, Node)
-        ), "pn and gn cannot both be Node"
+        assert not (isinstance(pn, Node) and isinstance(gn, Node)), (
+            "pn and gn cannot both be Node"
+        )
 
         if isinstance(pn, Node) and not isinstance(gn, Node):
             if pn.op == "placeholder":

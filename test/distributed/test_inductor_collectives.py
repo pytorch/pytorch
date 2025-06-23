@@ -870,9 +870,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
-    def test_inductor_doesnt_mutate_shared(self):
+    def _test_inductor_doesnt_mutate_shared(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
         """
@@ -908,6 +906,19 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
+    def test_inductor_doesnt_mutate_shared(self):
+        self._test_inductor_doesnt_mutate_shared()
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_inductor_doesnt_mutate_shared_graph_partition(self):
+        # checks graph partition reorder does not change relative order of ops
+        # when all ops are on cuda
+        self._test_inductor_doesnt_mutate_shared()
 
     def test_dynamo_trace_allreduce(self):
         def func(inp):
